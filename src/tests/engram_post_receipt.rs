@@ -1125,6 +1125,7 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
             handoff_prepared_turn_dispatch(
                 &state,
                 TurnDispatch::PersistentAcp {
+                    human_prompt_id: None,
                     federation_handoff: None,
                     opening_prompt: None,
                     active_turn_generation,
@@ -1437,6 +1438,7 @@ async fn assert_public_failed_stop_restores_admitted_handoff(
     handoff_prepared_turn_dispatch(
         &state,
         TurnDispatch::PersistentAcp {
+            human_prompt_id: None,
             federation_handoff: None,
             opening_prompt: None,
             active_turn_generation,

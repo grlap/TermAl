@@ -124,6 +124,21 @@ enum TurnDispatchDeliveryOutcome {
 }
 
 impl TurnDispatchDeliveryOutcome {
+    fn into_intake_result(
+        self,
+        state: &AppState,
+        session_id: &str,
+        accepted_prompt_id: Option<&str>,
+    ) -> Result<(), ApiError> {
+        match (self.into_public_result(), accepted_prompt_id) {
+            (Err(error), Some(prompt_id)) => {
+                state.retain_accepted_human_start_failure(session_id, prompt_id, &error.message);
+                Ok(())
+            }
+            (result, _) => result,
+        }
+    }
+
     fn into_public_result(self) -> Result<(), ApiError> {
         match self {
             Self::Delivered | Self::Scheduled | Self::Held { error: None } | Self::Superseded => {
@@ -484,6 +499,7 @@ fn handoff_prepared_turn_dispatch(
     }
     let engram_generation = dispatch.engram_dispatch_generation();
     let active_turn_generation = dispatch.active_turn_generation();
+    let human_prompt_id = dispatch.human_prompt_id().map(str::to_owned);
     let runtime_token = dispatch.runtime_token().clone();
     let session_id = dispatch.session_id().to_owned();
     let mailbox_notification = dispatch.mailbox_notification().cloned();
@@ -620,7 +636,30 @@ fn handoff_prepared_turn_dispatch(
             return reject_federation(error);
         }
     }
+    let human_handoff = human_prompt_id.is_some() && engram_generation.is_none()
+        && inner.find_session_index(&session_id).is_some_and(|index| {
+            let record = &inner.sessions[index];
+            human_prompt_handoff_allowed(record, active_turn_generation)
+                && record.human_prompt_turn.as_ref().is_some_and(|owner|
+                    Some(owner.prompt_id.as_str()) == human_prompt_id.as_deref())
+                && !record.engram.project_reset_in_progress
+                && !engram_project_for_session_locked(&inner, &session_id)
+                    .is_some_and(|project| inner.engram_project_resets.contains(&project.id))
+        });
+    if human_prompt_id.is_some() && !human_handoff {
+        drop(inner);
+        drop(relay_link);
+        let detail = "human prompt ownership or reset fence changed before provider handoff";
+        return match state.fail_rejected_turn_delivery(&session_id, &runtime_token,
+            active_turn_generation, None, detail)
+        {
+            Ok(true) => Err(ApiError::conflict(detail)),
+            Ok(false) => Ok(HandoffPreparedTurnDispatchOutcome::Superseded),
+            Err(error) => Err(ApiError::internal(format!("{detail}; failed to retain unsent turn: {error:#}"))),
+        };
+    }
     if engram_session_obligation_locked(&inner, &session_id).is_some()
+        && !human_handoff
         && !(engram_generation.is_none()
             && engram_unmediated_checkpoint_dispatch_allowed(
                 &inner, &session_id, Some(active_turn_generation),
@@ -633,7 +672,7 @@ fn handoff_prepared_turn_dispatch(
     let mut opening_diagnostic_delivery = None;
     let mut source_root_notice_delivery = Vec::new();
     let guarded =
-        engram_generation.is_some() || federation_handoff.is_some() || relay_handoff.is_some()
+        human_handoff || engram_generation.is_some() || federation_handoff.is_some() || relay_handoff.is_some()
             || matches!(&dispatch, TurnDispatch::PersistentCodex { .. });
     if guarded {
         let Some(index) = index else {
@@ -778,6 +817,23 @@ fn handoff_prepared_turn_dispatch(
             &source_root_notice_delivery,
         );
     }
+    if human_handoff {
+        let index = index.expect("human handoff owns session");
+        let record = &mut inner.sessions[index];
+        let prompt_id = record.human_prompt_turn.as_ref().expect("human handoff owner").prompt_id.clone();
+        // The qualified owner may be an explicit choice of a legacy envelope.
+        // Its original source stays on the receipt; it is not relabelled Human.
+        if let Some(position) = record.queued_prompts.iter().position(|queued|
+            queued.pending_prompt.id == prompt_id)
+        {
+            record.queued_prompts.remove(position);
+            sync_pending_prompts(record);
+            inner.stamp_session_at_index(index);
+            if let Err(error) = state.commit_locked(&mut inner) {
+                eprintln!("human prompt> failed persisting provider handoff: {error:#}");
+            }
+        }
+    }
     if engram_generation.is_some() {
         let index = index.expect("guarded handoff owns session");
         inner.sessions[index].engram.ordinary_handoff = None;
@@ -828,8 +884,26 @@ fn dispatch_turn_and_snapshot(
     session_id: &str,
     request: SendMessageRequest,
 ) -> Result<SendMessageRouteResponse, ApiError> {
+    dispatch_turn_and_snapshot_with_origin(state, session_id, request, None)
+}
+
+fn dispatch_turn_and_snapshot_with_origin(
+    state: &AppState,
+    session_id: &str,
+    request: SendMessageRequest,
+    origin: Option<ExplicitPromptOrigin>,
+) -> Result<SendMessageRouteResponse, ApiError> {
     let is_peer_message = request.source_session_id.is_some();
-    let dispatch = state.dispatch_turn(session_id, request)?;
+    if origin.is_some() && !explicit_human_request(&request) {
+        return Err(ApiError::bad_request("a human prompt cannot carry an automated sender"));
+    }
+    let mut accepted_prompt_id = None;
+    let dispatch = match origin {
+        Some(ExplicitPromptOrigin::Human) => state.dispatch_human_turn_with_acceptance(
+            session_id, request, &mut accepted_prompt_id,
+        )?,
+        None => state.dispatch_turn(session_id, request)?,
+    };
     let message_disposition = is_peer_message.then(|| match &dispatch {
         DispatchTurnResult::Dispatched(_) => PeerMessageDisposition::DeliveredToIdleSession,
         DispatchTurnResult::DispatchedAfterQueue(_) | DispatchTurnResult::Queued => {
@@ -839,7 +913,9 @@ fn dispatch_turn_and_snapshot(
     match dispatch {
         DispatchTurnResult::Dispatched(dispatch)
         | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
-            deliver_turn_dispatch(state, dispatch).into_public_result()?;
+            deliver_turn_dispatch(state, dispatch).into_intake_result(
+                state, session_id, accepted_prompt_id.as_deref(),
+            )?;
         }
         DispatchTurnResult::Queued => {}
     }
@@ -1220,7 +1296,8 @@ impl AppState {
                 let prompt = action
                     .prompt()
                     .ok_or_else(|| ApiError::internal("project action prompt is missing"))?;
-                let dispatch = self.dispatch_turn(
+                let mut accepted_prompt_id = None;
+                let dispatch = self.dispatch_human_turn_with_acceptance(
                     &session_id,
                     SendMessageRequest {
                         text: prompt.to_owned(),
@@ -1229,11 +1306,14 @@ impl AppState {
                         source_session_id: None,
                         source_mailbox: None,
                     },
+                    &mut accepted_prompt_id,
                 )?;
                 match dispatch {
                     DispatchTurnResult::Dispatched(dispatch)
                     | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
-                        deliver_turn_dispatch(self, dispatch).into_public_result()?;
+                        deliver_turn_dispatch(self, dispatch).into_intake_result(
+                            self, &session_id, accepted_prompt_id.as_deref(),
+                        )?;
                     }
                     DispatchTurnResult::Queued => {}
                 }
@@ -2030,12 +2110,16 @@ async fn rollback_codex_thread(
 async fn send_message(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
-    Json(request): Json<SendMessageRequest>,
+    Json(route_request): Json<SendMessageRouteRequest>,
 ) -> Result<(StatusCode, Json<SendMessageRouteResponse>), ApiError> {
     let snapshot = run_blocking_api({
         let state = state.clone();
         let session_id = session_id.clone();
         move || {
+            let SendMessageRouteRequest { prompt: request, origin } = route_request;
+            if origin.is_some() && !explicit_human_request(&request) {
+                return Err(ApiError::bad_request("a human prompt cannot carry an automated sender"));
+            }
             // Explicit UI input may reopen a finished child. Runtime queues and
             // peer deliveries still pass through the terminal dispatch fence.
             let followup = if request.source_session_id.is_none()
@@ -2058,13 +2142,17 @@ async fn send_message(
                 None
             };
             if let Some((parent, delegation)) = followup {
-                state.followup_delegation_request(&parent, &delegation, request)?;
+                if origin == Some(ExplicitPromptOrigin::Human) {
+                    state.followup_human_delegation_request(&parent, &delegation, request)?;
+                } else {
+                    state.followup_delegation_request(&parent, &delegation, request)?;
+                }
                 Ok(SendMessageRouteResponse {
                     state: state.summary_snapshot(),
                     message_disposition: None,
                 })
             } else {
-                dispatch_turn_and_snapshot(&state, &session_id, request)
+                dispatch_turn_and_snapshot_with_origin(&state, &session_id, request, origin)
             }
         }
     })
@@ -2087,8 +2175,21 @@ async fn cancel_queued_prompt(
 async fn resume_session_queue(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
+    body: axum::body::Bytes,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.resume_session_queue(&session_id)).await?;
+    // Existing clients send an empty JSON-typed POST. Optional<Json<_>>
+    // still attempts to parse that empty body and rejects it before Resume.
+    let request = if body.is_empty() { None } else {
+        Some(serde_json::from_slice::<ResumeQueueRequest>(&body)
+            .map_err(|_| ApiError::bad_request("invalid queue resume request"))?)
+    };
+    let response = run_blocking_api(move || match request {
+        Some(ResumeQueueRequest { origin: Some(ExplicitPromptOrigin::Human), human_choice: Some(selection) }) =>
+            state.resume_selected_human_prompt(&session_id, selection),
+        Some(ResumeQueueRequest { human_choice: Some(_), .. }) =>
+            Err(ApiError::bad_request("an exact human queue choice requires explicit human origin")),
+        _ => state.resume_session_queue(&session_id),
+    }).await?;
     Ok(Json(response))
 }
 

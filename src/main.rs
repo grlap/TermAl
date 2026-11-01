@@ -1055,6 +1055,8 @@ include!("engram_containment_admission_progress.rs");
 include!("engram_containment_bind_successor.rs");
 include!("engram_containment_begin_resume.rs");
 include!("engram_containment_queue.rs");
+include!("human_prompts.rs");
+include!("human_queue_choices.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
 include!("delegation_mcp_source_root.rs");

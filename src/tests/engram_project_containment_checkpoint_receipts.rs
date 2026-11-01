@@ -756,24 +756,40 @@ fn pending_off_receipt_with_queue(queued: bool) -> (
     Arc<ScriptedEngramControlTransport>,
     mpsc::Receiver<CodexRuntimeCommand>,
 ) {
+    pending_off_receipt_with_queue_kind(queued, false)
+}
+
+fn pending_off_receipt_with_queue_kind(queued: bool, receipted: bool) -> (
+    AppState, String, String, Arc<ScriptedEngramControlTransport>,
+    mpsc::Receiver<CodexRuntimeCommand>,
+) {
     let (state, project, session, _root, receiver) = fixture();
     if queued {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
-        queue_prompt_on_record(
-            inner.session_mut_by_index(index).unwrap(),
-            PendingPrompt {
-                id: "queued-before-off".into(),
-                timestamp: stamp_now(),
-                text: "ordinary queued input".into(),
-                expanded_text: None,
-                source: None,
-                attachments: Vec::new(),
-                engram_interrupted: false,
-                is_engram_retained: false,
-            },
-            Vec::new(),
-        );
+        let record = inner.session_mut_by_index(index).unwrap();
+        let pending = PendingPrompt {
+            id: "queued-before-off".into(),
+            timestamp: stamp_now(),
+            text: "ordinary queued input".into(),
+            expanded_text: None,
+            source: None,
+            attachments: Vec::new(),
+            engram_interrupted: false,
+            is_engram_retained: false,
+        };
+        if receipted {
+            queue_receipted_orchestrator_prompt_on_record(record, pending, Vec::new());
+            // A historical User entry with a real producer-owned Pending
+            // receipt, labelled before its first save as in the WAL fixture.
+            record.queued_prompts[0].source = QueuedPromptSource::User;
+            record.queued_prompts[0].engram_interrupted = true;
+            record.queued_prompt_durability_holds.get_mut("queued-before-off").unwrap().content =
+                queued_prompt_durability_content(&record.queued_prompts[0]);
+            record.set_auto_dispatch_blocked(true);
+        } else {
+            queue_prompt_on_record(record, pending, Vec::new());
+        }
         state.commit_locked(&mut inner).unwrap();
     }
     let mut response = raw_reply("retained-grant");
@@ -814,6 +830,74 @@ fn pending_off_receipt_with_queue(queued: bool) -> (
     (state, project, session, transport, receiver)
 }
 
+#[test]
+fn human_prompt_terminal_preserves_old_duty_and_only_its_own_receipt_reconciles_it() {
+    let (state, _project, session, transport, receiver) = pending_off_receipt_with_queue(false);
+    let original =
+        serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
+    let dispatch = match state.dispatch_human_turn(&session, prompt()).unwrap() {
+        DispatchTurnResult::Dispatched(d) | DispatchTurnResult::DispatchedAfterQueue(d) => d,
+        DispatchTurnResult::Queued => panic!("own old receipt must not strand a new human request"),
+    };
+    let token = dispatch.runtime_token().clone();
+    let generation = dispatch.active_turn_generation();
+    assert!(matches!(
+        deliver_turn_dispatch(&state, dispatch),
+        TurnDispatchDeliveryOutcome::Delivered
+    ));
+    assert!(matches!(
+        phase_sync::receive(&receiver, "the independent human turn"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    state
+        .finish_turn_ok_if_runtime_and_generation_match(&session, &token, generation)
+        .unwrap();
+    assert_eq!(
+        transport.requests().len(),
+        1,
+        "human completion cannot issue an old grant checkpoint"
+    );
+    assert_eq!(
+        serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap(),
+        original,
+        "a human turn does not settle the old operation"
+    );
+    assert!(
+        !state
+            .resume_off_checkpoint_receipt("another-session")
+            .unwrap(),
+        "a receipt cannot reconcile another session"
+    );
+    assert!(
+        state.resume_off_checkpoint_receipt(&session).unwrap(),
+        "the preserved exact original receipt supports its own local accounting"
+    );
+    {
+        let inner = state.inner.lock().unwrap();
+        assert!(engram_session_obligation_locked(&inner, &session).is_none());
+        assert!(inner.engram_pending_checkpoint_receipts.entries.is_empty());
+    }
+    assert_eq!(
+        transport.requests().len(),
+        1,
+        "local evidence reconciliation never replays a provider effect"
+    );
+    let (unknown, _project, unknown_session, unknown_receiver, unknown_transport) =
+        super::super::queue::held_fixture();
+    let unresolved =
+        serde_json::to_value(&unknown.inner.lock().unwrap().engram_session_obligations).unwrap();
+    assert!(
+        !unknown
+            .resume_off_checkpoint_receipt(&unknown_session)
+            .unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(&unknown.inner.lock().unwrap().engram_session_obligations).unwrap(),
+        unresolved
+    );
+    assert_eq!(unknown_transport.requests().len(), 2);
+    assert!(unknown_receiver.try_recv().is_err());
+}
 #[test]
 fn project_containment_off_checkpoint_unknown_ack_resume_is_local_and_does_not_drain() {
     let (state, project, session, transport, receiver) = pending_off_receipt_with_queue(true);
@@ -877,6 +961,36 @@ fn project_containment_off_checkpoint_unknown_ack_resume_is_local_and_does_not_d
         receiver.try_recv().is_err(),
         "local receipt Resume must not fall through to dispatch"
     );
+}
+
+#[tokio::test]
+async fn human_prompt_ui_selected_resume_accounts_only_its_original_off_checkpoint_receipt() {
+    use axum::{body::Body, http::{Request, StatusCode}};
+    use tower::ServiceExt;
+    let (state, _project, session, transport, receiver) = pending_off_receipt_with_queue(true);
+    let selected = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        HumanPromptSelection { prompt: projected_pending_prompts(record).remove(0),
+            session_mutation_stamp: record.mutation_stamp }
+    };
+    let response = app_router(state.clone()).oneshot(Request::builder().method("POST")
+        .uri(format!("/api/sessions/{session}/queue/resume"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&ResumeQueueRequest {
+            origin: Some(ExplicitPromptOrigin::Human), human_choice: Some(selected),
+        }).unwrap())).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let inner = state.inner.lock().unwrap();
+    assert!(engram_session_obligation_locked(&inner, &session).is_none());
+    assert!(inner.engram_pending_checkpoint_receipts.entries.is_empty());
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert_eq!(record.queued_prompts[0].pending_prompt.id, "queued-before-off");
+    assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
+    assert!(record.human_queue_choices.is_empty());
+    assert_eq!(transport.requests().len(), 1);
+    assert!(receiver.try_recv().is_err(), "receipt accounting cannot dispatch the queue");
 }
 
 #[test]
@@ -944,6 +1058,65 @@ fn project_containment_off_checkpoint_resume_preserves_receipt_on_owner_or_setti
         assert_eq!(transport.requests().len(), 1);
         assert!(receiver.try_recv().is_err());
     }
+}
+
+#[test]
+fn human_prompt_unknown_selected_resume_accounts_off_receipt_before_a_human_successor() {
+    let (state, _project, session, transport, receiver) = pending_off_receipt_with_queue(true);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let head = &mut inner.sessions[index].queued_prompts[0];
+        head.promotion_disposition_known = false;
+        head.engram_interrupted = true;
+    }
+    enqueue_human_for_resume(&state, &session, false);
+    let selection = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        HumanPromptSelection { prompt: projected_pending_prompts(record).remove(0),
+            session_mutation_stamp: record.mutation_stamp }
+    };
+    state.resume_selected_human_prompt(&session, selection).unwrap();
+    let inner = state.inner.lock().unwrap();
+    assert!(engram_session_obligation_locked(&inner, &session).is_none());
+    assert!(inner.engram_pending_checkpoint_receipts.entries.is_empty());
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert_eq!(record.queued_prompts.len(), 2);
+    assert_eq!(record.queued_prompts[0].pending_prompt.id, "queued-before-off");
+    assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
+    assert_eq!(record.queued_prompts[1].source, QueuedPromptSource::Human);
+    assert!(record.human_queue_choices.contains_key("queued-before-off"));
+    assert!(record.human_prompt_turn.is_none());
+    assert_eq!(transport.requests().len(), 1);
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn human_prompt_reusable_selected_resume_accounts_off_receipt_without_starting_write_ahead() {
+    let (state, _project, session, transport, receiver) = pending_off_receipt_with_queue_kind(true, true);
+    let (selection, nonce) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(human_choice_receipt_pending(record, "queued-before-off"));
+        (HumanPromptSelection { prompt: projected_pending_prompts(record).remove(0),
+            session_mutation_stamp: record.mutation_stamp },
+            record.prompt_deliveries["queued-before-off"].write_ahead.clone())
+    };
+    state.resume_selected_human_prompt(&session, selection).unwrap();
+    let inner = state.inner.lock().unwrap();
+    assert!(engram_session_obligation_locked(&inner, &session).is_none());
+    assert!(inner.engram_pending_checkpoint_receipts.entries.is_empty());
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert_eq!(record.queued_prompts[0].pending_prompt.id, "queued-before-off");
+    assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
+    let receipt = &record.prompt_deliveries["queued-before-off"];
+    assert_eq!(receipt.disposition, PromptDeliveryDisposition::Pending);
+    assert_eq!(receipt.write_ahead, nonce);
+    assert!(receipt.resume.is_none());
+    assert_eq!(transport.requests().len(), 1);
+    assert!(receiver.try_recv().is_err());
 }
 
 #[test]

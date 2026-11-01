@@ -361,6 +361,7 @@ fn claude_and_acp_handoff_supersession_is_success_without_provider_or_rejection(
             let turn_lifecycle = Arc::new((Mutex::new(successor_active), Condvar::new()));
             let dispatch = if acp {
                 TurnDispatch::PersistentAcp {
+                    human_prompt_id: None,
                     federation_handoff: None,
                     opening_prompt: None,
                     active_turn_generation,
@@ -382,6 +383,7 @@ fn claude_and_acp_handoff_supersession_is_success_without_provider_or_rejection(
                 }
             } else {
                 TurnDispatch::PersistentClaude {
+                    human_prompt_id: None,
                     federation_handoff: None,
                     opening_prompt: None,
                     active_turn_generation,

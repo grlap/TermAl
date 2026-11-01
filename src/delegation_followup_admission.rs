@@ -637,7 +637,7 @@ impl Drop for DelegationFollowupAdmission {
 }
 
 // Removing the first prompt does not create a new transcript boundary. If
-// another User prompt remains, it owns the same not-yet-started attempt.
+// another User or Human prompt remains, it owns the same not-yet-started attempt.
 // Automatic mailbox/orchestrator wakes cannot replace an explicit follow-up;
 // otherwise settle explicitly rather than deriving a result from old output.
 fn reconcile_removed_followup_prompt_locked(
@@ -667,7 +667,7 @@ fn reconcile_removed_followup_prompt_locked(
             inner.sessions[child]
                 .queued_prompts
                 .iter()
-                .find(|queued| queued.source == QueuedPromptSource::User)
+                .find(|queued| matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human))
         })
         .map(|queued| queued.pending_prompt.id.clone());
     if successor.is_some() {

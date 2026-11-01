@@ -86,6 +86,7 @@ fn channel_dispatch(fixture: &Fixture, token: &RuntimeToken,
             })
     };
     TurnDispatch::PersistentClaude {
+        human_prompt_id: None,
         federation_handoff,
         active_turn_generation: turn, opening_prompt: None,
         command: ClaudePromptCommand { attachments: Vec::new(), replay_generation: format!("attempt-{turn}"),

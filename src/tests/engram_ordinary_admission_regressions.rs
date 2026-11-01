@@ -90,6 +90,7 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
     state.request_stop_session(&session).unwrap();
     gate.wait_until_claimed();
     let mut dispatch = Some(TurnDispatch::PersistentAcp {
+        human_prompt_id: None,
         federation_handoff: None,
         opening_prompt: None,
         active_turn_generation,

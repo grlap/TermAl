@@ -138,6 +138,9 @@ struct EngramQueuedAdmissionOwner {
     generation: u64,
     active_turn_generation: u64,
     capacity_nonce: Option<String>,
+    // A WAL continuation carries the receipt it acknowledged, not one read
+    // afresh after an unrelated Stop, pause or retry changed the head.
+    receipt_resume: Option<PromptDeliveryResume>,
 }
 
 impl EngramQueuedAdmissionOwner {
@@ -156,12 +159,25 @@ impl EngramQueuedAdmissionOwner {
             generation: record.engram.dispatch_generation,
             active_turn_generation: record.active_turn_generation,
             capacity_nonce: None,
+            receipt_resume: None,
         })
     }
 
     fn matches(&self, record: &SessionRecord) -> bool {
         self.capacity_nonce.as_ref().is_none_or(|nonce|
             provider_capacity_resume_owned(record, nonce))
+            && self.receipt_resume.as_ref().is_none_or(|resume| {
+                record.runtime_stop_generation == resume.stop_generation
+                    && record.auto_dispatch_pause_epoch == resume.pause_epoch
+                    && record.queued_prompts.front().is_some_and(|head|
+                        receipted_prompt_intent(head) == resume.intent)
+                    && record.prompt_deliveries.get(&self.prompt_id).is_some_and(|delivery|
+                        delivery.resume.as_ref() == Some(resume)
+                            && delivery.write_ahead == resume.write_ahead
+                            && delivery.disposition == PromptDeliveryDisposition::HandingOff
+                            && delivery.turn_generation.is_none()
+                            && delivery.write_ahead_acknowledged)
+            })
             && record.engram.dispatch_generation == self.generation
             && record.active_turn_generation == self.active_turn_generation
             && record

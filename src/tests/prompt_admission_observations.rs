@@ -189,6 +189,7 @@ fn actual_enqueue(source: QueuedPromptSource, receiver_closed: bool) {
         handoff["source"],
         match source {
             QueuedPromptSource::User => "user",
+            QueuedPromptSource::Human => "human",
             QueuedPromptSource::Mailbox => "mailbox",
             QueuedPromptSource::Orchestrator => "orchestrator",
         }

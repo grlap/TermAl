@@ -68,8 +68,10 @@ fn off_checkpoint_receipt_owner_matches(
     });
     Ok(
         record.engram.dispatch_generation == expected.owner_generation
-            && record.active_turn_generation == owner.active_turn_generation
-            && format!("{:?}", record.runtime.runtime_token()) == owner.runtime_episode
+            && ((record.active_turn_generation == owner.active_turn_generation
+                && format!("{:?}", record.runtime.runtime_token()) == owner.runtime_episode)
+                || human_turn_descends_from_control_owner(record, expected.owner_generation,
+                    owner.active_turn_generation, &owner.runtime_episode))
             && record.engram.work_binding == owner.work_binding
             && record.engram.routing_token.as_deref() == Some(expected.routing_token.as_str())
             && (record.engram.active_grant_id.as_deref() == Some(expected.grant_id.as_str())

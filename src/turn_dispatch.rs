@@ -184,6 +184,9 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(session_id)?;
             let queued = inner.sessions[index].queued_prompts.front()?;
+            if queued.source == QueuedPromptSource::Human {
+                return None;
+            }
             if engram_queue_head_refused_as_interrupted(&inner.sessions[index])
                 && !containment_retained_reconciliation_allowed(&inner, session_id) {
                 return None;
@@ -360,6 +363,14 @@ impl AppState {
             );
             return Ok(None);
         };
+
+        // Human envelopes are promoted only by their off-lock Human owner,
+        // including with control OFF. A legacy locked Send drain has neither
+        // that owner nor authority to release its explicit pause.
+        if queued.source == QueuedPromptSource::Human {
+            abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram);
+            return Ok(None);
+        }
 
         // A head held for its durability acknowledgement is promoted by no
         // entry point, and the FIFO queue behind it waits with it. Its
@@ -686,6 +697,7 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentClaude {
+                    human_prompt_id: None,
                     federation_handoff: None,
                     active_turn_generation,
                     opening_prompt: None,
@@ -758,6 +770,7 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentCodex {
+                    human_prompt_id: None,
                     federation_handoff: None,
                     active_turn_generation,
                     opening_prompt: None,
@@ -860,6 +873,7 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentAcp {
+                    human_prompt_id: None,
                     federation_handoff: None,
                     active_turn_generation,
                     opening_prompt: None,
@@ -1038,7 +1052,7 @@ impl AppState {
                                     );
                                 }
                             }
-                            QueuedPromptSource::User => {}
+                            QueuedPromptSource::User | QueuedPromptSource::Human => {}
                         }
                     }
                     TurnDispatchDeliveryOutcome::Held { error: Some(error) } => eprintln!(
@@ -1341,6 +1355,42 @@ impl AppState {
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
+        let mut selected_human = None;
+        let human_owner = match owner.as_ref() {
+            None => true,
+            Some(QueuedDrainOwner::Resume(owner) | QueuedDrainOwner::Activation(owner)) => {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner.find_session_index(session_id).is_some_and(|index| {
+                    let record = &inner.sessions[index];
+                    let eligible = owner.matches(record) && record.queued_prompts.front().is_some_and(|head|
+                        (head.source == QueuedPromptSource::Human && !head.has_engram_intent())
+                            || human_choice_matches(record, head, &self.server_instance_id));
+                    if eligible { selected_human = HumanResumeOwner::capture(record, owner.clone()); }
+                    selected_human.is_some()
+                })
+            }
+            _ => false,
+        };
+        if human_owner && !orphaned_workflow_only {
+            #[cfg(test)]
+            let _drain_completion = selected_human.as_ref().and_then(|_| run_test_human_drain_capture_hook(self, session_id));
+            // Ordinary/peer Send also uses allow_blocked_dispatch for its own
+            // legacy queue policy. It is not an explicit Human Resume. Only
+            // the exact receipted Resume owner may carry that pause bypass;
+            // explicit Human UI actions call their own promotion path.
+            let human_resume = allow_blocked_dispatch
+                && matches!(owner.as_ref(), Some(QueuedDrainOwner::Resume(_)));
+            let drained = self.start_human_queued_turn_with_selection(session_id, human_resume, selected_human.as_mut());
+            let drained = match drained {
+                Err(error) if selected_human.is_some() && error.downcast_ref::<HumanPromptOwnerChanged>().is_some() => return Ok(None),
+                other => other?,
+            };
+            match drained {
+                HumanPromptDrain::Started(started) => return Ok(Some(started)),
+                HumanPromptDrain::Held => return Ok(None),
+                HumanPromptDrain::Absent => {}
+            }
+        }
         if let Some(QueuedDrainOwner::Activation(owner)) = &owner {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.find_session_index(session_id).is_none_or(|index| {
@@ -1427,6 +1477,12 @@ impl AppState {
                 let Some(index) = inner.find_session_index(session_id) else {
                     return Ok(None);
                 };
+                // A retained Human handoff has no ordinary admission owner,
+                // even before reload marks its unknown outcome interrupted.
+                if inner.sessions[index].queued_prompts.front()
+                    .is_some_and(|head| head.source == QueuedPromptSource::Human) {
+                    return Ok(None);
+                }
                 if engram_source_observation_holds_admission(&inner, index) {
                     if hold_source_observation_admission(&mut inner.sessions[index]) {
                         inner.stamp_session_at_index(index);
@@ -1971,6 +2027,11 @@ impl AppState {
                     return Ok(None);
                 };
                 // A held head asks Engram for nothing: it cannot be promoted.
+                // Recheck source here after off-lock preparation: only the
+                // Human path may act on a Human head, including unknown sends.
+                if queued.source == QueuedPromptSource::Human {
+                    return Ok(None);
+                }
                 if queued_prompt_held_for_durability(record, &queued) {
                     return Ok(None);
                 }
@@ -2528,9 +2589,12 @@ impl AppState {
         let blocked_queue_contains_user_prompt = inner.sessions[index]
             .queued_prompts
             .iter()
-            .any(|queued| queued.source == QueuedPromptSource::User);
+            .any(|queued| matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human));
         let orchestrator_auto_dispatch_blocked =
             inner.sessions[index].orchestrator_auto_dispatch_blocked;
+        let paused_human_queue = orchestrator_auto_dispatch_blocked
+            && inner.sessions[index].queued_prompts.iter()
+                .any(|queued| queued.source == QueuedPromptSource::Human);
         let queued_prompt_source = if source
             .as_ref()
             .is_some_and(|message_source| message_source.is_mailbox())
@@ -2543,6 +2607,7 @@ impl AppState {
             && (source.is_some() || request.source_mailbox.is_some());
         let explicit_reset_resume = project_reset_fenced
             && orchestrator_auto_dispatch_blocked
+            && !paused_human_queue
             && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User;
         if explicit_reset_resume {
@@ -2560,7 +2625,7 @@ impl AppState {
         // the moment of Stop; only a later user prompt may lift the latch.
         let blocked_automatic_prompt = orchestrator_auto_dispatch_blocked
             && (queued_prompt_source == QueuedPromptSource::Mailbox
-                || capacity_automatic_prompt);
+                || capacity_automatic_prompt || paused_human_queue);
 
         require_no_engram_local_dispatch_obligation(&inner, session_id)?;
         let mut message_id = inner.next_message_id();
@@ -2750,6 +2815,7 @@ impl AppState {
                 }
             }
             let recover_blocked_queue_with_existing_user_prompt = !session_is_busy
+                && !paused_human_queue
                 && has_queued_prompts
                 && orchestrator_auto_dispatch_blocked
                 && blocked_queue_contains_user_prompt
@@ -3020,6 +3086,7 @@ impl AppState {
             }
         }
         let recover_blocked_queue_with_existing_user_prompt = !session_is_busy
+            && !paused_human_queue
             && has_queued_prompts
             && orchestrator_auto_dispatch_blocked
             && blocked_queue_contains_user_prompt

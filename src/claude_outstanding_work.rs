@@ -95,7 +95,7 @@ fn claude_observation_disposition(
 ) -> ClaudeObservationDisposition {
     let provenance = match provenance {
         EngramObservationProvenance::Ambient => {
-            return if unmediated_claude_turn_hides_observations(record) {
+            return if human_prompt_turn_is_current(record) || unmediated_claude_turn_hides_observations(record) {
                 ClaudeObservationDisposition::Unowned
             } else {
                 ClaudeObservationDisposition::Current
@@ -113,7 +113,7 @@ fn claude_observation_disposition(
         {
             ClaudeObservationDisposition::Foreign
         }
-        _ if unmediated_claude_turn_hides_observations(record) => {
+        _ if human_prompt_turn_is_current(record) || unmediated_claude_turn_hides_observations(record) => {
             ClaudeObservationDisposition::Unowned
         }
         ClaudeWorkOrigin::Attempt { .. } => ClaudeObservationDisposition::Current,

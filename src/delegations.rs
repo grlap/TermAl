@@ -1464,6 +1464,21 @@ impl AppState {
         request: SendMessageRequest,
         host_acceptance_attempt: bool,
     ) -> Result<DelegationStatusResponse, ApiError> {
+        self.followup_delegation_request_with_prompt_origin(parent_session_id, delegation_id,
+            request, host_acceptance_attempt, false)
+    }
+
+    fn followup_human_delegation_request(
+        &self, parent_session_id: &str, delegation_id: &str, request: SendMessageRequest,
+    ) -> Result<DelegationStatusResponse, ApiError> {
+        let _acceptance = self.reserve_requester_acceptance_followup(parent_session_id, delegation_id, &request)?;
+        self.followup_delegation_request_with_prompt_origin(parent_session_id, delegation_id, request, false, true)
+    }
+
+    fn followup_delegation_request_with_prompt_origin(
+        &self, parent_session_id: &str, delegation_id: &str, request: SendMessageRequest,
+        host_acceptance_attempt: bool, human: bool,
+    ) -> Result<DelegationStatusResponse, ApiError> {
         // Reject malformed payloads before recovery/re-arm can clear a review.
         parse_prompt_image_attachments(&request.attachments)?;
         if request.text.trim().is_empty() && request.attachments.is_empty() {
@@ -1675,11 +1690,13 @@ impl AppState {
 
         // Phase 2: restore off-lock, then start/queue and re-arm under one state
         // lock. A rejected start never clears the previous terminal attempt.
-        let dispatch = match self.dispatch_turn_with_followup(
-            &child_session_id,
-            request,
-            Some(&admission.previous),
-        ) {
+        let mut accepted_prompt_id = None;
+        let started = if human {
+            self.dispatch_human_turn_with_followup(&child_session_id, request, Some(&admission.previous), &mut accepted_prompt_id)
+        } else {
+            self.dispatch_turn_with_followup(&child_session_id, request, Some(&admission.previous))
+        };
+        let dispatch = match started {
             Ok(dispatch) => dispatch,
             Err(mut error) => {
                 if error.kind == Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) {
@@ -1716,7 +1733,7 @@ impl AppState {
                 return Err(error);
             }
         };
-        let delivery = match dispatch {
+        let mut delivery = match dispatch {
             DispatchTurnResult::Dispatched(dispatch)
             | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
                 deliver_turn_dispatch(self, dispatch)
@@ -1724,6 +1741,19 @@ impl AppState {
             DispatchTurnResult::Queued => TurnDispatchDeliveryOutcome::Held { error: None },
         };
         let released = admission.release();
+        if let Some(prompt_id) = accepted_prompt_id.as_deref() {
+            if let TurnDispatchDeliveryOutcome::Rejected(error) = delivery {
+                self.retain_accepted_human_start_failure(&child_session_id, prompt_id, &error.message);
+                delivery = TurnDispatchDeliveryOutcome::Held { error: Some(error) };
+            }
+            if let Err(error) = released {
+                let error = ApiError::internal(format!("failed to refresh follow-up waits: {error:#}"));
+                self.retain_accepted_human_start_failure(&child_session_id, prompt_id, &error.message);
+                delivery = TurnDispatchDeliveryOutcome::Held { error: Some(error) };
+            }
+            drop(admission);
+            return self.delegation_status_after_followup_turn(parent_session_id, delegation_id, delivery);
+        }
         if let TurnDispatchDeliveryOutcome::Rejected(mut error) = delivery {
             if let Err(wait_error) = released {
                 error.message.push_str(&format!(

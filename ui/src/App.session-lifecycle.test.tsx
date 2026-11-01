@@ -409,6 +409,7 @@ describe("App session lifecycle", () => {
                   text: "Recover this prompt",
                   attachments: [],
                   expandedText: null,
+                  origin: "human",
                 })
             );
           }),

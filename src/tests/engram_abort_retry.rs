@@ -15,6 +15,37 @@
 // root dispatch tests whose fixtures it uses.
 use super::*;
 
+#[tokio::test]
+async fn human_prompt_ui_resume_uses_the_acknowledged_abort_retry_owner() {
+    let (state, session, receiver, persister, _transport) =
+        withheld_root_delivery(checkpoint_reply("abort-grant-1"), fresh_admission_steps());
+    await_settlement_acknowledgement(&state, &session);
+    // Fence completion is applied by the scheduler before explicit Resume.
+    state.engram_abort_retry_tick(chrono::Utc::now());
+    assert_eq!(prompts_received(&receiver), 0, "acknowledgement cannot deliver the held head");
+    let selection = with_record(&state, &session, |record| {
+        assert!(engram_abort_retry_holds_head(record));
+        assert!(!record.queued_prompts[0].has_engram_intent());
+        assert!(record.prompt_deliveries.is_empty());
+        assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
+        HumanPromptSelection { prompt: projected_pending_prompts(record)[0].clone(), session_mutation_stamp: record.mutation_stamp }
+    });
+    let response = app_router(state.clone()).oneshot(Request::builder().method("POST")
+        .uri(format!("/api/sessions/{session}/queue/resume")).header("content-type", "application/json")
+        .body(Body::from(json!({"origin":"human", "humanChoice":selection}).to_string())).unwrap()).await.unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(prompts_received(&receiver), 1);
+    with_record(&state, &session, |record| {
+        assert!(record.queued_prompts.is_empty());
+        assert!(record.human_prompt_turn.is_none());
+        assert!(record.human_queue_choices.is_empty());
+        assert_eq!(record.engram.active_grant_id.as_deref(), Some("abort-grant-2"));
+    });
+    persister.stop(&state);
+}
+
 const PROMPT: &str = "a prompt whose first delivery was withheld";
 
 /// A persistence worker for these tests: it fails the next `failures`

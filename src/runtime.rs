@@ -582,6 +582,7 @@ struct MailboxNotificationDelivery {
 /// Defines the turn dispatch variants.
 enum TurnDispatch {
     PersistentClaude {
+        human_prompt_id: Option<String>,
         federation_handoff: Option<FederationExecutorHandoffIdentity>,
         active_turn_generation: u64,
         opening_prompt: Option<EngramOpeningPrompt>,
@@ -593,6 +594,7 @@ enum TurnDispatch {
         session_id: String,
     },
     PersistentCodex {
+        human_prompt_id: Option<String>,
         federation_handoff: Option<FederationExecutorHandoffIdentity>,
         active_turn_generation: u64,
         opening_prompt: Option<EngramOpeningPrompt>,
@@ -605,6 +607,7 @@ enum TurnDispatch {
         session_id: String,
     },
     PersistentAcp {
+        human_prompt_id: Option<String>,
         federation_handoff: Option<FederationExecutorHandoffIdentity>,
         active_turn_generation: u64,
         opening_prompt: Option<EngramOpeningPrompt>,
@@ -619,6 +622,22 @@ enum TurnDispatch {
 }
 
 impl TurnDispatch {
+    fn human_prompt_id(&self) -> Option<&str> {
+        match self {
+            Self::PersistentClaude { human_prompt_id, .. }
+            | Self::PersistentCodex { human_prompt_id, .. }
+            | Self::PersistentAcp { human_prompt_id, .. } => human_prompt_id.as_deref(),
+        }
+    }
+
+    fn set_human_prompt_id(&mut self, prompt_id: String) {
+        match self {
+            Self::PersistentClaude { human_prompt_id, .. }
+            | Self::PersistentCodex { human_prompt_id, .. }
+            | Self::PersistentAcp { human_prompt_id, .. } => *human_prompt_id = Some(prompt_id),
+        }
+    }
+
     fn federation_handoff(&self) -> Option<&FederationExecutorHandoffIdentity> {
         match self {
             Self::PersistentClaude { federation_handoff, .. }

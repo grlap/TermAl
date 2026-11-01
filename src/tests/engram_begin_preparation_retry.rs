@@ -1260,6 +1260,33 @@ fn stop_then_resume_admits_a_never_sent_begin_preparation_head() {
     }
 }
 
+#[tokio::test]
+async fn human_prompt_ui_resume_releases_the_existing_never_sent_begin_owner() {
+    let (state, session, receiver, transport, writer) = settled_after_preparation_write_failure();
+    state.request_stop_session(&session).unwrap();
+    let selection = with_record(&state, &session, |record| {
+        assert!(matches!(engram_begin_preparation_resume(record), EngramBeginPreparationResume::Releasable));
+        assert!(!record.queued_prompts[0].has_engram_intent());
+        assert!(record.prompt_deliveries.is_empty());
+        assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
+        HumanPromptSelection { prompt: projected_pending_prompts(record)[0].clone(), session_mutation_stamp: record.mutation_stamp }
+    });
+    let response = app_router(state.clone()).oneshot(Request::builder().method("POST")
+        .uri(format!("/api/sessions/{session}/queue/resume")).header("content-type", "application/json")
+        .body(Body::from(json!({"origin":"human", "humanChoice":selection}).to_string())).unwrap()).await.unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    writer.finish(&state);
+    assert_eq!(abort_retry::prompts_received(&receiver), 1);
+    assert_eq!(begin_requests(&transport).len(), 1);
+    with_record(&state, &session, |record| {
+        assert!(record.queued_prompts.is_empty());
+        assert!(record.human_prompt_turn.is_none());
+        assert!(record.human_queue_choices.is_empty());
+    });
+}
+
 /// A prepared begin saved before a restart may have been sent: loading drops
 /// its pending marker, and the boot pass leaves a paused head as it is. When
 /// the operator's Resume then admits that head and its preparation, which

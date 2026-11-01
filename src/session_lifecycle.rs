@@ -540,14 +540,38 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_resume_session_queue(session_id);
         }
+        if self.resume_off_checkpoint_receipt(session_id)? {
+            return Ok(self.snapshot());
+        }
+        self.cancel_provider_capacity_retry(session_id);
+        match self.start_human_queued_turn(session_id, true)
+            .map_err(|error| ApiError::internal(format!("failed to resume human prompt: {error:#}")))?
+        {
+            HumanPromptDrain::Started(started) => {
+                deliver_turn_dispatch(self, started.dispatch).into_public_result()?;
+                return Ok(self.snapshot());
+            }
+            HumanPromptDrain::Held => {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                if inner.find_visible_session_index(session_id).is_some_and(|index| {
+                    let record = &inner.sessions[index];
+                    !record.orchestrator_auto_dispatch_blocked
+                        && queued_head_durability_resume_refusal(record).is_none()
+                }) {
+                    drop(inner);
+                    return Ok(self.snapshot());
+                }
+                let reason = inner.find_visible_session_index(session_id)
+                    .and_then(|index| queued_head_durability_resume_refusal(&inner.sessions[index]))
+                    .unwrap_or_else(|| "the human prompt is held by its runtime, reset, Stop or admission owner; Resume did not start a turn".to_owned());
+                return Err(ApiError::conflict(reason));
+            }
+            HumanPromptDrain::Absent => {}
+        }
         let delivery = {
             #[cfg(test)]
             let _local = self.test_api_phase_timer("resume_local_mutation", Some(session_id));
-            if self.resume_off_checkpoint_receipt(session_id)? {
-                None
-            } else {
-                self.resume_local_session_queue(session_id, None)?
-            }
+            self.resume_local_session_queue(session_id, None)?
         };
         if let Some(delivery) = delivery {
             delivery.into_public_result()?;
@@ -575,9 +599,30 @@ impl AppState {
     fn resume_local_session_queue_inner(
         &self,
         session_id: &str,
-        mut owner: Option<EngramQueuedAdmissionOwner>,
+        owner: Option<EngramQueuedAdmissionOwner>,
         capacity_nonce: Option<&str>,
     ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
+        self.resume_local_session_queue_inner_with_selection(session_id, owner, capacity_nonce, None)
+    }
+
+    fn resume_local_session_queue_inner_with_selection(
+        &self, session_id: &str, mut owner: Option<EngramQueuedAdmissionOwner>, capacity_nonce: Option<&str>,
+        ordinary_selection: Option<&HumanPromptSelection>,
+    ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
+        if let Some(selection) = ordinary_selection {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if !inner.find_visible_session_index(session_id).is_some_and(|index|
+                inner.sessions[index].mutation_stamp == selection.session_mutation_stamp
+                    && owner.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]))
+                    && selected_ordinary_resume_matches(&inner, &inner.sessions[index], selection))
+            { return Err(ApiError::conflict("the selected ordinary queue owner changed before Resume")); }
+        }
+        if ordinary_selection.is_some() {
+            if self.resume_off_checkpoint_receipt(session_id)? {
+                return Ok(None);
+            }
+            self.cancel_provider_capacity_retry(session_id);
+        }
         if let Some(owner) = owner.as_ref() {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.find_visible_session_index(session_id)
@@ -652,9 +697,11 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
+            if ordinary_selection.is_some_and(|selection|
+                !owner.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]))
+                    || !selected_ordinary_resume_matches(&inner, &inner.sessions[index], selection))
+            { return Err(ApiError::conflict("the selected ordinary queue disposition changed during Resume")); }
+            let record = inner.session_mut_by_index(index).expect("session index should be valid");
             if capacity_nonce.is_some_and(|nonce| !provider_capacity_resume_owned(record, nonce)) {
                 return Ok(Some(TurnDispatchDeliveryOutcome::Superseded));
             }

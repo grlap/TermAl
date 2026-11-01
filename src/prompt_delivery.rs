@@ -55,6 +55,23 @@ enum PromptDeliveryDisposition {
     Ambiguous,
 }
 
+/// Positive evidence owned by the existing receipt, never by a human choice
+/// or a missing observation. A promoted/reloaded handoff is not an unsent one.
+fn human_choice_receipt_pending(record: &SessionRecord, prompt_id: &str) -> bool {
+    record.prompt_deliveries.get(prompt_id).is_some_and(|delivery|
+        delivery.federation_operation.is_none()
+            && delivery.disposition == PromptDeliveryDisposition::Pending
+            && delivery.turn_generation.is_none())
+}
+
+fn human_choice_receipt_ready(record: &SessionRecord, prompt_id: &str) -> bool {
+    record.prompt_deliveries.get(prompt_id).is_some_and(|delivery|
+        delivery.federation_operation.is_none()
+            && delivery.disposition == PromptDeliveryDisposition::HandingOff
+            && delivery.turn_generation.is_none() && delivery.write_ahead_acknowledged)
+        && prompt_delivery_resume_holds(record, prompt_id)
+}
+
 impl PromptDeliveryDisposition {
     fn is_settled(self) -> bool {
         matches!(self, Self::Accepted | Self::Rejected | Self::Ambiguous)
@@ -146,7 +163,7 @@ struct CodexPromptReceipt {
 /// epoch then): a Stop, a later pause, a Cancel, a replacement or a content
 /// edit, or another attempt, ends it. Only the promotion it authorizes
 /// consumes it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PromptDeliveryResume {
     capacity_nonce: Option<String>,
     dispatch_generation: u64,
@@ -162,6 +179,7 @@ impl PromptDeliveryResume {
     /// was captured for, never one captured afresh.
     fn owner(&self, prompt_id: &str) -> EngramQueuedAdmissionOwner {
         EngramQueuedAdmissionOwner {
+            receipt_resume: Some(self.clone()),
             capacity_nonce: self.capacity_nonce.clone(),
             prompt_id: prompt_id.to_owned(),
             generation: self.dispatch_generation,
@@ -1013,13 +1031,32 @@ impl AppState {
         owner: Option<&EngramQueuedAdmissionOwner>,
         accepted: &ReceiptedResumeIdentity,
     ) -> ReceiptedResume {
+        self.resume_receipted_head_with_choice(session_id, owner, accepted, false)
+    }
+
+    fn resume_selected_human_receipted_head(
+        &self, session_id: &str, owner: Option<&EngramQueuedAdmissionOwner>, accepted: &ReceiptedResumeIdentity,
+    ) -> ReceiptedResume {
+        self.resume_receipted_head_with_choice(session_id, owner, accepted, true)
+    }
+
+    fn resume_receipted_head_with_choice(
+        &self, session_id: &str, owner: Option<&EngramQueuedAdmissionOwner>, accepted: &ReceiptedResumeIdentity,
+        human: bool,
+    ) -> ReceiptedResume {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_visible_session_index(session_id) else {
             return ReceiptedResume::NotReceipted;
         };
         let record = &inner.sessions[index];
         // Unpaused meanwhile: the Resume goes on as for any head.
-        if !record.orchestrator_auto_dispatch_blocked {
+        let human_choice = human && record.queued_prompts.front().is_some_and(|head|
+            human_choice_matches(record, head, &self.server_instance_id)
+                && human_choice_control_intent_preserved(&inner, session_id, head));
+        if human && !human_choice {
+            return ReceiptedResume::Refused("the exact human choice changed before its write-ahead".into());
+        }
+        if !record.orchestrator_auto_dispatch_blocked && !human_choice {
             return ReceiptedResume::NotReceipted;
         }
         let unchanged = record.queued_prompts.front().is_some_and(|head| {
@@ -1141,7 +1178,9 @@ impl AppState {
             // the pause only while it still holds; its drain is bound to the
             // head it was captured for, and the promotion's own gate checks
             // and consumes it again.
-            let resume_owner = (record.orchestrator_auto_dispatch_blocked
+            let human_choice = record.queued_prompts.front().is_some_and(|head|
+                human_choice_matches(record, head, &self.server_instance_id));
+            let resume_owner = ((record.orchestrator_auto_dispatch_blocked || human_choice)
                 && prompt_delivery_resume_holds(record, prompt_id))
             .then(|| {
                 record.prompt_deliveries[prompt_id]

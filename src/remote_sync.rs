@@ -632,6 +632,7 @@ fn push_remote_proxy_session_record(
         active_codex_reasoning_effort: None,
         active_codex_sandbox_mode: None,
         active_turn_generation: 0,
+        human_prompt_turn: None,
         mailbox_continuations: MailboxContinuationCoverage::default(),
         active_turn_mailbox_notification: None,
         active_turn_start_message_count: None,
@@ -666,6 +667,7 @@ fn push_remote_proxy_session_record(
         queued_peer_messages: HashMap::new(),
         queued_prompt_durability_holds: BTreeMap::new(),
         prompt_deliveries: BTreeMap::new(),
+        human_queue_choices: BTreeMap::new(),
         provider_handoff_observations: ProviderHandoffObservations::default(),
         message_start_index: if session.messages_loaded {
             0

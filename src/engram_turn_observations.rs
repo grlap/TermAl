@@ -61,7 +61,8 @@ impl EngramCheckpointPurpose {
     /// `TurnTerminal` or `Settlement`, from what `record` holds now.
     fn resolve(self, record: &SessionRecord) -> Self {
         match self {
-            Self::Teardown if unmediated_claude_turn_is_current(record) => Self::Settlement,
+            Self::Teardown if unmediated_claude_turn_is_current(record)
+                || human_prompt_turn_is_current(record) => Self::Settlement,
             Self::Teardown => Self::TurnTerminal,
             purpose => purpose,
         }

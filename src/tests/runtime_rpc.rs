@@ -29,6 +29,7 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
     deliver_turn_dispatch(
         &state,
         TurnDispatch::PersistentAcp {
+            human_prompt_id: None,
             federation_handoff: None,
             opening_prompt: None,
             active_turn_generation: 1,

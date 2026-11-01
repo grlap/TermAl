@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { useAppSessionActions } from "./app-session-actions";
 import { withActionSessionAuthority, type TestSessionActionsParams } from "./session-publication-test-fixtures";
-import { reconcileStateSessionSummaries } from "./session-reconcile";
+import { reconcileSingleSession, reconcileStateSessionSummaries } from "./session-reconcile";
 import type { StateResponse } from "./api";
 import type { AgentType, ConversationMarker, Project, Session } from "./types";
 import type { WorkspaceState } from "./workspace-types";
@@ -730,6 +730,52 @@ describe("useAppSessionActions", () => {
     );
   });
 
+  it("keeps the draft cleared when an accepted Human prompt is queued after provider startup failure", async () => {
+    const queuedSession = makeSession("session-1", {
+      status: "error", queuePaused: true, messagesLoaded: true,
+      preview: "Human prompt queued; start failed: provider unavailable. Resume retries the retained prompt.",
+      pendingPrompts: [{ id: "accepted-human", timestamp: "2026-11-01T00:00:00Z", text: "run migration" }],
+    });
+    const response = {
+      ...makeStateResponse(6),
+      sessions: [makeSession("session-1", {
+        status: "error", queuePaused: true,
+        preview: queuedSession.preview,
+      })],
+    } satisfies StateResponse;
+    const send = vi.spyOn(api, "sendMessage").mockResolvedValue(response);
+    let params!: ReturnType<typeof makeSessionActionsParams>;
+    const adoptState = vi.fn((state: StateResponse) => {
+      params.refs.sessionsRef.current = reconcileStateSessionSummaries(
+        params.refs.sessionsRef.current, state.sessions,
+      );
+      return true;
+    });
+    params = makeSessionActionsParams({ adoptState });
+    params.refs.draftsBySessionIdRef.current = { "session-1": "run migration" };
+    const actions = useAppSessionActions(params);
+
+    expect(actions.handleSend("session-1")).toBe(true);
+    await waitFor(() => expect(adoptState).toHaveBeenCalledWith(response));
+
+    expect(params.refs.draftsBySessionIdRef.current["session-1"]).toBe("");
+    expect(params.reportRequestError).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toEqual([
+      expect.objectContaining({ localOnly: true, text: "run migration" }),
+    ]);
+    expect(params.refs.sessionsRef.current[0]?.queuePaused).toBe(true);
+    params.refs.sessionsRef.current = [reconcileSingleSession(
+      params.refs.sessionsRef.current[0]!, queuedSession,
+    )];
+    expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toEqual([
+      expect.objectContaining({ id: "accepted-human", text: "run migration" }),
+    ]);
+    expect(params.refs.draftsBySessionIdRef.current["session-1"]).toBe("");
+    expect(actions.handleSend("session-1")).toBe(false);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps one optimistic prompt when the send response is transcript-free", async () => {
     const retainedMessage = {
       id: "message-79",
@@ -1000,6 +1046,51 @@ describe("useAppSessionActions", () => {
     expect(adoptState).toHaveBeenCalledTimes(1);
     expect(adoptState).toHaveBeenCalledWith(resumedState, undefined);
     expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
+  });
+
+  it("binds a human queue choice to the displayed head without changing unknown content", async () => {
+    const prompt = { id: "legacy-head", timestamp: "2026-11-01T00:00:00Z", text: "original input" };
+    const originalError = new Error("the original delivery remains unknown");
+    const resumeSpy = vi.spyOn(api, "resumeSessionQueue").mockRejectedValue(originalError);
+    const reportRequestError = vi.fn();
+    const params = makeSessionActionsParams({ reportRequestError });
+    params.refs.sessionsRef.current = [makeSession("session-1", {
+      pendingPrompts: [prompt], sessionMutationStamp: 42, queuePaused: true,
+    })];
+    const actions = useAppSessionActions(params);
+
+    await actions.handleResumeSessionQueue("session-1");
+
+    expect(resumeSpy).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
+    expect(reportRequestError).toHaveBeenCalledWith(originalError);
+    expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toEqual([prompt]);
+    expect(prompt).toEqual({ id: "legacy-head", timestamp: "2026-11-01T00:00:00Z", text: "original input" });
+  });
+
+  it("hydrates an optimistic head before selecting Resume and refuses a changed head", async () => {
+    for (const changed of [false, true]) {
+      const optimistic = { id: "optimistic-human", timestamp: "10:00", text: "run migration", localOnly: true };
+      const authoritative = { id: "accepted-human", timestamp: "10:00", text: "run migration" };
+      const params = makeSessionActionsParams();
+      params.refs.sessionsRef.current = [makeSession("session-1", {
+        pendingPrompts: [optimistic], sessionMutationStamp: 4, queuePaused: true,
+      })];
+      vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+        revision: 8, serverInstanceId: "server-a", session: makeSession("session-1", {
+          pendingPrompts: changed ? [{ ...authoritative, id: "replacement", text: "different work" }] : [authoritative],
+          sessionMutationStamp: 8, queuePaused: true,
+        }),
+      });
+      const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue(makeStateResponse(9));
+      await useAppSessionActions(params).handleResumeSessionQueue("session-1");
+      if (changed) {
+        expect(resume).not.toHaveBeenCalled();
+        expect(params.setters.setRequestError).toHaveBeenCalledWith("The queued prompt changed; refresh before resuming.");
+      } else {
+        expect(resume).toHaveBeenCalledWith("session-1", { prompt: authoritative, sessionMutationStamp: 8 });
+      }
+      vi.restoreAllMocks();
+    }
   });
 
   it("reports a failed queue resume without a recovery resync", async () => {

@@ -42,6 +42,7 @@ fn engram_containment_session_image(row: &Value) -> Value {
         // A transfer must acknowledge the exact prepared admission successor
         // as well as its metadata ledger, on the same writer connection.
         "queue": row.get("queuedPrompts"),
+        "humanQueueChoices": row.get("humanQueueChoices"),
         "admissionRetry": row.get("engramAdmissionRetry"),
     })
 }

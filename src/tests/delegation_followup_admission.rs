@@ -592,10 +592,11 @@ fn canceled_queued_followup_never_reuses_old_result_or_discards_successor() {
         for successor_source in [
             None,
             Some(QueuedPromptSource::User),
+            Some(QueuedPromptSource::Human),
             Some(QueuedPromptSource::Mailbox),
             Some(QueuedPromptSource::Orchestrator),
         ] {
-            let successor = successor_source == Some(QueuedPromptSource::User);
+            let successor = matches!(successor_source, Some(QueuedPromptSource::User | QueuedPromptSource::Human));
             let (state, _, parent) = mailbox_test_state();
             let (delegation, child) = install_required_review_delegation(&state, &parent);
             if reviewer {
@@ -618,9 +619,14 @@ fn canceled_queued_followup_never_reuses_old_result_or_discards_successor() {
                 let index = inner.find_session_index(&child).unwrap();
                 inner.sessions[index].engram.project_reset_in_progress = true;
             }
-            let admitted = state
-                .followup_delegation(&parent, &delegation, "Cancel me".to_owned())
-                .unwrap();
+            let admitted = if successor_source == Some(QueuedPromptSource::Human) {
+                state.followup_human_delegation_request(&parent, &delegation, SendMessageRequest {
+                    text: "Cancel me".to_owned(), expanded_text: None, attachments: vec![],
+                    source_session_id: None, source_mailbox: None,
+                })
+            } else {
+                state.followup_delegation(&parent, &delegation, "Cancel me".to_owned())
+            }.unwrap();
             let prompt = admitted.delegation.queued_followup_prompt_id.unwrap();
             let next = if let Some(successor_source) = successor_source {
                 let mut inner = state.inner.lock().unwrap();
@@ -712,6 +718,8 @@ fn canceled_queued_followup_never_reuses_old_result_or_discards_successor() {
                     let inner = state.inner.lock().unwrap();
                     let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
                     assert_eq!(record.queued_prompts.len(), 1);
+                    assert_eq!(record.queued_prompts[0].source, successor_source.unwrap());
+                    assert!(!delegated_child_dispatch_is_blocked_locked(&inner, inner.find_session_index(&child).unwrap()));
                     assert_eq!(
                         record.queued_prompts[0].pending_prompt.id,
                         next.as_ref().unwrap().as_str()

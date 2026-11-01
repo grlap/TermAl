@@ -407,6 +407,7 @@ async fn federation_m4_runtime_provider_handoff_is_once_and_queueing_is_not_a_ru
         fixture.satellite.commit_locked(&mut inner).unwrap();
     }
     let dispatch = || TurnDispatch::PersistentClaude {
+        human_prompt_id: None,
         federation_handoff: {
             let inner = fixture.satellite.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&fixture.native).unwrap()];

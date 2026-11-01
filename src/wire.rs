@@ -2812,7 +2812,40 @@ where
     .serialize(serializer)
 }
 
-/// Represents the send message request payload.
+/// Origin declared on the explicit UI action, outside agent/mailbox payloads.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum ExplicitPromptOrigin {
+    Human,
+}
+
+/// The UI states its origin on the request that creates the envelope. Legacy
+/// bodies remain ordinary/automated; missing attribution never grants this.
+#[derive(Deserialize)]
+struct SendMessageRouteRequest {
+    #[serde(flatten)]
+    prompt: SendMessageRequest,
+    #[serde(default)]
+    origin: Option<ExplicitPromptOrigin>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HumanPromptSelection {
+    prompt: PendingPrompt,
+    session_mutation_stamp: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResumeQueueRequest {
+    #[serde(default)]
+    origin: Option<ExplicitPromptOrigin>,
+    #[serde(default)]
+    human_choice: Option<HumanPromptSelection>,
+}
+
+/// Represents the ordinary internal send message request payload.
 #[derive(Deserialize, Serialize)]
 struct SendMessageRequest {
     text: String,

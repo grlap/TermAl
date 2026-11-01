@@ -314,6 +314,7 @@ async fn admission_review_stop_during_marker_fence_keeps_unsent_owner() {
                 handoff_prepared_turn_dispatch(
                     &worker_state,
                     TurnDispatch::PersistentAcp {
+                        human_prompt_id: None,
                         federation_handoff: None,
                         opening_prompt: None,
                         active_turn_generation,

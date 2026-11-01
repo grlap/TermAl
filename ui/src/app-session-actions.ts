@@ -1155,7 +1155,28 @@ export function useAppSessionActions(
   // reports `queuePaused: false`.
   async function handleResumeSessionQueue(sessionId: string) {
     try {
-      const state = await resumeSessionQueue(sessionId);
+      const session = sessionsRef.current.find((entry) => entry.id === sessionId);
+      let prompt = session?.pendingPrompts?.[0];
+      let stamp = session?.sessionMutationStamp;
+      if (prompt?.localOnly === true) {
+        const response = await fetchSessionTail(sessionId);
+        if (!isMountedRef.current) {
+          return;
+        }
+        const authoritativeId = resolveAuthoritativePendingPromptId(
+          prompt, session?.pendingPrompts ?? [], response.session.pendingPrompts ?? [],
+        );
+        const head = response.session.pendingPrompts?.[0];
+        if (!authoritativeId || head?.id !== authoritativeId) {
+          setRequestError("The queued prompt changed; refresh before resuming.");
+          return;
+        }
+        prompt = head;
+        stamp = response.session.sessionMutationStamp;
+      }
+      const state = prompt && prompt.source == null && typeof stamp === "number"
+        ? await resumeSessionQueue(sessionId, { prompt, sessionMutationStamp: stamp })
+        : await resumeSessionQueue(sessionId);
       if (!isMountedRef.current) {
         return;
       }

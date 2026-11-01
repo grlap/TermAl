@@ -797,6 +797,8 @@ struct PersistedSessionRecord {
     /// ambiguous (`prompt_delivery.rs`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     prompt_deliveries: BTreeMap<String, PromptDelivery>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    human_queue_choices: BTreeMap<String, HumanQueuedChoice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -984,6 +986,7 @@ impl PersistedSessionRecord {
             queued_peer_messages: self.queued_peer_messages.clone(),
             queued_prompt_durability_holds: self.queued_prompt_durability_holds.clone(),
             prompt_deliveries: self.prompt_deliveries.clone(),
+            human_queue_choices: self.human_queue_choices.clone(),
             remote_id: self.remote_id.clone(),
             remote_session_id: self.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked.clone(),
@@ -1043,6 +1046,7 @@ impl PersistedSessionRecord {
             queued_peer_messages: record.queued_peer_messages.clone(),
             queued_prompt_durability_holds: record.queued_prompt_durability_holds.clone(),
             prompt_deliveries: record.prompt_deliveries.clone(),
+            human_queue_choices: record.human_queue_choices.clone(),
             remote_id: record.remote_id.clone(),
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
@@ -1163,6 +1167,7 @@ impl PersistedSessionRecord {
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
             active_turn_generation: 0,
+            human_prompt_turn: None,
             mailbox_continuations: MailboxContinuationCoverage::default(),
             active_turn_mailbox_notification: None,
             active_turn_start_message_count: None,
@@ -1191,6 +1196,7 @@ impl PersistedSessionRecord {
             queued_peer_messages: self.queued_peer_messages,
             queued_prompt_durability_holds,
             prompt_deliveries: self.prompt_deliveries,
+            human_queue_choices: self.human_queue_choices,
             provider_handoff_observations: ProviderHandoffObservations::default(),
             message_start_index: self.message_start_index,
             message_positions: build_message_positions(&session.messages),

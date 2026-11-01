@@ -2183,6 +2183,10 @@ struct SessionRecord {
     /// every dispatch so asynchronous callbacks cannot mistake a successor
     /// turn on the same shared runtime for the turn that armed them.
     active_turn_generation: u64,
+    /// Process-local exact human opening. It grants no Engram authority and
+    /// goes inert when a successor generation starts. Queued provenance and
+    /// an unknown handoff remain durable independently of this live owner.
+    human_prompt_turn: Option<HumanPromptTurn>,
     /// Process-local coverage; never recovered from a cursor or durable audit.
     mailbox_continuations: MailboxContinuationCoverage,
     /// Exact durable mailbox boundary represented by the active turn, if any.
@@ -2248,6 +2252,9 @@ struct SessionRecord {
     /// Delivery receipts of receipted prompts, keyed by prompt id
     /// (`prompt_delivery.rs`). Empty for every ordinary prompt.
     prompt_deliveries: BTreeMap<String, PromptDelivery>,
+    /// Exact human choices beside the existing queue/receipt owners. A choice
+    /// is provenance for a new decision, never proof of an earlier delivery.
+    human_queue_choices: BTreeMap<String, HumanQueuedChoice>,
     /// Process-local observations only; no receipt or dispatch authority.
     provider_handoff_observations: ProviderHandoffObservations,
     /// Global transcript position represented by `session.messages[0]`.
@@ -2347,6 +2354,7 @@ struct SessionRecord {
 struct QueuePromotionSnapshot {
     body_sequence: SessionBodySequence,
     active_turn_generation: u64,
+    human_prompt_turn: Option<HumanPromptTurn>,
     status: SessionStatus,
     preview: String,
     live_activity: Option<SessionLiveActivity>,
@@ -2414,6 +2422,7 @@ impl SessionRecord {
         QueuePromotionSnapshot {
             body_sequence: self.body_sequence.clone(),
             active_turn_generation: self.active_turn_generation,
+            human_prompt_turn: self.human_prompt_turn.clone(),
             status: self.session.status,
             preview: self.session.preview.clone(),
             live_activity: self.session.live_activity.clone(),
@@ -2487,6 +2496,7 @@ impl SessionRecord {
         sync_pending_prompts(self);
         self.session.status = snapshot.status;
         self.active_turn_generation = snapshot.active_turn_generation;
+        self.human_prompt_turn = snapshot.human_prompt_turn;
         self.file_change_tracking = None;
         self.session.preview = snapshot.preview;
         self.session.live_activity = snapshot.live_activity;

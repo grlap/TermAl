@@ -1254,7 +1254,7 @@ export function sendMessage(
     `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
     {
       method: "POST",
-      body: JSON.stringify({ text, attachments, expandedText }),
+      body: JSON.stringify({ text, attachments, expandedText, origin: "human" }),
     },
   );
 }
@@ -1515,11 +1515,15 @@ export function stopSession(sessionId: string) {
 
 /** Releases the explicit-resume latch a Stop leaves behind and dispatches
  * the queued prompts that were parked behind it. */
-export function resumeSessionQueue(sessionId: string) {
+export function resumeSessionQueue(sessionId: string, humanChoice?: {
+  prompt: import("./types").PendingPrompt;
+  sessionMutationStamp: number;
+}) {
   return request<StateResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/queue/resume`,
     {
       method: "POST",
+      ...(humanChoice ? { body: JSON.stringify({ origin: "human", humanChoice }) } : {}),
     },
   );
 }

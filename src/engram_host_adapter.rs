@@ -5014,7 +5014,7 @@ impl AppState {
         // close such a leftover grant, reporting no turn's execution.
         let resolved = purpose.resolve(record);
         if resolved == EngramCheckpointPurpose::TurnTerminal
-            && unmediated_claude_turn_is_current(record)
+            && (unmediated_claude_turn_is_current(record) || human_prompt_turn_is_current(record))
         {
             return None;
         }
@@ -10413,6 +10413,7 @@ fn engram_turn_intent_fingerprint(
     }
     let source_kind = match queued_source {
         QueuedPromptSource::User => "user",
+        QueuedPromptSource::Human => "human",
         QueuedPromptSource::Mailbox => "mailbox",
         QueuedPromptSource::Orchestrator => "orchestrator",
     };

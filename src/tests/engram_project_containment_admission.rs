@@ -150,6 +150,60 @@ fn parked_admission(
 }
 
 #[test]
+fn human_prompt_off_resume_preserves_retained_admission_without_control_requests() {
+    for lost in ["session_bind", "turn_evaluate"] {
+        for cancelled in [false, true] {
+            for reload in [false, true] {
+                let (state, _project, session, _root, receiver, transport) =
+                    retained_admission(&[lost]);
+                let (head, original) = {
+                    let inner = state.inner.lock().unwrap();
+                    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                    assert!(engram_session_obligation_locked(&inner, &session).is_some());
+                    (
+                        record.queued_prompts[0].pending_prompt.id.clone(),
+                        serde_json::to_value(&inner.engram_session_obligations).unwrap(),
+                    )
+                };
+                enqueue_human_for_resume(&state, &session, reload);
+                let count = transport.inner.requests().len();
+                if cancelled {
+                    state.cancel_queued_prompt(&session, &head).unwrap();
+                }
+                state
+                    .resume_session_queue(&session)
+                    .expect("control OFF must permit ordinary Resume while retaining the old duty");
+                assert_eq!(
+                    transport.inner.requests().len(),
+                    count,
+                    "ordinary Resume sends no Engram request"
+                );
+                assert!(matches!(
+                    receiver.try_recv().unwrap(),
+                    CodexRuntimeCommand::Prompt { .. }
+                ));
+                assert!(receiver.try_recv().is_err(), "one ordinary provider turn");
+                let inner = state.inner.lock().unwrap();
+                assert_eq!(
+                    serde_json::to_value(&inner.engram_session_obligations).unwrap(),
+                    original,
+                    "OFF cannot erase or settle the original authority and intent"
+                );
+                assert!(
+                    !inner
+                        .find_project(&_project)
+                        .unwrap()
+                        .engram
+                        .as_ref()
+                        .unwrap()
+                        .is_control_enabled()
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn project_containment_retained_bind_transfers_only_at_prepared_begin() {
     retained_admission_transfers_only_at_prepared_begin("session_bind");
 }
@@ -157,6 +211,85 @@ fn project_containment_retained_bind_transfers_only_at_prepared_begin() {
 #[test]
 fn project_containment_retained_evaluate_transfers_only_at_prepared_begin() {
     retained_admission_transfers_only_at_prepared_begin("turn_evaluate");
+}
+
+#[tokio::test]
+async fn human_prompt_ui_resume_preserves_retained_gated_admission_recovery() {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+    for lost in ["session_bind", "turn_evaluate"] {
+        let (state, project, session, _root, receiver, transport) = retained_admission(&[lost]);
+        let original = transport
+            .inner
+            .requests()
+            .into_iter()
+            .find(|r| r.request["operation"] == lost)
+            .unwrap()
+            .request;
+        state
+            .update_project_engram_settings(&project, settings(&state, &project, true))
+            .unwrap();
+        let selection = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            HumanPromptSelection {
+                prompt: projected_pending_prompts(record).remove(0),
+                session_mutation_stamp: record.mutation_stamp,
+            }
+        };
+        let response = app_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/sessions/{session}/queue/resume"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ResumeQueueRequest {
+                            origin: Some(ExplicitPromptOrigin::Human),
+                            human_choice: Some(selection),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "UI-selected {lost} recovery"
+        );
+        assert!(transport.transfer_seen.load(Ordering::SeqCst));
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            CodexRuntimeCommand::Prompt { .. }
+        ));
+        assert!(receiver.try_recv().is_err());
+        let requests = transport.inner.requests();
+        let replay = requests
+            .iter()
+            .filter(|r| r.request["operation"] == lost)
+            .collect::<Vec<_>>();
+        assert_eq!(replay.len(), 2);
+        assert_eq!(replay[1].request, original);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|r| r.request["operation"] == "turn_begin")
+                .count(),
+            1
+        );
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.human_queue_choices.is_empty());
+        assert!(
+            record.human_prompt_turn.is_none(),
+            "existing control owner remains gated"
+        );
+    }
 }
 
 fn retained_admission_transfers_only_at_prepared_begin(lost: &str) {

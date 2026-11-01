@@ -611,11 +611,34 @@ impl AppState {
     }
 
     fn prepare_dedicated_runtime_reset_off_lock(&self, session_id: &str, model_refresh: bool) -> Result<()> {
+        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, model_refresh, None, None)
+    }
+
+    fn prepare_dedicated_runtime_reset_for_human_off_lock(
+        &self, session_id: &str, prompt_id: &str, intent: &str, explicit: bool,
+        selected: Option<&mut HumanResumeOwner>,
+    ) -> Result<()> {
+        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, false, Some((prompt_id, intent, explicit)), selected)
+    }
+
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    fn prepare_dedicated_runtime_reset_with_owner_off_lock(
+        &self, session_id: &str, model_refresh: bool, human: Option<(&str, &str, bool)>,
+        mut selected: Option<&mut HumanResumeOwner>,
+    ) -> Result<()> {
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            (if model_refresh { require_no_engram_session_obligation(&inner, session_id) }
-                else { require_no_engram_local_admission_obligation(&inner, session_id) })
-                .map_err(|error| anyhow!(error.message))?;
+            if selected.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
+                .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
+                return Err(anyhow!(HumanPromptOwnerChanged));
+            }
+            if let Some((prompt, intent, explicit)) = human {
+                require_human_runtime_reset_owner(&inner, session_id, prompt, intent, &self.server_instance_id, explicit)?;
+            } else {
+                (if model_refresh { require_no_engram_session_obligation(&inner, session_id) }
+                    else { require_no_engram_local_admission_obligation(&inner, session_id) })
+                    .map_err(|error| anyhow!(error.message))?;
+            }
         }
         self.retry_retained_dedicated_cleanup(session_id)?;
         #[cfg(not(windows))]
@@ -624,9 +647,17 @@ impl AppState {
         {
             let captured = {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
-                (if model_refresh { require_no_engram_session_obligation(&inner, session_id) }
-                    else { require_no_engram_local_admission_obligation(&inner, session_id) })
-                    .map_err(|error| anyhow!(error.message))?;
+                if selected.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
+                    .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
+                    return Err(anyhow!(HumanPromptOwnerChanged));
+                }
+                if let Some((prompt, intent, explicit)) = human {
+                    require_human_runtime_reset_owner(&inner, session_id, prompt, intent, &self.server_instance_id, explicit)?;
+                } else {
+                    (if model_refresh { require_no_engram_session_obligation(&inner, session_id) }
+                        else { require_no_engram_local_admission_obligation(&inner, session_id) })
+                        .map_err(|error| anyhow!(error.message))?;
+                }
                 let Some(index) = inner.find_session_index(session_id) else { return Ok(()); };
                 let record = &mut inner.sessions[index];
                 let refresh_restarts = model_refresh && matches!(record.session.agent, Agent::Claude | Agent::OpenCode | Agent::Kimi);
@@ -640,10 +671,11 @@ impl AppState {
                 let token = record.runtime.runtime_token().expect("dedicated runtime token");
                 let context = dedicated_reset_context(record);
                 let installed = record.engram_mcp_installed.clone();
+                let human_resume = human.and_then(|(prompt, _, _)| capture_human_reset_resume(record, prompt));
                 let generation = record.claim_runtime_stop(RuntimeStopOwnerKind::DedicatedReset, token.clone());
-                (tree, process, label, token, context, installed, generation)
+                (tree, process, label, token, context, installed, generation, human_resume)
             };
-            let (tree, process, label, token, context, installed, generation) = captured;
+            let (tree, process, label, token, context, installed, generation, human_resume) = captured;
             let outcome = tree.terminate(&process, label);
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else { return outcome; };
@@ -669,6 +701,23 @@ impl AppState {
                 inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner)?;
                 return Err(anyhow!("dedicated reset configuration or admission changed; callbacks retained for exact retry"));
+            }
+            if human_resume.as_ref().is_some_and(|saved| !transfer_human_reset_resume(record, saved, generation)) {
+                record.set_auto_dispatch_blocked(true);
+                inner.stamp_session_at_index(index);
+                self.commit_locked(&mut inner)?;
+                return Err(anyhow!("the exact human receipt or choice changed during dedicated reset"));
+            }
+            if let Some(owner) = selected.as_deref_mut() {
+                // The receipt's own transfer above and this exact cleanup's
+                // runtime ownership prove the only allowed Stop transition.
+                if let Some(resume) = owner.queue.receipt_resume.as_mut() {
+                    resume.stop_generation = generation;
+                }
+                if !owner.matches_with_stop(record, generation) {
+                    return Err(anyhow!(HumanPromptOwnerChanged));
+                }
+                owner.stop_generation = generation;
             }
             // The reset runtime's turn, captured before it is retired.
             let ending_turn = record.active_turn_generation;

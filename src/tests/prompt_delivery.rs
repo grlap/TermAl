@@ -1782,6 +1782,7 @@ fn reloaded_delivery(fixture: &Fixture, prompt_id: &str) -> PromptDelivery {
 /// Stop in progress defers one (`api.rs`).
 fn deferred_hand_off(fixture: &Fixture, turn_generation: u64, text: &str) -> DeferredEngramHandoff {
     DeferredEngramHandoff(Arc::new(Mutex::new(Some(TurnDispatch::PersistentClaude {
+        human_prompt_id: None,
         federation_handoff: None,
         active_turn_generation: turn_generation,
         opening_prompt: None,

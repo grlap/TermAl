@@ -12,7 +12,7 @@ fn request_history(
         .collect()
 }
 
-fn held_fixture() -> (
+pub(super) fn held_fixture() -> (
     AppState,
     String,
     String,
@@ -56,6 +56,215 @@ fn held_fixture() -> (
         ["turn_checkpoint", "turn_grant_read"]
     );
     (state, project, session, receiver, transport)
+}
+
+#[test]
+fn human_prompt_off_resume_preserves_unconfirmed_checkpoint_without_control_requests() {
+    for cancelled in [false, true] {
+        for reload in [false, true] {
+            let (state, _project, session, receiver, transport) = held_fixture();
+            enqueue_human_for_resume(&state, &session, reload);
+            let before = request_history(&transport);
+            let original =
+                serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations)
+                    .unwrap();
+            if cancelled {
+                state
+                    .cancel_queued_prompt(&session, "original-held-head")
+                    .unwrap();
+            }
+            state.resume_session_queue(&session).expect(
+                "control OFF must resume ordinary turns without settling the old checkpoint",
+            );
+            assert_eq!(
+                request_history(&transport),
+                before,
+                "no control request during ordinary Resume"
+            );
+            assert!(matches!(
+                receiver.try_recv().unwrap(),
+                CodexRuntimeCommand::Prompt { .. }
+            ));
+            assert!(receiver.try_recv().is_err());
+            let inner = state.inner.lock().unwrap();
+            assert_eq!(
+                serde_json::to_value(&inner.engram_session_obligations).unwrap(),
+                original,
+                "old checkpoint remains intact and unresolved"
+            );
+        }
+    }
+}
+
+#[test]
+fn human_prompt_on_send_is_ordinary_and_cannot_report_an_earlier_grant() {
+    let (state, project, session, _root, receiver) = fixture();
+    assert!(settings(&state, &project, true).is_control_enabled());
+    let transport = ScriptedEngramControlTransport::new([]);
+    install_control_only_transport(&state, transport.clone());
+    let (policy, sandbox) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        (record.codex_approval_policy, record.codex_sandbox_mode)
+    };
+    let dispatch = match state.dispatch_human_turn(&session, prompt()).unwrap() {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("idle human prompt must start under control ON"),
+    };
+    assert!(dispatch.human_prompt_id().is_some());
+    assert!(dispatch.engram_dispatch_generation().is_none());
+    assert!(matches!(
+        deliver_turn_dispatch(&state, dispatch),
+        TurnDispatchDeliveryOutcome::Delivered
+    ));
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    assert!(receiver.try_recv().is_err());
+    assert!(
+        transport.requests().is_empty(),
+        "human admission sends no control operation"
+    );
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert!(human_prompt_turn_is_current(record));
+    assert_eq!(
+        record.engram.active_grant_id.as_deref(),
+        Some("retained-grant")
+    );
+    assert_eq!(
+        (record.codex_approval_policy, record.codex_sandbox_mode),
+        (policy, sandbox)
+    );
+    assert_eq!(
+        claude_observation_disposition(record, &EngramObservationProvenance::Ambient),
+        ClaudeObservationDisposition::Unowned,
+        "the earlier grant cannot take this turn's observations"
+    );
+    assert!(
+        AppState::engram_checkpoint_grant_for_attempt_locked(
+            &inner,
+            &session,
+            EngramCheckpointPurpose::TurnTerminal,
+            None,
+            None,
+            None,
+            false,
+            None
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn human_prompt_source_is_explicit_and_survives_reload_without_upgrading_unknown_peers() {
+    let (state, _project, session, _root, _receiver) = fixture();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    for sender in [None, Some("a-deleted-peer")] {
+        let route: SendMessageRouteRequest = serde_json::from_value(json!({
+            "text": "historical or automated input", "sourceSessionId": sender,
+        }))
+        .unwrap();
+        assert!(
+            route.origin.is_none(),
+            "missing source is not explicit human provenance"
+        );
+        dispatch_turn_and_snapshot_with_origin(&state, &session, route.prompt, route.origin)
+            .unwrap();
+    }
+    let non_ui: SendMessageRequest = serde_json::from_value(json!({
+        "text": "an automated envelope cannot opt in", "origin": "human",
+    }))
+    .unwrap();
+    assert!(matches!(
+        state.dispatch_turn(&session, non_ui).unwrap(),
+        DispatchTurnResult::Queued
+    ));
+    let route: SendMessageRouteRequest = serde_json::from_value(json!({
+        "text": "typed human input", "origin": "human",
+    }))
+    .unwrap();
+    assert_eq!(route.origin, Some(ExplicitPromptOrigin::Human));
+    dispatch_turn_and_snapshot_with_origin(&state, &session, route.prompt, route.origin).unwrap();
+    let mixed: SendMessageRouteRequest = serde_json::from_value(json!({
+        "text": "mixed origin", "origin": "human", "sourceSessionId": "a-deleted-peer",
+    }))
+    .unwrap();
+    assert!(
+        dispatch_turn_and_snapshot_with_origin(&state, &session, mixed.prompt, mixed.origin)
+            .is_err()
+    );
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
+    assert_eq!(record.queued_prompts[1].source, QueuedPromptSource::User);
+    assert_eq!(record.queued_prompts[2].source, QueuedPromptSource::User);
+    assert_eq!(record.queued_prompts[3].source, QueuedPromptSource::Human);
+    let data = serde_json::to_vec(&PersistedSessionRecord::from_record(record)).unwrap();
+    let loaded = serde_json::from_slice::<PersistedSessionRecord>(&data)
+        .unwrap()
+        .into_record()
+        .unwrap();
+    assert_eq!(loaded.queued_prompts[0].source, QueuedPromptSource::User);
+    assert_eq!(loaded.queued_prompts[1].source, QueuedPromptSource::User);
+    assert_eq!(loaded.queued_prompts[2].source, QueuedPromptSource::User);
+    assert_eq!(loaded.queued_prompts[3].source, QueuedPromptSource::Human);
+    assert_eq!(QueuedPromptSource::default(), QueuedPromptSource::User);
+    assert_ne!(
+        engram_turn_intent_fingerprint("same", None, &[], None, QueuedPromptSource::User),
+        engram_turn_intent_fingerprint("same", None, &[], None, QueuedPromptSource::Human)
+    );
+}
+
+#[test]
+fn human_prompt_unknown_handoff_is_retained_after_reload_and_never_replayed() {
+    let (state, _project, session, _root, receiver) = fixture();
+    let dispatch = match state.dispatch_human_turn(&session, prompt()).unwrap() {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("human opening must be prepared"),
+    };
+    let prompt_id = dispatch.human_prompt_id().unwrap().to_owned();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let record = &inner.sessions[index];
+        let runtime = record.runtime.clone();
+        let saved = serde_json::to_vec(&PersistedSessionRecord::from_record(record)).unwrap();
+        let mut loaded = serde_json::from_slice::<PersistedSessionRecord>(&saved)
+            .unwrap()
+            .into_record()
+            .unwrap();
+        assert!(loaded.human_prompt_turn.is_none());
+        let head = loaded.queued_prompts.front().unwrap();
+        assert_eq!(head.pending_prompt.id, prompt_id);
+        assert!(head.engram_ordinary_handoff && head.engram_interrupted);
+        loaded.runtime = runtime;
+        inner.sessions[index] = loaded;
+    }
+    assert!(matches!(
+        state.start_human_queued_turn(&session, true).unwrap(),
+        HumanPromptDrain::Absent
+    ));
+    // The Human drainer owns no executable turn after reload. Ordinary
+    // recovery may run, but this original unknown handoff cannot be replayed.
+    assert!(!matches!(
+        deliver_turn_dispatch(&state, dispatch),
+        TurnDispatchDeliveryOutcome::Delivered
+    ));
+    assert!(receiver.try_recv().is_err());
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    let retained = record.queued_prompts.iter()
+        .find(|queued| queued.pending_prompt.id == prompt_id).unwrap();
+    assert_eq!(retained.source, QueuedPromptSource::Human);
+    assert!(retained.engram_ordinary_handoff && retained.engram_interrupted);
 }
 
 #[test]

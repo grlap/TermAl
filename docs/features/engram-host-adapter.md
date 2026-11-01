@@ -33,8 +33,43 @@ The local Engram integration has two independent tiers:
 
 See [project status](project-status.md#active-limitations-and-open-top-priority-problems).
 
-Premium admission covers both ordinary root sessions and delegation children,
-including direct sends and queued user, mailbox, and orchestrator turns. A root
+Explicit human prompts are outside premium Evaluate/Begin/grant admission,
+with control ON or OFF. Their source is recorded before sender attribution and
+survives queue persistence and reload. Peer, mailbox, orchestrator and legacy
+default-source prompts do not acquire human provenance. A human turn may pass a
+separately retained control duty without changing its original request, key or
+outcome. Unknown provider delivery remains retained after restart and is never
+automatically replayed. Human delivery grants no additional tool permission,
+and its completion cannot report execution on an earlier turn's grant.
+The project-action endpoint is a human-action ingress, including fixed actions
+invoked by the Telegram relay; it uses the same explicit Human dispatch path.
+Free-text Telegram messages, peer sends and internal follow-ups retain ordinary
+provenance. In the local unauthenticated HTTP model a client can assert Human
+origin; this classification does not authenticate a trusted UI client.
+
+Historical `User` or missing-source entries are ambiguous provenance. Resume
+can record an explicit choice of the displayed head and its session version,
+without rewriting that entry's source, request or id. Reusing its content
+requires the existing delivery receipt to prove an unsent attempt and a new
+acknowledged write-ahead record. A missing receipt or reloaded ambiguous handoff
+does not supply that proof: the original content and unknown attempt stay
+retained. A distinct new human Send remains available beside that control debt.
+These are separate outcomes; fresh-prompt availability is not historical replay
+recovery. Original checkpoint receipts can reconcile their own session's old
+operation independently of a completed human successor; the human turn itself
+never certifies the old outcome.
+Once intake accepts a Human envelope, a later provider startup failure keeps
+that same queued id and reports its failure on the session. The send remains
+accepted, so the composer does not restore a second copy. A definitely unsent
+entry can be retried with Resume; an unresolved handoff remains retained for
+delivery recovery.
+Known-unpromoted ordinary rows and retained control recovery continue through
+their original guarded Resume owners without changing source or acquiring a
+Human exemption. Selecting their displayed head does not require inventing a
+historical delivery receipt.
+
+Premium admission covers automated turns in ordinary root sessions and delegation children,
+including peer sends and queued mailbox and orchestrator turns. A root
 uses its session-shaped binding; a child retains its delegation-shaped effects
 and cannot fall back to root authority if its delegation metadata is missing.
 A root session binds and requests `observe`, `communicate` and `mutate_local`,

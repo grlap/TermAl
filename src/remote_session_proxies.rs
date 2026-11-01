@@ -111,6 +111,15 @@ impl AppState {
         session_id: &str,
         request: SendMessageRequest,
     ) -> Result<(), ApiError> {
+        self.proxy_remote_turn_dispatch_with_origin(session_id, request, None)
+    }
+
+    fn proxy_remote_turn_dispatch_with_origin(
+        &self,
+        session_id: &str,
+        request: SendMessageRequest,
+        origin: Option<ExplicitPromptOrigin>,
+    ) -> Result<(), ApiError> {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
@@ -127,6 +136,7 @@ impl AppState {
                     "text": request.text,
                     "expandedText": request.expanded_text,
                     "attachments": request.attachments,
+                    "origin": origin,
                 })),
             )?;
         self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
@@ -161,9 +171,59 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> Result<StateResponse, ApiError> {
+        self.proxy_remote_resume_session_queue_with_request(session_id, None)
+    }
+
+    fn proxy_remote_resume_session_queue_with_request(
+        &self,
+        session_id: &str,
+        mut request: Option<ResumeQueueRequest>,
+    ) -> Result<StateResponse, ApiError> {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
+        if let Some(selection) = request
+            .as_mut()
+            .and_then(|request| request.human_choice.as_mut())
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = &inner.sessions[index];
+            let same_target =
+                record
+                    .remote_proxy_identity()
+                    .ok()
+                    .flatten()
+                    .is_some_and(|(remote, session)| {
+                        remote == target.remote.id && session == target.remote_session_id
+                    });
+            if !same_target
+                || record.mutation_stamp != selection.session_mutation_stamp
+                || !record
+                    .session
+                    .pending_prompts
+                    .first()
+                    .is_some_and(|prompt| {
+                        serde_json::to_value(prompt).ok()
+                            == serde_json::to_value(&selection.prompt).ok()
+                    })
+            {
+                return Err(ApiError::conflict(
+                    "the selected remote queue changed; refresh before resuming",
+                ));
+            }
+            // The UI selected our local projection. Preserve its exact cached
+            // content, but qualify it upstream with the stamp that arrived
+            // with that same remote projection, never our independent counter.
+            selection.session_mutation_stamp =
+                record.session.session_mutation_stamp.ok_or_else(|| {
+                    ApiError::conflict(
+                        "the remote queue has no mutation version; refresh before resuming",
+                    )
+                })?;
+        }
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
             self.remote_registry.request_json_with_lease(
                 &target.remote,
@@ -173,7 +233,7 @@ impl AppState {
                     encode_uri_component(&target.remote_session_id)
                 ),
                 &[],
-                None,
+                request.map(|request| json!(request)),
             )?;
         self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())

@@ -24,6 +24,8 @@ import {
   registerRemoteTermal,
   readMailbox,
   saveFile,
+  sendMessage,
+  resumeSessionQueue,
   submitUserInput,
   testTelegramConnection,
   updateConversationMarker,
@@ -37,6 +39,38 @@ import {
   runTerminalCommandStream,
   TERMINAL_SSE_BUFFER_MAX_CHARS,
 } from "./api-terminal";
+
+describe("human prompt origin", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("marks the typed send at its origin while preserving the envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ sessions: [] }), {
+      status: 202,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await sendMessage("session-human", "typed input", [], "expanded input");
+    expect(fetchMock).toHaveBeenCalledWith("/api/sessions/session-human/messages", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ text: "typed input", attachments: [], expandedText: "expanded input", origin: "human" }),
+    }));
+  });
+
+  it("binds an explicit queue choice to its displayed content and session version", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ sessions: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const prompt = { id: "old-head", timestamp: "2026-11-01T00:00:00Z", text: "original content" };
+    await resumeSessionQueue("session-human", { prompt, sessionMutationStamp: 42 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/sessions/session-human/queue/resume", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ origin: "human", humanChoice: { prompt, sessionMutationStamp: 42 } }),
+    }));
+    expect(prompt).toEqual({ id: "old-head", timestamp: "2026-11-01T00:00:00Z", text: "original content" });
+  });
+});
 
 describe("readMailbox", () => {
   afterEach(() => vi.unstubAllGlobals());

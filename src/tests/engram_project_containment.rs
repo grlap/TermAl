@@ -18,6 +18,12 @@ mod admission;
 #[path = "engram_project_containment_queue.rs"]
 mod queue;
 
+#[path = "engram_human_queue_choices.rs"]
+mod human_choices;
+
+#[path = "engram_human_review_regressions.rs"]
+mod human_review;
+
 #[path = "engram_project_containment_checkpoint.rs"]
 mod checkpoint;
 
@@ -78,6 +84,37 @@ fn prompt() -> SendMessageRequest {
         source_session_id: None,
         source_mailbox: None,
     }
+}
+
+// Queue through the same explicit-human boundary as /messages while a real
+// runtime turn is busy. End that fixture turn without changing any control
+// evidence; optionally reconstruct the complete persisted session record.
+fn enqueue_human_for_resume(state: &AppState, session: &str, reload: bool) {
+    let status = {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(session).unwrap();
+        let status = inner.sessions[index].session.status;
+        inner.sessions[index].session.status = SessionStatus::Active;
+        status
+    };
+    assert!(matches!(state.dispatch_human_turn(session, prompt()).unwrap(), DispatchTurnResult::Queued));
+    let mut inner = state.inner.lock().unwrap();
+    let index = inner.find_session_index(session).unwrap();
+    inner.sessions[index].session.status = status;
+    let human = inner.sessions[index].queued_prompts.iter().find(|head|
+        head.source == QueuedPromptSource::Human).expect("explicit human source saved");
+    assert!(human.pending_prompt.source.is_none() && !human.has_engram_intent());
+    if reload {
+        let runtime = inner.sessions[index].runtime.clone();
+        let saved = serde_json::to_vec(&PersistedSessionRecord::from_record(&inner.sessions[index])).unwrap();
+        let mut loaded = serde_json::from_slice::<PersistedSessionRecord>(&saved).unwrap().into_record().unwrap();
+        assert!(loaded.human_prompt_turn.is_none(), "live handoff authority is never restored");
+        assert!(loaded.queued_prompts.iter().any(|head| head.source == QueuedPromptSource::Human));
+        // Replace only the provider with the existing isolated runtime fixture.
+        loaded.runtime = runtime;
+        inner.sessions[index] = loaded;
+    }
+    state.commit_locked(&mut inner).unwrap();
 }
 
 fn assert_retained(state: &AppState, project: &str, session: &str, code: &str) {

@@ -144,6 +144,9 @@ fn record_has_archived_codex_thread(record: &SessionRecord) -> bool {
 enum QueuedPromptSource {
     #[default]
     User,
+    /// Classified at the explicit human request boundary, before attribution
+    /// lookup. Legacy/default User rows never acquire this provenance.
+    Human,
     Mailbox,
     Orchestrator,
 }
@@ -236,6 +239,7 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
         .retain(|prompt_id, _| live_prompt_ids.contains(&prompt_id.as_str()));
     prune_queued_prompt_durability_holds(record);
     prune_prompt_deliveries(record);
+    prune_human_queue_choices(record);
     record.session.pending_prompts = projected_pending_prompts(record);
 }
 
@@ -713,7 +717,7 @@ fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
     let mut deferred_prompts = VecDeque::new();
 
     while let Some(queued) = record.queued_prompts.pop_front() {
-        if queued.source == QueuedPromptSource::User {
+        if matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human) {
             user_prompts.push_back(queued);
         } else {
             deferred_prompts.push_back(queued);
