@@ -48,20 +48,27 @@ impl AcceptanceEvaluatorDefaults {
 }
 
 fn auto_acceptance_evaluator_agent(parent: Agent, readiness: &[AgentReadiness]) -> Agent {
+    let is_ready = |agent| {
+        readiness.iter().any(|entry| {
+            entry.agent == agent
+                && !entry.blocking
+                && entry.status == AgentReadinessStatus::Ready
+        })
+    };
     let other = match parent {
         Agent::Claude => Some(Agent::Codex),
         Agent::Codex => Some(Agent::Claude),
         _ => None,
     };
-    other
-        .filter(|other| {
-            readiness.iter().any(|entry| {
-                entry.agent == *other
-                    && !entry.blocking
-                    && entry.status == AgentReadinessStatus::Ready
-            })
-        })
-        .unwrap_or(parent)
+    if let Some(other) = other {
+        return if is_ready(other) { other } else { parent };
+    }
+    // ACP parents cannot evaluate: prefer a ready supported vendor in a
+    // stable order, retaining Codex as the supported fallback.
+    [Agent::Codex, Agent::Claude]
+        .into_iter()
+        .find(|agent| is_ready(*agent))
+        .unwrap_or(Agent::Codex)
 }
 
 #[derive(Clone, Debug, Serialize)]

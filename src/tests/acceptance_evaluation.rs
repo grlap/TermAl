@@ -2651,6 +2651,82 @@ fn acceptance_request_applies_request_defaults_and_real_provider_precedence() {
 }
 
 #[test]
+fn acceptance_request_auto_from_unsupported_parent_uses_supported_vendor_without_legacy_model() {
+    for parent_agent in [Agent::Kimi, Agent::Cursor, Agent::Gemini, Agent::OpenCode] {
+        for (ready_agents, expected) in [
+            (vec![Agent::Claude, Agent::Codex], Agent::Codex),
+            (vec![Agent::Claude], Agent::Claude),
+            (vec![], Agent::Codex),
+        ] {
+            let (state, project, parent, root) = fixture();
+            install_store(&state, &project, &root);
+            super::delegation_support::install_delegation_codex_runtime(
+                &state,
+                "acceptance-auto-runtime",
+            );
+            {
+                let mut inner = state.inner.lock().unwrap();
+                let parent_index = inner.find_session_index(&parent).unwrap();
+                inner.sessions[parent_index].session.agent = parent_agent;
+                inner
+                    .projects
+                    .iter_mut()
+                    .find(|p| p.id == project)
+                    .unwrap()
+                    .engram
+                    .as_mut()
+                    .unwrap()
+                    .acceptance_evaluation = Some(AcceptanceEvaluatorDefaults {
+                    default_mode: Some(AcceptanceEvaluationMode::SubAgent),
+                    // Legacy unsupported defaults must neither select the
+                    // parent nor leak its vendor-specific model.
+                    evaluator_agent: Some(parent_agent),
+                    evaluator_model: Some("unsupported-vendor-only".into()),
+                });
+            }
+            *state.agent_readiness_cache.write().unwrap() = AgentReadinessCache::fresh(
+                ready_agents
+                    .into_iter()
+                    .map(|agent| AgentReadiness {
+                        agent,
+                        status: AgentReadinessStatus::Ready,
+                        blocking: false,
+                        detail: String::new(),
+                        warning_detail: None,
+                        command_path: Some("fixture".into()),
+                    })
+                    .collect(),
+            );
+            let response = state
+                .request_acceptance_evaluation_with_runner(
+                    &parent,
+                    evaluation_request(None),
+                    fixture_reader(
+                        Arc::default(),
+                        show_receipt(None),
+                        Ok(policy_receipt(Some(&["sub_agent"]))),
+                    ),
+                )
+                .unwrap();
+            let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
+                panic!("automatic selection must spawn a supported evaluator")
+            };
+            assert_eq!(delegation.delegation.agent, expected, "{parent_agent:?}");
+            let expected_model = state
+                .inner
+                .lock()
+                .unwrap()
+                .preferences
+                .default_model_for_agent(expected);
+            assert_eq!(
+                delegation.delegation.model.as_deref(),
+                Some(expected_model.as_str()),
+            );
+        }
+    }
+}
+
+#[test]
 fn acceptance_request_model_requires_explicit_agent_before_any_tracker_read() {
     let (state, _, parent, _) = fixture();
     let mut request = evaluation_request(None);

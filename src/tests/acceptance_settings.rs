@@ -37,6 +37,69 @@ fn acceptance_settings_auto_prefers_only_a_ready_other_vendor() {
     );
 }
 
+#[test]
+fn acceptance_settings_auto_unsupported_parents_choose_only_supported_vendors() {
+    let entry = |agent, status, blocking| AgentReadiness {
+        agent,
+        status,
+        blocking,
+        detail: String::new(),
+        warning_detail: None,
+        command_path: None,
+    };
+    for parent in [Agent::Kimi, Agent::Cursor, Agent::Gemini, Agent::OpenCode] {
+        for (readiness, expected) in [
+            (vec![], Agent::Codex),
+            (
+                vec![entry(parent, AgentReadinessStatus::Ready, false)],
+                Agent::Codex,
+            ),
+            (
+                vec![entry(Agent::Claude, AgentReadinessStatus::Ready, false)],
+                Agent::Claude,
+            ),
+            (
+                vec![
+                    entry(Agent::Claude, AgentReadinessStatus::Ready, false),
+                    entry(Agent::Codex, AgentReadinessStatus::Ready, false),
+                ],
+                Agent::Codex,
+            ),
+            (
+                vec![
+                    entry(Agent::Codex, AgentReadinessStatus::Ready, true),
+                    entry(Agent::Claude, AgentReadinessStatus::Ready, false),
+                ],
+                Agent::Claude,
+            ),
+            (
+                vec![entry(Agent::Claude, AgentReadinessStatus::Ready, true)],
+                Agent::Codex,
+            ),
+            (
+                vec![
+                    entry(Agent::Codex, AgentReadinessStatus::Missing, false),
+                    entry(Agent::Claude, AgentReadinessStatus::NeedsSetup, false),
+                ],
+                Agent::Codex,
+            ),
+            (
+                vec![
+                    entry(Agent::Codex, AgentReadinessStatus::NeedsSetup, false),
+                    entry(Agent::Claude, AgentReadinessStatus::Ready, false),
+                ],
+                Agent::Claude,
+            ),
+        ] {
+            assert_eq!(
+                auto_acceptance_evaluator_agent(parent, &readiness),
+                expected,
+                "parent={parent:?}, readiness={readiness:?}"
+            );
+        }
+    }
+}
+
 fn change(reader: String) -> UpdateAcceptancePolicyRequest {
     serde_json::from_value(
         json!({"modes":["independent_session"],"mechanicalBasis":"asserted",

@@ -4379,11 +4379,13 @@ or sub-agent-plus-same-session policy cannot use a saved same-session preference
 to bypass the child producer. `sub_agent` is produced and can be saved as a
 default. Defaults require an existing Engram configuration and do
 not turn an unconfigured project into an operator veto. Explicit request agent/model win over
-project defaults. With no agent preference, choose the other Claude/Codex vendor
-when its readiness check is ready. A request-provided `model` requires an explicit
-`agent` (otherwise HTTP 400), so Auto cannot choose a different model vendor;
-without a ready alternate vendor, use the parent's agent. With no model
-override the selected agent uses its normal default. A saved model override
+project defaults. With no agent preference, a Claude/Codex parent chooses the
+other vendor when it is ready and nonblocking, otherwise its own vendor. A Kimi,
+Cursor, Gemini or OpenCode parent chooses a ready, nonblocking Codex first, then
+Claude; when neither is ready, it falls back to Codex. Automatic selection never
+chooses an unsupported evaluator. A request-provided `model` requires an explicit
+`agent` (otherwise HTTP 400), so Auto cannot choose a different model vendor.
+With no model override the selected agent uses its normal default. A saved model override
 requires a concrete evaluator agent and is applied only when that agent is
 selected; an explicit request selecting another agent cannot inherit it. Model
 names are trimmed on ingest. The UI clears the model when its agent changes.
