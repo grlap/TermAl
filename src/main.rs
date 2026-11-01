@@ -1048,6 +1048,7 @@ include!("engram_checkpoint_receipts.rs");
 include!("engram_containment_receipts.rs");
 include!("engram_session_obligations.rs");
 include!("engram_import_reconciliation.rs");
+include!("engram_import_hold_decision.rs");
 include!("persist_import_reconciliation.rs");
 include!("engram_containment_admission.rs");
 include!("engram_containment_admission_image.rs");

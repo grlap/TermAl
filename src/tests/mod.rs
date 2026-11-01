@@ -83,6 +83,7 @@ mod engram_budget_watchdog_unwind;
 mod engram_child_temp;
 mod engram_compaction;
 mod engram_host_adapter;
+mod engram_import_hold_decision;
 mod engram_import_reconciliation;
 mod engram_readiness;
 mod engram_readiness_test_seam;
