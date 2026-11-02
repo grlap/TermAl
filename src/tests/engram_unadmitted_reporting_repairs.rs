@@ -136,6 +136,50 @@ fn unadmitted_review_denied_test_is_not_an_observed_run_but_unknown_end_is() {
     fixture.assert_no_granted_reporting();
 }
 
+// An abandoned command leaves the adopted turn's trace, which is durable
+// session state, so the production delta persist must select the session:
+// tests otherwise fall back to a full synchronous save that hides a missing stamp.
+#[test]
+fn unadmitted_review_abandoned_command_drop_reaches_the_delta_persist() {
+    let mut fixture = ReportingTurn::new("unadmitted-abandoned-delta", true, ReplyMode::Recorded, false);
+    fixture.reader.feed(json!({"type": "assistant", "message": {"content": [{
+        "type": "tool_use", "id": "abandoned-test", "name": "Bash", "input": {"command": SIZE_TEST}
+    }]}}));
+    let traced = |turn: &CheckedTurn| turn.record(|record| {
+        record.engram.unadmitted_active_turn.as_ref().unwrap().commands.iter()
+            .any(|entry| entry.tool_key == "abandoned-test")
+    });
+    assert!(traced(&fixture.turn), "the started command is in the adopted trace");
+    let provenance = fixture.turn.record(|record| EngramObservationProvenance::Claude(
+        ClaudeObservationProvenance {
+            token: record.runtime.runtime_token().unwrap(),
+            origin: ClaudeWorkOrigin::Adopted { turn_generation: record.active_turn_generation },
+        },
+    ));
+    // A live receiver keeps this handle's persistence on the production path,
+    // which only wakes the delta worker.
+    let (tx, _rx) = mpsc::channel();
+    fixture.turn.state.persist_tx = tx;
+    let watermark = fixture.turn.state.inner.lock().unwrap().last_mutation_stamp;
+    let snapshot = crate::tests::session_stamp_delta::DurableSessionSnapshot::take(&fixture.turn.state);
+
+    fixture.turn.state.note_engram_command_abandoned(&fixture.turn.session_id, &provenance, "abandoned-test");
+
+    assert!(!traced(&fixture.turn), "the abandoned command left the trace");
+    let delta = collect_persist_delta_from_shared_state(&fixture.turn.state.inner, watermark);
+    let persisted = delta
+        .changed_sessions
+        .iter()
+        .find(|record| record.session.id == fixture.turn.session_id)
+        .expect("the trace change must be selected by the delta persist");
+    assert!(
+        !persisted.engram_unadmitted_active_turn.as_ref().unwrap().commands.iter()
+            .any(|entry| entry.tool_key == "abandoned-test"),
+        "the persisted trace no longer lists the abandoned command"
+    );
+    snapshot.assert_changes_reach_the_delta(&fixture.turn.state);
+}
+
 #[test]
 fn unadmitted_review_active_delete_without_connection_is_not_blocked() {
     active_delete_case("no-connection");

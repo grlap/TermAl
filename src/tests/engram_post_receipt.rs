@@ -1792,6 +1792,150 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
     assert!(root_rx.try_recv().is_err(), "never handed off");
 }
 
+// Reading-backed coverage: checkpoint preparation also stamps the session.
+// This checks the retirement image at that boundary, not whether the earlier
+// retirement stamp alone is necessary or whether an async wake is a disk fence.
+#[tokio::test]
+async fn a_stop_retirement_is_in_the_checkpoint_preparation_delta() {
+    let (mut state, session, root_rx, _) = root_fixture([
+        bind_reply("token"),
+        grant_reply("grant"),
+        begin_reply("grant"),
+        checkpoint_reply("grant"),
+    ]);
+    // A live writer keeps commits on the production path, which only wakes
+    // the delta worker; tests otherwise fall back to a full synchronous save.
+    // It acknowledges each fence as a worker would: this test inspects which
+    // sessions the delta persist selects, not physical SQLite durability.
+    let (tx, persist_rx) = mpsc::channel();
+    state.persist_tx = tx.clone();
+    let writer = std::thread::spawn(move || {
+        while let Ok(request) = persist_rx.recv() {
+            match request {
+                PersistRequest::Fence(fence) => fence.finish(Ok(())),
+                PersistRequest::Shutdown => break,
+                _ => {}
+            }
+        }
+    });
+    let dispatch = root_dispatch(&state, &session, false);
+    let generation = dispatch.engram_dispatch_generation().unwrap();
+    let turn_generation = dispatch.active_turn_generation();
+    assert!(matches!(
+        state.prepare_engram_turn_delivery_off_lock(&session, generation),
+        EngramTurnDeliveryPreparation::Ready
+    ));
+    let prompt_id = {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let record = inner.session_mut_by_index(index).unwrap();
+        let head = record.queued_prompts[0].pending_prompt.id.clone();
+        record.prompt_deliveries.insert(
+            head.clone(),
+            PromptDelivery {
+                federation_operation: None,
+                federation_handoff_started: false,
+                disposition: PromptDeliveryDisposition::HandingOff,
+                attempt: 1,
+                write_ahead: "admitted-write-ahead".to_owned(),
+                sequence: 1,
+                message_id: None,
+                turn_generation: Some(turn_generation),
+                attempt_key: None,
+                reason: None,
+                entry: None,
+                write_ahead_acknowledged: true,
+                resume: None,
+                runtime_write: PromptRuntimeWrite::Untracked,
+            },
+        );
+        head
+    };
+    let (runtime, receiver) =
+        test_acp_runtime_handle(AcpAgent::OpenCode, "receipted-stop-delta");
+    // The Stop stamps the session as it starts, then shuts the runtime down
+    // off the lock before retiring the head. A delta persist woken by any
+    // other commit in that window has collected the session already, so the
+    // later checkpoint preparation must carry the retirement. The watcher
+    // makes that window deterministic: it holds the runtime's turn lifecycle
+    // so the Stop's cancellation wait cannot return, records the watermark
+    // such a persist would leave when the Cancel arrives, then lets it go.
+    let turn_lifecycle = runtime.turn_lifecycle.clone();
+    *turn_lifecycle.0.lock().unwrap() = true;
+    let watermark = Arc::new(Mutex::new(None::<u64>));
+    let (held_tx, held_rx) = mpsc::channel();
+    let watcher = {
+        let watermark = watermark.clone();
+        let observed = state.clone();
+        std::thread::spawn(move || {
+            let (active_lock, settled) = &*turn_lifecycle;
+            let mut active = active_lock.lock().unwrap();
+            held_tx.send(()).unwrap();
+            assert!(
+                matches!(
+                    receiver.recv_timeout(phase_sync::DEADLOCK_GUARD),
+                    Ok(AcpRuntimeCommand::Cancel)
+                ),
+                "the Stop cancels the runtime's turn"
+            );
+            *watermark.lock().unwrap() = Some(observed.inner.lock().unwrap().last_mutation_stamp);
+            *active = false;
+            settled.notify_all();
+        })
+    };
+    held_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+    }
+    let options = StopSessionOptions::default();
+    let (_, claim) = state.begin_requested_stop_session(&session, &options).unwrap();
+    let claim = claim.expect("the Stop claims the runtime");
+    let selected = Arc::new(Mutex::new(None::<Option<PersistedSessionRecord>>));
+    let captured = selected.clone();
+    let observed = state.clone();
+    let observed_session = session.clone();
+    let recorded = watermark.clone();
+    TEST_ENGRAM_BEFORE_TURN_CHECKPOINT_REQUEST.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let watermark = recorded
+                .lock()
+                .unwrap()
+                .expect("the watcher recorded the watermark during the runtime shutdown");
+            let delta = collect_persist_delta_from_shared_state(&observed.inner, watermark);
+            *captured.lock().unwrap() = Some(
+                delta
+                    .changed_sessions
+                    .into_iter()
+                    .find(|record| record.session.id == observed_session),
+            );
+        }))
+    });
+
+    state
+        .stop_local_session_with_options(&session, options, Some(claim))
+        .unwrap();
+    watcher.join().unwrap();
+
+    let persisted = selected
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the Stop's turn checkpoint was sent")
+        .expect("the retirement must be selected by the delta persist before the checkpoint");
+    assert!(persisted.queued_prompts.is_empty(), "the retired head stays retired");
+    assert_eq!(
+        persisted.prompt_deliveries[&prompt_id].disposition,
+        PromptDeliveryDisposition::Rejected,
+        "its receipt is terminal in that same write"
+    );
+    drop(dispatch);
+    assert!(root_rx.try_recv().is_err(), "never handed off");
+    tx.send(PersistRequest::Shutdown).unwrap();
+    writer.join().unwrap();
+}
+
 /// The session's bind sent outside queued admission whose answer was lost is
 /// sent again as the identical request before anything else binds the
 /// session (`engram_bind_retention.rs`): the same key and intent, on the same

@@ -381,6 +381,9 @@ fn hold_source_observation_admission(record: &mut SessionRecord) -> bool {
 fn finish_source_observation_handoff_locked(inner: &mut StateInner, index: usize) {
     let gate = inner.sessions[index].engram.source_observation_gate.take();
     if let Some(gate) = gate {
+        // The gate is durable session state: its removal must reach the
+        // delta persist even when the caller stamps nothing else.
+        inner.stamp_session_at_index(index);
         if let Some(owner) = inner.engram_source_sightings.iter_mut().find(|owner| owner.scope == gate.scope) {
             if let Some(intent) = owner.observations.iter_mut().find(|intent| intent.id == gate.observation_id) {
                 intent.continuation_released = true;

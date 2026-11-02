@@ -691,6 +691,8 @@ impl AppState {
                     if let Some(gate) = &mut record.engram.source_observation_gate {
                         gate.retry_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
                     }
+                    // The gate is durable; the tick below may skip this session.
+                    inner.stamp_session_at_index(index);
                 }
                 live
             };
@@ -1110,6 +1112,10 @@ impl AppState {
 
         if let Err(error) = self.commit_locked(&mut inner) {
             inner.sessions[index] = original;
+            // The restored record keeps the provider-capacity clear made before
+            // it was copied, under a stamp the delta persist may already have
+            // passed: restamp it so memory and storage agree.
+            inner.stamp_session_at_index(index);
             return Err(ApiError::internal(format!(
                 "failed to persist stopping session state: {error:#}"
             )));
@@ -1544,6 +1550,10 @@ impl AppState {
                 settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
                 record_dropped_engram_intent(record, retired_head_begin);
                 sync_pending_prompts(record);
+                // Include the retirement in this delta wake without relying
+                // on a later checkpoint-preparation stamp. The wake itself
+                // does not fence physical SQLite durability.
+                inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner).map_err(|error| {
                     ApiError::internal(format!(
                         "failed to persist stopped admission retirement: {error:#}"

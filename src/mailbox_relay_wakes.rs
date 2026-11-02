@@ -575,6 +575,10 @@ impl AppState {
             };
             if rewrite_queued_wake_as_continuation(queued, &mailbox, &message, sequence, boundary) {
                 sync_pending_prompts(root);
+                // The rewritten wake is durable queue state: stamp the session
+                // so the delta persist carries it, as the native path does
+                // through `session_mut_by_index`.
+                inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner)?;
             }
         }

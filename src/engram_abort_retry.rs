@@ -524,6 +524,12 @@ impl AppState {
             record.engram.abort_retry_fence = None;
             record.engram.abort_retry_acknowledged = false;
             record.engram.abort_retry_saved = false;
+            // The retry record is durable: persist its removal as the stale
+            // admission and bind retry cleanups above do.
+            inner.stamp_session_at_index(index);
+            self.commit_locked(&mut inner).map_err(|error| {
+                ApiError::internal(format!("Failed to persist stale abort retry cleanup: {error:#}"))
+            })?;
             return Ok(false);
         }
         // Waiting for the retry, or in the retried admission's window before

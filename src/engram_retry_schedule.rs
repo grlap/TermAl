@@ -608,6 +608,7 @@ impl AppState {
                     .begin_preparation_lineage
                     .as_ref()
                     .is_some_and(|lineage| lineage.ended);
+                let lineage_before = record.engram.begin_preparation_lineage.is_some();
                 // A head that had a prepared begin withheld is bounded by its
                 // overall admission budget, whichever retry holds it now
                 // (`engram_begin_preparation_retry.rs`).
@@ -633,14 +634,18 @@ impl AppState {
                 // A window an operator's pause or control disabled ended is
                 // saved whatever the retry's own step returned: control
                 // disabled is not saved, so after a restart only the ended
-                // window keeps the head from automatic advancement.
+                // window keeps the head from automatic advancement. A budget
+                // dropped because it named another head is saved the same way,
+                // so a restart does not bring it back.
                 let window_newly_ended = !window_ended_before
                     && record
                         .engram
                         .begin_preparation_lineage
                         .as_ref()
                         .is_some_and(|lineage| lineage.ended);
-                if window_newly_ended {
+                let lineage_dropped =
+                    lineage_before && record.engram.begin_preparation_lineage.is_none();
+                if window_newly_ended || lineage_dropped {
                     inner.stamp_session_at_index(index);
                     changed = true;
                 }

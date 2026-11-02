@@ -2919,6 +2919,15 @@ impl AppState {
                 provenance,
                 &EngramRecorderObservation::CommandAbandoned { key },
             );
+            if disposition == ClaudeObservationDisposition::Unowned {
+                // An unowned observation edits the adopted turn's durable
+                // trace, and nothing below commits: stamp the session and wake
+                // the delta persist so the dropped command does not come back.
+                inner.stamp_session_at_index(index);
+                if let Err(error) = self.persist_internal_locked(&inner) {
+                    eprintln!("[termal] failed to persist an abandoned unowned command: {error:#}");
+                }
+            }
             let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
             let record = &mut inner.sessions[index];
             let runtime = record.runtime.runtime_token();

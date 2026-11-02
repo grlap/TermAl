@@ -153,6 +153,60 @@ async fn mailbox_relay_review_r2_ordinary_user_send_survives_a_refused_relay_hea
     }
 }
 
+// A prompt queued behind a refused relay carrier is durable queue state: the
+// production delta persist must select its session, not only the synchronous
+// full save tests otherwise fall back to.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_review_r2_prompt_queued_behind_a_refused_carrier_reaches_the_delta_persist() {
+    use crate::tests::session_stamp_delta::DurableSessionSnapshot;
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::new(false).await;
+    let _handles = central_handle(&fixture);
+    append_to_central(&fixture, "queued-behind-refused-carrier");
+    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    fixture.central.inner.lock().unwrap().sessions[0]
+        .session
+        .status = SessionStatus::Active;
+    set_federation_enabled(&fixture.central, false);
+    // Snapshot after the Send's queued-wake revalidation, which may itself
+    // rewrite and stamp the carrier: only the queueing behind the refused
+    // carrier, under the admission lock, is judged.
+    let snapshot = Arc::new(Mutex::new(None::<DurableSessionSnapshot>));
+    {
+        let snapshot = snapshot.clone();
+        let observed = fixture.central.clone();
+        TEST_MAILBOX_RELAY_AFTER_SEND_REVALIDATION.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                *snapshot.lock().unwrap() = Some(DurableSessionSnapshot::take(&observed));
+            }))
+        });
+    }
+
+    assert!(matches!(
+        fixture
+            .central
+            .dispatch_turn(&fixture.native, user_prompt("work behind a refused carrier"))
+            .unwrap(),
+        DispatchTurnResult::Queued
+    ));
+
+    {
+        let inner = fixture.central.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&fixture.native).unwrap()];
+        assert!(record
+            .queued_prompts
+            .iter()
+            .any(|queued| queued.pending_prompt.text == "work behind a refused carrier"));
+    }
+    snapshot
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the Send revalidated its queued wakes")
+        .assert_changes_reach_the_delta(&fixture.central);
+    fixture.finish().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mailbox_relay_review_r2_authority_return_redrives_retained_head_and_following_user_work() {
     let _scope = TestTempRootDirectoryScope::repository_local();

@@ -187,6 +187,66 @@ async fn mailbox_relay_review_ack_before_first_home_batch_keeps_the_owed_continu
     fixture.finish().await;
 }
 
+// The acknowledgement rewrite of an already queued relay wake must reach the
+// production delta persist: that persist selects only stamped sessions, and
+// tests otherwise fall back to a full synchronous save that hides a missing stamp.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_review_ack_rewrite_of_a_queued_wake_reaches_the_delta_persist() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = Fixture::new(false).await;
+    let _handles = central_handle(&fixture);
+    let (append, receipt) = append_to_central(&fixture, "ack-after-queued-wake");
+    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    let queued_text = |app: &AppState| {
+        let inner = app.inner.lock().unwrap();
+        let root = &inner.sessions[inner.find_session_index(&fixture.native).unwrap()];
+        root.queued_prompts
+            .iter()
+            .map(|queued| queued.pending_prompt.text.clone())
+            .collect::<Vec<_>>()
+    };
+    let before = queued_text(&fixture.central);
+    assert_eq!(before.len(), 1, "the unread wake is queued before its ACK");
+    assert!(before[0].contains("has 1 unread"), "{}", before[0]);
+    // A live receiver keeps this handle's commits on the production path,
+    // which only wakes the delta worker.
+    let (tx, _rx) = mpsc::channel();
+    fixture.central.persist_tx = tx;
+    let watermark = fixture.central.inner.lock().unwrap().last_mutation_stamp;
+
+    acknowledge_at_home(&fixture, &append, &receipt);
+
+    let after = queued_text(&fixture.central);
+    assert!(after[0].contains("already acknowledged"), "{}", after[0]);
+    let delta = collect_persist_delta_from_shared_state(&fixture.central.inner, watermark);
+    assert!(
+        delta
+            .changed_sessions
+            .iter()
+            .any(|record| record.session.id == fixture.native),
+        "the rewritten wake's session must be selected by the delta persist"
+    );
+    persist_delta_via_cache(
+        &mut SqlitePersistConnectionCache::new(),
+        fixture.central.persistence_path.as_path(),
+        &delta,
+    )
+    .unwrap();
+    let disk = load_state(fixture.central.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let reloaded = &disk.sessions[disk.find_session_index(&fixture.native).unwrap()];
+    assert!(
+        reloaded.queued_prompts[0]
+            .pending_prompt
+            .text
+            .contains("already acknowledged"),
+        "the reloaded queue carries the rewrite: {}",
+        reloaded.queued_prompts[0].pending_prompt.text
+    );
+    fixture.finish().await;
+}
+
 async fn receiver_boot_after_handoff(acknowledged: bool) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::new(false).await;

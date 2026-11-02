@@ -958,6 +958,9 @@ impl AppState {
                         queued.clone(),
                         &queued.pending_prompt.id,
                     );
+                    // A failed start may reset the runtime and drop durable
+                    // carried checks that queue restoration does not restore.
+                    inner.stamp_session_at_index(index);
                     return Err(anyhow!(error.message));
                 }
             };

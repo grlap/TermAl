@@ -374,7 +374,10 @@ impl AppState {
         // including with control OFF. A legacy locked Send drain has neither
         // that owner nor authority to release its explicit pause.
         if queued.source == QueuedPromptSource::Human {
-            abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram);
+            // An abandon moves the durable dispatch generation: stamp it.
+            if abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram) {
+                inner.stamp_session_at_index(index);
+            }
             return Ok(None);
         }
 
@@ -426,7 +429,10 @@ impl AppState {
         // The M4 supervisor's own stop does not stop ordinary local queues.
         let host_shutdown = self.shutdown_signal_tx.borrow();
         if *host_shutdown {
-            abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram);
+            // An abandon moves the durable dispatch generation: stamp it.
+            if abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram) {
+                inner.stamp_session_at_index(index);
+            }
             return Ok(None);
         }
         let standard_dispatch = !ordinary_off_execution_applies(inner, &session_id);
@@ -2237,7 +2243,11 @@ impl AppState {
             if let Some(error) = relay_refusal {
                 // Preserve the exact preparation using the existing abandon /
                 // rebind protocol; a late authority loss is not a new turn.
-                abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram);
+                // The abandon moves the durable dispatch generation and may
+                // clear the head's intent: stamp it so this commit carries it.
+                if abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram) {
+                    inner.stamp_session_at_index(index);
+                }
                 self.commit_locked(&mut inner)?;
                 return Err(mailbox_relay_admission_held(error.context("relay authority lost before queue promotion")));
             }
@@ -2767,7 +2777,12 @@ impl AppState {
             // Admission of ordinary work is separate from authority to promote
             // the retained relay carrier. Keep FIFO/durability and resume gates;
             // the relay worker will re-drive the carrier when authority returns.
-            queue_prompt_on_record_with_source(&mut inner.sessions[index], PendingPrompt {
+            // The queued prompt is durable: queue it through the stamping
+            // accessor so the commit below carries it, as the branch after
+            // this one does.
+            queue_prompt_on_record_with_source(
+                inner.session_mut_by_index(index).expect("session index should be valid"),
+                PendingPrompt {
                 engram_interrupted:false, is_engram_retained:false,
                 attachments:attachments.iter().map(|attachment|attachment.metadata.clone()).collect(),
                 id:message_id.clone(), timestamp:stamp_now(), text:prompt,
