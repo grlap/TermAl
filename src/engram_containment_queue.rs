@@ -69,6 +69,7 @@ impl AppState {
         request: &SendMessageRequest,
         followup: Option<&DelegationRecord>,
     ) -> Result<bool, ApiError> {
+        if self.ordinary_off_execution_applies(session_id) { return Ok(false); }
         if followup.is_some() {
             return Ok(false);
         }

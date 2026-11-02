@@ -2593,6 +2593,7 @@ fn remote_session_create_forwards_configured_default_model() {
         codex_thread_state: None,
         live_activity: None,
         engram_boot_recovery_pending: false,
+        engram_control_off: None,
         status: SessionStatus::Idle,
         preview: "Remote Default Model ready.".to_owned(),
         messages: (Vec::new()).into(),

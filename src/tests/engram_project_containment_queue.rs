@@ -19,6 +19,16 @@ pub(super) fn held_fixture() -> (
     mpsc::Receiver<CodexRuntimeCommand>,
     Arc<ScriptedEngramControlTransport>,
 ) {
+    held_fixture_with_control_pause(false)
+}
+
+fn held_fixture_with_control_pause(control_pause: bool) -> (
+    AppState,
+    String,
+    String,
+    mpsc::Receiver<CodexRuntimeCommand>,
+    Arc<ScriptedEngramControlTransport>,
+) {
     let (state, project, session, _root, receiver) = fixture();
     {
         let mut inner = state.inner.lock().unwrap();
@@ -39,7 +49,14 @@ pub(super) fn held_fixture() -> (
             Vec::new(),
         );
         record.queued_prompts[0].engram_interrupted = true;
+        // The fixture represents historical delivery with no proof of a
+        // never-promoted attempt, not merely an interrupted unsent envelope.
+        record.queued_prompts[0].promotion_disposition_known = false;
         record.set_auto_dispatch_blocked(true);
+        if control_pause {
+            record.session.preview = ENGRAM_RETAINED_AUTHORIZATION_PREVIEW.to_owned();
+            assert!(control_pause_is_owned(record));
+        }
         state.commit_locked(&mut inner).unwrap();
     }
     let transport = ScriptedEngramControlTransport::new([]);
@@ -268,8 +285,38 @@ fn human_prompt_unknown_handoff_is_retained_after_reload_and_never_replayed() {
 }
 
 #[test]
-fn project_containment_off_queue_append_is_durable_and_does_not_admit_after_restart_or_cancel() {
-    let (state, project, session, receiver, transport) = held_fixture();
+fn project_containment_off_unproven_pause_stays_visible_until_one_resume() {
+    let (state, _project, session, receiver, transport) = held_fixture();
+    let before_requests = request_history(&transport);
+    let (head, debt) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused);
+        assert!(!control_pause_is_owned(record));
+        (serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+            serde_json::to_value(&inner.engram_session_obligations).unwrap())
+    };
+    let request = prompt();
+    let text = request.text.clone();
+    assert!(matches!(state.dispatch_turn(&session, request).unwrap(), DispatchTurnResult::Queued));
+    assert!(receiver.try_recv().is_err());
+    state.resume_session_queue(&session).unwrap();
+    assert!(matches!(phase_sync::receive(&receiver, "one explicit Resume of unproven pause"),
+        CodexRuntimeCommand::Prompt { command, .. } if command.prompt.ends_with(&text)));
+    assert!(receiver.try_recv().is_err());
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert!(!record.orchestrator_auto_dispatch_blocked && !record.session.queue_paused);
+    assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), head);
+    assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), debt);
+    assert_eq!(request_history(&transport), before_requests);
+}
+
+#[test]
+fn project_containment_off_queue_dispatches_durably_without_settling_after_restart_or_cancel() {
+    // This case starts behind a proven control hold. The default fixture's
+    // unproven pause remains an independent barrier until explicit Resume.
+    let (state, project, session, receiver, transport) = held_fixture_with_control_pause(true);
     let before_requests = request_history(&transport);
     let (head, entry) = {
         let inner = state.inner.lock().unwrap();
@@ -279,14 +326,18 @@ fn project_containment_off_queue_append_is_durable_and_does_not_admit_after_rest
             serde_json::to_value(&inner.engram_session_obligations.entries[0]).unwrap(),
         )
     };
-    assert!(matches!(
-        state.dispatch_turn(&session, prompt()).unwrap(),
-        DispatchTurnResult::Queued
-    ));
+    let dispatch = match state.dispatch_turn(&session, prompt()).unwrap() {
+        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("OFF ordinary work must pass the unknown historical head"),
+    };
+    assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+    assert!(matches!(phase_sync::receive(&receiver, "OFF ordinary work behind historical debt"),
+        CodexRuntimeCommand::Prompt { .. }));
+    assert!(receiver.try_recv().is_err());
     {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.queued_prompts.len(), 2);
+        assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(
             serde_json::to_value(&record.queued_prompts[0]).unwrap(),
             head
@@ -295,22 +346,24 @@ fn project_containment_off_queue_append_is_durable_and_does_not_admit_after_rest
             serde_json::to_value(&inner.engram_session_obligations.entries[0]).unwrap(),
             entry
         );
-        assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused);
+        assert!(!record.orchestrator_auto_dispatch_blocked && !record.session.queue_paused);
     }
     let loaded = load_state(state.persistence_path.as_path())
         .unwrap()
         .unwrap();
     let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-    assert_eq!(record.queued_prompts.len(), 2);
-    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert!(!record.orchestrator_auto_dispatch_blocked);
     assert!(engram_session_obligation_locked(&loaded, &session).is_some());
     state
         .cancel_queued_prompt(&session, "original-held-head")
         .unwrap();
-    assert!(
-        state.resume_session_queue(&session).is_err(),
-        "cancellation is not control settlement"
-    );
+    let token = {
+        let inner = state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&session).unwrap()].runtime.runtime_token().unwrap()
+    };
+    state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
+    state.resume_session_queue(&session).unwrap();
     assert!(
         state
             .dispatch_next_queued_turn(&session, false)
@@ -330,14 +383,20 @@ fn project_containment_off_queue_append_is_durable_and_does_not_admit_after_rest
     );
     assert_eq!(request_history(&transport), before_requests);
     assert!(receiver.try_recv().is_err());
+    assert_eq!(serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations.entries[0]).unwrap(), entry);
 }
 
 #[test]
-fn project_containment_off_queue_rechecks_every_eligibility_fact_after_parsing() {
+fn project_containment_legacy_control_queue_rechecks_every_eligibility_fact_after_parsing() {
     for changed in [
         "owner", "settings", "project", "head", "entry", "reset", "terminal",
     ] {
         let (state, project, session, receiver, transport) = held_fixture();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].set_auto_dispatch_blocked(true);
+        }
         let before_requests = request_history(&transport);
         let target = state.clone();
         let target_session = session.clone();
@@ -376,7 +435,7 @@ fn project_containment_off_queue_rechecks_every_eligibility_fact_after_parsing()
             }))
         });
         assert!(
-            state.dispatch_turn(&session, prompt()).is_err(),
+            state.queue_user_behind_contained_head(&session, &prompt(), None).is_err(),
             "{changed}"
         );
         assert_eq!(
@@ -400,9 +459,14 @@ fn project_containment_off_queue_rechecks_every_eligibility_fact_after_parsing()
 }
 
 #[test]
-fn project_containment_off_queue_unknown_or_failed_persistence_never_reports_acceptance() {
+fn project_containment_legacy_control_queue_unknown_or_failed_persistence_never_reports_acceptance() {
     for failed_write in [false, true] {
         let (state, _project, session, receiver, transport) = held_fixture();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].set_auto_dispatch_blocked(true);
+        }
         let before_requests = request_history(&transport);
         if failed_write {
             let state = AppState {
@@ -411,10 +475,10 @@ fn project_containment_off_queue_unknown_or_failed_persistence_never_reports_acc
                 ),
                 ..state
             };
-            assert!(state.dispatch_turn(&session, prompt()).is_err());
+            assert!(state.queue_user_behind_contained_head(&session, &prompt(), None).is_err());
         } else {
             TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(false));
-            let result = state.dispatch_turn(&session, prompt());
+            let result = state.queue_user_behind_contained_head(&session, &prompt(), None);
             TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(true));
             assert!(result.is_err(), "an unconfirmed queue write is not Queued");
             assert!(

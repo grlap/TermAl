@@ -1105,6 +1105,7 @@ fn a_cancel_between_the_acknowledgement_and_the_promotion_starts_no_successor() 
     let fixture = Fixture::new(state, "resume-then-cancel");
     let (id, owner, _write_ahead) =
         acknowledged_resume(&fixture, &writer, "cancelled before its promotion");
+    let nonce = owner.receipt_resume.as_ref().unwrap().write_ahead.clone();
     let successor = enqueue_successor(&fixture, "the successor behind it");
     {
         let mut inner = fixture.state.inner.lock().unwrap();
@@ -1114,7 +1115,7 @@ fn a_cancel_between_the_acknowledgement_and_the_promotion_starts_no_successor() 
         fixture.state.commit_locked(&mut inner).unwrap();
     }
     assert_eq!(fixture.queue_ids(), vec![successor.clone()]);
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, Some(owner));
+    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     assert_eq!(fixture.delivered_prompts(), 0, "no successor past the pause");
     assert_eq!(fixture.queue_ids(), vec![successor]);
     assert!(queue_paused(&fixture));
@@ -1129,13 +1130,14 @@ fn a_content_change_between_the_acknowledgement_and_the_promotion_sends_nothing(
     let fixture = Fixture::new(state, "resume-then-edit");
     let (id, owner, _write_ahead) =
         acknowledged_resume(&fixture, &writer, "edited before its promotion");
+    let nonce = owner.receipt_resume.as_ref().unwrap().write_ahead.clone();
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
         record.queued_prompts.front_mut().unwrap().pending_prompt.text = "something else".to_owned();
     }
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, Some(owner));
+    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     assert_eq!(fixture.delivered_prompts(), 0, "not the content the Resume saw");
     assert_eq!(fixture.queue_ids(), vec![id]);
     assert!(queue_paused(&fixture));
@@ -1150,9 +1152,10 @@ fn a_pause_between_the_acknowledgement_and_the_promotion_sends_nothing() {
     let fixture = Fixture::new(state, "resume-then-ack-then-repause");
     let (id, owner, _write_ahead) =
         acknowledged_resume(&fixture, &writer, "paused again before its promotion");
+    let nonce = owner.receipt_resume.as_ref().unwrap().write_ahead.clone();
     fixture.set_paused(false);
     fixture.set_paused(true);
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, Some(owner));
+    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     assert_eq!(fixture.delivered_prompts(), 0, "the later pause is not crossed");
     assert_eq!(fixture.queue_ids(), vec![id]);
 }
@@ -1467,7 +1470,7 @@ fn another_drain_after_the_acknowledgement_completes_the_authorized_promotion_on
     assert!(delivery.turn_generation.is_some());
     assert!(delivery.resume.is_none(), "consumed by that promotion");
 
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, Some(owner));
+    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     fixture
         .state
         .return_unpromoted_write_ahead_to_pending(&fixture.session, &id, &nonce);
@@ -1529,7 +1532,7 @@ fn a_manual_send_after_the_acknowledgement_inherits_nothing() {
     }
     assert_eq!(fixture.received_prompt("the manual send").text, "a manual send");
 
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, Some(owner));
+    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     fixture
         .state
         .return_unpromoted_write_ahead_to_pending(&fixture.session, &id, &nonce);
@@ -1622,7 +1625,7 @@ fn manual_send_after(label: &str, revoke: fn(&Fixture, &str)) {
         Err(error) => panic!("the manual send failed: {}", error.message),
     }
     assert_eq!(fixture.received_prompt("the manual send").text, "a manual send");
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, Some(owner));
+    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     fixture
         .state
         .return_unpromoted_write_ahead_to_pending(&fixture.session, &id, &nonce);

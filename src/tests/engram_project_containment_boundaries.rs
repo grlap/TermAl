@@ -5,6 +5,88 @@ use super::*;
 #[path = "engram_project_containment_settings_races.rs"]
 mod settings_races;
 
+fn requested_stop_progress_without_claim_wait(gated: bool) {
+    let mut observations = Vec::new();
+    for replaced in [false, true] {
+        let (state, project, session, _root, provider) = fixture();
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let process = process_owner.process.clone();
+        let (runtime, input, _) = test_shared_codex_runtime_with_process("requested-stop-progress", process.clone());
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let record = &mut inner.sessions[index];
+            record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: runtime.runtime_id.clone(), input_tx: runtime.input_tx.clone(),
+                process: process.clone(), shared_session: None,
+            });
+            record.session.status = SessionStatus::Active;
+            state.commit_locked(&mut inner).unwrap();
+        }
+        let transport = ScriptedEngramControlTransport::new([]);
+        state.install_control_test_transport(transport.clone());
+        state.update_project_engram_settings(&project, settings(&state, &project, false)).unwrap();
+        if gated {
+            state.update_project_engram_settings(&project, settings(&state, &project, true)).unwrap();
+        }
+        let pending = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            record.engram_containment_stop.as_ref()
+                .map(|pending| (pending.owner.clone(), record.runtime_stop_generation))
+        };
+        let (owner, before_claim) = pending.expect("the public OFF operation registered its original Stop");
+        if replaced {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].active_turn_generation += 1;
+            state.commit_locked(&mut inner).unwrap();
+        }
+        // No test claim gate or timeout is installed: one real scheduler call
+        // must complete its Stop, or retire a stale owner without interruption.
+        let now = state.engram_budget_clock().wall_now();
+        state.engram_abort_retry_tick(now);
+        let (retired, after_claim, idle, protected, stale_reason) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            let duty = engram_session_obligation_locked(&inner, &session);
+            (record.engram_containment_stop.is_none() && !record.runtime_stop_in_progress,
+                record.runtime_stop_generation, record.session.status == SessionStatus::Idle,
+                duty.is_some_and(|entry| entry.id == owner.obligation_id
+                    && entry.phase != EngramSessionObligationPhase::Confirmed
+                    && !inner.engram_confirmed_containment_ids.contains(&entry.id)),
+                duty.is_some_and(|entry| entry.reason_code == "provider_stop_owner_changed"))
+        };
+        let stopped = process.try_wait().unwrap().is_some();
+        state.engram_abort_retry_tick(now);
+        let once = {
+            let inner = state.inner.lock().unwrap();
+            inner.sessions[inner.find_session_index(&session).unwrap()].runtime_stop_generation == after_claim
+        };
+        let valid = retired && protected && once
+            && if replaced { !stopped && after_claim == before_claim && stale_reason }
+                else { stopped && after_claim > before_claim && idle };
+        observations.push((valid, json!({"gated":gated,"replaced":replaced,
+            "retired":retired,"stopped":stopped,"beforeClaim":before_claim,
+            "afterClaim":after_claim,"once":once,"protected":protected,"staleReason":stale_reason})));
+        assert!(input.try_recv().is_err());
+        assert!(provider.try_recv().is_err());
+        assert!(transport.requests().is_empty());
+        assert_eq!(state.engram_retry_slots.in_flight(), 0);
+    }
+    assert!(observations.iter().all(|(valid, _)| *valid), "{}", json!(observations));
+}
+
+#[test]
+fn project_containment_off_requested_stop_progress_without_claim_wait() {
+    requested_stop_progress_without_claim_wait(false);
+}
+
+#[test]
+fn project_containment_on_requested_stop_progress_without_claim_wait() {
+    requested_stop_progress_without_claim_wait(true);
+}
+
 fn retain_refused_deletion_duty(state: &AppState, project: &str) {
     // Checkpoint-only debt may outlive deletion. Keep a distinct unresolved
     // grant in the frozen image to exercise the independent-duty blocker.
@@ -371,75 +453,237 @@ fn project_containment_store_ack_alone_never_releases_an_unsettled_grant() {
 }
 
 #[test]
-fn project_containment_excluded_queue_drain_does_not_abort_shared_runtime_exit() {
-    let (state, project, session, _root, _receiver) = fixture();
-    let transport =
-        ScriptedEngramControlTransport::new([checkpoint_refusal_reply("GrantScopeMismatch")]);
-    install_control_only_transport(&state, transport);
-    state
-        .update_project_engram_settings(&project, settings(&state, &project, false))
-        .unwrap();
-    let healthy = test_session_id(&state, Agent::Codex);
-    let process_owner = phase_sync::ParkedProcess::spawn();
-    let process = process_owner.process.clone();
-    let (runtime, _input_rx, _) =
-        test_shared_codex_runtime_with_process("containment-exit", process.clone());
-    *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
-    {
-        let mut inner = state.inner.lock().unwrap();
+fn project_containment_operator_paused_queue_does_not_abort_shared_runtime_exit() {
+    for gated in [false, true] {
+        let (state, project, session, _root, _receiver) = fixture();
+        let transport =
+            ScriptedEngramControlTransport::new([checkpoint_refusal_reply("GrantScopeMismatch")]);
+        install_control_only_transport(&state, transport);
+        state
+            .update_project_engram_settings(&project, settings(&state, &project, false))
+            .unwrap();
+        if gated {
+            state.update_project_engram_settings(&project, settings(&state, &project, true)).unwrap();
+        }
+        let healthy = test_session_id(&state, Agent::Codex);
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let process = process_owner.process.clone();
+        let (runtime, _input_rx, _) =
+            test_shared_codex_runtime_with_process("containment-exit", process.clone());
+        *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+        {
+            let mut inner = state.inner.lock().unwrap();
+            for id in [&session, &healthy] {
+                let index = inner.find_session_index(id).unwrap();
+                let record = inner.session_mut_by_index(index).unwrap();
+                record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                    runtime_id: runtime.runtime_id.clone(),
+                    input_tx: runtime.input_tx.clone(),
+                    process: process.clone(),
+                    shared_session: Some(SharedCodexSessionHandle {
+                        runtime: runtime.clone(),
+                        session_id: id.clone(),
+                    }),
+                });
+                record.session.status = SessionStatus::Active;
+                record.session.queue_paused = false;
+                if id == &session {
+                    record.engram.operator_paused = true;
+                    record.set_auto_dispatch_blocked(true);
+                    record.engram.source_observation_admission_held = true;
+                    queue_prompt_on_record(
+                        record,
+                        PendingPrompt {
+                            id: "excluded-queued-head".into(),
+                            timestamp: stamp_now(),
+                            text: "keep held".into(),
+                            expanded_text: None,
+                            source: None,
+                            attachments: Vec::new(),
+                            engram_interrupted: false,
+                            is_engram_retained: false,
+                        },
+                        Vec::new(),
+                    );
+                }
+            }
+            state.commit_locked(&mut inner).unwrap();
+        }
+        assert!(
+            state
+                .dispatch_next_queued_turn(&session, false)
+                .unwrap()
+                .is_none()
+        );
+        let operator_held = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            record.engram.operator_paused && record.orchestrator_auto_dispatch_blocked
+        };
+        assert!(operator_held, "the runtime exit starts with an actual operator pause");
+        state
+            .handle_shared_codex_runtime_exit("containment-exit", Some("fixture runtime exit"))
+            .unwrap();
+        let inner = state.inner.lock().unwrap();
         for id in [&session, &healthy] {
-            let index = inner.find_session_index(id).unwrap();
-            let record = inner.session_mut_by_index(index).unwrap();
+            let record = &inner.sessions[inner.find_session_index(id).unwrap()];
+            assert!(matches!(record.runtime, SessionRuntime::None));
+            assert_eq!(record.session.status, SessionStatus::Error);
+        }
+        assert!(state.shared_codex_runtime.lock().unwrap().is_none());
+        let held = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(held.engram.operator_paused && held.orchestrator_auto_dispatch_blocked);
+        assert!(held.session.queue_paused, "the retained operator pause is visible");
+        assert!(!held.engram.source_observation_admission_held,
+            "runtime exit retains the original source-observation hold cleanup, gated={gated}");
+        assert_eq!(held.queued_prompts.len(), 1);
+        assert_eq!(held.queued_prompts[0].pending_prompt.id, "excluded-queued-head");
+        assert!(engram_session_obligation_locked(&inner, &session).is_some());
+        drop(inner);
+        phase_sync::process_exit(&process, "contained shared runtime termination");
+        assert!(process.try_wait().unwrap().is_some());
+    }
+}
+
+#[test]
+fn project_containment_control_stop_preserves_only_the_control_hold() {
+    for gated in [false, true] {
+        let (mut state, project, session, _root, original_provider) = fixture();
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let process = process_owner.process.clone();
+        let (old_runtime, old_input, _) =
+            test_shared_codex_runtime_with_process("control-stop-original", process.clone());
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let record = &mut inner.sessions[index];
             record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
-                runtime_id: runtime.runtime_id.clone(),
-                input_tx: runtime.input_tx.clone(),
+                runtime_id: old_runtime.runtime_id.clone(),
+                input_tx: old_runtime.input_tx.clone(),
                 process: process.clone(),
-                shared_session: Some(SharedCodexSessionHandle {
-                    runtime: runtime.clone(),
-                    session_id: id.clone(),
-                }),
+                shared_session: None,
             });
             record.session.status = SessionStatus::Active;
-            record.session.queue_paused = false;
-            if id == &session {
-                queue_prompt_on_record(
-                    record,
-                    PendingPrompt {
-                        id: "excluded-queued-head".into(),
-                        timestamp: stamp_now(),
-                        text: "keep held".into(),
-                        expanded_text: None,
-                        source: None,
-                        attachments: Vec::new(),
-                        engram_interrupted: false,
-                        is_engram_retained: false,
-                    },
-                    Vec::new(),
-                );
-            }
+            queue_prompt_on_record(record, PendingPrompt {
+                id: "after-control-stop".into(), timestamp: stamp_now(),
+                text: "ordinary work after control Stop".into(), expanded_text: None,
+                source: None, attachments: Vec::new(), engram_interrupted: false,
+                is_engram_retained: false,
+            }, Vec::new());
+            state.commit_locked(&mut inner).unwrap();
         }
-        state.commit_locked(&mut inner).unwrap();
+        let transport = ScriptedEngramControlTransport::new([]);
+        state.install_control_test_transport(transport.clone());
+        state.update_project_engram_settings(&project, settings(&state, &project, false)).unwrap();
+        if gated {
+            state.update_project_engram_settings(&project, settings(&state, &project, true)).unwrap();
+        }
+        let (original_duty, control_pause_before_stop) = {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let record = &mut inner.sessions[index];
+            assert!(record.engram_containment_stop.is_some(), "the public switch registered its real Stop");
+            assert!(!record.engram.operator_paused);
+            record.engram.source_observation_admission_held = true;
+            state.commit_locked(&mut inner).unwrap();
+            (engram_session_obligation_locked(&inner, &session).unwrap().id.clone(),
+                inner.sessions[index].orchestrator_auto_dispatch_blocked)
+        };
+        let (fresh_runtime, fresh_input, _) = test_shared_codex_runtime("after-control-stop");
+        install_single_wire_codex_fixture(&state, Some(fresh_runtime));
+        state.engram_abort_retry_tick(state.engram_budget_clock().wall_now());
+        phase_sync::process_exit(&process, "the control-owned Stop retired its original provider");
+        assert!(process.try_wait().unwrap().is_some());
+        {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert!(!record.engram.operator_paused, "control Stop must not create a user pause, gated={gated}");
+            assert!(record.engram_containment_stop.is_none());
+            assert!(!record.runtime_stop_in_progress);
+            assert_eq!(record.orchestrator_auto_dispatch_blocked, control_pause_before_stop,
+                "control Stop does not invent a generic pause");
+        }
+        let next = state.dispatch_next_queued_turn(&session, false).unwrap();
+        if gated {
+            assert!(next.is_none(), "ON must refuse dispatch through its retained control owner");
+        } else if let Some(started) = next {
+            deliver_turn_dispatch(&state, started).unwrap();
+        }
+        if gated {
+            assert!(fresh_input.try_recv().is_err());
+        } else {
+            let CodexRuntimeCommand::Prompt { session_id, command } =
+                phase_sync::receive(&fresh_input, "ordinary OFF delivery after control Stop")
+            else { panic!("expected the ordinary provider prompt"); };
+            assert_eq!(session_id, session);
+            // turn_dispatch prepends Base context/notices, then the raw user
+            // payload (engram_context_runtime_prompt and start_turn_on_record).
+            let raw = "ordinary work after control Stop";
+            assert!(command.prompt == raw || command.prompt.ends_with(&format!("\n\n{raw}")),
+                "wrong trailing user payload: {:?}", command.prompt);
+            assert_eq!(command.prompt.matches(raw).count(), 1);
+            assert!(fresh_input.try_recv().is_err());
+            let token = {
+                let mut inner = state.inner.lock().unwrap();
+                let record = inner.session_mut(&session).unwrap();
+                assert!(record.engram.source_observation_admission_held);
+                queue_prompt_on_record(record, PendingPrompt {
+                    id: "next-after-control-stop".into(), timestamp: stamp_now(),
+                    text: "next ordinary turn with retained source hold".into(), expanded_text: None,
+                    source: None, attachments: Vec::new(), engram_interrupted: false,
+                    is_engram_retained: false,
+                }, Vec::new());
+                record.runtime.runtime_token().unwrap()
+            };
+            state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
+            let CodexRuntimeCommand::Prompt { session_id, command } =
+                phase_sync::receive(&fresh_input, "next ordinary OFF turn with the old source hold")
+            else { panic!("expected the next ordinary prompt"); };
+            assert_eq!(session_id, session);
+            let raw = "next ordinary turn with retained source hold";
+            assert!(command.prompt == raw || command.prompt.ends_with(&format!("\n\n{raw}")));
+            assert_eq!(command.prompt.matches(raw).count(), 1);
+            assert!(fresh_input.try_recv().is_err());
+            state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
+            state.resume_session_queue(&session).unwrap();
+            {
+                let inner = state.inner.lock().unwrap();
+                assert!(inner.sessions[inner.find_session_index(&session).unwrap()]
+                    .engram.source_observation_admission_held,
+                    "ordinary completion and Resume do not settle the old source hold");
+            }
+            assert!(fresh_input.try_recv().is_err());
+            let path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
+            state.mailbox_store = Arc::new(MailboxStore::open(&path).unwrap());
+            let sender = test_session_id(&state, Agent::Claude);
+            let receipt = state.append_mailbox_message_and_notify(&sender, SendMailboxMessageRequest {
+                target_session_id: session.clone(), message: "wake after control Stop".into(),
+                idempotency_key: "wake-after-control-stop".into(), topic: None, state_stamp: None,
+                class: Some("routine".into()),
+            }).unwrap();
+            let CodexRuntimeCommand::Prompt { session_id, command } =
+                phase_sync::receive(&fresh_input, "mailbox OFF wake with the old source hold")
+            else { panic!("expected the mailbox wake"); };
+            assert_eq!(session_id, session);
+            assert!(command.prompt.contains(&receipt.mailbox_id));
+            assert!(fresh_input.try_recv().is_err());
+        }
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.engram.source_observation_admission_held,
+            "control Stop and ordinary OFF handoff preserve the source hold as historical state");
+        assert_eq!(ordinary_admission_is_excluded(&inner, &session), gated,
+            "the retained obligation gates ON admission and is inapplicable at OFF");
+        assert_eq!(record.orchestrator_auto_dispatch_blocked, gated && control_pause_before_stop);
+        assert_eq!(record.session.queue_paused, record.orchestrator_auto_dispatch_blocked);
+        let duty = engram_session_obligation_locked(&inner, &session).unwrap();
+        assert_eq!(duty.id, original_duty);
+        assert_ne!(duty.phase, EngramSessionObligationPhase::Confirmed);
+        assert!(!inner.engram_confirmed_containment_ids.contains(&duty.id));
+        assert!(old_input.try_recv().is_err());
+        assert!(original_provider.try_recv().is_err());
+        assert!(transport.requests().is_empty());
     }
-    assert!(
-        state
-            .dispatch_next_queued_turn(&session, false)
-            .unwrap()
-            .is_none()
-    );
-    state
-        .handle_shared_codex_runtime_exit("containment-exit", Some("fixture runtime exit"))
-        .unwrap();
-    let inner = state.inner.lock().unwrap();
-    for id in [&session, &healthy] {
-        let record = &inner.sessions[inner.find_session_index(id).unwrap()];
-        assert!(matches!(record.runtime, SessionRuntime::None));
-        assert_eq!(record.session.status, SessionStatus::Error);
-    }
-    assert!(state.shared_codex_runtime.lock().unwrap().is_none());
-    assert!(engram_session_obligation_locked(&inner, &session).is_some());
-    drop(inner);
-    phase_sync::process_exit(&process, "contained shared runtime termination");
-    assert!(process.try_wait().unwrap().is_some());
 }
 
 #[test]
@@ -506,14 +750,18 @@ fn project_containment_stop_interrupts_under_its_own_fence_and_defers_foreign_ho
             "no Stop is admitted before the initial acknowledgement returns");
         let request = settlement.wait();
         assert_eq!(request.connection.session_id, settling);
-        let (owner, due_at) = {
+        let pending = {
             let inner = state.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            let pending = record.engram_containment_stop.as_ref().unwrap();
-            assert!(inner.engram_project_resets.is_owned_by(&project, pending.owner.reset_generation));
-            assert!(record.engram.project_reset_in_progress);
-            (pending.owner.clone(), pending.due_at.clone())
+            record.engram_containment_stop.as_ref().map(|pending| (
+                pending.owner.clone(), pending.due_at.clone(),
+                inner.engram_project_resets.is_owned_by(&project, pending.owner.reset_generation),
+                record.engram.project_reset_in_progress,
+            ))
         };
+        let (owner, due_at, reset_owned, resetting) = pending.expect("the original provider Stop was registered");
+        assert!(reset_owned);
+        assert!(resetting);
         assert!(process.try_wait().unwrap().is_none());
         let foreign_generation = if hold == "own" {
             let occupied = (0..ENGRAM_RETRY_MAX_IN_FLIGHT)
@@ -934,6 +1182,14 @@ fn project_containment_active_and_approval_off_requests_stop_without_claiming_se
             {
                 let inner = state.inner.lock().unwrap();
                 let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                assert!(!record.engram.operator_paused, "control Stop is not an operator pause");
+            }
+            state.request_stop_session(&session).unwrap();
+            {
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                assert!(record.engram.operator_paused && record.session.queue_paused,
+                    "a public Stop arriving during control cleanup still pauses");
                 assert_eq!(record.session.status, SessionStatus::Stopping);
                 assert!(
                     record.runtime_stop_in_progress,
@@ -970,6 +1226,9 @@ fn project_containment_active_and_approval_off_requests_stop_without_claiming_se
             guard.wait("existing Stop lifecycle completes");
         }
         let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.engram.operator_paused && record.session.queue_paused,
+            "the public Stop pause survives the control-owned cleanup");
         assert!(
             engram_session_obligation_locked(&inner, &session).is_some(),
             "a completed Stop alone does not settle the retained control duty"
@@ -1038,8 +1297,16 @@ fn project_containment_legacy_route_never_becomes_confirmed_authority() {
                 .update_project_engram_settings(&project, settings(&state, &project, true))
                 .is_err()
         );
-        assert!(state.resume_session_queue(&session).is_err());
-        assert!(state.dispatch_turn(&session, prompt()).is_err());
+        let original = serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
+        state.resume_session_queue(&session).unwrap();
+        let dispatch = match state.dispatch_turn(&session, prompt()).unwrap() {
+            DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+            DispatchTurnResult::Queued => panic!("an unconfirmed old authority is not an OFF execution prerequisite"),
+        };
+        assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+        assert!(matches!(phase_sync::receive(&receiver, "ordinary OFF prompt with an unconfirmed old authority"),
+            CodexRuntimeCommand::Prompt { .. }));
+        assert_eq!(serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap(), original);
         assert!(transport.requests().is_empty());
         assert!(receiver.try_recv().is_err());
         assert_eq!(

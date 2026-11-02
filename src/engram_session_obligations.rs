@@ -894,6 +894,7 @@ fn require_no_engram_local_dispatch_obligation(
     inner: &StateInner,
     session_id: &str,
 ) -> Result<(), ApiError> {
+    if ordinary_off_execution_applies(inner, session_id) { return Ok(()); }
     if engram_unmediated_checkpoint_dispatch_allowed(inner, session_id, None) {
         Ok(())
     } else {
@@ -905,6 +906,7 @@ fn require_no_engram_local_admission_obligation(
     inner: &StateInner,
     session_id: &str,
 ) -> Result<(), ApiError> {
+    if ordinary_off_execution_applies(inner, session_id) { return Ok(()); }
     if engram_unmediated_checkpoint_dispatch_allowed(inner, session_id, None) {
         Ok(())
     } else {

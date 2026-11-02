@@ -834,6 +834,9 @@ struct Session {
     /// process-local state and is never persisted as session authority.
     #[serde(default, skip_serializing_if = "is_false")]
     engram_boot_recovery_pending: bool,
+    /// Executing host's ordinary OFF queue policy. Absent on older remote hosts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_control_off: Option<bool>,
     status: SessionStatus,
     preview: String,
     messages: MessageSequence,
@@ -938,6 +941,7 @@ impl Session {
             codex_thread_state: self.codex_thread_state.clone(),
             live_activity: self.live_activity.clone(),
             engram_boot_recovery_pending: self.engram_boot_recovery_pending.clone(),
+            engram_control_off: self.engram_control_off,
             status: self.status.clone(),
             preview: self.preview.clone(),
             messages: MessageSequence::default(),
@@ -1038,6 +1042,8 @@ struct StateSessionSummary {
     live_activity: Option<SessionLiveActivity>,
     #[serde(default, skip_serializing_if = "is_false")]
     engram_boot_recovery_pending: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_control_off: Option<bool>,
     status: SessionStatus,
     preview: String,
     #[serde(rename = "messageCount")]

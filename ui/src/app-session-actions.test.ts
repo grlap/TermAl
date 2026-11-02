@@ -1067,6 +1067,112 @@ describe("useAppSessionActions", () => {
     expect(prompt).toEqual({ id: "legacy-head", timestamp: "2026-11-01T00:00:00Z", text: "original input" });
   });
 
+  it("uses ordinary Resume at OFF and preserves the exact-head choice at ON", async () => {
+    for (const { gated, optimistic, ordinaryOff, enabled = true } of [
+      { gated: false, optimistic: false, ordinaryOff: true },
+      { gated: false, optimistic: true, ordinaryOff: true },
+      { gated: true, optimistic: false, ordinaryOff: false },
+      // Disabled integration and the global kill switch keep the ordinary
+      // pre-adapter policy, rather than the Base/OFF history-skipping lane.
+      { gated: true, optimistic: false, ordinaryOff: false, enabled: false },
+      { gated: false, optimistic: false, ordinaryOff: false, enabled: false },
+    ]) {
+      const prompt = { id: "unknown-original", timestamp: "2026-11-01T00:00:00Z",
+        text: "unknown provider attempt", engramInterrupted: true, isEngramRetained: true,
+        ...(optimistic ? { localOnly: true } : {}),
+      };
+      const successor = { id: "ordinary-successor", timestamp: "2026-11-01T00:00:01Z",
+        text: "known ordinary successor" };
+      const params = makeSessionActionsParams();
+      const session = makeSession("session-1", { projectId: "project-1",
+        engramControlOff: ordinaryOff,
+        pendingPrompts: [prompt, successor], sessionMutationStamp: 42, queuePaused: true });
+      params.refs.sessionsRef.current = [session];
+      const snapshot = params.refs.actionStateClassifierContextRef.current.getSnapshot;
+      params.refs.actionStateClassifierContextRef.current.getSnapshot = () => ({
+        ...snapshot(), projects: [{ id: "project-1", name: "Project", rootPath: "/repo",
+          engram: { enabled, turnGatedControl: gated } }],
+      });
+      const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue({
+        ...makeStateResponse(6), sessions: [{ ...session, queuePaused: false }],
+      });
+      const tail = vi.spyOn(api, "fetchSessionTail").mockRejectedValue(
+        new Error("ordinary OFF Resume must not depend on selecting a projected head"),
+      );
+      await useAppSessionActions(params).handleResumeSessionQueue("session-1");
+      expect(resume).toHaveBeenCalledTimes(1);
+      if (!ordinaryOff) {
+        expect(resume).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
+      } else {
+        expect(resume).toHaveBeenCalledWith("session-1");
+      }
+      expect(tail).not.toHaveBeenCalled();
+      expect(prompt.text).toBe("unknown provider attempt");
+      expect(successor.text).toBe("known ordinary successor");
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("uses executing-session OFF applicability and keeps unknown remote selection", async () => {
+    for (const kind of ["remote-unknown", "remote-off", "inherited-off"]) {
+      const prompt = { id: "legacy-owner", timestamp: "10:00", text: "original input" };
+      const params = makeSessionActionsParams();
+      params.refs.sessionsRef.current = [makeSession("session-1", {
+        projectId: kind === "inherited-off" ? undefined : "remote-project",
+        remoteId: kind.startsWith("remote") ? "remote-owner" : undefined,
+        pendingPrompts: [prompt], sessionMutationStamp: 42,
+        ...(kind.endsWith("off") ? { engramControlOff: true } : {}),
+      })];
+      const snapshot = params.refs.actionStateClassifierContextRef.current.getSnapshot;
+      params.refs.actionStateClassifierContextRef.current.getSnapshot = () => ({
+        ...snapshot(), projects: [{ id: "remote-project", name: "Remote", rootPath: "/repo",
+          remoteId: "remote-owner" }],
+      });
+      const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue(makeStateResponse(6));
+      await useAppSessionActions(params).handleResumeSessionQueue("session-1");
+      expect(resume).toHaveBeenCalledTimes(1);
+      if (kind === "remote-unknown") {
+        expect(resume).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
+      } else {
+        expect(resume).toHaveBeenCalledWith("session-1");
+      }
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("adopts same-stamp OFF policy changes before choosing the Resume body", async () => {
+    for (const summary of [false, true]) {
+      for (const disableMutationStampFastPath of [false, true]) {
+        for (const [before, after] of [
+          [false, true], [true, false], [undefined, true],
+          [true, undefined], [undefined, false], [false, undefined],
+        ]) {
+          const prompt = { id: "retained-head", timestamp: "10:00", text: "original input" };
+          const previous = makeSession("session-1", { pendingPrompts: [prompt],
+            messagesLoaded: true, sessionMutationStamp: 42, engramControlOff: before });
+          const canonical = { ...previous, engramControlOff: after };
+          const options = { disableMutationStampFastPath };
+          const adopted = summary
+            ? reconcileStateSessionSummaries([previous], [canonical], options)[0]
+            : reconcileSingleSession(previous, canonical, options);
+          expect(adopted.engramControlOff).toBe(after);
+          expect(adopted.sessionMutationStamp).toBe(42);
+          const params = makeSessionActionsParams();
+          params.refs.sessionsRef.current = [adopted];
+          const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue(makeStateResponse(6));
+          await useAppSessionActions(params).handleResumeSessionQueue("session-1");
+          expect(resume).toHaveBeenCalledTimes(1);
+          if (after === true) {
+            expect(resume).toHaveBeenCalledWith("session-1");
+          } else {
+            expect(resume).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
+          }
+          vi.restoreAllMocks();
+        }
+      }
+    }
+  });
+
   it("hydrates an optimistic head before selecting Resume and refuses a changed head", async () => {
     for (const changed of [false, true]) {
       const optimistic = { id: "optimistic-human", timestamp: "10:00", text: "run migration", localOnly: true };

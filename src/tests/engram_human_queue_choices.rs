@@ -99,7 +99,8 @@ impl Drop for ChoiceWriter {
 
 #[test]
 fn human_prompt_legacy_choice_without_a_receipt_records_choice_and_retains_unknown_content() {
-    let (state, _project, session, receiver, transport) = queue::held_fixture();
+    let (state, project, session, receiver, transport) = queue::held_fixture();
+    enable_gated_legacy_selection_fixture(&state, &project, &session);
     let selected = selection(&state, &session);
     let (head, duties, stamp) = {
         let inner = state.inner.lock().unwrap();
@@ -142,7 +143,7 @@ fn human_prompt_legacy_choice_without_a_receipt_records_choice_and_retains_unkno
         let saved = PersistedSessionRecord::from_record(record);
         let sparse = saved.clone_without_messages();
         let loaded =
-            serde_json::from_value::<PersistedSessionRecord>(serde_json::to_value(sparse).unwrap())
+            serde_json::from_value::<PersistedSessionRecord>(serde_json::to_value(&sparse).unwrap())
                 .unwrap()
                 .into_record()
                 .unwrap();
@@ -150,10 +151,21 @@ fn human_prompt_legacy_choice_without_a_receipt_records_choice_and_retains_unkno
             loaded.human_queue_choices["original-held-head"].decision_id,
             choice.decision_id
         );
+        let mut normalized = head.clone();
+        normalized["promotion_disposition_known"] = json!(true);
         assert_eq!(
             serde_json::to_value(&loaded.queued_prompts[0]).unwrap(),
-            head
+            normalized,
+            "complete history proves no promotion without changing content or inventing a receipt"
         );
+        assert!(loaded.prompt_deliveries.is_empty());
+        assert!(loaded.queued_prompts[0].promoted_message_index.is_none());
+        let mut truncated = sparse;
+        truncated.message_start_index = 1;
+        let unknown = truncated.into_record().unwrap();
+        assert_eq!(serde_json::to_value(&unknown.queued_prompts[0]).unwrap(), head,
+            "truncated history cannot prove that the old prompt was never promoted");
+        assert!(unknown.orchestrator_auto_dispatch_blocked);
     }
     assert!(receiver.try_recv().is_err());
     assert_eq!(transport.requests().len(), before);
@@ -211,6 +223,17 @@ fn human_prompt_legacy_selection_refuses_a_stale_content_or_session_version() {
     }
 }
 
+// Legacy Human choices remain a control-ON recovery contract. OFF now uses
+// ordinary queue selection, covered by the separate OFF Resume regressions.
+pub(super) fn enable_gated_legacy_selection_fixture(state: &AppState, project: &str, session: &str) {
+    let mut inner = state.inner.lock().unwrap();
+    inner.projects.iter_mut().find(|p| p.id == project).unwrap()
+        .engram.as_mut().unwrap().turn_gated_control = true;
+    let index = inner.find_session_index(session).unwrap();
+    inner.sessions[index].set_auto_dispatch_blocked(true);
+    state.commit_locked(&mut inner).unwrap();
+}
+
 pub(super) fn legacy_pending_fixture() -> (
     AppState,
     String,
@@ -258,6 +281,7 @@ pub(super) fn legacy_pending_fixture() -> (
         let index = inner.find_session_index(&session).unwrap();
         inner.sessions[index] = loaded_record;
     }
+    enable_gated_legacy_selection_fixture(&state, &project, &session);
     (state, project, session, receiver, transport)
 }
 

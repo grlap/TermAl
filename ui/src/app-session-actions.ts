@@ -1156,9 +1156,10 @@ export function useAppSessionActions(
   async function handleResumeSessionQueue(sessionId: string) {
     try {
       const session = sessionsRef.current.find((entry) => entry.id === sessionId);
+      const controlOff = session?.engramControlOff === true;
       let prompt = session?.pendingPrompts?.[0];
       let stamp = session?.sessionMutationStamp;
-      if (prompt?.localOnly === true) {
+      if (!controlOff && prompt?.localOnly === true) {
         const response = await fetchSessionTail(sessionId);
         if (!isMountedRef.current) {
           return;
@@ -1174,7 +1175,7 @@ export function useAppSessionActions(
         prompt = head;
         stamp = response.session.sessionMutationStamp;
       }
-      const state = prompt && prompt.source == null && typeof stamp === "number"
+      const state = !controlOff && prompt && prompt.source == null && typeof stamp === "number"
         ? await resumeSessionQueue(sessionId, { prompt, sessionMutationStamp: stamp })
         : await resumeSessionQueue(sessionId);
       if (!isMountedRef.current) {

@@ -636,6 +636,9 @@ fn handoff_prepared_turn_dispatch(
             return reject_federation(error);
         }
     }
+    if engram_generation.is_some() && ordinary_off_execution_applies(&inner, &session_id) {
+        return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+    }
     let human_handoff = human_prompt_id.is_some() && engram_generation.is_none()
         && inner.find_session_index(&session_id).is_some_and(|index| {
             let record = &inner.sessions[index];
@@ -658,7 +661,8 @@ fn handoff_prepared_turn_dispatch(
             Err(error) => Err(ApiError::internal(format!("{detail}; failed to retain unsent turn: {error:#}"))),
         };
     }
-    if engram_session_obligation_locked(&inner, &session_id).is_some()
+    if !ordinary_off_execution_applies(&inner, &session_id)
+        && engram_session_obligation_locked(&inner, &session_id).is_some()
         && !human_handoff
         && !(engram_generation.is_none()
             && engram_unmediated_checkpoint_dispatch_allowed(
@@ -671,10 +675,7 @@ fn handoff_prepared_turn_dispatch(
     let index = inner.find_session_index(&session_id);
     let mut opening_diagnostic_delivery = None;
     let mut source_root_notice_delivery = Vec::new();
-    let guarded =
-        human_handoff || engram_generation.is_some() || federation_handoff.is_some() || relay_handoff.is_some()
-            || matches!(&dispatch, TurnDispatch::PersistentCodex { .. });
-    if guarded {
+    {
         let Some(index) = index else {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
         };

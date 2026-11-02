@@ -411,6 +411,8 @@ export type Session = {
   liveActivity?: SessionLiveActivity | null;
   /** True while TermAl restores this session's Engram authority after restart. */
   engramBootRecoveryPending?: boolean;
+  /** Executing host's ordinary OFF queue policy; absent on older remote hosts. */
+  engramControlOff?: boolean;
   status: SessionStatus;
   preview: string;
   messages: Message[];

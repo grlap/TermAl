@@ -291,6 +291,7 @@ mod visible_session_hydration_error_tests {
             codex_thread_state: None,
             live_activity: None,
             engram_boot_recovery_pending: false,
+            engram_control_off: None,
             status: SessionStatus::Idle,
             preview: "Remote session ready.".to_owned(),
             message_count: 0,
@@ -678,6 +679,18 @@ impl AppState {
         sha256_hex(&serialized)
     }
 
+    fn wire_session_for_inner(inner: &StateInner, local_instance_id: &str, record: &SessionRecord) -> Session {
+        let mut session = Self::wire_session_from_record(local_instance_id, record);
+        session.engram_control_off = session_ordinary_off_projection(inner, record);
+        session
+    }
+
+    fn wire_session_summary_for_inner(inner: &StateInner, local_instance_id: &str, record: &SessionRecord) -> StateSessionSummary {
+        let mut summary = Self::wire_session_summary_from_record(local_instance_id, record);
+        summary.engram_control_off = session_ordinary_off_projection(inner, record);
+        summary
+    }
+
     fn wire_session_from_record(local_instance_id: &str, record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
         if record.is_local_session() {
@@ -819,6 +832,7 @@ impl AppState {
                 .then(|| bounded_live_activity_summary(&session.live_activity))
                 .flatten(),
             engram_boot_recovery_pending: record.engram_boot_recovery_pending,
+            engram_control_off: session.engram_control_off,
             status: session.status,
             preview: session.preview.clone(),
             message_count: session_message_count(record),
@@ -1097,14 +1111,13 @@ impl AppState {
         let record = &inner.sessions[index];
         let tail_start_index = Self::session_tail_start_index(record, message_limit);
         let messages_loaded = record.session.messages_loaded && tail_start_index == 0;
+        let mut session = Self::wire_session_tail_from_record(
+            &self.server_instance_id, record, message_limit, messages_loaded,
+        );
+        session.engram_control_off = session_ordinary_off_projection(&inner, record);
         Ok(SessionResponse {
             revision: inner.revision,
-            session: Self::wire_session_tail_from_record(
-                &self.server_instance_id,
-                record,
-                message_limit,
-                messages_loaded,
-            ),
+            session,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -1480,8 +1493,13 @@ impl AppState {
         }
         #[cfg(test)]
         observe_state_snapshot_projection_for_test();
+        let control_projection = OrdinaryOffProjection::new(inner);
         let sessions = inner.sessions.iter().filter(|record| !record.hidden)
-            .map(|record| Self::wire_session_summary_from_record(&self.server_instance_id, record))
+            .map(|record| {
+                let mut summary = Self::wire_session_summary_from_record(&self.server_instance_id, record);
+                summary.engram_control_off = control_projection.for_record(record);
+                summary
+            })
             .collect();
         self.snapshot_header_from_inner(inner, agent_readiness, sessions)
     }
@@ -1525,6 +1543,7 @@ impl AppState {
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,
     ) -> FullStateSnapshot {
+        let control_projection = OrdinaryOffProjection::new(inner);
         FullStateSnapshot {
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
@@ -1538,7 +1557,11 @@ impl AppState {
                 .sessions
                 .iter()
                 .filter(|record| !record.hidden)
-                .map(|record| Self::wire_session_from_record(&self.server_instance_id, record))
+                .map(|record| {
+                    let mut session = Self::wire_session_from_record(&self.server_instance_id, record);
+                    session.engram_control_off = control_projection.for_record(record);
+                    session
+                })
                 .collect(),
             delegations: inner
                 .delegations

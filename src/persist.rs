@@ -1105,6 +1105,7 @@ fn load_state_from_sqlite_with_connection(
             token: Uuid::new_v4().to_string(),
             source: delegation_inventory_file_identity(path)?,
             worker_started: false,
+            queue_pause_images: Vec::new(),
         };
     }
     let mut inner = persisted

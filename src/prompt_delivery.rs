@@ -179,6 +179,7 @@ impl PromptDeliveryResume {
     /// was captured for, never one captured afresh.
     fn owner(&self, prompt_id: &str) -> EngramQueuedAdmissionOwner {
         EngramQueuedAdmissionOwner {
+            ordinary: None,
             receipt_resume: Some(self.clone()),
             capacity_nonce: self.capacity_nonce.clone(),
             prompt_id: prompt_id.to_owned(),
@@ -976,8 +977,8 @@ impl AppState {
             .expect("session index should be valid");
         let content = record
             .queued_prompts
-            .front()
-            .filter(|head| head.pending_prompt.id == prompt_id)
+            .iter()
+            .find(|head| head.pending_prompt.id == prompt_id)
             .map(receipted_prompt_intent);
         let (dispatch_generation, active_turn_generation) =
             (record.engram.dispatch_generation, record.active_turn_generation);
@@ -1226,7 +1227,7 @@ impl AppState {
             }
         };
         if let Some(resume_owner) = release {
-            self.dispatch_after_write_ahead(session_id, prompt_id, resume_owner);
+            self.dispatch_after_write_ahead(session_id, prompt_id, write_ahead, resume_owner);
             self.return_unpromoted_write_ahead_to_pending(session_id, prompt_id, write_ahead);
         }
     }
@@ -1240,8 +1241,31 @@ impl AppState {
         &self,
         session_id: &str,
         prompt_id: &str,
+        write_ahead: &str,
         resume_owner: Option<EngramQueuedAdmissionOwner>,
     ) {
+        let resume_owner = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if ordinary_off_execution_applies(&inner, session_id) {
+                let ordinary = inner.find_session_index(session_id)
+                    .filter(|index| inner.sessions[*index].prompt_deliveries.get(prompt_id).is_some_and(|delivery|
+                        delivery.write_ahead == write_ahead && delivery.write_ahead_acknowledged
+                            && delivery.disposition == PromptDeliveryDisposition::HandingOff
+                            && delivery.turn_generation.is_none()))
+                    .and_then(|index| EngramQueuedAdmissionOwner::capture_ordinary(&inner.sessions[index]))
+                    .filter(|owner| owner.prompt_id == prompt_id);
+                match (ordinary, resume_owner) {
+                    (Some(mut ordinary), previous) => {
+                        if let Some(previous) = previous {
+                            ordinary.receipt_resume = previous.receipt_resume;
+                            ordinary.capacity_nonce = previous.capacity_nonce;
+                        }
+                        Some(ordinary)
+                    }
+                    (None, _) => return,
+                }
+            } else { resume_owner }
+        };
         let drained = match resume_owner {
             Some(owner) => self.dispatch_next_queued_turn_for_resume(session_id, owner),
             None => self.dispatch_next_queued_turn(session_id, false),

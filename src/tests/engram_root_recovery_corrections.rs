@@ -803,14 +803,14 @@ fn stale_begin_retirement_cannot_clear_replacement_evaluation() {
 }
 
 #[test]
-fn disabled_control_after_restart_surfaces_retained_authorization_until_cancel() {
+fn disabled_control_after_restart_keeps_unknown_history_and_runs_distinct_ordinary_input() {
     let (state, session, receiver, transport) = root_fixture([
         bind_reply("token"),
         ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline("lost evaluate"))),
     ]);
     let dispatch = root_dispatch(&state, &session, false);
     deliver_turn_dispatch(&state, dispatch).unwrap();
-    let prompt_id = {
+    let (prompt_id, original_head, original_debt) = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         inner
             .projects
@@ -821,6 +821,8 @@ fn disabled_control_after_restart_surfaces_retained_authorization_until_cancel()
             .as_mut()
             .unwrap()
             .turn_gated_control = false;
+        let settings = inner.projects.iter().find_map(|project| project.engram.as_ref()).unwrap();
+        assert!(settings.is_base_enabled() && !settings.is_control_enabled());
         let index = inner.find_session_index(&session).unwrap();
         // Settings reset clears ephemeral state, but not the durable intent.
         inner.sessions[index].engram = EngramSessionState::default();
@@ -828,24 +830,45 @@ fn disabled_control_after_restart_surfaces_retained_authorization_until_cancel()
             .into_record()
             .unwrap();
         assert!(inner.sessions[index].engram.recovered_admission);
-        inner.sessions[index].queued_prompts[0]
-            .pending_prompt
-            .id
-            .clone()
+        let record = &inner.sessions[index];
+        assert_eq!(ordinary_queue_position(record), None,
+            "restored history has no proof permitting a provider replay");
+        let head = &record.queued_prompts[0];
+        (head.pending_prompt.id.clone(),
+            serde_json::to_value(head).unwrap(),
+            serde_json::to_value(&inner.engram_session_obligations).unwrap())
     };
-    let error = state
-        .resume_session_queue(&session)
-        .err()
-        .expect("control off must explain its hold");
-    assert_eq!(error.status, StatusCode::CONFLICT);
+    state.resume_session_queue(&session).expect("OFF Resume releases the ordinary pause without replaying history");
+    assert!(receiver.try_recv().is_err(), "Resume cannot replay the unproven historical input");
+    let dispatch = match state.dispatch_turn(&session, SendMessageRequest {
+        text: "Distinct ordinary input after OFF restart".into(), expanded_text: None,
+        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
+    }).unwrap() {
+        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("unknown old control history cannot block fresh OFF work"),
+    };
+    deliver_turn_dispatch(&state, dispatch).unwrap();
+    assert!(matches!(phase_sync::receive(&receiver, "distinct ordinary OFF input"),
+        CodexRuntimeCommand::Prompt { command, .. }
+            if command.prompt.ends_with("Distinct ordinary input after OFF restart")));
+    assert!(receiver.try_recv().is_err());
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.session.preview.contains("Engram control is off"));
-        assert!(record.queued_prompts[0].is_engram_retained());
+        let head = record.queued_prompts.iter().find(|head| head.pending_prompt.id == prompt_id).unwrap();
+        assert_eq!(head.source, QueuedPromptSource::User);
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(serde_json::to_value(head).unwrap(), original_head);
+        assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), original_debt);
+        assert!(!record.orchestrator_auto_dispatch_blocked);
     }
     assert_eq!(operations(&transport), ["session_bind", "turn_evaluate"]);
-    assert!(receiver.try_recv().is_err());
+    let token = {
+        let inner = state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&session).unwrap()].runtime.runtime_token().unwrap()
+    };
+    state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
+    assert!(receiver.try_recv().is_err(), "completion cannot replay the retained history");
     state.cancel_queued_prompt(&session, &prompt_id).unwrap();
     let dispatch = root_dispatch(&state, &session, false);
     deliver_turn_dispatch(&state, dispatch).unwrap();
@@ -853,6 +876,8 @@ fn disabled_control_after_restart_surfaces_retained_authorization_until_cancel()
         receiver.try_recv().unwrap(),
         CodexRuntimeCommand::Prompt { .. }
     ));
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(operations(&transport), ["session_bind", "turn_evaluate"]);
 }
 
 struct LostAdmissionReplyTransport {
@@ -950,12 +975,21 @@ fn reenabled_control_resume_recovers_retained_evaluate_without_cancel() {
         state
             .update_project_engram_settings(&project_id, disabled)
             .unwrap();
-        let error = state
-            .resume_session_queue(&session)
-            .err()
-            .expect("control off holds the retained intent");
-        assert_eq!(error.status, StatusCode::CONFLICT);
+        let (head_before, duties_before) = {
+            let inner = state.inner.lock().unwrap();
+            assert!(ordinary_off_execution_applies(&inner, &session));
+            (serde_json::to_value(&inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts[0]).unwrap(),
+                serde_json::to_value(&inner.engram_session_obligations).unwrap())
+        };
+        let off_requests = transport.inner.requests().len();
+        state.resume_session_queue(&session).expect("Base/OFF Resume does not replay the retained intent");
         assert!(receiver.try_recv().is_err());
+        assert_eq!(transport.inner.requests().len(), off_requests);
+        {
+            let inner = state.inner.lock().unwrap();
+            assert_eq!(serde_json::to_value(&inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts[0]).unwrap(), head_before);
+            assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), duties_before);
+        }
         let count_before_enable = transport.inner.requests().len();
         state
             .update_project_engram_settings(&project_id, settings)

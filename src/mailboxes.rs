@@ -997,9 +997,10 @@ impl AppState {
             // content proven durable: revalidation never rewrites or drops it.
             inner
                 .find_session_index(session_id)
-                .map(|index| &inner.sessions[index])
-                .and_then(|record| {
-                    record.queued_prompts.front().filter(|queued| {
+                .and_then(|index| {
+                    let record = &inner.sessions[index];
+                    dispatch_queue_position(&inner, index)
+                        .and_then(|position| record.queued_prompts.get(position)).filter(|queued| {
                         !queued.is_engram_retained()
                             && !queued_prompt_kept_standalone(record, queued)
                     })
@@ -1061,9 +1062,8 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(false);
         };
-        let front_matches = inner.sessions[index]
-            .queued_prompts
-            .front()
+        let position = dispatch_queue_position(&inner, index);
+        let front_matches = position.and_then(|position| inner.sessions[index].queued_prompts.get(position))
             .is_some_and(|queued| {
                 queued.pending_prompt.id == head.prompt_id
                     && queued.pending_prompt.text == head.text
@@ -1081,9 +1081,7 @@ impl AppState {
         // Authorization may have been prepared during the off-lock mailbox
         // read. Its text/source is now replay input, not a coalescible wake.
         // The same holds for an entry that took a durability hold meanwhile.
-        if inner.sessions[index]
-            .queued_prompts
-            .front()
+        if position.and_then(|position| inner.sessions[index].queued_prompts.get(position))
             .is_some_and(|queued| {
                 queued.is_engram_retained()
                     || queued_prompt_kept_standalone(&inner.sessions[index], queued)
@@ -1098,10 +1096,10 @@ impl AppState {
                 .expect("session index should be valid");
             let queued = record
                 .queued_prompts
-                .front_mut()
+                .get_mut(position.expect("validated mailbox queue position"))
                 .expect("validated mailbox queue head should exist");
             let Some(boundary) = boundary.filter(|boundary| !boundary.delivered) else {
-                record.queued_prompts.pop_front();
+                record.queued_prompts.remove(position.expect("validated mailbox queue position"));
                 sync_pending_prompts(record);
                 self.commit_locked(&mut inner)?;
                 return Ok(true);
@@ -1126,7 +1124,7 @@ impl AppState {
             .expect("session index should be valid");
         let queued = record
             .queued_prompts
-            .front_mut()
+            .get_mut(position.expect("validated mailbox queue position"))
             .expect("validated mailbox queue head should exist");
         let text = mailbox_notification_text(
             &wakeup.mailbox_id,

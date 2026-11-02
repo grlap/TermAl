@@ -1474,7 +1474,8 @@ async fn human_prompt_resume_route_accepts_empty_json_body() {
 
 #[tokio::test]
 async fn human_prompt_ui_legacy_choice_keeps_unknown_head_but_delivers_distinct_successor() {
-    let (state, _project, session, receiver, transport) = queue::held_fixture();
+    let (state, project, session, receiver, transport) = queue::held_fixture();
+    human_choices::enable_gated_legacy_selection_fixture(&state, &project, &session);
     enqueue_human_for_resume(&state, &session, false);
     let (selection, old, duties) = {
         let inner = state.inner.lock().unwrap();
@@ -2057,16 +2058,16 @@ fn human_prompt_old_obligation_does_not_allow_skipping_unrelated_user_fifo() {
         );
         state.commit_locked(&mut inner).unwrap();
     }
-    assert!(matches!(
-        state.dispatch_human_turn(&session, prompt()).unwrap(),
-        DispatchTurnResult::Queued
-    ));
+    let dispatch = match state.dispatch_human_turn(&session, prompt()).unwrap() {
+        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("OFF must activate the earlier eligible ordinary prompt"),
+    };
+    assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+    assert!(matches!(phase_sync::receive(&receiver, "the earlier ordinary FIFO prompt"),
+        CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains("earlier independent user")));
     assert!(receiver.try_recv().is_err());
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(
-        record.queued_prompts[1].pending_prompt.id,
-        "independent-user-head"
-    );
-    assert_eq!(record.queued_prompts[2].source, QueuedPromptSource::Human);
+    assert_eq!(record.queued_prompts[0].pending_prompt.id, "original-held-head");
+    assert_eq!(record.queued_prompts[1].source, QueuedPromptSource::Human);
 }

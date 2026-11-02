@@ -372,8 +372,8 @@ impl AppState {
         Ok(())
     }
 
-    // Called only by the explicit public Resume route. Automatic admission and
-    // capacity callers cannot select this producer through the ordinary helper.
+    // Reconcile only this receipt's original control owner. Ordinary OFF
+    // Resume bypasses accounting; it is never a prerequisite for new work.
     fn resume_off_checkpoint_receipt(&self, session_id: &str) -> Result<bool, ApiError> {
         let clock = self.engram_budget_clock();
         let (key, deadline) = {

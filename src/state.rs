@@ -2166,6 +2166,9 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
 /// Represents a session record.
 #[derive(Clone)]
 struct SessionRecord {
+    // Process-local identity of an ordinary turn opened with gated control OFF.
+    // Terminal callbacks of that turn do not own historical control dispatches.
+    unmediated_turn_generation: Option<u64>,
     /// Explicit domain participation; never inferred from a name or local id.
     federation_mailbox_binding: Option<FederationMailboxBinding>,
     /// Routing only. Older receivers ignore this field and retain no grant.
@@ -2352,6 +2355,8 @@ struct SessionRecord {
 /// where it was instead of leaving a half-started turn in memory: head gone,
 /// latch cleared, status Active, and nothing delivered to the runtime.
 struct QueuePromotionSnapshot {
+    unmediated_turn_generation: Option<u64>,
+    queue_order: Vec<String>,
     body_sequence: SessionBodySequence,
     active_turn_generation: u64,
     human_prompt_turn: Option<HumanPromptTurn>,
@@ -2420,6 +2425,8 @@ impl SessionRecord {
 
     fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {
         QueuePromotionSnapshot {
+            unmediated_turn_generation: self.unmediated_turn_generation,
+            queue_order: self.queued_prompts.iter().map(|queued| queued.pending_prompt.id.clone()).collect(),
             body_sequence: self.body_sequence.clone(),
             active_turn_generation: self.active_turn_generation,
             human_prompt_turn: self.human_prompt_turn.clone(),
@@ -2472,7 +2479,10 @@ impl SessionRecord {
         self.session.prompt_history = snapshot.prompt_history;
         self.prompt_history_mutation_stamp = snapshot.prompt_history_mutation_stamp;
         let preserve_prepared_engram_operation = queued.has_engram_intent();
-        if preserve_prepared_engram_operation {
+        if self.unmediated_turn_generation == Some(self.active_turn_generation) {
+            // This failed ordinary promotion never owned the historical
+            // pending control dispatch, prepared request or grant.
+        } else if preserve_prepared_engram_operation {
             // The bind/evaluate request was committed before promotion. The
             // failed promotion commit did not make a provider handoff real,
             // so detach only its runtime pending marker without retiring the
@@ -2488,7 +2498,11 @@ impl SessionRecord {
         {
             *current = queued;
         } else {
-            self.queued_prompts.push_front(queued);
+            let position = snapshot.queue_order.iter()
+                .take_while(|id| *id != &queued.pending_prompt.id)
+                .filter(|id| self.queued_prompts.iter().any(|entry| &entry.pending_prompt.id == *id))
+                .count();
+            self.queued_prompts.insert(position, queued);
         }
         // Holds of entries still queued come back; sync prunes the rest.
         self.queued_prompt_durability_holds = snapshot.queued_prompt_durability_holds;
@@ -2496,6 +2510,7 @@ impl SessionRecord {
         sync_pending_prompts(self);
         self.session.status = snapshot.status;
         self.active_turn_generation = snapshot.active_turn_generation;
+        self.unmediated_turn_generation = snapshot.unmediated_turn_generation;
         self.human_prompt_turn = snapshot.human_prompt_turn;
         self.file_change_tracking = None;
         self.session.preview = snapshot.preview;

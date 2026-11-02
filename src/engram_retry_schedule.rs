@@ -483,9 +483,7 @@ impl AppState {
         // Before boot preparation has raised the restarted sessions'
         // readiness fences, a retry rebuilt on load would be replayed without
         // its reconciliation: start nothing until then.
-        if self.engram_retry_slots.boot_preparation_pending() {
-            return;
-        }
+        let control_boot_pending = self.engram_retry_slots.boot_preparation_pending();
         let budget_now = self.engram_budget_clock().now();
         let mut due = Vec::new();
         // Sessions whose hold changed: a held delegation child reports it.
@@ -510,6 +508,11 @@ impl AppState {
                 let fenced = inner.sessions[index].engram.project_reset_in_progress
                     || engram_project_for_session_locked(&inner, &session_id)
                         .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
+                let standard_dispatch = !ordinary_off_execution_applies(&inner, &session_id);
+                if control_boot_pending && standard_dispatch { continue; }
+                // An already-requested provider Stop owns real runtime
+                // custody. OFF bypasses control admission, not that Stop or
+                // the retirement of a Stop whose exact owner changed.
                 if let Some(pending) = inner.sessions[index].engram_containment_stop.as_ref() {
                     if !pending.owner.reset_allows_stop(&inner, &inner.sessions[index]) {
                         continue;
@@ -534,6 +537,19 @@ impl AppState {
                             session_id, owner: EngramRetryOwner::Stop(pending.owner.clone()),
                             kind: EngramRetryKind::ContainmentStop, due_at: pending.due_at.clone(),
                         });
+                    }
+                    continue;
+                }
+                if !standard_dispatch {
+                    let record = &inner.sessions[index];
+                    if !fenced && !record.orchestrator_auto_dispatch_blocked
+                        && !record.runtime_stop_in_progress
+                        && !matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+                        && let Some((owner, due_at)) = &record.engram_queue_schedule.activation
+                        && owner.matches(record) && engram_retry_due_passed(due_at, now)
+                    {
+                        due.push(EngramDueRetry { session_id, owner: owner.clone().into(),
+                            kind: EngramRetryKind::Activation, due_at: due_at.clone() });
                     }
                     continue;
                 }
@@ -696,6 +712,32 @@ impl AppState {
         let mut admitted = Vec::new();
         let mut deferred = 0;
         for retry in due {
+            if retry.kind == EngramRetryKind::Activation
+                && self.ordinary_off_execution_applies(&retry.session_id)
+            {
+                // Ordinary activation does not spend or wait for a control
+                // admission slot. The drain still checks Stop and runtime
+                // ownership, including changes since this tick's snapshot.
+                if let EngramRetryOwner::Queue(owner) = retry.owner {
+                    match self.dispatch_next_queued_turn_for_activation(&retry.session_id, owner.clone()) {
+                        Ok(Some(dispatch)) => {
+                            {
+                                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                                if let Some(index) = inner.find_session_index(&retry.session_id)
+                                    && inner.sessions[index].engram_queue_schedule.activation.as_ref()
+                                        .is_some_and(|(current, _)| current == &owner)
+                                {
+                                    inner.sessions[index].engram_queue_schedule.activation = None;
+                                }
+                            }
+                            let _ = deliver_turn_dispatch(self, dispatch);
+                        }
+                        Ok(None) => {}
+                        Err(error) => eprintln!("ordinary queue activation remains pending: {error:#}"),
+                    }
+                }
+                continue;
+            }
             match self.engram_retry_slots.try_acquire() {
                 Some(slot) => {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");

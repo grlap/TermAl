@@ -10,6 +10,7 @@ enum DelegationInventoryState {
         token: String,
         source: FederationImageFileIdentity,
         worker_started: bool,
+        queue_pause_images: Vec<OrdinaryQueueLoadPause>,
     },
     Failed {
         reason: &'static str,
@@ -145,6 +146,7 @@ impl AppState {
                     token,
                     source,
                     worker_started,
+                    ..
                 } if !*worker_started => {
                     *worker_started = true;
                     (token.clone(), source.clone())
@@ -245,10 +247,16 @@ impl AppState {
                 *inner.delegation_catalog_children.get_mut().expect("catalog child index poisoned") =
                     catalog_children;
                 inner.repair_delegation_child_session_links_with(links);
-                inner.delegation_inventory = DelegationInventoryState::Ready;
+                let queue_pause_images = match std::mem::replace(
+                    &mut inner.delegation_inventory, DelegationInventoryState::Ready,
+                ) {
+                    DelegationInventoryState::Loading { queue_pause_images, .. } => queue_pause_images,
+                    _ => unreachable!("publication owner was checked above"),
+                };
                 // Publication is linearized while external SQL writers are
                 // excluded. Release before recovery can synchronously persist.
                 drop(publication.take());
+                restore_ordinary_queue_load_pauses(&mut inner, queue_pause_images);
                 inner.recover_interrupted_delegations();
                 let revision = inner.revision;
                 let prepared = self

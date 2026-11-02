@@ -288,7 +288,25 @@ impl AppState {
                 .find(|p| p.id == project_snapshot.id)
                 .expect("project")
                 .engram = Some(settings);
+            // OFF leaves ordinary execution unpaused. Re-enabling this exact
+            // authority restores the retained operation's explicit Resume hold
+            // here: this same-connection path never enters the reset pipeline.
+            let mut held_before = Vec::new();
+            for id in &ids {
+                if engram_session_obligation_locked(&inner, id).is_none() {
+                    continue;
+                }
+                let index = inner.find_session_index(id).expect("retained session");
+                let before = inner.sessions[index].clone();
+                if hold_engram_queued_authorization_for_resume(&mut inner.sessions[index]) {
+                    inner.stamp_session_at_index(index);
+                    held_before.push((index, before));
+                }
+            }
             if let Err(error) = self.commit_locked(&mut inner) {
+                for (index, before) in held_before {
+                    inner.sessions[index] = before;
+                }
                 inner
                     .projects
                     .iter_mut()

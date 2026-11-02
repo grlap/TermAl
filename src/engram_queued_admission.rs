@@ -134,6 +134,7 @@ impl Eq for DeferredEngramHandoff {}
 // Identity of the queue head that owns an off-lock recovery operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EngramQueuedAdmissionOwner {
+    ordinary: Option<OrdinaryQueueIdentity>,
     prompt_id: String,
     generation: u64,
     active_turn_generation: u64,
@@ -144,6 +145,23 @@ struct EngramQueuedAdmissionOwner {
 }
 
 impl EngramQueuedAdmissionOwner {
+    fn capture_ordinary(record: &SessionRecord) -> Option<Self> {
+        let queued = &record.queued_prompts[ordinary_queue_position(record)?];
+        Some(Self {
+            ordinary: Some(OrdinaryQueueIdentity {
+                intent: receipted_prompt_intent(queued),
+                stop_generation: record.runtime_stop_generation,
+                pause_epoch: record.auto_dispatch_pause_epoch,
+                write_ahead: record.prompt_deliveries.get(&queued.pending_prompt.id).map(|delivery| delivery.write_ahead.clone()),
+            }),
+            prompt_id: queued.pending_prompt.id.clone(),
+            generation: record.engram.dispatch_generation,
+            active_turn_generation: record.active_turn_generation,
+            capacity_nonce: None,
+            receipt_resume: None,
+        })
+    }
+
     fn capture_promoted(record: &SessionRecord) -> Option<Self> {
         let owner = Self::capture(record)?;
         record
@@ -155,6 +173,7 @@ impl EngramQueuedAdmissionOwner {
 
     fn capture(record: &SessionRecord) -> Option<Self> {
         record.queued_prompts.front().map(|queued| Self {
+            ordinary: None,
             prompt_id: queued.pending_prompt.id.clone(),
             generation: record.engram.dispatch_generation,
             active_turn_generation: record.active_turn_generation,
@@ -164,6 +183,28 @@ impl EngramQueuedAdmissionOwner {
     }
 
     fn matches(&self, record: &SessionRecord) -> bool {
+        if let Some(ordinary) = &self.ordinary {
+            return record.active_turn_generation == self.active_turn_generation
+                && record.runtime_stop_generation == ordinary.stop_generation
+                && record.auto_dispatch_pause_epoch == ordinary.pause_epoch
+                && record.prompt_deliveries.get(&self.prompt_id).map(|delivery| &delivery.write_ahead)
+                    == ordinary.write_ahead.as_ref()
+                && self.capacity_nonce.as_ref().is_none_or(|nonce| provider_capacity_resume_owned(record, nonce))
+                && self.receipt_resume.as_ref().is_none_or(|resume| {
+                    record.runtime_stop_generation == resume.stop_generation
+                        && record.auto_dispatch_pause_epoch == resume.pause_epoch
+                        && record.prompt_deliveries.get(&self.prompt_id).is_some_and(|delivery|
+                            delivery.resume.as_ref() == Some(resume)
+                                && delivery.write_ahead == resume.write_ahead
+                                && delivery.disposition == PromptDeliveryDisposition::HandingOff
+                                && delivery.turn_generation.is_none()
+                                && delivery.write_ahead_acknowledged)
+                })
+                && ordinary_queue_position(record).is_some_and(|position| {
+                    let queued = &record.queued_prompts[position];
+                    queued.pending_prompt.id == self.prompt_id && receipted_prompt_intent(queued) == ordinary.intent
+                });
+        }
         self.capacity_nonce.as_ref().is_none_or(|nonce|
             provider_capacity_resume_owned(record, nonce))
             && self.receipt_resume.as_ref().is_none_or(|resume| {
@@ -187,10 +228,16 @@ impl EngramQueuedAdmissionOwner {
     }
 }
 
-/// Preserve the existing control-off presentation without trying admission.
-/// Reset release uses the same hold as an ordinary drain, so deferring that
-/// drain cannot erase the interrupted marker needed by exact Resume recovery.
-fn hold_engram_queued_authorization_when_control_off(record: &mut SessionRecord) -> bool {
+/// Control-enabled recovery retains its explicit Resume hold. OFF callers
+/// bypass this control-only presentation and preserve the original operation.
+const ENGRAM_RETAINED_AUTHORIZATION_PREVIEW: &str =
+    "Engram recovered authorization retained. Resume to recover the exact queued prompt.";
+const ENGRAM_CONTROL_OFF_AUTHORIZATION_PREVIEW: &str =
+    "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing.";
+const ENGRAM_SETTINGS_AUTHORIZATION_PREVIEW: &str =
+    "Engram settings changed. Authorization retained; cancel or reconcile before continuing.";
+
+fn hold_engram_queued_authorization_for_resume(record: &mut SessionRecord) -> bool {
     if !record.engram.recovered_admission
         && !record
             .queued_prompts
@@ -205,8 +252,18 @@ fn hold_engram_queued_authorization_when_control_off(record: &mut SessionRecord)
     }
     record.set_auto_dispatch_blocked(true);
     record.session.live_activity = None;
-    record.session.preview = "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing.".to_owned();
+    record.session.preview = ENGRAM_RETAINED_AUTHORIZATION_PREVIEW.to_owned();
     sync_pending_prompts(record);
+    true
+}
+
+// Callers outside the positive ordinary OFF lane keep the original disabled
+// control recovery policy. ON re-enable recovery uses the Resume hold above.
+fn hold_engram_queued_authorization_when_control_off(record: &mut SessionRecord) -> bool {
+    if !hold_engram_queued_authorization_for_resume(record) {
+        return false;
+    }
+    record.session.preview = ENGRAM_CONTROL_OFF_AUTHORIZATION_PREVIEW.to_owned();
     true
 }
 

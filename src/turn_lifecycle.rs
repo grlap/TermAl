@@ -616,7 +616,7 @@ impl AppState {
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
                 let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
-                take_and_abandon_engram_pending_dispatch(record);
+                abandon_ending_turn_engram_dispatch(record);
                 // The stopped runtime's turn, captured before it is retired.
                 let ending_turn = record.active_turn_generation;
                 if retain_runtime_for_retry {
@@ -958,7 +958,7 @@ impl AppState {
                     "the turn failed before the runtime acknowledged the prompt: {cleaned}"
                 )),
             );
-            take_and_abandon_engram_pending_dispatch(record);
+            abandon_ending_turn_engram_dispatch(record);
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
                 // Restore the durable wake below, but do not immediately run
@@ -1613,7 +1613,7 @@ impl AppState {
                         sync_pending_prompts(record);
                     }
                 } else {
-                    take_and_abandon_engram_pending_dispatch(record);
+                    abandon_ending_turn_engram_dispatch(record);
                 }
                 let deferred_stop_callbacks = if mode.retained_runtime_token().is_some() {
                     record.clear_runtime_stop();
@@ -1992,7 +1992,7 @@ impl AppState {
             let _ = record;
             self.queue_runtime_observation_close_locked(&mut inner, index);
             let record = &mut inner.sessions[index];
-            take_and_abandon_engram_pending_dispatch(record);
+            abandon_ending_turn_engram_dispatch(record);
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
                 record.set_auto_dispatch_blocked(true);
@@ -2178,7 +2178,7 @@ impl AppState {
             let _ = record;
             self.queue_runtime_observation_close_locked(&mut inner, index);
             let record = &mut inner.sessions[index];
-            take_and_abandon_engram_pending_dispatch(record);
+            abandon_ending_turn_engram_dispatch(record);
 
             if record.session.status == SessionStatus::Active {
                 record.session.status = SessionStatus::Idle;
@@ -2421,7 +2421,9 @@ impl AppState {
             let preserve_dedicated_reset = preserve_dedicated_hold && inner.sessions[index].runtime_reset_required;
             let preserve_automatic_resume_block = inner.sessions[index]
                 .engram_mcp_runtime_quarantined
-                && inner.sessions[index].orchestrator_auto_dispatch_blocked || preserve_dedicated_hold;
+                && inner.sessions[index].orchestrator_auto_dispatch_blocked
+                || preserve_dedicated_hold;
+            let operator_paused = inner.sessions[index].engram.operator_paused;
             let quarantined_exit = inner.sessions[index].engram_mcp_runtime_quarantined;
             let message_id = ((!quarantined_exit || retain_cleanup_owner) && (was_busy || !cleaned.is_empty()))
                 .then(|| inner.next_message_id());
@@ -2461,7 +2463,7 @@ impl AppState {
                 let exited_mailbox_notification = was_busy
                     .then(|| record.active_turn_mailbox_notification.take())
                     .flatten();
-                take_and_abandon_engram_pending_dispatch(record);
+                abandon_ending_turn_engram_dispatch(record);
                 if !retain_cleanup_owner {
                     record.clear_runtime();
                     if !preserve_dedicated_reset { record.clear_runtime_reset(); }
@@ -2469,6 +2471,14 @@ impl AppState {
                 record.set_auto_dispatch_blocked(
                     retain_cleanup_owner || preserve_automatic_resume_block || exited_mailbox_notification.is_some(),
                 );
+                if operator_paused {
+                    // Keep the operator latch after applying the normal exit
+                    // policy, including its source-observation hold cleanup.
+                    if !record.orchestrator_auto_dispatch_blocked {
+                        record.set_auto_dispatch_blocked(true);
+                    }
+                    record.engram.operator_paused = true;
+                }
                 record.clear_runtime_stop();
                 // Unsent deferred hand-offs first; then the runtime went away
                 // before it acknowledged a receipted prompt, so whether it

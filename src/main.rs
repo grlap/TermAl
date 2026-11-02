@@ -1073,6 +1073,7 @@ include!("engram_containment_admission_progress.rs");
 include!("engram_containment_bind_successor.rs");
 include!("engram_containment_begin_resume.rs");
 include!("engram_containment_queue.rs");
+include!("engram_control_mode.rs");
 include!("human_prompts.rs");
 include!("human_queue_choices.rs");
 include!("coordination_instructions.rs");

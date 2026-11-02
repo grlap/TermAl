@@ -122,6 +122,7 @@ impl StateInner {
             .then(|| session_model.clone());
 
         let record = SessionRecord {
+            unmediated_turn_generation: None,
             federation_mailbox_binding: None,
             federation_automatic_mailbox_binding: None,
             federation_retired_automatic_mailbox_bindings: Vec::new(),
@@ -253,6 +254,7 @@ impl StateInner {
                 codex_thread_state: None,
                 live_activity: None,
                 engram_boot_recovery_pending: false,
+                engram_control_off: None,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
                 messages: MessageSequence::default(),

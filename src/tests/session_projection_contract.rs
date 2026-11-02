@@ -101,10 +101,12 @@ async fn serialized_session_projection_preserves_metadata_and_redacts_private_bo
         let index = inner
             .find_session_index(&session_id)
             .expect("session exists");
-        AppState::wire_session_from_record(&state.server_instance_id, &inner.sessions[index])
+        AppState::wire_session_for_inner(&inner, &state.server_instance_id, &inner.sessions[index])
     };
     let full = serde_json::to_value(full).expect("full projection serializes");
     let full_object = full.as_object().unwrap();
+    assert_eq!(full["engramControlOff"], false,
+        "a plain local session is outside the positive Base/OFF lane");
     let app = app_router(state.clone());
 
     // No handoffFrom/handoffTo query is used here: those optional bounds

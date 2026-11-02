@@ -2,6 +2,30 @@
 // Does not access live authority or claim a scripted reply proves remote state.
 use super::*;
 
+fn finish_distinct_off_input(
+    state: &AppState,
+    session: &str,
+    receiver: &mpsc::Receiver<CodexRuntimeCommand>,
+    text: &str,
+) {
+    assert!(ordinary_off_execution_applies(&state.inner.lock().unwrap(), session));
+    let mut fresh = prompt();
+    fresh.text = text.to_owned();
+    let dispatch = match state.dispatch_turn(session, fresh).unwrap() {
+        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("distinct OFF input must start"),
+    };
+    assert!(dispatch.engram_dispatch_generation().is_none());
+    let token = dispatch.runtime_token().clone();
+    let generation = dispatch.active_turn_generation();
+    assert!(matches!(deliver_turn_dispatch(state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+    assert!(matches!(phase_sync::receive(receiver, "distinct OFF input"),
+        CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains(text)));
+    assert!(receiver.try_recv().is_err());
+    state.finish_turn_ok_if_runtime_and_generation_match(session, &token, generation).unwrap();
+    assert!(receiver.try_recv().is_err(), "completion must not replay historical work");
+}
+
 pub(super) fn grant_read(session: &str, grant: &str, state: &str) -> ScriptedEngramControlResponse {
     ScriptedEngramControlResponse::Reply(Ok(json!({
         "control_schema_version": ENGRAM_CONTROL_SCHEMA_VERSION,
@@ -132,9 +156,11 @@ fn project_containment_unknown_begin_remains_excluded_and_can_only_read_exact_gr
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].request["operation"], "turn_grant_read");
     assert_eq!(requests[0].request["grant_id"], "possibly-sent-grant");
-    assert!(state.resume_local_session_queue(&session, None).is_err());
-    assert!(state.dispatch_turn(&session, prompt()).is_err());
-    assert!(receiver.try_recv().is_err());
+    let debt = serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
+    assert!(matches!(state.resume_local_session_queue(&session, None), Ok(None)));
+    assert!(receiver.try_recv().is_err(), "Resume never sends the possibly delivered old prompt");
+    finish_distinct_off_input(&state, &session, &receiver, "distinct work beside unknown Begin");
+    assert_eq!(serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap(), debt);
     state.shutdown_persist_blocking();
     let loaded = load_state(state.persistence_path.as_path())
         .unwrap()
@@ -152,8 +178,9 @@ fn project_containment_unknown_begin_remains_excluded_and_can_only_read_exact_gr
         boot.targets.is_empty(),
         "boot cannot bootstrap the excluded control session"
     );
-    assert!(state.resume_local_session_queue(&session, None).is_err());
-    assert!(state.dispatch_turn(&session, prompt()).is_err());
+    assert!(matches!(state.resume_local_session_queue(&session, None), Ok(None)));
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap(), debt);
     assert_eq!(
         transport.requests().len(),
         1,
@@ -205,8 +232,10 @@ fn project_containment_first_reader_preserves_unhandled_retirement_and_its_owner
         "session_bind_retirement"
     );
     assert!(response.engram_control_recovery[0].excluded);
-    assert!(state.dispatch_turn(&session, prompt()).is_err());
-    assert!(state.resume_local_session_queue(&session, None).is_err());
+    assert!(matches!(state.resume_local_session_queue(&session, None), Ok(None)));
+    assert!(receiver.try_recv().is_err());
+    finish_distinct_off_input(&state, &session, &receiver, "distinct work beside retained retirement");
+    assert_eq!(serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations.entries[0]).unwrap(), original);
     assert!(
         state
             .prepare_engram_sessions_for_boot_recovery()
@@ -558,10 +587,8 @@ fn project_containment_cancelled_head_and_local_recreation_keep_original_obligat
         );
         state.commit_locked(&mut inner).unwrap();
     }
-    install_control_only_transport(
-        &state,
-        ScriptedEngramControlTransport::new([checkpoint_refusal_reply("GrantScopeMismatch")]),
-    );
+    let transport = ScriptedEngramControlTransport::new([checkpoint_refusal_reply("GrantScopeMismatch")]);
+    install_control_only_transport(&state, transport.clone());
     state
         .update_project_engram_settings(&project, settings(&state, &project, false))
         .unwrap();
@@ -580,7 +607,11 @@ fn project_containment_cancelled_head_and_local_recreation_keep_original_obligat
         assert!(require_no_engram_local_dispatch_obligation(&inner, &session).is_ok(),
             "only direct fresh intake with no older queued work may use the OFF exception");
     }
-    assert!(state.resume_local_session_queue(&session, None).is_err());
+    let requests = transport.requests().iter().map(|request| request.request.clone()).collect::<Vec<_>>();
+    assert!(ordinary_off_execution_applies(&state.inner.lock().unwrap(), &session));
+    assert!(matches!(state.resume_local_session_queue(&session, None), Ok(None)));
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(transport.requests().iter().map(|request| request.request.clone()).collect::<Vec<_>>(), requests);
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();

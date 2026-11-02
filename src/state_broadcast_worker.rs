@@ -116,6 +116,7 @@ impl AppState {
             codex_thread_state,
             live_activity,
             engram_boot_recovery_pending,
+            engram_control_off: _,
             status,
             preview,
             message_count,
@@ -237,16 +238,19 @@ impl AppState {
                 .clone_from(&self.server_instance_id);
         }
         let mut live = HashSet::new();
+        let control_projection = OrdinaryOffProjection::new(inner);
         let sessions = inner
             .sessions
             .iter()
             .filter(|record| !record.hidden)
             .map(|record| {
                 let id = record.session.id.as_str();
+                let control_off = control_projection.for_record(record);
                 live.insert(id);
                 let key = StateProjectionKey::for_record(record);
                 if let Some((cached_key, summary)) = cache.sessions.get(id) {
                     if *cached_key == key
+                        && summary.engram_control_off == control_off
                         && Self::cached_state_summary_matches_record(
                             &self.server_instance_id,
                             record,
@@ -256,10 +260,12 @@ impl AppState {
                         return summary.clone();
                     }
                 }
-                let summary = Arc::new(Self::wire_session_summary_from_record(
+                let mut summary = Self::wire_session_summary_from_record(
                     &self.server_instance_id,
                     record,
-                ));
+                );
+                summary.engram_control_off = control_off;
+                let summary = Arc::new(summary);
                 cache.sessions.insert(id.to_owned(), (key, summary.clone()));
                 summary
             })

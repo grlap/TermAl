@@ -354,6 +354,9 @@ impl AppState {
         turn_generation: u64,
     ) -> EngramAuthorizationParkOutcome {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if ordinary_off_execution_applies(&inner, session_id) {
+            return EngramAuthorizationParkOutcome::Superseded;
+        }
         let Some(index) = inner.find_session_index(session_id) else {
             return EngramAuthorizationParkOutcome::Superseded;
         };

@@ -413,7 +413,14 @@ impl PersistedState {
         // project provenance can all be checked. Per-row boot conversion must
         // not replace these inputs with irreversible lost-credit notices.
         let mut pending_checkpoint_inputs = Vec::new();
+        let mut ordinary_load_images = Vec::new();
         let sessions = self.sessions.into_iter().map(|mut persisted| {
+            let control_pause = !persisted.engram_operator_paused
+                && persisted.provider_capacity_retry.is_none()
+                && persisted.queued_prompts.iter().any(QueuedPromptRecord::is_engram_retained)
+                && control_pause_preview_is_owned(&persisted.session.preview);
+            ordinary_load_images.push((persisted.session.id.clone(),
+                persisted.orchestrator_auto_dispatch_blocked, control_pause));
             if let Some(mirror) = &persisted.engram_checkpoint_operation
                 && !self.engram_session_obligations.checkpoint_operations.iter().any(|operation|
                     operation.protection.local_session_id == persisted.session.id
@@ -639,6 +646,16 @@ impl PersistedState {
             .collect::<HashSet<_>>();
         inner.normalize_local_paths();
         inner.validate_projects_consistent()?;
+        let queue_pause_images = ordinary_load_images.into_iter().filter_map(|(session_id, paused, control_pause)| {
+            let index = inner.find_session_index(&session_id)?;
+            Some(OrdinaryQueueLoadPause { session_id, paused, control_pause,
+                pause_epoch: inner.sessions[index].auto_dispatch_pause_epoch })
+        }).collect();
+        if let DelegationInventoryState::Loading { queue_pause_images: pending, .. } = &mut inner.delegation_inventory {
+            *pending = queue_pause_images;
+        } else {
+            restore_ordinary_queue_load_pauses(&mut inner, queue_pause_images);
+        }
         for (session_id, batches) in pending_checkpoint_inputs {
             let Some(index) = inner.find_session_index(&session_id) else { continue };
             for batch in batches {
@@ -1158,6 +1175,7 @@ impl PersistedSessionRecord {
             })
             .collect();
         let mut record = SessionRecord {
+            unmediated_turn_generation: None,
             federation_mailbox_binding: self.federation_mailbox_binding,
             federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding,
             federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings,

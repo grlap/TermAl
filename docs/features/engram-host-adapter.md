@@ -22,6 +22,33 @@ The local Engram integration has two independent tiers:
   is enabled, the existing host-private bind/evaluate/begin/checkpoint protocol
   can withhold a prompt until Engram authorizes that exact turn.
 
+With local Base integration enabled and turn-gated control OFF, ordinary sends, queue drains, Resume and mailbox
+wakes do not depend on old grants, checkpoints, obligations or admission
+recovery. Base integration remains available. Resume releases the ordinary
+queue pause without replaying or accounting for an old control operation.
+Runtime ownership, Stop, settings-reset fences, provider durability and
+federation authorization still apply.
+
+Absent or disabled integration, the global integration kill switch and unresolved
+project associations keep the existing queue behavior. Explicit Human sends keep
+their priority over paused automatic work. Queues without retained control history
+keep ordinary mailbox coalescing and manual recovery. The executing host projects
+the per-session OFF policy, including inherited projects; a proxy forwards that
+decision and leaves it unknown for an older host.
+
+An operator Pause or Stop remains visible as a paused queue after a runtime
+exits. Sessions paused before this fix whose cause cannot be proven stay
+paused until you click Resume. Their saved error or recovery preview remains
+visible. Positively control-owned holds release at OFF, and new control-origin
+Stops do not create an operator pause.
+
+Queue selection preserves unknown provider attempts in place and skips them.
+A row can execute without gated admission only with positive evidence that
+it was never promoted and no receipt indicating possible provider delivery.
+Eligible ordinary rows retain FIFO order. Old control requests and checkpoint
+debts remain evidence; OFF does not mean they were settled. Local reset and
+removal retain their separate preservation and custody checks.
+
 **Where the tiers are deployed (2026-10-29):**
 - Turn-gated control has been ON for the Engram project since 2026-10-29,
   after a passed steady-state canary.
@@ -47,7 +74,7 @@ Free-text Telegram messages, peer sends and internal follow-ups retain ordinary
 provenance. In the local unauthenticated HTTP model a client can assert Human
 origin; this classification does not authenticate a trusted UI client.
 
-Historical `User` or missing-source entries are ambiguous provenance. Resume
+With control ON, historical `User` or missing-source entries are ambiguous provenance. Resume
 can record an explicit choice of the displayed head and its session version,
 without rewriting that entry's source, request or id. Reusing its content
 requires the existing delivery receipt to prove an unsent attempt and a new

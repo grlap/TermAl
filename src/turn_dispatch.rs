@@ -308,7 +308,12 @@ impl AppState {
         allow_blocked_dispatch: bool,
         pending_engram: Option<EngramPendingDispatch>,
     ) -> Result<Option<StartedTurn>> {
-        if engram_admission_obligation_locked(inner, &inner.sessions[index].session.id).is_some() {
+        if pending_engram.is_some()
+            && ordinary_off_execution_applies(inner, &inner.sessions[index].session.id)
+        {
+            return Ok(None);
+        }
+        if ordinary_admission_is_excluded(inner, &inner.sessions[index].session.id) {
             return Ok(None);
         }
         // None may mean evaluation was withheld by an obligation that has
@@ -354,7 +359,8 @@ impl AppState {
             return Ok(None);
         }
 
-        let Some(queued) = inner.sessions[index].queued_prompts.front().cloned() else {
+        let queue_position = dispatch_queue_position(inner, index);
+        let Some(queued) = queue_position.and_then(|position| inner.sessions[index].queued_prompts.get(position)).cloned() else {
             abandon_engram_pending_dispatch(
                 inner
                     .session_mut_by_index(index)
@@ -389,7 +395,8 @@ impl AppState {
         // only the off-lock Resume wrapper. Settings reset is not non-delivery.
         // Checked before the receipt gate, so a refused head consumes no
         // Resume.
-        if pending_engram.is_none() && queued.is_engram_retained() {
+        if !ordinary_off_execution_applies(inner, &inner.sessions[index].session.id)
+            && pending_engram.is_none() && queued.is_engram_retained() {
             return Ok(None);
         }
 
@@ -422,7 +429,8 @@ impl AppState {
             abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram);
             return Ok(None);
         }
-        let mut started = match self.start_turn_on_record(
+        let standard_dispatch = !ordinary_off_execution_applies(inner, &session_id);
+        let mut started = match self.start_turn_on_record_with_control_mode(
             inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid"),
@@ -434,6 +442,7 @@ impl AppState {
             pending_engram,
             engram_mcp,
             host_mcp_servers_only,
+            standard_dispatch,
         ) {
             Ok(started) => started,
             Err(error) => {
@@ -465,8 +474,15 @@ impl AppState {
             &self.server_instance_id,
         );
         // Authorization intent survives until the provider handoff is known.
-        if !retain_for_admission {
-            record.queued_prompts.pop_front();
+        if !standard_dispatch && queued.is_engram_retained() {
+            // The original control request remains evidence even though its
+            // positively never-promoted prompt ran as ordinary work. Record
+            // this new handoff so no later selector can replay the envelope.
+            let entry = &mut record.queued_prompts[queue_position.expect("selected queue position")];
+            entry.engram_ordinary_handoff = true;
+            entry.promoted_message_index = Some(started.message_delta.message_index);
+        } else if !retain_for_admission {
+            record.queued_prompts.remove(queue_position.expect("selected queue position"));
         }
         sync_pending_prompts(record);
         started.message_delta.session_mutation_stamp = record.mutation_stamp;
@@ -511,9 +527,26 @@ impl AppState {
         attachments: Vec<PromptImageAttachment>,
         expanded_prompt: Option<String>,
         source: Option<MessageSource>,
+        pending_engram: Option<EngramPendingDispatch>,
+        engram_mcp: Option<EngramMcpRuntimeConfig>,
+        host_mcp_servers_only: bool,
+    ) -> std::result::Result<StartedTurn, ApiError> {
+        self.start_turn_on_record_with_control_mode(record, message_id, prompt, attachments,
+            expanded_prompt, source, pending_engram, engram_mcp, host_mcp_servers_only, true)
+    }
+
+    fn start_turn_on_record_with_control_mode(
+        &self,
+        record: &mut SessionRecord,
+        message_id: String,
+        prompt: String,
+        attachments: Vec<PromptImageAttachment>,
+        expanded_prompt: Option<String>,
+        source: Option<MessageSource>,
         mut pending_engram: Option<EngramPendingDispatch>,
         engram_mcp: Option<EngramMcpRuntimeConfig>,
         host_mcp_servers_only: bool,
+        standard_dispatch: bool,
     ) -> std::result::Result<StartedTurn, ApiError> {
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
@@ -557,6 +590,7 @@ impl AppState {
             .collect::<Vec<_>>();
         record.active_turn_generation = record.active_turn_generation.wrapping_add(1).max(1);
         let active_turn_generation = record.active_turn_generation;
+        record.unmediated_turn_generation = (!standard_dispatch).then_some(active_turn_generation);
         // A successor never inherits the previous opening's presentation.
         record.engram.opening_diagnostic = None;
         record.active_turn_start_message_count = Some(record.session.messages.len());
@@ -903,11 +937,17 @@ impl AppState {
             }
         };
 
-        record.set_auto_dispatch_blocked(false);
+        if standard_dispatch {
+            record.set_auto_dispatch_blocked(false);
+        } else {
+            record.orchestrator_auto_dispatch_blocked = false;
+            record.session.queue_paused = false;
+            record.engram.operator_paused = false;
+        }
         record.active_turn_file_changes.clear();
         record.active_turn_file_change_grace_deadline = None;
-        let observation_source = record.queued_prompts.front()
-            .filter(|head| head.pending_prompt.id == message_id)
+        let observation_source = record.queued_prompts.iter()
+            .find(|head| head.pending_prompt.id == message_id)
             .map(|head| head.source)
             .unwrap_or(if source.as_ref().is_some_and(MessageSource::is_mailbox) {
                 QueuedPromptSource::Mailbox
@@ -925,8 +965,8 @@ impl AppState {
         };
         let previous_promotion = record
             .queued_prompts
-            .front()
-            .filter(|queued| queued.pending_prompt.id == message_id)
+            .iter()
+            .find(|queued| queued.pending_prompt.id == message_id)
             .and_then(|queued| queued.promoted_message_index);
         let message_index = previous_promotion.unwrap_or_else(|| {
             let local_index = cached_message_index_on_record(record, &message_id)
@@ -958,12 +998,14 @@ impl AppState {
         });
         record.session.status = SessionStatus::Active;
         record.session.preview = prompt_preview_text(&prompt, &message_attachments);
-        record.engram.dispatch_generation = engram_dispatch_generation
-            .unwrap_or_else(|| record.engram.dispatch_generation.saturating_add(1));
-        if let Some(pending) = pending_engram.as_mut() {
-            pending.dispatch_generation = record.engram.dispatch_generation;
+        if standard_dispatch {
+            record.engram.dispatch_generation = engram_dispatch_generation
+                .unwrap_or_else(|| record.engram.dispatch_generation.saturating_add(1));
+            if let Some(pending) = pending_engram.as_mut() {
+                pending.dispatch_generation = record.engram.dispatch_generation;
+            }
+            record.engram.pending_dispatch = pending_engram;
         }
-        record.engram.pending_dispatch = pending_engram;
         record.provider_handoff_observations.prepared = Some(ProviderHandoffPrompt {
             prompt_id: message_id.clone(),
             source: observation_source,
@@ -1014,11 +1056,7 @@ impl AppState {
                             record.session.status,
                             SessionStatus::Idle | SessionStatus::Error
                         )
-                        && record
-                            .queued_prompts
-                            .iter()
-                            .find(|queued| queued.source != QueuedPromptSource::Mailbox)
-                            .is_some_and(|queued| queued.source == QueuedPromptSource::Orchestrator)
+                        && queue_has_orphaned_workflow(&inner, record)
                         && !record.orchestrator_auto_dispatch_blocked
                         && matches!(record.runtime, SessionRuntime::None)
                 })
@@ -1353,8 +1391,35 @@ impl AppState {
         session_id: &str,
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
-        owner: Option<QueuedDrainOwner>,
+        mut owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if ordinary_off_execution_applies(&inner, session_id) {
+                if let Some(QueuedDrainOwner::Activation(previous)) = &owner {
+                    let Some(index) = inner.find_session_index(session_id) else { return Ok(None); };
+                    if inner.sessions[index].active_turn_generation != previous.active_turn_generation {
+                        return Ok(None);
+                    }
+                    owner = EngramQueuedAdmissionOwner::capture_ordinary(&inner.sessions[index])
+                        .map(QueuedDrainOwner::Activation);
+                }
+                match owner.as_ref() {
+                    // A historical control retry is not an activation event
+                    // for unrelated ordinary work at OFF.
+                    Some(QueuedDrainOwner::AbortRetry(_) | QueuedDrainOwner::BindRetry(_)
+                        | QueuedDrainOwner::AdmissionRetry(_)) => return Ok(None),
+                    Some(QueuedDrainOwner::Resume(owner)) => {
+                        if inner.find_session_index(session_id).is_none_or(|index|
+                            !owner.matches(&inner.sessions[index])
+                                || dispatch_queue_position(&inner, index).is_none_or(|position|
+                                    inner.sessions[index].queued_prompts[position].pending_prompt.id != owner.prompt_id))
+                        { return Ok(None); }
+                    }
+                    _ => {}
+                }
+            }
+        }
         let mut selected_human = None;
         let human_owner = match owner.as_ref() {
             None => true,
@@ -1362,7 +1427,8 @@ impl AppState {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 inner.find_session_index(session_id).is_some_and(|index| {
                     let record = &inner.sessions[index];
-                    let eligible = owner.matches(record) && record.queued_prompts.front().is_some_and(|head|
+                    let eligible = owner.matches(record) && dispatch_queue_position(&inner, index)
+                        .and_then(|position| record.queued_prompts.get(position)).is_some_and(|head|
                         (head.source == QueuedPromptSource::Human && !head.has_engram_intent())
                             || human_choice_matches(record, head, &self.server_instance_id));
                     if eligible { selected_human = HumanResumeOwner::capture(record, owner.clone()); }
@@ -1398,8 +1464,8 @@ impl AppState {
                 !owner.matches(record) || record.orchestrator_auto_dispatch_blocked
                     || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
                     || record.engram.project_reset_in_progress || record.runtime_stop_in_progress
-                    || record.engram_boot_recovery_pending
-                    || engram_admission_obligation_locked(&inner, session_id).is_some()
+                    || (!ordinary_off_execution_applies(&inner, session_id) && record.engram_boot_recovery_pending)
+                    || ordinary_admission_is_excluded(&inner, session_id)
                     || engram_project_for_session_locked(&inner, session_id)
                         .is_some_and(|project| inner.engram_project_resets.contains(&project.id))
             }) { return Ok(None) }
@@ -1477,6 +1543,10 @@ impl AppState {
                 let Some(index) = inner.find_session_index(session_id) else {
                     return Ok(None);
                 };
+                if ordinary_off_execution_applies(&inner, session_id) {
+                    drop(inner);
+                    return drain();
+                }
                 // A retained Human handoff has no ordinary admission owner,
                 // even before reload marks its unknown outcome interrupted.
                 if inner.sessions[index].queued_prompts.front()
@@ -1651,7 +1721,7 @@ impl AppState {
         session_id: &str,
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
-        owner: Option<QueuedDrainOwner>,
+        mut owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
         // Only an unrestricted ordinary drain can leave ordinary activation.
         // Specialized owners retain their own restrictions and retry custody.
@@ -1677,11 +1747,16 @@ impl AppState {
         }
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if engram_admission_obligation_locked(&inner, session_id).is_some() {
+            if ordinary_admission_is_excluded(&inner, session_id) {
                 return Ok(None);
             }
         }
-        self.prepare_dedicated_runtime_reset_off_lock(session_id, false)?;
+        let ordinary_owner = match owner.as_mut() {
+            Some(QueuedDrainOwner::Resume(owner) | QueuedDrainOwner::Activation(owner))
+                if owner.ordinary.is_some() => Some(owner),
+            _ => None,
+        };
+        self.prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(session_id, ordinary_owner)?;
         // An explicit Send/Resume bypass is permission for the queue head
         // that existed when this drain began, not for a successor exposed by
         // cancellation while its authorization was off-lock. A retried
@@ -1768,7 +1843,7 @@ impl AppState {
             {
                 return Ok(None);
             }
-            if inner.sessions[index].engram_boot_recovery_pending {
+            if !ordinary_off_execution_applies(&inner, session_id) && inner.sessions[index].engram_boot_recovery_pending {
                 let should_retry = if orphaned_workflow_only {
                     inner.sessions[index]
                         .queued_prompts
@@ -1826,18 +1901,13 @@ impl AppState {
                             SessionStatus::Idle | SessionStatus::Error
                         )
                         && matches!(record.runtime, SessionRuntime::None)
-                        && record
-                            .queued_prompts
-                            .iter()
-                            .find(|queued| queued.source != QueuedPromptSource::Mailbox)
-                            .is_some_and(|queued| {
-                                queued.source == QueuedPromptSource::Orchestrator
-                            });
+                        && queue_has_orphaned_workflow(&inner, record);
                     if !eligible {
                         return Ok(None);
                     }
                 }
-                let Some(queued) = record.queued_prompts.front().cloned() else {
+                let Some(queued) = dispatch_queue_position(&inner, index)
+                    .and_then(|position| record.queued_prompts.get(position)).cloned() else {
                     return Ok(None);
                 };
                 // As in the Engram branch below, this drain, not the
@@ -2104,6 +2174,11 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
+            if ordinary_off_execution_applies(&inner, session_id) {
+                // The settings transition owns the next ordinary activation.
+                // This old evaluation owns neither a successor nor its pause.
+                return Ok(None);
+            }
             let unchanged = inner.sessions[index].engram.dispatch_generation == snapshot.1
                 && activation_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
                 && live_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
@@ -2319,7 +2394,8 @@ impl AppState {
         request: SendMessageRequest,
         followup: Option<&DelegationRecord>,
     ) -> std::result::Result<DispatchTurnResult, ApiError> {
-        if self.queue_user_behind_contained_head(session_id, &request, followup)? {
+        if !self.ordinary_off_execution_applies(session_id)
+            && self.queue_user_behind_contained_head(session_id, &request, followup)? {
             return Ok(DispatchTurnResult::Queued);
         }
         if self.queue_ordinary_behind_checkpoint(session_id, &request, followup)? {
@@ -2328,7 +2404,8 @@ impl AppState {
         let _checkpoint_budget = self.begin_checkpoint_preflight_budget(session_id);
         let checkpoint_preflight = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            certified_checkpoint_replay_target_locked(&inner, session_id, None).is_some()
+            !ordinary_off_execution_applies(&inner, session_id)
+                && certified_checkpoint_replay_target_locked(&inner, session_id, None).is_some()
         };
         if checkpoint_preflight {
             if request.text.trim().is_empty() && request.attachments.is_empty() {
@@ -2354,7 +2431,8 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
                 .find_visible_session_index(session_id)
-                .is_some_and(|index| inner.sessions[index].engram_boot_recovery_pending)
+                .is_some_and(|index| !ordinary_off_execution_applies(&inner, session_id)
+                    && inner.sessions[index].engram_boot_recovery_pending)
         };
         if recovery_pending {
             self.request_engram_boot_recovery_retry(session_id);
@@ -2481,7 +2559,7 @@ impl AppState {
                 refused_relay_head = EngramQueuedAdmissionOwner::capture(&inner.sessions[index]);
             }
         }
-        if inner.sessions[index].engram_boot_recovery_pending {
+        if !ordinary_off_execution_applies(&inner, session_id) && inner.sessions[index].engram_boot_recovery_pending {
             drop(inner);
             self.request_engram_boot_recovery_retry(session_id);
             return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
@@ -2606,6 +2684,41 @@ impl AppState {
         };
         let capacity_automatic_prompt = inner.sessions[index].provider_capacity_retry.is_some()
             && (source.is_some() || request.source_mailbox.is_some());
+        if ordinary_off_execution_applies(&inner, session_id)
+            && inner.sessions[index].queued_prompts.iter().any(|queued|
+                queued.is_engram_retained()
+                    || !ordinary_queue_entry_is_runnable(&inner.sessions[index], queued))
+        {
+            let message_id = inner.next_message_id();
+            // Historical rows remain at their original positions. Neither
+            // coalescing nor explicit-user prioritization rewrites them.
+            let before = inner.sessions[index].clone();
+            queue_prompt_on_record_with_source(inner.session_mut_by_index(index).expect("validated session"), PendingPrompt {
+                engram_interrupted: false, is_engram_retained: false,
+                attachments: attachments.iter().map(|attachment| attachment.metadata.clone()).collect(),
+                id: message_id.clone(), timestamp: stamp_now(), text: prompt,
+                expanded_text: expanded_prompt, source,
+            }, attachments, queued_prompt_source);
+            if let Err(error) = self.commit_followup_prompt_locked_for_session(
+                &mut inner, followup, &message_id, true, Some(session_id),
+            ) {
+                if followup.is_none() { inner.sessions[index] = before; }
+                return Err(ApiError::internal(format!("failed persisting prompt: {error:#}")));
+            }
+            if session_is_busy || orchestrator_auto_dispatch_blocked {
+                return Ok(DispatchTurnResult::Queued);
+            }
+            let owner = EngramQueuedAdmissionOwner::capture_ordinary(&inner.sessions[index]);
+            drop(inner);
+            return match owner.map(|owner| self.dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner)).transpose() {
+                Ok(Some(Some(started))) => Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch)),
+                Ok(_) => Ok(DispatchTurnResult::Queued),
+                Err(error) => {
+                    eprintln!("queued prompt start remains pending: {error:#}");
+                    Ok(DispatchTurnResult::Queued)
+                }
+            };
+        }
         let explicit_reset_resume = project_reset_fenced
             && orchestrator_auto_dispatch_blocked
             && !paused_human_queue
@@ -2671,7 +2784,7 @@ impl AppState {
         // inherited child scope); it performs no Engram I/O. The branches below
         // retain the non-control dispatch transitions.
         if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
-            if inner.sessions[index]
+            if !ordinary_off_execution_applies(&inner, session_id) && inner.sessions[index]
                 .queued_prompts
                 .front()
                 .is_some_and(QueuedPromptRecord::is_engram_retained)
@@ -2886,7 +2999,8 @@ impl AppState {
                 let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
                 let host_mcp_servers_only =
                     session_is_acceptance_evaluator_child_locked(&inner, session_id);
-                let started = self.start_turn_on_record(
+                let standard_dispatch = !ordinary_off_execution_applies(&inner, session_id);
+                let started = self.start_turn_on_record_with_control_mode(
                     inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid"),
@@ -2898,6 +3012,7 @@ impl AppState {
                     None,
                     engram_mcp,
                     host_mcp_servers_only,
+                    standard_dispatch,
                 )?;
                 EngramHost::turn_started(&mut inner, index);
                 let revision = self
@@ -2968,7 +3083,8 @@ impl AppState {
             let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
             let host_mcp_servers_only =
                 session_is_acceptance_evaluator_child_locked(&inner, session_id);
-            let started = self.start_turn_on_record(
+            let standard_dispatch = !ordinary_off_execution_applies(&inner, session_id);
+            let started = self.start_turn_on_record_with_control_mode(
                 inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid"),
@@ -2980,6 +3096,7 @@ impl AppState {
                 None,
                 engram_mcp,
                 host_mcp_servers_only,
+                standard_dispatch,
             )?;
             EngramHost::turn_started(&mut inner, index);
             let revision = self

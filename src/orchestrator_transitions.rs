@@ -359,7 +359,7 @@ fn referenced_sessions_for_orchestrators(
         .sessions
         .iter()
         .filter(|record| referenced_session_ids.contains(record.session.id.as_str()))
-        .map(|record| AppState::wire_session_summary_from_record(local_instance_id, record))
+        .map(|record| AppState::wire_session_summary_for_inner(&inner, local_instance_id, record))
         .collect()
 }
 
@@ -463,7 +463,7 @@ fn detect_deadlocked_consolidate_session_ids(
             if matches!(
                 destination_record.session.status,
                 SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-            ) || !destination_record.queued_prompts.is_empty()
+            ) || dispatch_queue_position(inner, destination_session_index).is_some()
             {
                 return None;
             }

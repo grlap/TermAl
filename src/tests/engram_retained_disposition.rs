@@ -1067,7 +1067,7 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
             ),
             EngramTurnDeliveryPreparation::Ready
         ));
-        let (project, mut settings, prompt) = {
+        let (project, mut settings, prompt, before_off_head, before_off_prompt) = {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
             let saved: PersistedSessionRecord =
@@ -1095,6 +1095,8 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
                     .clone()
                     .unwrap(),
                 record.queued_prompts[0].pending_prompt.id.clone(),
+                serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+                serde_json::to_value(&projected_pending_prompts(record)[0]).unwrap(),
             )
         };
         if disable_host {
@@ -1105,40 +1107,68 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
         state
             .update_project_engram_settings(&project, settings)
             .unwrap();
-        assert_eq!(
-            state
-                .resume_session_queue(&session)
-                .err()
-                .expect("retained head must refuse Resume")
-                .status,
-            StatusCode::CONFLICT
-        );
-        assert!(matches!(
-            state
-                .dispatch_turn(
-                    &session,
-                    SendMessageRequest {
-                        text: "successor after disable".into(),
-                        expanded_text: None,
-                        attachments: vec![],
-                        source_session_id: None,
-                        source_mailbox: None,
-                    }
-                )
-                .unwrap(),
-            DispatchTurnResult::Queued
-        ));
+        let (old_head, old_debt) = {
+            let inner = state.inner.lock().unwrap();
+            assert_eq!(ordinary_off_execution_applies(&inner, &session), !disable_host);
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            if !disable_host {
+                assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before_off_head,
+                    "positive OFF preserves every original retained-head field");
+                assert_eq!(serde_json::to_value(&projected_pending_prompts(record)[0]).unwrap(), before_off_prompt);
+            }
+            (serde_json::to_value(&inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts[0]).unwrap(),
+                serde_json::to_value(&inner.engram_session_obligations).unwrap())
+        };
+        let old_requests = operations(&transport);
+        if disable_host {
+            assert_eq!(state.resume_session_queue(&session).err()
+                .expect("disabled integration stays outside the ordinary OFF lane").status,
+                StatusCode::CONFLICT);
+        } else {
+            state.resume_session_queue(&session).expect("Base/OFF Resume cannot replay the begun head");
+        }
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(operations(&transport), old_requests);
+        let result = state.dispatch_turn(&session, SendMessageRequest {
+            text: "successor after disable".into(), expanded_text: None,
+            attachments: vec![], source_session_id: None, source_mailbox: None,
+        }).unwrap();
+        if disable_host {
+            assert!(matches!(result, DispatchTurnResult::Queued));
+        } else {
+            let dispatch = match result {
+                DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+                DispatchTurnResult::Queued => panic!("Base/OFF must run distinct ordinary input"),
+            };
+            assert!(dispatch.engram_dispatch_generation().is_none());
+            let token = dispatch.runtime_token().clone();
+            let generation = dispatch.active_turn_generation();
+            assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+            assert!(matches!(phase_sync::receive(&receiver, "Base/OFF distinct successor"),
+                CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains("successor after disable")
+                    && !command.prompt.contains("Root controlled turn")));
+            assert!(receiver.try_recv().is_err());
+            state.finish_turn_ok_if_runtime_and_generation_match(&session, &token, generation).unwrap();
+            assert!(receiver.try_recv().is_err(), "completion cannot replay the old begun head");
+        }
         {
             let inner = state.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert!(record.session.queue_paused);
-            assert!(record.session.pending_prompts[0].engram_interrupted);
+            assert_eq!(record.session.queue_paused, disable_host);
+            if disable_host {
+                assert!(record.session.pending_prompts[0].engram_interrupted,
+                    "disabled integration keeps the original reset barrier");
+            } else {
+                assert_eq!(serde_json::to_value(&record.session.pending_prompts[0]).unwrap(), before_off_prompt,
+                    "ordinary completion cannot rewrite historical interruption evidence");
+            }
             assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt);
-            assert_eq!(record.queued_prompts.len(), 2);
-            assert_eq!(
-                record.queued_prompts[1].pending_prompt.text,
-                "successor after disable"
-            );
+            assert_eq!(record.queued_prompts.len(), if disable_host { 2 } else { 1 });
+            if disable_host {
+                assert_eq!(record.queued_prompts[1].pending_prompt.text, "successor after disable");
+            }
+            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), old_head);
+            assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), old_debt);
             assert_eq!(
                 record.queued_prompts[0]
                     .engram_evaluate
@@ -1171,7 +1201,11 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
                 serde_json::from_value(original.frozen_request.clone()).unwrap();
             assert_eq!(original_image.queued_prompts[0].engram_evaluate.as_ref()
                 .unwrap().begun_grant_id.as_deref(), Some("grant"));
-            assert!(state.resume_session_queue(&session).is_err());
+            if disable_host {
+                assert!(state.resume_session_queue(&session).is_err());
+            } else {
+                state.resume_session_queue(&session).unwrap();
+            }
             assert!(receiver.try_recv().is_err());
             state.shutdown_persist_blocking();
             let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
@@ -1179,8 +1213,12 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
                 .expect("Cancel and restart retain the independent duty");
             assert_eq!(serde_json::to_value(kept).unwrap(), serde_json::to_value(original).unwrap());
             let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-            assert_eq!(record.queued_prompts.len(), 1);
-            assert_eq!(record.queued_prompts[0].pending_prompt.text, "successor after disable");
+            assert_eq!(record.queued_prompts.len(), usize::from(disable_host));
+            if disable_host {
+                assert_eq!(record.queued_prompts[0].pending_prompt.text, "successor after disable");
+            }
+            assert_eq!(operations(&transport), old_requests, "ordinary OFF work never settles old control");
+            eprintln!("retained reset disable_host={disable_host}: preservation and branch controls verified");
             continue;
         }
         // The positive branch needs an actually consumed matching checkpoint,
@@ -1197,6 +1235,7 @@ fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
         assert!(command.prompt.contains("successor after disable"));
         assert!(!command.prompt.contains("Root controlled turn"));
         assert!(receiver.try_recv().is_err());
+        eprintln!("retained reset disable_host={disable_host}: consumed matching checkpoint and successor controls verified");
     }
 }
 

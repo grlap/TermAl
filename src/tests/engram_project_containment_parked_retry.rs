@@ -21,14 +21,10 @@ fn project_containment_only_scoped_request_preparation_can_cross_interruption() 
         .update_project_engram_settings(&project, settings(&state, &project, true))
         .unwrap();
     let capture_scope = state.begin_contained_admission_resume(&session).unwrap().unwrap();
-    let (target, owner, intent, original) = {
+    let (target, owner, intent, original, interrupted) = {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
         let head = record.queued_prompts.front().unwrap();
-        assert!(
-            head.engram_interrupted,
-            "OFF preserves the interrupted head"
-        );
         let target =
             AppState::engram_binding_target_for_session_shape_locked(&inner, &session, true)
                 .unwrap()
@@ -42,8 +38,13 @@ fn project_containment_only_scoped_request_preparation_can_cross_interruption() 
                 intent_fingerprint: containment_prompt_fingerprint(head),
             },
             head.engram_evaluate.as_ref().unwrap().request.clone(),
+            head.engram_interrupted,
         )
     };
+    assert!(
+        interrupted,
+        "re-enabling control restores the explicit interrupted-head hold"
+    );
     drop(capture_scope);
     let sent = transport.inner.requests().len();
     assert!(

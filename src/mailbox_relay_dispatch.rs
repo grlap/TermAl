@@ -194,9 +194,8 @@ impl AppState {
             let Some(index) = inner.find_session_index(session) else {
                 return Ok(None);
             };
-            inner.sessions[index]
-                .queued_prompts
-                .front()
+            dispatch_queue_position(&inner, index)
+                .and_then(|position| inner.sessions[index].queued_prompts.get(position))
                 .and_then(|queued| {
                     let source = queued.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
                     source.mailbox_id.starts_with("relay-mailbox-").then(|| {
@@ -232,7 +231,8 @@ impl AppState {
         else {
             return Ok(());
         };
-        let Some(queued) = root.queued_prompts.front() else {
+        let position = if !ordinary_off_execution_applies(inner, session) { Some(0) } else { ordinary_queue_position(root) };
+        let Some(queued) = position.and_then(|position| root.queued_prompts.get(position)) else {
             return Ok(());
         };
         let Some(source) = queued

@@ -26,11 +26,12 @@ impl HumanResumeOwner {
         if !queue.matches(record) {
             return None;
         }
-        let head = record.queued_prompts.front()?;
+        let position = if queue.ordinary.is_some() { ordinary_queue_position(record)? } else { 0 };
+        let head = record.queued_prompts.get(position)?;
         Some(Self {
             queue,
             selection: HumanPromptSelection {
-                prompt: projected_pending_prompts(record).into_iter().next()?,
+                prompt: projected_pending_prompts(record).into_iter().nth(position)?,
                 session_mutation_stamp: record.mutation_stamp,
             },
             intent: receipted_prompt_intent(head),
@@ -49,10 +50,13 @@ impl HumanResumeOwner {
     }
 
     fn matches_with_stop(&self, record: &SessionRecord, stop_generation: u64) -> bool {
-        self.queue.matches(record)
+        let mut queue = self.queue.clone();
+        if let Some(ordinary) = &mut queue.ordinary { ordinary.stop_generation = stop_generation; }
+        let position = if queue.ordinary.is_some() { ordinary_queue_position(record) } else { Some(0) };
+        queue.matches(record)
             && record.runtime_stop_generation == stop_generation
             && record.auto_dispatch_pause_epoch == self.pause_epoch
-            && record.queued_prompts.front().is_some_and(|head| {
+            && position.and_then(|position| record.queued_prompts.get(position)).is_some_and(|head| {
                 head.source == self.source
                     && receipted_prompt_intent(head) == self.intent
                     && record
@@ -67,7 +71,7 @@ impl HumanResumeOwner {
                         == self.write_ahead.as_ref()
             })
             && projected_pending_prompts(record)
-                .first()
+                .get(position.unwrap_or(usize::MAX))
                 .is_some_and(|head| {
                     serde_json::to_value(head).ok()
                         == serde_json::to_value(&self.selection.prompt).ok()
@@ -228,6 +232,9 @@ impl AppState {
                     human_choice: Some(selection),
                 }),
             );
+        }
+        if self.ordinary_off_execution_applies(session_id) {
+            return self.resume_queue_without_gated_control(session_id, Some(&selection));
         }
         let (owner, accepted, decision_id, fence) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");

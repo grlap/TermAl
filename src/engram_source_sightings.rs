@@ -348,6 +348,7 @@ fn engram_source_observation_can_deliver(record: &SessionRecord) -> bool {
 // Session ownership survives settings changes; a shared exact association
 // also fences another session admitting the same work in the same store.
 fn engram_source_observation_holds_admission(inner: &StateInner, index: usize) -> bool {
+    if ordinary_off_execution_applies(inner, &inner.sessions[index].session.id) { return false; }
     if inner.sessions[index].engram.source_observation_delete_requested { return true; }
     let session_id = &inner.sessions[index].session.id;
     let target = AppState::engram_binding_target_for_session_shape_locked(inner, session_id, true)

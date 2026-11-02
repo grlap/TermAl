@@ -572,7 +572,7 @@ fn spawn_dedicated_runtime(command: &mut Command, label: &str) -> Result<Dedicat
 }
 
 #[cfg(windows)]
-fn dedicated_reset_context(record: &SessionRecord) -> Vec<u8> {
+fn dedicated_reset_context(record: &SessionRecord, standard_dispatch: bool) -> Vec<u8> {
     serde_json::to_vec(&json!({"agent":record.session.agent,
         "cwd":record.session.workdir,"model":record.session.model,
         "claudeApproval":record.session.claude_approval_mode,"claudeEffort":record.session.claude_effort,
@@ -580,8 +580,9 @@ fn dedicated_reset_context(record: &SessionRecord) -> Vec<u8> {
         "opencodeModel":record.session.opencode_model,"opencodeEffort":record.session.opencode_effort,
         "opencodeMode":record.session.opencode_mode,"external":record.external_session_id,
         "reset":record.runtime_reset_required,"turn":record.active_turn_generation,
-        "dispatch":record.engram.dispatch_generation,
-        "head":record.queued_prompts.front().map(|head| &head.pending_prompt.id)})).expect("reset context serializes")
+        "control":standard_dispatch,"dispatch":standard_dispatch.then_some(record.engram.dispatch_generation),
+        "head":(if standard_dispatch { Some(0) } else { ordinary_queue_position(record) })
+            .and_then(|position| record.queued_prompts.get(position)).map(|head| &head.pending_prompt.id)})).expect("reset context serializes")
 }
 
 impl AppState {
@@ -611,23 +612,34 @@ impl AppState {
     }
 
     fn prepare_dedicated_runtime_reset_off_lock(&self, session_id: &str, model_refresh: bool) -> Result<()> {
-        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, model_refresh, None, None)
+        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, model_refresh, None, None, None)
     }
 
     fn prepare_dedicated_runtime_reset_for_human_off_lock(
         &self, session_id: &str, prompt_id: &str, intent: &str, explicit: bool,
         selected: Option<&mut HumanResumeOwner>,
     ) -> Result<()> {
-        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, false, Some((prompt_id, intent, explicit)), selected)
+        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, false, Some((prompt_id, intent, explicit)), selected, None)
+    }
+
+    fn prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(
+        &self, session_id: &str, owner: Option<&mut EngramQueuedAdmissionOwner>,
+    ) -> Result<()> {
+        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, false, None, None, owner)
     }
 
     #[cfg_attr(not(windows), allow(unused_mut))]
     fn prepare_dedicated_runtime_reset_with_owner_off_lock(
         &self, session_id: &str, model_refresh: bool, human: Option<(&str, &str, bool)>,
         mut selected: Option<&mut HumanResumeOwner>,
+        mut ordinary: Option<&mut EngramQueuedAdmissionOwner>,
     ) -> Result<()> {
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
+            if ordinary.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
+                .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
+                bail!("ordinary queue owner changed before runtime reset");
+            }
             if selected.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
                 .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
                 return Err(anyhow!(HumanPromptOwnerChanged));
@@ -647,6 +659,10 @@ impl AppState {
         {
             let captured = {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
+                if ordinary.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
+                    .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
+                    bail!("ordinary queue owner changed before runtime reset");
+                }
                 if selected.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
                     .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
                     return Err(anyhow!(HumanPromptOwnerChanged));
@@ -659,6 +675,7 @@ impl AppState {
                         .map_err(|error| anyhow!(error.message))?;
                 }
                 let Some(index) = inner.find_session_index(session_id) else { return Ok(()); };
+                let standard_dispatch = !ordinary_off_execution_applies(&inner, session_id);
                 let record = &mut inner.sessions[index];
                 let refresh_restarts = model_refresh && matches!(record.session.agent, Agent::Claude | Agent::OpenCode | Agent::Kimi);
                 if !(record.runtime_reset_required || refresh_restarts)
@@ -669,7 +686,7 @@ impl AppState {
                 if let Some(detail) = record.runtime.dedicated_cleanup_failure() { bail!("{detail}; Stop must finish cleanup before reset"); }
                 let Some((tree, process, label)) = record.runtime.dedicated_tree_owner() else { return Ok(()); };
                 let token = record.runtime.runtime_token().expect("dedicated runtime token");
-                let context = dedicated_reset_context(record);
+                let context = dedicated_reset_context(record, standard_dispatch);
                 let installed = record.engram_mcp_installed.clone();
                 let human_resume = human.and_then(|(prompt, _, _)| capture_human_reset_resume(record, prompt));
                 let generation = record.claim_runtime_stop(RuntimeStopOwnerKind::DedicatedReset, token.clone());
@@ -679,12 +696,13 @@ impl AppState {
             let outcome = tree.terminate(&process, label);
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else { return outcome; };
+            let standard_dispatch = !ordinary_off_execution_applies(&inner, session_id);
             let record = &mut inner.sessions[index];
             if !record.runtime.matches_runtime_token(&token)
                 || !record.runtime_stop_is_owned_by(RuntimeStopOwnerKind::DedicatedReset, &token, generation) {
                 return Err(anyhow!("dedicated reset no longer owns the runtime"));
             }
-            let same_context = dedicated_reset_context(record) == context && record.engram_mcp_installed == installed;
+            let same_context = dedicated_reset_context(record, standard_dispatch) == context && record.engram_mcp_installed == installed;
             record.clear_runtime_stop();
             if let Err(error) = outcome {
                 record.set_auto_dispatch_blocked(true);
@@ -718,6 +736,24 @@ impl AppState {
                     return Err(anyhow!(HumanPromptOwnerChanged));
                 }
                 owner.stop_generation = generation;
+            }
+            if let Some(owner) = ordinary.as_deref_mut() {
+                let mut transferred = owner.clone();
+                if let Some(ordinary) = &mut transferred.ordinary { ordinary.stop_generation = generation; }
+                let mut probe = transferred.clone();
+                probe.receipt_resume = None;
+                if !probe.matches(record) { bail!("ordinary queue owner changed during runtime reset"); }
+                if let Some(resume) = &mut transferred.receipt_resume {
+                    let Some(delivery) = record.prompt_deliveries.get_mut(&owner.prompt_id)
+                        .filter(|delivery| delivery.resume == owner.receipt_resume
+                            && delivery.write_ahead == resume.write_ahead
+                            && delivery.turn_generation.is_none() && delivery.write_ahead_acknowledged)
+                    else { bail!("ordinary delivery receipt changed during runtime reset"); };
+                    resume.stop_generation = generation;
+                    delivery.resume = Some(resume.clone());
+                }
+                if !transferred.matches(record) { bail!("ordinary queue owner changed during runtime reset"); }
+                *owner = transferred;
             }
             // The reset runtime's turn, captured before it is retired.
             let ending_turn = record.active_turn_generation;

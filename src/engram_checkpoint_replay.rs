@@ -94,6 +94,7 @@ impl AppState {
         session_id: &str,
         owner: Option<&EngramQueuedAdmissionOwner>,
     ) -> Result<(), ApiError> {
+        if self.ordinary_off_execution_applies(session_id) { return Ok(()); }
         self.account_pending_checkpoint_receipt(session_id)
             .map_err(|error| ApiError::conflict(format!("{error:#}")))?;
         self.recover_original_checkpoint_before_admission(session_id, owner)

@@ -714,8 +714,8 @@ impl AppState {
             child_record.session.parent_delegation_id = Some(delegation_id.clone());
         }
         let child_session =
-            Self::wire_session_from_record(&self.server_instance_id, &inner.sessions[child_index]);
-        let child_delta_session = Self::wire_session_summary_from_record(
+            Self::wire_session_for_inner(&inner, &self.server_instance_id, &inner.sessions[child_index]);
+        let child_delta_session = Self::wire_session_summary_for_inner(&inner,
             &self.server_instance_id,
             &inner.sessions[child_index],
         );
@@ -889,7 +889,7 @@ impl AppState {
         let child_session = inner
             .find_session_index(&delegation.child_session_id)
             .and_then(|index| inner.sessions.get(index))
-            .map(|record| Self::wire_session_from_record(&self.server_instance_id, record))
+            .map(|record| Self::wire_session_for_inner(&inner, &self.server_instance_id, record))
             .ok_or_else(|| ApiError::not_found("delegation child session not found"))?;
         Ok(DelegationResponse {
             revision: inner.revision,
@@ -3066,7 +3066,11 @@ fn queue_delegation_wait_resume_locked(
             record.session.status,
             SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
         ) && !record.orchestrator_auto_dispatch_blocked
-            && record.queued_prompts.is_empty()
+            && (if !ordinary_off_execution_applies(inner, parent_session_id) {
+                record.queued_prompts.is_empty()
+            } else {
+                ordinary_queue_position(record).is_none()
+            })
             && !record_has_archived_codex_thread(record)
     };
     let message_id = inner.next_message_id();

@@ -591,10 +591,28 @@ fn project_containment_off_report_dispatch_rechecks_on_and_independent_duties() 
             }
             state.commit_locked(&mut inner).unwrap();
             assert!(!engram_unmediated_checkpoint_dispatch_allowed(&inner, &session, None));
+            if matches!(blocker, "begin" | "successor") {
+                assert!(ordinary_off_execution_applies(&inner, &session));
+            }
             drop(inner);
-            let result = state.dispatch_turn(&session, prompt());
-            assert!(!matches!(result, Ok(DispatchTurnResult::Dispatched(_)
-                | DispatchTurnResult::DispatchedAfterQueue(_))));
+            let mut fresh = prompt();
+            fresh.text = format!("Distinct fresh OFF report input: {blocker}");
+            let expected = fresh.text.clone();
+            let result = state.dispatch_turn(&session, fresh);
+            if matches!(blocker, "begin" | "successor") {
+                let dispatch = match result.unwrap() {
+                    DispatchTurnResult::Dispatched(dispatch)
+                    | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+                    DispatchTurnResult::Queued => panic!("{blocker}: old control state cannot hold fresh OFF input"),
+                };
+                assert!(dispatch.engram_dispatch_generation().is_none());
+                assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+                assert!(matches!(phase_sync::receive(&receiver, "fresh OFF report input"),
+                    CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains(&expected)));
+            } else {
+                assert!(!matches!(result, Ok(DispatchTurnResult::Dispatched(_)
+                    | DispatchTurnResult::DispatchedAfterQueue(_))), "{blocker}");
+            }
         } else {
             let dispatch = match state.dispatch_turn(&session, prompt()).unwrap() {
                 DispatchTurnResult::Dispatched(dispatch) => dispatch,

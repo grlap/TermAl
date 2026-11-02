@@ -23,33 +23,21 @@ use super::*;
 #[test]
 fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
     let state = test_app_state();
-    let (input_tx, _input_rx) = mpsc::channel();
-    let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
-
-    deliver_turn_dispatch(
-        &state,
-        TurnDispatch::PersistentAcp {
-            human_prompt_id: None,
-            federation_handoff: None,
-            opening_prompt: None,
-            active_turn_generation: 1,
-            command: AcpPromptCommand {
-                cwd: state.default_workdir.clone(),
-                cursor_mode: None,
-                model: OPENCODE_CONFIG_AUTO.to_owned(),
-                opencode_effort: None,
-                opencode_mode: Some(OPENCODE_CONFIG_AUTO.to_owned()),
-                prompt: "queued before stop".to_owned(),
-                resume_session_id: None,
-            },
-            engram_dispatch_generation: None,
-            mailbox_notification: None,
-            runtime_token: RuntimeToken::Acp("queued-acp-runtime".to_owned()),
-            sender: input_tx,
-            session_id: "queued-acp-session".to_owned(),
-            turn_lifecycle: turn_lifecycle.clone(),
-        },
-    )
+    let session = test_session_id(&state, Agent::Cursor);
+    let (runtime, input_rx) = test_acp_runtime_handle(AcpAgent::Cursor, "queued-acp-runtime");
+    let turn_lifecycle = runtime.turn_lifecycle.clone();
+    let dispatch = {
+        let mut inner = state.inner.lock().unwrap();
+        let message = inner.next_message_id();
+        let record = inner.session_mut(&session).unwrap();
+        record.runtime = SessionRuntime::Acp(runtime);
+        record.session.status = SessionStatus::Idle;
+        let started = state.start_turn_on_record(record, message,
+            "queued before stop".into(), Vec::new(), None, None, None, None, false).unwrap();
+        state.commit_locked(&mut inner).unwrap();
+        started.dispatch
+    };
+    deliver_turn_dispatch(&state, dispatch)
     .expect("live ACP writer channel should accept the prompt");
 
     assert!(
@@ -59,6 +47,9 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
             .expect("ACP turn lifecycle mutex poisoned"),
         "stop must observe a queued/starting prompt before the writer consumes it"
     );
+    assert!(matches!(input_rx.try_recv().unwrap(), AcpRuntimeCommand::Prompt(command)
+        if command.prompt.ends_with("queued before stop")));
+    assert!(input_rx.try_recv().is_err());
 }
 
 // pins the untimed ACP waiter: after the request id is written and parked in

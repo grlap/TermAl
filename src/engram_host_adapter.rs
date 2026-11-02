@@ -4102,6 +4102,7 @@ impl AppState {
     // children. Target construction below still preserves each session's
     // authority shape; a missing child binding must never become a root bind.
     fn engram_session_requires_dispatch_card_locked(inner: &StateInner, session_id: &str) -> bool {
+        if ordinary_off_execution_applies(inner, session_id) { return false; }
         if engram_unmediated_checkpoint_dispatch_allowed(inner, session_id, None) {
             return false;
         }
@@ -5118,6 +5119,16 @@ impl AppState {
         rejected_delivery_owner: Option<&RejectedEngramCheckpointOwner>,
         transport_error: Option<&mut Option<EngramTransportError>>,
     ) -> EngramCheckpointOutcome {
+        if purpose == EngramCheckpointPurpose::TurnTerminal {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.find_session_index(session_id).is_some_and(|index| {
+                let record = &inner.sessions[index];
+                record.unmediated_turn_generation == Some(record.active_turn_generation)
+                    && active_turn_generation.is_none_or(|generation| generation == record.active_turn_generation)
+            }) {
+                return EngramCheckpointOutcome::Skipped;
+            }
+        }
         // A carried gate whose run ended since the index last looked is read
         // now, so this checkpoint can settle it (`engram_carried_checks.rs`);
         // a session with none to read waits on no poll.
@@ -7876,6 +7887,9 @@ impl AppState {
         defer_not_before: Option<chrono::DateTime<chrono::Utc>>,
     ) -> EngramDispatchRecordFinish {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if ordinary_off_execution_applies(&inner, session_id) {
+            return EngramDispatchRecordFinish::Superseded;
+        }
         let (revision, creates, publication) = {
             let Some(index) = inner.find_session_index(session_id) else {
                 return EngramDispatchRecordFinish::Superseded;

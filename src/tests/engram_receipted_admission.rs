@@ -255,7 +255,7 @@ fn acknowledged_while_another_drain_admits(
     evaluate_gate.wait();
 
     // The acknowledgement's second half: its drain, then its cleanup.
-    state.dispatch_after_write_ahead(&session, &id, None);
+    state.dispatch_after_write_ahead(&session, &id, &nonce, None);
     state.return_unpromoted_write_ahead_to_pending(&session, &id, &nonce);
     assert_left_to_the_admission(&state, &session, &id, &nonce);
     assert!(receiver.try_recv().is_err(), "nothing is sent before the admission");

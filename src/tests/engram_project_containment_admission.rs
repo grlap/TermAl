@@ -221,7 +221,38 @@ async fn human_prompt_ui_resume_preserves_retained_gated_admission_recovery() {
     };
     use tower::ServiceExt;
     for lost in ["session_bind", "turn_evaluate"] {
-        let (state, project, session, _root, receiver, transport) = retained_admission(&[lost]);
+        let (state, project, session, _root, receiver, transport) = parked_admission(&[lost]);
+        let (paused_before, control_owned, interrupted_before, head_before, image_before) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            eprintln!("OFF_PAUSE_BEFORE {}", json!({"lost": lost,
+                "paused": record.orchestrator_auto_dispatch_blocked,
+                "operatorPaused": record.engram.operator_paused,
+                "capacityRetry": record.provider_capacity_retry.is_some(),
+                "preview": record.session.preview,
+                "controlOwned": control_pause_is_owned(record)}));
+            (record.orchestrator_auto_dispatch_blocked, control_pause_is_owned(record),
+                record.queued_prompts[0].engram_interrupted,
+                serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+                EngramUnsettledControlImage {
+                    operation: "unsettled_control_image".into(),
+                    routing_token: record.engram.routing_token.clone(),
+                    active_grant_id: record.engram.active_grant_id.clone(),
+                    uncertain_grant_id: record.engram.uncertain_grant_id.clone(),
+                    begins_recorded: record.engram.begins_recorded,
+                    bind_in_progress: record.engram.bind_in_progress,
+                    checkpoint_in_progress: record.engram.checkpoint_in_progress,
+                    existing_checkpoint: record.engram.checkpoint_operation.clone(),
+                    runtime_running: false,
+                    parked_admission_retry: record.engram.admission_retry.clone(),
+                    parked_bind_retry: record.engram.bind_retry.clone(),
+                    queued_prompts: record.queued_prompts.iter().cloned().collect(),
+                    begin_requested: record.engram.pending_dispatch.as_ref()
+                        .and_then(|pending| pending.begin_requested.clone()),
+                    dispatch_generation: record.engram.dispatch_generation,
+                })
+        };
+        state.update_project_engram_settings(&project, settings(&state, &project, false)).unwrap();
         let original = transport
             .inner
             .requests()
@@ -229,12 +260,58 @@ async fn human_prompt_ui_resume_preserves_retained_gated_admission_recovery() {
             .find(|r| r.request["operation"] == lost)
             .unwrap()
             .request;
+        let off_debt = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert!(ordinary_off_execution_applies(&inner, &session));
+            eprintln!("OFF_PAUSE_AFTER {}", json!({"lost": lost,
+                "paused": record.orchestrator_auto_dispatch_blocked,
+                "preview": record.session.preview, "controlOwnedBefore": control_owned}));
+            assert_eq!(record.orchestrator_auto_dispatch_blocked, paused_before && !control_owned,
+                "OFF releases only a positively owned control pause");
+            assert_eq!(record.queued_prompts[0].engram_interrupted, interrupted_before,
+                "OFF preserves the prior interruption marker");
+            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), head_before);
+            let entry = engram_session_obligation_locked(&inner, &session).expect("OFF retains the original uncertainty");
+            assert_eq!(entry.basis, EngramSessionObligationBasis::ControlStateUnsettled);
+            assert_eq!(entry.local_session_id, session);
+            assert_eq!(entry.project_id, project);
+            assert_eq!(entry.prompt_id.as_deref(), Some(record.queued_prompts[0].pending_prompt.id.as_str()));
+            assert_eq!(entry.owner_generation, image_before.dispatch_generation + 1);
+            assert_eq!(entry.owner_generation, record.engram.dispatch_generation);
+            assert_eq!(entry.frozen_request, serde_json::to_value(&image_before).unwrap());
+            let head = &image_before.queued_prompts[0];
+            let request = if lost == "session_bind" { &head.engram_bind.as_ref().unwrap().request }
+                else { &head.engram_evaluate.as_ref().unwrap().request };
+            assert_eq!(serde_json::to_value(request).unwrap(), original);
+            serde_json::to_value(&inner.engram_session_obligations).unwrap()
+        };
+        let off_requests = transport.inner.requests().len();
+        state.resume_session_queue(&session).unwrap();
+        {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert!(!record.orchestrator_auto_dispatch_blocked,
+                "one ordinary Resume releases the unproven pause without replay");
+            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), head_before);
+            assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), off_debt);
+        }
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(transport.inner.requests().len(), off_requests);
+        let before_enable = transport.inner.requests().len();
         state
             .update_project_engram_settings(&project, settings(&state, &project, true))
             .unwrap();
         let selection = {
             let inner = state.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert!(record.orchestrator_auto_dispatch_blocked);
+            assert!(record.queued_prompts[0].engram_interrupted);
+            assert_eq!(record.session.preview,
+                "Engram recovered authorization retained. Resume to recover the exact queued prompt.",
+                "ON re-enable preserves its exact Resume recovery policy");
+            assert_eq!(transport.inner.requests().len(), before_enable,
+                "enabling control restores a hold without replaying the operation");
             HumanPromptSelection {
                 prompt: projected_pending_prompts(record).remove(0),
                 session_mutation_stamp: record.mutation_stamp,
@@ -294,10 +371,12 @@ async fn human_prompt_ui_resume_preserves_retained_gated_admission_recovery() {
 
 fn retained_admission_transfers_only_at_prepared_begin(lost: &str) {
     let (state, project, session, _root, receiver, transport) = retained_admission(&[lost]);
-    assert!(
-        state.resume_session_queue(&session).is_err(),
-        "OFF still excludes Resume"
-    );
+    let off_requests = transport.inner.requests().len();
+    state.resume_session_queue(&session).unwrap();
+    assert_eq!(transport.inner.requests().len(), off_requests,
+        "OFF Resume must not replay retained control");
+    assert!(receiver.try_recv().is_err(),
+        "an old promoted attempt is not an ordinary provider send");
     let original = transport
         .inner
         .requests()

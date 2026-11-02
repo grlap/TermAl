@@ -509,14 +509,29 @@ impl AppState {
             if inner.sessions[index].hidden || !inner.sessions[index].is_local_session() {
                 continue;
             }
-            if !Self::engram_session_requires_dispatch_card_locked(inner, session_id)
+            let standard_dispatch = !ordinary_off_execution_applies(inner, session_id);
+            if standard_dispatch
+                && !Self::engram_session_requires_dispatch_card_locked(inner, session_id)
                 && hold_engram_queued_authorization_when_control_off(&mut inner.sessions[index])
             {
                 inner.stamp_session_at_index(index);
                 holds_changed = true;
             }
+            let release_control_pause = !standard_dispatch && control_pause_is_owned(&inner.sessions[index]);
+            if release_control_pause {
+                inner.stamp_session_at_index(index);
+            }
             let record = &mut inner.sessions[index];
-            let Some(owner) = EngramQueuedAdmissionOwner::capture(record) else {
+            if release_control_pause {
+                record.orchestrator_auto_dispatch_blocked = false;
+                record.session.queue_paused = false;
+                if record.session.preview == ENGRAM_CONTROL_OFF_AUTHORIZATION_PREVIEW {
+                    record.session.preview = ENGRAM_RETAINED_AUTHORIZATION_PREVIEW.to_owned();
+                }
+                holds_changed = true;
+            }
+            let Some(owner) = (if standard_dispatch { EngramQueuedAdmissionOwner::capture(record) }
+                else { EngramQueuedAdmissionOwner::capture_ordinary(record) }) else {
                 continue;
             };
             record.engram_queue_schedule.register_activation(owner, &eligible_at);

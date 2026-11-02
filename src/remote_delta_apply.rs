@@ -275,7 +275,7 @@ impl AppState {
                         let local_record = inner.sessions.get(local_index).ok_or_else(|| {
                             anyhow!("local proxy session `{local_session_id}` not found")
                         })?;
-                        let delta_session = AppState::wire_session_summary_from_record(
+                        let delta_session = AppState::wire_session_summary_for_inner(&inner,
                             &self.server_instance_id,
                             local_record,
                         );

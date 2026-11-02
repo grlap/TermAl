@@ -44,6 +44,7 @@ fn engram_source_observation_opening_locked(
 impl AppState {
     fn hold_engram_source_observation(&self, session_id: &str, owner: &EngramQueuedAdmissionOwner, reason: &str) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if ordinary_off_execution_applies(&inner, session_id) { return; }
         let Some(index) = inner.find_session_index(session_id) else { return; };
         if inner.sessions[index].engram.source_observation_delete_requested {
             retain_source_observation_removal_locked(&mut inner, &[session_id.to_owned()]);
@@ -85,6 +86,7 @@ impl AppState {
     fn park_source_observation_dispatch(&self, dispatch: TurnDispatch) -> bool {
         let session_id = dispatch.session_id().to_owned();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if ordinary_off_execution_applies(&inner, &session_id) { return false; }
         let Some(index) = inner.find_session_index(&session_id) else { return false; };
         let record = &mut inner.sessions[index];
         if record.engram.source_observation_delete_requested
@@ -116,6 +118,7 @@ impl AppState {
             let mut retired = false;
             for index in 0..inner.sessions.len() {
                 let record = &inner.sessions[index];
+                if ordinary_off_execution_applies(&inner, &record.session.id) { continue; }
                 let Some(gate) = record.engram.source_observation_gate.clone() else { continue; };
                 if gate.retired { continue; }
                 let runtime_changed = record.engram.source_observation_continuation.as_ref()
@@ -198,6 +201,7 @@ impl AppState {
     fn release_source_observation_continuation(&self, session_id: &str) {
         let dispatch = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if ordinary_off_execution_applies(&inner, session_id) { return; }
             let Some(index) = inner.find_session_index(session_id) else { return; };
             let record = &mut inner.sessions[index];
             if !engram_source_observation_can_deliver(record) || record.runtime_stop_in_progress { return; }

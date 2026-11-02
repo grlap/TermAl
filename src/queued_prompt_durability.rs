@@ -159,6 +159,13 @@ fn queued_head_held_for_durability(record: &SessionRecord) -> bool {
 /// once the head is saved. None when the head is not held.
 fn queued_head_durability_resume_refusal(record: &SessionRecord) -> Option<String> {
     let head = record.queued_prompts.front()?;
+    queued_prompt_durability_resume_refusal(record, head)
+}
+
+fn queued_prompt_durability_resume_refusal(
+    record: &SessionRecord,
+    head: &QueuedPromptRecord,
+) -> Option<String> {
     let hold = record
         .queued_prompt_durability_holds
         .get(&head.pending_prompt.id)

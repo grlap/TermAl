@@ -245,11 +245,17 @@ fn human_queue_entry_is_eligible(
     queued: &QueuedPromptRecord,
     instance: &str,
 ) -> bool {
+    if ordinary_off_execution_applies(inner, &record.session.id)
+        && !ordinary_queue_entry_is_runnable(record, queued)
+    {
+        return false;
+    }
     (queued.source == QueuedPromptSource::Human
         && queued.pending_prompt.source.is_none()
         && !queued.has_engram_intent()
         && queued.promoted_message_index.is_none())
-        || (human_choice_matches(record, queued, instance)
+        || (!ordinary_off_execution_applies(inner, &record.session.id)
+            && human_choice_matches(record, queued, instance)
             && human_choice_receipt_ready(record, &queued.pending_prompt.id)
             && human_choice_control_intent_preserved(inner, &record.session.id, queued))
 }
@@ -273,7 +279,7 @@ fn require_human_runtime_reset_owner(
     else {
         return Err(anyhow!(HumanPromptOwnerChanged));
     };
-    if !human_position_may_start(record, position, explicit)
+    if !human_position_may_start(inner, record, position, explicit)
         || human_start_is_held(inner, index, &record.queued_prompts[position], explicit)
         || record.engram.project_reset_in_progress
         || engram_project_for_session_locked(inner, session_id)
@@ -359,17 +365,20 @@ fn transfer_human_reset_resume(
     true
 }
 
-fn human_position_may_start(record: &SessionRecord, position: usize, explicit: bool) -> bool {
+fn human_position_may_start(inner: &StateInner, record: &SessionRecord, position: usize, explicit: bool) -> bool {
+    let ordinary_off = ordinary_off_execution_applies(inner, &record.session.id);
     position == 0
         || record
             .queued_prompts
             .iter()
             .take(position)
-            .all(QueuedPromptRecord::is_engram_retained)
+            .all(|queued| if ordinary_off {
+                !ordinary_queue_entry_is_runnable(record, queued)
+            } else { queued.is_engram_retained() })
         || (explicit
             && record.orchestrator_auto_dispatch_blocked
             && record.queued_prompts.iter().take(position).all(|queued| {
-                matches!(
+                (ordinary_off && !ordinary_queue_entry_is_runnable(record, queued)) || matches!(
                     queued.source,
                     QueuedPromptSource::Mailbox | QueuedPromptSource::Orchestrator
                 )
@@ -408,11 +417,12 @@ fn human_start_is_held(
                     .expect("Codex release mutex poisoned")
                     .is_none()
             })
-        || record.engram.admission_in_progress.is_some()
-        || record.engram.bind_in_progress
-        || record.engram.checkpoint_in_progress
-        || record.engram.pending_dispatch.is_some()
-        || record.engram.source_observation_preparations != 0
+        || (!ordinary_off_execution_applies(inner, &record.session.id)
+            && (record.engram.admission_in_progress.is_some()
+                || record.engram.bind_in_progress
+                || record.engram.checkpoint_in_progress
+                || record.engram.pending_dispatch.is_some()
+                || record.engram.source_observation_preparations != 0))
         || (record.orchestrator_auto_dispatch_blocked && !explicit)
         || queued_prompt_held_for_durability(record, queued)
 }
@@ -669,6 +679,25 @@ impl AppState {
                 Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch))
             }
             HumanPromptDrain::Absent => {
+                if self.ordinary_off_execution_applies(session_id) {
+                    // Explicit Send activates the first runnable FIFO owner,
+                    // including through a dormant pause. Historical rows never
+                    // become that owner, and a concurrent replacement cannot
+                    // borrow this activation.
+                    let owner = {
+                        let inner = self.inner.lock().expect("state mutex poisoned");
+                        inner.find_session_index(session_id).and_then(|index|
+                            EngramQueuedAdmissionOwner::capture_ordinary(&inner.sessions[index]))
+                    };
+                    let started = owner.map(|owner|
+                        self.dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner))
+                        .transpose().map(Option::flatten);
+                    return Ok(match started {
+                        Ok(Some(started)) => DispatchTurnResult::DispatchedAfterQueue(started.dispatch),
+                        Ok(None) => DispatchTurnResult::Queued,
+                        Err(error) => self.retain_accepted_human_start_failure(session_id, &accepted_id, &format!("{error:#}")),
+                    });
+                }
                 // A new explicit Send also activates an older dormant FIFO
                 // head. It keeps its original gated admission and exact owner;
                 // missing historical delivery disposition is never inferred.
@@ -805,7 +834,7 @@ impl AppState {
                 return Ok(HumanPromptDrain::Absent);
             };
             let queued = &record.queued_prompts[position];
-            if !human_position_may_start(record, position, explicit_resume) {
+            if !human_position_may_start(&inner, record, position, explicit_resume) {
                 return Ok(HumanPromptDrain::Absent);
             }
             if self.host_is_shutting_down()
@@ -869,21 +898,7 @@ impl AppState {
             };
             // Ordinary FIFO remains intact. A separately retained control
             // owner may not strand the human envelope behind it.
-            if position != 0
-                && !(explicit_resume
-                    && record.orchestrator_auto_dispatch_blocked
-                    && record.queued_prompts.iter().take(position).all(|queued| {
-                        matches!(
-                            queued.source,
-                            QueuedPromptSource::Mailbox | QueuedPromptSource::Orchestrator
-                        )
-                    }))
-                && !record
-                    .queued_prompts
-                    .iter()
-                    .take(position)
-                    .all(QueuedPromptRecord::is_engram_retained)
-            {
+            if !human_position_may_start(&inner, record, position, explicit_resume) {
                 return Ok(HumanPromptDrain::Absent);
             }
             let queued = record.queued_prompts[position].clone();
@@ -907,7 +922,8 @@ impl AppState {
             let control_generation = inner.sessions[index].engram.dispatch_generation;
             // Carry the original episode across this request's successful
             // dedicated reset, never reconstruct it from the cleared runtime.
-            if selected.2.control_generation != control_generation {
+            if !ordinary_off_execution_applies(&inner, session_id)
+                && selected.2.control_generation != control_generation {
                 return Ok(HumanPromptDrain::Absent);
             }
             let control_predecessor = selected.2;
@@ -919,7 +935,8 @@ impl AppState {
             inner.sessions[index]
                 .queued_prompts
                 .push_front(queued.clone());
-            let started = self.start_turn_on_record(
+            let standard_dispatch = !ordinary_off_execution_applies(&inner, session_id);
+            let started = self.start_turn_on_record_with_control_mode(
                 &mut inner.sessions[index],
                 queued.pending_prompt.id.clone(),
                 queued.pending_prompt.text.clone(),
@@ -929,6 +946,7 @@ impl AppState {
                 None,
                 mcp,
                 host_only,
+                standard_dispatch,
             );
             let mut started = match started {
                 Ok(started) => started,
@@ -940,12 +958,6 @@ impl AppState {
                         queued.clone(),
                         &queued.pending_prompt.id,
                     );
-                    let restored = record
-                        .queued_prompts
-                        .pop_front()
-                        .expect("restored human prompt");
-                    record.queued_prompts.insert(position, restored);
-                    sync_pending_prompts(record);
                     return Err(anyhow!(error.message));
                 }
             };
@@ -1000,14 +1012,6 @@ impl AppState {
                         queued.clone(),
                         &queued.pending_prompt.id,
                     );
-                    // restore_queue_promotion restores at the front; retain the
-                    // original ordering of the independently owned old heads.
-                    let restored = record
-                        .queued_prompts
-                        .pop_front()
-                        .expect("restored human prompt");
-                    record.queued_prompts.insert(position, restored);
-                    sync_pending_prompts(record);
                     inner.stamp_session_at_index(index);
                     let restore_error = self.persist_internal_locked(&inner).err();
                     self.publish_state_locked(&inner);

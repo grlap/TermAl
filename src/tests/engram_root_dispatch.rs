@@ -4,6 +4,9 @@
 
 use super::*;
 
+#[path = "off_disables_gated_control.rs"]
+mod off_disables_gated_control;
+
 #[path = "engram_admission_availability_contract.rs"]
 mod admission_availability_contract;
 

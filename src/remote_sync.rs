@@ -623,6 +623,7 @@ fn push_remote_proxy_session_record(
     session: Session,
 ) {
     let mut record = SessionRecord {
+        unmediated_turn_generation: None,
         federation_mailbox_binding: None,
         federation_automatic_mailbox_binding: None,
         federation_retired_automatic_mailbox_bindings: Vec::new(),
@@ -925,6 +926,7 @@ fn localize_remote_session_summary(
         codex_thread_state: remote_session.codex_thread_state,
         live_activity: remote_session.live_activity.clone(),
         engram_boot_recovery_pending: remote_session.engram_boot_recovery_pending,
+        engram_control_off: remote_session.engram_control_off,
         status: remote_session.status,
         preview: remote_session.preview.clone(),
         messages: MessageSequence::default(),

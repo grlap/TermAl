@@ -3313,6 +3313,7 @@ impl AppState {
                     let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
                     retire_source_observation_locked(&mut inner, index);
                     let source_observation_gate = inner.sessions[index].engram.source_observation_gate.clone();
+                    let ordinary_off = ordinary_off_execution_applies(&inner, session_id);
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
@@ -3413,14 +3414,14 @@ impl AppState {
                     }
                     // Resetting a binding is not proof that a retained prompt
                     // was never delivered. Preserve the durable queue barrier.
-                    if let Some(queued) = record
+                    if !ordinary_off && let Some(queued) = record
                         .queued_prompts
                         .front_mut()
                         .filter(|queued| queued.is_engram_retained())
                     {
                         queued.engram_interrupted = true;
                         record.set_auto_dispatch_blocked(true);
-                        record.session.preview = "Engram settings changed. Authorization retained; cancel or reconcile before continuing.".to_owned();
+                        record.session.preview = ENGRAM_SETTINGS_AUTHORIZATION_PREVIEW.to_owned();
                         sync_pending_prompts(record);
                     }
                     if let Some((_, routing_token, active_grant_id)) = checkpoint_recovery
@@ -4496,9 +4497,9 @@ impl AppState {
             .find_session_index(&record.session.id)
             .and_then(|index| inner.sessions.get(index))
             .expect("just-created session must be present in the index");
-        let session = AppState::wire_session_from_record(&self.server_instance_id, created_record);
+        let session = AppState::wire_session_for_inner(&inner, &self.server_instance_id, created_record);
         let delta_session =
-            AppState::wire_session_summary_from_record(&self.server_instance_id, created_record);
+            AppState::wire_session_summary_for_inner(&inner, &self.server_instance_id, created_record);
         self.publish_delta_locked(
             &inner,
             DeltaEvent::SessionCreated {
