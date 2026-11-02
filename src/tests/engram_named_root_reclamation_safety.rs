@@ -54,7 +54,7 @@ fn named_root_reclamation_current_terminal_own_clear_is_synchronous_and_event_fr
     let (claimed, entry) = settled_root("reclaim-current-terminal-clear", "completed");
     let binding = claimed.state.inner.lock().unwrap().engram_named_root_journal[0]
         .read_binding.clone().unwrap();
-    claimed.record(|record| record.engram.work_binding = Some(binding.clone()));
+    claimed.record_mut(|record| record.engram.work_binding = Some(binding.clone()));
     claimed.transport.enable_named_roots(&claimed.session_id, &binding);
     let before = claimed.transport.requests().iter()
         .filter(|request| request.request["operation"] == "named_root_bind").count();
@@ -87,11 +87,10 @@ fn named_root_reclamation_own_clear_cannot_remove_a_foreign_replacement_after_he
 }
 
 #[test]
-fn named_root_reclamation_current_missing_directory_keeps_root_invalid_flush_recoverable() {
+fn named_root_reclamation_missing_directory_keeps_exact_root_invalid_cleanup_recoverable() {
     let label = "reclaim-root-invalid-owner";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(&claimed, label, Some(&worktree), vec![claimed_root_held(label)]).unwrap();
+    let (mut claimed, worktree) = root_fixture(label);
+    request_fixture_name(&claimed, Some(&worktree)).unwrap();
     let original_receipt = claimed.state.inner.lock().unwrap().engram_named_root_journal[0].confirmed.clone();
     // Simulate a missing Git worktree without deleting any fixture data.
     fs::rename(worktree.join(".git"), worktree.join("saved-git-entry")).unwrap();
@@ -100,10 +99,16 @@ fn named_root_reclamation_current_missing_directory_keeps_root_invalid_flush_rec
     let failure = claimed.root.join("blocked-cleanup-image");
     fs::create_dir_all(&failure).unwrap();
     claimed.state.persistence_path = Arc::new(failure);
-    claimed.record(|record| record.engram.active_grant_id = Some("root-invalid-opening".to_owned()));
-    // The current-binding opening probes the missing worktree and queues the
-    // producer intent. Its existing flush owner must first acknowledge it.
-    claimed.state.record_engram_turn_start_basis_off_lock(&claimed.session_id, "root-invalid-opening");
+    assert!(engram_named_root_absent(worktree.to_str().unwrap()));
+    {
+        // The opening-time grant probe was deleted. Exercise the retained
+        // cleanup owner with the exact confirmed root-invalid intent.
+        let mut inner = claimed.state.inner.lock().unwrap();
+        let root = inner.engram_work_source_roots[0].clone();
+        engram_queue_root_cleanup(&mut inner.engram_named_root_journal,
+            &root, EngramNamedRootEndReason::RootInvalid);
+    }
+    claimed.state.flush_engram_root_cleanup(&claimed.session_id, Duration::from_secs(2));
     let pending = claimed.state.inner.lock().unwrap().engram_named_root_journal[0].pending.clone().unwrap();
     assert_eq!(pending.kind, EngramNamedRootKind::Ended);
     assert_eq!(pending.end_reason, Some(EngramNamedRootEndReason::RootInvalid));

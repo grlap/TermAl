@@ -47,8 +47,14 @@ fn run_federation_engram_probe(
         4096,
         true,
     );
-    let Ok(output) = result else {
-        return FederationEngramOnboardingOutcome::unavailable();
+    let output = match result {
+        Ok(output) => output,
+        Err(error) => {
+            let mut outcome = FederationEngramOnboardingOutcome::unavailable();
+            outcome.reason = format!("Engram external verification unavailable: {error:#}");
+            eprintln!("federation onboarding> {}", outcome.reason);
+            return outcome;
+        }
     };
     let summary = if config.json_summary {
         match serde_json::from_slice::<FederationEngramProbeSummary>(&output.stdout) {

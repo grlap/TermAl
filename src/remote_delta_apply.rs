@@ -275,7 +275,7 @@ impl AppState {
                         let local_record = inner.sessions.get(local_index).ok_or_else(|| {
                             anyhow!("local proxy session `{local_session_id}` not found")
                         })?;
-                        let delta_session = AppState::wire_session_summary_for_inner(&inner,
+                        let delta_session = AppState::wire_session_summary_from_record(
                             &self.server_instance_id,
                             local_record,
                         );
@@ -463,15 +463,7 @@ impl AppState {
                         message,
                         preview,
                         status,
-                        // A remote proxy reports no queue hold of its own: its
-                        // local record holds no retry records
-                        // (`engram_automatic_retry_hold`), so snapshots and
-                        // hydration carry none, and neither does the forwarded
-                        // queue.
-                        session_queue: session_queue.map(|queue| SessionQueueDelta {
-                            queue_hold: None,
-                            ..queue
-                        }),
+                        session_queue,
                         session_mutation_stamp: Some(session_mutation_stamp),
                         session_seq: remote_session_seq,
                         body_seq_epoch: remote_sequence_epoch,

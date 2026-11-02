@@ -419,7 +419,7 @@ fn engram_named_root_release_route_for(
         && !engram_named_root_session_quiet(&inner.sessions[index])
     {
         return Err(ApiError::conflict(format!(
-            "its naming session {} is busy (in a turn, holding a grant or checkpointing); \
+            "its naming session {} is busy (in a turn, stopping or naming a root); \
              release it once that session is idle. Nothing was released",
             root.named_by_session
         )));
@@ -428,12 +428,11 @@ fn engram_named_root_release_route_for(
 }
 
 /// Whether the session in `record` is doing nothing that could act on a
-/// root: no grant (active or uncertain), no checkpoint, no unmediated Claude
-/// turn, and idle or stopped in error.
+/// root: no runtime transition or naming operation, no unmediated Claude
+/// turn, and idle or stopped in error. Historical control records are inert.
 fn engram_named_root_session_quiet(record: &SessionRecord) -> bool {
-    record.engram.active_grant_id.is_none()
-        && record.engram.uncertain_grant_id.is_none()
-        && !record.engram.checkpoint_in_progress
+    !record.runtime_stop_in_progress
+        && record.engram.source_root_bind_owner.is_none()
         && record.unmediated_claude_turn.is_none()
         && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error)
 }

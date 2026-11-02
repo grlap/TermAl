@@ -15,12 +15,6 @@ fn restored_live_selection_omits_the_obsolete_rename_instruction() {
         .or_else(|| added["short_ref"].as_str())
         .unwrap();
     fixture.work(session, &["claim", work, "--json"]);
-    fixture
-        .live
-        .state
-        .ensure_engram_session_bound_off_lock(session)
-        .unwrap()
-        .unwrap();
     let request = || EngramSourceRootRequest {
         work: work.to_owned(),
         path: Some(Some(fixture.root.to_string_lossy().into_owned())),
@@ -38,7 +32,6 @@ fn restored_live_selection_omits_the_obsolete_rename_instruction() {
     .unwrap()
     .unwrap();
     let binding = target.work_binding.clone().unwrap();
-    let token = target.routing_token.clone().unwrap();
     // A real canonical successor makes the original local selection obsolete.
     // This is a protocol operation in the disposable producer, not a store edit
     // or an injected root-read response.
@@ -50,7 +43,6 @@ fn restored_live_selection_omits_the_obsolete_rename_instruction() {
             .request(
                 &target.connection,
                 &EngramControlRequest::NamedRootBind {
-                    routing_token: token.clone(),
                     claim_id: binding.claim_id.clone(),
                     claim_fence: binding.claim_fence,
                     workspace_id: first.root.clone().unwrap(),
@@ -75,17 +67,11 @@ fn restored_live_selection_omits_the_obsolete_rename_instruction() {
         matches!(changed.named_root, EngramNamedRootState::Bound { generation, .. }
         if generation == successor as i64)
     );
-    fixture
-        .live
-        .state
-        .reconcile_engram_named_root(
-            session,
-            &token,
-            Some(&binding),
-            Some(changed.named_root),
-            successor,
-        )
-        .unwrap();
+    let fence = EngramRootReadFence::capture(&fixture.live.state.inner.lock().unwrap());
+    fixture.live.state.reconcile_engram_named_root_with_route_classified_until(
+        session, Some(&binding), Some(changed.named_root), &fence, Some(&target.connection),
+        fixture.live.state.engram_budget_clock().now() + target.settings.call_timeout(),
+    ).unwrap_or_else(|failure| panic!("canonical root reconciliation failed: {}", failure.into_transport()));
     fixture.record(session, |record| {
         assert!(record.engram.source_root_notices.iter().any(|notice|
             matches!(&notice.kind, EngramSourceRootNoticeKind::SelectionLoss { selection }
@@ -127,12 +113,13 @@ fn restored_live_selection_omits_the_obsolete_rename_instruction() {
         command.prompt
     );
     fixture.record(session, |record| {
-        assert!(matches!(record.engram.active_turn_root_capture,
-            Some(EngramRootCapture::Recorded { generation, state: EngramSourceRootState::Named, .. })
-                if generation == restored.generation as i64));
-        assert_eq!(record.engram.active_turn_start_basis.as_ref().unwrap().source_root_generation,
-            Some(restored.generation as i64));
+        let opening = record.engram.unadmitted_active_turn.as_ref().unwrap().opening_root.as_ref().unwrap();
+        assert_eq!(opening.binding, binding);
+        assert!(matches!(opening.provenance, EngramRootCapture::Recorded { generation, .. }
+            if generation == restored.generation as i64));
         assert!(record.engram.source_root_notices.is_empty());
     });
     finish_live_root(&fixture.live.state, session);
+    fixture.wait_for_reports(session);
+    assert_no_live_turn_gate(&fixture.live.transport);
 }

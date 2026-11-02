@@ -49,6 +49,7 @@ fn engram_is_build_command(program: &str, args: &[String]) -> bool {
 
 /// Capture the nested Cargo selector at command start, without probing a
 /// workspace-chosen path. The report still fingerprints the original wrapper.
+#[cfg(test)]
 fn engram_build_toolchain_command(check: &EngramCheckCommand) -> EngramCheckCommand {
     let mut toolchain = check.clone();
     if check.kind == EngramVerificationKind::Build
@@ -88,6 +89,7 @@ enum EngramBuildRejection {
 }
 
 impl EngramBuildRejection {
+    #[cfg(test)]
     fn label(self) -> &'static str {
         match self {
             Self::Owner => "owner",
@@ -163,6 +165,7 @@ impl EngramBuildDiagnostic {
         }
     }
 
+    #[cfg(test)]
     fn summary(&self, command: &EngramCheckCommand) -> String {
         let terminal = self.observed_exit.map_or_else(
             || "no native terminal exit observed".to_owned(),

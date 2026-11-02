@@ -5,7 +5,6 @@ import type {
   ParallelAgentsMessage,
   Session,
   SessionLiveActivity,
-  SessionQueueHold,
   PendingPrompt,
   TextMessage,
 } from "./types";
@@ -326,7 +325,9 @@ function pendingPromptsAfterMessageCreated(
   // A newly visible authoritative queue entry acknowledges exactly one
   // matching optimistic send. Entries already visible before this delta are
   // not fresh evidence: consuming another same-content send on replay would
-  // make repeated deltas non-idempotent.
+  // make repeated deltas non-idempotent. An old transcript event cannot
+  // acknowledge a newer optimistic send; a later authoritative queue update
+  // can acknowledge its new queue identity even while reusing that event.
   for (const authoritativePrompt of authoritativePrompts) {
     if (previouslyVisibleAuthoritativeIds.has(authoritativePrompt.id)) {
       continue;
@@ -337,7 +338,7 @@ function pendingPromptsAfterMessageCreated(
         !matchedOptimisticIds.has(prompt.id) &&
         !residentMessageIds.has(authoritativePrompt.id) &&
         !(
-          authoritativePrompt.isEngramRetained === true &&
+          !createdMessageWasAlreadyKnown &&
           typeof prompt.transcriptEndIndexAtEnqueue === "number" &&
           delta.messageIndex <= prompt.transcriptEndIndexAtEnqueue
         ) &&
@@ -373,8 +374,7 @@ export function applyMetadataOnlySessionDelta(
     delta.type === "messageCreated"
       ? pendingPromptsAfterMessageCreated(session, delta)
       : session.pendingPrompts;
-  const base = withQueueHoldFromDelta(
-    {
+  const base: Session = {
       ...session,
       liveActivity: liveActivityAfterTranscriptDelta(session, delta),
       messageCount: delta.messageCount,
@@ -391,9 +391,7 @@ export function applyMetadataOnlySessionDelta(
         session,
         delta.sessionMutationStamp,
       ),
-    },
-    delta.type === "messageCreated" ? delta.sessionQueue : null,
-  );
+  };
 
   switch (delta.type) {
     case "messageCreated":
@@ -417,35 +415,6 @@ export function applyMetadataOnlySessionDelta(
         preview: delta.preview,
       };
   }
-}
-
-/** `next` with the queue hold a queue delta carries: the delta's `queueHold`,
- * a missing one clearing the session's. A delta with no queue changes
- * nothing, and a session that had no hold keeps its shape. */
-function withQueueHoldFromDelta(
-  next: Session,
-  sessionQueue: { queueHold?: SessionQueueHold | null } | null | undefined,
-): Session {
-  if (!sessionQueue) {
-    return next;
-  }
-  if (sessionQueue.queueHold) {
-    return { ...next, queueHold: sessionQueue.queueHold };
-  }
-  if (next.queueHold == null) {
-    return next;
-  }
-  const cleared = { ...next };
-  delete cleared.queueHold;
-  return cleared;
-}
-
-/** The queue hold a session has after a queue delta. */
-function queueHoldAfterQueueDelta(
-  session: Session,
-  sessionQueue: { queueHold?: SessionQueueHold | null } | null | undefined,
-): SessionQueueHold | null {
-  return sessionQueue ? sessionQueue.queueHold ?? null : session.queueHold ?? null;
 }
 
 function serializedValuesMatch(left: unknown, right: unknown) {
@@ -602,11 +571,7 @@ function messageCreatedDeltaIsNoOp(
       pendingPromptsAfterMessageCreated(session, delta),
     ) &&
     (delta.sessionQueue?.queuePaused ?? session.queuePaused) ===
-      session.queuePaused &&
-    serializedValuesMatch(
-      queueHoldAfterQueueDelta(session, delta.sessionQueue),
-      session.queueHold ?? null,
-    )
+      session.queuePaused
   );
 }
 
@@ -692,8 +657,7 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     delta.messageCount,
   );
 
-  return withQueueHoldFromDelta(
-    {
+  return {
       ...session,
       messages: updatedMessages,
       messagesLoaded:
@@ -716,9 +680,7 @@ function applyMessageCreatedDeltaToRetainedTranscript(
         session,
         delta.sessionMutationStamp,
       ),
-    },
-    delta.sessionQueue,
-  );
+  };
 }
 
 type RetainedMessageTargetResult =

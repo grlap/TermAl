@@ -13,6 +13,7 @@
 // that compile without the bounded retry, so that file alone is the naming
 // side's test-only fail-first witness.
 use super::*;
+use super::reclamation::{root_fixture, request_fixture_name};
 
 /// Another owner (such as the automatic reclamation pass) replaces this
 /// work's authority image.
@@ -26,7 +27,7 @@ fn supersede(inner: &mut StateInner) {
     }
 }
 
-fn named_any(claimed: &ClaimedRoot, label: &str) -> bool {
+fn named_any(claimed: &EOCheckedTurn, label: &str) -> bool {
     claimed
         .state
         .inner
@@ -34,12 +35,12 @@ fn named_any(claimed: &ClaimedRoot, label: &str) -> bool {
         .unwrap()
         .engram_work_source_roots
         .iter()
-        .any(|entry| entry.short_ref == format!("w-{label}"))
+        .any(|entry| entry.work_id == test_control_work_binding(&format!("eo-check-{label}"), 1).work_id)
 }
 
 /// Another owner replaces this work's authority image at EVERY owner check;
 /// returns how many owner checks ran.
-fn supersede_every_owner_check(claimed: &ClaimedRoot) -> Arc<std::sync::atomic::AtomicUsize> {
+fn supersede_every_owner_check(claimed: &EOCheckedTurn) -> Arc<std::sync::atomic::AtomicUsize> {
     let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let hook_checks = checks.clone();
     let state = claimed.state.clone();
@@ -56,11 +57,10 @@ fn supersede_every_owner_check(claimed: &ClaimedRoot) -> Arc<std::sync::atomic::
 #[test]
 fn a_naming_superseded_at_every_attempt_refuses_after_its_bounded_retries() {
     let label = "naming-always-superseded";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let tree = add_claimed_root_worktree(&claimed.root);
+    let (claimed, tree) = root_fixture(label);
     let checks = supersede_every_owner_check(&claimed);
 
-    let named = name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]);
+    let named = request_fixture_name(&claimed, Some(&tree));
     claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
 
     let error = named.expect_err("a naming superseded at every attempt does not complete");
@@ -84,11 +84,67 @@ fn a_naming_superseded_at_every_attempt_refuses_after_its_bounded_retries() {
     assert!(!named_any(&claimed, label), "nothing was named");
 }
 
+#[test]
+fn a_refused_naming_guard_keeps_the_previous_held_association() {
+    let (claimed, tree) = root_fixture("naming-other-claim-guard-refusal");
+    let original = claimed.record(|record| record.engram.work_binding.clone().unwrap());
+    let requested = test_control_work_binding("naming-requested-other-claim", 1);
+    claimed.transport.register_named_root_run(&requested);
+    claimed.transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: [&original, &requested].into_iter().map(|binding| EngramHeldClaim {
+            work_id: binding.work_id.clone(),
+            short_ref: binding.work_id.clone(),
+            claim_id: binding.claim_id.clone(),
+            claim_fence: binding.claim_fence,
+            focused: binding == &requested,
+            control_binding: Some(binding.clone()),
+        }).collect(),
+        omitted: 0,
+    })]);
+    {
+        let inner = claimed.state.inner.lock().unwrap();
+        claimed.state.persist_session_internal_locked(&inner, &claimed.session_id).unwrap();
+    }
+    let persisted_session = || {
+        let loaded = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+        let record = &loaded.sessions[loaded.find_session_index(&claimed.session_id).unwrap()];
+        assert!(record.engram.work_binding.is_none(),
+            "ordinary associations are not restored as durable authority");
+        assert!(loaded.engram_work_source_roots.iter()
+            .all(|root| root.claim_id != requested.claim_id));
+        assert!(loaded.engram_named_root_journal.iter()
+            .filter(|journal| journal.claim_id == requested.claim_id)
+            .all(|journal| journal.confirmed.is_none() && journal.pending.is_none()));
+        serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap()
+    };
+    let before = persisted_session();
+    let checks = supersede_every_owner_check(&claimed);
+    let error = claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
+        work: requested.work_id.clone(),
+        path: Some(Some(tree.to_string_lossy().into_owned())),
+    }).expect_err("an unacknowledged guard cannot select the requested claim");
+    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+    assert!(error.message.contains("superseded authority image")
+        && error.message.contains("can be retried")
+        && !error.message.contains("cannot help"), "{}", error.message);
+    assert_eq!(checks.load(std::sync::atomic::Ordering::SeqCst),
+        1 + ENGRAM_NAMING_SUPERSEDED_RETRIES);
+    claimed.record(|record| {
+        assert_eq!(record.engram.work_binding.as_ref(), Some(&original));
+        assert!(record.engram.source_root_bind_owner.is_none());
+    });
+    assert_eq!(persisted_session(), before,
+        "refused naming leaves the original SQLite session image unchanged");
+    assert!(claimed.transport.requests().iter()
+        .all(|request| request.request["operation"] != "named_root_bind"));
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+}
+
 /// While the naming's claim-lifecycle guard is acknowledged, another owner
 /// supersedes its image and `change` alters the session's work binding.
 /// Returns how many owner checks ran.
 fn supersede_at_the_guard_while(
-    claimed: &ClaimedRoot,
+    claimed: &EOCheckedTurn,
     change: fn(&mut Option<EngramControlWorkBinding>),
 ) -> Arc<std::sync::atomic::AtomicUsize> {
     let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -120,11 +176,10 @@ fn a_naming_whose_claim_changed_while_superseded_refuses_at_once_and_says_retryi
     ];
     for (case, change) in cases {
         let label = format!("naming-superseded-{case}");
-        let claimed = ClaimedRoot::new_scripted(&label, Vec::new());
-        let tree = add_claimed_root_worktree(&claimed.root);
+        let (claimed, tree) = root_fixture(&label);
         let checks = supersede_at_the_guard_while(&claimed, change);
 
-        let named = name_root(&claimed, &label, Some(&tree), vec![claimed_root_held(&label)]);
+        let named = request_fixture_name(&claimed, Some(&tree));
         claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
 
         let error = named.expect_err("a naming whose claim moved does not complete");
@@ -152,8 +207,7 @@ fn a_naming_whose_claim_run_changed_while_its_event_was_superseded_refuses_at_on
     // its event's image is being acknowledged, another owner supersedes it
     // and the claim's run association moves (as a recovery would move it).
     let label = "naming-event-superseded-run-changed";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let tree = add_claimed_root_worktree(&claimed.root);
+    let (claimed, tree) = root_fixture(label);
     let event_checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let hook_checks = event_checks.clone();
     let state = claimed.state.clone();
@@ -177,7 +231,7 @@ fn a_naming_whose_claim_run_changed_while_its_event_was_superseded_refuses_at_on
             }
         }));
 
-    let named = name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]);
+    let named = request_fixture_name(&claimed, Some(&tree));
     claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
 
     let error = named.expect_err("a naming whose run association moved does not complete");

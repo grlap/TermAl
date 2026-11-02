@@ -302,29 +302,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("disables the composer while Engram boot recovery is pending", () => {
+it("keeps ordinary sending available with historical Engram recovery metadata", () => {
   const onSend = vi.fn(() => true);
-  render(
-    renderFooter({
-      session: makeSession("session-a", { engramBootRecoveryPending: true }),
-      committedDraft: "Wait for recovery",
-      onSend,
-    }),
-  );
-
+  const session = { ...makeSession("session-a"), ...JSON.parse('{"engramBootRecoveryPending":true}') };
+  render(renderFooter({ session, committedDraft: "Continue ordinary work", onSend }));
   const textarea = screen.getByLabelText("Message session-a");
-  expect(textarea).toBeDisabled();
-  expect(textarea).toHaveAttribute(
-    "placeholder",
-    "Resuming Engram recovery after restart...",
-  );
-  expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
-  expect(
-    screen.getByText(
-      "Opening this session resumes Engram recovery. Prompts will be available when its background retry finishes.",
-    ),
-  ).toBeInTheDocument();
-  expect(onSend).not.toHaveBeenCalled();
+  expect(textarea).toBeEnabled();
+  expect(textarea).toHaveAttribute("placeholder", "Send a prompt to Codex...");
+  const send = screen.getByRole("button", { name: "Send" });
+  expect(send).toBeEnabled();
+  fireEvent.click(send);
+  expect(onSend).toHaveBeenCalled();
 });
 
 it("navigates projected prompt history from an empty composer and restores the draft", async () => {

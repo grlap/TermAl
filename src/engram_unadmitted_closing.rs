@@ -39,7 +39,7 @@ impl AppState {
                 return Ok(EngramRuntimeClosingOutcome::BindingRecoveryPending);
             }
             job.scope.require_current(&inner, session_id)?;
-            Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+            Self::engram_source_root_target_locked(&inner, session_id)
                 .map_err(EngramTransportError::local_state)?
         };
         let Some(target) = target else {
@@ -48,20 +48,41 @@ impl AppState {
                 "connection or binding absent",
             ));
         };
-        let Some(current) = target.work_binding.as_ref() else {
-            return Err(runtime_observation_scope_changed(
-                &job.scope,
-                "connection or binding absent",
-            ));
-        };
         let store = target.settings.authority_store_key.clone().ok_or_else(|| {
             EngramTransportError::local_state("runtime closing capture has no verified store")
         })?;
-        let routing = target.routing_token.as_deref().ok_or_else(|| {
-            EngramTransportError::local_state("runtime closing capture has no route")
-        })?;
         let deadline = target.budget_clock.now() + target.settings.call_timeout();
         let timeout = || target.rpc_timeout_until(deadline);
+        if job.scope.binding.is_none() {
+            target.adapter.read_work_session(&target.connection, &store, timeout()?)?;
+            let binding = target.adapter.read_work_binding(
+                &target.connection,
+                EngramBindingPreference { current: target.work_binding.as_ref() },
+                timeout()?,
+            )?;
+            let Some(binding) = binding else {
+                if target.work_binding.is_some() {
+                    return Err(runtime_observation_scope_changed(&job.scope,
+                        "the original claim association is no longer current"));
+                }
+                // An ordinary chat has no work owner to report to. A successful
+                // canonical read proving no claim is a quiet terminal result,
+                // not a transport failure or a retry/removal obligation.
+                return Ok(EngramRuntimeClosingOutcome::Unclaimed);
+            };
+            if target.work_binding.as_ref().is_some_and(|expected| expected != &binding) {
+                return Err(runtime_observation_scope_changed(&job.scope,
+                    "the original claim association is no longer current"));
+            }
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            job.scope.require_current(&inner, session_id)?;
+            let mut scope = EngramRuntimeClosingScope::capture_with_binding(
+                &inner, session_id, Some(&binding),
+            ).map_err(EngramTransportError::local_state)?;
+            scope.historical_fields = job.scope.historical_fields.clone();
+            return Ok(EngramRuntimeClosingOutcome::Binding(scope));
+        }
+        let current = job.scope.binding.as_ref().expect("ordinary binding read completed");
         let Some(policy) = job.policy.as_ref() else {
             return target
                 .adapter
@@ -72,7 +93,6 @@ impl AppState {
             &target.connection,
             EngramBindingPreference {
                 current: Some(current),
-                refused: &[],
             },
             timeout()?,
         )?;
@@ -82,7 +102,7 @@ impl AppState {
                 "connection or binding absent",
             ));
         };
-        if binding != job.scope.binding {
+        if job.scope.binding.as_ref() != Some(&binding) {
             return Err(runtime_observation_scope_changed(
                 &job.scope,
                 &format!("canonical claim {} / {}", binding.work_id, binding.claim_id),
@@ -93,7 +113,6 @@ impl AppState {
             .request(
                 &target.connection,
                 &EngramControlRequest::NamedRootRead {
-                    routing_token: routing.to_owned(),
                     run_id: binding.run_id.clone(),
                     claim_id: binding.claim_id.clone(),
                 },
@@ -131,8 +150,7 @@ impl AppState {
                 || !target
                     .source_root_read_fence
                     .same_store(&inner, &target.project_id)
-                || record.engram.routing_token.as_deref() != Some(routing)
-                || record.engram.work_binding.as_ref() != Some(&binding)
+                || record.engram.work_binding.as_ref().is_some_and(|current| current != &binding)
             {
                 return Err(EngramTransportError::local_state(
                     "runtime closing basis changed during its read",
@@ -209,23 +227,9 @@ impl AppState {
                 EngramTransportError::local_state("runtime closing source could not be measured")
             })?;
         let observed_at = unadmitted_observation_timestamp();
-        let status = target
-            .adapter
-            .request(
-                &target.connection,
-                &EngramControlRequest::SessionStatus {
-                    routing_token: routing.to_owned(),
-                },
-                timeout()?,
-            )
-            .and_then(parse_engram_result::<EngramSessionStatusResponse>)?;
-        let observer = status.session_id.ok_or_else(|| {
-            EngramTransportError::protocol(
-                "runtime closing status has no producer session identity",
-            )
-        })?;
-        // SessionStatus is identity-only here. No phase is interpreted as
-        // permission, and a leftover open grant is never borrowed.
+        let observer = target.adapter.read_work_session(&target.connection, &store, timeout()?)?;
+        // The ordinary child's identity proves the observing session. No
+        // control status, phase or leftover open grant enters this report.
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.find_session_index(session_id).is_some_and(|index| {
@@ -235,12 +239,11 @@ impl AppState {
             }
             job.scope.require_current(&inner, session_id)?;
             let current =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .map_err(EngramTransportError::local_state)?;
             if current.as_ref().is_none_or(|current| {
                 current.connection != target.connection
-                    || current.work_binding.as_ref() != Some(&binding)
-                    || current.routing_token.as_deref() != Some(routing)
+                    || current.work_binding.as_ref().is_some_and(|current| current != &binding)
             }) || !target
                 .source_root_read_fence
                 .same_store(&inner, &target.project_id)
@@ -267,7 +270,6 @@ impl AppState {
             },
             target.connection.clone(),
             store,
-            routing,
             observer,
             target.settings.call_timeout(),
         )

@@ -1105,7 +1105,6 @@ fn load_state_from_sqlite_with_connection(
             token: Uuid::new_v4().to_string(),
             source: delegation_inventory_file_identity(path)?,
             worker_started: false,
-            queue_pause_images: Vec::new(),
         };
     }
     let mut inner = persisted
@@ -1520,6 +1519,10 @@ fn persist_state_parts_via_connection(
 struct PersistTranscriptBaseline {
     start: usize,
     identities: Vec<std::sync::Weak<Message>>,
+    transcript_valid: bool,
+    // Highest verified own-row cut for this incarnation. Body invalidation
+    // cannot revoke a completed write; rejected/failed writes never advance it.
+    row_stamp: Option<PersistSessionWriteStamp>,
 }
 
 /// Thread-local SQLite connection cache for the background persist thread.
@@ -1582,7 +1585,8 @@ impl SqlitePersistConnectionCache {
     /// startup-only metadata and legacy-authority validation is a precondition
     /// already established for this path by the current process boot.
     fn connection_for(&mut self, path: &FsPath) -> Result<&mut rusqlite::Connection> {
-        let matches_cache = self.path.as_deref() == Some(path);
+        let same_store = self.path.as_deref() == Some(path);
+        let matches_cache = same_store && self.connection.is_some();
         if !matches_cache {
             // Path changed (or first open): open+validate the replacement
             // first so a transient failure does not speculatively discard a
@@ -1597,7 +1601,11 @@ impl SqlitePersistConnectionCache {
             self.path = Some(path.to_path_buf());
             self.connection = Some(connection);
             self.metadata_units = None;
-            self.transcripts.clear();
+            if same_store {
+                self.invalidate_transcript_bodies();
+            } else {
+                self.transcripts.clear();
+            }
             self.transcript_data_version = None;
         }
         Ok(self
@@ -1643,10 +1651,21 @@ impl SqlitePersistConnectionCache {
     /// one connection per process lifetime.
     fn invalidate(&mut self) {
         self.connection = None;
-        self.path = None;
         self.metadata_units = None;
-        self.transcripts.clear();
+        self.invalidate_transcript_bodies();
         self.transcript_data_version = None;
+    }
+
+    fn invalidate_transcript_bodies(&mut self) {
+        for row in self.transcripts.values_mut() {
+            row.transcript_valid = false;
+            row.identities.clear();
+            row.start = 0;
+        }
+        // A sparse predecessor is disposable. A verified own-row commit is
+        // a historical fact, so the same-store cache keeps its stamp for a
+        // fence that arrives after the write. Path switches and row removal
+        // still discard the whole entry.
     }
 }
 
@@ -1765,9 +1784,10 @@ fn persist_delta_via_cache_inner(
         None
     };
     if predecessor_version != cache.transcript_data_version {
-        cache.transcripts.clear();
+        cache.invalidate_transcript_bodies();
     }
-    let used_baseline = !cache.transcripts.is_empty();
+    let used_baseline = cache.path.as_deref() == Some(path)
+        && cache.transcripts.values().any(|row| row.transcript_valid);
     let mut rejected_sessions = Vec::new();
     let serialized = (|| -> Result<_> {
         let metadata_units = project_metadata_units(&delta.metadata)?;
@@ -1778,7 +1798,8 @@ fn persist_delta_via_cache_inner(
             .changed_sessions
             .iter()
             .filter_map(|record| {
-                let previous = baseline.and_then(|rows| rows.get(&record.session.id));
+                let previous = baseline.and_then(|rows| rows.get(&record.session.id))
+                    .filter(|row| row.transcript_valid);
                 match serialize_persisted_session_since(record, previous) {
                     Ok(row) => Some(row),
                     Err(error) => {
@@ -1948,15 +1969,27 @@ fn persist_delta_via_cache_inner(
         cache.transcripts.remove(id);
     }
     let committed_ids = persisted_session_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    let row_stamps = delta.changed_sessions.iter()
+        .map(|record| (record.session.id.as_str(), record.source_stamp.clone()))
+        .collect::<HashMap<_, _>>();
     // A rejected row made no SQL changes, or its savepoint rolled them back.
     // Its prior baseline still describes the last verified durable bodies.
     // Only a successfully written row may replace that predecessor.
     for row in serialized_sessions.iter().filter(|row| committed_ids.contains(row.session_id.as_str())) {
+        let captured = row_stamps.get(row.session_id.as_str()).cloned().flatten();
+        let row_stamp = match (cache.transcripts.get(&row.session_id)
+            .and_then(|previous| previous.row_stamp.as_ref()), captured)
+        {
+            (Some(previous), Some(captured)) if previous.covers(&captured) => Some(previous.clone()),
+            (_, captured) => captured,
+        };
         cache.transcripts.insert(
             row.session_id.clone(),
             PersistTranscriptBaseline {
                 start: row.message_start_index,
                 identities: row.snapshot.identities(),
+                transcript_valid: true,
+                row_stamp,
             },
         );
     }

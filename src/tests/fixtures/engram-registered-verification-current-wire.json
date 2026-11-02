@@ -1,0 +1,217 @@
+{
+  "failed_request": {
+    "checks": [
+      {
+        "check_fingerprint": "9cd1737764727b7b390edc348bc1822d3ca2d3c609609385d7aec8177847be77",
+        "check_kind": "test",
+        "command": "cargo test --lib",
+        "completed_at": "2026-11-02T01:56:17Z",
+        "counts": {
+          "failed": 1,
+          "passed": 0,
+          "unrun": 0
+        },
+        "outcome": "failed",
+        "stage": "focused",
+        "started_at": "2026-11-02T01:56:14Z",
+        "summary": "native test result"
+      },
+      {
+        "check_fingerprint": "9cd1737764727b7b390edc348bc1822d3ca2d3c609609385d7aec8177847be77",
+        "check_kind": "test",
+        "command": "cargo test --lib",
+        "outcome": "not_run",
+        "stage": "later",
+        "summary": "native test result"
+      }
+    ],
+    "input": {
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "kind": "commit"
+    },
+    "operation": "verification_record",
+    "operation_key": "termal-run:test-failed",
+    "post_run": {
+      "clean_after": true,
+      "clean_before": true,
+      "outcome": "clean"
+    },
+    "registration": {
+      "binding": {
+        "claim_fence": 1,
+        "claim_id": "01a199f8-c228-7700-b1c6-4f5129ba7f19",
+        "root_execution_id": "01a199f8-c20b-7f60-b89a-053a20f43fec",
+        "run_id": "01a199f8-c20b-7f60-b89a-05233374d64a",
+        "work_id": "01a199f8-c20b-7f60-b89a-0511a3d2a39c",
+        "work_revision": 1
+      },
+      "host_run_id": "test-failed",
+      "initiating_session_id": "runner",
+      "registered_at": "2026-11-02T01:56:13Z",
+      "request_identity": "host-registered-request",
+      "root": {
+        "generation": 1,
+        "state": "named",
+        "workspace_id": "workspace-a"
+      }
+    },
+    "run": {
+      "command": "cargo test --lib",
+      "finished_at": "2026-11-02T01:56:17Z",
+      "mode": "focused",
+      "outcome": "failed",
+      "started_at": "2026-11-02T01:56:13Z"
+    }
+  },
+  "failed_response": {
+    "result": {
+      "operation": "52bfe03248204416ac49b4353d607a0f",
+      "producer": "52bfe03248204416ac49b4353d607a0f",
+      "run_outcome": "failed",
+      "verifications": [
+        {
+          "record_id": "6375efa7dd604d0e82ebfc1b882a5cc3",
+          "stage": "focused"
+        }
+      ]
+    },
+    "status": "ok"
+  },
+  "refusal": {
+    "error": {
+      "code": "verification_record_refused",
+      "details": {
+        "field": "post_run",
+        "reason": "only unchanged clean inputs are eligible"
+      },
+      "message": "registered verification refused (post_run): only unchanged clean inputs are eligible"
+    },
+    "status": "error"
+  },
+  "refused_request": {
+    "checks": [
+      {
+        "check_fingerprint": "9cd1737764727b7b390edc348bc1822d3ca2d3c609609385d7aec8177847be77",
+        "check_kind": "test",
+        "command": "cargo test --lib",
+        "completed_at": "2026-11-02T01:56:17Z",
+        "counts": {
+          "failed": 0,
+          "passed": 1,
+          "unrun": 0
+        },
+        "outcome": "passed",
+        "stage": "focused",
+        "started_at": "2026-11-02T01:56:14Z",
+        "summary": "native test result"
+      }
+    ],
+    "input": {
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "kind": "commit"
+    },
+    "operation": "verification_record",
+    "operation_key": "termal-run:test-refused",
+    "post_run": {
+      "clean_after": true,
+      "clean_before": false,
+      "outcome": "clean"
+    },
+    "registration": {
+      "binding": {
+        "claim_fence": 1,
+        "claim_id": "01a199f8-c228-7700-b1c6-4f5129ba7f19",
+        "root_execution_id": "01a199f8-c20b-7f60-b89a-053a20f43fec",
+        "run_id": "01a199f8-c20b-7f60-b89a-05233374d64a",
+        "work_id": "01a199f8-c20b-7f60-b89a-0511a3d2a39c",
+        "work_revision": 1
+      },
+      "host_run_id": "test-refused",
+      "initiating_session_id": "runner",
+      "registered_at": "2026-11-02T01:56:13Z",
+      "request_identity": "host-registered-request",
+      "root": {
+        "generation": 1,
+        "state": "named",
+        "workspace_id": "workspace-a"
+      }
+    },
+    "run": {
+      "command": "cargo test --lib",
+      "finished_at": "2026-11-02T01:56:17Z",
+      "mode": "focused",
+      "outcome": "passed",
+      "started_at": "2026-11-02T01:56:13Z"
+    }
+  },
+  "request": {
+    "checks": [
+      {
+        "check_fingerprint": "9cd1737764727b7b390edc348bc1822d3ca2d3c609609385d7aec8177847be77",
+        "check_kind": "test",
+        "command": "cargo test --lib",
+        "completed_at": "2026-11-02T01:56:17Z",
+        "counts": {
+          "failed": 0,
+          "passed": 1,
+          "unrun": 0
+        },
+        "outcome": "passed",
+        "stage": "focused",
+        "started_at": "2026-11-02T01:56:14Z",
+        "summary": "native test result"
+      }
+    ],
+    "input": {
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "kind": "commit"
+    },
+    "operation": "verification_record",
+    "operation_key": "termal-run:test-native",
+    "post_run": {
+      "clean_after": true,
+      "clean_before": true,
+      "outcome": "clean"
+    },
+    "registration": {
+      "binding": {
+        "claim_fence": 1,
+        "claim_id": "01a199f8-c228-7700-b1c6-4f5129ba7f19",
+        "root_execution_id": "01a199f8-c20b-7f60-b89a-053a20f43fec",
+        "run_id": "01a199f8-c20b-7f60-b89a-05233374d64a",
+        "work_id": "01a199f8-c20b-7f60-b89a-0511a3d2a39c",
+        "work_revision": 1
+      },
+      "host_run_id": "test-native",
+      "initiating_session_id": "runner",
+      "registered_at": "2026-11-02T01:56:13Z",
+      "request_identity": "host-registered-request",
+      "root": {
+        "generation": 1,
+        "state": "named",
+        "workspace_id": "workspace-a"
+      }
+    },
+    "run": {
+      "command": "cargo test --lib",
+      "finished_at": "2026-11-02T01:56:17Z",
+      "mode": "focused",
+      "outcome": "passed",
+      "started_at": "2026-11-02T01:56:13Z"
+    }
+  },
+  "response": {
+    "result": {
+      "operation": "72615262d1284380817233edef9d0615",
+      "producer": "72615262d1284380817233edef9d0615",
+      "run_outcome": "passed",
+      "verifications": [
+        {
+          "record_id": "6e79f988912b4e52b18240e6529420d1",
+          "stage": "focused"
+        }
+      ]
+    },
+    "status": "ok"
+  }
+}

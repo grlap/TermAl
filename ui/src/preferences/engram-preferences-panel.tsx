@@ -5,7 +5,6 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { updateEngramHostSettings, type StateResponse } from "../api";
-import { EngramControlRecoveryPanel } from "../engram-control-recovery";
 import {
   describeProjectEngramState,
   EngramProjectSettingsPanel,
@@ -44,9 +43,6 @@ export function EngramPreferencesPanel({
   );
   const [binaryPath, setBinaryPath] = useState(hostSettings.binaryPath);
   const [home, setHome] = useState(hostSettings.home);
-  const [bootRecoveryBudgetMs, setBootRecoveryBudgetMs] = useState(
-    hostSettings.bootRecoveryBudgetMs,
-  );
   const [isSavingHost, setIsSavingHost] = useState(false);
   const [hostNotice, setHostNotice] = useState<string | null>(null);
   const [hostError, setHostError] = useState<string | null>(null);
@@ -58,10 +54,8 @@ export function EngramPreferencesPanel({
     setDeveloperName(hostSettings.developerName);
     setBinaryPath(hostSettings.binaryPath);
     setHome(hostSettings.home);
-    setBootRecoveryBudgetMs(hostSettings.bootRecoveryBudgetMs);
   }, [
     hostSettings.binaryPath,
-    hostSettings.bootRecoveryBudgetMs,
     hostSettings.developerName,
     hostSettings.home,
   ]);
@@ -89,7 +83,6 @@ export function EngramPreferencesPanel({
         developerName: developerName.trim().toLowerCase(),
         binaryPath: binaryPath.trim() || "engram",
         home: home.trim(),
-        bootRecoveryBudgetMs,
       });
       onStateUpdated(state);
       setHostNotice("Host Engram settings saved.");
@@ -102,7 +95,6 @@ export function EngramPreferencesPanel({
 
   return (
     <section className="settings-panel-stack engram-preferences-panel">
-      <EngramControlRecoveryPanel />
       <article className="message-card prompt-settings-card engram-host-settings-card">
         <div className="settings-section-header">
           <div>
@@ -183,32 +175,6 @@ export function EngramPreferencesPanel({
               Defaults to the server user's <code>.engram</code> directory.
             </span>
           </label>
-          <label
-            className="create-session-field"
-            htmlFor="settings-engram-boot-recovery-budget"
-          >
-            <span>Boot recovery budget (ms)</span>
-            <input
-              id="settings-engram-boot-recovery-budget"
-              aria-label="Engram boot recovery budget"
-              className="themed-input"
-              type="number"
-              min={100}
-              max={60_000}
-              step={100}
-              value={bootRecoveryBudgetMs}
-              disabled={isSavingHost}
-              onChange={(event) => {
-                setBootRecoveryBudgetMs(event.currentTarget.valueAsNumber);
-                setHostNotice(null);
-                setHostError(null);
-              }}
-            />
-            <span className="create-session-field-hint">
-              Eager recovery stops at this wall-clock budget; unfinished
-              sessions retry when next used.
-            </span>
-          </label>
         </div>
 
         {hostNotice ? (
@@ -266,8 +232,7 @@ export function EngramPreferencesPanel({
               }))}
             />
             <span className="create-session-field-hint">
-              Base MCP and work context are enabled per declared repository;
-              turn-gated control remains a separate opt-in.
+              Engram MCP, work context and host observations are enabled per declared repository.
             </span>
           </label>
         ) : (

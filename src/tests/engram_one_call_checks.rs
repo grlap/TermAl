@@ -9,8 +9,8 @@
 // test, and a fallback where it could not, a lost shell found again first;
 // and which sessions the named-root line tells the form up front. Does not
 // own the recognition of a
-// plain test line or the rest of check crediting
-// (src/tests/engram_turn_checks.rs, whose `CheckedTurn` fixture this child
+// plain test line or the ordinary observation lifecycle
+// (src/tests/engram_turn_checks.rs, whose `EOCheckedTurn` fixture this child
 // module uses). New module, split from the one-call tests that would
 // otherwise have grown src/tests/engram_turn_checks.rs.
 use super::*;
@@ -27,7 +27,7 @@ fn grammar_dir() -> &'static str {
 
 /// Runs `command` to the end `exit`, as a shell that reports no directory
 /// (Claude) runs it, waiting for the check's snapshots at its start and end.
-fn run_without_directory(turn: &CheckedTurn, key: &str, command: &str, exit: EngramCommandExit) {
+fn run_without_directory(turn: &EOCheckedTurn, key: &str, command: &str, exit: EngramCommandExit) {
     run_with_output(
         turn,
         key,
@@ -39,7 +39,7 @@ fn run_without_directory(turn: &CheckedTurn, key: &str, command: &str, exit: Eng
 
 /// `run_without_directory` with the command's `output`.
 fn run_with_output(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     key: &str,
     command: &str,
     output: &str,
@@ -58,7 +58,7 @@ fn run_with_output(
 
 /// Starts `command` without ending it, as a shell that reports no directory
 /// runs it, once its opening snapshot is taken.
-fn start_without_directory(turn: &CheckedTurn, key: &str, command: &str) {
+fn start_without_directory(turn: &EOCheckedTurn, key: &str, command: &str) {
     turn.recorder()
         .command_started(key, command)
         .expect("the start should record");
@@ -66,7 +66,7 @@ fn start_without_directory(turn: &CheckedTurn, key: &str, command: &str) {
 }
 
 /// Ends the started `command` with exit 0.
-fn end_command(turn: &CheckedTurn, key: &str, command: &str) {
+fn end_command(turn: &EOCheckedTurn, key: &str, command: &str) {
     turn.recorder()
         .command_completed_with_exit(
             key,
@@ -79,7 +79,7 @@ fn end_command(turn: &CheckedTurn, key: &str, command: &str) {
 }
 
 /// The key and target of each check the turn has kept.
-fn kept_checks(turn: &CheckedTurn) -> Vec<(String, EngramCheckTarget)> {
+fn kept_checks(turn: &EOCheckedTurn) -> Vec<(String, EngramCheckTarget)> {
     turn.record(|record| {
         record
             .engram
@@ -92,7 +92,7 @@ fn kept_checks(turn: &CheckedTurn) -> Vec<(String, EngramCheckTarget)> {
 
 /// The host line waiting for the agent's next prompt, cleared for the next
 /// step of a test.
-fn take_pending_line(turn: &CheckedTurn) -> Option<String> {
+fn take_pending_line(turn: &EOCheckedTurn) -> Option<String> {
     let line = turn.record(|record| record.engram.pending_source_root_line.clone());
     turn.record_mut(|record| record.engram.pending_source_root_line = None);
     line
@@ -142,7 +142,7 @@ fn the_unreadable_path_kinds_reach_their_branches_on_any_host() {
     // form can name only where the host's path allows it, so it asserts
     // nothing here (`PATH_KINDS`).
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("path-kind{kind}"), false);
+        let turn = EOCheckedTurn::start(&format!("path-kind{kind}"), false);
         let (root, readable) = root_as_named(&turn.root);
         match kind {
             "" => {}
@@ -188,7 +188,7 @@ fn new_session_remedy(lead: &str, worktree: &str) -> String {
 }
 
 /// The directory TermAl presumes `turn`'s shell in, as a canonical key.
-fn shell_key(turn: &CheckedTurn) -> Option<String> {
+fn shell_key(turn: &EOCheckedTurn) -> Option<String> {
     turn.record(|record| {
         record
             .engram
@@ -534,7 +534,7 @@ fn a_build_after_another_command_on_its_line_leaves_no_test_near_miss_line() {
     // A runtime that reports its directory ran, in the named root, a line
     // with a build after other commands: no test ran, so the agent is told
     // nothing of a test. A test after another command there is still told.
-    let turn = CheckedTurn::start("embedded-build-no-near-miss", true);
+    let turn = EOCheckedTurn::start("embedded-build-no-near-miss", true);
     let worktree = name_turn_source_root(&turn);
     let (root, _) = root_as_named(&worktree);
     turn.recorder()
@@ -734,7 +734,7 @@ fn a_test_after_a_cd_in_an_earlier_call_gets_no_credit_and_the_agent_is_told_the
     // there: no credit, and it is told so, with the form that counts. Before,
     // it got neither a check nor a word.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("cd-then-test{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("cd-then-test{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
         let workdir = turn.record(|record| record.session.workdir.clone());
@@ -789,7 +789,7 @@ fn a_one_call_line_into_the_named_root_is_credited_there_wherever_the_shell_was(
     // whether or not the shell keeps a `cd`, even one TermAl lost; the shell
     // is presumed in DIR afterwards.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-credit{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-credit{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
         run_without_directory(&turn, "lose", "cd $OTHER", EngramCommandExit::Code(0));
@@ -863,7 +863,7 @@ fn a_one_call_line_writes_where_its_directory_is() {
     // DIR's worktree: the worktrees a command may write in, which overlap
     // marking reads, include it.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-writer{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-writer{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         // The worktrees follow the line's change of directory, whether or
         // not the form can read DIR: into DIR's worktree where TermAl follows
@@ -897,7 +897,7 @@ fn a_one_call_line_writes_where_its_directory_is() {
 #[test]
 fn a_test_in_another_shape_of_line_is_no_check_and_the_agent_is_told_why() {
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("other-shapes{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("other-shapes{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
         let fallback = format!("it from a session whose workdir is in {root}");
@@ -967,7 +967,7 @@ fn a_test_in_another_shape_of_line_is_no_check_and_the_agent_is_told_why() {
 #[test]
 fn a_one_call_line_elsewhere_or_to_a_missing_directory_gets_no_credit() {
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-elsewhere{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-elsewhere{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, root_readable) = root_as_named(&worktree);
         let (main, main_readable) = root_as_named(&turn.root);
@@ -1047,7 +1047,7 @@ fn a_one_call_test_with_an_argument_outside_the_worktree_gets_a_refusal_line() {
     // The command is in the named root, but its manifest argument leads out:
     // no check is kept and the agent is told why the arguments were refused.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-leads-out{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-leads-out{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
         let test_command = "cargo test --manifest-path ../../elsewhere/Cargo.toml";
@@ -1081,7 +1081,7 @@ fn the_remedy_never_names_a_directory_it_would_have_to_guess() {
     // root itself, where it would test something else, or nothing: the
     // directory is left to the agent.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-subdirectory{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-subdirectory{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         fs::create_dir_all(worktree.join("ui")).expect("the subdirectory should exist");
         let (ui, _) = root_as_named(&worktree.join("ui"));
@@ -1132,11 +1132,11 @@ fn without_a_named_root_the_remedy_names_a_directory_in_the_sessions_worktree() 
     // The measured worktree is the session's; its tests run from the workdir
     // inside it (`ui`), which the agent names.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start_with(
+        let turn = EOCheckedTurn::start_in(
             &format!("workdir-remedy{kind}"),
             true,
             Some("ui"),
-            vec![checkpoint_reply(CHECK_GRANT)],
+            false,
         );
         let workdir = turn.record(|record| record.session.workdir.clone());
         let (worktree, readable) = root_as_named(&turn.root);
@@ -1191,11 +1191,11 @@ fn a_session_whose_workdir_is_in_the_root_brings_its_shell_back_with_a_cd() {
         .into_iter()
         .flat_map(|kind| [(kind, false), (kind, true)])
     {
-        let turn = CheckedTurn::start_with(
+        let turn = EOCheckedTurn::start_in(
             &format!("shell-back{kind}"),
             true,
             Some("ui"),
-            vec![checkpoint_reply(CHECK_GRANT)],
+            false,
         );
         let worktree_path = if named {
             // A session working in its named root.
@@ -1300,7 +1300,7 @@ fn a_session_whose_workdir_is_outside_the_named_root_is_told_to_use_one_inside()
     // out on any path), a session whose workdir is outside is told so,
     // whether TermAl followed its `cd` into the root or not.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("outside-root{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("outside-root{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, _) = root_as_named(&worktree);
         run_without_directory(
@@ -1328,11 +1328,11 @@ fn a_runtime_that_reports_its_directory_is_told_to_set_it_where_the_test_runs() 
     // ran after another command, in a shell of its own, is told to run as a
     // line of its own with its working directory there; so run, it counts.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start_with(
+        let turn = EOCheckedTurn::start_in(
             &format!("reported-directory{kind}"),
             true,
             Some("ui"),
-            vec![checkpoint_reply(CHECK_GRANT)],
+            false,
         );
         let workdir = turn.record(|record| record.session.workdir.clone());
         let (worktree, _) = root_as_named(&turn.root);
@@ -1378,11 +1378,11 @@ fn without_a_named_root_a_shell_moved_inside_its_worktree_needs_no_word() {
     // shell that may return to the workdir matters only with a named root.
     // Where TermAl follows no `cd` into the path, the shell is lost instead.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start_with(
+        let turn = EOCheckedTurn::start_in(
             &format!("unnamed-shell-inside{kind}"),
             true,
             Some("ui"),
-            vec![checkpoint_reply(CHECK_GRANT)],
+            false,
         );
         fs::create_dir_all(turn.root.join("crate")).expect("the subdirectory should exist");
         let (inside, _) = root_as_named(&turn.root.join("crate"));
@@ -1447,10 +1447,10 @@ fn a_one_call_check_is_credited_to_its_own_directory_on_any_path() {
     // The crediting does not depend on the form's characters, so it is
     // checked on every kind of test directory.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-any-path{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-any-path{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let named = turn
-            .record(|record| record.engram.active_turn_source_root.clone())
+            .record(|record| record.engram.unadmitted_active_turn.as_ref().and_then(|trace| trace.opening_root.as_ref()).and_then(|opening| opening.source_root.clone()))
             .expect("the turn has a named root");
         let credit_root = Some((FsPath::new(&named.root), named.common_dir_key.as_str()));
         let check = |directory: &FsPath| EngramCheckCommand {
@@ -1478,7 +1478,7 @@ fn a_one_call_test_whose_runner_stated_no_result_is_reported_as_unknown() {
     // Its exit does not say whether the `pushd` or the test failed: nothing
     // in its output shows its runner ran.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-fails{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-fails{kind}"), true);
         let (root, readable) = root_as_named(&turn.root);
         let command = format!("pushd \"{root}\" && cargo test");
         if !readable {
@@ -1493,20 +1493,23 @@ fn a_one_call_test_whose_runner_stated_no_result_is_reported_as_unknown() {
             "The system cannot find the path specified.",
             EngramCommandExit::Code(1),
         );
-        let checkpoint = turn.finish();
-
-        let observations = observations(&checkpoint);
-        assert_eq!(observations[0]["outcome"], "unknown", "{checkpoint:#}");
-        // Nor do its summary and refs pin the exit on the test.
-        let evidence = &checkpoint["verification_evidence"][0];
+        // The diagnostic summary keeps the distinction between a failed
+        // directory change and a failed test; neither becomes verification.
+        let check = turn.record(|record| record.engram.active_turn_checks[0].clone());
+        let end = check.end.as_ref().expect("the command ended");
         assert_eq!(
-            evidence["summary"],
+            engram_check_summary(&check.command, end.exit, &end.result_lines),
             format!(
                 "`{command}` exited 1, which does not say whether its `pushd` or its test failed"
             ),
-            "{checkpoint:#}"
         );
-        assert_eq!(evidence["refs"], serde_json::json!(["command:cargo test"]));
+        assert_eq!(engram_check_refs(&check.command, end.exit, &end.result_lines),
+            ["command:cargo test"]);
+        let request = turn.finish();
+        let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+        assert_eq!(checks.len(), 1, "{request:#}");
+        assert_eq!(checks[0]["observed_result"], "indeterminate", "{request:#}");
+        assert_ordinary_observation_has_no_native_credit(&turn, &request);
     }
 }
 
@@ -1515,7 +1518,7 @@ fn a_one_call_test_whose_runner_stated_its_result_fails_as_its_own() {
     // Its runner ran, so its `pushd` succeeded and the line's exit is the
     // test's: a failure is recorded as one, with its exit.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-runner-failed{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-runner-failed{kind}"), true);
         let (root, readable) = root_as_named(&turn.root);
         let command = format!("pushd \"{root}\" && cargo test");
         if !readable {
@@ -1530,75 +1533,83 @@ fn a_one_call_test_whose_runner_stated_its_result_fails_as_its_own() {
             "running 3 tests\ntest result: FAILED. 2 passed; 1 failed",
             EngramCommandExit::Code(101),
         );
-        let checkpoint = turn.finish();
-
-        let observations = observations(&checkpoint);
-        assert_eq!(observations[0]["outcome"], "failed", "{checkpoint:#}");
-        let evidence = &checkpoint["verification_evidence"][0];
+        let check = turn.record(|record| record.engram.active_turn_checks[0].clone());
+        let end = check.end.as_ref().expect("the command ended");
         assert_eq!(
-            evidence["summary"],
+            engram_check_summary(&check.command, end.exit, &end.result_lines),
             format!("`{command}` exited 101\ntest result: FAILED. 2 passed; 1 failed"),
-            "{checkpoint:#}"
         );
         assert_eq!(
-            evidence["refs"],
-            serde_json::json!(["command:cargo test", "exit:101"])
+            engram_check_refs(&check.command, end.exit, &end.result_lines),
+            ["command:cargo test", "exit:101"]
         );
+        let request = turn.finish();
+        let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+        assert_eq!(checks.len(), 1, "{request:#}");
+        assert_eq!(checks[0]["observed_result"], "failed", "{request:#}");
+        assert_ordinary_observation_has_no_native_credit(&turn, &request);
     }
 }
 
 #[test]
-fn a_one_call_lines_result_lines_reach_its_outcome_and_evidence_on_any_host() {
+fn a_one_call_lines_result_lines_reach_its_ordinary_fact_and_diagnostic_on_any_host() {
     // The two tests above reach a one-call line's end only where the host's
     // temp path is one the form can name. A finished check's record needs no
-    // path, so here the runner's result lines are carried from the check's
-    // end to its outcome, summary and refs on every host.
-    let turn = CheckedTurn::start("one-call-result-lines", true);
+    // path. This unit fixture supplies the recognized command directly, so
+    // it tests the ordinary trace's result and the diagnostic text on every
+    // host, without pretending to execute a command in that grammar path.
     let line = format!("pushd \"{}\" && cargo test", grammar_dir());
-    for (stated, outcome, summary, refs) in [
+    for (output, outcome, summary, refs) in [
         (
-            vec!["test result: FAILED. 2 passed; 1 failed".to_owned()],
-            EngramExecutionOutcome::Failed,
+            "test result: FAILED. 2 passed; 1 failed",
+            EngramObservedCheckResult::Failed,
             format!("`{line}` exited 101\ntest result: FAILED. 2 passed; 1 failed"),
             vec!["command:cargo test", "exit:101"],
         ),
         (
-            Vec::new(),
-            EngramExecutionOutcome::Unknown,
+            "The system cannot find the path specified.",
+            EngramObservedCheckResult::Indeterminate,
             format!(
                 "`{line}` exited 101, which does not say whether its `pushd` or its test failed"
             ),
             vec!["command:cargo test"],
         ),
     ] {
-        let mut check = finished_check(0, engram_ready_basis_capture());
-        check.command = engram_check_command(&line).expect("the one-call form");
-        let end = check.end.as_mut().expect("a finished check");
-        end.exit = EngramCommandExit::Code(101);
-        end.result_lines = stated;
-        let resolved = engram_resolve_turn_checks(
-            &turn.session_id,
-            CHECK_GRANT,
-            vec![check],
-            std::time::Instant::now() + DEADLOCK_GUARD,
-        );
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].outcome, outcome);
-        let (report, _) = turn.record(|record| {
-            engram_turn_report(
-                record,
-                &turn.session_id,
-                CHECK_GRANT,
-                EngramExecutionOutcome::Succeeded,
-                false,
-                None,
-                resolved,
-            )
+        let command = engram_check_command(&line).expect("the one-call form");
+        let result_lines = engram_check_result_lines(&command.program, output);
+        let mut trace = EngramRuntimeObservedTurn::started("one-call-unit".to_owned(), 1);
+        trace.observe_recognized(&EngramRecorderObservation::CommandStarted {
+            key: "one-call", ran: Some(&line), cwd: None,
+        }, Some(&command), None, true);
+        let original = serde_json::to_value(&trace).unwrap();
+        let mut trace: EngramRuntimeObservedTurn = serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&trace).unwrap(), original,
+            "a persisted trace retains the start's interpretation");
+        trace.observe(&EngramRecorderObservation::CommandFinished {
+            key: "one-call", command: "provider tool title", reported_command: None,
+            output, exit: Some(EngramCommandExit::Code(101)), runtime_output_cut: false,
         });
-        assert_eq!(report.observations[0].outcome, outcome);
-        let evidence = &report.verification_evidence[0];
-        assert_eq!(evidence.summary.as_deref(), Some(summary.as_str()));
-        assert_eq!(evidence.refs, refs);
+        assert_eq!(trace.commands.len(), 1);
+        assert_eq!(trace.commands[0].check.observed_result, outcome);
+        assert!(trace.commands[0].check.finished_at.is_some());
+        let wire = serde_json::to_value(&trace.commands[0].check).unwrap();
+        assert!(wire.get("verification_evidence").is_none());
+        assert_eq!(engram_check_summary(&command, EngramCommandExit::Code(101), &result_lines),
+            summary);
+        assert_eq!(engram_check_refs(&command, EngramCommandExit::Code(101), &result_lines), refs);
+
+        // A pre-descriptor trace cannot turn a later title/exit into proof
+        // of the original test's result, even when the output names a runner.
+        let mut legacy_wire = original;
+        legacy_wire["commands"][0].as_object_mut().unwrap().remove("recognized_command");
+        let mut legacy: EngramRuntimeObservedTurn = serde_json::from_value(legacy_wire).unwrap();
+        legacy.observe(&EngramRecorderObservation::CommandFinished {
+            key: "one-call", command: "cargo test", reported_command: Some("cargo test"),
+            output, exit: Some(EngramCommandExit::Code(101)), runtime_output_cut: false,
+        });
+        assert_eq!(legacy.commands[0].check.observed_result,
+            EngramObservedCheckResult::Indeterminate,
+            "a completion must not invent the missing original descriptor");
     }
 }
 
@@ -1783,7 +1794,7 @@ fn a_one_call_line_with_a_git_bash_dir_is_told_to_write_it_as_windows_names_it()
     // and DIR in Windows spelling, which then counts. Elsewhere `/c/…` is a
     // path of its own.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-git-bash{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-git-bash{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
         if !cfg!(windows) {
@@ -1860,7 +1871,7 @@ fn a_one_call_line_with_something_after_its_test_is_told_to_run_the_test_alone()
     let reason = "its line starts as the one-call form, but the form takes only one test after \
                   its `pushd`, alone, with nothing before or after it and no shell of its own.";
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-piped{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-piped{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
         // (key, line, the test its remedy names: `<test>` where TermAl cannot
@@ -1926,7 +1937,7 @@ fn a_runtime_that_reports_its_directory_is_credited_to_a_one_call_lines_director
     // The line names where its test runs, so the directory the runtime
     // reported for it (the main checkout) does not decide.
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-reported-cwd{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-reported-cwd{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
         let (main, _) = root_as_named(&turn.root);
@@ -1977,7 +1988,7 @@ fn a_runtime_that_reports_its_directory_is_credited_to_a_one_call_lines_director
 #[test]
 fn a_repeated_report_of_a_one_call_line_keeps_its_check_until_it_names_another_directory() {
     for kind in PATH_KINDS {
-        let turn = CheckedTurn::start(&format!("one-call-repeated{kind}"), true);
+        let turn = EOCheckedTurn::start(&format!("one-call-repeated{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let (root, readable) = root_as_named(&worktree);
         let (main, _) = root_as_named(&turn.root);
@@ -1995,7 +2006,7 @@ fn a_repeated_report_of_a_one_call_line_keeps_its_check_until_it_names_another_d
             assert!(line.contains(&near_miss_fallback(&root)), "{line}");
             continue;
         }
-        let keys = |turn: &CheckedTurn| {
+        let keys = |turn: &EOCheckedTurn| {
             kept_checks(turn)
                 .into_iter()
                 .map(|(key, _)| key)

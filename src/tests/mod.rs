@@ -959,7 +959,7 @@ pub(crate) fn test_app_state() -> AppState {
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
         review_documents_lock: Arc::new(Mutex::new(())),
         engram_carried_poll_lock: Arc::new(Mutex::new(())),
-        engram_retry_slots: EngramRetrySlots::default(),
+        runtime_retry_slots: RuntimeRetrySlots::default(),
         state_broadcast_senders: StateBroadcastSenders {
             stream_events: broadcast::channel(16).0,
             legacy_state_subscribers: Arc::default(),
@@ -1051,13 +1051,6 @@ impl ScopedEnvVar {
         Self { key, original }
     }
 
-    fn set(key: &'static str, value: &str) -> Self {
-        let original = std::env::var_os(key);
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self { key, original }
-    }
 
     /// Unsets `key` for the scope of the returned guard, saving any
     /// current value so it is restored on drop. Used by tests that assert
@@ -1419,8 +1412,6 @@ fn sample_remote_orchestrator_state(
                 agent_commands_revision: 0,
                 codex_thread_state: None,
                 live_activity: None,
-                engram_boot_recovery_pending: false,
-                engram_control_off: None,
                 status: SessionStatus::Idle,
                 preview: format!("Remote {} ready.", template_session.name),
                 messages: MessageSequence::default(),
@@ -1432,10 +1423,8 @@ fn sample_remote_orchestrator_state(
                 pending_prompts: Vec::new(),
                 prompt_deliveries: Vec::new(),
                 provider_handoffs: Vec::new(),
-                prompt_admission_budgets: BTreeMap::new(),
                 provider_handoff_history: None,
                 queue_paused: false,
-                queue_hold: None,
                 provider_capacity_waiting: false,
                 source_tracking_recovery: false,
                 queue_projection_hash: None,
@@ -1474,7 +1463,6 @@ fn sample_remote_orchestrator_state(
     TestRemoteState {
         sessions,
         state: StateResponse {
-            engram_control_recovery: Vec::new(),
             revision,
             // Tests simulate a remote snapshot; a stable stub id is fine
             // since remote-state sync doesn't consume the field today.
@@ -1562,14 +1550,11 @@ fn test_state_session_summary_from_session(session: &Session) -> StateSessionSum
         agent_commands_revision: session.agent_commands_revision,
         codex_thread_state: session.codex_thread_state,
         live_activity: session.live_activity.clone(),
-        engram_boot_recovery_pending: session.engram_boot_recovery_pending,
-        engram_control_off: session.engram_control_off,
         status: session.status,
         preview: session.preview.clone(),
         message_count: session.message_count,
         markers: session.markers.clone(),
         queue_paused: session.queue_paused,
-        queue_hold: session.queue_hold.clone(),
         provider_capacity_waiting: session.provider_capacity_waiting,
         source_tracking_recovery: session.source_tracking_recovery,
         queue_projection_hash: session.queue_projection_hash.clone(),

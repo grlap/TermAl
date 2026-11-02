@@ -57,20 +57,11 @@ fn live_local_root(
     session: &str,
     task: &AcceptanceEvaluationTask,
 ) -> Option<AcceptanceEvaluationSourceRoot> {
-    let inner = fixture
-        .live
-        .state
-        .inner
-        .lock()
-        .expect("state mutex poisoned");
+    let binding = fixture.claim_binding(session);
+    let inner = fixture.live.state.inner.lock().unwrap();
     let store = acceptance_evaluation_host_target_locked(&inner, session)
         .expect("the host reader is configured")
         .store;
-    let binding = inner.sessions[inner.find_session_index(session).expect("session exists")]
-        .engram
-        .work_binding
-        .clone()
-        .expect("the session is bound to its claim");
     engram_work_source_root_for_claim(
         &inner.engram_work_source_roots,
         &store,
@@ -182,12 +173,8 @@ fn live_sighting_preflight_follows_each_state_of_the_real_producer() {
         .expect("work ref")
         .to_owned();
     fixture.work(&session, &["claim", &work_ref, "--json"]);
-    fixture
-        .live
-        .state
-        .ensure_engram_session_bound_off_lock(&session)
-        .expect("the claim binds")
-        .expect("control is enabled");
+    let binding = fixture.claim_binding(&session);
+    assert_eq!(fixture.canonical_read(&session, &binding).named_root, EngramNamedRootState::None);
 
     // Neither side binds a root: the evaluation may go ahead.
     let unnamed = live_task(&fixture, &session, &work_ref);
@@ -270,6 +257,7 @@ fn live_sighting_preflight_follows_each_state_of_the_real_producer() {
     // A checkpointed turn of the claim sights the root: the evaluation may go.
     fixture.begin(&session, "Look at the named worktree.");
     finish_live_root(&fixture.live.state, &session);
+    fixture.wait_for_reports(&session);
     let sighted = live_task(&fixture, &session, &work_ref);
     let read = live_sighting(&fixture, &session, &sighted, sighted.evidence_basis);
     match &read.root {

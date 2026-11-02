@@ -507,41 +507,25 @@ impl AppState {
         self.finish_mailbox_append_and_notify(sender_session_id, &input.target_session_id, &input, appended)
     }
 
-    /// The disposition of a mailbox wake whose dispatch was held before
-    /// provider hand-off: waiting for the due automatic Engram retry that now
-    /// owns its head, if one does; otherwise `None`, recorded as before.
+    /// A held wake may name an existing provider-capacity recovery, but it
+    /// remains unwoken. Other holds keep the ordinary durable-but-not-woken
+    /// disposition; stored control history never supplies a retry owner.
     fn mailbox_held_wake_disposition(&self, target_session_id: &str) -> Option<&'static str> {
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        inner
-            .find_session_index(target_session_id)
-            .map(|index| &inner.sessions[index])
-            .and_then(mailbox_wake_disposition_behind_automatic_retry)
+        let disposition = self.mailbox_queued_wake_disposition(target_session_id);
+        (disposition == "waitingForProviderCapacity").then_some(disposition)
     }
 
     /// The disposition of a mailbox wake that was queued rather than started:
     /// behind a turn that is running, or held, when no turn runs and the
     /// session's queue is paused (a retained prompt, a Stop, or a failed
-    /// mailbox turn). A held wake waits for that hold to clear, not for a
-    /// turn to end; a hold that a due automatic Engram retry owns clears by
-    /// itself and is named as that retry (`engram_retry_hold.rs`).
+    /// mailbox turn). Provider-capacity recovery keeps its existing distinct
+    /// disposition. Neither stored control history nor acknowledgement
+    /// authorizes a queued wake to pass a pause.
     fn mailbox_queued_wake_disposition(&self, target_session_id: &str) -> &'static str {
         let inner = self.inner.lock().expect("state mutex poisoned");
         if inner.find_session_index(target_session_id).is_some_and(|index|
             inner.sessions[index].provider_capacity_retry.as_ref().is_some_and(|retry| retry.due_at.is_some() || (retry.recovering && !retry.dispatched))) {
             return "waitingForProviderCapacity";
-        }
-        if let Some(disposition) = inner
-            .find_session_index(target_session_id)
-            .map(|index| &inner.sessions[index])
-            .filter(|record| {
-                !matches!(
-                    record.session.status,
-                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-                )
-            })
-            .and_then(mailbox_wake_disposition_behind_automatic_retry)
-        {
-            return disposition;
         }
         let held = inner
             .find_session_index(target_session_id)
@@ -813,7 +797,7 @@ impl AppState {
             // A retained request is immutable, but it still covers its original
             // boundary. Recovery of that same wake must not append a duplicate.
             if record.queued_prompts.iter().any(|queued| {
-                queued.is_engram_retained()
+                queued.has_stored_history()
                     && queued
                         .pending_prompt
                         .source
@@ -830,7 +814,7 @@ impl AppState {
             // content proven durable; it is never rewritten as a wake.
             let durability_holds = &record.queued_prompt_durability_holds;
             if let Some(existing_index) = record.queued_prompts.iter().position(|queued| {
-                !queued.is_engram_retained()
+                !queued.has_stored_history()
                     && !durability_holds.contains_key(&queued.pending_prompt.id)
                     && queued
                         .pending_prompt
@@ -868,7 +852,7 @@ impl AppState {
                     && !record
                         .queued_prompts
                         .front()
-                        .is_some_and(QueuedPromptRecord::is_engram_retained)
+                        .is_some_and(QueuedPromptRecord::has_stored_history)
                     && !queued_head_held_for_durability(record)
                 {
                     record.queued_prompts.push_front(existing);
@@ -887,7 +871,7 @@ impl AppState {
                 record
                     .queued_prompts
                     .front()
-                    .is_some_and(QueuedPromptRecord::is_engram_retained)
+                    .is_some_and(QueuedPromptRecord::has_stored_history)
                     || queued_head_held_for_durability(record),
             );
             record.queued_prompts.insert(
@@ -1001,7 +985,7 @@ impl AppState {
                     let record = &inner.sessions[index];
                     dispatch_queue_position(&inner, index)
                         .and_then(|position| record.queued_prompts.get(position)).filter(|queued| {
-                        !queued.is_engram_retained()
+                        !queued.has_stored_history()
                             && !queued_prompt_kept_standalone(record, queued)
                     })
                 })
@@ -1083,7 +1067,7 @@ impl AppState {
         // The same holds for an entry that took a durability hold meanwhile.
         if position.and_then(|position| inner.sessions[index].queued_prompts.get(position))
             .is_some_and(|queued| {
-                queued.is_engram_retained()
+                queued.has_stored_history()
                     || queued_prompt_kept_standalone(&inner.sessions[index], queued)
             })
         {
@@ -1895,18 +1879,22 @@ impl MailboxStore {
         mailbox_message_for_idempotency_key(&connection, sender_session_id, idempotency_key)
     }
 
+    #[cfg(test)]
     fn append(&self, input: &MailboxAppendInput) -> Result<MailboxAppendResult> {
         self.append_authorized(input, || Ok(()))
     }
 
+    #[cfg(test)]
     fn append_authorized<G>(&self, input: &MailboxAppendInput, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
         self.append_with_delivery(input, None, authorize)
     }
 
+    #[cfg(test)]
     fn append_with_delivery<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
         self.append_with_delivery_and_relay(input, delivery, None, authorize)
     }
 
+    #[cfg(test)]
     fn append_with_delivery_and_relay<G>(&self, input: &MailboxAppendInput, delivery: Option<&FederationDelivery>, relay: Option<(&MailboxRelayAppend, &FederationPeerSnapshot)>, authorize: impl FnOnce() -> Result<G>) -> Result<MailboxAppendResult> {
         self.append_with_delivery_policy(input, delivery, relay, authorize, |_, _| Ok(()))
     }
@@ -2186,7 +2174,7 @@ impl MailboxStore {
     /// Records the receipt's immutable `dispatch_outcome` only, leaving the
     /// row's wake lifecycle state `durableButNotWoken`, so the never-woken
     /// recovery still covers it: a wake held before hand-off is not woken,
-    /// whatever its receipt names as the reason (`engram_retry_hold.rs`).
+    /// whatever its receipt names as the hold's reason.
     fn record_held_dispatch_outcome(
         &self,
         message_id: &str,

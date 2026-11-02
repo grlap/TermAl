@@ -1,18 +1,7 @@
-// Owns the end-to-end regressions for the host's guard on Claude file writes
-// into a worktree whose credited full gate has not settled: a Write, Edit,
-// MultiEdit or NotebookEdit request whose target lies there is denied at the
-// permission decision, before anything is written, whoever sends it (another
-// session, the gate's own holder, a subagent), through a relative or linked
-// path too; a delayed approval, for the session too, is checked again before
-// it is allowed; the denied request fences nothing, so the gate keeps its
-// credit; a target the watcher would not route to the gate's worktree, and a
-// gate that can no longer be credited, are left to the ordinary policy, while
-// a run read as ended stays protected, its denial naming what releases it
-// (its holder's next checkpoint, or a refocus on its launch claim, or its
-// expiry); and with no gate there the ordinary policy answers. Does not own the watcher, edit and
-// command fences (the parent module), or Bash commands, which the guard does
-// not parse. New module, a child of src/tests/engram_carried_checks.rs,
-// whose gate fixtures it uses.
+// Real Claude permission frames obey the ordinary policy independently of
+// carried artifacts. Permission responses are not tool execution: Ask still
+// pauses, explicit rejection still denies, and acceptance keeps request
+// identity/input and the session-mode contract without gating verification.
 use super::*;
 
 /// A Claude runtime reading frames for one session, through the production
@@ -107,23 +96,12 @@ fn assert_allowed(decision: &ClaudePermissionDecision, why: &str) {
     }
 }
 
-/// Asserts `decision` denies `request_id` because a credited full gate runs
-/// in the target's worktree, and the denial says so.
-fn assert_denied_for_gate(decision: &ClaudePermissionDecision, request_id: &str) {
+/// Inspect the real response's correlation, not a gate-shaped denial.
+fn assert_allowed_request(decision: &ClaudePermissionDecision, expected_id: &str) {
     match decision {
-        ClaudePermissionDecision::Deny {
-            request_id: denied,
-            message,
-        } => {
-            assert_eq!(denied, request_id);
-            assert!(
-                message.contains("full gate"),
-                "the denial names the gate it protects: {message}"
-            );
-        }
-        ClaudePermissionDecision::Allow { .. } => {
-            panic!("{request_id}: the write is denied, not allowed")
-        }
+        ClaudePermissionDecision::Allow { request_id, .. } => assert_eq!(request_id, expected_id),
+        ClaudePermissionDecision::Deny { message, .. } =>
+            panic!("{expected_id}: ordinary policy unexpectedly denied: {message}"),
     }
 }
 
@@ -156,23 +134,23 @@ fn file_writes(target: &FsPath) -> Vec<(&'static str, &'static str, Value)> {
 }
 
 /// A Claude session of `turn`'s project working in `directory`.
-fn claude_session_in(turn: &CheckedTurn, directory: &FsPath) -> String {
+fn claude_session_in(turn: &EOCheckedTurn, directory: &FsPath) -> String {
     let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
     create_test_project_session(&turn.state, Agent::Claude, &project_id, directory)
 }
 
 #[test]
-fn another_sessions_file_writes_into_a_running_gate_are_denied_and_it_keeps_its_credit() {
-    let (turn, worktree) = named_turn("guard-other-session");
+fn another_sessions_file_permissions_are_ordinary_and_do_not_execute_writes() {
+    let (turn, worktree) = ordinary_carried_turn("guard-other-session");
     let elsewhere = sibling_worktree(&turn, "guard-other-session-elsewhere");
     let writer = claude_session_in(&turn, &elsewhere);
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::AutoApprove);
     let target = worktree.join("README.md");
     let before = fs::read(&target).expect("the tracked file exists");
     for (id, tool, input) in file_writes(&target) {
         requester.request(id, tool, input, None);
-        assert_denied_for_gate(&requester.answer(), id);
+        assert_allowed_request(&requester.answer(), id);
     }
     assert_eq!(fs::read(&target).unwrap(), before, "nothing was written");
     assert!(
@@ -180,70 +158,73 @@ fn another_sessions_file_writes_into_a_running_gate_are_denied_and_it_keeps_its_
         "no notebook was created"
     );
     assert_eq!(
-        carried_fence(&turn),
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
         None,
-        "a denied request fences nothing"
+        "a permission response is not a tool write"
     );
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]
-fn the_gate_holders_own_file_write_into_its_running_gate_is_denied() {
-    let (turn, worktree) = named_turn("guard-holder");
-    launch_gate(&turn, &worktree, false);
+fn the_artifact_holders_own_permission_uses_ordinary_policy() {
+    let (turn, worktree) = ordinary_carried_turn("guard-holder");
+    ordinary_launch_gate(&turn, &worktree, false);
     let mut requester = Requester::on(
         &turn.state,
         &turn.session_id,
         ClaudeApprovalMode::AutoApprove,
     );
     let target = worktree.join("README.md");
+    let before = fs::read(&target).unwrap();
     requester.request(
         "holder-edit",
         "Edit",
         file_writes(&target)[1].2.clone(),
         None,
     );
-    assert_denied_for_gate(&requester.answer(), "holder-edit");
+    assert_allowed_request(&requester.answer(), "holder-edit");
     assert_eq!(
-        carried_fence(&turn),
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
         None,
-        "a denied request fences nothing"
+        "a permission response is not a tool write"
     );
+    assert_eq!(fs::read(&target).unwrap(), before);
+    assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
 #[test]
-fn a_subagents_file_write_into_a_running_gate_is_denied_and_it_keeps_its_credit() {
-    let (turn, worktree) = named_turn("guard-subagent");
+fn a_subagents_file_permission_is_ordinary_and_preserves_artifact_custody() {
+    let (turn, worktree) = ordinary_carried_turn("guard-subagent");
     let elsewhere = sibling_worktree(&turn, "guard-subagent-elsewhere");
     let writer = claude_session_in(&turn, &elsewhere);
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::AutoApprove);
     let target = worktree.join("README.md");
+    let before = fs::read(&target).unwrap();
     requester.request(
         "subagent-write",
         "Write",
         file_writes(&target)[0].2.clone(),
         Some("toolu-task"),
     );
-    assert_denied_for_gate(&requester.answer(), "subagent-write");
+    assert_allowed_request(&requester.answer(), "subagent-write");
     assert_eq!(
-        carried_fence(&turn),
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
         None,
-        "a denied request fences nothing"
+        "a permission response is not a tool write"
     );
+    assert_eq!(fs::read(&target).unwrap(), before);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]
-fn a_relative_or_linked_target_inside_a_running_gate_is_denied() {
+fn relative_new_and_linked_targets_use_ordinary_permission_policy() {
     // Relative to the requesting tool's directory, which is the worktree.
-    let (turn, worktree) = named_turn("guard-relative");
+    let (turn, worktree) = ordinary_carried_turn("guard-relative");
     let inside = claude_session_in(&turn, &worktree);
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     let mut requester = Requester::on(&turn.state, &inside, ClaudeApprovalMode::AutoApprove);
     requester.request(
         "relative-edit",
@@ -251,7 +232,7 @@ fn a_relative_or_linked_target_inside_a_running_gate_is_denied() {
         json!({"file_path": "README.md", "old_string": "checked", "new_string": "changed"}),
         None,
     );
-    assert_denied_for_gate(&requester.answer(), "relative-edit");
+    assert_allowed_request(&requester.answer(), "relative-edit");
     // A file not created yet, under a directory not created yet.
     requester.request(
         "new-file",
@@ -259,15 +240,15 @@ fn a_relative_or_linked_target_inside_a_running_gate_is_denied() {
         json!({"file_path": worktree.join("src").join("new").join("file.rs"), "content": "x"}),
         None,
     );
-    assert_denied_for_gate(&requester.answer(), "new-file");
+    assert_allowed_request(&requester.answer(), "new-file");
 
     // Through a link to the worktree from outside it.
-    let (turn, worktree) = named_turn("guard-linked");
+    let (turn, worktree) = ordinary_carried_turn("guard-linked");
     let elsewhere = sibling_worktree(&turn, "guard-linked-elsewhere");
     let link = elsewhere.join("gate-link");
     link_directory(&link, &worktree);
     let writer = claude_session_in(&turn, &elsewhere);
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::AutoApprove);
     requester.request(
         "linked-write",
@@ -275,29 +256,30 @@ fn a_relative_or_linked_target_inside_a_running_gate_is_denied() {
         json!({"file_path": link.join("README.md"), "content": "changed\n"}),
         None,
     );
-    assert_denied_for_gate(&requester.answer(), "linked-write");
+    assert_allowed_request(&requester.answer(), "linked-write");
     assert_eq!(
-        carried_fence(&turn),
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
         None,
-        "a denied request fences nothing"
+        "a permission response is not a tool write"
     );
 }
 
 #[test]
-fn an_approval_given_after_the_gate_started_is_checked_again_and_denied() {
-    let (turn, worktree) = named_turn("guard-delayed");
+fn ask_acceptance_and_rejection_are_not_overridden_by_a_carried_artifact() {
+    let (turn, worktree) = ordinary_carried_turn("guard-delayed");
     let elsewhere = sibling_worktree(&turn, "guard-delayed-elsewhere");
     let writer = claude_session_in(&turn, &elsewhere);
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::Ask);
     let target = worktree.join("README.md");
-    // Asked before the gate starts: no gate protects the worktree yet, so the
-    // request waits for the user, as every Ask request does.
+    // Ask waits for a real user decision, before and after an artifact starts.
     requester.request(
         "delayed-edit",
         "Edit",
         file_writes(&target)[1].2.clone(),
         None,
     );
+    let (answers, modes) = requester.received();
+    assert!(answers.is_empty() && modes.is_empty(), "Ask has not authorized anything");
     let message_id = {
         let inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&writer).unwrap();
@@ -308,21 +290,41 @@ fn an_approval_given_after_the_gate_started_is_checked_again_and_denied() {
             .cloned()
             .expect("the request waits for the user")
     };
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     turn.state
         .update_approval(&writer, &message_id, ApprovalDecision::Accepted)
         .expect("the approval is delivered");
-    assert_denied_for_gate(&requester.answer(), "delayed-edit");
+    let (answers, modes) = requester.received();
+    assert_eq!(answers.len(), 1);
+    assert!(modes.is_empty(), "one acceptance does not change the session mode");
+    assert_allowed_request(&answers[0], "delayed-edit");
     assert_eq!(
-        carried_fence(&turn),
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
         None,
-        "a denied request fences nothing"
+        "a permission response is not a tool write"
     );
+    requester.request("rejected-edit", "Edit", file_writes(&target)[1].2.clone(), None);
+    let (answers, modes) = requester.received();
+    assert!(answers.is_empty() && modes.is_empty());
+    let rejected_id = {
+        let inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&writer).unwrap();
+        inner.sessions[index].pending_claude_approvals.keys().next().unwrap().clone()
+    };
+    turn.state.update_approval(&writer, &rejected_id, ApprovalDecision::Rejected).unwrap();
+    match requester.answer() {
+        ClaudePermissionDecision::Deny { request_id, message } => {
+            assert_eq!(request_id, "rejected-edit");
+            assert_eq!(message, "User rejected this action in TermAl.");
+        }
+        ClaudePermissionDecision::Allow { .. } => panic!("explicit rejection must deny"),
+    }
+    assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
 #[test]
-fn an_approval_for_the_session_after_the_gate_started_is_denied_and_changes_no_mode() {
-    let (turn, worktree) = named_turn("guard-delayed-session");
+fn accepted_for_session_delivers_its_offered_mode_despite_a_carried_artifact() {
+    let (turn, worktree) = ordinary_carried_turn("guard-delayed-session");
     let elsewhere = sibling_worktree(&turn, "guard-delayed-session-elsewhere");
     let writer = claude_session_in(&turn, &elsewhere);
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::Ask);
@@ -334,6 +336,8 @@ fn an_approval_for_the_session_after_the_gate_started_is_denied_and_changes_no_m
         &json!({"type": "control_request", "request_id": "session-edit",
         "request": request}),
     );
+    let (answers, modes) = requester.received();
+    assert!(answers.is_empty() && modes.is_empty(), "Ask waits for the session decision");
     let message_id = {
         let inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&writer).unwrap();
@@ -349,25 +353,23 @@ fn an_approval_for_the_session_after_the_gate_started_is_denied_and_changes_no_m
         );
         message_id.clone()
     };
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     turn.state
         .update_approval(&writer, &message_id, ApprovalDecision::AcceptedForSession)
         .expect("the approval is delivered");
     let (answers, modes) = requester.received();
     assert_eq!(answers.len(), 1, "one answer");
-    assert_denied_for_gate(&answers[0], "session-edit");
-    assert!(
-        modes.is_empty(),
-        "a denied approval changes no mode: {modes:?}"
-    );
+    assert_allowed_request(&answers[0], "session-edit");
+    assert_eq!(modes, vec!["acceptEdits".to_owned()],
+        "AcceptedForSession delivers the offered ordinary session mode");
+    assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
 #[test]
-fn a_delayed_approval_resolves_a_relative_target_where_the_request_arrived() {
-    // The later check resolves a relative target against the runtime's own
-    // directory, kept with the request, not against the session's directory
-    // read at approval time, which may name another place by then.
-    let (turn, worktree) = named_turn("guard-delayed-relative");
+fn a_delayed_approval_preserves_relative_input_after_the_session_moves() {
+    // Ordinary approval preserves the runtime's original request/input.
+    // Moving the session's displayed directory does not rewrite that input.
+    let (turn, worktree) = ordinary_carried_turn("guard-delayed-relative");
     let elsewhere = sibling_worktree(&turn, "guard-delayed-relative-elsewhere");
     let writer = claude_session_in(&turn, &worktree);
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::Ask);
@@ -390,21 +392,30 @@ fn a_delayed_approval_resolves_a_relative_target_where_the_request_arrived() {
             .cloned()
             .expect("the request waits for the user")
     };
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     turn.state
         .update_approval(&writer, &message_id, ApprovalDecision::Accepted)
         .expect("the approval is delivered");
-    assert_denied_for_gate(&requester.answer(), "delayed-relative");
+    match requester.answer() {
+        ClaudePermissionDecision::Allow { request_id, updated_input } => {
+            assert_eq!(request_id, "delayed-relative");
+            assert_eq!(updated_input, json!({
+                "file_path": "README.md", "old_string": "checked", "new_string": "changed"}));
+        }
+        ClaudePermissionDecision::Deny { message, .. } => panic!("{message}"),
+    }
+    assert_eq!(requester.context.cwd, worktree.to_string_lossy());
+    assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
 #[test]
-fn a_write_the_watcher_would_not_route_to_the_gates_worktree_is_not_denied() {
-    let (turn, worktree) = named_turn("guard-elsewhere-in-tree");
+fn ordinary_permissions_cover_nested_beside_scratch_ignored_and_tracked_targets() {
+    let (turn, worktree) = ordinary_carried_turn("guard-elsewhere-in-tree");
     // A plain directory beside the worktree whose name shares its prefix.
     let beside = worktree.with_file_name("wt-beside");
     fs::create_dir_all(&beside).expect("the directory beside exists");
     let writer = claude_session_in(&turn, &worktree);
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     // A repository of its own nested in the gate's worktree, made after the
     // launch: one there before it leaves the launch snapshot without a basis.
     let nested = worktree.join("nested");
@@ -441,145 +452,82 @@ fn a_write_the_watcher_would_not_route_to_the_gates_worktree_is_not_denied() {
         );
         assert_allowed(&requester.answer(), why);
     }
-    // A tracked file of the gate's worktree, from the same session, still is.
+    // The tracked-file control obeys the same ordinary policy.
     requester.request(
         "tracked",
         "Edit",
         file_writes(&worktree.join("README.md"))[1].2.clone(),
         None,
     );
-    assert_denied_for_gate(&requester.answer(), "tracked");
+    assert_allowed_request(&requester.answer(), "tracked");
+    assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
 #[test]
-fn a_gate_that_can_no_longer_be_credited_protects_nothing_and_an_ended_one_still_does() {
+fn carried_artifact_states_do_not_override_ordinary_permission_policy() {
     let expired = (chrono::Utc::now()
         - chrono::Duration::seconds(ENGRAM_CARRIED_CHECK_TTL_SECONDS + 60))
-    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let cases: Vec<(&str, Box<dyn Fn(&mut EngramCarriedCheck)>, bool)> = vec![
-        (
-            "fenced",
-            Box::new(|carried| carried.fence = Some("an earlier write".to_owned())),
-            false,
-        ),
-        (
-            "by-report",
-            Box::new(|carried| carried.ends_by_report = true),
-            false,
-        ),
-        (
-            "expired",
-            Box::new(move |carried| carried.check.started_at = expired.clone()),
-            false,
-        ),
-        (
-            "launcher-gone",
-            Box::new(|carried| carried.launcher_gone = true),
-            false,
-        ),
-        (
-            "ambiguous",
-            Box::new(|carried| carried.ambiguous = true),
-            false,
-        ),
-        (
-            "conflict",
-            Box::new(|carried| {
-                carried.terminal_digest = Some("a".repeat(64));
-                carried.terminal_conflict = true;
-            }),
-            false,
-        ),
-        // Read as ended, not settled: a change the watcher reports now could
-        // still have landed while it ran.
-        (
-            "ended",
-            Box::new(|carried| carried.terminal_digest = Some("a".repeat(64))),
-            true,
-        ),
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let cases: Vec<(&str, Box<dyn Fn(&mut EngramCarriedCheck)>)> = vec![
+        ("fenced", Box::new(|carried| carried.fence = Some("an earlier write".to_owned()))),
+        ("by-report", Box::new(|carried| carried.ends_by_report = true)),
+        ("expired", Box::new(move |carried| carried.check.started_at = expired.clone())),
+        ("launcher-gone", Box::new(|carried| carried.launcher_gone = true)),
+        ("ambiguous", Box::new(|carried| carried.ambiguous = true)),
+        ("conflict", Box::new(|carried| {
+            carried.terminal_digest = Some("a".repeat(64));
+            carried.terminal_conflict = true;
+        })),
+        ("ended", Box::new(|carried| carried.terminal_digest = Some("a".repeat(64)))),
     ];
-    for (label, change, protected) in cases {
-        let (turn, worktree) = named_turn(&format!("guard-state-{label}"));
-        let elsewhere = sibling_worktree(&turn, &format!("guard-state-{label}-elsewhere"));
+    for (label, change) in cases {
+        let (turn, worktree) = ordinary_carried_turn(&format!("ordinary-policy-state-{label}"));
+        let elsewhere = sibling_worktree(&turn, &format!("ordinary-policy-state-{label}-elsewhere"));
         let writer = claude_session_in(&turn, &elsewhere);
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         turn.record_mut(|record| change(&mut record.engram.carried_checks[0]));
+        let before = fs::read(worktree.join("README.md")).unwrap();
         let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::AutoApprove);
-        requester.request(
-            label,
-            "Edit",
-            file_writes(&worktree.join("README.md"))[1].2.clone(),
-            None,
-        );
-        if protected {
-            assert_denied_for_gate(&requester.answer(), label);
-        } else {
-            assert_allowed(&requester.answer(), label);
-        }
+        requester.request(label, "Edit", file_writes(&worktree.join("README.md"))[1].2.clone(), None);
+        assert_allowed_request(&requester.answer(), label);
+        assert_eq!(fs::read(worktree.join("README.md")).unwrap(), before,
+            "permission delivery does not execute the tool");
+        assert_ordinary_turn_has_no_native_requests(&turn);
     }
 }
 
 #[test]
-fn an_ended_gate_whose_holder_moved_its_focus_names_the_release_it_waits_for() {
-    // Read as ended and not settled: only a checkpoint on its launch claim
-    // settles it, so the denial says when the protection ends.
-    let (turn, worktree) = named_turn("guard-ended-release");
-    let elsewhere = sibling_worktree(&turn, "guard-ended-release-elsewhere");
+fn an_ended_artifact_and_a_changed_focus_do_not_create_a_permission_release_gate() {
+    let (turn, worktree) = ordinary_carried_turn("ordinary-policy-ended-focus");
+    let elsewhere = sibling_worktree(&turn, "ordinary-policy-ended-focus-elsewhere");
     let writer = claude_session_in(&turn, &elsewhere);
-    launch_gate(&turn, &worktree, false);
-    turn.record_mut(|record| {
-        record.engram.carried_checks[0].terminal_digest = Some("a".repeat(64));
-    });
+    ordinary_launch_gate(&turn, &worktree, false);
+    let digest = "a".repeat(64);
+    turn.record_mut(|record| record.engram.carried_checks[0].terminal_digest = Some(digest.clone()));
+    let before = fs::read(worktree.join("README.md")).unwrap();
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::AutoApprove);
     let edit = file_writes(&worktree.join("README.md"))[1].2.clone();
-    let denial = |decision: ClaudePermissionDecision, id: &str| {
-        assert_denied_for_gate(&decision, id);
-        match decision {
-            ClaudePermissionDecision::Deny { message, .. } => message,
-            ClaudePermissionDecision::Allow { .. } => unreachable!(),
-        }
-    };
-
-    // Its holder is still focused on the launch claim: its next checkpoint
-    // settles it.
     requester.request("still-focused", "Edit", edit.clone(), None);
-    let message = denial(requester.answer(), "still-focused");
-    assert!(
-        message.contains(&turn.session_id)
-            && message.contains("next checkpoint")
-            && message.contains("expires at "),
-        "the denial names the holder, its next checkpoint and the expiry: {message}"
-    );
-
-    // Its holder's focus moved to another claim: its next checkpoint settles
-    // nothing, and the denial says what does.
+    assert_allowed_request(&requester.answer(), "still-focused");
     turn.record_mut(|record| {
-        let binding = record
-            .engram
-            .work_binding
-            .as_mut()
-            .expect("the holder holds a claim");
-        binding.claim_id = "another-claim".to_owned();
+        record.engram.work_binding.as_mut().expect("the ordinary holder has a claim")
+            .claim_id = "another-claim".to_owned();
     });
     requester.request("moved-focus", "Edit", edit, None);
-    let message = denial(requester.answer(), "moved-focus");
-    assert!(
-        message.contains(&turn.session_id)
-            && message.contains("not focused on the claim that launched it")
-            && message.contains("expires at ")
-            && !message.contains("next checkpoint"),
-        "the denial names the refocus or the expiry as the release: {message}"
-    );
-    assert_eq!(
-        carried_fence(&turn),
-        None,
-        "a denied request fences nothing"
-    );
+    assert_allowed_request(&requester.answer(), "moved-focus");
+    turn.record(|record| {
+        let carried = &record.engram.carried_checks[0];
+        assert!(carried.fence.is_none());
+        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
+        assert!(record.engram.carried_consumed_runs.is_empty());
+    });
+    assert_eq!(fs::read(worktree.join("README.md")).unwrap(), before);
+    assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
 #[test]
 fn with_no_gate_running_the_ordinary_policy_answers() {
-    let (turn, worktree) = named_turn("guard-no-gate");
+    let (turn, worktree) = ordinary_carried_turn("guard-no-gate");
     let elsewhere = sibling_worktree(&turn, "guard-no-gate-elsewhere");
     let writer = claude_session_in(&turn, &elsewhere);
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::AutoApprove);
@@ -591,6 +539,7 @@ fn with_no_gate_running_the_ordinary_policy_answers() {
     );
     assert!(
         matches!(requester.answer(), ClaudePermissionDecision::Allow { .. }),
-        "auto-approve allows a write no gate protects"
+        "the real ordinary auto-approve policy allows the request"
     );
+    assert_ordinary_turn_has_no_native_requests(&turn);
 }

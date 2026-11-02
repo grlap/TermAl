@@ -706,9 +706,8 @@ fn acceptance_settings_defaults_validate_server_side() {
 #[test]
 fn acceptance_settings_connection_edit_preserves_omitted_evaluator_defaults() {
     let (state, project, _, root) = fixture();
-    // The settings edit below binds through Engram's targets, so the test
-    // chooses the one scripted budget clock before the store is enabled.
-    super::engram_host_adapter::select_scripted_engram_budget_clock_before_enable(&state);
+    // Store edits share the state's chosen clock with the fixture transport.
+    state.select_test_scripted_engram_budget_clock();
     install_store(&state, &project, &root);
     let defaults = AcceptanceEvaluatorDefaults {
         evaluator_agent: Some(Agent::Claude),
@@ -961,7 +960,9 @@ fn acceptance_settings_real_receipt_contract_rejects_only_unknown_replaceable_di
     let minimal = parse_acceptance_policy(without_metadata, "reader".into()).unwrap();
     assert!(minimal.available);
     assert!(minimal.epoch.is_none());
-    assert!(minimal.required_assurance.is_none());
+    let minimal = serde_json::to_value(minimal).unwrap();
+    assert!(minimal.get("requiredAssurance").is_none());
+    assert!(minimal.get("required_assurance").is_none());
     let mut future = real;
     future["acceptance_evaluation"]["future_dimension"] = json!(true);
     assert_eq!(

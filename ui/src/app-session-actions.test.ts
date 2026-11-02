@@ -1067,109 +1067,149 @@ describe("useAppSessionActions", () => {
     expect(prompt).toEqual({ id: "legacy-head", timestamp: "2026-11-01T00:00:00Z", text: "original input" });
   });
 
-  it("uses ordinary Resume at OFF and preserves the exact-head choice at ON", async () => {
-    for (const { gated, optimistic, ordinaryOff, enabled = true } of [
-      { gated: false, optimistic: false, ordinaryOff: true },
-      { gated: false, optimistic: true, ordinaryOff: true },
-      { gated: true, optimistic: false, ordinaryOff: false },
-      // Disabled integration and the global kill switch keep the ordinary
-      // pre-adapter policy, rather than the Base/OFF history-skipping lane.
-      { gated: true, optimistic: false, ordinaryOff: false, enabled: false },
-      { gated: false, optimistic: false, ordinaryOff: false, enabled: false },
-    ]) {
-      const prompt = { id: "unknown-original", timestamp: "2026-11-01T00:00:00Z",
-        text: "unknown provider attempt", engramInterrupted: true, isEngramRetained: true,
-        ...(optimistic ? { localOnly: true } : {}),
-      };
-      const successor = { id: "ordinary-successor", timestamp: "2026-11-01T00:00:01Z",
-        text: "known ordinary successor" };
-      const params = makeSessionActionsParams();
-      const session = makeSession("session-1", { projectId: "project-1",
-        engramControlOff: ordinaryOff,
-        pendingPrompts: [prompt, successor], sessionMutationStamp: 42, queuePaused: true });
-      params.refs.sessionsRef.current = [session];
-      const snapshot = params.refs.actionStateClassifierContextRef.current.getSnapshot;
-      params.refs.actionStateClassifierContextRef.current.getSnapshot = () => ({
-        ...snapshot(), projects: [{ id: "project-1", name: "Project", rootPath: "/repo",
-          engram: { enabled, turnGatedControl: gated } }],
-      });
-      const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue({
-        ...makeStateResponse(6), sessions: [{ ...session, queuePaused: false }],
-      });
-      const tail = vi.spyOn(api, "fetchSessionTail").mockRejectedValue(
-        new Error("ordinary OFF Resume must not depend on selecting a projected head"),
-      );
-      await useAppSessionActions(params).handleResumeSessionQueue("session-1");
-      expect(resume).toHaveBeenCalledTimes(1);
-      if (!ordinaryOff) {
-        expect(resume).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
-      } else {
+  it("uses ordinary Resume for historical heads across observation settings", async () => {
+    for (const integration of [undefined, { enabled: false },
+      { enabled: true, executionObservability: false },
+      { enabled: true, executionObservability: true }]) {
+      for (const optimistic of [false, true]) {
+        const prompt = { id: "unknown-original", timestamp: "2026-11-01T00:00:00Z",
+          text: "unknown provider attempt", engramInterrupted: true, isEngramRetained: true,
+          ...(optimistic ? { localOnly: true } : {}),
+        };
+        const successor = { id: "ordinary-successor", timestamp: "2026-11-01T00:00:01Z",
+          text: "known ordinary successor" };
+        const params = makeSessionActionsParams();
+        const session = makeSession("session-1", { projectId: "project-1",
+          pendingPrompts: [prompt, successor], sessionMutationStamp: 42, queuePaused: true });
+        const before = structuredClone(session.pendingPrompts);
+        params.refs.sessionsRef.current = [session];
+        const snapshot = params.refs.actionStateClassifierContextRef.current.getSnapshot;
+        params.refs.actionStateClassifierContextRef.current.getSnapshot = () => ({
+          ...snapshot(), projects: [{ id: "project-1", name: "Project", rootPath: "/repo",
+            ...(integration ? { engram: integration } : {}) }],
+        });
+        const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue({
+          ...makeStateResponse(6), sessions: [{ ...session, queuePaused: false }],
+        });
+        const tail = vi.spyOn(api, "fetchSessionTail").mockRejectedValue(
+          new Error("ordinary Resume must not select a historical projected head"),
+        );
+        await useAppSessionActions(params).handleResumeSessionQueue("session-1");
+        expect(resume).toHaveBeenCalledTimes(1);
         expect(resume).toHaveBeenCalledWith("session-1");
+        expect(tail).not.toHaveBeenCalled();
+        expect(session.pendingPrompts).toEqual(before);
+        expect(params.adoptState).toHaveBeenCalledWith(expect.objectContaining({ revision: 6 }), undefined);
+        vi.restoreAllMocks();
       }
-      expect(tail).not.toHaveBeenCalled();
-      expect(prompt.text).toBe("unknown provider attempt");
-      expect(successor.text).toBe("known ordinary successor");
-      vi.restoreAllMocks();
     }
   });
 
-  it("uses executing-session OFF applicability and keeps unknown remote selection", async () => {
-    for (const kind of ["remote-unknown", "remote-off", "inherited-off"]) {
-      const prompt = { id: "legacy-owner", timestamp: "10:00", text: "original input" };
-      const params = makeSessionActionsParams();
-      params.refs.sessionsRef.current = [makeSession("session-1", {
-        projectId: kind === "inherited-off" ? undefined : "remote-project",
-        remoteId: kind.startsWith("remote") ? "remote-owner" : undefined,
-        pendingPrompts: [prompt], sessionMutationStamp: 42,
-        ...(kind.endsWith("off") ? { engramControlOff: true } : {}),
-      })];
-      const snapshot = params.refs.actionStateClassifierContextRef.current.getSnapshot;
-      params.refs.actionStateClassifierContextRef.current.getSnapshot = () => ({
-        ...snapshot(), projects: [{ id: "remote-project", name: "Remote", rootPath: "/repo",
-          remoteId: "remote-owner" }],
-      });
-      const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue(makeStateResponse(6));
-      await useAppSessionActions(params).handleResumeSessionQueue("session-1");
-      expect(resume).toHaveBeenCalledTimes(1);
-      if (kind === "remote-unknown") {
-        expect(resume).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
-      } else {
-        expect(resume).toHaveBeenCalledWith("session-1");
+  it("keeps ordinary Resume and exact plain-head selection independent of project ownership", async () => {
+    for (const kind of ["local", "remote", "inherited"]) {
+      for (const historical of [false, true]) {
+        const prompt = { id: "original-head", timestamp: "10:00", text: "original input",
+          ...(historical ? { engramInterrupted: true, isEngramRetained: true } : {}) };
+        const params = makeSessionActionsParams();
+        params.refs.sessionsRef.current = [makeSession("session-1", {
+          projectId: kind === "inherited" ? undefined : "project-1",
+          remoteId: kind === "remote" ? "remote-owner" : undefined,
+          pendingPrompts: [prompt], sessionMutationStamp: 42,
+          ...(!historical ? { promptDeliveries: [
+            { promptId: prompt.id, disposition: "pending" as const, attempt: 1 },
+          ] } : {}),
+        })];
+        const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue(makeStateResponse(6));
+        await useAppSessionActions(params).handleResumeSessionQueue("session-1");
+        expect(resume).toHaveBeenCalledTimes(1);
+        if (historical) {
+          expect(resume).toHaveBeenCalledWith("session-1");
+        } else {
+          expect(resume).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
+        }
+        vi.restoreAllMocks();
       }
-      vi.restoreAllMocks();
     }
   });
 
-  it("adopts same-stamp OFF policy changes before choosing the Resume body", async () => {
-    for (const summary of [false, true]) {
-      for (const disableMutationStampFastPath of [false, true]) {
-        for (const [before, after] of [
-          [false, true], [true, false], [undefined, true],
-          [true, undefined], [undefined, false], [false, undefined],
-        ]) {
-          const prompt = { id: "retained-head", timestamp: "10:00", text: "original input" };
-          const previous = makeSession("session-1", { pendingPrompts: [prompt],
-            messagesLoaded: true, sessionMutationStamp: 42, engramControlOff: before });
-          const canonical = { ...previous, engramControlOff: after };
+  it("adopts same-stamp ordinary pause and targeted delivery changes before Resume", async () => {
+    for (const disableMutationStampFastPath of [false, true]) {
+      for (const summary of [false, true]) {
+        for (const [before, after] of [[false, true], [true, false]] as const) {
+          const previous = makeSession("session-1", { messagesLoaded: true,
+            sessionMutationStamp: 42, queuePaused: before });
+          const canonical = { ...previous, queuePaused: after };
           const options = { disableMutationStampFastPath };
           const adopted = summary
             ? reconcileStateSessionSummaries([previous], [canonical], options)[0]
             : reconcileSingleSession(previous, canonical, options);
-          expect(adopted.engramControlOff).toBe(after);
+          expect(adopted.queuePaused).toBe(after);
+          expect(adopted.sessionMutationStamp).toBe(42);
+        }
+      }
+      for (const partial of [false, true]) {
+        for (const disposition of ["handingOff", "accepted", "rejected", "ambiguous"] as const) {
+          const prompt = { id: "ordinary-head", timestamp: "10:00", text: "original input" };
+          const previous = makeSession("session-1", { pendingPrompts: [prompt],
+            messagesLoaded: true, sessionMutationStamp: 42,
+            promptDeliveries: [{ promptId: prompt.id, disposition: "pending", attempt: 1 }] });
+          const canonical = { ...previous, messagesLoaded: !partial,
+            promptDeliveries: [{ promptId: prompt.id, disposition, attempt: 1 }] };
+          const adopted = reconcileSingleSession(previous, canonical,
+            { disableMutationStampFastPath, adoptPartialMessages: partial });
+          expect(adopted.promptDeliveries).toEqual(canonical.promptDeliveries);
+          expect(adopted.promptDeliveries?.[0]?.disposition).toBe(disposition);
+          expect(adopted).not.toBe(previous);
           expect(adopted.sessionMutationStamp).toBe(42);
           const params = makeSessionActionsParams();
           params.refs.sessionsRef.current = [adopted];
           const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue(makeStateResponse(6));
           await useAppSessionActions(params).handleResumeSessionQueue("session-1");
           expect(resume).toHaveBeenCalledTimes(1);
-          if (after === true) {
-            expect(resume).toHaveBeenCalledWith("session-1");
-          } else {
-            expect(resume).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
-          }
+          expect(resume).toHaveBeenCalledWith("session-1");
+          expect(previous.pendingPrompts).toEqual([prompt]);
           vi.restoreAllMocks();
         }
       }
+    }
+  });
+
+  it("keeps delivery evidence when metadata summaries omit prompt bodies and receipts", () => {
+    for (const disableMutationStampFastPath of [false, true]) {
+      const prompt = { id: "unknown-head", timestamp: "10:00", text: "original input" };
+      const previous = makeSession("session-1", { pendingPrompts: [prompt], messagesLoaded: true,
+        sessionMutationStamp: 42, promptDeliveries: [
+          { promptId: prompt.id, disposition: "ambiguous", attempt: 1 },
+        ] });
+      const { pendingPrompts: _prompts, promptDeliveries: _deliveries,
+        messages: _messages, messagesLoaded: _loaded, ...summary } = previous;
+      const adopted = reconcileStateSessionSummaries([previous], [{ ...summary, queuePaused: true }],
+        { disableMutationStampFastPath })[0];
+      expect(adopted.queuePaused).toBe(true);
+      expect(adopted.promptDeliveries).toBe(previous.promptDeliveries);
+      expect(adopted.pendingPrompts).toBe(previous.pendingPrompts);
+      expect(adopted.messages).toBe(previous.messages);
+    }
+  });
+
+  it("clears targeted delivery evidence at the same stamp without clearing metadata omissions", async () => {
+    for (const partial of [false, true]) {
+      const prompt = { id: "ordinary-head", timestamp: "10:00", text: "original input" };
+      const previous = makeSession("session-1", { pendingPrompts: [prompt], messagesLoaded: true,
+        sessionMutationStamp: 42, promptDeliveries: [
+          { promptId: prompt.id, disposition: "ambiguous", attempt: 1 },
+        ] });
+      const adopted = reconcileSingleSession(previous,
+        { ...previous, messagesLoaded: !partial, promptDeliveries: [] },
+        { adoptPartialMessages: partial });
+      expect(adopted.promptDeliveries).toEqual([]);
+      expect(adopted.pendingPrompts).toBe(previous.pendingPrompts);
+      const params = makeSessionActionsParams();
+      params.refs.sessionsRef.current = [adopted];
+      const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue(makeStateResponse(6));
+      await useAppSessionActions(params).handleResumeSessionQueue("session-1");
+      expect(resume).toHaveBeenCalledWith("session-1", { prompt, sessionMutationStamp: 42 });
+      vi.restoreAllMocks();
     }
   });
 
@@ -1197,6 +1237,27 @@ describe("useAppSessionActions", () => {
       }
       vi.restoreAllMocks();
     }
+  });
+
+  it("uses hydrated delivery evidence instead of selecting an optimistic attempted head", async () => {
+    const optimistic = { id: "optimistic-human", timestamp: "10:00", text: "original input", localOnly: true };
+    const canonical = { id: "accepted-human", timestamp: "10:00", text: "original input" };
+    const params = makeSessionActionsParams();
+    params.refs.sessionsRef.current = [makeSession("session-1", {
+      pendingPrompts: [optimistic], sessionMutationStamp: 4, queuePaused: true,
+    })];
+    const tail = vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 8, serverInstanceId: "server-a", session: makeSession("session-1", {
+        pendingPrompts: [canonical], sessionMutationStamp: 8, queuePaused: true,
+        promptDeliveries: [{ promptId: canonical.id, disposition: "ambiguous", attempt: 1 }],
+      }),
+    });
+    const resume = vi.spyOn(api, "resumeSessionQueue").mockResolvedValue(makeStateResponse(9));
+    await useAppSessionActions(params).handleResumeSessionQueue("session-1");
+    expect(tail).toHaveBeenCalledTimes(1);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(resume).toHaveBeenCalledWith("session-1");
+    expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toEqual([optimistic]);
   });
 
   it("reports a failed queue resume without a recovery resync", async () => {

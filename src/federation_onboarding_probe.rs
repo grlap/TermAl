@@ -47,10 +47,12 @@ fn federation_probe_command(
         4096,
         true,
     )
-    .map_err(|_| {
+    .map_err(|error| {
+        let message = format!("isolated platform probe could not spawn and reap its child: {error:#}");
+        eprintln!("federation onboarding> {message}");
         ApiError::from_status(
             StatusCode::SERVICE_UNAVAILABLE,
-            "isolated platform probe could not spawn and reap its child",
+            message,
         )
     })?;
     if !output.status.success() {

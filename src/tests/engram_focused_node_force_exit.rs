@@ -107,7 +107,7 @@ fn engram_node_force_exit_records_matched_pass_and_failure_with_native_counts() 
             );
             one_node_test(
                 &fixture.finish(EngramCommandExit::Code(native)),
-                if native == 0 { "succeeded" } else { "failed" },
+                if native == 0 { "passed" } else { "failed" },
             );
         }
     }
@@ -133,14 +133,14 @@ fn engram_node_force_exit_cannot_rescue_invalid_artifacts_or_counts() {
         fixture
             .output
             .push_str("tests: passed=20 failed=0 ignored=0\n");
-        one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "unknown");
+        one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "indeterminate");
     }
 }
 
 #[test]
-fn engram_node_force_exit_keeps_source_and_grant_fences() {
-    for changed in ["source", "grant"] {
-        let fixture = FocusedNodeFixture::with_test(
+fn engram_node_force_exit_keeps_source_and_runtime_owner_fences() {
+    for changed in ["source", "owner"] {
+        let mut fixture = FocusedNodeFixture::with_test(
             &format!("force-exit-{changed}-changed"),
             0,
             false,
@@ -150,14 +150,24 @@ fn engram_node_force_exit_keeps_source_and_grant_fences() {
         if changed == "source" {
             fixture.turn.change_readme("changed while Node tests ran\n");
         } else {
-            fixture.turn.record_mut(|record| {
-                record.engram.active_grant_id = Some("replacement-grant".to_owned())
+            fixture.provenance = fixture.turn.record(|record| EngramObservationProvenance::Runtime {
+                token: record.runtime.runtime_token().unwrap(),
+                turn_generation: record.active_turn_generation.saturating_add(1),
             });
         }
-        assert!(fixture
-            .finish(EngramCommandExit::Code(0))
-            .get("verification_evidence")
-            .is_none());
+        let observation = fixture.finish(EngramCommandExit::Code(0));
+        assert!(observation.get("verification_evidence").is_none());
+        if changed == "owner" {
+            one_node_test(&observation, "indeterminate");
+            assert!(observation["occurrence"]["observed_checks"][0].get("finished_at").is_none());
+        } else {
+            let check = node_diagnostic(&fixture.turn);
+            let start = check.start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+            let end = check.end.as_ref().unwrap().end_basis
+                .wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+            assert_ne!(start.source_revision, end.source_revision);
+            assert!(observation["occurrence"]["observed_checks"][0].get("source_basis").is_none());
+        }
     }
 }
 

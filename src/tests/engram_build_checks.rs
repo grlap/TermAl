@@ -1,4 +1,4 @@
-// Build recognition and typed closing-checkpoint evidence. Does not own
+// Build recognition, diagnostic captures and uncredited ordinary observations. Does not own
 // disposable producer admission or the deferred real-task completion matrix.
 // New child of engram_turn_checks.rs, reusing its actual recorder fixture.
 use super::*;
@@ -10,7 +10,7 @@ mod outcomes;
 mod intervals;
 
 fn complete_command(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     key: &str,
     command: &str,
     exit: EngramCommandExit,
@@ -38,47 +38,54 @@ fn complete_command(
     turn.wait_for_snapshots();
 }
 
-fn one_build(checkpoint: &Value, revision: &str, outcome: &str) {
-    let rows = checkpoint["verification_evidence"]
-        .as_array()
-        .expect("evidence array");
-    assert_eq!(
-        rows.len(),
-        1,
-        "one Build verification, not zero or dual recording: {checkpoint:#}"
-    );
-    let evidence = &rows[0];
-    assert_eq!(evidence["check_kind"], "build", "{checkpoint:#}");
-    let id = evidence["producer_observation"]["observation_id"]
-        .as_str()
-        .unwrap();
-    let producers = observations(checkpoint)
-        .into_iter()
-        .filter(|observation| observation["observation_id"] == id)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        producers.len(),
-        1,
-        "exactly one referenced producer: {checkpoint:#}"
-    );
-    let producer = &producers[0];
-    assert_eq!(producer["effect"], "observe");
-    assert_eq!(producer["outcome"], outcome);
-    assert_eq!(producer["source_changed"], false);
-    assert_eq!(producer["source_basis"]["source_revision"], revision);
-    let index = evidence["environment"]["index"]
-        .as_u64()
-        .expect("environment link") as usize;
-    let environment = &checkpoint["environment_evidence"][index];
-    assert_eq!(environment["source_basis"], producer["source_basis"]);
-    assert_eq!(environment["observed_at"], producer["observed_at"]);
-    let components: EngramEnvironmentComponents =
-        serde_json::from_value(environment["components"].clone()).unwrap();
-    assert_eq!(components.toolchain, FIXTURE_TOOLCHAIN);
-    assert_eq!(
-        environment["environment_fingerprint"],
-        engram_environment_fingerprint(&components)
-    );
+// Closing source measurement and check facts have separate meanings: a
+// matching sighting is not proof that the build ran against that revision.
+fn one_build(request: &Value, revision: &str, outcome: &str) {
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "one build fact, never dual recording: {request:#}");
+    assert_eq!(checks[0]["check_kind"], "build", "{request:#}");
+    assert_eq!(checks[0]["observed_result"], outcome, "{request:#}");
+    assert!(checks[0].get("source_basis").is_none(), "no automatic source verification");
+    assert_eq!(request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], revision);
+    assert!(request.get("verification_evidence").is_none());
+    assert!(request.get("environment_evidence").is_none());
+}
+
+fn diagnostic(turn: &EOCheckedTurn) -> EngramTurnCheck {
+    turn.record(|record| record.engram.active_turn_checks.last().unwrap().clone())
+}
+
+fn diagnostic_refs(turn: &EOCheckedTurn) -> Vec<String> {
+    let check = diagnostic(turn);
+    let end = check.end.as_ref().unwrap();
+    engram_check_refs(&check.command, end.exit, &end.result_lines)
+}
+
+fn diagnostic_summary(turn: &EOCheckedTurn) -> String {
+    let check = diagnostic(turn);
+    let end = check.end.as_ref().unwrap();
+    end.build_diagnostic.as_ref().map_or_else(
+        || engram_check_summary(&check.command, end.exit, &end.result_lines),
+        |diagnostic| diagnostic.summary(&check.command))
+}
+
+fn finish_observation(turn: &EOCheckedTurn) -> Value {
+    let request = turn.finish();
+    assert_ordinary_observation_has_no_native_credit(turn, &request);
+    request
+}
+
+fn assert_native_capture(turn: &EOCheckedTurn, revision: &str) {
+    let check = diagnostic(turn);
+    let (root, _) = content_revision(&turn.root).unwrap();
+    for capture in [&check.start_basis, &check.end.as_ref().unwrap().end_basis] {
+        let basis = capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+            .expect("the real diagnostic capture settles").expect("the source was measured");
+        assert_eq!(basis.workspace_id, root.to_string_lossy());
+        assert_eq!(basis.source_revision, revision);
+    }
+    assert_eq!(check.toolchain.wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .flatten().as_deref(), Some(FIXTURE_TOOLCHAIN));
 }
 
 #[test]
@@ -97,7 +104,7 @@ fn engram_build_native_commands_are_recognized_without_substring_matching() {
 
 #[test]
 fn engram_build_native_pass_records_source_and_environment_without_test_output() {
-    let turn = CheckedTurn::start("build-native-pass", true);
+    let turn = EOCheckedTurn::start("build-native-pass", true);
     let revision = turn.revision();
     complete_command(
         &turn,
@@ -106,23 +113,23 @@ fn engram_build_native_pass_records_source_and_environment_without_test_output()
         EngramCommandExit::Code(0),
         "",
     );
-    let checkpoint = turn.finish();
-    one_build(&checkpoint, &revision, "succeeded");
+    assert_native_capture(&turn, &revision);
+    let request = finish_observation(&turn);
+    one_build(&request, &revision, "passed");
     assert_eq!(
-        checkpoint["verification_evidence"][0]["refs"],
-        json!(["command:cargo build", "exit:0"])
+        diagnostic_refs(&turn),
+        ["command:cargo build", "exit:0"]
     );
+    let check = diagnostic(&turn);
+    let end = check.end.as_ref().unwrap();
     assert!(
-        checkpoint["verification_evidence"][0]["summary"]
-            .as_str()
-            .unwrap()
-            .contains("exited 0")
+        engram_check_summary(&check.command, end.exit, &end.result_lines).contains("exited 0")
     );
 }
 
 #[test]
 fn engram_build_native_failure_records_failed_producer_without_test_output() {
-    let turn = CheckedTurn::start("build-native-fail", true);
+    let turn = EOCheckedTurn::start("build-native-fail", true);
     let revision = turn.revision();
     complete_command(
         &turn,
@@ -131,19 +138,16 @@ fn engram_build_native_failure_records_failed_producer_without_test_output() {
         EngramCommandExit::Code(101),
         "error: could not compile fixture",
     );
-    let checkpoint = turn.finish();
-    one_build(&checkpoint, &revision, "failed");
+    let request = finish_observation(&turn);
+    one_build(&request, &revision, "failed");
     assert!(
-        checkpoint["verification_evidence"][0]["refs"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("exit:101"))
+        diagnostic_refs(&turn).contains(&"exit:101".to_owned())
     );
 }
 
 #[test]
 fn engram_build_and_test_commands_each_emit_only_their_own_kind() {
-    let turn = CheckedTurn::start("build-and-test", true);
+    let turn = EOCheckedTurn::start("build-and-test", true);
     complete_command(
         &turn,
         "build",
@@ -158,24 +162,24 @@ fn engram_build_and_test_commands_each_emit_only_their_own_kind() {
         EngramCommandExit::Code(0),
         "test result: ok. 1 passed; 0 failed",
     );
-    let checkpoint = turn.finish();
-    let rows = checkpoint["verification_evidence"].as_array().unwrap();
+    let request = finish_observation(&turn);
+    let rows = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(
         rows.len(),
         2,
-        "two commands, each exactly once: {checkpoint:#}"
+        "two commands, each exactly once: {request:#}"
     );
     assert_eq!(rows[0]["check_kind"], "build");
     assert_eq!(rows[1]["check_kind"], "test");
     assert_ne!(
-        rows[0]["producer_observation"],
-        rows[1]["producer_observation"]
+        rows[0]["host_check_id"],
+        rows[1]["host_check_id"]
     );
 }
 
 #[test]
 fn engram_build_generic_reported_success_is_unknown_even_with_passing_test_text() {
-    let turn = CheckedTurn::start("build-no-native-exit", true);
+    let turn = EOCheckedTurn::start("build-no-native-exit", true);
     let revision = turn.revision();
     complete_command(
         &turn,
@@ -184,20 +188,18 @@ fn engram_build_generic_reported_success_is_unknown_even_with_passing_test_text(
         EngramCommandExit::ReportedSuccess,
         "test result: ok. 8 passed; 0 failed",
     );
-    let checkpoint = turn.finish();
-    one_build(&checkpoint, &revision, "unknown");
+    let request = finish_observation(&turn);
+    one_build(&request, &revision, "indeterminate");
     assert!(
-        !checkpoint["verification_evidence"][0]["refs"]
-            .as_array()
-            .unwrap()
+        !diagnostic_refs(&turn)
             .iter()
-            .any(|value| value.as_str().is_some_and(|text| text.starts_with("exit:")))
+            .any(|value| value.starts_with("exit:"))
     );
 }
 
 #[test]
 fn engram_build_one_call_failure_is_not_rescued_by_test_output() {
-    let turn = CheckedTurn::start("build-pushd-failure", true);
+    let turn = EOCheckedTurn::start("build-pushd-failure", true);
     let revision = turn.revision();
     let command = format!("pushd \"{}\" && cargo build", turn.root.display());
     complete_command(
@@ -207,13 +209,10 @@ fn engram_build_one_call_failure_is_not_rescued_by_test_output() {
         EngramCommandExit::Code(1),
         "test result: FAILED. 0 passed; 1 failed",
     );
-    let checkpoint = turn.finish();
-    one_build(&checkpoint, &revision, "unknown");
+    let request = finish_observation(&turn);
+    one_build(&request, &revision, "indeterminate");
     assert!(
-        !checkpoint["verification_evidence"][0]["refs"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("exit:1"))
+        !diagnostic_refs(&turn).contains(&"exit:1".to_owned())
     );
 }
 
@@ -243,7 +242,7 @@ fn engram_build_non_build_help_and_planning_commands_have_no_build_check() {
 
 #[test]
 fn engram_build_preserves_test_kind_and_its_positive_count_requirement() {
-    let turn = CheckedTurn::start("build-test-control", true);
+    let turn = EOCheckedTurn::start("build-test-control", true);
     complete_command(
         &turn,
         "test",
@@ -251,16 +250,17 @@ fn engram_build_preserves_test_kind_and_its_positive_count_requirement() {
         EngramCommandExit::Code(0),
         "test result: ok. 1 passed; 0 failed",
     );
-    let checkpoint = turn.finish();
+    let request = finish_observation(&turn);
     assert_eq!(
-        checkpoint["verification_evidence"]
+        request["occurrence"]["observed_checks"]
             .as_array()
             .unwrap()
             .len(),
         1
     );
-    assert_eq!(checkpoint["verification_evidence"][0]["check_kind"], "test");
-    let empty = CheckedTurn::start("build-empty-test-control", true);
+    assert_eq!(request["occurrence"]["observed_checks"][0]["check_kind"], "test");
+    assert!(diagnostic(&turn).end.as_ref().unwrap().showed_passing_tests);
+    let empty = EOCheckedTurn::start("build-empty-test-control", true);
     complete_command(
         &empty,
         "test",
@@ -268,12 +268,16 @@ fn engram_build_preserves_test_kind_and_its_positive_count_requirement() {
         EngramCommandExit::Code(0),
         "test result: ok. 0 passed; 0 failed",
     );
-    assert!(empty.finish().get("verification_evidence").is_none());
+    assert!(!diagnostic(&empty).end.as_ref().unwrap().showed_passing_tests,
+        "zero-test output never supplies positive diagnostic test counts");
+    let empty_request = finish_observation(&empty);
+    assert_eq!(empty_request["occurrence"]["observed_checks"][0]["check_kind"], "test");
+    assert!(empty_request.get("verification_evidence").is_none());
 }
 
 #[test]
 fn engram_build_changed_source_cannot_acquire_passing_credit() {
-    let turn = CheckedTurn::start("build-changed-source", true);
+    let turn = EOCheckedTurn::start("build-changed-source", true);
     let mut recorder = turn.recorder();
     recorder.command_started("build", "cargo build").unwrap();
     assert_eq!(
@@ -293,16 +297,24 @@ fn engram_build_changed_source_cannot_acquire_passing_credit() {
         )
         .unwrap();
     turn.wait_for_snapshots();
-    assert!(turn.finish().get("verification_evidence").is_none());
+    let check = diagnostic(&turn);
+    let start = check.start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+    let end = check.end.as_ref().unwrap().end_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+    assert_ne!(start.source_revision, end.source_revision);
+    let request = finish_observation(&turn);
+    assert!(request.get("verification_evidence").is_none());
+    assert!(request["occurrence"]["observed_checks"][0].get("source_basis").is_none(),
+        "an observed successful exit cannot verify source that changed during the build");
 }
 
 #[test]
 fn engram_build_one_call_native_success_is_build_not_test() {
-    let turn = CheckedTurn::start("build-pushd-success", true);
+    let turn = EOCheckedTurn::start("build-pushd-success", true);
     let revision = turn.revision();
     let command = format!("pushd \"{}\" && cargo build", turn.root.display());
     complete_command(&turn, "build", &command, EngramCommandExit::Code(0), "");
-    one_build(&turn.finish(), &revision, "succeeded");
+    one_build(&finish_observation(&turn), &revision, "passed");
 }
 
 const FOCUSED_BUILD: &str = "node scripts/test-launcher.mjs focused -- cargo build --offline";
@@ -310,7 +322,7 @@ const FOCUSED_BUILD: &str = "node scripts/test-launcher.mjs focused -- cargo bui
 /// Synthetic local launcher records, not execution evidence for the tracker.
 /// Their ownership and interval are captured from the real running check.
 struct FocusedBuildFixture {
-    turn: CheckedTurn,
+    turn: EOCheckedTurn,
     check: EngramTurnCheck,
     directory: PathBuf,
     request: Value,
@@ -321,7 +333,7 @@ struct FocusedBuildFixture {
 
 impl FocusedBuildFixture {
     fn new(label: &str, code: i64) -> Self {
-        let turn = CheckedTurn::start(label, true);
+        let turn = EOCheckedTurn::start(label, true);
         turn.recorder()
             .command_started_in(
                 "build",
@@ -377,7 +389,7 @@ impl FocusedBuildFixture {
         }
     }
 
-    fn finish(self, exit: EngramCommandExit) -> Value {
+    fn finish(&self, exit: EngramCommandExit) -> Value {
         self.save();
         self.turn
             .recorder()
@@ -394,7 +406,7 @@ impl FocusedBuildFixture {
             )
             .unwrap();
         self.turn.wait_for_snapshots();
-        self.turn.finish()
+        finish_observation(&self.turn)
     }
 }
 
@@ -403,19 +415,16 @@ fn engram_build_focused_native_stage_records_pass_and_failure_without_test_count
     for code in [0, 101] {
         let fixture = FocusedBuildFixture::new(&format!("build-focused-{code}"), code);
         let revision = fixture.turn.revision();
-        let checkpoint = fixture.finish(EngramCommandExit::Code(code));
+        let request = fixture.finish(EngramCommandExit::Code(code));
         one_build(
-            &checkpoint,
+            &request,
             &revision,
-            if code == 0 { "succeeded" } else { "failed" },
+            if code == 0 { "passed" } else { "failed" },
         );
         assert!(
-            checkpoint["verification_evidence"][0]["refs"]
-                .as_array()
-                .unwrap()
-                .contains(&json!(format!("exit:{code}")))
+            diagnostic_refs(&fixture.turn).contains(&format!("exit:{code}"))
         );
-        assert!(!checkpoint.to_string().contains("results.json"));
+        assert!(!request.to_string().contains("results.json"));
     }
 }
 
@@ -426,13 +435,13 @@ fn engram_build_focused_owned_native_stage_can_supply_a_reported_success_exit() 
     one_build(
         &fixture.finish(EngramCommandExit::ReportedSuccess),
         &revision,
-        "succeeded",
+        "passed",
     );
 }
 
 #[test]
 fn engram_build_focused_summary_alone_does_not_supply_native_evidence() {
-    let turn = CheckedTurn::start("build-focused-unbacked", true);
+    let turn = EOCheckedTurn::start("build-focused-unbacked", true);
     let revision = turn.revision();
     complete_command(
         &turn,
@@ -441,13 +450,10 @@ fn engram_build_focused_summary_alone_does_not_supply_native_evidence() {
         EngramCommandExit::Code(0),
         "PASS test-fake exit=0\nfocused: passed\nfocused build: native exit 0\ntest result: ok. 5 passed",
     );
-    let checkpoint = turn.finish();
-    one_build(&checkpoint, &revision, "unknown");
+    let request = finish_observation(&turn);
+    one_build(&request, &revision, "indeterminate");
     assert!(
-        !checkpoint["verification_evidence"][0]["refs"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("exit:0"))
+        !diagnostic_refs(&turn).contains(&"exit:0".to_owned())
     );
 }
 
@@ -549,13 +555,10 @@ fn engram_build_focused_rejects_stale_foreign_and_mismatched_artifacts() {
             "must refuse: {label}"
         );
         let revision = fixture.turn.revision();
-        let checkpoint = fixture.finish(EngramCommandExit::Code(0));
-        one_build(&checkpoint, &revision, "unknown");
+        let request = fixture.finish(EngramCommandExit::Code(0));
+        one_build(&request, &revision, "indeterminate");
         assert!(
-            !checkpoint["verification_evidence"][0]["refs"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("exit:0")),
+            !diagnostic_refs(&fixture.turn).contains(&"exit:0".to_owned()),
             "{label}"
         );
     }
@@ -585,7 +588,7 @@ fn engram_build_focused_runtime_failure_or_interrupt_cannot_borrow_a_pass() {
 #[test]
 fn engram_build_overlapping_command_and_outstanding_work_still_withhold_success() {
     for outstanding in [false, true] {
-        let turn = CheckedTurn::start("build-hazard", true);
+        let turn = EOCheckedTurn::start("build-hazard", true);
         let mut recorder = turn.recorder();
         recorder.command_started("build", "cargo build").unwrap();
         turn.wait_for_snapshots();
@@ -608,12 +611,15 @@ fn engram_build_overlapping_command_and_outstanding_work_still_withhold_success(
             )
             .unwrap();
         turn.wait_for_snapshots();
-        let checkpoint = turn.finish();
-        assert!(checkpoint.get("verification_evidence").is_none());
-        let line = turn
-            .record(|record| record.engram.pending_source_root_line.clone())
-            .unwrap();
-        assert!(line.contains("cargo build (check"), "{line}");
-        assert!(!line.contains("cargo test -q"), "{line}");
+        let request = finish_observation(&turn);
+        assert!(request.get("verification_evidence").is_none());
+        let check = diagnostic(&turn);
+        assert_eq!(check.command.kind, EngramVerificationKind::Build);
+        assert!(check.overlapped);
+        if outstanding {
+            assert!(check.fenced_by_outstanding.is_some());
+        } else {
+            assert!(check.overlap_cause.is_some());
+        }
     }
 }

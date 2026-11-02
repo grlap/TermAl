@@ -2,31 +2,38 @@
 use super::*;
 
 fn delayed_retirement_cannot_lend_run(
-    missing_grant: bool,
+    missing_trace: bool,
     published_before_retirement: bool,
     saved_eligible_carry: bool,
-    during_settlement: bool,
 ) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("delayed-diagnostic-retirement");
-    let (binding, grant) = turn.record(|record| {
+    let (turn, worktree) = ordinary_carried_turn("delayed-location-retirement");
+    let (binding, trace) = turn.record(|record| {
         (
             record.engram.work_binding.clone(),
-            record.engram.active_grant_id.clone(),
+            record.engram.unadmitted_active_turn.clone(),
         )
     });
     turn.record_mut(|record| {
-        if missing_grant {
-            record.engram.active_grant_id = None;
+        if missing_trace {
+            record.engram.unadmitted_active_turn = None;
         } else {
             record.engram.work_binding = None;
         }
     });
     let mut recorder = turn.recorder();
-    let mark = begin_diagnostic(&turn, &worktree, &mut recorder, "first-uncredited");
+    let mark = begin_unmeasured_launch(&turn, &worktree, &mut recorder, "first-uncredited");
+    if saved_eligible_carry {
+        // Unit seam: defer only the existing factual window publication.
+        // The original execution is real and remains immutable; no gate,
+        // source owner or pending diagnostic is fabricated.
+        turn.record_mut(|record| record.engram.carried_unmatched_launches.retain(|(root, at)| {
+            *root != engram_path_key(&worktree) || at != launch_start(&mark)
+        }));
+    }
     turn.record_mut(|record| {
         record.engram.work_binding = binding;
-        record.engram.active_grant_id = grant;
+        record.engram.unadmitted_active_turn = trace;
     });
     let cwd = fs::canonicalize(&worktree).unwrap();
     recorder
@@ -45,10 +52,10 @@ fn delayed_retirement_cannot_lend_run(
             .iter_mut()
             .find(|check| check.key == "second-gate" && check.end.is_none())
             .unwrap()
-            .started_at = mark.started_at.clone();
+            .started_at = launch_start(&mark).to_owned();
     });
     // Unlike the earlier retirement tests, the eligible carry exists before
-    // the missing-authority command reports its changed completion.
+    // the earlier unmeasured command reports its changed completion.
     recorder
         .command_completed_with_exit(
             "second-gate",
@@ -65,22 +72,12 @@ fn delayed_retirement_cannot_lend_run(
             record.engram.carried_checks[0].fence.is_none(),
             "no unrelated fence"
         );
-        assert!(record
-            .engram
-            .pending_launch_diagnostics
-            .iter()
-            .any(|pending| pending.key == "first-uncredited"));
+        assert_eq!(record.engram.carried_checks[0].ambiguous, !saved_eligible_carry);
     });
-    if saved_eligible_carry {
-        // Exercise retirement independently of the admission-time guard:
-        // pin the already-saved eligibility that the old code produced.
-        turn.record_mut(|record| record.engram.carried_checks[0].ambiguous = false);
-    }
-    let earlier_at = (engram_parse_time(&mark.started_at).unwrap() - chrono::Duration::seconds(1))
+    assert_launch_identity(&turn, &mark);
+    let earlier_at = (engram_parse_time(launch_start(&mark)).unwrap() - chrono::Duration::seconds(1))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let runs = review_runs(&worktree);
-    let mut closers = Closers::default();
-    let mut held_settlement = None;
     if published_before_retirement {
         let run = publish_running_run(&runs, &cwd, &earlier_at);
         turn.state.poll_engram_carried_runs();
@@ -95,21 +92,6 @@ fn delayed_retirement_cannot_lend_run(
             }
         });
     }
-    if during_settlement {
-        write_run(
-            &runs,
-            "test-earlier-uncredited",
-            &cwd,
-            &earlier_at,
-            "passed",
-            &"f".repeat(64),
-        );
-        turn.state.poll_engram_carried_runs();
-        let hold = install_test_engram_settlement_hold(&cwd, false);
-        closers.spawn(&turn);
-        hold.wait_taken(std::time::Instant::now() + DEADLOCK_GUARD);
-        held_settlement = Some(hold);
-    }
     recorder
         .command_completed_with_exit(
             "first-uncredited",
@@ -119,11 +101,17 @@ fn delayed_retirement_cannot_lend_run(
             EngramCommandExit::Code(0),
         )
         .unwrap();
+    if saved_eligible_carry {
+        // Publish the captured original root/time through the genuine
+        // current exclusion owner after the real poll saved a match.
+        turn.record_mut(|record| engram_note_unmatched_launch(
+            record, &worktree, launch_start(&mark)));
+    }
+    assert_launch_identity(&turn, &mark);
     turn.record(|record| {
-        assert!(record.engram.pending_launch_diagnostics.is_empty());
         assert!(record.engram.carried_unmatched_launches.contains(&(
-            engram_path_key(mark.root.as_ref().unwrap()),
-            mark.started_at.clone()
+            engram_path_key(&worktree),
+            launch_start(&mark).to_owned()
         )));
         if saved_eligible_carry {
             assert!(
@@ -136,57 +124,65 @@ fn delayed_retirement_cannot_lend_run(
         publish_running_run(&runs, &cwd, &earlier_at);
         turn.state.poll_engram_carried_runs();
     }
-    let checkpoint = if let Some(hold) = held_settlement {
-        hold.release();
-        closers.join(0);
-        checkpoint_requests(&turn)
-            .into_iter()
-            .last()
-            .expect("the closer sent a checkpoint")
-    } else {
-        write_run(
-            &runs,
-            "test-earlier-uncredited",
-            &cwd,
-            &earlier_at,
-            "passed",
-            &"f".repeat(64),
-        );
-        turn.finish()
-    };
-    assert_refused(&turn, &checkpoint, "another background gate launched");
+    write_run(&runs, "test-earlier-uncredited", &cwd, &earlier_at, "passed", &"f".repeat(64));
+    assert_carried_ambiguity(&turn);
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
+    assert_carried_ambiguity(&turn);
 }
 
 #[test]
-fn medium_repair_delayed_retirement_blocks_later_published_run() {
-    for missing_grant in [false, true] {
-        delayed_retirement_cannot_lend_run(missing_grant, false, false, false);
+fn original_location_window_blocks_a_run_published_after_completion() {
+    for missing_trace in [false, true] {
+        delayed_retirement_cannot_lend_run(missing_trace, false, false);
     }
 }
 
 #[test]
-fn medium_repair_delayed_retirement_blocks_already_matched_running_run() {
-    for missing_grant in [false, true] {
-        delayed_retirement_cannot_lend_run(missing_grant, true, false, false);
+fn early_location_window_blocks_a_run_published_before_completion() {
+    for missing_trace in [false, true] {
+        delayed_retirement_cannot_lend_run(missing_trace, true, false);
     }
 }
 
 #[test]
-fn medium_repair_new_diagnostic_retirement_invalidates_an_existing_run_match() {
-    delayed_retirement_cannot_lend_run(false, true, true, false);
+fn late_factual_location_publication_invalidates_an_existing_run_match() {
+    delayed_retirement_cannot_lend_run(false, true, true);
 }
 
 #[test]
-fn medium_repair_retirement_after_settlement_copy_cannot_publish_credit() {
-    delayed_retirement_cannot_lend_run(false, true, true, true);
+fn retirement_during_an_in_flight_artifact_read_keeps_the_saved_match_ambiguous() {
+    let (turn, worktree) = ordinary_carried_turn("retirement-in-flight-artifact");
+    ordinary_launch_gate(&turn, &worktree, false);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let started = turn.record(|record| record.engram.carried_checks[0].check.started_at.clone());
+    let (paused, release) = install_test_engram_carried_poll_pause(&turn.state);
+    let state = turn.state.clone();
+    let poll = std::thread::spawn(move || state.poll_engram_carried_runs());
+    let inspected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::tests::phase_sync::receive(&paused, "the real artifact read pauses before install");
+        turn.record_mut(|record| engram_note_unmatched_launch(record, &worktree, &started));
+        turn.record(|record| assert!(record.engram.carried_checks[0].ambiguous));
+    }));
+    let _ = release.send(());
+    poll.join().expect("the artifact read always releases and joins");
+    if let Err(panic) = inspected { std::panic::resume_unwind(panic); }
+    let digest = engram_terminal_record_digest(&run).unwrap();
+    turn.record(|record| {
+        let carried = &record.engram.carried_checks[0];
+        assert!(carried.ambiguous, "installing a previously read artifact cannot restore association");
+        assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
+        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
+    });
+    assert_carried_ambiguity(&turn);
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
 #[test]
-fn medium_repair_later_distant_retirement_keeps_older_terminal_credit() {
+fn later_distant_retirement_keeps_the_exact_older_terminal_artifact() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     for seconds in [30, 121, 1800] {
-        let (turn, worktree) = named_turn(&format!("distant-retirement-{seconds}"));
-        launch_gate(&turn, &worktree, false);
+        let (turn, worktree) = ordinary_carried_turn(&format!("distant-retirement-{seconds}"));
+        ordinary_launch_gate(&turn, &worktree, false);
         let run = finish_run(&worktree, "passed", &"f".repeat(64));
         turn.state.poll_engram_carried_runs();
         turn.record_mut(|record| {
@@ -197,15 +193,15 @@ fn medium_repair_later_distant_retirement_keeps_older_terminal_credit() {
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             engram_note_unmatched_launch(record, &worktree, &later);
         });
-        assert_credited(&turn, &turn.finish(), &run, "succeeded");
+        assert_carried_artifact_custody(&turn, &run, true);
     }
 }
 
 #[test]
 fn medium_repair_nearby_later_retirement_still_refuses_confusable_run() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("nearby-retirement");
-    launch_gate(&turn, &worktree, false);
+    let (turn, worktree) = ordinary_carried_turn("nearby-retirement");
+    ordinary_launch_gate(&turn, &worktree, false);
     // Pin a coherent synthetic timeline: the later launch and its running
     // artifact are still before the current clock, with no terminal read.
     let started = (chrono::Utc::now() - chrono::Duration::seconds(60))
@@ -226,14 +222,15 @@ fn medium_repair_nearby_later_retirement_still_refuses_confusable_run() {
         "passed",
         &"f".repeat(64),
     );
-    assert_refused(&turn, &turn.finish(), "another background gate launched");
+    assert_carried_ambiguity(&turn);
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
 #[test]
 fn medium_repair_distant_later_retirement_keeps_running_gate_eligible() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("distant-retirement-running");
-    launch_gate(&turn, &worktree, false);
+    let (turn, worktree) = ordinary_carried_turn("distant-retirement-running");
+    ordinary_launch_gate(&turn, &worktree, false);
     let started = turn.record(|record| record.engram.carried_checks[0].check.started_at.clone());
     let later = (engram_parse_time(&started).unwrap() + chrono::Duration::seconds(121))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -251,34 +248,15 @@ fn medium_repair_distant_later_retirement_keeps_running_gate_eligible() {
         "passed",
         &"f".repeat(64),
     );
-    // This artifact has a different synthetic id from assert_credited's
-    // standard fixture, so follow its exact evidence producer directly.
-    let checkpoint = turn.finish();
-    let rows = checkpoint["verification_evidence"]
-        .as_array()
-        .expect("gate evidence");
-    assert_eq!(rows.len(), 1, "{checkpoint:#}");
-    let id = &rows[0]["producer_observation"]["observation_id"];
-    let producer = checkpoint["observations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| &row["observation_id"] == id)
-        .expect("exact producer");
-    assert_eq!(producer["outcome"], "succeeded", "{checkpoint:#}");
-    assert!(rows[0]["summary"]
-        .as_str()
-        .unwrap()
-        .contains("test-earlier-uncredited"));
-    assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
+    assert_carried_artifact_custody(&turn, &run, true);
     assert!(run.exists());
 }
 
 #[test]
 fn medium_repair_ambiguous_saved_match_is_not_described_as_pending_credit() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("ambiguous-restart-risk");
-    launch_gate(&turn, &worktree, true);
+    let (turn, worktree) = ordinary_carried_turn("ambiguous-restart-risk");
+    ordinary_launch_gate(&turn, &worktree, true);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     let path = run.join("request.json");
     let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -291,16 +269,22 @@ fn medium_repair_ambiguous_saved_match_is_not_described_as_pending_credit() {
             .refresh_test_runs_with(&|_, _| false, &|inner, event| {
                 turn.state.publish_delta_locked(inner, event.clone())
             });
-        turn.state
+        let registration = turn.state
             .test_run_summaries(None)
             .into_iter()
             .find(|row| row.run_id == "test-carried")
             .expect("the exact artifact")
-            .registration
-            .restart_evidence_reason
+            .registration;
+        (registration.restart_would_void_evidence, registration.restart_evidence_reason)
     };
-    assert!(view().contains("Exact carried run is awaiting host verification settlement"));
+    let (risk, reason) = view();
+    assert_eq!(risk, None, "artifact custody alone establishes no native evidence obligation");
+    assert!(!reason.contains("Exact carried run is awaiting host verification settlement"),
+        "ordinary artifacts never promise automatic native settlement");
     turn.record_mut(|record| record.engram.carried_checks[0].ambiguous = true);
-    assert!(!view().contains("Exact carried run is awaiting host verification settlement"));
-    assert_refused(&turn, &turn.finish(), "another background gate launched");
+    let (risk, reason) = view();
+    assert_eq!(risk, None);
+    assert!(!reason.contains("Exact carried run is awaiting host verification settlement"));
+    assert_carried_ambiguity(&turn);
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }

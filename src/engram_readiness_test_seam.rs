@@ -178,7 +178,6 @@ fn staged_test_engram_readiness_receipt(
         "mutation_enabled": false,
         "work_schema_version": 1,
         "host_path_policy": { "stored": "fixture", "resolved": "fixture", "status": "matched" },
-        "control": { "required_assurance": "turn_gated" },
         "database": database.to_string_lossy(),
         "project_id": project_id,
     });

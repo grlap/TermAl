@@ -312,7 +312,7 @@ impl AppState {
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let local_session =
-                AppState::wire_session_for_inner(&inner, &self.server_instance_id, &local_record);
+                AppState::wire_session_from_record( &self.server_instance_id, &local_record);
             let revision = if changed {
                 self.commit_remote_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
@@ -330,7 +330,7 @@ impl AppState {
                 inner.revision
             };
             let delta_session = changed.then(|| {
-                AppState::wire_session_summary_for_inner(&inner, &self.server_instance_id, &local_record)
+                AppState::wire_session_summary_from_record( &self.server_instance_id, &local_record)
             });
             (
                 revision,

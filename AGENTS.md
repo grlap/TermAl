@@ -24,9 +24,9 @@ Beads itself was removed from the repository on 2026-10-03.
 - In a root session, name the git worktree you work in once per claim with
   `termal_name_source_root`, before your first edit for the item: naming
   takes effect at your next turn, and edits made in the naming turn are
-  reported by neither turn. TermAl then measures that worktree and credits
-  only tests that run there. A delegated session names nothing; it is
-  measured in its own workdir.
+  reported by neither turn. TermAl then measures that worktree, and only
+  a registered run there can earn test credit. A delegated session names
+  nothing; it is measured in its own workdir.
 - Run each test where TermAl can place it. A runtime that reports its
   working directory (Codex) runs the test as a command of its own with its
   working directory set to the directory in the worktree where it runs.
@@ -38,28 +38,32 @@ Beads itself was removed from the repository on 2026-10-03.
   drive and `\` on Windows, with no `.` or `..` step, no doubled or
   trailing backslash and no network path); for any other path the host's
   line names what to do instead. A test Claude runs through its
-  PowerShell tool is not recorded. The host records the result as
-  verification evidence on the turn's closing checkpoint.
-  A full gate outlasts a Claude tool call's 10-minute cap: in a root session
-  measured in a named source root, launch it in the same form,
-  `pushd "DIR" && node scripts/test-launcher.mjs full`, in the Bash tool's
-  background mode (or with `--detach` from a runtime that can
-  notify a coordinator), then end the turn. The host carries it and
-  records its result, passed or failed, on a later checkpoint of the same
-  claim. While the run is going, any command the session runs in that
-  worktree refuses the credit, except, in a Claude session, one that only
-  reads (such as `git status`, `git diff`, or
-  `node scripts/test-launcher.mjs summary RUN_DIRECTORY` from the repository
-  root); so do a file edit the session reports, another writable session's
-  turn or command there, a file change the host's watcher sees there, and a
-  source change still there at that checkpoint. An evaluation requested
-  before the record lands goes stale when it lands (docs/test.md).
+  PowerShell tool is not recorded. The host reports each recognised test
+  in the turn's host observation as an uncredited check. Test credit
+  comes only from registered verification: a test-launcher run started
+  with `--input commit` in the claim's named source root, on the claim's
+  store, which the host sends to Engram with `verification_record` once
+  the run ends with an eligible committed-input record (docs/test.md,
+  "Ordinary committed-input runs"). A default staged or freeze `full` or
+  `focused` run sends no verification record. A full gate outlasts a
+  Claude tool call's 10-minute cap: in a root session measured in a
+  named source root, launch it in the same form, `pushd "DIR" && node
+  scripts/test-launcher.mjs full --input commit`, in the Bash tool's
+  background mode (or with `--detach` from a runtime that can notify a
+  coordinator), then end the turn. Until the run ends, change nothing in
+  that worktree: an edit to a tracked file, a new untracked file or a
+  moved HEAD leaves the run's record not eligible, while a command that
+  only reads (such as `git status`, `git diff`, or `node
+  scripts/test-launcher.mjs summary RUN_DIRECTORY` from the repository
+  root) does not. An evaluation requested before the record lands goes
+  stale when it lands (docs/test.md).
 - A repository may declare its test commands in `termal-tests.toml` at its
   root (docs/features/declared-test-commands.md). Run a declared command
   exactly as declared, from its `cwd`, in the same one-call form; the host
-  judges it from the result artifact the command writes, never from output;
-  a passing result is eligible for verification, and UNKNOWN is not PASS: it
-  names what was observed. This needs a running TermAl build that implements
+  judges it from the result artifact the command writes, never from
+  output; a passing result is reported as a passed check, which is not
+  test credit, and UNKNOWN is not PASS: it names what was observed.
+  This needs a running TermAl build that implements
   declared commands. Until the running host implements it, the declaration
   adds no recognition and built-in commands behave as today.
 - Do not commit or push without explicit authority from the user or the
@@ -67,9 +71,9 @@ Beads itself was removed from the repository on 2026-10-03.
   section says what counts; until it has one, this sentence is the rule.
 - Acceptance is evaluated independently: request
   `termal_evaluate_acceptance` in the turn after the check, never in the
-  same turn; `done` consumes that evaluation. A criterion bound to a test
-  passes only on a host-recorded check with a passed result at the judged
-  revision.
+  same turn; `done` consumes that evaluation. A criterion bound to a
+  test passes only on a registered verification record with a passed
+  result at the judged revision.
 - Never put Engram or Beads ids in source comments, identifiers or
   user-facing text; ids belong in the tracker and in commit messages.
 - Problems with Engram itself go to the Engram project's agents by mailbox;

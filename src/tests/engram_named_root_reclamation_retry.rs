@@ -144,7 +144,7 @@ fn named_root_reclamation_startup_failure_retries_with_fresh_budget_after_cooldo
     assert!(inner.engram_work_naming_history[0].retirements[0].published);
     drop(inner);
     assert_eq!(claimed.record(|record| record.engram.work_binding.clone()), binding_before);
-    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 }
 
 #[test]

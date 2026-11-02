@@ -58,13 +58,14 @@ struct ClaudeObservationProvenance {
 }
 
 /// The provenance a recorder gives its observations. `Ambient` is that of a
-/// runtime with no turn ownership of its own (Codex, ACP) and of a test
-/// driving a recorder directly; the Claude reader gives every frame `Claude`.
+/// separately fenced Codex adapter and of tests driving a recorder directly.
+/// Claude frames and ACP reader events carry their producing runtime and turn.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 enum EngramObservationProvenance {
     #[default]
     Ambient,
     Claude(ClaudeObservationProvenance),
+    Runtime { token: RuntimeToken, turn_generation: u64 },
 }
 
 /// What the sink does with one observation, decided under the state lock in
@@ -94,6 +95,17 @@ fn claude_observation_disposition(
     provenance: &EngramObservationProvenance,
 ) -> ClaudeObservationDisposition {
     let provenance = match provenance {
+        EngramObservationProvenance::Runtime { token, turn_generation } => {
+            return if !record.runtime.matches_runtime_token(token) {
+                ClaudeObservationDisposition::Replaced
+            } else if *turn_generation != record.active_turn_generation {
+                ClaudeObservationDisposition::Foreign
+            } else if human_prompt_turn_is_current(record) {
+                ClaudeObservationDisposition::Unowned
+            } else {
+                ClaudeObservationDisposition::Current
+            };
+        }
         EngramObservationProvenance::Ambient => {
             return if human_prompt_turn_is_current(record) || unmediated_claude_turn_hides_observations(record) {
                 ClaudeObservationDisposition::Unowned
@@ -168,7 +180,9 @@ impl ClaudeHazardCause {
 fn claude_evidence_restricted_notice(record: &SessionRecord) -> String {
     let work = &record.claude_outstanding;
     let current = record.runtime.runtime_token();
-    let hazards = work.hazard_count(current.as_ref(), record.active_turn_generation);
+    let hazards = work.hazard_count(
+        current.as_ref(), record.active_turn_generation, record.adopted_claude_turn_generation,
+    );
     let orphaned = work.unknown
         || work
             .entries
@@ -220,66 +234,26 @@ fn claude_evidence_released_notice(record: &SessionRecord) -> String {
     )
 }
 
-/// Excludes the session's live grant from activity of another turn or a
-/// replaced runtime that this frame proves now: the grant is marked mixed
-/// (`claude_mark_grant_mixed`) and its checks still open to writes are
-/// fenced, with the session's own unresolved work as the stored cause. Work
-/// that stays outstanding reaches checks and grants through the interference
-/// rule (`engram_claude_interference.rs`). Called under the state lock, in
-/// the section that applies the activity.
-fn claude_exclude_live_grant(record: &mut SessionRecord) {
+/// Activity owned by another turn still fences any checks it may overlap.
+/// It cannot become source evidence attributed to the current ordinary turn.
+fn claude_exclude_current_turn(record: &mut SessionRecord) {
     for check in &mut record.engram.active_turn_checks {
         if check.open_to_writes() {
             check.overlapped = true;
-            check
-                .fenced_by_outstanding
-                .get_or_insert(ClaudeHazardCause::OwnSession);
+            check.fenced_by_outstanding.get_or_insert(ClaudeHazardCause::OwnSession);
         }
     }
-    claude_mark_grant_mixed(record);
+    claude_mark_observation_mixed(record);
 }
 
-/// Marks the session's live grant mixed: what changed in its interval may be
-/// Claude work its root turn cannot be credited with, so its own source
-/// report is withheld as uncertain. The mark is sticky for the grant; nothing
-/// clears it but the next grant. A newly effective mark makes the session's
-/// notice due. Under the state lock.
-fn claude_mark_grant_mixed(record: &mut SessionRecord) {
-    let Some(grant_id) = record.engram.active_grant_id.clone() else {
-        return;
-    };
-    if record.engram.active_turn_mixed_attribution.as_deref() == Some(grant_id.as_str()) {
+fn claude_mark_observation_mixed(record: &mut SessionRecord) {
+    if !mark_runtime_observation_source_uncertain(record) {
         return;
     }
-    record.engram.active_turn_mixed_attribution = Some(grant_id.clone());
     record.claude_outstanding.notice_due = true;
     push_unassigned_claude_observation(
         record,
-        format!(
-            "Claude work grant {grant_id}'s own root turn cannot be credited with ran in its \
-             measurement interval; what changed may be that work's, so the grant's own source \
-             report is withheld as uncertain and its open checks are fenced"
-        ),
-    );
-}
-
-/// Marks the grant `grant_id`, beginning now, mixed when Claude work may
-/// still be outstanding on `record`: its interval overlaps that work from
-/// its first instant. Called under the state lock, in the section that
-/// begins the grant.
-fn claude_begin_grant_beside_outstanding_work(record: &mut SessionRecord, grant_id: &str) {
-    if !record.claude_outstanding.any() {
-        return;
-    }
-    record.engram.active_turn_mixed_attribution = Some(grant_id.to_owned());
-    record.claude_outstanding.notice_due = true;
-    push_unassigned_claude_observation(
-        record,
-        format!(
-            "grant {grant_id} began while Claude work an earlier turn or runtime started may \
-             still run; what changes during it may be that work's, so the grant's own source \
-             report is withheld as uncertain"
-        ),
+        "Outstanding Claude work overlapped this turn's observation interval; source changes are not attributed to the turn and open checks remain fenced.".to_owned(),
     );
 }
 
@@ -296,7 +270,9 @@ fn claude_exclude_observation(
     observation: &EngramRecorderObservation<'_>,
 ) {
     match disposition {
-        ClaudeObservationDisposition::Current => {}
+        ClaudeObservationDisposition::Current => {
+            observe_runtime_unadmitted_command(record, provenance, observation);
+        }
         ClaudeObservationDisposition::Unowned => {
             observe_runtime_unadmitted_command(record, provenance, observation);
             push_unassigned_claude_observation(
@@ -309,7 +285,7 @@ fn claude_exclude_observation(
                 record,
                 unassigned_claude_observation_text(observation),
             );
-            claude_exclude_live_grant(record);
+            claude_exclude_current_turn(record);
         }
         ClaudeObservationDisposition::Replaced => {
             if matches!(
@@ -317,7 +293,7 @@ fn claude_exclude_observation(
                 EngramRecorderObservation::CommandStarted { .. }
                     | EngramRecorderObservation::CommandDescribed { .. }
             ) {
-                claude_exclude_live_grant(record);
+                claude_exclude_current_turn(record);
             }
         }
     }
@@ -370,12 +346,20 @@ impl ClaudeOutstandingEntry {
     /// work of another runtime or another turn. A root foreground command of
     /// the session's current runtime and turn is not: it is that turn's own,
     /// and the turn's running commands already fence its checks; it is kept
-    /// so it survives a Stop or a runtime replacement as an orphan.
-    fn is_hazard(&self, current: Option<&RuntimeToken>, turn_generation: u64) -> bool {
-        self.background
-            || self.nested
-            || Some(&self.token) != current
-            || self.origin != (ClaudeWorkOrigin::Attempt { turn_generation })
+    /// so it survives a Stop or a runtime replacement as an orphan. That turn
+    /// is the prompt attempt of `turn_generation`, or the runtime-started
+    /// turn adopted at it (`adopted_generation`): an adopted turn's own root
+    /// foreground command is its own as well.
+    fn is_hazard(
+        &self,
+        current: Option<&RuntimeToken>,
+        turn_generation: u64,
+        adopted_generation: Option<u64>,
+    ) -> bool {
+        let own_turn = self.origin == (ClaudeWorkOrigin::Attempt { turn_generation })
+            || (self.origin == (ClaudeWorkOrigin::Adopted { turn_generation })
+                && adopted_generation == Some(turn_generation));
+        self.background || self.nested || Some(&self.token) != current || !own_turn
     }
 }
 
@@ -472,22 +456,26 @@ impl ClaudeOutstandingWork {
         self.unknown || !self.entries.is_empty()
     }
 
-    fn hazard_count(&self, current: Option<&RuntimeToken>, turn_generation: u64) -> usize {
+    fn hazard_count(
+        &self, current: Option<&RuntimeToken>, turn_generation: u64, adopted_generation: Option<u64>,
+    ) -> usize {
         self.entries
             .iter()
-            .filter(|entry| entry.is_hazard(current, turn_generation))
+            .filter(|entry| entry.is_hazard(current, turn_generation, adopted_generation))
             .count()
     }
 
     /// Whether any work restricts the session's turn `turn_generation` of
     /// the runtime `current` (`ClaudeOutstandingEntry::is_hazard`), or
     /// unknown work does: the current status an agent is told.
-    fn restricts(&self, current: Option<&RuntimeToken>, turn_generation: u64) -> bool {
+    fn restricts(
+        &self, current: Option<&RuntimeToken>, turn_generation: u64, adopted_generation: Option<u64>,
+    ) -> bool {
         self.unknown
             || self
                 .entries
                 .iter()
-                .any(|entry| entry.is_hazard(current, turn_generation))
+                .any(|entry| entry.is_hazard(current, turn_generation, adopted_generation))
     }
 
     /// Takes in `other`'s work (a removed session's), keeping what each may
@@ -508,6 +496,7 @@ fn claude_session_work_restricts(record: &SessionRecord) -> bool {
     record.claude_outstanding.restricts(
         record.runtime.runtime_token().as_ref(),
         record.active_turn_generation,
+        record.adopted_claude_turn_generation,
     )
 }
 
@@ -695,6 +684,7 @@ impl AppState {
         };
         let current = inner.sessions[index].runtime.runtime_token();
         let turn_generation = inner.sessions[index].active_turn_generation;
+        let adopted_generation = inner.sessions[index].adopted_claude_turn_generation;
         let disposition = claude_observation_disposition(
             &inner.sessions[index],
             &EngramObservationProvenance::Claude(provenance.clone()),
@@ -716,7 +706,7 @@ impl AppState {
                     locations: locations.clone(),
                     registered_at: EngramHost::interference_tick(),
                 };
-                if entry.is_hazard(current.as_ref(), turn_generation) {
+                if entry.is_hazard(current.as_ref(), turn_generation, adopted_generation) {
                     changed.push(key.clone());
                 }
                 record.claude_outstanding.register(entry);
@@ -748,7 +738,7 @@ impl AppState {
                 }
             };
             if excludes {
-                claude_exclude_live_grant(record);
+                claude_exclude_current_turn(record);
             }
         }
         if !changed.is_empty() {

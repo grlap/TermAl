@@ -2,12 +2,12 @@
 // Uses real image persistence and existing transport/notice delivery boundaries.
 use super::*;
 
-fn read_count(claimed: &ClaimedRoot) -> usize {
+fn read_count(claimed: &EOCheckedTurn) -> usize {
     claimed.transport.requests().iter()
         .filter(|request| request.request["operation"] == "named_root_read").count()
 }
 
-fn add_reclamation_store(claimed: &ClaimedRoot, other: &ClaimedRoot) -> EngramWorkSourceRoot {
+fn add_reclamation_store(claimed: &EOCheckedTurn, other: &EOCheckedTurn) -> EngramWorkSourceRoot {
     // Independent fixtures number their rows locally. Remap those identities
     // before combining stores, so each reader still resolves its own project.
     let other_session = format!("other-{}", Uuid::new_v4());
@@ -77,9 +77,18 @@ fn named_root_reclamation_other_store_frees_global_capacity_and_rotation_is_fair
     assert_eq!(engram_named_root_capacity(&inner), 63);
     drop(inner);
     let later_label = "reclaim-later-actual-naming";
-    let binding = test_control_work_binding(&format!("turn-observation-{later_label}"), 1);
-    claimed.record(|record| record.engram.work_binding = Some(binding));
-    let later = name_root(&claimed, later_label, Some(&claimed.root), vec![claimed_root_held(later_label)]).unwrap();
+    let binding = test_control_work_binding(&format!("eo-check-{later_label}"), 1);
+    claimed.record_mut(|record| record.engram.work_binding = Some(binding.clone()));
+    claimed.transport.set_current_work_binding(Some(binding.clone()));
+    claimed.transport.enable_named_roots(&claimed.session_id, &binding);
+    claimed.transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: vec![EngramHeldClaim {
+            work_id: binding.work_id.clone(), short_ref: binding.work_id.clone(),
+            claim_id: binding.claim_id.clone(), claim_fence: binding.claim_fence,
+            focused: true, control_binding: Some(binding),
+        }], omitted: 0,
+    })]);
+    let later = request_fixture_name(&claimed, Some(&claimed.root)).unwrap();
     assert!(later.root.is_some(), "the public naming path can use capacity released in another store");
     assert_eq!(engram_named_root_capacity(&claimed.state.inner.lock().unwrap()), 64);
 }
@@ -146,7 +155,7 @@ fn named_root_reclamation_recurring_host_tick_retires_without_an_agent_prompt() 
     assert!(!inner.engram_work_source_roots.contains(&entry));
     assert!(inner.engram_root_reclamation.flight.is_none());
     assert!(inner.engram_work_naming_history[0].retirements[0].published);
-    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 }
 
 #[test]
@@ -168,10 +177,10 @@ fn named_root_reclamation_unknown_oldest_cools_down_and_later_terminal_entry_pro
 #[test]
 fn named_root_reclamation_no_reader_is_retained_until_same_store_authority_returns() {
     let (claimed, entry) = settled_root("reclaim-reader-restored", "completed");
-    let token = claimed.record(|record| record.engram.routing_token.take());
+    let project = claimed.record_mut(|record| record.session.project_id.take());
     assert!(reclamation_plan(&claimed).is_empty());
     assert_root_retained(&claimed, &entry);
-    claimed.record(|record| record.engram.routing_token = token);
+    claimed.record_mut(|record| record.session.project_id = project);
     claimed.state.run_engram_root_reclamation_pass(reclamation_plan(&claimed));
     assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry));
 }
@@ -235,7 +244,7 @@ fn named_root_reclamation_reader_authority_change_during_read_retains_the_entry(
         *hook.borrow_mut() = Some(Box::new(move || {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].engram.routing_token = Some("replaced-reader-token".to_owned());
+            inner.sessions[index].session.project_id = None;
         }));
     });
     claimed.state.run_engram_root_reclamation_pass(reclamation_plan(&claimed));
@@ -281,7 +290,11 @@ fn named_root_reclamation_failed_candidate_commit_reserves_capacity_then_restart
     *claimed.state.inner.lock().unwrap() = restored;
     claimed.state.select_test_engram_budget_clock(clock);
     install_control_only_transport(&claimed.state, claimed.transport.clone());
-    prepare_claimed_root_naming(&claimed, label);
+    claimed.record_mut(|record| {
+        // Explicit current fixture association after boot, never credential recovery.
+        assert!(record.engram.work_binding.is_none());
+        record.engram.work_binding = Some(binding.clone());
+    });
     let before = read_count(&claimed);
     claimed.state.recover_one_engram_root_until(&entry,
         &EngramRootReclamationRoute::OwnClear(claimed.session_id.clone()),
@@ -347,34 +360,38 @@ fn named_root_reclamation_notice_survives_restart_and_focus_change_and_acks_once
     let index = restored.find_session_index(&claimed.session_id).unwrap();
     assert!(refresh_engram_source_root_notices_locked(&mut restored, index).is_empty());
     assert_eq!(restored.engram_work_naming_history[0].retirements.len(), 1);
-    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 }
 
 #[test]
 fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
     let label = "reclaim-published-journal-capacity";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
+    let (claimed, worktree) = root_fixture(label);
     let clock = claimed.state.engram_budget_clock();
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
-    claimed_root_store(&claimed);
     for occurrence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
-        prepare_claimed_root_naming(&claimed, label);
-        let mut held = claimed_root_held(label);
+        let fixture_binding = test_control_work_binding(&format!("eo-check-{label}"), 1);
+        let mut held = EngramHeldClaims {
+            items: vec![EngramHeldClaim {
+                work_id: fixture_binding.work_id.clone(), short_ref: fixture_binding.work_id.clone(),
+                claim_id: fixture_binding.claim_id.clone(), claim_fence: fixture_binding.claim_fence,
+                focused: true, control_binding: Some(fixture_binding),
+            }], omitted: 0,
+        };
         let binding = held.items[0].control_binding.as_mut().unwrap();
         binding.claim_id = format!("retired-claim-{occurrence}");
         binding.run_id = format!("retired-run-{occurrence}");
         binding.root_execution_id = format!("retired-execution-{occurrence}");
         let binding = binding.clone();
         held.items[0].claim_id = binding.claim_id.clone();
-        claimed.record(|record| {
+        claimed.record_mut(|record| {
             record.engram.work_binding = Some(binding.clone());
             record.engram.named_root = None;
         });
         claimed.transport.enable_named_roots(&claimed.session_id, &binding);
+        claimed.transport.set_current_work_binding(Some(binding.clone()));
         claimed.transport.replace_held_claims([Ok(held)]);
         let named = claimed.state.name_engram_source_root(&claimed.session_id,
-            EngramSourceRootRequest { work: format!("w-{label}"),
+            EngramSourceRootRequest { work: binding.work_id.clone(),
                 path: Some(Some(worktree.to_string_lossy().into_owned())) });
         assert!(named.is_ok(),
             "new naming {occurrence} must progress after acknowledged retirements: {named:?}");
@@ -387,7 +404,7 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
                 &entry.store, &entry.claim_id).unwrap().clone();
             (entry, journal)
         };
-        let mut proof = covering_removed_root_read(&journal, false);
+        let mut proof = retained_root_proof(&journal, false);
         proof["run"]["generation"] = json!(claimed.transport.named_roots.lock().unwrap()
             .as_ref().unwrap().run_generations[&binding.run_id]);
         serde_json::from_value::<EngramNamedRootReadResponse>(proof.clone()).unwrap()
@@ -401,7 +418,7 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
         reader.claim_id = "capacity-reader-claim".to_owned();
         reader.run_id = "capacity-reader-run".to_owned();
         reader.root_execution_id = "capacity-reader-execution".to_owned();
-        claimed.record(|record| record.engram.work_binding = Some(reader.clone()));
+        claimed.record_mut(|record| record.engram.work_binding = Some(reader.clone()));
         claimed.transport.enable_named_roots(&claimed.session_id, &reader);
         assert!(claimed.state.recover_one_engram_root_until(&entry,
             &EngramRootReclamationRoute::Unfocused,
@@ -496,15 +513,44 @@ fn named_root_reclamation_published_notice_of_removed_session_is_retained_withou
 #[test]
 fn named_root_reclamation_published_notice_keeps_other_journal_protections() {
     let (claimed, entry) = settled_root("reclaim-compaction-protections", "completed");
+    let successor = claimed.record(|record| record.engram.work_binding.clone().unwrap());
+    let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
+        &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
+    claimed.record_mut(|record| {
+        record.engram.work_binding = Some(binding.clone());
+        record.engram.named_root = Some(EngramNamedRootState::Bound {
+            workspace_id: entry.root.clone(), generation: entry.generation as i64,
+            named_at: entry.named_at.clone(),
+        });
+    });
+    claimed.transport.enable_named_roots(&claimed.session_id, &binding);
+    // Open while the fixture's recorded Bound event is still live. The
+    // completed readback becomes authoritative only after this opening.
+    let completed = claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .root_reads.remove(&entry.claim_id).expect("the completed readback is seeded");
+    claimed.begin("An ordinary opening whose old root remains pinned.");
+    let observed = claimed.record(|record| record.engram.unadmitted_active_turn.clone().unwrap());
+    assert_eq!(observed.opening_root.as_ref().unwrap().binding, binding);
+    assert_eq!(observed.opening_root.as_ref().unwrap().source_root.as_ref().unwrap().generation, entry.generation);
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.record_mut(|record| {
+        record.engram.work_binding = Some(successor.clone());
+        record.engram.named_root = Some(EngramNamedRootState::None);
+    });
+    claimed.transport.enable_named_roots(&claimed.session_id, &successor);
+    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .root_reads.insert(entry.claim_id.clone(), completed);
     claimed.state.run_engram_root_reclamation_pass(reclamation_plan(&claimed));
     let mut inner = claimed.state.inner.lock().unwrap();
     let journal = inner.engram_named_root_journal[0].clone();
     let index = inner.find_session_index(&claimed.session_id).unwrap();
     let original_runtime = inner.sessions[index].engram.clone();
+    let mut unprotected_runtime = original_runtime.clone();
+    unprotected_runtime.unadmitted_active_turn = None;
     let notice = inner.engram_work_naming_history[0].retirements[0].clone();
     for protection in ["pending-bound", "pending-ended", "pending-invalid", "binding", "capture", "evaluator", "replacement", "live-bound"] {
         *inner.engram_named_root_journal = vec![journal.clone()];
-        inner.sessions[index].engram = original_runtime.clone();
+        inner.sessions[index].engram = unprotected_runtime.clone();
         match protection {
             "pending-bound" | "pending-ended" | "pending-invalid" => {
                 let mut event = journal.confirmed.as_ref().unwrap().0.clone();
@@ -520,10 +566,7 @@ fn named_root_reclamation_published_notice_keeps_other_journal_protections() {
                 inner.engram_named_root_journal[0].pending = Some(event);
             }
             "binding" => inner.sessions[index].engram.work_binding = journal.read_binding.clone(),
-            "capture" => inner.sessions[index].engram.active_turn_root_capture = Some(EngramRootCapture::Recorded {
-                generation: i64::try_from(entry.generation).unwrap(), state: EngramSourceRootState::Named,
-                workspace_id: entry.root.clone(),
-            }),
+            "capture" => inner.sessions[index].engram.unadmitted_active_turn = Some(observed.clone()),
             "evaluator" => inner.delegations.push(serde_json::from_value(json!({
                 "id":"compaction-evaluator", "parentSessionId":claimed.session_id,
                 "childSessionId":"compaction-evaluator-child", "mode":DelegationMode::Evaluator,
@@ -551,10 +594,12 @@ fn named_root_reclamation_published_notice_keeps_other_journal_protections() {
         inner.engram_work_source_roots.clear();
         inner.delegations.clear();
     }
-    inner.sessions[index].engram = original_runtime;
+    inner.sessions[index].engram = unprotected_runtime;
     *inner.engram_named_root_journal = vec![journal];
     engram_compact_root_journal(&mut inner);
     assert!(inner.engram_named_root_journal.is_empty(), "no protection must still make progress");
+    // Restore the actual trace after the negative metadata-control image.
+    inner.sessions[index].engram = original_runtime;
 }
 
 #[test]

@@ -329,7 +329,6 @@ fn tracker_reads_are_admitted_for_a_running_non_evaluator_child_with_the_hosts_s
             actor_id: "dev/reviewer".to_owned(),
             actor_context: None,
             store_key: None,
-            work_authority_grant: None,
         });
     }
     assert!(admitted(&state, &child));

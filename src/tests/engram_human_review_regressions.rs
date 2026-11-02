@@ -1,35 +1,19 @@
-// Route and failed-promotion boundaries for explicit Human dispatch. No live
-// state, authority transport or provider is used; original control debt stays.
+//! HTTP, exact-selection, provider and persistence boundaries for ordinary Human dispatch.
+//! Disposable runtime channels retain passive history; no control executor is installed.
 use super::*;
+use super::super::uncertain_begin::OrdinaryRoot;
 use crate::tests::delegation_support::install_required_review_delegation;
 
-fn ordinary_selection_fixture() -> (AppState, String, mpsc::Receiver<CodexRuntimeCommand>) {
-    let (state, receiver) =
-        test_app_state_with_delegation_codex_runtime("ordinary-selected-resume");
-    let session = test_session_id(&state, Agent::Codex);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
+fn ordinary_selection_fixture() -> OrdinaryRoot {
+    let turn = OrdinaryRoot::new("ordinary-selected-resume");
+    turn.edit(|record| {
         record.session.status = SessionStatus::Idle;
         record.set_auto_dispatch_blocked(true);
-        queue_prompt_on_record(
-            record,
-            PendingPrompt {
-                id: "original-ordinary-head".into(),
-                timestamp: stamp_now(),
-                text: "ordinary original payload".into(),
-                expanded_text: None,
-                source: None,
-                attachments: vec![],
-                engram_interrupted: false,
-                is_engram_retained: false,
-            },
-            vec![],
-        );
-        state.commit_locked(&mut inner).unwrap();
-    }
-    (state, session, receiver)
+        let mut pending = human_choices::selection_prompt("original-ordinary-head");
+        pending.text = "ordinary original payload".into();
+        queue_prompt_on_record(record, pending, vec![]);
+    });
+    turn
 }
 
 fn selected_head(state: &AppState, session: &str) -> HumanPromptSelection {
@@ -43,7 +27,8 @@ fn selected_head(state: &AppState, session: &str) -> HumanPromptSelection {
 
 #[test]
 fn human_prompt_selected_unknown_head_cannot_authorize_a_distinct_successor() {
-    let (state, session, receiver) = ordinary_selection_fixture();
+    let turn = ordinary_selection_fixture();
+    let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -76,10 +61,129 @@ fn human_prompt_selected_unknown_head_cannot_authorize_a_distinct_successor() {
 }
 
 #[test]
+fn unknown_queue_history_projects_uncertainty_and_only_resumes_a_known_unsent_successor() {
+    for marker in ["unknown_disposition", "handed_off", "promoted"] {
+        let turn = ordinary_selection_fixture();
+        let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
+        let durable_prefix = if marker == "unknown_disposition" {
+            // The window's 100 missing positions must exist in SQLite before
+            // the ordinary commit below can preserve their history.
+            turn.edit(|record| {
+                assert!(record.session.messages.is_empty());
+                for index in 0..100 + SQLITE_SESSION_TAIL_MESSAGES {
+                    push_message_on_record(record, Message::Text {
+                        id: format!("human-history-{index}"), timestamp: stamp_now(),
+                        author: Author::Assistant, text: format!("Earlier history {index}"),
+                        expanded_text: None, source: None, attachments: Vec::new(),
+                    });
+                }
+            });
+            turn.edit(|record| trim_retained_session_messages(record, SQLITE_SESSION_TAIL_MESSAGES));
+            let prefix = load_persisted_message_range(&state.persistence_path, &session, 0, 100).unwrap();
+            assert_eq!(prefix.len(), 100);
+            Some(serde_json::to_value(prefix).unwrap())
+        } else { None };
+        let original = {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            let record = &mut inner.sessions[index];
+            record.queued_prompts[0].source = QueuedPromptSource::Human;
+            let mut next = record.queued_prompts[0].clone();
+            next.source = QueuedPromptSource::User;
+            next.pending_prompt.id = "known-unsent-successor".into();
+            next.pending_prompt.text = "Only this distinct successor may be delivered".into();
+            match marker {
+                "unknown_disposition" => {
+                    record.queued_prompts[0].promotion_disposition_known = false;
+                    assert_eq!(record.message_start_index, 100);
+                }
+                "handed_off" => record.queued_prompts[0].engram_ordinary_handoff = true,
+                "promoted" => record.queued_prompts[0].promoted_message_index = Some(0),
+                _ => unreachable!(),
+            }
+            record.engram.historical_control.insert("historicalQueueNote".into(),
+                json!({"unknown": {"payload": "Original history\nżółw 🐢"}}));
+            record.queued_prompts.push_back(next);
+            sync_pending_prompts(record);
+            let original = serde_json::to_value(&record.queued_prompts[0]).unwrap();
+            let saved = serde_json::to_vec(&PersistedSessionRecord::from_record(record)).unwrap();
+            let message_start_index = record.message_start_index;
+            let runtime = record.runtime.clone();
+            let mut persisted = serde_json::from_slice::<PersistedSessionRecord>(&saved).unwrap();
+            // SQLite restores this non-serialized window metadata before
+            // into_record decides whether the transcript proves no promotion.
+            persisted.message_start_index = message_start_index;
+            persisted.session.messages_loaded = message_start_index == 0;
+            let mut loaded = persisted.into_record().unwrap();
+            assert_eq!(loaded.message_start_index, message_start_index);
+            if marker == "unknown_disposition" {
+                assert!(!loaded.queued_prompts[0].promotion_disposition_known);
+                assert!(loaded.queued_prompts[0].engram_ordinary_handoff);
+            }
+            assert_eq!(serde_json::to_value(&loaded.queued_prompts[0].pending_prompt).unwrap(),
+                original["pending_prompt"], "reload preserves A's original content");
+            assert_eq!(loaded.queued_prompts[0].source, QueuedPromptSource::Human);
+            // Missing evicted transcript proof may conservatively mark the
+            // old row as an unknown handoff. Keep that loaded history exact
+            // through selection, B's handoff and subsequent Resume.
+            let original = serde_json::to_value(&loaded.queued_prompts[0]).unwrap();
+            loaded.runtime = runtime;
+            inner.sessions[index] = loaded;
+            inner.stamp_session_at_index(index);
+            state.commit_locked(&mut inner).unwrap();
+            original
+        };
+        let assert_negative_view = || {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            assert!(!record.prompt_deliveries.contains_key("original-ordinary-head"));
+            let view = record.session.prompt_deliveries.iter()
+                .find(|view| view.prompt_id == "original-ordinary-head").unwrap();
+            assert_eq!(view.disposition, PromptDeliveryDisposition::Ambiguous);
+            assert_eq!(view.attempt, 0, "display uncertainty fabricates no provider attempt");
+            assert!(view.message_id.is_none());
+            assert!(view.reason.as_deref().unwrap().contains("will not be replayed"));
+            assert_eq!(serde_json::to_value(record.queued_prompts.iter()
+                .find(|row| row.pending_prompt.id == "original-ordinary-head").unwrap()).unwrap(), original);
+            assert_eq!(record.engram.historical_control.get("historicalQueueNote"),
+                Some(&json!({"unknown": {"payload": "Original history\nżółw 🐢"}})));
+        };
+        assert_negative_view();
+        let error = state.resume_selected_human_prompt(&session, selected_head(&state, &session))
+            .err().expect("an exact unknown selection cannot authorize a different row");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(receiver.try_recv().is_err(), "selected A cannot substitute B");
+        assert_negative_view();
+
+        state.resume_session_queue(&session).unwrap();
+        let CodexRuntimeCommand::Prompt { command, .. } = phase_sync::receive(&receiver, "ordinary successor B") else {
+            panic!("Resume must deliver the known-unsent successor");
+        };
+        assert!(command.prompt.contains("Only this distinct successor may be delivered"));
+        assert!(!command.prompt.contains("ordinary original payload"));
+        assert!(receiver.try_recv().is_err());
+        assert_negative_view();
+        let token = {
+            let inner = state.inner.lock().unwrap();
+            inner.sessions[inner.find_session_index(&session).unwrap()].runtime.runtime_token().unwrap()
+        };
+        state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
+        state.resume_session_queue(&session).unwrap();
+        assert!(receiver.try_recv().is_err(), "B is delivered once and A remains history");
+        assert_negative_view();
+        if let Some(prefix) = durable_prefix {
+            assert_eq!(serde_json::to_value(load_persisted_message_range(
+                &state.persistence_path, &session, 0, 100).unwrap()).unwrap(), prefix);
+        }
+    }
+}
+
+#[test]
 fn human_prompt_selected_resume_never_starts_a_concurrent_replacement() {
     for phase in ["before_resume", "before_reset", "before_promotion"] {
         for replacement in ["human", "ordinary", "edited", "stop"] {
-            let (state, session, receiver) = ordinary_selection_fixture();
+            let turn = ordinary_selection_fixture();
+            let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
             {
                 let mut inner = state.inner.lock().unwrap();
                 let index = inner.find_session_index(&session).unwrap();
@@ -212,7 +316,8 @@ fn human_prompt_selected_resume_never_starts_a_concurrent_replacement() {
 
 #[tokio::test]
 async fn human_prompt_failed_initial_sql_commit_restores_queue_before_http_retry() {
-    let (state, session, receiver) = ordinary_selection_fixture();
+    let turn = ordinary_selection_fixture();
+    let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
     let before = {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
@@ -297,7 +402,8 @@ async fn human_prompt_failed_initial_sql_commit_restores_queue_before_http_retry
 #[tokio::test]
 async fn human_prompt_resume_is_idempotent_for_unpaused_busy_session() {
     for paused in [false, true] {
-        let (state, session, receiver) = ordinary_selection_fixture();
+        let turn = ordinary_selection_fixture();
+        let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
         let generation = {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -339,8 +445,10 @@ async fn human_prompt_resume_is_idempotent_for_unpaused_busy_session() {
 #[tokio::test]
 async fn human_prompt_accepted_intake_survives_final_provider_rejection() {
     for older_fifo in [true, false] {
-        let (state, session, closed_receiver) = ordinary_selection_fixture();
-        drop(closed_receiver);
+        let mut turn = ordinary_selection_fixture();
+        let (state, session) = (turn.state.clone(), turn.session.clone());
+        let (_closed_tx, replacement_receiver) = mpsc::channel();
+        drop(std::mem::replace(&mut turn.receiver, replacement_receiver));
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -424,7 +532,8 @@ async fn human_prompt_accepted_intake_survives_final_provider_rejection() {
 
 #[tokio::test]
 async fn human_prompt_ui_choice_preserves_ordinary_known_unpromoted_resume_without_conversion() {
-    let (state, session, receiver) = ordinary_selection_fixture();
+    let turn = ordinary_selection_fixture();
+    let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
     let selected = selected_head(&state, &session);
     let response = app_router(state.clone()).oneshot(Request::builder().method("POST")
         .uri(format!("/api/sessions/{session}/queue/resume")).header("content-type", "application/json")
@@ -452,7 +561,8 @@ async fn human_prompt_ui_choice_preserves_ordinary_known_unpromoted_resume_witho
 #[test]
 fn human_prompt_ordinary_fallback_refuses_unknown_disposition_handoff_or_replaced_owner() {
     for case in ["missing_disposition", "possible_handoff", "replaced"] {
-        let (state, session, receiver) = ordinary_selection_fixture();
+        let turn = ordinary_selection_fixture();
+        let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
         if case != "replaced" {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -508,23 +618,23 @@ fn human_prompt_ordinary_fallback_refuses_unknown_disposition_handoff_or_replace
 }
 
 #[test]
-fn human_prompt_queued_head_never_exempts_a_peer_or_default_send_from_control() {
+fn human_prompt_paused_human_head_cannot_be_activated_by_peer_or_default_send() {
     for peer in [false, true] {
-        let (state, _project, session, _root, receiver) = fixture();
+        let turn = OrdinaryRoot::new("human-review-boundary");
+        let (state, _project, session, _root, receiver) =
+            (turn.state.clone(), turn.project.clone(), turn.session.clone(), turn.root.clone(), &turn.receiver);
         let transport = ScriptedEngramControlTransport::new([]);
-        install_control_only_transport(&state, transport.clone());
+        state.install_control_test_transport(transport.clone());
         enqueue_human_for_resume(&state, &session, false);
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
             inner.sessions[index].session.status = SessionStatus::Idle;
             inner.sessions[index].set_auto_dispatch_blocked(true);
-            assert!(AppState::engram_session_requires_dispatch_card_locked(
-                &inner, &session
-            ));
+            assert!(inner.sessions[index].orchestrator_auto_dispatch_blocked);
         }
         let mut request = prompt();
-        request.text = "automated successor must remain gated".into();
+        request.text = "automated successor must retain ordinary provenance".into();
         if peer {
             request.source_session_id = Some(test_session_id(&state, Agent::Claude));
         }
@@ -546,12 +656,14 @@ fn human_prompt_queued_head_never_exempts_a_peer_or_default_send_from_control() 
 fn human_prompt_paused_head_cannot_be_promoted_by_off_or_unconfigured_ordinary_send() {
     for configured in [false, true] {
         for peer in [false, true] {
-            let (state, project, session, _root, receiver) = fixture();
+            let turn = OrdinaryRoot::new("human-review-boundary");
+            let (state, project, session, _root, receiver) =
+                (turn.state.clone(), turn.project.clone(), turn.session.clone(), turn.root.clone(), &turn.receiver);
             {
                 let mut inner = state.inner.lock().unwrap();
                 let project = inner.projects.iter_mut().find(|p| p.id == project).unwrap();
                 if configured {
-                    project.engram.as_mut().unwrap().turn_gated_control = false;
+                    project.engram.as_mut().unwrap().execution_observability = false;
                 } else {
                     project.engram = None;
                 }
@@ -589,7 +701,8 @@ fn human_prompt_paused_head_cannot_be_promoted_by_off_or_unconfigured_ordinary_s
 #[tokio::test]
 async fn human_prompt_ui_send_activates_a_dormant_ordinary_fifo_without_relabelling() {
     for paused in [false, true] {
-        let (state, session, receiver) = ordinary_selection_fixture();
+        let turn = ordinary_selection_fixture();
+        let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -652,7 +765,8 @@ async fn human_prompt_ui_send_activates_a_dormant_ordinary_fifo_without_relabell
 
 #[test]
 fn human_prompt_send_preserves_a_refused_relay_carrier_and_starts_its_own_envelope() {
-    let (state, session, receiver) = ordinary_selection_fixture();
+    let turn = ordinary_selection_fixture();
+    let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
     let original = {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -707,7 +821,8 @@ fn human_prompt_send_preserves_a_refused_relay_carrier_and_starts_its_own_envelo
 
 #[test]
 fn human_prompt_concurrent_promotion_before_reset_returns_accepted_without_duplicate() {
-    let (state, session, receiver) = ordinary_selection_fixture();
+    let turn = ordinary_selection_fixture();
+    let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -762,7 +877,8 @@ fn human_prompt_concurrent_promotion_before_reset_returns_accepted_without_dupli
 #[test]
 fn human_prompt_remote_choice_translates_only_the_exact_cached_projection_version() {
     for remote_changed in [false, true] {
-        let (upstream, upstream_session, receiver) = ordinary_selection_fixture();
+        let turn = ordinary_selection_fixture();
+        let (upstream, upstream_session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
         let (remote_wire, remote_stamp) = {
             let inner = upstream.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&upstream_session).unwrap()];
@@ -935,155 +1051,67 @@ fn human_prompt_remote_choice_translates_only_the_exact_cached_projection_versio
 }
 
 #[test]
-fn human_prompt_live_unknown_handoff_never_enters_control_on_admission() {
-    for entry in [
-        "resume",
-        "bound_resume",
-        "drain",
-        "prepare",
-        "admission",
-        "inner",
-    ] {
-        let paused = matches!(entry, "resume" | "bound_resume");
-        let (state, _project, session, _root, receiver) = fixture();
-        let transport = ScriptedEngramControlTransport::new([]);
-        install_control_only_transport(&state, transport.clone());
+fn human_prompt_live_unknown_handoff_never_replays_through_ordinary_entry_points() {
+    for entry in ["resume", "capture", "drain", "human", "inner"] {
+        let turn = OrdinaryRoot::new("live-unknown-human-handoff");
+        let obligations = recovery::install_passive_original(&turn);
+        let state = turn.state.clone();
+        let session = turn.session.clone();
         let dispatch = match state.dispatch_human_turn(&session, prompt()).unwrap() {
             DispatchTurnResult::Dispatched(d) | DispatchTurnResult::DispatchedAfterQueue(d) => d,
-            DispatchTurnResult::Queued => panic!("idle Human must prepare under control ON"),
+            DispatchTurnResult::Queued => panic!("idle explicit Human must prepare"),
         };
         let original_id = dispatch.human_prompt_id().unwrap().to_owned();
+        let reset_generation = {
+            let mut inner = state.inner.lock().unwrap();
+            inner.claim_engram_project_reset(&turn.project).unwrap()
+        };
+        assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Rejected(_)));
         {
             let mut inner = state.inner.lock().unwrap();
+            assert!(inner.engram_project_resets.release(&turn.project, reset_generation));
             let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].engram.project_reset_in_progress = true;
+            inner.sessions[index].set_auto_dispatch_blocked(entry=="resume");
         }
-        assert!(matches!(
-            deliver_turn_dispatch(&state, dispatch),
-            TurnDispatchDeliveryOutcome::Rejected(_)
-        ));
-        let (generation, grant, rebind, intent, obligations) = {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            let record = &mut inner.sessions[index];
-            record.engram.project_reset_in_progress = false;
-            record.set_auto_dispatch_blocked(paused);
+        let (generation, intent) = turn.record(|record| {
             let head = record.queued_prompts.front().unwrap();
             assert_eq!(head.source, QueuedPromptSource::Human);
             assert_eq!(head.pending_prompt.id, original_id);
-            assert!(head.engram_ordinary_handoff);
-            assert!(!head.engram_interrupted, "live failure, not reload's fence");
+            assert!(head.engram_ordinary_handoff && !head.engram_interrupted);
             assert_eq!(record.session.status, SessionStatus::Error);
             assert!(matches!(record.runtime, SessionRuntime::None));
-            // Rejection retires the runtime, retaining lineage for the old
-            // operation's independent accounting; it is not a new live send.
-            let owner = record.human_prompt_turn.as_ref().unwrap();
-            assert_eq!(owner.prompt_id, original_id);
-            assert_eq!(owner.generation, record.active_turn_generation);
-            assert!(AppState::engram_session_requires_dispatch_card_locked(
-                &inner, &session
-            ));
-            let record = &inner.sessions[index];
-            (
-                record.engram.dispatch_generation,
-                record.engram.active_grant_id.clone(),
-                record.engram.rebind_required,
-                receipted_prompt_intent(record.queued_prompts.front().unwrap()),
-                serde_json::to_value(&inner.engram_session_obligations).unwrap(),
-            )
-        };
-        assert!(transport.requests().is_empty());
-        assert!(receiver.try_recv().is_err());
+            (record.active_turn_generation, receipted_prompt_intent(head))
+        });
         match entry {
-            "resume" => {
-                let refusal = state
-                    .resume_session_queue(&session)
-                    .err()
-                    .expect("unknown provider handoff must remain refused");
-                assert_eq!(refusal.status, StatusCode::CONFLICT);
-                assert!(
-                    refusal
-                        .message
-                        .contains("may already have reached its provider")
-                );
-            }
-            "bound_resume" => {
-                let owner = {
-                    let inner = state.inner.lock().unwrap();
-                    EngramQueuedAdmissionOwner::capture(
-                        &inner.sessions[inner.find_session_index(&session).unwrap()],
-                    )
-                    .unwrap()
-                };
-                assert!(
-                    state
-                        .dispatch_next_queued_turn_for_resume(&session, owner)
-                        .unwrap()
-                        .is_none()
-                );
-            }
-            "drain" => assert!(
-                state
-                    .dispatch_next_queued_turn(&session, false)
-                    .unwrap()
-                    .is_none()
-            ),
-            "prepare" => assert!(
-                state
-                    .prepare_next_queued_turn_engram_off_lock(&session)
-                    .is_none()
-            ),
-            "admission" => assert!(
-                state
-                    .with_queued_engram_admission(&session, || {
-                        panic!("a Human head must not acquire an ordinary admission guard")
-                    })
-                    .unwrap()
-                    .is_none()
-            ),
-            "inner" => assert!(
-                state
-                    .start_next_queued_turn_inner_off_lock(&session, false, false, None)
-                    .unwrap()
-                    .is_none()
-            ),
+            // Generic Resume with no runnable entry may clear its pause; it
+            // cannot turn an unknown old handoff into another provider send.
+            "resume" => { state.resume_session_queue(&session).unwrap(); },
+            "capture" => turn.record(|record| assert!(QueuedTurnOwner::capture(record).is_none())),
+            "drain" => assert!(state.dispatch_next_queued_turn(&session, false).unwrap().is_none()),
+            "human" => assert!(matches!(state.start_human_queued_turn(&session, true).unwrap(), HumanPromptDrain::Absent)),
+            "inner" => assert!(state.start_next_queued_turn_inner_off_lock(&session, false, false, None).unwrap().is_none()),
             _ => unreachable!(),
         }
-        assert!(
-            transport.requests().is_empty(),
-            "{entry}: Human is never evaluated"
-        );
-        assert!(
-            receiver.try_recv().is_err(),
-            "{entry}: unknown handoff is not replayed"
-        );
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.engram.dispatch_generation, generation, "{entry}");
-        assert_eq!(record.engram.active_grant_id, grant, "{entry}");
-        assert_eq!(record.engram.rebind_required, rebind, "{entry}");
-        assert!(record.engram.admission_in_progress.is_none());
-        assert_eq!(record.session.status, SessionStatus::Error);
-        assert!(matches!(record.runtime, SessionRuntime::None));
-        let owner = record.human_prompt_turn.as_ref().unwrap();
-        assert_eq!(owner.prompt_id, original_id);
-        assert_eq!(owner.generation, record.active_turn_generation);
-        assert_eq!(record.orchestrator_auto_dispatch_blocked, paused);
-        assert_eq!(record.queued_prompts.len(), 1);
-        let head = record.queued_prompts.front().unwrap();
-        assert_eq!(head.pending_prompt.id, original_id);
-        assert_eq!(receipted_prompt_intent(head), intent);
-        assert!(head.engram_ordinary_handoff && !head.engram_interrupted);
-        assert_eq!(
-            serde_json::to_value(&inner.engram_session_obligations).unwrap(),
-            obligations
-        );
+        turn.record(|record| {
+            assert_eq!(record.active_turn_generation, generation);
+            assert_eq!(record.session.status, SessionStatus::Error);
+            assert!(matches!(record.runtime, SessionRuntime::None));
+            assert_eq!(record.queued_prompts.len(), 1);
+            let head = record.queued_prompts.front().unwrap();
+            assert_eq!(head.pending_prompt.id, original_id);
+            assert_eq!(receipted_prompt_intent(head), intent);
+            assert!(head.engram_ordinary_handoff && !head.engram_interrupted);
+        });
+        turn.assert_no_prompt();
+        recovery::assert_passive_original(&turn, &obligations);
     }
 }
 
 #[test]
 fn human_prompt_denied_final_handoff_releases_only_its_unsent_runtime() {
-    let (state, _project, session, receiver, transport) = queue::held_fixture();
+    let turn = queue::retained_queue_fixture();
+    let (state, _project, session, receiver, transport) =
+        (turn.state.clone(), turn.project.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
     let dispatch = match state.dispatch_human_turn(&session, prompt()).unwrap() {
         DispatchTurnResult::Dispatched(d) | DispatchTurnResult::DispatchedAfterQueue(d) => d,
         _ => panic!("initial human turn must prepare"),
@@ -1092,8 +1120,7 @@ fn human_prompt_denied_final_handoff_releases_only_its_unsent_runtime() {
         serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
     {
         let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].engram.project_reset_in_progress = true;
+        assert!(inner.claim_engram_project_reset(&turn.project).is_some());
     }
     assert!(matches!(
         deliver_turn_dispatch(&state, dispatch),
@@ -1113,15 +1140,19 @@ fn human_prompt_denied_final_handoff_releases_only_its_unsent_runtime() {
         serde_json::to_value(&inner.engram_session_obligations).unwrap(),
         original
     );
-    assert_eq!(transport.requests().len(), 2);
+    assert!(transport.requests().is_empty());
 }
 
 #[cfg(windows)]
 #[test]
 fn human_prompt_one_legacy_resume_carries_exact_receipt_across_dedicated_runtime_reset() {
     use crate::tests::delegation_process_cleanup::ProductionWorkerTree;
-    let (mut state, _project, session, receiver, transport) =
-        human_choices::legacy_pending_fixture();
+    let turn = human_choices::receipted_pending_fixture();
+    let (mut state, session, receiver, transport) =
+        (turn.state.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
+    let (original, choices, old_nonce) = turn.record(|record| (
+        record.queued_prompts[0].clone(), record.human_queue_choices.clone(),
+        record.prompt_deliveries["legacy-proven-pending"].write_ahead.clone()));
     let temp = TestTempRoot::create("legacy-human-dedicated-to-shared-reset");
     // A retained dedicated owner from the previous runtime configuration is
     // retired before the current shared-Codex destination can be promoted.
@@ -1152,37 +1183,65 @@ fn human_prompt_one_legacy_resume_carries_exact_receipt_across_dedicated_runtime
     phase_sync::receive(&claimed_rx, "the selected receipt owns its dedicated reset");
     assert!(state.inner.inner.try_lock().is_ok());
     release_tx.send(()).unwrap();
-    assert!(
-        matches!(phase_sync::receive(&receiver,"one Resume delivers after its own successful reset"),
-        CodexRuntimeCommand::Prompt{command,..} if command.prompt.contains("Exactly this legacy content"))
-    );
+    let command = match phase_sync::receive(&receiver,
+        "one Resume delivers after its own successful reset") {
+        CodexRuntimeCommand::Prompt { command, .. } => command,
+        _ => panic!("expected the exact resumed prompt"),
+    };
+    assert!(command.prompt.contains("Exactly this legacy content"));
+    let receipt = command.delivery_receipt.as_ref().expect("original receipt survives reset");
+    assert_eq!(receipt.prompt_id, original.pending_prompt.id);
+    assert_ne!(receipt.write_ahead, old_nonce);
     old.await_exit();
     old.assert_peers_exited();
     assert!(old.tree.is_confirmed());
     assert!(receiver.try_recv().is_err());
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert!(record.runtime_stop_generation > prior_stop);
-    assert_eq!(
-        record.human_queue_choices["legacy-proven-pending"].stop_generation,
-        record.runtime_stop_generation
-    );
-    assert_eq!(
-        record.prompt_deliveries["legacy-proven-pending"]
-            .entry
-            .as_ref()
-            .unwrap()
-            .source,
-        QueuedPromptSource::User
-    );
-    assert!(record.queued_prompts.is_empty());
-    assert!(human_prompt_turn_is_current(record));
-    assert_eq!(transport.requests().len(), 2);
+    let token = turn.record(|record| {
+        assert!(record.runtime_stop_generation > prior_stop);
+        assert_eq!(record.human_queue_choices["legacy-proven-pending"]["decisionId"],
+            json!("historical-choice-only"));
+        assert_eq!(record.human_queue_choices, choices);
+        let delivery = &record.prompt_deliveries["legacy-proven-pending"];
+        assert_eq!(delivery.entry.as_ref().unwrap().source, QueuedPromptSource::User);
+        assert_eq!(delivery.write_ahead, receipt.write_ahead);
+        assert_eq!(delivery.turn_generation, Some(command.active_turn_generation));
+        assert_eq!(delivery.message_id.as_deref(), Some(original.pending_prompt.id.as_str()));
+        let promoted = record.session.messages.iter()
+            .position(|message| message.id() == original.pending_prompt.id).unwrap();
+        assert_eq!(record.session.messages.iter()
+            .filter(|message| message.id() == original.pending_prompt.id).count(), 1);
+        let mut expected = original.clone();
+        expected.engram_ordinary_handoff = true;
+        expected.promoted_message_index = Some(global_message_index(record, promoted));
+        assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), json!([expected]),
+            "the reset retains exactly the original history plus its promotion identity");
+        assert!(!ordinary_queue_entry_is_runnable(record, &record.queued_prompts[0]));
+        assert!(ordinary_queue_position(record).is_none());
+        assert!(record.human_prompt_turn.is_none(), "original User provenance survives reset");
+        record.runtime.runtime_token().unwrap()
+    });
+    state.finish_turn_ok_if_runtime_and_generation_match(
+        &session, &token, command.active_turn_generation).unwrap();
+    turn.record(|record| assert_eq!(record.session.status, SessionStatus::Idle));
+    let retained = turn.record(|record| serde_json::to_value(&record.queued_prompts).unwrap());
+    assert!(state.resume_local_session_queue(&session, None).unwrap().is_none());
+    turn.record(|record| {
+        assert_eq!(record.active_turn_generation, command.active_turn_generation);
+        assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), retained);
+        assert_eq!(record.session.messages.iter()
+            .filter(|message| message.id() == original.pending_prompt.id).count(), 1);
+        assert_eq!(record.human_queue_choices, choices);
+        assert!(record.human_prompt_turn.is_none());
+    });
+    turn.assert_no_prompt();
+    assert!(transport.requests().is_empty());
 }
 
 #[test]
 fn human_prompt_refused_choice_does_not_create_a_new_pause() {
-    let (state, _project, session, receiver, _transport) = human_choices::legacy_pending_fixture();
+    let turn = human_choices::receipted_pending_fixture();
+    let (state, session, receiver, _transport) =
+        (turn.state.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -1191,7 +1250,7 @@ fn human_prompt_refused_choice_does_not_create_a_new_pause() {
     let selected = selected_head(&state, &session);
     let hook_state = state.clone();
     let hook_session = session.clone();
-    TEST_CONTAINMENT_BEFORE_ACK_RETURN.with(|slot| {
+    TEST_ORDINARY_SELECTED_BEFORE_RESUME.with(|slot| {
         *slot.borrow_mut() = Some(Box::new(move || {
             let mut inner = hook_state.inner.lock().unwrap();
             let index = inner.find_session_index(&hook_session).unwrap();
@@ -1218,113 +1277,91 @@ fn human_prompt_refused_choice_does_not_create_a_new_pause() {
 }
 
 #[test]
-fn human_prompt_legacy_promotion_failure_returns_exact_receipt_to_pending_and_retries_once() {
-    for capture in [true, false] {
-        let (mut state, _project, session, receiver, transport) =
-            human_choices::legacy_pending_fixture();
+fn human_prompt_receipt_ack_failure_returns_exact_user_prompt_to_pending_and_retries_once() {
+    for deadline in [false, true] {
+        let turn = human_choices::receipted_pending_fixture();
+        let mut state = turn.state.clone();
+        let session = turn.session.clone();
+        let original = turn.record(|record| record.queued_prompts[0].clone());
+        let choices = turn.record(|record| record.human_queue_choices.clone());
+        let duties = serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
         let writer = human_choices::ChoiceWriter::attach(&mut state);
-        state
-            .resume_selected_human_prompt(&session, selected_head(&state, &session))
-            .unwrap();
+        state.resume_selected_human_prompt(&session, selected_head(&state, &session)).unwrap();
         let wal = writer.write_ahead();
         let (prompt_id, nonce) = match &wal.target {
-            PersistFenceTarget::PromptDeliveryWriteAhead {
-                prompt_id,
-                write_ahead,
-                ..
-            } => (prompt_id.clone(), write_ahead.clone()),
-            _ => panic!("actual write-ahead fence expected"),
+            PersistFenceTarget::PromptDeliveryWriteAhead { prompt_id, write_ahead, .. } =>
+                (prompt_id.clone(), write_ahead.clone()),
+            _ => panic!("the actual receipt WAL fence is required"),
         };
-        let duties =
-            serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
-        // The writer already proved this exact WAL in real SQLite. Run its
-        // production settlement on a joined thread so capture injection is
-        // scoped to this continuation, without a scheduler timing assumption.
         let callback_state = state.clone();
         let callback_session = session.clone();
         let callback_id = prompt_id.clone();
         let callback_nonce = nonce.clone();
         let wal = (*wal).on_resolved(move |result| {
-            if capture {
-                TEST_HUMAN_PROMOTION_CAPTURE_FAILURE.with(|flag| flag.set(true));
-            }
             callback_state.settle_prompt_delivery_write_ahead(
-                &callback_session,
-                &callback_id,
-                &callback_nonce,
-                result,
-            );
+                &callback_session, &callback_id, &callback_nonce, result);
         });
-        if !capture {
-            writer.hold_next_promotion();
-        }
-        let worker = std::thread::spawn(move || wal.finish(Ok(())));
-        let rejected = if capture {
-            None
-        } else {
-            let promotion = writer.write_ahead();
-            assert!(matches!(
-                &promotion.target,
-                PersistFenceTarget::EngramProjectContainment(_)
-            ));
-            promotion.finish(Err(PersistFenceError::WriteFailed(
-                "rejected legacy promotion".into(),
-            )));
-            Some(promotion)
-        };
-        worker.join().unwrap();
-        assert!(
-            receiver.try_recv().is_err(),
-            "failed promotion never reaches provider"
-        );
-        {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        let failure = if deadline { PersistFenceError::Deadline }
+            else { PersistFenceError::WriteFailed("rejected receipt acknowledgement".into()) };
+        // Real SQLite content was written. The missing/failed acknowledgement
+        // still cannot authorize a provider send or a different prompt.
+        std::thread::spawn(move || wal.finish(Err(failure))).join().unwrap();
+        turn.assert_no_prompt();
+        turn.record(|record| {
             let receipt = &record.prompt_deliveries[&prompt_id];
             assert_eq!(receipt.disposition, PromptDeliveryDisposition::Pending);
-            assert!(receipt.turn_generation.is_none());
+            assert!(receipt.turn_generation.is_none() && receipt.resume.is_none());
             assert_ne!(receipt.write_ahead, nonce);
-            assert_eq!(record.session.status, SessionStatus::Error);
             assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
-            assert_eq!(
-                record.queued_prompts[0].pending_prompt.text,
-                "Exactly this legacy content"
-            );
+            assert_eq!(record.queued_prompts[0].pending_prompt.text, "Exactly this legacy content");
             assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
-            assert_eq!(
-                serde_json::to_value(&inner.engram_session_obligations).unwrap(),
-                duties
-            );
-        }
-        state
-            .resume_selected_human_prompt(&session, selected_head(&state, &session))
-            .unwrap();
+            assert_eq!(record.human_queue_choices, choices);
+        });
+        state.resume_selected_human_prompt(&session, selected_head(&state, &session)).unwrap();
         writer.write_ahead().finish(Ok(()));
-        let command = match phase_sync::receive(&receiver, "same legacy prompt retried once") {
-            CodexRuntimeCommand::Prompt { command, .. } => command,
-            _ => panic!("prompt expected"),
-        };
-        assert_eq!(
-            command.delivery_receipt.as_ref().unwrap().prompt_id,
-            prompt_id
-        );
+        let command = turn.prompt();
+        assert_eq!(command.delivery_receipt.as_ref().unwrap().prompt_id, prompt_id);
+        assert_ne!(command.delivery_receipt.as_ref().unwrap().write_ahead, nonce);
         assert!(command.prompt.contains("Exactly this legacy content"));
-        if let Some(late) = rejected {
-            late.finish(Ok(()));
-        }
         state.settle_prompt_delivery_write_ahead(&session, &prompt_id, &nonce, Ok(()));
-        assert!(
-            receiver.try_recv().is_err(),
-            "late old outcomes cannot replay the prompt"
-        );
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(
-            record.active_turn_generation,
-            command.active_turn_generation
-        );
-        assert!(record.queued_prompts.is_empty());
-        assert_eq!(transport.requests().len(), 2);
+        turn.assert_no_prompt();
+        let token = turn.record(|record| {
+            assert_eq!(record.active_turn_generation, command.active_turn_generation);
+            let promoted = record.session.messages.iter()
+                .position(|message| message.id() == original.pending_prompt.id).unwrap();
+            assert_eq!(record.session.messages.iter()
+                .filter(|message| message.id() == original.pending_prompt.id).count(), 1);
+            let mut expected = original.clone();
+            expected.engram_ordinary_handoff = true;
+            expected.promoted_message_index = Some(global_message_index(record, promoted));
+            assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), json!([expected]),
+                "the successful retry retains exactly the original history and promotion identity");
+            assert!(!ordinary_queue_entry_is_runnable(record, &record.queued_prompts[0]));
+            assert!(ordinary_queue_position(record).is_none());
+            let receipt = &record.prompt_deliveries[&prompt_id];
+            assert_eq!(receipt.message_id.as_deref(), Some(original.pending_prompt.id.as_str()));
+            assert_eq!(receipt.turn_generation, Some(command.active_turn_generation));
+            assert_eq!(receipt.write_ahead, command.delivery_receipt.as_ref().unwrap().write_ahead);
+            assert_eq!(receipt.entry.as_ref().unwrap().source, QueuedPromptSource::User);
+            assert_eq!(record.human_queue_choices, choices);
+            assert!(record.human_prompt_turn.is_none());
+            record.runtime.runtime_token().unwrap()
+        });
+        state.finish_turn_ok_if_runtime_and_generation_match(
+            &session, &token, command.active_turn_generation).unwrap();
+        turn.record(|record| assert_eq!(record.session.status, SessionStatus::Idle));
+        let retained = turn.record(|record| serde_json::to_value(&record.queued_prompts).unwrap());
+        assert!(state.resume_local_session_queue(&session, None).unwrap().is_none());
+        turn.record(|record| {
+            assert_eq!(record.active_turn_generation, command.active_turn_generation);
+            assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), retained);
+            assert_eq!(record.session.messages.iter()
+                .filter(|message| message.id() == original.pending_prompt.id).count(), 1);
+            assert_eq!(record.human_queue_choices, choices);
+            assert!(record.human_prompt_turn.is_none());
+        });
+        turn.assert_no_prompt();
+        recovery::assert_passive_original(&turn, &duties);
     }
 }
 
@@ -1335,10 +1372,12 @@ fn human_prompt_busy_receipted_choice_reports_conflict_without_a_continuation() 
         SessionStatus::Approval,
         SessionStatus::Stopping,
     ] {
-        let (state, _project, session, receiver, _) = human_choices::legacy_pending_fixture();
+        let turn = human_choices::receipted_pending_fixture();
+        let (state, session, receiver, _) =
+            (turn.state.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
         let changed_state = state.clone();
         let changed_session = session.clone();
-        TEST_CONTAINMENT_BEFORE_ACK_RETURN.with(|slot| {
+        TEST_ORDINARY_SELECTED_BEFORE_RESUME.with(|slot| {
             *slot.borrow_mut() = Some(Box::new(move || {
                 let mut inner = changed_state.inner.lock().unwrap();
                 let index = inner.find_session_index(&changed_session).unwrap();
@@ -1365,7 +1404,8 @@ fn human_prompt_busy_receipted_choice_reports_conflict_without_a_continuation() 
 #[tokio::test]
 async fn human_prompt_ui_resume_cancels_capacity_owner_before_selected_or_human_dispatch() {
     for human in [false, true] {
-        let (state, session, _unused_receiver) = ordinary_selection_fixture();
+        let turn = ordinary_selection_fixture();
+        let (state, session) = (turn.state.clone(), turn.session.clone());
         let (shared, receiver, process) = test_shared_codex_runtime("selected-capacity-resume");
         let (runtime, generation) = {
             let mut inner = state.inner.lock().unwrap();
@@ -1473,62 +1513,49 @@ async fn human_prompt_resume_route_accepts_empty_json_body() {
 }
 
 #[tokio::test]
-async fn human_prompt_ui_legacy_choice_keeps_unknown_head_but_delivers_distinct_successor() {
-    let (state, project, session, receiver, transport) = queue::held_fixture();
-    human_choices::enable_gated_legacy_selection_fixture(&state, &project, &session);
-    enqueue_human_for_resume(&state, &session, false);
-    let (selection, old, duties) = {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        (
-            json!({"origin":"human", "humanChoice": {
-                "prompt": projected_pending_prompts(record)[0], "sessionMutationStamp":record.mutation_stamp
-            }}),
-            serde_json::to_value(&record.queued_prompts[0]).unwrap(),
-            serde_json::to_value(&inner.engram_session_obligations).unwrap(),
-        )
+async fn human_prompt_ui_unknown_choice_refuses_without_delivering_a_distinct_successor() {
+    let turn = queue::retained_queue_fixture();
+    enqueue_human_for_resume(&turn.state, &turn.session, false);
+    let before = turn.saved();
+    let duties = serde_json::to_value(&turn.state.inner.lock().unwrap().engram_session_obligations).unwrap();
+    let selection = selected_head(&turn.state, &turn.session);
+    let response = app_router(turn.state.clone()).oneshot(
+        Request::builder().method("POST")
+            .uri(format!("/api/sessions/{}/queue/resume", turn.session))
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"origin":"human", "humanChoice":selection}).to_string())).unwrap()
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(turn.saved(), before, "selected unknown original cannot authorize the queued successor");
+    turn.assert_no_prompt();
+    // An attempted selection of the successor still cannot authorize a non-head row.
+    let selected = {
+        let inner = turn.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&turn.session).unwrap()];
+        HumanPromptSelection { prompt: projected_pending_prompts(record)[1].clone(),
+            session_mutation_stamp: record.mutation_stamp }
     };
-    let response = app_router(state.clone())
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/sessions/{session}/queue/resume"))
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&selection).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let status = response.status();
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err());
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(
-        serde_json::to_value(&record.queued_prompts[0]).unwrap(),
-        old
-    );
-    assert!(record.prompt_deliveries.is_empty());
-    assert!(
-        record
-            .human_queue_choices
-            .contains_key("original-held-head")
-    );
-    assert_eq!(
-        serde_json::to_value(&inner.engram_session_obligations).unwrap(),
-        duties
-    );
-    assert_eq!(transport.requests().len(), 2);
+    // The current selection API selects the queue head only, even if a
+    // generic Resume may independently find a runnable successor.
+    assert!(turn.state.resume_selected_human_prompt(&turn.session, selected).is_err());
+    turn.assert_no_prompt();
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    assert!(turn.prompt().prompt.contains("Distinct ordinary input."));
+    turn.assert_no_prompt();
+    turn.record(|record| {
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(record.queued_prompts[0].pending_prompt.id, "original-held-head");
+        assert!(record.prompt_deliveries.is_empty());
+        assert!(record.human_queue_choices.is_empty());
+    });
+    recovery::assert_passive_original(&turn, &duties);
 }
 
 #[test]
 fn human_prompt_failed_promotion_capture_releases_only_unsent_turn_and_retains_debt() {
-    let (state, _project, session, receiver, transport) = queue::held_fixture();
+    let turn = queue::retained_queue_fixture();
+    let (state, _project, session, receiver, transport) =
+        (turn.state.clone(), turn.project.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
     let duties =
         serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
     TEST_HUMAN_PROMOTION_CAPTURE_FAILURE.with(|flag| flag.set(true));
@@ -1576,13 +1603,15 @@ fn human_prompt_failed_promotion_capture_releases_only_unsent_turn_and_retains_d
         if command.prompt.contains("Independent successor after failed image capture"))
     );
     assert!(receiver.try_recv().is_err());
-    assert_eq!(transport.requests().len(), 2);
+    assert!(transport.requests().is_empty());
 }
 
 #[tokio::test]
 async fn human_prompt_ui_followup_keeps_origin_for_completed_and_failed_children() {
     for status in [DelegationStatus::Completed, DelegationStatus::Failed] {
-        let (state, project, parent, root, receiver) = fixture();
+        let turn = OrdinaryRoot::new("human-review-boundary");
+        let (state, project, parent, root, receiver) =
+            (turn.state.clone(), turn.project.clone(), turn.session.clone(), turn.root.clone(), &turn.receiver);
         let (delegation, child) = install_required_review_delegation(&state, &parent);
         {
             let mut inner = state.inner.lock().unwrap();
@@ -1595,13 +1624,12 @@ async fn human_prompt_ui_followup_keeps_origin_for_completed_and_failed_children
             record.session.project_id = Some(project);
             record.session.workdir = root.to_string_lossy().into_owned();
             record.session.status = SessionStatus::Idle;
-            record.engram.routing_token = Some("old-child-token".into());
-            record.engram.active_grant_id = Some("old-child-grant".into());
-            record.engram.begins_recorded = true;
+            record.engram.historical_control.insert("historicalChildNote".into(),
+                json!({"grant":"old-child-grant","payload":"retained unchanged"}));
             state.commit_locked(&mut inner).unwrap();
         }
         let transport = ScriptedEngramControlTransport::new([]);
-        install_control_only_transport(&state, transport.clone());
+        state.install_control_test_transport(transport.clone());
         let response = app_router(state.clone())
             .oneshot(
                 Request::builder()
@@ -1631,10 +1659,8 @@ async fn human_prompt_ui_followup_keeps_origin_for_completed_and_failed_children
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
         assert!(human_prompt_turn_is_current(record));
-        assert_eq!(
-            record.engram.active_grant_id.as_deref(),
-            Some("old-child-grant")
-        );
+        assert_eq!(record.engram.historical_control["historicalChildNote"],
+            json!({"grant":"old-child-grant","payload":"retained unchanged"}));
         assert_eq!(
             inner.delegations[inner.find_delegation_index(&delegation).unwrap()].status,
             DelegationStatus::Running
@@ -1642,6 +1668,8 @@ async fn human_prompt_ui_followup_keeps_origin_for_completed_and_failed_children
         assert!(transport.requests().is_empty());
     }
 }
+
+
 
 #[cfg(windows)]
 #[test]
@@ -1776,7 +1804,9 @@ fn human_prompt_windows_reset_reaches_the_existing_off_lock_cleanup_owner() {
 
 #[tokio::test]
 async fn human_prompt_provider_start_failure_is_accepted_and_resume_reuses_one_original_envelope() {
-    let (mut state, session, _old_receiver) = ordinary_selection_fixture();
+    let (mut state, _old_receiver) =
+        crate::tests::delegation_support::test_app_state_with_delegation_codex_runtime("ordinary-selected-resume");
+    let session = test_session_id(&state, Agent::Codex);
     state.agent_runtime_spawning_enabled = false;
     install_single_wire_codex_fixture(&state, None);
     {
@@ -1814,7 +1844,7 @@ async fn human_prompt_provider_start_failure_is_accepted_and_resume_reuses_one_o
         let head = &record.queued_prompts[0];
         assert_eq!(head.source, QueuedPromptSource::Human);
         assert_eq!(head.pending_prompt.text, "run this exactly once");
-        assert!(head.promoted_message_index.is_none() && !head.has_engram_intent());
+        assert!(head.promoted_message_index.is_none() && !head.has_stored_history());
         assert!(record.human_prompt_turn.is_none());
         head.pending_prompt.id.clone()
     };
@@ -1837,9 +1867,11 @@ async fn human_prompt_provider_start_failure_is_accepted_and_resume_reuses_one_o
 }
 
 #[test]
-fn human_prompt_failed_or_expired_promotion_ack_cannot_strand_or_replace_a_successor() {
+fn human_prompt_failed_or_deadline_promotion_ack_cannot_strand_or_replace_a_successor() {
     for expires in [false, true] {
-        let (mut state, _project, session, receiver, transport) = queue::held_fixture();
+        let turn = queue::retained_queue_fixture();
+        let (mut state, _project, session, receiver, transport) =
+            (turn.state.clone(), turn.project.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
         enqueue_human_for_resume(&state, &session, false);
         let duties =
             serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
@@ -1856,21 +1888,17 @@ fn human_prompt_failed_or_expired_promotion_ack_cannot_strand_or_replace_a_succe
             {
                 assert!(matches!(
                     &fence.target,
-                    PersistFenceTarget::EngramProjectContainment(_)
+                    PersistFenceTarget::HumanPromptRow { .. }
                 ));
                 break fence;
             }
         };
         assert!(receiver.try_recv().is_err());
-        let clock = state.engram_budget_clock();
         let late = if expires {
-            clock.wait_for_scripted_waiter();
-            clock.advance(
-                fence
-                    .completion
-                    .deadline
-                    .saturating_duration_since(clock.now()),
-            );
+            // Settle the genuine pending row fence with the deadline outcome.
+            // This tests the terminal-result fence, without changing its clock
+            // or claiming an elapsed timer observation.
+            fence.finish(Err(PersistFenceError::Deadline));
             Some(fence)
         } else {
             fence.finish(Err(PersistFenceError::WriteFailed(
@@ -1922,14 +1950,16 @@ fn human_prompt_failed_or_expired_promotion_ack_cannot_strand_or_replace_a_succe
             serde_json::to_value(&inner.engram_session_obligations).unwrap(),
             duties
         );
-        assert_eq!(transport.requests().len(), 2);
+        assert!(transport.requests().is_empty());
     }
 }
 
 #[test]
 fn human_prompt_orchestrator_destination_keeps_template_rendering() {
     for expanded in [false, true] {
-        let (state, project, session, root, receiver) = fixture();
+        let turn = OrdinaryRoot::new("human-review-boundary");
+        let (state, project, session, root, receiver) =
+            (turn.state.clone(), turn.project.clone(), turn.session.clone(), turn.root.clone(), &turn.receiver);
         let mut instance = sample_remote_orchestrator_state(
             &project,
             &root.to_string_lossy(),
@@ -2038,7 +2068,9 @@ fn human_prompt_unknown_tail_does_not_preempt_an_ordinary_head() {
 
 #[test]
 fn human_prompt_old_obligation_does_not_allow_skipping_unrelated_user_fifo() {
-    let (state, _project, session, receiver, _transport) = queue::held_fixture();
+    let turn = queue::retained_queue_fixture();
+    let (state, _project, session, receiver, _transport) =
+        (turn.state.clone(), turn.project.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();

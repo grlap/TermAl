@@ -16,15 +16,15 @@ fn change(path: &FsPath, kind: WorkspaceFileChangeKind) -> WorkspaceFileChangeEv
 }
 
 #[test]
-fn cargo_target_sibling_changes_leave_a_carried_gate_unfenced_and_credited() {
+fn cargo_target_sibling_changes_leave_a_carried_gate_unfenced_in_artifact_custody() {
     for renamed in [false, true] {
-        let (turn, worktree) = named_turn(if renamed {
+        let (turn, worktree) = ordinary_carried_turn(if renamed {
             "cargo-target-renamed"
         } else {
             "cargo-target-present"
         });
         fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
         let sibling = watched.join("targetVsXPcL");
         fs::create_dir(&sibling).unwrap();
@@ -59,16 +59,15 @@ fn cargo_target_sibling_changes_leave_a_carried_gate_unfenced_and_credited() {
         }
         let run = finish_run(&worktree, "passed", &"f".repeat(64));
         turn.state.poll_engram_carried_runs();
-        let checkpoint = turn.finish();
-        assert_credited(&turn, &checkpoint, &run, "succeeded");
+        assert_carried_artifact_custody(&turn, &run, true);
     }
 }
 
 #[test]
-fn cargo_target_sibling_early_create_then_rename_is_credited() {
-    let (turn, worktree) = named_turn("cargo-target-early-create");
+fn cargo_target_sibling_early_create_then_rename_keeps_artifact_custody() {
+    let (turn, worktree) = ordinary_carried_turn("cargo-target-early-create");
     fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     let sibling = watched.join("targetVsXPcL");
     fs::create_dir(&sibling).unwrap();
@@ -78,7 +77,7 @@ fn cargo_target_sibling_early_create_then_rename_is_credited() {
     assert_eq!(
         turn.record(|record| record.engram.carried_checks[0].fence.clone()),
         None,
-        "a candidate must wait for terminal settlement, not latch a fence"
+        "a candidate remains data rather than latching a source fence"
     );
     // A nonterminal poll must not judge the still-unrenamed candidate either.
     turn.state.poll_engram_carried_runs();
@@ -89,14 +88,13 @@ fn cargo_target_sibling_early_create_then_rename_is_credited() {
         .note_engram_workspace_file_changes(&[change(&sibling, WorkspaceFileChangeKind::Deleted)]);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]
-fn cargo_target_sibling_does_not_exempt_a_reported_end_carry() {
+fn cargo_target_sibling_reported_end_preserves_inherited_candidate_but_fences_new_delivery() {
     for inherited in [false, true] {
-        let (turn, worktree) = named_turn(if inherited {
+        let (turn, worktree) = ordinary_carried_turn(if inherited {
             "cargo-target-inherited-reported-end"
         } else {
             "cargo-target-reported-end"
@@ -118,19 +116,16 @@ fn cargo_target_sibling_does_not_exempt_a_reported_end_carry() {
             turn.state
                 .note_engram_workspace_file_changes(&[event.clone()]);
         }
-        turn.finish();
+        assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
         assert!(turn.record(|record| record.engram.carried_checks[0].ends_by_report));
         if inherited {
             let carried = turn.record(|record| record.engram.carried_checks[0].clone());
-            let result = engram_settle_carried_check(
-                &carried,
-                &Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                std::time::Instant::now() + DEADLOCK_GUARD,
-            );
-            assert!(
-                result.is_err_and(|why| why.contains("targetVsXPcL")),
-                "an inherited candidate must not bypass reported-end settlement"
-            );
+            assert!(carried.fence.is_none());
+            assert_eq!(carried.check.watcher_cargo_candidates.len(), 1);
+            assert!(carried.check.watcher_cargo_candidates[0].path.contains("targetVsXPcL"));
+            // Closing preserves the candidate as data. The deleted
+            // reported-end settlement can no longer consume or credit it.
+            assert_ordinary_turn_has_no_native_requests(&turn);
         } else {
             turn.state.note_engram_workspace_file_changes(&[event]);
             assert!(turn.record(|record| {
@@ -147,7 +142,7 @@ fn cargo_target_sibling_does_not_exempt_a_reported_end_carry() {
 
 #[test]
 fn cargo_target_sibling_seen_during_launch_stays_pending_when_carried() {
-    let (turn, worktree) = named_turn("cargo-target-during-launch");
+    let (turn, worktree) = ordinary_carried_turn("cargo-target-during-launch");
     fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     let cwd = watched.to_string_lossy().into_owned();
@@ -179,128 +174,85 @@ fn cargo_target_sibling_seen_during_launch_stays_pending_when_carried() {
     fs::rename(&sibling, watched.join("target")).unwrap();
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]
-fn cargo_target_sibling_arriving_after_off_lock_settlement_is_not_credited() {
-    let (turn, worktree) = named_turn("cargo-target-after-settlement");
+fn cargo_target_sibling_arriving_during_off_lock_poll_keeps_its_candidate() {
+    let (turn, worktree) = ordinary_carried_turn("cargo-target-poll-window");
     fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
     fs::create_dir(worktree.join("target")).unwrap();
-    launch_gate(&turn, &worktree, false);
-    finish_run(&worktree, "passed", &"f".repeat(64));
-    turn.state.poll_engram_carried_runs();
-    let runtime_token = turn.record(|record| record.runtime.runtime_token().unwrap());
-    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
-    let finishing = {
+    ordinary_launch_gate(&turn, &worktree, false);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let (paused, release) = install_test_engram_carried_poll_pause(&turn.state);
+    let polling = {
         let state = turn.state.clone();
-        let session_id = turn.session_id.clone();
-        std::thread::spawn(move || {
-            state
-                .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
-                .unwrap();
-        })
+        std::thread::spawn(move || state.poll_engram_carried_runs())
     };
-    gate.wait_until_claimed();
+    paused.recv_timeout(DEADLOCK_GUARD).expect("actual off-lock artifact read");
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     turn.state.note_engram_workspace_file_changes(&[change(
-        &watched.join("targetAb1234"),
-        WorkspaceFileChangeKind::Deleted,
-    )]);
-    gate.release();
-    finishing.join().unwrap();
-    let checkpoint = turn
-        .transport
-        .requests()
-        .into_iter()
-        .find(|request| request.request["operation"] == "turn_checkpoint")
-        .unwrap()
-        .request;
-    assert_refused(&turn, &checkpoint, "targetAb1234");
+        &watched.join("targetAb1234"), WorkspaceFileChangeKind::Deleted)]);
+    release.send(()).unwrap();
+    polling.join().unwrap();
+    turn.record(|record| {
+        let carried = &record.engram.carried_checks[0];
+        assert!(carried.fence.is_none() && carried.check.watcher_exempted.is_none());
+        assert_eq!(carried.check.watcher_cargo_candidates.len(), 1);
+        let candidate = &carried.check.watcher_cargo_candidates[0];
+        assert!(!candidate.before_launch);
+        assert!(candidate.path.contains("targetAb1234"));
+    });
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]
-fn cargo_target_sibling_notified_before_the_launch_but_handled_in_settlement_is_deferred() {
-    // The same delivery during off-lock settlement as above, but of a
-    // notification that reached the host before the launch: the settlement
-    // already under way never judged it, so the gate stays carried for the
-    // next one, which credits it because target/ is a directory.
-    let (turn, worktree) = named_turn("cargo-target-prelaunch-late");
+fn cargo_target_sibling_prelaunch_arrival_during_off_lock_poll_keeps_its_order() {
+    let (turn, worktree) = ordinary_carried_turn("cargo-target-prelaunch-late");
     fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
     fs::create_dir(worktree.join("target")).unwrap();
     let before = engram_watcher_arrival_now();
-    launch_gate(&turn, &worktree, false);
-    finish_run(&worktree, "passed", &"f".repeat(64));
-    turn.state.poll_engram_carried_runs();
-    let runtime_token = turn.record(|record| record.runtime.runtime_token().unwrap());
-    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
-    let finishing = {
+    ordinary_launch_gate(&turn, &worktree, false);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let (paused, release) = install_test_engram_carried_poll_pause(&turn.state);
+    let polling = {
         let state = turn.state.clone();
-        let session_id = turn.session_id.clone();
-        std::thread::spawn(move || {
-            state
-                .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
-                .unwrap();
-        })
+        std::thread::spawn(move || state.poll_engram_carried_runs())
     };
-    gate.wait_until_claimed();
+    paused.recv_timeout(DEADLOCK_GUARD).expect("actual off-lock artifact read");
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     turn.state.note_engram_workspace_file_changes_observed(
-        &[change(
-            &watched.join("targetAb1234"),
-            WorkspaceFileChangeKind::Deleted,
-        )],
-        Some(before),
-    );
-    gate.release();
-    finishing.join().unwrap();
-    let checkpoint = turn
-        .transport
-        .requests()
-        .into_iter()
-        .find(|request| request.request["operation"] == "turn_checkpoint")
-        .unwrap()
-        .request;
-    assert!(
-        checkpoint.get("verification_evidence").is_none(),
-        "the settlement that missed the candidate credits nothing: {checkpoint:#}"
-    );
-    let carried = turn.record(|record| record.engram.carried_checks[0].clone());
-    assert!(
-        carried.fence.is_none()
-            && carried.check.watcher_exempted.is_none()
-            && carried
-                .check
-                .watcher_cargo_candidates
-                .iter()
-                .any(|candidate| candidate.before_launch),
-        "the gate stays carried with the pre-launch candidate for its next settlement"
-    );
-    match engram_settle_carried_check(
-        &carried,
-        &Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        std::time::Instant::now() + DEADLOCK_GUARD,
-    ) {
-        Ok(Some(_)) => {}
-        Ok(None) => panic!("the next settlement's snapshots were not ready"),
-        Err(why) => panic!("target/ is a directory, so the candidate is credited: {why}"),
-    }
+        &[change(&watched.join("targetAb1234"), WorkspaceFileChangeKind::Deleted)],
+        Some(before));
+    release.send(()).unwrap();
+    polling.join().unwrap();
+    turn.record(|record| {
+        let carried = &record.engram.carried_checks[0];
+        assert!(carried.fence.is_none() && carried.check.watcher_exempted.is_none());
+        assert_eq!(carried.check.watcher_cargo_candidates.len(), 1);
+        let candidate = &carried.check.watcher_cargo_candidates[0];
+        assert!(candidate.before_launch);
+        assert!(candidate.path.contains("targetAb1234"));
+    });
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]
-fn cargo_target_sibling_notified_after_registration_but_before_a_late_stamp_is_credited() {
+fn cargo_target_sibling_notified_between_registration_and_stamp_keeps_candidate_custody() {
     // The run registers, Cargo makes its temporary sibling, and only then is
     // the delayed command start stamped: the notification falls between the
-    // run's registration and the stamp. A sibling takes no timing exemption;
-    // it is judged by target/ at terminal settlement as always.
-    let (turn, worktree) = named_turn("cargo-target-between-registration-and-stamp");
+    // run's registration and the stamp. A sibling is a candidate, not a
+    // timing exemption or verification evidence.
+    let (turn, worktree) = ordinary_carried_turn("cargo-target-between-registration-and-stamp");
     fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
     let directory = review_runs(&worktree).join("test-carried");
     fs::create_dir_all(&directory).unwrap();
     engram_note_run_registered(&fs::canonicalize(&directory).unwrap());
+    let registration = engram_run_registration_order(&directory).unwrap();
     let arrival = engram_watcher_arrival_now();
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
+    assert!(registration < arrival.order);
+    assert!(arrival.order < turn.record(|record| record.engram.carried_checks[0].check.started_order.expect("actual command start has a host order")));
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     let sibling = watched.join("targetAb1234");
     fs::create_dir(&sibling).unwrap();
@@ -317,10 +269,15 @@ fn cargo_target_sibling_notified_after_registration_but_before_a_late_stamp_is_c
                 .is_none()),
         "a sibling is kept as a candidate, not exempted"
     );
+    turn.record(|record| {
+        let candidates = &record.engram.carried_checks[0].check.watcher_cargo_candidates;
+        assert_eq!(candidates.len(), 1);
+        assert!(candidates[0].before_launch);
+        assert!(candidates[0].path.contains("targetAb1234"));
+    });
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]
@@ -335,9 +292,9 @@ fn cargo_target_sibling_similar_source_names_still_fence_a_carried_gate() {
         "src/targetAb1234/cache",
         "target-notes.md/cache",
     ] {
-        let (turn, worktree) = named_turn("cargo-target-source-control");
+        let (turn, worktree) = ordinary_carried_turn("cargo-target-source-control");
         fs::create_dir(worktree.join("target")).unwrap();
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
         let path = watched.join(relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -357,35 +314,43 @@ fn cargo_target_sibling_similar_source_names_still_fence_a_carried_gate() {
 }
 
 #[test]
-fn cargo_target_sibling_without_the_target_directory_still_fences_a_carried_gate() {
+fn cargo_target_candidate_without_a_directory_is_data_not_a_verification_exemption() {
     for target_is_file in [false, true] {
-        let (turn, worktree) = named_turn("cargo-target-no-destination");
+        let (turn, worktree) = ordinary_carried_turn("cargo-target-no-destination");
+        let target = worktree.join("target");
         if target_is_file {
-            fs::write(worktree.join("target"), "ordinary file\n").unwrap();
+            fs::write(&target, "ordinary file\n").unwrap();
         }
-        launch_gate(&turn, &worktree, false);
+        assert!(!target.is_dir());
+        assert_eq!(target.is_file(), target_is_file);
+        ordinary_launch_gate(&turn, &worktree, false);
         let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
         let sibling = watched.join("targetAb1234");
         fs::create_dir(&sibling).unwrap();
         turn.state.note_engram_workspace_file_changes(&[change(
-            &sibling,
-            WorkspaceFileChangeKind::Created,
-        )]);
-        // The name alone never grants credit: the destination is judged at
-        // terminal settlement even if the watcher initially keeps it pending.
+            &sibling, WorkspaceFileChangeKind::Created)]);
         fs::remove_dir(&sibling).unwrap();
-        finish_run(&worktree, "passed", &"f".repeat(64));
+        let run = finish_run(&worktree, "passed", &"f".repeat(64));
         turn.state.poll_engram_carried_runs();
-        let checkpoint = turn.finish();
-        assert_refused(&turn, &checkpoint, "targetAb1234");
+        turn.record(|record| {
+            let carried = &record.engram.carried_checks[0];
+            assert!(carried.fence.is_none());
+            assert_eq!(carried.check.watcher_cargo_candidates.len(), 1);
+            assert!(carried.check.watcher_cargo_candidates[0].path.contains("targetAb1234"));
+            assert!(carried.check.watcher_exempted.is_none());
+        });
+        // The former target-directory credit decision was checkpoint-only.
+        // The real artifact reader now preserves custody without any credit.
+        assert_carried_artifact_custody(&turn, &run, true);
+        assert!(!target.is_dir());
     }
 }
 
 #[test]
 fn cargo_target_sibling_pending_overflow_fences_even_if_target_appears_later() {
-    let (turn, worktree) = named_turn("cargo-target-pending-overflow");
+    let (turn, worktree) = ordinary_carried_turn("cargo-target-pending-overflow");
     fs::write(worktree.join(".gitignore"), "target/\n").unwrap();
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     for index in 0..=ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT {
         let sibling = watched.join(format!("target{index:06}"));
@@ -401,6 +366,5 @@ fn cargo_target_sibling_pending_overflow_fences_even_if_target_appears_later() {
     assert!(fence.contains("pending Cargo"), "{fence}");
     finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let checkpoint = turn.finish();
-    assert_refused(&turn, &checkpoint, "pending Cargo");
+    assert_carried_fence_custody(&turn, "pending Cargo");
 }

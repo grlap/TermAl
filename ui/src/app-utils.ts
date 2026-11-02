@@ -315,7 +315,7 @@ export function messageChangeMarker(message: Message) {
 }
 
 export function pendingPromptChangeMarker(prompt: PendingPrompt) {
-  return `${prompt.text.length}:${prompt.attachments?.length ?? 0}:${Boolean(prompt.isEngramRetained)}:${Boolean(prompt.engramInterrupted)}`;
+  return `${prompt.text.length}:${prompt.attachments?.length ?? 0}`;
 }
 
 export function removePendingPromptById(
@@ -371,18 +371,6 @@ export function removePendingPromptForCreatedMessage(
   message: Message,
   candidateGlobalIndex?: number | null,
 ) {
-  // An explicitly retained Engram entry may survive promotion into the
-  // transcript. Hydration is not evidence of delivery; only authoritative
-  // queue metadata can retire it. Ordinary paused and optimistic prompts still
-  // reconcile normally below.
-  if (pendingPrompts?.some(
-    (prompt) =>
-      prompt.id === message.id &&
-      !prompt.localOnly &&
-      prompt.isEngramRetained === true,
-  )) {
-    return pendingPrompts;
-  }
   const withoutMatchingServerId = removePendingPromptById(
     pendingPrompts,
     message.id,

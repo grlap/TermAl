@@ -4,7 +4,7 @@
 
 A repository tells TermAl which commands are its tests by committing one file, `termal-tests.toml`, at the repository root. When an agent runs a declared command exactly as declared, TermAl records it as a test check and judges it from the result artifact the command writes, never from console text. The runner is not TermAl's: the agent runs its real command through its own runtime, and TermAl observes.
 
-Related: [Test Runs](test-runs.md) (the launcher's runs and cards), [Engram host adapter](engram-host-adapter.md) (how checks become verification evidence), [Supervised pilot onboarding](supervised-pilot-onboarding.md) (how a colleague's repository declares its dotnet tests for the pilot).
+Related: [Test Runs](test-runs.md) (the launcher's runs and cards), [Engram host adapter](engram-host-adapter.md) (how checks are reported, and where test credit comes from), [Supervised pilot onboarding](supervised-pilot-onboarding.md) (how a colleague's repository declares its dotnet tests for the pilot).
 
 ## The declaration
 
@@ -45,7 +45,7 @@ A run can report passing tests and still have failed as a run (for example an at
 
 JUnit (not implemented in `2b1e3f85`; proposed follow-up contract): complete XML and one unambiguous aggregate (`testsuites` attributes, or the `testsuite` elements summed once). **PASS**: exit 0, `tests - skipped >= 1`, `failures = errors = 0`, levels consistent. **FAIL**: `failures + errors >= 1`, or exit not 0. **UNKNOWN**: zero or all skipped, contradiction, unknown dialect. A JUnit reader must be proven on captured producer output; other producers' files may read as UNKNOWN until a capture of theirs is added.
 
-A passing result is ELIGIBLE for verification; the host's source, ownership and overlap checks still apply, and the recorded verification is authoritative. A declaration by itself grants no credit. PASS is never inferred from exit 0 alone or from console output. UNKNOWN is not a weaker PASS: it earns nothing and names what was observed.
+A passing result is reported as a `passed` check in the turn's host observation; the host's source, ownership and overlap checks still apply. It earns no test credit by itself: credit comes only from registered verification ([test evidence](engram-host-adapter.md#test-evidence)). A declaration by itself grants no credit. PASS is never inferred from exit 0 alone or from console output. UNKNOWN is not a weaker PASS: it earns nothing and names what was observed.
 
 ## Examples
 
@@ -60,7 +60,7 @@ artifact = "tests/Orders.Tests/.termal-results/results.trx"
 
 One project and one target framework per entry: a fixed `LogFileName` across several target frameworks overwrites the report. This exact line is recognised only by a running host that implements declared commands.
 
-Proposed JUnit example for a future reader. A matching command can be recorded as a declared check, but the current TRX-only reader cannot parse its JUnit results or grant passing verification from them; at exit 0, the result is UNKNOWN. A project-provided wrapper runs the real tests synchronously, propagates their exit status, and writes exactly that one complete JUnit file (direct `npx vitest` and `pytest` are built-in checks and never take the declared route):
+Proposed JUnit example for a future reader. A matching command can be recorded as a declared check, but the current TRX-only reader cannot parse its JUnit results or report them as passed; at exit 0, the result is UNKNOWN. A project-provided wrapper runs the real tests synchronously, propagates their exit status, and writes exactly that one complete JUnit file (direct `npx vitest` and `pytest` are built-in checks and never take the declared route):
 
 ```toml
 [[test]]
@@ -75,11 +75,11 @@ artifact = ".termal-results/junit.xml"
 
 Operator, once per repository: write `termal-tests.toml`, ignore the result directory, commit both, run one declared command once and check that the check appears with its counters; an UNKNOWN reason here points at the declaration, the result path or the ignore rule.
 
-Agent, each run: read `termal-tests.toml` at the root; run one entry exactly as declared, from its `cwd`, in the recognised one-call form; then read the host's line or the check record. A passing result is eligible for verification; the recorded verification is what counts. UNKNOWN gives an observed reason, not a diagnosed cause: on "missing", check that the logger flag and result path match the declaration; on "not ignored", check the ignore rule; on "zero executed", check what the command selects. Do not retype the command with other flags to make it match, and do not edit the declaration to fit a command already run: fix the declaration, commit it under the repository's rules, run again.
+Agent, each run: read `termal-tests.toml` at the root; run one entry exactly as declared, from its `cwd`, in the recognised one-call form; then read the host's line or the check record. A passing result is reported as passed, and is not test credit. UNKNOWN gives an observed reason, not a diagnosed cause: on "missing", check that the logger flag and result path match the declaration; on "not ignored", check the ignore rule; on "zero executed", check what the command selects. Do not retype the command with other flags to make it match, and do not edit the declaration to fit a command already run: fix the declaration, commit it under the repository's rules, run again.
 
 Snippet for a repository's own agent instructions:
 
-"Test commands are declared in termal-tests.toml at the root. Run one exactly as declared, from its cwd, as a single call (`pushd "DIR" && <command>`). TermAl judges it from the result file it writes; a passing result is eligible for verification, UNKNOWN is not PASS and names what was observed. This requires a running TermAl build that implements declared commands."
+"Test commands are declared in termal-tests.toml at the root. Run one exactly as declared, from its cwd, as a single call (`pushd "DIR" && <command>`). TermAl judges it from the result file it writes; a passing result is reported as passed but is not test credit, UNKNOWN is not PASS and names what was observed. This requires a running TermAl build that implements declared commands."
 
 ## What the pilot does not do
 

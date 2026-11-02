@@ -32,7 +32,7 @@ fn consume_mailbox_relay_hold<T>(result: Result<Option<T>>) -> Result<Option<T>>
 
 #[derive(Clone)]
 struct MailboxRelayDrainOwner {
-    queue: EngramQueuedAdmissionOwner,
+    queue: QueuedTurnOwner,
     mailbox: String,
     message: String,
     sequence: u64,
@@ -48,8 +48,8 @@ impl MailboxRelayDrainOwner {
 
     fn capture_boundary(record: &SessionRecord, home: &MailboxRelayHome, mailbox: &str, sequence: u64,
         signal: Arc<FederationExecutorWakeSignal>) -> Option<Self> {
-        let queue = EngramQueuedAdmissionOwner::capture(record)?;
-        let source = record.queued_prompts.front()?.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
+        let queue = QueuedTurnOwner::capture(record)?;
+        let source = record.queued_prompts.get(ordinary_queue_position(record)?)?.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
         let locator = MailboxRelayLocator::decode(&source.mailbox_id, false).ok()??;
         if source.sequence < sequence || locator.id != mailbox || &locator.home != home {
             return None;
@@ -65,7 +65,7 @@ impl MailboxRelayDrainOwner {
         !self.signal.is_stopping() && self.queue.matches(record)
             && record.runtime_stop_generation == self.stop_generation
             && record.auto_dispatch_pause_epoch == self.pause_epoch
-            && record.queued_prompts.front().and_then(|queued| queued.pending_prompt.source.as_ref())
+            && ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position)).and_then(|queued| queued.pending_prompt.source.as_ref())
                 .and_then(|source| source.mailbox.as_ref()).is_some_and(|source|
                     source.mailbox_id == self.mailbox && source.message_id == self.message && source.sequence == self.sequence)
     }
@@ -231,7 +231,7 @@ impl AppState {
         else {
             return Ok(());
         };
-        let position = if !ordinary_off_execution_applies(inner, session) { Some(0) } else { ordinary_queue_position(root) };
+        let position = ordinary_queue_position(root);
         let Some(queued) = position.and_then(|position| root.queued_prompts.get(position)) else {
             return Ok(());
         };

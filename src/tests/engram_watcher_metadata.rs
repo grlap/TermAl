@@ -1,10 +1,10 @@
-// Raw watcher notifications through the carried-run checkpoint. Equal endpoint
+// Raw watcher notifications retained by ordinary carried-run custody. Equal endpoint
 // contents cannot excuse a real leaf write, including a write then restore.
 use super::*;
 use notify::event::{CreateKind, DataChange, MetadataKind, ModifyKind, RemoveKind, RenameMode};
 
-fn instruction_fixture(label: &str) -> (CheckedTurn, PathBuf, PathBuf) {
-    let (turn, worktree) = named_turn(label);
+fn instruction_fixture(label: &str) -> (EOCheckedTurn, PathBuf, PathBuf) {
+    let (turn, worktree) = ordinary_carried_turn(label);
     let directory = worktree.join(".claude");
     fs::create_dir_all(directory.join("commands")).unwrap();
     fs::write(directory.join("settings.json"), "{}\n").unwrap();
@@ -19,7 +19,7 @@ fn instruction_fixture(label: &str) -> (CheckedTurn, PathBuf, PathBuf) {
 }
 
 fn deliver_raw(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     path: &FsPath,
     kind: NotifyEventKind,
 ) -> Vec<WorkspaceFileChangeEvent> {
@@ -31,7 +31,7 @@ fn deliver_raw(
 }
 
 #[test]
-fn watcher_metadata_directory_hint_keeps_unchanged_gate_credit() {
+fn watcher_metadata_directory_hint_keeps_unchanged_artifact_custody() {
     for (label, kind) in [
         ("directory-any", ModifyKind::Any),
         (
@@ -44,33 +44,31 @@ fn watcher_metadata_directory_hint_keeps_unchanged_gate_credit() {
         ),
     ] {
         let (turn, worktree, directory) = instruction_fixture(label);
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         deliver_raw(&turn, &directory, NotifyEventKind::Modify(kind));
         let run = finish_run(&worktree, "passed", &"f".repeat(64));
-        let checkpoint = turn.finish();
-        assert_credited(&turn, &checkpoint, &run, "succeeded");
+        assert_carried_artifact_custody(&turn, &run, true);
     }
 }
 
 #[test]
-fn watcher_metadata_real_child_write_then_restore_still_refuses_credit() {
+fn watcher_metadata_real_child_write_then_restore_still_fences_custody() {
     for relative in ["settings.json", "commands/review.md"] {
         let (turn, worktree, directory) = instruction_fixture("directory-child-write");
         let path = directory.join(relative);
         let original = fs::read(&path).unwrap();
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         fs::write(&path, "changed\n").unwrap();
         let changes = deliver_raw(&turn, &path, NotifyEventKind::Modify(ModifyKind::Any));
         assert_eq!(changes.len(), 1, "the real child event remains observable");
         fs::write(&path, &original).unwrap();
         finish_run(&worktree, "passed", &"f".repeat(64));
-        let checkpoint = turn.finish();
-        assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+        assert_carried_fence_custody(&turn, "a file in its worktree changed");
     }
 }
 
 #[test]
-fn watcher_metadata_namespace_events_on_existing_directory_still_refuse_credit() {
+fn watcher_metadata_namespace_events_on_existing_directory_still_fence_custody() {
     for kind in [
         NotifyEventKind::Create(CreateKind::Folder),
         NotifyEventKind::Remove(RemoveKind::Folder),
@@ -81,19 +79,18 @@ fn watcher_metadata_namespace_events_on_existing_directory_still_refuse_credit()
         NotifyEventKind::Other,
     ] {
         let (turn, worktree, directory) = instruction_fixture("directory-namespace");
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         // A delayed delete/rename may be handled after a replacement exists.
         // Its current directory type must not erase the event's operation.
         let changes = deliver_raw(&turn, &directory, kind);
         assert_eq!(changes.len(), 1);
         finish_run(&worktree, "passed", &"f".repeat(64));
-        let checkpoint = turn.finish();
-        assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+        assert_carried_fence_custody(&turn, "a file in its worktree changed");
     }
 }
 
 #[test]
-fn watcher_metadata_unknown_or_leaf_paths_still_refuse_credit() {
+fn watcher_metadata_unknown_or_leaf_paths_still_fence_custody() {
     for (relative, kind) in [
         ("gone", ModifyKind::Any),
         (
@@ -103,7 +100,7 @@ fn watcher_metadata_unknown_or_leaf_paths_still_refuse_credit() {
         ("commands/review.md", ModifyKind::Data(DataChange::Any)),
     ] {
         let (turn, worktree, directory) = instruction_fixture("directory-unknown");
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         let changes = deliver_raw(
             &turn,
             &directory.join(relative),
@@ -111,8 +108,7 @@ fn watcher_metadata_unknown_or_leaf_paths_still_refuse_credit() {
         );
         assert_eq!(changes.len(), 1);
         finish_run(&worktree, "passed", &"f".repeat(64));
-        let checkpoint = turn.finish();
-        assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+        assert_carried_fence_custody(&turn, "a file in its worktree changed");
     }
 }
 
@@ -143,7 +139,7 @@ fn watcher_metadata_link_or_link_ancestor_keeps_the_fence() {
         fs::create_dir_all(target.join("child")).unwrap();
         let link = directory.join("linked");
         directory_link(&link, &target);
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         let path = if child {
             link.join("child")
         } else {
@@ -156,8 +152,7 @@ fn watcher_metadata_link_or_link_ancestor_keeps_the_fence() {
             "neither a link nor its target child is exempt"
         );
         finish_run(&worktree, "passed", &"f".repeat(64));
-        let checkpoint = turn.finish();
-        assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+        assert_carried_fence_custody(&turn, "a file in its worktree changed");
         // Remove only the link itself, never recurse into its target.
         #[cfg(windows)]
         fs::remove_dir(&link).unwrap();
@@ -169,7 +164,7 @@ fn watcher_metadata_link_or_link_ancestor_keeps_the_fence() {
 #[test]
 fn watcher_metadata_replaced_directory_keeps_its_namespace_fence() {
     let (turn, worktree, directory) = instruction_fixture("directory-replaced");
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     let saved = worktree.join("saved-instructions");
     fs::rename(&directory, &saved).unwrap();
     fs::create_dir(&directory).unwrap();
@@ -189,8 +184,7 @@ fn watcher_metadata_replaced_directory_keeps_its_namespace_fence() {
         NotifyEventKind::Create(CreateKind::Folder),
     );
     finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+    assert_carried_fence_custody(&turn, "a file in its worktree changed");
 }
 
 #[test]
@@ -199,7 +193,7 @@ fn watcher_metadata_child_create_delete_or_rename_remains_observable() {
         let (turn, worktree, directory) = instruction_fixture("directory-child-namespace");
         let path = directory.join("settings.json");
         let original = fs::read(&path).unwrap();
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         let event = match action {
             "create" => {
                 let created = directory.join("commands/new.md");
@@ -231,15 +225,14 @@ fn watcher_metadata_child_create_delete_or_rename_remains_observable() {
             _ => unreachable!(),
         }
         finish_run(&worktree, "passed", &"f".repeat(64));
-        let checkpoint = turn.finish();
-        assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+        assert_carried_fence_custody(&turn, "a file in its worktree changed");
     }
 }
 
 #[test]
 fn watcher_metadata_mixed_batch_keeps_the_file_event() {
     let (turn, worktree, directory) = instruction_fixture("directory-mixed-batch");
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     let path = directory.join("settings.json");
     let event = NotifyEvent::new(NotifyEventKind::Modify(ModifyKind::Any))
         .add_path(directory)
@@ -254,6 +247,5 @@ fn watcher_metadata_mixed_batch_keeps_the_file_event() {
     );
     turn.state.engram_host().workspace_files_changed(&changes);
     finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+    assert_carried_fence_custody(&turn, "a file in its worktree changed");
 }

@@ -164,6 +164,7 @@ fn engram_check_command_outcome(
 /// launcher run whose own terminal record says it ran no stage
 /// (`EngramTurnCheckEnd::launcher_ran_no_stage`): a run refused before its
 /// first stage prints a `FAIL RUN exit=1` verdict, but tested nothing.
+#[cfg(test)]
 fn engram_check_end_outcome(
     command: &EngramCheckCommand,
     end: &EngramTurnCheckEnd,

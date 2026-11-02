@@ -164,38 +164,6 @@ fn the_guard_flags_only_an_unstamped_durable_write() {
 }
 
 #[test]
-fn stopping_a_stale_abort_retry_persists_its_removal() {
-    let state = test_app_state();
-    let session = test_session_id(&state, Agent::Codex);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        // A retry left behind by a head since cancelled.
-        inner.session_mut_by_index(index).unwrap().engram.abort_retry = Some(EngramAbortRetry {
-            prompt_id: "a-head-since-cancelled".to_owned(),
-            reason: EngramAbortReason::AdmissionFence,
-            settled_grant_id: None,
-            attempts: 1,
-            held_since: rfc3339_now(),
-            due_at: rfc3339_now(),
-            authority: "the-aborted-admission".to_owned(),
-            acknowledged: true,
-            generation: 0,
-        });
-    }
-    let snapshot = DurableSessionSnapshot::take(&state);
-
-    assert!(!state.stop_engram_abort_retry(&session).unwrap());
-
-    {
-        let inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        assert!(inner.sessions[index].engram.abort_retry.is_none());
-    }
-    snapshot.assert_changes_reach_the_delta(&state);
-}
-
-#[test]
 fn a_failed_stop_commit_restamps_the_restored_capacity_clear() {
     let mut state = test_app_state();
     let session = test_session_id(&state, Agent::Codex);
@@ -211,7 +179,6 @@ fn a_failed_stop_commit_restamps_the_restored_capacity_clear() {
             generation: 1,
             stop_generation: 0,
             pause_epoch: 0,
-            dispatch_generation: 0,
             settings: "settings".to_owned(),
             attempts: 1,
             due_at: Some(rfc3339_now()),

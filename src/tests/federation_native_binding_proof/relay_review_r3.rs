@@ -123,95 +123,78 @@ async fn mailbox_relay_review_r3_cancel_between_redrive_capture_and_drain_never_
     fixture.finish().await;
 }
 
-fn enable_relay_control(fixture: &Fixture) -> Arc<ScriptedEngramControlTransport> {
-    fixture.central.select_test_scripted_engram_budget_clock();
-    let root = fixture.central.test_temp_root.as_ref().unwrap().path().join("relay-controlled-project");
-    fs::create_dir_all(&root).unwrap();
-    let project = create_test_project(&fixture.central, &root, "Controlled relay");
-    {
-        let mut inner = fixture.central.inner.lock().unwrap();
-        let record = &mut inner.sessions[0];
-        record.session.project_id = Some(project.clone());
-        record.session.workdir = root.to_string_lossy().into_owned();
-        record.engram.context_nudge_pending = false;
-    }
-    crate::tests::engram_host_adapter::enable_test_project_engram(&fixture.central, &project, &root);
-    let transport = ScriptedEngramControlTransport::new([
-        ScriptedEngramControlResponse::Reply(Ok(json!({"routing_token":"relay-token","status":{"phase":"ready"}}))),
-        ScriptedEngramControlResponse::Reply(Ok(json!({"decision":"grant","grant":{"grant_id":"relay-evaluated-grant"}}))),
-    ]);
-    fixture.central.install_control_test_transport(transport.clone());
-    transport
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mailbox_relay_review_r3_revoke_after_evaluate_prevents_queue_promotion() {
+async fn mailbox_relay_review_r3_revoke_after_authority_capture_prevents_queue_promotion() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::new(false).await;
     let _handles = central_handle(&fixture);
-    append_to_central(&fixture, "revoke-after-evaluation");
+    let (append, receipt) = append_to_central(&fixture, "revoke-after-authority-capture");
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
-    let _input = claude_input(&fixture);
-    let transport = enable_relay_control(&fixture);
-    let app = fixture.central.clone();
-    let peer = fixture.channel.current_authority().unwrap();
-    let reached = Arc::new(AtomicBool::new(false));
-    let observed = reached.clone();
-    TEST_MAILBOX_RELAY_AFTER_EVALUATE.with(|hook| *hook.borrow_mut() = Some(Box::new(move || {
-        observed.store(true, Ordering::SeqCst);
-        app.transition_federation_peer(&peer, FederationMembershipState::Revoked).unwrap();
-    })));
-    let result = fixture.central.dispatch_next_queued_turn(&fixture.native, false);
-    assert!(reached.load(Ordering::SeqCst), "the authority change must follow an actual off-lock evaluation");
-    assert!(transport.requests().iter().any(|request| request.request["operation"] == "turn_evaluate"));
-    assert!(!matches!(result, Ok(Some(_))), "authority lost during evaluation must prevent promotion, not merely provider enqueue");
-    let snapshot = {
+    let input = claude_input(&fixture);
+    // Capture through the actual ordinary authority owner, then change the
+    // peer before its locked revalidation/promotion. No evaluation is run.
+    let captured = fixture.central.prepare_front_mailbox_relay_authority(&fixture.native)
+        .unwrap().expect("the exact relay head has current authority");
+    fixture.central.transition_federation_peer(
+        &fixture.channel.current_authority().unwrap(), FederationMembershipState::Revoked,
+    ).unwrap();
+    {
         let inner = fixture.central.inner.lock().unwrap();
-        (inner.sessions[0].session.status, inner.sessions[0].queued_prompts.len())
-    };
-    assert_ne!(snapshot.0, SessionStatus::Active);
-    assert_eq!(snapshot.1, 1);
-    assert!(fixture.central.inner.lock().unwrap().sessions[0].engram.rebind_required,
-        "the issued evaluation must retain its existing rebind settlement obligation");
+        assert!(fixture.central.validate_front_mailbox_relay_authority_locked(
+            &inner, &fixture.native, Some(&captured),
+        ).is_err(), "captured authority cannot survive revocation");
+    }
+    let result = fixture.central.dispatch_next_queued_turn(&fixture.native, false);
+    assert!(!matches!(result, Ok(Some(_))), "lost ordinary authority must prevent promotion");
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    let inner = fixture.central.inner.lock().unwrap();
+    assert_ne!(inner.sessions[0].session.status, SessionStatus::Active);
+    assert_eq!(inner.sessions[0].queued_prompts.len(), 1);
+    drop(inner);
+    let retained = fixture.central.mailbox_store.mailbox_relay_notification(
+        &append.target, &receipt.mailbox_id, receipt.sequence,
+    ).unwrap().unwrap();
+    assert!(!retained.handed_off, "revocation leaves the exact relay obligation owed");
     fixture.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mailbox_relay_review_r3_cancel_after_redrive_evaluate_never_evaluates_successor() {
+async fn mailbox_relay_review_r3_cancel_after_redrive_capture_never_promotes_successor() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::new(false).await;
     let _handles = central_handle(&fixture);
-    let (append, receipt) = append_to_central(&fixture, "cancel-after-redrive-evaluate");
+    let (append, receipt) = append_to_central(&fixture, "cancel-after-redrive-capture");
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
     let input = claude_input(&fixture);
     fixture.central.inner.lock().unwrap().sessions[0].session.status = SessionStatus::Active;
-    assert!(matches!(fixture.central.dispatch_turn(&fixture.native, r2::user_prompt("unevaluated successor"))
+    assert!(matches!(fixture.central.dispatch_turn(&fixture.native, r2::user_prompt("unrelated successor"))
         .unwrap(), DispatchTurnResult::Queued));
     let carrier = {
         let mut inner = fixture.central.inner.lock().unwrap();
         inner.sessions[0].session.status = SessionStatus::Idle;
         inner.sessions[0].queued_prompts.front().unwrap().pending_prompt.id.clone()
     };
-    let transport = enable_relay_control(&fixture);
     let app = fixture.central.clone();
     let session = fixture.native.clone();
-    TEST_MAILBOX_RELAY_AFTER_EVALUATE.with(|hook| *hook.borrow_mut() = Some(Box::new(move || {
+    let reached = Arc::new(AtomicBool::new(false));
+    let observed = reached.clone();
+    // The production redrive has captured its MailboxRelayDrainOwner before
+    // this existing seam. Cancel must invalidate that owner, not lend it to B.
+    TEST_MAILBOX_RELAY_BEFORE_REDRIVE.with(|hook| *hook.borrow_mut() = Some(Box::new(move || {
+        observed.store(true, Ordering::SeqCst);
         app.cancel_queued_prompt(&session, &carrier).unwrap();
     })));
     let retained = fixture.central.mailbox_store.mailbox_relay_notification(
-        &append.target, &receipt.mailbox_id, receipt.sequence
+        &append.target, &receipt.mailbox_id, receipt.sequence,
     ).unwrap().unwrap();
     fixture.central.queue_native_mailbox_relay_wake(&retained.wake, None).unwrap();
+    assert!(reached.load(Ordering::SeqCst), "the actual redrive owner cut must execute");
     assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
-    let requests = transport.requests();
-    assert_eq!(requests.iter().filter(|request| request.request["operation"] == "turn_evaluate").count(), 1,
-        "an old redrive cannot evaluate a successor after its captured owner is canceled");
-    let (status, queued) = {
-        let inner = fixture.central.inner.lock().unwrap();
-        (inner.sessions[0].session.status, inner.sessions[0].queued_prompts.len())
-    };
-    assert_ne!(status, SessionStatus::Active);
-    assert_eq!(queued, 1);
+    let inner = fixture.central.inner.lock().unwrap();
+    assert_ne!(inner.sessions[0].session.status, SessionStatus::Active);
+    assert_eq!(inner.sessions[0].queued_prompts.len(), 1);
+    assert_eq!(inner.sessions[0].queued_prompts[0].pending_prompt.text, "unrelated successor");
+    drop(inner);
     fixture.finish().await;
 }
 
@@ -252,7 +235,7 @@ async fn mailbox_relay_review_r3_fenced_carrier_bypass_keeps_ordinary_user_fifo(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mailbox_relay_review_r3_fenced_carrier_cannot_bypass_retained_or_exclusive_preparation() {
     let _scope = TestTempRootDirectoryScope::repository_local();
-    for hold in ["retained", "admitting", "source-preparing", "uncertain"] {
+    for hold in ["stop", "delete", "reset"] {
         let fixture = Fixture::new(false).await;
         let _handles = central_handle(&fixture);
         append_to_central(&fixture, "fenced-exclusive-preparation");
@@ -260,14 +243,20 @@ async fn mailbox_relay_review_r3_fenced_carrier_cannot_bypass_retained_or_exclus
         let input = claude_input(&fixture);
         fixture.central.transition_federation_peer(&fixture.channel.current_authority().unwrap(),
             FederationMembershipState::Revoked).unwrap();
+        let project = (hold == "reset").then(|| create_test_project(&fixture.central,
+            fixture.central.test_temp_root.as_ref().unwrap().path(), "Relay resource fence"));
         {
             let mut inner = fixture.central.inner.lock().unwrap();
             let record = &mut inner.sessions[0];
             match hold {
-                "retained" => record.queued_prompts.front_mut().unwrap().engram_interrupted = true,
-                "admitting" => record.engram.admission_in_progress = Some(Arc::new(AtomicBool::new(false))),
-                "source-preparing" => record.engram.source_observation_preparations = 1,
-                _ => record.engram.uncertain_grant_id = Some("unresolved-begin".into()),
+                "stop" => record.runtime_stop_in_progress = true,
+                "delete" => record.engram.observation_delete_requested = true,
+                "reset" => {
+                    let project = project.as_ref().unwrap();
+                    record.session.project_id = Some(project.clone());
+                    assert!(inner.claim_engram_project_reset(project).is_some());
+                }
+                _ => unreachable!(),
             }
         }
         assert!(matches!(fixture.central.dispatch_turn(&fixture.native, r2::user_prompt("protected ordinary work"))
@@ -276,6 +265,60 @@ async fn mailbox_relay_review_r3_fenced_carrier_cannot_bypass_retained_or_exclus
         assert_eq!(fixture.central.inner.lock().unwrap().sessions[0].queued_prompts.len(), 2);
         fixture.finish().await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_review_r3_unknown_carrier_stays_immutable_while_fresh_user_work_runs() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::new(false).await;
+    let _handles = central_handle(&fixture);
+    let (append, receipt) = append_to_central(&fixture, "fenced-unknown-carrier");
+    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    let input = claude_input(&fixture);
+    fixture.central.transition_federation_peer(&fixture.channel.current_authority().unwrap(),
+        FederationMembershipState::Revoked).unwrap();
+    let original = {
+        let mut inner = fixture.central.inner.lock().unwrap();
+        let record = &mut inner.sessions[0];
+        assert_eq!(record.queued_prompts.len(), 1);
+        let head = record.queued_prompts.front_mut().unwrap();
+        head.promotion_disposition_known = false;
+        head.engram_ordinary_handoff = true;
+        serde_json::to_value(head).unwrap()
+    };
+    let before = fixture.central.mailbox_store.mailbox_relay_notification(
+        &append.target, &receipt.mailbox_id, receipt.sequence,
+    ).unwrap().unwrap();
+    assert!(!before.handed_off);
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    let result = fixture.central.dispatch_turn(&fixture.native,
+        r2::user_prompt("fresh user beside an unknown carrier")).unwrap();
+    let dispatch = match result {
+        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("unknown delivery history cannot hold fresh ordinary work"),
+    };
+    deliver_turn_dispatch(&fixture.central, dispatch).unwrap();
+    match recv_within_guard(&input, "only fresh ordinary input reaches the provider") {
+        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => assert_eq!(prompt.text, "fresh user beside an unknown carrier"),
+        _ => panic!("expected the fresh user prompt"),
+    }
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    fixture.central.finish_turn_ok_if_runtime_matches(&fixture.native,
+        &RuntimeToken::Claude("relay-review-authority".into())).unwrap();
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "the unknown original is never replayed after the fresh turn");
+    {
+        let inner = fixture.central.inner.lock().unwrap();
+        assert_eq!(inner.sessions[0].queued_prompts.len(), 1);
+        assert_eq!(serde_json::to_value(&inner.sessions[0].queued_prompts[0]).unwrap(), original);
+    }
+    let after = fixture.central.mailbox_store.mailbox_relay_notification(
+        &append.target, &receipt.mailbox_id, receipt.sequence,
+    ).unwrap().unwrap();
+    assert_eq!((after.wake, after.peer, after.acknowledged, after.handed_off, after.queued),
+        (before.wake, before.peer, before.acknowledged, before.handed_off, before.queued),
+        "fresh work leaves the exact relay obligation unchanged");
+    fixture.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

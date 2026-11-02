@@ -1,15 +1,25 @@
 // Owns the tests of Claude work that outlives its frame
 // (src/claude_outstanding_work.rs), driven through the production frame
-// application and the checkpoint path: a subagent command running across the
-// prompt boundary excludes the next grant with no later frame; a checkpoint
-// racing a foreign frame never installs a clean report after the frame was
-// admitted; a replaced runtime's frame credits nothing to its successor, and
+// application and ordinary closing path: a command crossing the prompt
+// boundary makes the next trace's sources uncertain without another frame;
+// an admitted foreign frame fences attribution before its handler finishes;
+// a replaced runtime's frame contributes nothing to its successor, and
 // a turnover on the same runtime leaves old work foreign; a background
 // launch's acknowledgement retires nothing, its terminal notice does.
 // Does not own the router's origin rules (src/tests/claude_frame_router.rs) or
 // the turns no prompt owns (src/tests/engram_claude_runtime_turns.rs, whose
 // reader and frame helpers this child module uses). New module.
 use super::*;
+
+fn source_uncertain(record: &SessionRecord) -> bool {
+    let trace = record.engram.unadmitted_active_turn.as_ref().expect("ordinary trace");
+    assert_eq!(trace.generation, record.active_turn_generation);
+    trace.source_attribution_uncertain
+}
+
+fn current_trace(turn: &EOCheckedTurn) -> String {
+    turn.record(|record| record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref.clone())
+}
 
 /// A top-level Bash tool call.
 fn root_bash(id: &str, command: &str, background: bool) -> Value {
@@ -61,7 +71,7 @@ const LONG_COMMAND: &str = "sleep 30 && echo done";
 fn straddling_root(
     label: &str,
 ) -> (
-    CheckedTurn,
+    EOCheckedTurn,
     ClaudeReaderOn,
     ClaudePromptCommand,
     ClaudeTurnOwnership,
@@ -94,21 +104,15 @@ fn straddling_root(
 }
 
 #[test]
-fn a_subagent_command_running_across_the_prompt_boundary_excludes_the_next_grant_with_no_later_frame()
+fn a_subagent_command_running_across_the_prompt_boundary_marks_the_next_trace_uncertain_without_another_frame()
  {
     let (turn, mut reader, second, _ownership) = straddling_root("outstanding-straddle");
+    let turn_ref = current_trace(&turn);
     // No frame of A's subagent has arrived since B began: B is excluded from
     // the command still running all the same.
     turn.record(|record| {
-        assert_eq!(
-            record.engram.active_grant_id.as_deref(),
-            Some(CONTINUITY_NEXT_GRANT)
-        );
-        assert_eq!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(CONTINUITY_NEXT_GRANT),
-            "B begins mixed"
-        );
+        assert_eq!(record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref, turn_ref);
+        assert!(source_uncertain(record));
         assert!(record.claude_outstanding.holds("long-under-a"));
     });
     // A test B runs while that command may write is fenced.
@@ -140,31 +144,23 @@ fn a_subagent_command_running_across_the_prompt_boundary_excludes_the_next_grant
                 .unassigned_claude_observations
                 .iter()
                 .any(|kept| kept.what.contains("long-under-a") && kept.what.contains("finished")),
-            "its end is kept for no grant"
+            "its end stays with the original local owner"
         );
     });
     reader.feed(named_result(&second));
-    let checkpoints = checkpoint_requests(&turn);
-    assert_eq!(checkpoints.len(), 2);
-    let report = &checkpoints[1];
+    let report = turn.observation_for(&turn_ref);
     assert_eq!(
-        report["verification_evidence"]
+        report["occurrence"]["observed_checks"]
             .as_array()
             .map_or(0, Vec::len),
-        0,
-        "B's fenced test is not B's evidence: {report:#}"
+        1,
+        "B's fenced test remains an uncredited observed fact: {report:#}"
     );
-    assert!(
-        report["observations"]
-            .as_array()
-            .is_none_or(|observations| observations
-                .iter()
-                .all(|observation| observation["source_changed"] != true)),
-        "B claims no source change: {report:#}"
-    );
+    assert!(report["occurrence"]["source_change"].is_null(), "{report:#}");
+    assert_ordinary_observation_has_no_native_credit(&turn, &report);
 }
 
-/// How far a foreign frame got when the checkpoint built its report.
+/// How far a foreign frame got before the ordinary terminal owner froze facts.
 #[derive(Clone, Copy, Debug)]
 enum ForeignStage {
     /// No foreign frame at all: the contrast.
@@ -177,10 +173,10 @@ enum ForeignStage {
     Settled,
 }
 
-/// The report a checkpoint racing a foreign frame installs, with the frame
-/// at `stage` while the checkpoint sits between its capture and its claim.
-fn report_racing_a_foreign_frame(label: &str, stage: ForeignStage) -> Value {
-    let turn = CheckedTurn::start(label, true);
+/// The ordinary terminal report after a foreign frame was admitted, observed
+/// or fully applied. Handler completion is not required to retain uncertainty.
+fn terminal_report_after_foreign_stage(label: &str, stage: ForeignStage) -> Value {
+    let turn = EOCheckedTurn::start(label, true);
     let token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
     let generation = turn.record(|record| record.active_turn_generation);
     let ownership = new_claude_turn_ownership();
@@ -191,23 +187,6 @@ fn report_racing_a_foreign_frame(label: &str, stage: ForeignStage) -> Value {
     reader.feed(lifecycle(&prompt, "started"));
     turn.change_readme("changed in the turn\n");
 
-    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
-    let checkpoint = {
-        let state = turn.state.clone();
-        let session_id = turn.session_id.clone();
-        std::thread::spawn(move || {
-            state.checkpoint_engram_turn_off_lock(
-                &session_id,
-                EngramCheckpointPurpose::Teardown,
-                None,
-                None,
-                EngramNextIntent::Exit,
-                Some(EngramExecutionOutcome::Succeeded),
-                None,
-            )
-        })
-    };
-    gate.wait_until_claimed();
     let frame = unknown_parent_write("racing-write");
     let provenance = ClaudeObservationProvenance {
         token: token.clone(),
@@ -231,53 +210,37 @@ fn report_racing_a_foreign_frame(label: &str, stage: ForeignStage) -> Value {
         }
         ForeignStage::Settled => reader.feed(frame.clone()),
     }
-    gate.release();
-    checkpoint.join().expect("the checkpoint should not panic");
+    let report = turn.finish();
     // Whatever the frame does after the report was installed changes it not.
     if matches!(stage, ForeignStage::Admitted | ForeignStage::Observed) {
         turn.state
             .settle_claude_frame(&turn.session_id, &token, &work);
     }
-    let checkpoints = checkpoint_requests(&turn);
-    assert_eq!(checkpoints.len(), 1, "{stage:?}");
-    checkpoints[0].clone()
+    assert_ordinary_observation_has_no_native_credit(&turn, &report);
+    report
 }
 
 #[test]
-fn a_checkpoint_racing_a_foreign_frame_never_installs_a_clean_report_after_its_admission() {
+fn a_foreign_frame_admitted_before_terminal_close_withholds_sources_without_waiting_for_its_handler() {
     // The contrast: with no foreign frame, the turn reports its own change.
-    let clean = report_racing_a_foreign_frame("race-contrast", ForeignStage::None);
-    assert!(
-        clean["observations"]
-            .as_array()
-            .is_some_and(|observations| observations
-                .iter()
-                .any(|observation| observation["source_changed"] == true)),
-        "the contrast reports the turn's change: {clean:#}"
-    );
+    let clean = terminal_report_after_foreign_stage("race-contrast", ForeignStage::None);
+    assert!(!clean["occurrence"]["source_change"].is_null(), "{clean:#}");
     for (label, stage) in [
         ("race-admitted", ForeignStage::Admitted),
         ("race-observed", ForeignStage::Observed),
         ("race-settled", ForeignStage::Settled),
     ] {
-        let report = report_racing_a_foreign_frame(label, stage);
-        assert!(
-            report["observations"]
-                .as_array()
-                .is_none_or(|observations| observations
-                    .iter()
-                    .all(|observation| observation["source_changed"] != true)),
-            "{stage:?}: the grant's own change is withheld: {report:#}"
-        );
+        let report = terminal_report_after_foreign_stage(label, stage);
+        assert!(report["occurrence"]["source_change"].is_null(), "{stage:?}: {report:#}");
     }
 }
 
 #[test]
-fn the_sink_alone_excludes_the_live_grant_from_another_turns_observation() {
+fn the_sink_alone_marks_the_current_trace_uncertain_from_another_turns_observation() {
     // Without the frame's admission: the sink decides from the provenance
     // the observation carries, under the lock that applies it.
     for (label, foreign) in [("sink-foreign", true), ("sink-current", false)] {
-        let turn = CheckedTurn::start(label, true);
+        let turn = EOCheckedTurn::start(label, true);
         let token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
         let generation = turn.record(|record| record.active_turn_generation);
         let provenance = EngramObservationProvenance::Claude(ClaudeObservationProvenance {
@@ -299,7 +262,7 @@ fn the_sink_alone_excludes_the_live_grant_from_another_turns_observation() {
         );
         turn.record(|record| {
             assert_eq!(
-                record.engram.active_turn_mixed_attribution.as_deref() == Some(CHECK_GRANT),
+                source_uncertain(record),
                 foreign,
                 "{label}"
             );
@@ -310,7 +273,7 @@ fn the_sink_alone_excludes_the_live_grant_from_another_turns_observation() {
 #[test]
 fn a_frame_routed_before_its_runtime_was_replaced_credits_nothing_to_the_successor() {
     for (label, root_frame) in [("replaced-root", true), ("replaced-subagent", false)] {
-        let turn = CheckedTurn::start(label, true);
+        let turn = EOCheckedTurn::start(label, true);
         let generation = turn.record(|record| record.active_turn_generation);
         let ownership = new_claude_turn_ownership();
         let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
@@ -348,7 +311,7 @@ fn a_frame_routed_before_its_runtime_was_replaced_credits_nothing_to_the_success
         turn.record(|record| {
             assert!(
                 record.engram.active_turn_checks.is_empty(),
-                "{label}: no check of the successor's grant"
+                "{label}: no check of the successor's trace"
             );
             assert!(
                 !record
@@ -382,7 +345,7 @@ fn a_frame_routed_before_its_runtime_was_replaced_credits_nothing_to_the_success
 }
 
 #[test]
-fn a_grant_turnover_after_routing_leaves_old_work_foreign_on_the_same_runtime() {
+fn an_ordinary_turnover_after_routing_leaves_old_work_foreign_on_the_same_runtime() {
     let turn = two_turn_root("turnover-after-routing");
     let ownership = new_claude_turn_ownership();
     let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
@@ -403,7 +366,7 @@ fn a_grant_turnover_after_routing_leaves_old_work_foreign_on_the_same_runtime() 
     // A ends and B begins on the same runtime before the frame's effects.
     reader.feed(named_result(&first));
     begin_next_turn(&turn);
-    turn.record_mut(|record| record.engram.active_turn_mixed_attribution = None);
+    turn.record_mut(|record| record.engram.unadmitted_active_turn.as_mut().unwrap().source_attribution_uncertain = false);
     apply_claude_frame_plan(
         &reader.context,
         &mut reader.frames,
@@ -415,41 +378,22 @@ fn a_grant_turnover_after_routing_leaves_old_work_foreign_on_the_same_runtime() 
     turn.record(|record| {
         assert!(
             record.engram.active_turn_checks.is_empty(),
-            "A's work starts no check of B's grant"
+            "A's work starts no check of B's trace"
         );
-        assert_eq!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(CONTINUITY_NEXT_GRANT),
-            "B is excluded from it"
-        );
+        assert!(source_uncertain(record));
         assert!(
             record
                 .unassigned_claude_observations
                 .iter()
                 .any(|kept| kept.what.contains("racing-test") && kept.what.contains("started")),
-            "it is kept for no grant"
+            "it stays locally unassigned"
         );
     });
 }
 
 #[test]
 fn a_background_launch_acknowledgement_retires_nothing_and_its_terminal_notice_does() {
-    const THIRD_GRANT: &str = "outstanding-third-grant";
-    let turn = CheckedTurn::start_with_turns(
-        "background-launch",
-        true,
-        None,
-        vec![
-            checkpoint_reply(CHECK_GRANT),
-            grant_reply(CONTINUITY_NEXT_GRANT),
-            begin_reply(CONTINUITY_NEXT_GRANT),
-            checkpoint_reply(CONTINUITY_NEXT_GRANT),
-            grant_reply(THIRD_GRANT),
-            begin_reply(THIRD_GRANT),
-            checkpoint_reply(THIRD_GRANT),
-        ],
-        3,
-    );
+    let turn = EOCheckedTurn::start("background-launch", true);
     let ownership = new_claude_turn_ownership();
     let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
     let first = host_prompt(
@@ -474,6 +418,7 @@ fn a_background_launch_acknowledgement_retires_nothing_and_its_terminal_notice_d
 
     // B begins while it runs: mixed, and fenced until its end is reported.
     begin_next_turn(&turn);
+    let second_ref = current_trace(&turn);
     let second = host_prompt(
         "The next prompt.",
         turn.record(|record| record.active_turn_generation),
@@ -485,8 +430,10 @@ fn a_background_launch_acknowledgement_retires_nothing_and_its_terminal_notice_d
     assert!(turn.record(|record| record.engram.active_turn_checks[0].overlapped));
     reader.feed(root_bash_result("fenced-test", PASSING));
 
-    // Its terminal notice retires it: a test B runs from then on keeps its
-    // eligibility, and B, already mixed, stays mixed.
+    // Its terminal notice retires it as outstanding Claude work: a test B
+    // runs from then on is not fenced by it, and B, already mixed, stays
+    // mixed. B's start forgot A's running commands, as a turn's start always
+    // did, so the launch it reports no exit for does not overlap B's check.
     reader.feed(task_ended("toolu-bg"));
     turn.record(|record| assert!(!record.claude_outstanding.any()));
     reader.feed(root_bash("clean-test", SIZE_TEST, false));
@@ -498,33 +445,75 @@ fn a_background_launch_acknowledgement_retires_nothing_and_its_terminal_notice_d
             .iter()
             .find(|check| check.key == "clean-test")
             .expect("the later test starts a check");
-        assert!(!clean.overlapped, "nothing foreign may still run");
-        assert_eq!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(CONTINUITY_NEXT_GRANT)
-        );
+        assert_eq!(clean.fenced_by_outstanding, None, "no outstanding Claude work fences it");
+        assert!(!clean.overlapped, "an earlier turn's command does not overlap this turn");
+        assert_eq!(clean.overlap_cause, None);
+        assert!(!record.engram.running_command_keys.contains_key("toolu-bg"));
+        assert!(source_uncertain(record));
     });
     reader.feed(root_bash_result("clean-test", PASSING));
     reader.feed(named_result(&second));
-    let checkpoints = checkpoint_requests(&turn);
+    let observed = turn.observation_for(&second_ref);
     assert_eq!(
-        checkpoints[1]["verification_evidence"]
+        observed["occurrence"]["observed_checks"]
             .as_array()
             .map(Vec::len),
-        Some(1),
-        "only the test run after the notice is B's evidence: {:#}",
-        checkpoints[1]
+        Some(2),
+        "both executed checks remain ordinary facts, including the fenced one: {observed:#}"
     );
+    let checks = observed["occurrence"]["observed_checks"].as_array().unwrap();
+    assert!(checks.iter().any(|check| check["host_check_id"] == unadmitted_host_check_id(&second_ref, "fenced-test")));
+    assert!(checks.iter().any(|check| check["host_check_id"] == unadmitted_host_check_id(&second_ref, "clean-test")));
+    assert!(observed["occurrence"]["source_change"].is_null());
+    assert_ordinary_observation_has_no_native_credit(&turn, &observed);
 
-    // A grant that begins once nothing is outstanding begins clean.
+    // A later ordinary trace begins clean once nothing is outstanding.
     begin_next_turn(&turn);
     turn.record(|record| {
-        assert_eq!(record.engram.active_grant_id.as_deref(), Some(THIRD_GRANT));
-        assert_ne!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(THIRD_GRANT)
+        assert_ne!(record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref, second_ref);
+        assert!(!source_uncertain(record));
+    });
+}
+
+/// A background command still running in the current turn is that turn's
+/// running command: a check the same turn starts later in its worktree is
+/// overlapped by it. Only a later turn's start forgets it.
+#[test]
+fn a_background_command_still_running_in_its_own_turn_overlaps_that_turns_later_check() {
+    let turn = EOCheckedTurn::start("background-same-turn", true);
+    let ownership = new_claude_turn_ownership();
+    let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
+    let prompt = host_prompt(
+        "Run it in the background, then test.",
+        turn.record(|record| record.active_turn_generation),
+    );
+    lock_claude_turn_ownership(&ownership).reserve(claude_host_prompt_owner(&prompt));
+    reader.feed(capable_init());
+    reader.feed(lifecycle(&prompt, "started"));
+    reader.feed(root_bash("toolu-bg-same", LONG_COMMAND, true));
+    reader.feed(root_bash_result(
+        "toolu-bg-same",
+        "Command running in background with ID: b2.",
+    ));
+    reader.feed(root_bash("same-turn-test", SIZE_TEST, false));
+    turn.wait_for_snapshots();
+    turn.record(|record| {
+        assert!(record.engram.running_command_keys.contains_key("toolu-bg-same"),
+            "the current turn's launch is still running");
+        let check = record
+            .engram
+            .active_turn_checks
+            .iter()
+            .find(|check| check.key == "same-turn-test")
+            .expect("the later test starts a check");
+        assert!(check.overlapped, "its own turn's background command still overlaps it");
+        assert_eq!(
+            check.overlap_cause,
+            Some(format!("{} was still running", engram_session_command_label("toolu-bg-same")))
         );
     });
+    reader.feed(root_bash_result("same-turn-test", PASSING));
+    reader.feed(named_result(&prompt));
 }
 
 fn system_texts(record: &SessionRecord, starting: &str) -> usize {
@@ -542,7 +531,7 @@ fn system_texts(record: &SessionRecord, starting: &str) -> usize {
 #[test]
 fn a_stop_and_the_old_runtimes_exit_leave_its_command_outstanding_and_only_its_correlated_end_retires_it()
  {
-    let turn = CheckedTurn::start("orphan-stop", true);
+    let turn = EOCheckedTurn::start("orphan-stop", true);
     let token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
     let generation = turn.record(|record| record.active_turn_generation);
     let ownership = new_claude_turn_ownership();
@@ -586,6 +575,22 @@ fn a_stop_and_the_old_runtimes_exit_leave_its_command_outstanding_and_only_its_c
         &claude_frame_work(&root_bash_result("survivor", "done"), false),
     );
     assert!(!turn.record(|record| record.claude_outstanding.any()));
+
+    // The stop closed an ordinary turn, whose observation worker may still
+    // run: stop the host, release every handle on it and wait until the last
+    // one has removed its root.
+    let cleaned = turn
+        .state
+        .test_temp_root
+        .as_ref()
+        .expect("the fixture owns a guarded root")
+        .observe_cleanup();
+    turn.state.trigger_shutdown_signal();
+    turn.state.shutdown_persist_blocking();
+    drop(reader);
+    drop(turn);
+    crate::tests::phase_sync::receive(&cleaned, "the stopped host removes the fixture root")
+        .expect("the fixture root is removed");
 }
 
 #[test]
@@ -613,9 +618,9 @@ fn an_abandoned_call_and_a_parents_end_without_proof_for_its_subagent_keep_work_
 }
 
 #[test]
-fn a_replaced_runtimes_buffered_result_is_not_successor_work_but_its_new_command_excludes_the_grant()
+fn a_replaced_runtimes_buffered_result_is_not_successor_work_but_its_new_command_fences_the_trace()
  {
-    let turn = CheckedTurn::start("stale-history", true);
+    let turn = EOCheckedTurn::start("stale-history", true);
     let generation = turn.record(|record| record.active_turn_generation);
     let ownership = new_claude_turn_ownership();
     let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
@@ -624,48 +629,43 @@ fn a_replaced_runtimes_buffered_result_is_not_successor_work_but_its_new_command
     reader.feed(capable_init());
     reader.feed(lifecycle(&prompt, "started"));
     reader.feed(root_bash("old-command", LONG_COMMAND, false));
-    // The runtime is replaced; the grant's turn goes on under the successor.
+    // The runtime is replaced; the ordinary turn goes on under its successor.
     let (successor, _commands) = test_claude_runtime_handle("stale-history-successor");
     turn.record_mut(|record| record.runtime = SessionRuntime::Claude(successor));
     let unassigned = turn.record(|record| record.unassigned_claude_observations.len());
 
     // The old reader's buffered result: history, not successor work during
-    // the grant, and no proof that the old runtime's command ended. That
+    // the trace, and no proof that the old runtime's command ended. That
     // command is now outstanding work of a runtime that can never report its
-    // end, overlapping the live grant: the grant is mixed by it, as by any of
+    // end, overlapping the live trace and making its sources uncertain, as any
     // the session's own outstanding work, when the result's end reconciles
     // the session's records with it (`engram_claude_interference.rs`).
     reader.feed(root_bash_result("old-command", "done"));
     turn.record(|record| {
-        assert_eq!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(CHECK_GRANT)
-        );
+        assert!(source_uncertain(record));
         assert!(record.claude_outstanding.holds("old-command"));
-        // The only line kept is the grant's exclusion; the result itself is
+        // The only line kept describes source uncertainty; the result itself is
         // not kept as anyone's work.
         assert_eq!(record.unassigned_claude_observations.len(), unassigned + 1);
         let kept = &record.unassigned_claude_observations.back().unwrap().what;
-        assert!(kept.contains("cannot be credited"), "{kept}");
+        assert!(kept.contains("source changes are not attributed"), "{kept}");
         assert_eq!(record.session.status, SessionStatus::Active);
         assert_eq!(record.active_turn_generation, generation);
     });
-    // A command it starts now is new activity: it reaches what the grant
+    // A command it starts now is new activity: it reaches what the trace
     // has open now. A check still taking its end snapshot is fenced by it,
     // with the session's own unresolved work as the cause, and nothing else
     // of the successor's turn changes.
     let pending = Arc::new(EngramBasisCapture::default());
+    let check = turn.finished_check(0, pending.clone());
     turn.record_mut(|record| {
-        record.engram.active_turn_checks = vec![turn.finished_check(0, pending.clone())];
+        record.engram.active_turn_checks = vec![check];
     });
     reader.feed(root_bash("old-new-command", SIZE_TEST, false));
     pending.finish(None);
     turn.wait_for_snapshots();
     turn.record(|record| {
-        assert_eq!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(CHECK_GRANT)
-        );
+        assert!(source_uncertain(record));
         assert_eq!(record.engram.active_turn_checks.len(), 1);
         assert_eq!(
             record.engram.active_turn_checks[0].fenced_by_outstanding,
@@ -679,8 +679,8 @@ fn a_replaced_runtimes_buffered_result_is_not_successor_work_but_its_new_command
 }
 
 #[test]
-fn a_late_duplicate_of_work_proven_complete_does_not_mix_the_successor_grant() {
-    let turn = CheckedTurn::start("stale-duplicate", true);
+fn a_late_duplicate_of_work_proven_complete_does_not_make_the_successor_trace_uncertain() {
+    let turn = EOCheckedTurn::start("stale-duplicate", true);
     let generation = turn.record(|record| record.active_turn_generation);
     let ownership = new_claude_turn_ownership();
     let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
@@ -695,12 +695,12 @@ fn a_late_duplicate_of_work_proven_complete_does_not_mix_the_successor_grant() {
     assert!(turn.record(|record| !record.claude_outstanding.holds("done-command")));
     // The runtime is replaced, and the old reader delivers the same result
     // again: receiving a stale frame alone shows no work overlapping the
-    // grant, so it stays clean.
+    // trace, so it stays clean.
     let (successor, _commands) = test_claude_runtime_handle("stale-duplicate-successor");
     turn.record_mut(|record| record.runtime = SessionRuntime::Claude(successor));
     reader.feed(root_bash_result("done-command", "done"));
     turn.record(|record| {
-        assert_eq!(record.engram.active_turn_mixed_attribution, None);
+        assert!(!source_uncertain(record));
         assert!(!record.claude_outstanding.any());
     });
 }
@@ -708,6 +708,7 @@ fn a_late_duplicate_of_work_proven_complete_does_not_mix_the_successor_grant() {
 #[test]
 fn an_excluded_session_says_why_once_and_says_so_again_when_the_work_ends() {
     let (turn, mut reader, second, _ownership) = straddling_root("evidence-notice");
+    let turn_ref = current_trace(&turn);
     // The restriction took effect when A launched its background task: the
     // session said so then, in the transcript and in the line A's next
     // prompt carried (B's), and B, beginning while it lasts, repeats nothing.
@@ -741,19 +742,14 @@ fn an_excluded_session_says_why_once_and_says_so_again_when_the_work_ends() {
             1
         );
     });
-    // B's fenced test is refused with the outstanding work as its reason.
+    // The fenced test remains a fact after the restriction lifts; no
+    // automatic checkpoint-to-verification conversion follows its close.
     reader.feed(named_result(&second));
+    let observed = turn.observation_for(&turn_ref);
+    assert_eq!(observed["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
+    assert!(observed["occurrence"]["source_change"].is_null());
+    assert_ordinary_observation_has_no_native_credit(&turn, &observed);
     turn.record(|record| {
-        let pending = record
-            .engram
-            .pending_source_root_line
-            .clone()
-            .unwrap_or_default();
-        assert!(
-            pending.contains("this session's own Claude work"),
-            "the refused check names its reason: {pending}"
-        );
-        assert!(!pending.contains("Run it again on its own"), "{pending}");
         assert_eq!(
             system_texts(record, "Evidence restricted for this session"),
             1
@@ -764,7 +760,7 @@ fn an_excluded_session_says_why_once_and_says_so_again_when_the_work_ends() {
 #[test]
 fn another_sessions_outstanding_work_fences_checks_only_in_the_worktree_it_may_write() {
     for (label, same_worktree) in [("cross-session-same", true), ("cross-session-other", false)] {
-        let turn = CheckedTurn::start(label, true);
+        let turn = EOCheckedTurn::start(label, true);
         let other = other_session_in_worktree(&turn);
         let other_token = RuntimeToken::Claude(format!("{label}-stopped"));
         let root_key = engram_worktree_root(&turn.root);
@@ -814,7 +810,7 @@ fn an_acceptance_evaluation_requested_under_a_restriction_is_told_why() {
         .claude_evidence_restriction_notice(&turn.session_id, &place)
         .expect("the restriction is told");
     assert!(notice.contains("cannot pass on those runs"), "{notice}");
-    let clean = CheckedTurn::start("evaluation-notice-clean", true);
+    let clean = EOCheckedTurn::start("evaluation-notice-clean", true);
     assert_eq!(
         clean.state.claude_evidence_restriction_notice(
             &clean.session_id,
@@ -824,10 +820,10 @@ fn an_acceptance_evaluation_requested_under_a_restriction_is_told_why() {
     );
 }
 
-/// A claimed root with one begun grant, its reader, and its prompt's turn
+/// A claimed root with its ordinary trace, reader, and prompt's turn
 /// open.
-fn open_prompt(label: &str) -> (CheckedTurn, ClaudeReaderOn, ClaudePromptCommand) {
-    let turn = CheckedTurn::start(label, true);
+fn open_prompt(label: &str) -> (EOCheckedTurn, ClaudeReaderOn, ClaudePromptCommand) {
+    let turn = EOCheckedTurn::start(label, true);
     let ownership = new_claude_turn_ownership();
     let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
     let prompt = host_prompt(
@@ -841,8 +837,9 @@ fn open_prompt(label: &str) -> (CheckedTurn, ClaudeReaderOn, ClaudePromptCommand
 }
 
 #[test]
-fn a_clean_top_level_test_keeps_its_credit_when_no_claude_work_is_outstanding() {
+fn a_clean_top_level_test_remains_an_uncredited_fact_when_no_claude_work_is_outstanding() {
     let (turn, mut reader, prompt) = open_prompt("clean-root");
+    let turn_ref = current_trace(&turn);
     reader.feed(root_bash("root-test", SIZE_TEST, false));
     turn.wait_for_snapshots();
     turn.record(|record| {
@@ -853,18 +850,18 @@ fn a_clean_top_level_test_keeps_its_credit_when_no_claude_work_is_outstanding() 
     reader.feed(root_bash_result("root-test", PASSING));
     turn.record(|record| {
         assert!(!record.claude_outstanding.any(), "its result retired it");
-        assert_eq!(record.engram.active_turn_mixed_attribution, None);
+        assert!(!source_uncertain(record));
     });
     reader.feed(named_result(&prompt));
-    let checkpoints = checkpoint_requests(&turn);
+    let observed = turn.observation_for(&turn_ref);
     assert_eq!(
-        checkpoints[0]["verification_evidence"]
+        observed["occurrence"]["observed_checks"]
             .as_array()
             .map(Vec::len),
         Some(1),
-        "{:#}",
-        checkpoints[0]
+        "{observed:#}"
     );
+    assert_ordinary_observation_has_no_native_credit(&turn, &observed);
     turn.record(|record| {
         assert_eq!(
             system_texts(record, "Evidence restricted for this session"),
@@ -874,15 +871,12 @@ fn a_clean_top_level_test_keeps_its_credit_when_no_claude_work_is_outstanding() 
 }
 
 #[test]
-fn the_grant_that_launches_background_work_is_excluded_and_told_at_once() {
-    let (turn, mut reader, _prompt) = open_prompt("launching-grant");
+fn the_trace_that_launches_background_work_is_uncertain_even_if_work_ends_before_close() {
+    let (turn, mut reader, prompt) = open_prompt("launching-ordinary");
+    let turn_ref = current_trace(&turn);
     reader.feed(root_bash("toolu-bg", LONG_COMMAND, true));
     turn.record(|record| {
-        assert_eq!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(CHECK_GRANT),
-            "the launching grant's interval overlaps its background work"
-        );
+        assert!(source_uncertain(record));
         assert_eq!(
             system_texts(record, "Evidence restricted for this session"),
             1
@@ -905,6 +899,18 @@ fn the_grant_that_launches_background_work_is_excluded_and_told_at_once() {
             entry.locations
         );
     });
+    turn.change_readme("may have been written by the background work\n");
+    reader.feed(task_ended("toolu-bg"));
+    turn.record(|record| {
+        assert!(!record.claude_outstanding.any());
+        assert!(record.engram.active_turn_checks.is_empty(), "non-test work starts no check");
+        assert!(source_uncertain(record), "the interval stays uncertain after its hazard ends");
+    });
+    reader.feed(named_result(&prompt));
+    let observed = turn.observation_for(&turn_ref);
+    assert!(observed["occurrence"]["source_change"].is_null());
+    assert_eq!(observed["occurrence"]["observed_checks"], json!([]));
+    assert_ordinary_observation_has_no_native_credit(&turn, &observed);
 }
 
 #[test]
@@ -936,7 +942,7 @@ fn a_command_moved_to_the_background_outlives_its_result_until_its_notice() {
 #[test]
 fn deleting_or_collecting_a_session_keeps_its_work_fencing_the_workspace() {
     for (label, collect) in [("orphan-delete", false), ("orphan-collect", true)] {
-        let turn = CheckedTurn::start(label, true);
+        let turn = EOCheckedTurn::start(label, true);
         let other = other_session_in_worktree(&turn);
         let root_key = engram_worktree_root(&turn.root);
         {
@@ -1014,7 +1020,7 @@ fn may_write_in(work: &ClaudeOutstandingWork, root: &str) -> bool {
         ended_at: None,
         simple_full_gate: false,
     };
-    engram_hazards_of_work(&owner, work, None, 0, true, None)
+    engram_hazards_of_work(&owner, work, None, 0, None, true, None)
         .iter()
         .any(|hazard| engram_claude_interference(hazard, &subject).is_some())
 }
@@ -1033,7 +1039,7 @@ fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
         registered_at: EngramHost::interference_tick(),
     };
     let mut work = ClaudeOutstandingWork::default();
-    // Registered where its session worked and the root its grant named.
+    // Registered where its session worked and its independently named root.
     work.register(entry(
         "task",
         vec![Some("workdir".to_owned()), Some("named-root".to_owned())],
@@ -1079,8 +1085,9 @@ fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
 }
 
 #[test]
-fn a_command_moved_to_the_background_excludes_its_grant_before_its_partial_output_can_pass() {
+fn a_command_moved_to_the_background_fences_its_trace_before_partial_output_can_look_complete() {
     let (turn, mut reader, prompt) = open_prompt("moved-fenced");
+    let turn_ref = current_trace(&turn);
     reader.feed(root_bash("moved-test", SIZE_TEST, false));
     turn.wait_for_snapshots();
     assert!(turn.record(|record| !record.engram.active_turn_checks[0].overlapped));
@@ -1095,11 +1102,7 @@ fn a_command_moved_to_the_background_excludes_its_grant_before_its_partial_outpu
             "backgroundTaskId": "b9"}}),
     );
     turn.record(|record| {
-        assert_eq!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(CHECK_GRANT),
-            "the launching grant is excluded"
-        );
+        assert!(source_uncertain(record));
         let check = &record.engram.active_turn_checks[0];
         assert!(check.overlapped);
         assert_eq!(
@@ -1117,15 +1120,17 @@ fn a_command_moved_to_the_background_excludes_its_grant_before_its_partial_outpu
         );
     });
     reader.feed(named_result(&prompt));
-    let checkpoints = checkpoint_requests(&turn);
+    let observed = turn.observation_for(&turn_ref);
     assert_eq!(
-        checkpoints[0]["verification_evidence"]
+        observed["occurrence"]["observed_checks"]
             .as_array()
             .map_or(0, Vec::len),
-        0,
-        "its partial output is no evidence: {:#}",
-        checkpoints[0]
+        1,
+        "the unfinished command remains an honest observed fact: {observed:#}"
     );
+    assert_eq!(observed["occurrence"]["observed_checks"][0]["observed_result"], "indeterminate");
+    assert!(observed["occurrence"]["source_change"].is_null());
+    assert_ordinary_observation_has_no_native_credit(&turn, &observed);
 }
 
 #[test]
@@ -1171,14 +1176,11 @@ fn only_a_top_level_simple_full_gate_call_is_its_own_gate() {
 #[test]
 fn a_one_off_exclusion_with_nothing_outstanding_gives_no_restriction_notice() {
     let (turn, mut reader, _prompt) = open_prompt("one-off-exclusion");
-    // A subagent's file write, by a parent this reader never saw: the grant
-    // is excluded from it, but nothing is left running.
+    // A subagent's file write, by a parent this reader never saw, makes
+    // source attribution uncertain but leaves nothing running.
     reader.feed(unknown_parent_write("one-off"));
     turn.record(|record| {
-        assert_eq!(
-            record.engram.active_turn_mixed_attribution.as_deref(),
-            Some(CHECK_GRANT)
-        );
+        assert!(source_uncertain(record));
         assert!(!claude_session_work_restricts(record));
         assert_eq!(
             system_texts(record, "Evidence restricted for this session"),
@@ -1186,4 +1188,41 @@ fn a_one_off_exclusion_with_nothing_outstanding_gives_no_restriction_notice() {
         );
         assert_eq!(system_texts(record, "Evidence restriction lifted"), 0);
     });
+}
+
+/// A runtime-started (adopted) turn's own root foreground command is that
+/// turn's own, as a prompt attempt's is. Its background or nested work, work
+/// of an earlier generation, work after the adoption ended, and another
+/// runtime's work still restrict the session, so the live turn is marked
+/// mixed (`engram_apply_claude_hazards`).
+#[test]
+fn an_adopted_turns_own_foreground_command_is_its_own_and_nothing_else_is() {
+    let token = RuntimeToken::Claude("adopted".to_owned());
+    let entry = |origin: ClaudeWorkOrigin, background: bool, nested: bool| ClaudeOutstandingEntry {
+        token: token.clone(),
+        key: "bash".to_owned(),
+        origin,
+        background,
+        nested,
+        self_gate: false,
+        locations: vec![Some("workdir".to_owned())],
+        registered_at: EngramHost::interference_tick(),
+    };
+    let own = ClaudeWorkOrigin::Adopted { turn_generation: 4 };
+    assert!(!entry(own.clone(), false, false).is_hazard(Some(&token), 4, Some(4)),
+        "the adopted turn's own foreground command");
+    assert!(!entry(ClaudeWorkOrigin::Attempt { turn_generation: 4 }, false, false)
+        .is_hazard(Some(&token), 4, None), "a prompt attempt's own command is unchanged");
+    assert!(entry(own.clone(), true, false).is_hazard(Some(&token), 4, Some(4)), "background");
+    assert!(entry(own.clone(), false, true).is_hazard(Some(&token), 4, Some(4)), "nested");
+    assert!(entry(ClaudeWorkOrigin::Adopted { turn_generation: 3 }, false, false)
+        .is_hazard(Some(&token), 4, Some(4)), "an earlier generation");
+    assert!(entry(own.clone(), false, false).is_hazard(Some(&token), 4, None),
+        "no adopted turn any more");
+    assert!(entry(own.clone(), false, false).is_hazard(Some(&token), 4, Some(3)),
+        "adopted at another generation");
+    let replaced = RuntimeToken::Claude("replaced".to_owned());
+    assert!(entry(own, false, false).is_hazard(Some(&replaced), 4, Some(4)), "another runtime");
+    assert!(entry(ClaudeWorkOrigin::Unattributed, false, false).is_hazard(Some(&token), 4, Some(4)),
+        "unattributed work");
 }

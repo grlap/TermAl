@@ -24,8 +24,9 @@
 /// revision: Engram binds only a member whose newest sighting is there, and
 /// the host never makes one up. A focus switch alone records nothing; a
 /// granted turn on the member's own claim reports its root's source basis.
+#[cfg(test)]
 const ENGRAM_BIND_SIGHTING_REMEDY: &str =
-    "before the gate, give this item a granted turn on its own claim in the gate's worktree on the frozen tree, so Engram records its newest sighting at the gate's revision";
+    "before the gate, record a measured ordinary source sighting on this item's own claim in the gate's worktree on the frozen tree, so Engram records its newest sighting at the gate's revision";
 
 /// One other held item of a batch, as the gate's launch saw it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -112,6 +113,7 @@ struct EngramVerificationBindTarget {
 }
 
 /// Whether a member is bound when its gate settles.
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum EngramBindDecision {
     Bind {
@@ -131,6 +133,7 @@ enum EngramBindDecision {
 /// `named_root_sighting_read` at the head of its run). Engram decides again
 /// when it binds; this keeps a request it would refuse from being sent and
 /// says why in the holder's terms. A sighting is only ever read, never made.
+#[cfg(test)]
 fn engram_bind_decision(
     target: &EngramBindTarget,
     held: &EngramHeldClaims,
@@ -225,23 +228,22 @@ fn engram_bind_decision(
 /// The idempotency key of binding `original` to `work_id`: one per (gate,
 /// member), and the same on every resend, so Engram replays a request it
 /// already committed instead of binding twice.
+#[cfg(test)]
 fn engram_bind_idempotency_key(original: &str, work_id: &str) -> String {
     format!("termal-verification-bind:{original}:{work_id}")
 }
 
 /// The request binding `original` to one member. It is built once and kept:
-/// a resend sends exactly it, `measured_at` included, and after Engram
-/// refuses the connection's credentials it is sent again with only the
-/// routing token refreshed, which is not part of the intent Engram compares.
+/// a resend sends the same tokenless intent, including `measured_at`,
+/// binding and sighting, on the initiating session's ordinary connection.
+#[cfg(test)]
 fn engram_verification_bind_request(
-    routing_token: &str,
     original: &str,
     measurement: EngramBindMeasurement,
     binding: EngramControlWorkBinding,
     sighting: EngramBindSighting,
 ) -> EngramControlRequest {
     EngramControlRequest::VerificationBind {
-        routing_token: routing_token.to_owned(),
         idempotency_key: engram_bind_idempotency_key(original, &binding.work_id),
         original: original.to_owned(),
         measurement,
@@ -253,9 +255,8 @@ fn engram_verification_bind_request(
     }
 }
 
-// Outside tests nothing reads a bound member's record id or replay flag.
-#[cfg_attr(not(test), allow(dead_code))]
 /// How one `verification_bind` call settled its member.
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum EngramBindOutcome {
     /// Engram wrote the bound record (or replays the one it wrote).
@@ -276,16 +277,13 @@ enum EngramBindOutcome {
     Collision(String),
     /// Nothing is known to be written: send the identical request again.
     Resend(String),
-    /// Engram refused this connection's credentials. That says nothing of an
-    /// earlier attempt, which may have committed: refresh the session's
-    /// routing token and send the same request again, which Engram replays
-    /// if it committed.
-    Refresh(String),
+
 }
 
 /// Engram's error codes that a resend of the same request can settle (Engram
 /// src/host.rs `store_error_code`): an expiry Engram certifies wrote nothing,
 /// a busy store, and the generic storage error, which covers a failed commit.
+#[cfg(test)]
 const ENGRAM_BIND_RESEND_CODES: &[&str] = &[
     "control_request_expired",
     "control_store_busy",
@@ -296,28 +294,26 @@ const ENGRAM_BIND_RESEND_CODES: &[&str] = &[
 /// docs/features/acceptance-evaluation.md, `verification_bind`: "Any failure
 /// refuses the whole request with `verification_bind_refused`, and nothing
 /// is written for any target"; and a request it cannot decode at all). Any
-/// other code is no proof that nothing was written: the identical request is
-/// sent again, bounded, and an unconfirmed bind is disclosed as such.
+/// other code is no proof that nothing was written. The classifier below
+/// records that uncertainty without scheduling a resend.
+#[cfg(test)]
 const ENGRAM_BIND_PRE_WRITE_REFUSALS: &[&str] = &["verification_bind_refused", "invalid_request"];
 
-/// The words every identity-collision line carries
-/// (`EngramBindOutcome::Collision`). A settled entry whose line has them is
-/// also written to the session's transcript, durably, in the same commit
-/// that retires it (`apply_engram_owed_binds`).
+/// The words every identity-collision diagnostic carries
+/// (`EngramBindOutcome::Collision`). Classification does not retire history.
+#[cfg(test)]
 const ENGRAM_BIND_COLLISION_PHRASE: &str = "Engram rejected this bind as an identity collision";
 
 /// How `result`, the answer to binding one member `short_ref`, settles it.
-/// A refusal of the connection is resent under refreshed credentials. Only
-/// Engram's typed refusals that wrote nothing (`ENGRAM_BIND_PRE_WRITE_REFUSALS`,
+/// Only Engram's typed refusals that wrote nothing (`ENGRAM_BIND_PRE_WRITE_REFUSALS`,
 /// such as an Engram without `verification_bind` answering
 /// `invalid_request`) are final. An idempotency conflict is a terminal
 /// identity collision: this request was rejected unapplied, and an earlier,
 /// different operation holds its key. Every other
 /// answer, an expiry, a busy store, a storage error, a code this build does
-/// not know, or one that did not reach Engram or came back unreadable, is
-/// resent as it is, since Engram replays a committed request by its key and
-/// never binds twice; the resend is bounded, and the holder is told when no
-/// certain answer came.
+/// not know, or one that did not reach Engram or came back unreadable, stays
+/// uncertain. This pure response contract neither sends nor retries a request.
+#[cfg(test)]
 fn engram_bind_outcome(
     result: std::result::Result<Value, EngramTransportError>,
     original: &str,
@@ -379,9 +375,6 @@ fn engram_bind_outcome(
             "key {}; original {original}; work {work_id}; {detail}",
             engram_bind_idempotency_key(original, work_id)
         )),
-        // The connection is refused, not the bind: final for that routing
-        // token only (`engram_code_invalidates_routing_token`).
-        code if engram_code_invalidates_routing_token(code) => EngramBindOutcome::Refresh(detail),
         code if ENGRAM_BIND_RESEND_CODES.contains(&code) => EngramBindOutcome::Resend(detail),
         code if ENGRAM_BIND_PRE_WRITE_REFUSALS.contains(&code) => {
             EngramBindOutcome::Final(format!("Engram refused it ({detail})"))
@@ -394,6 +387,7 @@ fn engram_bind_outcome(
 
 /// The line the gate's holder is told about one member, or `None` while a
 /// resend, with or without refreshed credentials, is still owed.
+#[cfg(test)]
 fn engram_bind_notice_line(short_ref: &str, outcome: &EngramBindOutcome) -> Option<String> {
     match outcome {
         EngramBindOutcome::Bound { .. } | EngramBindOutcome::AlreadyBound => Some(format!(
@@ -409,7 +403,7 @@ fn engram_bind_notice_line(short_ref: &str, outcome: &EngramBindOutcome) -> Opti
                  not known"
             ),
         )),
-        EngramBindOutcome::Resend(_) | EngramBindOutcome::Refresh(_) => None,
+        EngramBindOutcome::Resend(_) => None,
     }
 }
 

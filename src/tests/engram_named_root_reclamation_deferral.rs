@@ -11,7 +11,7 @@ fn per_root_share() -> Duration {
 
 /// Another retained root beside `entry`, named after it, with its own work,
 /// claim and canonical run association.
-fn add_sibling_root(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot, label: &str, named_at: &str)
+fn add_sibling_root(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot, label: &str, named_at: &str)
     -> EngramWorkSourceRoot
 {
     let mut inner = claimed.state.inner.lock().unwrap();
@@ -36,7 +36,7 @@ fn unfocused(root: &EngramWorkSourceRoot) -> EngramRootReclamationTask {
 
 /// Whether a pass started anything for `root`: an authority transition for
 /// its work, or a cooldown after its attempt.
-fn touched(claimed: &ClaimedRoot, root: &EngramWorkSourceRoot) -> (bool, bool) {
+fn touched(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) -> (bool, bool) {
     let inner = claimed.state.inner.lock().unwrap();
     let transition = inner.engram_work_naming_history.iter()
         .any(|history| history.store == root.store && history.work_id == root.work_id
@@ -46,7 +46,7 @@ fn touched(claimed: &ClaimedRoot, root: &EngramWorkSourceRoot) -> (bool, bool) {
 }
 
 /// Spend all but half of the per-root share during the pass's first task.
-fn starve_after_first_task(claimed: &ClaimedRoot) {
+fn starve_after_first_task(claimed: &EOCheckedTurn) {
     let clock = claimed.state.engram_budget_clock();
     let spent = Arc::new(std::sync::atomic::AtomicBool::new(false));
     claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
@@ -83,7 +83,7 @@ fn a_root_reached_without_its_share_of_the_pass_budget_is_deferred_untouched() {
 }
 
 /// `count` more retained roots, all named before any root this file defers.
-fn add_earlier_roots(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot, count: usize)
+fn add_earlier_roots(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot, count: usize)
     -> Vec<EngramWorkSourceRoot>
 {
     (0..count).map(|number| add_sibling_root(claimed, entry, &format!("earlier-{number}"),
@@ -91,7 +91,7 @@ fn add_earlier_roots(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot, count:
 }
 
 /// Defer `starved` in one pass whose first task is `first`.
-fn defer_one(claimed: &ClaimedRoot, first: &EngramWorkSourceRoot, starved: &EngramWorkSourceRoot) {
+fn defer_one(claimed: &EOCheckedTurn, first: &EngramWorkSourceRoot, starved: &EngramWorkSourceRoot) {
     starve_after_first_task(claimed);
     claimed.state.run_engram_root_reclamation_pass(vec![unfocused(first), unfocused(starved)]);
     claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;

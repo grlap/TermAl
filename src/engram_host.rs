@@ -5,21 +5,16 @@
 //! Owns the facade and nothing else: the typed observation a provider's
 //! recorder reports, the host facts the routes, the turn dispatch, the
 //! watcher and the test-run tick report, the exit a runtime's own result
-//! states, and the two host lines a reset or a restart leaves for a carried
-//! gate. Every operation calls the handler that did the work before the
-//! facade existed, with the same arguments, at the same point and under the
-//! same locks, so nothing about a check or its credit changes here.
+//! states, and custody of command ends that arrive after their original turn.
+//! Observed facts and registered native verification retain separate owners.
 //!
 //! Does not own the checks, their captures, the overlap marking, the carried
-//! fence or the checkpoint's composition: those stay in the fragments
+//! facts or observation delivery: those stay in the fragments
 //! `engram_turn_checks.rs`, `engram_carried_checks.rs`, `engram_reported_ends.rs`,
 //! `engram_check_recognition.rs`, `engram_launcher_stages.rs` and
 //! `engram_one_call.rs`, which only the
-//! component and this facade name. Does not own turn admission, source roots,
-//! settings or recovery, which keep their own entry points until their moves
-//! (section 5.5).
-//!
-//! New module; nothing was split out of another file.
+//! component and this facade name. Source roots, ordinary dispatch and
+//! project settings keep their own entry points.
 use super::*;
 
 /// The Engram host component, as the rest of the host reaches it.
@@ -72,13 +67,10 @@ pub(crate) enum EngramRecorderObservation<'a> {
 
 impl EngramHost<'_> {
     /// Reports what a recorder saw in `session_id`, produced as `provenance`
-    /// says. Every handler reaches the observation, because where a command
-    /// runs and what it may write fences carried gates and other sessions'
-    /// checks whoever ran it. Whether the session's grant may take it is
-    /// decided inside each handler, under the state lock in the section that
-    /// applies it (`claude_observation_disposition`): work of another turn,
-    /// of a turn no prompt owns or of a replaced runtime is attributed to no
-    /// grant, and the live grant is excluded from it
+    /// says. Command locations and edits still mark interference with other
+    /// checks. Each handler validates runtime and turn provenance under the
+    /// state lock before attributing facts to an ordinary observation.
+    /// Foreign or unowned work makes source attribution uncertain
     /// (`claude_outstanding_work.rs`).
     pub(crate) fn observe(
         &self,
@@ -136,7 +128,7 @@ impl EngramHost<'_> {
     /// repeated a cached report or was skipped) is closed with outcome
     /// Unknown, and the holder line that says so is published now, so this
     /// very prompt carries it. The closed checks leave the live checks, so the
-    /// begin's clear does not close them again (`engram_close_unended_checks`).
+    /// next ordinary start does not close them again (`engram_close_unended_checks`).
     /// Called under the state lock, by the dispatch that holds it, before the
     /// prompt's host line is composed.
     pub(crate) fn turn_prompt_composing(record: &mut SessionRecord) {
@@ -193,6 +185,7 @@ impl EngramHost<'_> {
     /// lock, by the dispatch that holds it.
     pub(crate) fn turn_started(inner: &mut StateInner, index: usize) {
         engram_note_turn_started(inner, index);
+        start_ordinary_runtime_observation(inner, index);
     }
 
     /// A turn of the session at `index` began beside the turn it is already
@@ -204,8 +197,8 @@ impl EngramHost<'_> {
     }
 
     /// Where the session in `record` may write now: its workdir's worktree,
-    /// as last resolved (`None` when never resolved, so any), and its grant's
-    /// named source root while one is held. For outstanding Claude work
+    /// as last resolved (`None` when never resolved, so any), and its observed
+    /// turn's named source root. For outstanding Claude work
     /// registered now (`claude_outstanding_work.rs`).
     pub(crate) fn session_write_locations(record: &SessionRecord) -> Vec<Option<String>> {
         let mut locations = vec![engram_session_worktree(record)];
@@ -225,8 +218,8 @@ impl EngramHost<'_> {
     }
 
     /// The outstanding Claude work `keys` of the session at `owner` was
-    /// registered, promoted or placed further: every unpublished record and
-    /// live grant it may overlap is reconciled with it
+    /// registered, promoted or placed further: every captured check and
+    /// ordinary observation it may overlap is reconciled with it
     /// (`engram_reconcile_claude_work`). Called under the state lock.
     pub(crate) fn reconcile_claude_work(inner: &mut StateInner, owner: usize, keys: &[String]) {
         engram_reconcile_claude_work(inner, owner, keys);
@@ -329,37 +322,6 @@ impl EngramHost<'_> {
             .note_engram_observed_workspace_file_changes(changes, observation, arrival);
     }
 
-    /// Whether a change in the directory keyed `directory_key`, at the entry
-    /// `name`, lies in the scratch directory at the root of the worktree keyed
-    /// `worktree`, which the workspace watcher leaves out
-    /// (`engram_is_worktree_scratch`).
-    pub(crate) fn is_worktree_scratch(
-        worktree: &str,
-        directory_key: &str,
-        name: Option<&str>,
-    ) -> bool {
-        engram_is_worktree_scratch(worktree, directory_key, name)
-    }
-
-    /// Whether the carried check `carried` is too old at `now` to be credited
-    /// (`engram_carried_check_expired`).
-    pub(crate) fn carried_check_expired(
-        carried: &EngramCarriedCheck,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> bool {
-        engram_carried_check_expired(carried, now)
-    }
-
-    /// When the carried check `carried` becomes too old to be credited: its
-    /// launch plus `ENGRAM_CARRIED_CHECK_TTL_SECONDS`, or `None` when its
-    /// launch time cannot be read (`engram_carried_check_expired`).
-    pub(crate) fn carried_check_expires_at(
-        carried: &EngramCarriedCheck,
-    ) -> Option<chrono::DateTime<chrono::Utc>> {
-        engram_parse_time(&carried.check.started_at)
-            .map(|launched| launched + chrono::Duration::seconds(ENGRAM_CARRIED_CHECK_TTL_SECONDS))
-    }
-
     /// The test-run index ticked: a carried gate's terminal record is read as
     /// soon as the tick finds it. Its one caller, the test-run index thread,
     /// is not built into tests, which call the poll directly.
@@ -416,9 +378,9 @@ impl EngramHost<'_> {
         engram_carried_lost_to_restart_line(marker)
     }
 
-    /// The host lines for the carried gates `record` loses when its Engram
-    /// state is reset, and `why`.
-    pub(crate) fn carried_checks_reset_lines(record: &SessionRecord, why: &str) -> Vec<String> {
-        engram_carried_checks_reset_lines(record, why)
+    /// The lines the holders of a session's carried checks get when a
+    /// project settings change ends its claim association.
+    pub(crate) fn carried_checks_association_reset_lines(record: &SessionRecord, why: &str) -> Vec<String> {
+        engram_carried_checks_association_reset_lines(record, why)
     }
 }

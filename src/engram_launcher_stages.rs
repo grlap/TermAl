@@ -200,6 +200,7 @@ fn engram_launcher_is_focused_request(request: &Value) -> bool {
 /// launcher writing these records but not this summary line (another
 /// project's launcher), not a run that passed nothing, so its holder is told
 /// what is missing instead of that no test passed.
+#[cfg(test)]
 fn engram_focused_stage_line_missing(
     check: &EngramCheckCommand,
     result_lines: &[String],

@@ -52,19 +52,7 @@ import {
   requestJsonFirst,
 } from "./api-request";
 
-/** Public recovery projection; never contains retained requests or credentials. */
-export type EngramControlRecoverySummary = {
-  projectId: string;
-  sessionId: string;
-  operation: string;
-  code: string;
-  excluded: boolean;
-  settlementConfirmed: boolean;
-  nextActions: string[];
-};
-
 export type StateResponse = {
-  engramControlRecovery?: EngramControlRecoverySummary[];
   testRunWaits?: import("./test-run-waits").TestRunWaitRecord[];
   testRuns?: import("./test-runs").TestRunSummary[];
   revision: number;
@@ -889,7 +877,6 @@ export function updateEngramHostSettings(payload: {
   developerName: string;
   binaryPath: string;
   home: string;
-  bootRecoveryBudgetMs: number;
 }) {
   return request<StateResponse>("/api/engram/settings", {
     method: "PATCH",

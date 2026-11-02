@@ -42,10 +42,6 @@ struct FileChangeOwnerCapture {
     reset_required: bool,
     paused: bool,
     workdir: String,
-    dispatch_generation: u64,
-    routing_token: Option<String>,
-    grant_id: Option<String>,
-    intent_fingerprint: Option<String>,
     naming: Option<(EngramAuthorityStoreKey, String)>,
     source_root: Option<EngramTurnSourceRoot>,
     delete_requested: bool,
@@ -71,13 +67,9 @@ impl FileChangeOwnerCapture {
             reset_required: record.runtime_reset_required,
             paused: record.orchestrator_auto_dispatch_blocked,
             workdir: record.session.workdir.clone(),
-            dispatch_generation: record.engram.dispatch_generation,
-            routing_token: record.engram.routing_token.clone(),
-            grant_id: record.engram.active_grant_id.clone(),
-            intent_fingerprint: record.engram.active_turn_intent_fingerprint.clone(),
-            naming: record.engram.active_turn_naming_identity.clone(),
-            source_root: record.engram.active_turn_source_root.clone(),
-            delete_requested: record.engram.source_observation_delete_requested,
+                                            naming: record.engram.observed_naming_identity(),
+            source_root: record.engram.observed_source_root().cloned(),
+            delete_requested: record.engram.observation_delete_requested,
         }
     }
 
@@ -99,13 +91,9 @@ impl FileChangeOwnerCapture {
             && record.runtime_stop_in_progress == self.stop_in_progress
             && record.runtime_reset_required == self.reset_required
             && record.orchestrator_auto_dispatch_blocked == self.paused
-            && record.engram.dispatch_generation == self.dispatch_generation
-            && record.engram.routing_token == self.routing_token
-            && record.engram.active_grant_id == self.grant_id
-            && record.engram.active_turn_intent_fingerprint == self.intent_fingerprint
-            && record.engram.active_turn_naming_identity == self.naming
-            && record.engram.active_turn_source_root == self.source_root
-            && record.engram.source_observation_delete_requested == self.delete_requested
+            && record.engram.observed_naming_identity() == self.naming
+            && record.engram.observed_source_root() == self.source_root.as_ref()
+            && record.engram.observation_delete_requested == self.delete_requested
             && (record.runtime.runtime_token() == self.runtime
                 || (completed && record.runtime.runtime_token().is_none()))
             && (record.active_turn_start_message_count == self.start_count
@@ -151,7 +139,6 @@ fn prepare_file_change_capture(
     let root_key = owner
         .source_root
         .as_ref()
-        .filter(|_| owner.grant_id.is_some())
         .map(|root| engram_path_key(&normalize_user_facing_path(FsPath::new(&root.root))));
     let mut prepared = Vec::new();
     for change in changes {

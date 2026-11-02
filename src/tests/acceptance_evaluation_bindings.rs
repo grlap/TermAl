@@ -355,6 +355,8 @@ fn a_bound_pass_on_a_basis_other_than_observed_is_refused_with_the_rule() {
 fn the_request_path_briefs_and_persists_the_bindings() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
+    let (_, _, binding_page) = evidence_selection::canonical_binding_receipts();
+    evidence_selection::install_binding_evidence_transport(&state, &parent, vec![binding_page]);
     let full = bound_full_receipt();
     let show = show_with_verification();
     let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {

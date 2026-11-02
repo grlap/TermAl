@@ -94,8 +94,6 @@ struct AcceptancePolicySnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     epoch: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    required_assurance: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     acceptance_evaluation: Option<AcceptanceStorePolicy>,
 }
 
@@ -110,7 +108,6 @@ fn parse_acceptance_policy(
         schema_version: u32,
         policy: String,
         epoch: Option<u64>,
-        required_assurance: Option<String>,
         acceptance_evaluation: Option<Policy>,
     }
     #[derive(Deserialize)]
@@ -149,7 +146,6 @@ fn parse_acceptance_policy(
         reader_key,
         policy: Some(receipt.policy),
         epoch: receipt.epoch,
-        required_assurance: receipt.required_assurance,
         acceptance_evaluation: receipt
             .acceptance_evaluation
             .map(|policy| AcceptanceStorePolicy {
@@ -289,7 +285,6 @@ impl AppState {
                 reader_key: target.reader_key,
                 policy: None,
                 epoch: None,
-                required_assurance: None,
                 acceptance_evaluation: None,
             }),
         }
@@ -426,7 +421,6 @@ impl AppState {
                 reader_key: target.reader_key,
                 policy: None,
                 epoch: None,
-                required_assurance: None,
                 acceptance_evaluation: None,
             },
         };

@@ -8,18 +8,13 @@
 // files (registration, input, run, one check per stage with its check
 // fingerprint over the stage's actual argv, post-run classification), frozen
 // in a file beside the run and resent byte for byte under the idempotency key
-// "termal-run:<run id>"; the route: the initiating session's owner-managed
-// connection and the valid routing token the session already holds (never
-// the owning session's, never a reader's, never a token of the sender's own),
-// with the record kept pending while the session holds none; the sender
-// creates no Engram bind of any kind; the refusal to send while that
-// connection's own bind or status answer does not list
+// "termal-run:<run id>"; the route: the initiating session's ordinary
+// work-session connection, with its exact store identity and child generation;
+// the refusal to send while that connection's work-session answer does not list
 // `verification_record_v1` (src/engram_capabilities.rs), kept as a typed
 // pending reason beside the run; which Engram refusals are definite (the
 // record is rejected) and which are deferred (the same frozen body is sent
-// again under the same key); a refused routing token, for which only what was
-// read under it is forgotten and the record stays pending; the reading and
-// checking of Engram's receipt,
+// again under the same key); the reading and checking of Engram's receipt,
 // held once valid on the run's registration in state
 // (`TestRunVerificationAck`, which the state file beside the run only
 // mirrors) and never sent for again; handing its
@@ -31,19 +26,16 @@
 // the host's registration and the run's files, and a held receipt against
 // that body, before either is sent or settled from; and the tick's own budget
 // (`ENGRAM_VERIFICATION_RECORD_TICK_BUDGET`) and round-robin cursor
-// (`EngramVerificationRecordCursor`), with the in-memory per-run backoff and
-// per-session refused routing tokens the cursor keeps.
+// (`EngramVerificationRecordCursor`), with its in-memory per-run backoff.
 //
 // Does not own: registration, binding or the named root
-// (src/test_run_registration.rs, src/test_run_named_root.rs); the session's
-// Engram binding, which source-root naming or, under turn-gated control, the
-// session's own admission or recovery creates and renews; the launcher's
+// (src/test_run_registration.rs, src/test_run_named_root.rs); the launcher's
 // committed-input classification (src/test_run_committed_input.rs,
 // scripts/test-launcher.mjs); command recognition and the check fingerprint
 // (src/engram_check_recognition.rs via `EngramHost::check_fingerprint`); the
 // control transport and its capability reading (src/engram_host_adapter.rs,
 // src/engram_capabilities.rs); the tick thread (src/engram_retry_schedule.rs);
-// any credit, acceptance or tracker decision, which stay Engram's. New module.
+// any credit, acceptance or tracker decision, which stay Engram's.
 
 /// The frozen body's file in the run directory: written once, never rebuilt.
 const ENGRAM_VERIFICATION_RECORD_BODY_FILE: &str = "engram-verification-record.json";
@@ -253,24 +245,16 @@ struct EngramVerificationRecordVerification {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum EngramVerificationRecordPending {
-    /// The initiating session's bound connection does not list the
-    /// capability, by its own last bind or status answer.
+    /// The initiating session's ordinary work-session answer does not list
+    /// the capability under the current connection and child generation.
     CapabilityUnsupported { support: EngramVerificationRecordSupport },
     /// The initiating session no longer exists. No other session's
     /// connection is ever used in its place.
     InitiatingSessionGone,
     /// The initiating session's project has no enabled Engram connection.
     NoConnection,
-    /// The initiating session holds no valid binding: no routing token, or
-    /// one marked for rebinding (as after a reload). The sender never binds:
-    /// source-root naming binds the session, or, under turn-gated control,
-    /// its own admission or recovery; a later look sends the same record
-    /// under the token it then holds.
+    /// Historical progress only; current routing does not emit this reason.
     AwaitingNamingBinding,
-    /// Engram refused the routing token the record was sent under; what was
-    /// read under it is forgotten, and the session's status is read afresh
-    /// before the same record goes again.
-    RoutingTokenRefused,
     /// A stage is neither a test nor a build check; the record is not built
     /// until someone decides how it is recorded.
     UnclassifiedStages { stages: Vec<String> },
@@ -457,23 +441,19 @@ enum EngramVerificationRecordAssociation {
     NoLaunchRow,
 }
 
-/// The connection a record goes out on: the initiating session's own bound
-/// connection, with its current routing token. The owning session is audit
-/// only.
+/// The initiating session's ordinary work-session connection. The owning
+/// session is audit only.
 struct EngramVerificationRecordLink<'a> {
     adapter: &'a EngramHostAdapter,
     connection: &'a EngramConnectionConfig,
-    routing_token: &'a str,
     timeout: Duration,
 }
 
 /// An owned `EngramVerificationRecordLink`, carried off the state lock: the
-/// initiating session's owner-managed connection and its current routing
-/// token, read from the session's own state. The sender keeps no token.
+/// initiating session's owner-managed ordinary connection.
 struct EngramVerificationRecordRoute {
     adapter: Arc<EngramHostAdapter>,
     connection: EngramConnectionConfig,
-    routing_token: String,
     timeout: Duration,
 }
 
@@ -482,7 +462,6 @@ impl EngramVerificationRecordRoute {
         EngramVerificationRecordLink {
             adapter: &self.adapter,
             connection: &self.connection,
-            routing_token: &self.routing_token,
             timeout: self.timeout,
         }
     }
@@ -907,18 +886,22 @@ fn engram_verification_record_parse(text: &str) -> Option<(Value, EngramVerifica
     if !record.is_object() || serde_json::to_string(&record).ok()?.as_str() != text {
         return None;
     }
-    let body = serde_json::from_value(record.clone()).ok()?;
+    let body: EngramVerificationRecordBody = serde_json::from_value(record.clone()).ok()?;
+    // A typed comparison alone would ignore unknown fields while the raw
+    // value is flattened into the outgoing request. Preserve the file, but
+    // refuse to send or settle any body that carries such extra fields.
+    if serde_json::to_value(&body).ok()? != record {
+        return None;
+    }
     Some((record, body))
 }
 
-/// The request that sends `frozen` under `routing_token`: the same key and
-/// body bytes on every send; only the token, outside both, may differ.
+/// The tokenless ordinary request sends the same frozen key and body bytes
+/// on every attempt.
 fn engram_verification_record_request(
     frozen: &EngramVerificationRecordFrozen,
-    routing_token: &str,
 ) -> EngramControlRequest {
     EngramControlRequest::VerificationRecord {
-        routing_token: routing_token.to_owned(),
         operation_key: engram_verification_record_key(&frozen.run_id),
         record: frozen.record.clone(),
     }
@@ -1230,11 +1213,11 @@ fn engram_verification_record_send(
     };
     let support = link
         .adapter
-        .verification_record_support(link.connection, link.routing_token);
+        .verification_record_route_support(link.connection);
     if !support.is_supported() {
         return pending(EngramVerificationRecordPending::CapabilityUnsupported { support });
     }
-    let request = engram_verification_record_request(&frozen, link.routing_token);
+    let request = engram_verification_record_request(&frozen);
     let reply = link.adapter.request(link.connection, &request, link.timeout);
     let rejected = |detail: String| {
         eprintln!("engram> run={} verification record not settled: {detail}", frozen.run_id);
@@ -1265,14 +1248,6 @@ fn engram_verification_record_send(
             );
             EngramVerificationRecordStep::Received { body: frozen.body, receipt }
         }
-        // Engram refused the session's credentials, not the record: what
-        // was read under that token is dropped, and the next look reads the
-        // session's status afresh and sends the same record again under
-        // whatever binding the session then holds.
-        Err(error) if engram_status_error_requires_fresh_bind(&error) => {
-            link.adapter.capabilities.forget(&link.connection.session_id);
-            pending(EngramVerificationRecordPending::RoutingTokenRefused)
-        }
         // A refusal from a child that no longer serves the connection (it was
         // respawned under the send) says nothing about this record: the
         // capability is read again before it is sent again.
@@ -1280,7 +1255,7 @@ fn engram_verification_record_send(
             if error.kind == EngramTransportErrorKind::Remote
                 && !link
                     .adapter
-                    .verification_record_support(link.connection, link.routing_token)
+                    .verification_record_route_support(link.connection)
                     .is_supported() =>
         {
             pending(EngramVerificationRecordPending::CapabilityUnsupported {
@@ -1375,93 +1350,48 @@ fn engram_verification_record_producers(
 /// so a run whose calls spend a pass's budget goes behind the runs it held
 /// up, and every run is looked at within a bounded number of passes. Kept by
 /// the tick's own thread (src/engram_retry_schedule.rs) across its passes,
-/// in memory only, with each run's backoff and each session's refused
-/// routing token.
+/// in memory only, with each run's backoff.
 #[derive(Debug, Default)]
 struct EngramVerificationRecordCursor {
     last: Option<String>,
-    /// Runs a look left pending, or with an unsettled receipt, by run id: not
-    /// looked at again before their time.
     backoff: HashMap<String, EngramVerificationRecordBackoff>,
-    /// The routing token Engram refused, by initiating session: none of the
-    /// session's runs is routed, and no status is read for them, while the
-    /// session still holds that token.
-    refused_tokens: HashMap<String, String>,
 }
 
-/// One run's wait before its next look, and what it was taken under: a
-/// change of the host's acknowledgment on the run, or of its initiating
-/// session's routing token, ends the wait.
 #[derive(Debug)]
 struct EngramVerificationRecordBackoff {
     next: std::time::Instant,
     wait: Duration,
     ack: Option<TestRunVerificationAck>,
-    token: Option<String>,
 }
 
 impl EngramVerificationRecordCursor {
-    /// Whether `registration`'s look waits: its backoff has not run out, or
-    /// its session still holds the token Engram refused. A backoff taken
-    /// under another acknowledgment or token is dropped first.
-    fn waits(&mut self, registration: &TestRunRegistration, token: Option<&String>, now: std::time::Instant) -> bool {
-        let session = &registration.initiating_session_id;
-        if self.refused_tokens.get(session).is_some_and(|refused| Some(refused) != token) {
-            self.refused_tokens.remove(session);
-        }
-        if let Some(backoff) = self.backoff.get(&registration.run_id)
-            && (backoff.ack != registration.verification_record || backoff.token.as_ref() != token)
+    fn waits(&mut self, registration: &TestRunRegistration, now: std::time::Instant) -> bool {
+        if self.backoff.get(&registration.run_id)
+            .is_some_and(|backoff| backoff.ack != registration.verification_record)
         {
             self.backoff.remove(&registration.run_id);
         }
-        self.refused_tokens.get(session).is_some()
-            || self.backoff.get(&registration.run_id).is_some_and(|backoff| now < backoff.next)
+        self.backoff.get(&registration.run_id).is_some_and(|backoff| now < backoff.next)
     }
 
-    /// Puts `registration` off after a look that left it pending or
-    /// unsettled: twice its last wait, from the first, up to the longest.
-    fn back_off(&mut self, registration: &TestRunRegistration, token: Option<&String>, now: std::time::Instant) {
-        let wait = self
-            .backoff
-            .get(&registration.run_id)
-            .map_or(ENGRAM_VERIFICATION_RECORD_BACKOFF_START, |backoff| {
-                (backoff.wait * 2).min(ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX)
-            });
-        self.backoff.insert(
-            registration.run_id.clone(),
-            EngramVerificationRecordBackoff {
-                next: now + wait,
-                wait,
-                ack: registration.verification_record.clone(),
-                token: token.cloned(),
-            },
-        );
+    fn back_off(&mut self, registration: &TestRunRegistration, now: std::time::Instant) {
+        let wait = self.backoff.get(&registration.run_id)
+            .map_or(ENGRAM_VERIFICATION_RECORD_BACKOFF_START, |backoff|
+                (backoff.wait * 2).min(ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX));
+        self.backoff.insert(registration.run_id.clone(), EngramVerificationRecordBackoff {
+            next: now + wait, wait, ack: registration.verification_record.clone(),
+        });
     }
 
-    /// Forgets the waits of runs and sessions no longer among `selected`.
-    fn retain(&mut self, selected: &[(TestRunRegistration, Option<String>)]) {
-        let runs: HashSet<&str> = selected.iter().map(|(registration, _)| registration.run_id.as_str()).collect();
-        let sessions: HashSet<&str> = selected
-            .iter()
-            .map(|(registration, _)| registration.initiating_session_id.as_str())
-            .collect();
+    fn retain(&mut self, selected: &[TestRunRegistration]) {
+        let runs: HashSet<&str> = selected.iter().map(|registration| registration.run_id.as_str()).collect();
         self.backoff.retain(|run_id, _| runs.contains(run_id.as_str()));
-        self.refused_tokens.retain(|session, _| sessions.contains(session.as_str()));
     }
 
-    /// `registrations` (each with its initiating session's routing token), in
-    /// run id order, rotated to start after the run the last pass looked at
-    /// last.
-    fn order(
-        &self,
-        mut registrations: Vec<(TestRunRegistration, Option<String>)>,
-    ) -> Vec<(TestRunRegistration, Option<String>)> {
-        registrations.sort_by(|(left, _), (right, _)| left.run_id.cmp(&right.run_id));
+    fn order(&self, mut registrations: Vec<TestRunRegistration>) -> Vec<TestRunRegistration> {
+        registrations.sort_by(|left, right| left.run_id.cmp(&right.run_id));
         let start = self.last.as_ref().map_or(0, |last| {
-            registrations
-                .iter()
-                .position(|(registration, _)| registration.run_id > *last)
-                .unwrap_or(0)
+            registrations.iter().position(|registration| registration.run_id > *last).unwrap_or(0)
         });
         registrations.rotate_left(start);
         registrations
@@ -1506,8 +1436,7 @@ impl AppState {
     /// `engram_verification_records_tick_within`, starting after the run
     /// `cursor` names and leaving it at the last run this pass looked at.
     /// A run whose look left it pending, or its receipt unsettled, waits out
-    /// its backoff in `cursor` before the next look; the runs of a session
-    /// whose routing token Engram refused wait until it holds another.
+    /// its backoff in `cursor` before the next look.
     fn engram_verification_records_tick_from(
         &self,
         budget: Duration,
@@ -1516,10 +1445,9 @@ impl AppState {
     ) -> usize {
         let clock = self.engram_budget_clock();
         let deadline = clock.now() + budget;
-        // Each run with its initiating session's routing token as it stands
-        // now. A settled or rejected run is finished: it is not selected, so
+        // A settled or rejected run is finished: it is not selected, so
         // none of its files is read again.
-        let registrations: Vec<(TestRunRegistration, Option<String>)> = {
+        let registrations: Vec<TestRunRegistration> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
                 .test_run_registrations
@@ -1532,23 +1460,17 @@ impl AppState {
                             Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. })
                         )
                 })
-                .map(|registration| {
-                    let token = inner
-                        .find_session_index(&registration.initiating_session_id)
-                        .and_then(|index| inner.sessions[index].engram.routing_token.clone());
-                    (registration.clone(), token)
-                })
+                .cloned()
                 .collect()
         };
         cursor.retain(&registrations);
         let mut looked = 0;
-        for (registration, token) in cursor.order(registrations) {
+        for registration in cursor.order(registrations) {
             if stopping() || clock.now() >= deadline {
                 break;
             }
-            // A run in its backoff, or under a token Engram refused, is
-            // neither read nor routed, and no status is read for it.
-            if cursor.waits(&registration, token.as_ref(), clock.now()) {
+            // A run in its backoff is neither read nor routed.
+            if cursor.waits(&registration, clock.now()) {
                 continue;
             }
             looked += 1;
@@ -1559,32 +1481,17 @@ impl AppState {
             let done = match engram_verification_record_prepare(&registration) {
                 EngramVerificationRecordPrepared::Ready(frozen) => {
                     let route = self.engram_verification_record_route_until(&registration, deadline);
-                    let routed_token = route
-                        .as_ref()
-                        .map_or(token.clone(), |route| Some(route.routing_token.clone()));
                     let step = engram_verification_record_send(
                         frozen,
                         route.as_ref().map(EngramVerificationRecordRoute::link).map_err(Clone::clone),
                     );
                     self.note_engram_verification_record_step(&registration, &step);
-                    // A refused routing token stays pending as such: the
-                    // sender never binds or clears the session's binding,
-                    // and routes none of its runs while it holds that token.
                     match step {
                         EngramVerificationRecordStep::Received { body, receipt } => settled(
                             self.complete_engram_verification_record_until(&registration, &body, &receipt, deadline),
                         ),
                         EngramVerificationRecordStep::Rejected(_) => true,
-                        EngramVerificationRecordStep::Pending(reason) => {
-                            if reason == EngramVerificationRecordPending::RoutingTokenRefused
-                                && let Some(refused) = routed_token
-                            {
-                                cursor
-                                    .refused_tokens
-                                    .insert(registration.initiating_session_id.clone(), refused);
-                            }
-                            false
-                        }
+                        EngramVerificationRecordStep::Pending(_) => false,
                     }
                 }
                 EngramVerificationRecordPrepared::ReceiptHeld { frozen, receipt } => settled(
@@ -1596,12 +1503,11 @@ impl AppState {
                 | EngramVerificationRecordPrepared::Finished => true,
             };
             // Left pending, or with its receipt unsettled: looked at again
-            // only after its backoff, unless its acknowledgment or its
-            // session's token changes first.
+            // only after its backoff, unless its acknowledgment changes first.
             if done {
                 cursor.backoff.remove(&registration.run_id);
             } else {
-                cursor.back_off(&registration, token.as_ref(), clock.now());
+                cursor.back_off(&registration, clock.now());
             }
         }
         looked
@@ -1794,24 +1700,12 @@ impl AppState {
         self.engram_verification_record_route_until(registration, deadline)
     }
 
-    /// The initiating session's owner-managed connection and its current
-    /// routing token. Never another session's, and never a reader's: a
-    /// session that is gone is pending as such. The session's target is the
-    /// Base binding owner's (`engram_source_root_target_locked`: Base enabled,
-    /// local, not disabled, no reset, root or child shape, obligations
-    /// excluded). Only a session that already holds a valid binding (a
-    /// routing token not marked for rebinding) routes; any other waits,
-    /// pending as `AwaitingNamingBinding`, for source-root naming or, under
-    /// turn-gated control, its own admission or recovery to bind it. The
-    /// sender creates no bind of any kind and never calls a binder. A bound
-    /// session keeps its binding as it is, and its own status read refreshes
-    /// what that binding's child supports when no answer under it stands; a
-    /// status read that refuses the token forgets what was read under it,
-    /// leaves the session's binding as it is, and sends nothing under it.
-    /// Focus and the session's work binding play no part: Engram validates
-    /// the registration's own binding, and each send uses whatever
-    /// credentials the session holds then. Every call, and the route's own
-    /// timeout, is bounded by `deadline`.
+    /// The initiating session's ordinary work connection, never the owning
+    /// session's or a reader's. Verify the registration's exact store and
+    /// the serving child's work-session identity/capabilities. No control
+    /// token, naming bind or admission recovery is needed or changed.
+    /// Engram validates the registration's own work binding independently.
+    /// Every call and the returned route stay inside `deadline`.
     fn engram_verification_record_route_until(
         &self,
         registration: &TestRunRegistration,
@@ -1834,10 +1728,6 @@ impl AppState {
             }
             target
         };
-        // Only a binding the session already holds, and holds validly.
-        let Some(token) = target.routing_token.clone().filter(|_| !target.rebind_required) else {
-            return Err(EngramVerificationRecordPending::AwaitingNamingBinding);
-        };
         // What is left of `deadline` for one call; none is started without.
         let timeout_left = || {
             let left = deadline.saturating_duration_since(target.budget_clock.now());
@@ -1848,28 +1738,15 @@ impl AppState {
             }
             Ok(target.settings.call_timeout().min(left))
         };
-        if target.adapter.current_routing_token(&target.connection).as_deref() != Some(token.as_str()) {
-            // A read: its answer is recorded by the adapter, and any other
-            // failure leaves the capability unread for a later look. A
-            // refusal of the token itself forgets what was read under it;
-            // the session's binding is its owner's and stays as it is.
-            let status = target.adapter.request(
-                &target.connection,
-                &EngramControlRequest::SessionStatus { routing_token: token.clone() },
-                timeout_left()?,
-            );
-            if let Err(error) = &status
-                && engram_status_error_requires_fresh_bind(error)
-            {
-                target.adapter.capabilities.forget(&target.connection.session_id);
-                return Err(EngramVerificationRecordPending::RoutingTokenRefused);
-            }
-        }
+        target.adapter.read_work_session(
+            &target.connection, registration.authority_store.as_ref().expect("checked store"), timeout_left()?,
+        ).map_err(|error| EngramVerificationRecordPending::TransportFailed {
+            error_kind: format!("{:?}", error.kind),
+        })?;
         Ok(EngramVerificationRecordRoute {
             adapter: Arc::clone(&target.adapter),
             connection: target.connection.clone(),
             timeout: timeout_left()?,
-            routing_token: token,
         })
     }
 
@@ -1970,7 +1847,6 @@ impl AppState {
         for row in Self::settle_test_run_producer_records_locked(
             &mut inner,
             settlements,
-            TestRunRecordSettlement::VerificationRecord,
             store,
             binding,
         ) {

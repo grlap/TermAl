@@ -4,7 +4,7 @@
 // and newest sighting at the gate's revision, never a made-up sighting), the
 // request's wire form and stable key, and how each Engram answer settles a
 // member.
-// Does not own: the gate's native credit (engram_carried_checks.rs tests),
+// Does not own: the gate's native credit (engram_verification_record.rs tests),
 // sending, persisting and replaying binds, or the bound record's citation,
 // which Engram serves.
 // A new module, declared from tests/mod.rs.
@@ -265,7 +265,6 @@ fn a_bind_request_carries_one_member_under_a_key_stable_per_gate_and_member() {
     };
     let build = || {
         engram_verification_bind_request(
-            "routing-merger",
             &"f".repeat(32),
             measurement.clone(),
             binding("member", 3),
@@ -274,7 +273,7 @@ fn a_bind_request_carries_one_member_under_a_key_stable_per_gate_and_member() {
     };
     let wire = serde_json::to_value(build()).unwrap();
     assert_eq!(wire["operation"], "verification_bind");
-    assert_eq!(wire["routing_token"], "routing-merger");
+    assert!(wire.get("routing_token").is_none());
     assert_eq!(wire["original"], "f".repeat(32));
     assert_eq!(
         wire["idempotency_key"],
@@ -361,8 +360,9 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
             "{message}"
         );
     }
-    // The connection was refused, not the bind; an earlier attempt may have
-    // committed, so the same request goes again under refreshed credentials.
+    // Old or unknown connection errors do not prove that a bind was not
+    // applied. Keep the same native request pending; no control bind or
+    // routing-token refresh is a supported recovery action.
     for code in [
         "control_session_not_bound",
         "control_session_token_mismatch",
@@ -371,7 +371,7 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
         "unknown_routing_token",
     ] {
         assert!(
-            matches!(outcome(remote(code, "refused")), EngramBindOutcome::Refresh(_)),
+            matches!(outcome(remote(code, "refused")), EngramBindOutcome::Resend(_)),
             "{code}"
         );
     }
@@ -440,7 +440,7 @@ fn the_holder_is_told_each_member_bound_or_not_with_its_reason() {
         None
     );
     assert_eq!(
-        engram_bind_notice_line("w-member", &EngramBindOutcome::Refresh("superseded".to_owned())),
+        engram_bind_notice_line("w-member", &EngramBindOutcome::Resend("superseded".to_owned())),
         None
     );
     // An identity collision is told as not recorded, never as bound, with

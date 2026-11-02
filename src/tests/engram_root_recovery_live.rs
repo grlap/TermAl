@@ -8,8 +8,6 @@
 
 use super::*;
 
-const OLD_CALL_TIMEOUT: Duration = Duration::from_millis(250);
-const OLD_DISPATCH_BUDGET: Duration = Duration::from_millis(600);
 const LIVE_RESPONSE_DELAY: Duration = Duration::from_millis(350);
 
 #[derive(Clone, Copy, Debug)]
@@ -46,7 +44,8 @@ struct BoundaryFaultTransport {
     faults: Mutex<VecDeque<BoundaryFault>>,
     observations: Mutex<Vec<BoundaryObservation>>,
     root_reads: Mutex<Vec<EngramNamedRootReadResponse>>,
-    evaluate_entered: Mutex<Option<mpsc::Sender<()>>>,
+    request_entered: Mutex<Option<(String, mpsc::Sender<()>)>>,
+    reply_pause: Mutex<Option<(String, mpsc::Sender<()>, mpsc::Receiver<()>)>>,
 }
 
 impl BoundaryFaultTransport {
@@ -56,7 +55,8 @@ impl BoundaryFaultTransport {
             faults: Mutex::new(faults.into_iter().collect()),
             observations: Mutex::new(Vec::new()),
             root_reads: Mutex::new(Vec::new()),
-            evaluate_entered: Mutex::new(None),
+            request_entered: Mutex::new(None),
+            reply_pause: Mutex::new(None),
         })
     }
 
@@ -105,9 +105,10 @@ impl EngramControlTransport for BoundaryFaultTransport {
             .expect("Engram request operation should serialize")
             .to_owned();
         let started_at = std::time::Instant::now();
-        if operation == "turn_evaluate" {
-            if let Some(sender) = self.evaluate_entered.lock().unwrap().take() {
-                sender.send(()).unwrap();
+        {
+            let mut entered = self.request_entered.lock().unwrap();
+            if entered.as_ref().is_some_and(|(expected, _)| expected == &operation) {
+                entered.take().unwrap().1.send(()).unwrap();
             }
         }
         let result = self.inner.request(connection, request, timeout);
@@ -130,6 +131,16 @@ impl EngramControlTransport for BoundaryFaultTransport {
                     .unwrap_or("ok"))
                 .unwrap_or("error")
         );
+        let pause = {
+            let mut pause = self.reply_pause.lock().unwrap();
+            if result.is_ok() && pause.as_ref().is_some_and(|(expected, _, _)| expected == &operation) {
+                pause.take()
+            } else { None }
+        };
+        if let Some((_, entered, release)) = pause {
+            entered.send(()).unwrap();
+            release.recv_timeout(DEADLOCK_GUARD).expect("the witness releases the actual producer reply");
+        }
         let fault = result
             .as_ref()
             .ok()
@@ -201,14 +212,8 @@ impl EngramControlTransport for BoundaryFaultTransport {
             .read_work_binding(connection, preference, timeout)
     }
 
-    fn read_work_binding_for_boot(
-        &self,
-        connection: &EngramConnectionConfig,
-        preference: EngramBindingPreference<'_>,
-        timeout: Duration,
-    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner
-            .read_work_binding_for_boot(connection, preference, timeout)
+    fn connection_generation(&self, session_id: &str) -> Option<u64> {
+        self.inner.connection_generation(session_id)
     }
 
     fn read_held_claims(
@@ -313,7 +318,7 @@ fn live_root_fixture(
                 .expect("temporary home path should be Unicode"),
             "init",
             "--required-assurance",
-            ENGRAM_CONTROL_ASSURANCE,
+            "turn_gated",
             "--authorized-by",
             "termal-live-root-recovery-test",
         ])
@@ -338,10 +343,9 @@ fn live_root_fixture(
             .engram = Some(EngramProjectSettings {
             acceptance_evaluation: None,
             enabled: true,
-            turn_gated_control: true,
+            execution_observability: true,
             binary_path: Some(binary_path.to_string_lossy().into_owned()),
             home: Some(home.to_string_lossy().into_owned()),
-            work_authority_grant: None,
             authority_store_key: None,
             deadline_ms: None,
         });
@@ -353,7 +357,6 @@ fn live_root_fixture(
             .find_session_index(&session_id)
             .expect("root session should exist");
         inner.sessions[index].engram.context_nudge_pending = false;
-        assert!(inner.test_engram_dispatch_budget.is_none());
         state
             .commit_locked(&mut inner)
             .expect("live root settings should persist");
@@ -443,13 +446,7 @@ fn finish_live_root(state: &AppState, session_id: &str) {
     };
     state
         .finish_turn_ok_if_runtime_matches(session_id, &runtime_token)
-        .expect("live root completion should checkpoint");
-}
-
-fn operation_key(request: &Value) -> &str {
-    request["idempotency_key"]
-        .as_str()
-        .expect("mutating Engram request should carry an idempotency key")
+        .expect("ordinary runtime completion succeeds");
 }
 
 fn take_live_provider_prompts(
@@ -516,868 +513,122 @@ fn restart_live_root_fixture(fixture: LiveRootFixture) -> LiveRootFixture {
     }
 }
 
-fn assert_live_pre_handoff_begin(
-    record: &SessionRecord,
-    original_begin: &Value,
-    prompt: &str,
-) -> String {
-    let head = record.queued_prompts.front().expect("original retained head");
-    assert_eq!(head.pending_prompt.text, prompt);
-    assert!(head.promotion_disposition_known);
-    assert!(!head.engram_interrupted);
-    assert!(!head.engram_ordinary_handoff);
-    assert!(record.engram.active_grant_id.is_none());
-    let evaluate = head.engram_evaluate.as_ref().expect("retained evaluate");
-    assert!(
-        evaluate.begun_grant_id.is_none(),
-        "no acknowledged pre-handoff receipt"
-    );
-    let prepared = evaluate.prepared_begin.as_ref().expect("durable prepared Begin");
-    assert_eq!(prepared.phase, EngramPreparedBeginPhase::Prepared);
-    assert_eq!(
-        record.engram.uncertain_grant_id.as_deref(),
-        Some(prepared.grant_id.as_str())
-    );
-    let evaluate_request = serde_json::to_value(&evaluate.request).unwrap();
-    assert_eq!(*original_begin, json!({
-        "operation": "turn_begin",
-        "routing_token": evaluate_request["routing_token"],
-        "grant_id": prepared.grant_id,
-        "delivery_tokens": prepared.delivery_tokens,
-        "idempotency_key": prepared.idempotency_key,
-    }));
-    let retry = record.engram.admission_retry.as_ref().expect("scheduled exact Begin replay");
-    assert_eq!(retry.code, ENGRAM_BEGIN_REPLAY_CODE);
-    assert_eq!(retry.prompt_id, head.pending_prompt.id);
-    head.pending_prompt.id.clone()
+
+fn assert_no_live_turn_gate(transport: &BoundaryFaultTransport) {
+    for operation in ["session_bind", "session_status", "turn_evaluate", "turn_begin", "turn_checkpoint"] {
+        assert!(transport.requests_for(operation).is_empty(), "{operation} is retired");
+    }
 }
 
-fn retry_live_bind_without_resume(fixture: &LiveRootFixture) {
-    let (retry, prepared_bind, waiter) = {
-        let inner = fixture.state.inner.lock().expect("state mutex poisoned");
-        let record = &inner.sessions[inner
-            .find_session_index(&fixture.session_id)
-            .expect("live root should exist")];
-        let head = record.queued_prompts.front().expect("retained bind head");
-        let retry = record.engram.bind_retry.as_ref().expect("typed bind retry");
-        assert_eq!(retry.proof.prompt_id, head.pending_prompt.id);
-        assert_eq!(retry.proof.phase, engram_bind_retry_phase(head));
-        assert!(matches!(
-            retry.proof.phase,
-            EngramBindRetryPhase::Prepared { .. }
-        ));
-        assert_eq!(
-            retry.proof.dispatch_generation,
-            record.engram.dispatch_generation
-        );
-        assert_eq!(
-            retry.proof.promoted_turn_generation,
-            record.active_turn_generation
-        );
-        assert_eq!(
-            record.engram.bind_retry_runtime,
-            record.runtime.runtime_token()
-        );
-        assert!(record.engram.bind_retry_runtime.is_some());
-        assert_eq!(retry.attempts, 1);
-        assert!(
-            !retry.acknowledged,
-            "park starts with acknowledgement pending"
-        );
-        assert!(!record.engram.abort_retry_acknowledged);
-        assert!(record.engram.abort_retry_saved || record.engram.abort_retry_fence.is_some());
-        assert_eq!(record.session.status, SessionStatus::Idle);
-        assert!(head.engram_waiting);
-        assert!(!head.engram_interrupted);
-        assert!(head.engram_evaluate.is_none());
-        assert!(record.engram.active_grant_id.is_none());
-        assert!(record.engram.uncertain_grant_id.is_none());
-        (
-            retry.clone(),
-            head.engram_bind.clone().expect("prepared bind retained"),
-            record.engram.abort_retry_fence.clone(),
-        )
-    };
-    let due = chrono::DateTime::parse_from_rfc3339(&retry.due_at)
-        .expect("retry has a valid due time")
-        .with_timezone(&chrono::Utc);
-    let saved: PersistedSessionRecord =
-        serde_json::from_str(&persisted_session_json(&fixture.state, &fixture.session_id))
-            .expect("durable parked session");
-    assert_eq!(
-        serde_json::to_value(
-            saved
-                .engram_bind_retry
-                .as_ref()
-                .expect("durable bind retry")
-        )
-        .unwrap(),
-        serde_json::to_value(&retry).unwrap(),
-    );
-    assert_eq!(
-        saved.queued_prompts[0].pending_prompt.id,
-        retry.proof.prompt_id
-    );
-    assert_eq!(
-        serde_json::to_value(&saved.queued_prompts[0].engram_bind).unwrap(),
-        serde_json::to_value(Some(&prepared_bind)).unwrap(),
-    );
-    assert!(saved.queued_prompts[0].engram_waiting);
-    assert!(saved.orchestrator_auto_dispatch_blocked);
-    assert_eq!(fixture.transport.requests_for("session_bind").len(), 1);
-    assert!(fixture.transport.requests_for("turn_evaluate").is_empty());
-    assert!(fixture.transport.requests_for("turn_begin").is_empty());
-
-    // The fixture uses the production synchronous SQLite fallback, not a
-    // fabricated successful fence. If a writer is present, wait off the lock.
-    if let Some(waiter) = waiter {
-        assert!(matches!(
-            waiter
-                .0
-                .wait_until(waiter.0.now() + phase_sync::DEADLOCK_GUARD),
-            Some(Ok(()))
-        ));
-    }
-    fixture.state.engram_abort_retry_tick(due);
-    {
-        let inner = fixture.state.inner.lock().expect("state mutex poisoned");
-        let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
-        assert!(record.engram.bind_retry.as_ref().unwrap().acknowledged);
-        assert!(record.engram.abort_retry_acknowledged);
-        assert!(record.orchestrator_auto_dispatch_blocked);
-    }
-    let acknowledged: PersistedSessionRecord =
-        serde_json::from_str(&persisted_session_json(&fixture.state, &fixture.session_id))
-            .expect("durable acknowledged session");
-    assert!(
-        acknowledged
-            .engram_bind_retry
-            .as_ref()
-            .unwrap()
-            .acknowledged
-    );
-    assert_eq!(fixture.transport.requests_for("session_bind").len(), 1);
-    assert!(
-        fixture.receiver.try_recv().is_err(),
-        "acknowledgement is not handoff"
-    );
-
-    // Give the scheduler its pre-due time explicitly. There is no Resume in
-    // this schedule, and no retry authority/backoff field is modified.
-    fixture
-        .state
-        .engram_abort_retry_tick(due - chrono::Duration::milliseconds(1));
-    assert_eq!(fixture.transport.requests_for("session_bind").len(), 1);
-    assert!(fixture.transport.requests_for("turn_evaluate").is_empty());
-    assert!(fixture.transport.requests_for("turn_begin").is_empty());
-    assert!(
-        fixture.receiver.try_recv().is_err(),
-        "a pre-due tick cannot deliver"
-    );
-
-    // The producer and the host budget clock are real in this live fixture.
-    // Wait for BOTH published deadlines, rather than assuming a fixed sleep
-    // expires the retry and transport backoff. The guard diagnoses a hang.
-    let guard = phase_sync::PollGuard::new();
-    loop {
-        let backoff_elapsed = {
-            let inner = fixture.state.inner.lock().expect("state mutex poisoned");
-            let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
-            record
-                .engram
-                .next_bind_retry_at
-                .is_none_or(|at| at <= inner.engram_budget_clock.now())
-        };
-        if chrono::Utc::now() >= due && backoff_elapsed {
-            break;
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn ordinary_live_prompt_does_not_wait_for_a_work_service_deadline() {
+    for source in [None, Some(QueuedPromptSource::Orchestrator), Some(QueuedPromptSource::Mailbox)] {
+        let fixture = live_root_fixture("ordinary-service-deadline", [
+            BoundaryFault::DelayAfterReply { operation: "work_session_read", delay: DEADLOCK_GUARD },
+        ]);
+        let prompt = "Preserve the ordinary prompt while optional work reporting is unavailable.";
+        let dispatch = dispatch_live_root(&fixture.state, &fixture.session_id, prompt, source);
+        deliver_turn_dispatch(&fixture.state, dispatch).unwrap();
+        assert_one_provider_prompt(&fixture.receiver, &fixture.session_id, prompt);
+        assert!(fixture.transport.observations().is_empty(), "handoff makes no work RPC");
+        if source == Some(QueuedPromptSource::Orchestrator) {
+            queue_test_engram_prompt(&fixture.state, &fixture.session_id,
+                "A separate queued orchestrator intent remains cancelable.", QueuedPromptSource::Orchestrator, None);
+            let id = {
+                let inner = fixture.state.inner.lock().unwrap();
+                inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()]
+                    .queued_prompts.back().unwrap().pending_prompt.id.clone()
+            };
+            fixture.state.cancel_queued_prompt(&fixture.session_id, &id).unwrap();
+            assert!(fixture.receiver.try_recv().is_err(), "Cancel never sends a second prompt");
         }
-        guard.wait("live retained-bind retry due and transport backoff elapsed");
-    }
-    fixture.state.engram_abort_retry_tick(chrono::Utc::now());
-    let observations = fixture.transport.observations();
-    let admission = observations
-        .iter()
-        .filter(|observation| {
-            matches!(
-                observation.request["operation"].as_str(),
-                Some("session_bind" | "turn_evaluate" | "turn_begin")
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        admission
-            .iter()
-            .map(|item| item.request["operation"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        [
-            "session_bind",
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin"
-        ]
-    );
-    assert_eq!(admission[0].disposition, "dropped_after_reply");
-    assert_eq!(admission[1].disposition, "returned");
-    assert_eq!(admission[0].request, admission[1].request);
-    assert_eq!(
-        operation_key(&admission[0].request),
-        operation_key(&admission[1].request)
-    );
-    let inner = fixture.state.inner.lock().expect("state mutex poisoned");
-    let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
-    assert!(
-        record.engram.bind_retry.is_none(),
-        "evaluate retires bind-only scheduling"
-    );
-    assert!(record.engram.bind_retry_runtime.is_none());
-}
-
-#[test]
-#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_root_deadline_retains_cancelable_orchestrator_prompt() {
-    let fixture = live_root_fixture(
-        "deadline",
-        [BoundaryFault::DelayAfterReply {
-            operation: "turn_evaluate",
-            delay: Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS) + Duration::from_secs(1),
-        }],
-    );
-    let prompt = "Preserve orchestrator intent across the real admission deadline.";
-    let started = std::time::Instant::now();
-    let dispatch = dispatch_live_root(
-        &fixture.state,
-        &fixture.session_id,
-        prompt,
-        Some(QueuedPromptSource::Orchestrator),
-    );
-    deliver_turn_dispatch(&fixture.state, dispatch)
-        .expect("deadline is waiting, not a policy denial");
-    assert!(started.elapsed() >= Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS));
-    assert!(fixture.receiver.try_recv().is_err());
-    assert!(fixture.transport.requests_for("turn_begin").is_empty());
-    let id = {
-        let inner = fixture.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
-        // Scheduled for its automatic replay (`engram_admission_retry.rs`);
-        // the prompt stays queued and cancelable.
-        assert!(record
-            .session
-            .preview
-            .starts_with("Engram: waiting for admission; retrying automatically, attempt 1"));
-        let queued = record.queued_prompts.front().unwrap();
-        assert_eq!(queued.pending_prompt.text, prompt);
-        assert!(matches!(queued.source, QueuedPromptSource::Orchestrator));
-        queued.pending_prompt.id.clone()
-    };
-    fixture
-        .state
-        .cancel_queued_prompt(&fixture.session_id, &id)
-        .expect("cancel works after timeout");
-    assert!(fixture.receiver.try_recv().is_err());
-}
-
-#[test]
-#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_root_real_policy_refusal_never_begins_or_delivers() {
-    for (suffix, source) in [
-        ("deny-direct", None),
-        ("deny-mailbox", Some(QueuedPromptSource::Mailbox)),
-    ] {
-        let fixture = live_root_fixture(suffix, []);
-        let target = fixture
-            .state
-            .ensure_engram_session_bound_off_lock(&fixture.session_id)
-            .unwrap()
-            .unwrap();
-        let changed = Command::new(&target.connection.binary_path)
-            .arg("--project-file")
-            .arg(&target.connection.project_file)
-            .arg("--home")
-            .arg(&target.connection.home)
-            .args([
-                "control-policy",
-                "set-required-assurance",
-                "action_gated",
-                "--authorized-by",
-                "termal-live-test",
-                "--idempotency-key",
-                suffix,
-            ])
-            .output()
-            .expect("disposable policy command launches");
-        assert!(
-            changed.status.success(),
-            "{}",
-            String::from_utf8_lossy(&changed.stderr)
-        );
-        let dispatch = dispatch_live_root(
-            &fixture.state,
-            &fixture.session_id,
-            "Refuse this exact operation.",
-            source,
-        );
-        assert_eq!(
-            deliver_turn_dispatch(&fixture.state, dispatch)
-                .unwrap_err()
-                .status,
-            StatusCode::CONFLICT
-        );
-        assert!(fixture.receiver.try_recv().is_err());
-        assert!(fixture.transport.requests_for("turn_begin").is_empty());
-        let inner = fixture.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
-        assert!(record.session.messages.iter().any(|message| matches!(message,
-            Message::EngramControl { card, .. } if card.refusal_code.as_deref() == Some("control_assurance_insufficient"))));
+        assert_no_live_turn_gate(&fixture.transport);
     }
 }
 
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_root_writer_contention_and_retired_sidecar_still_admit_once() {
-    let fixture = live_root_fixture("writer-lock", []);
-    let target = fixture
-        .state
-        .ensure_engram_session_bound_off_lock(&fixture.session_id)
-        .unwrap()
-        .unwrap();
-    let project = fs::read_to_string(&target.connection.project_file).unwrap();
-    let db = target
-        .connection
-        .home
-        .join("projects")
-        .join(sha256_hex(project.trim().as_bytes()))
-        .join("engram.db");
-    assert!(db.is_file());
-    // Same state as an idle-retired worker, without a wall-clock idle sleep.
-    fixture.transport.shutdown_session(&fixture.session_id);
-    let mut connection = rusqlite::Connection::open(db).unwrap();
-    let transaction = connection
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .unwrap();
-    let (entered_tx, entered_rx) = mpsc::channel();
-    *fixture.transport.evaluate_entered.lock().unwrap() = Some(entered_tx);
-    let prompt = "Wait for the disposable SQLite writer, then deliver exactly once.";
-    std::thread::scope(|scope| {
-        let worker = scope.spawn(|| {
-            let dispatch = dispatch_live_root(&fixture.state, &fixture.session_id, prompt, None);
-            deliver_turn_dispatch(&fixture.state, dispatch)
-        });
-        entered_rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("evaluation reaches the held writer");
-        std::thread::sleep(Duration::from_millis(900));
-        transaction.commit().unwrap();
-        worker
-            .join()
-            .unwrap()
-            .expect("writer release permits admission");
+fn ordinary_live_policy_is_not_a_provider_admission_authority() {
+    let fixture = named_root_completion_live::completion_fixture();
+    fixture.command(&fixture.live.session_id, &[
+        "control-policy", "set-required-assurance", "action_gated", "--authorized-by",
+        "termal-live-test", "--idempotency-key", "ordinary-policy",
+    ], false);
+    let prompt = "An ordinary prompt needs no tracker grant.";
+    let dispatch = dispatch_live_root(&fixture.live.state, &fixture.live.session_id, prompt, None);
+    deliver_turn_dispatch(&fixture.live.state, dispatch).unwrap();
+    assert_one_provider_prompt(&fixture.live.receiver, &fixture.live.session_id, prompt);
+    assert_no_live_turn_gate(&fixture.live.transport);
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn ordinary_live_writer_contention_and_retired_sidecar_do_not_block_handoff() {
+    let fixture = named_root_completion_live::completion_fixture();
+    let session = &fixture.live.session_id;
+    let added = fixture.work(session, &["add", "Retain the actual claim during writer contention", "--json"]);
+    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    fixture.work(session, &["claim", work, "--json"]);
+    let binding = fixture.claim_binding(session);
+    let database = fixture.store().database_path;
+    fixture.live.transport.shutdown_session(session);
+    let mut connection = rusqlite::Connection::open(&database).unwrap();
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+    let prompt = "Deliver once while the disposable tracker writer is held.";
+    let dispatch = dispatch_live_root(&fixture.live.state, session, prompt, None);
+    deliver_turn_dispatch(&fixture.live.state, dispatch).unwrap();
+    assert_one_provider_prompt(&fixture.live.receiver, session, prompt);
+    transaction.commit().unwrap();
+    assert_eq!(fixture.claim_binding(session), binding, "the real held claim is unchanged");
+    assert_no_live_turn_gate(&fixture.live.transport);
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn ordinary_live_slow_read_keeps_its_real_budget_without_authorizing_a_turn() {
+    let fixture = named_root_completion_live::completion_fixture();
+    fixture.live.transport.faults.lock().unwrap().push_back(BoundaryFault::DelayAfterReply {
+        operation: "work_session_read", delay: LIVE_RESPONSE_DELAY,
     });
+    let target = fixture.target(&fixture.live.session_id);
+    let session = target.adapter.read_work_session(&target.connection, &fixture.store(), target.settings.call_timeout()).unwrap();
+    assert_eq!(session, fixture.live.session_id);
+    let observations = fixture.live.transport.observations();
+    let delayed = observations.iter().find(|row| row.disposition == "delayed_after_reply").unwrap();
+    assert!(delayed.elapsed >= LIVE_RESPONSE_DELAY);
+    assert!(delayed.timeout > LIVE_RESPONSE_DELAY);
+    let prompt = "A read is evidence of service identity, never a grant.";
+    let dispatch = dispatch_live_root(&fixture.live.state, &session, prompt, None);
+    deliver_turn_dispatch(&fixture.live.state, dispatch).unwrap();
+    assert_one_provider_prompt(&fixture.live.receiver, &session, prompt);
+    assert_no_live_turn_gate(&fixture.live.transport);
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn ordinary_live_restart_does_not_redeliver_a_persisted_provider_handoff() {
+    let fixture = live_root_fixture("ordinary-post-handoff-restart", []);
+    let prompt = "Keep this genuine persisted handoff exactly once.";
+    let dispatch = dispatch_live_root(&fixture.state, &fixture.session_id, prompt, None);
+    deliver_turn_dispatch(&fixture.state, dispatch).unwrap();
     assert_one_provider_prompt(&fixture.receiver, &fixture.session_id, prompt);
-    let observations = fixture.transport.observations();
-    assert!(
-        observations
-            .iter()
-            .any(|item| item.request["operation"] == "turn_evaluate"
-                && item.elapsed > OLD_DISPATCH_BUDGET)
-    );
-    finish_live_root(&fixture.state, &fixture.session_id);
-}
-
-#[test]
-#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_root_default_budget_allows_replies_beyond_the_retired_limits() {
-    assert_eq!(
-        EngramProjectSettings::default().call_timeout(),
-        Duration::from_secs(20)
-    );
-    assert_eq!(ENGRAM_DISPATCH_BUDGET_MS, 20_000);
-
-    for (suffix, queued_source) in [
-        ("delayed-direct", None),
-        ("delayed-mailbox", Some(QueuedPromptSource::Mailbox)),
-    ] {
-        let fixture = live_root_fixture(
-            suffix,
-            [
-                BoundaryFault::DelayAfterReply {
-                    operation: "session_bind",
-                    delay: LIVE_RESPONSE_DELAY,
-                },
-                BoundaryFault::DelayAfterReply {
-                    operation: "turn_evaluate",
-                    delay: LIVE_RESPONSE_DELAY,
-                },
-                BoundaryFault::DelayAfterReply {
-                    operation: "turn_begin",
-                    delay: LIVE_RESPONSE_DELAY,
-                },
-            ],
-        );
-        let prompt = format!("Preserve exact {suffix} prompt bytes.");
-        let started_at = std::time::Instant::now();
-        let dispatch =
-            dispatch_live_root(&fixture.state, &fixture.session_id, &prompt, queued_source);
-        assert!(fixture.receiver.try_recv().is_err());
-        deliver_turn_dispatch(&fixture.state, dispatch)
-            .expect("delayed real grant and begin should still admit the prompt");
-        let admission_elapsed = started_at.elapsed();
-        assert!(
-            admission_elapsed > OLD_DISPATCH_BUDGET,
-            "real admission should prove the retired 600 ms budget is gone: {admission_elapsed:?}"
-        );
-        assert_one_provider_prompt(&fixture.receiver, &fixture.session_id, &prompt);
-        finish_live_root(&fixture.state, &fixture.session_id);
-
-        let observations = fixture.transport.observations();
-        for operation in ["session_bind", "turn_evaluate", "turn_begin"] {
-            let observation = observations
-                .iter()
-                .find(|observation| observation.request["operation"] == operation)
-                .expect("delayed operation should be observed");
-            assert_eq!(observation.disposition, "delayed_after_reply");
-            assert!(observation.elapsed > OLD_CALL_TIMEOUT);
-            assert!(observation.timeout <= Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS));
-            assert!(observation.timeout > OLD_CALL_TIMEOUT);
-        }
-
-        let first_evaluate = fixture.transport.requests_for("turn_evaluate");
-        assert_eq!(first_evaluate.len(), 1);
-        let second_prompt = format!("Use a new operation identity after {suffix}.");
-        let second = dispatch_live_root(&fixture.state, &fixture.session_id, &second_prompt, None);
-        deliver_turn_dispatch(&fixture.state, second).expect("second operation should be admitted");
-        assert_one_provider_prompt(&fixture.receiver, &fixture.session_id, &second_prompt);
-        finish_live_root(&fixture.state, &fixture.session_id);
-        let evaluates = fixture.transport.requests_for("turn_evaluate");
-        assert_eq!(evaluates.len(), 2);
-        assert_ne!(
-            operation_key(&evaluates[0]),
-            operation_key(&evaluates[1]),
-            "a new prompt must mint a new evaluation identity"
-        );
-    }
-}
-
-#[test]
-#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_root_lost_committed_replies_replay_exact_requests_once() {
-    for operation in ["session_bind", "turn_evaluate", "turn_begin"] {
-        let fixture = live_root_fixture(
-            &format!("drop-{operation}"),
-            [BoundaryFault::DropAfterReply { operation }],
-        );
-        let prompt = format!("Retain exact root prompt after lost {operation} reply.");
-        let dispatch = dispatch_live_root(&fixture.state, &fixture.session_id, &prompt, None);
-        deliver_turn_dispatch(&fixture.state, dispatch)
-            .expect("uncertain real admission should park rather than deny");
-        assert!(
-            fixture.receiver.try_recv().is_err(),
-            "an uncertain operation must not reach the provider"
-        );
-        {
-            let inner = fixture.state.inner.lock().expect("state mutex poisoned");
-            let record = &inner.sessions[inner
-                .find_session_index(&fixture.session_id)
-                .expect("live root should exist")];
-            let queued = record
-                .queued_prompts
-                .front()
-                .expect("uncertain prompt should remain queued");
-            assert_eq!(queued.pending_prompt.text, prompt);
-            assert!(queued.has_engram_intent());
-            if operation == "session_bind" {
-                assert!(record.engram.bind_retry.is_some());
-                assert!(
-                    record
-                        .session
-                        .preview
-                        .contains("bind deferred before delivery")
-                );
-            } else if operation == "turn_evaluate" {
-                // An unknown evaluate with nothing begun is scheduled for its
-                // automatic replay (`engram_admission_retry.rs`); an explicit
-                // Resume below may still run that replay now.
-                assert!(record.engram.bind_retry.is_none());
-                assert!(record.session.preview.starts_with(
-                    "Engram: waiting for admission; retrying automatically, attempt 1"
-                ));
-            } else {
-                assert!(record.engram.bind_retry.is_none());
-                assert!(record.session.preview.starts_with(ENGRAM_ADMISSION_RETRY_PREVIEW_PREFIX));
-                assert!(record.session.preview.contains("begin reconciliation: replaying the same begin"));
-                let begins = fixture.transport.requests_for("turn_begin");
-                assert_eq!(begins.len(), 1);
-                assert_live_pre_handoff_begin(record, &begins[0], &prompt);
-            }
-            assert!(record.orchestrator_auto_dispatch_blocked);
-        }
-        if operation == "turn_begin" {
-            // Select the acknowledged replay-schedule cut, after the lost
-            // reply and before a due retry can send the same Begin.
-            fixture.state.engram_abort_retry_tick(chrono::Utc::now());
-        }
-        let persisted = persisted_session_json(&fixture.state, &fixture.session_id);
-        assert!(persisted.contains(&prompt));
-        assert!(persisted.contains("engram_"));
-
-        if operation == "turn_begin" {
-            let begins = fixture.transport.requests_for("turn_begin");
-            let loaded = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
-            let record = &loaded.sessions[loaded.find_session_index(&fixture.session_id).unwrap()];
-            assert_live_pre_handoff_begin(record, &begins[0], &prompt);
-        }
-
-        if operation == "session_bind" {
-            retry_live_bind_without_resume(&fixture);
-        } else {
-            // Resume may drive the retained evaluate or exact Begin replay.
-            std::thread::sleep(Duration::from_millis(1_100));
-            fixture
-                .state
-                .resume_session_queue(&fixture.session_id)
-                .expect("exact uncertain operation should replay after backoff");
-        }
-        assert_one_provider_prompt(&fixture.receiver, &fixture.session_id, &prompt);
-        fixture.state.engram_abort_retry_tick(chrono::Utc::now());
-        assert!(
-            fixture.receiver.try_recv().is_err(),
-            "a later tick cannot hand off twice"
-        );
-        if operation == "turn_begin" {
-            assert_eq!(fixture.transport.requests_for("turn_evaluate").len(), 1,
-                "Begin reconciliation must keep the original evaluation");
-            let begins = fixture.transport.requests_for("turn_begin");
-            assert_eq!(begins.len(), 2);
-            assert_eq!(begins[0], begins[1]);
-        }
-        finish_live_root(&fixture.state, &fixture.session_id);
-
-        let requests = fixture.transport.requests_for(operation);
-        assert_eq!(
-            requests.len(),
-            if operation == "turn_evaluate" { 3 } else { 2 }
-        );
-        assert_eq!(
-            requests[0], requests[1],
-            "lost {operation} must replay the exact serialized request"
-        );
-        if operation == "turn_evaluate" {
-            assert_ne!(
-                operation_key(&requests[1]),
-                operation_key(&requests[2]),
-                "a sidecar restart retires an issued grant; only a fresh evaluation can replace it"
-            );
-        }
-        assert_eq!(
-            fixture
-                .transport
-                .observations()
-                .iter()
-                .filter(|observation| observation.disposition == "dropped_after_reply")
-                .count(),
-            1,
-            "only the selected committed reply should be discarded"
-        );
-    }
-}
-
-#[test]
-#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_root_restart_after_lost_evaluate_replays_issued_grant_without_rebinding() {
-    let fixture = live_root_fixture(
-        "restart-after-evaluate",
-        [BoundaryFault::DropAfterReply {
-            operation: "turn_evaluate",
-        }],
-    );
-    let prompt = "Replay this exact root evaluation after restart, then deliver once.";
-    let dispatch = dispatch_live_root(&fixture.state, &fixture.session_id, prompt, None);
-    deliver_turn_dispatch(&fixture.state, dispatch)
-        .expect("lost evaluate receipt should leave an uncertain queued admission");
-    assert!(fixture.receiver.try_recv().is_err());
-    let original_evaluate = fixture.transport.requests_for("turn_evaluate");
-    assert_eq!(original_evaluate.len(), 1);
-    let persisted = persisted_session_json(&fixture.state, &fixture.session_id);
-    assert!(persisted.contains("engram_evaluate"));
-    assert!(persisted.contains(prompt));
-
-    let root_guard = fixture
-        .state
-        .test_temp_root
-        .as_ref()
-        .expect("test root should exist")
-        .clone();
-    let default_workdir = fixture
-        .state
-        .inner
-        .lock()
-        .expect("state mutex poisoned")
-        .sessions
-        .iter()
-        .find(|record| record.session.id == fixture.session_id)
-        .expect("live root should exist")
-        .session
-        .workdir
-        .clone();
-    let persistence_path = fixture.state.persistence_path.as_path().to_path_buf();
-    let templates_path = fixture
-        .state
-        .orchestrator_templates_path
-        .as_path()
-        .to_path_buf();
-    let session_id = fixture.session_id.clone();
-    drop(fixture.cleanup);
-    drop(fixture.receiver);
-    drop(fixture.state);
-    drop(fixture.transport);
-
-    let recovery_transport =
-        BoundaryFaultTransport::new(engram_host_workdir(&persistence_path).unwrap(), []);
-    let restarted = AppState::new_with_paths_and_engram_transport_for_test(
-        default_workdir,
-        persistence_path,
-        templates_path,
-        recovery_transport.clone(),
-    )
-    .expect("TermAl should recover the durable issued-grant admission");
-    let _cleanup = LiveRootCleanup {
-        transport: recovery_transport.clone(),
-        session_id: session_id.clone(),
-    };
-    // Keep the independent Base context-nudge feature out of the prompt-byte
-    // assertion, as in live_root_fixture. The queued user intent is unchanged.
-    {
-        let mut inner = restarted.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(&session_id)
-            .expect("restored root exists");
-        inner.sessions[index].engram.context_nudge_pending = false;
-    }
-    let (runtime, receiver, _process) =
-        test_shared_codex_runtime("engram-live-root-evaluate-restart-provider");
-    install_single_wire_codex_fixture(&restarted, Some(runtime));
-
-    restarted
-        .resume_session_queue(&session_id)
-        .expect("an issued grant should replay the exact evaluation and continue");
-    assert_one_provider_prompt(&receiver, &session_id, prompt);
-    let replayed_evaluate = recovery_transport.requests_for("turn_evaluate");
-    assert_eq!(replayed_evaluate.len(), 2);
-    assert_eq!(
-        original_evaluate[0], replayed_evaluate[0],
-        "cold issued-grant recovery must replay the exact evaluation request"
-    );
-    let operations = recovery_transport
-        .observations()
-        .into_iter()
-        .map(|observation| {
-            observation.request["operation"]
-                .as_str()
-                .expect("operation should serialize")
-                .to_owned()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        operations,
-        [
-            "session_status",
-            "turn_evaluate",
-            "turn_begin",
-            "session_status",
-            "turn_evaluate",
-            "turn_begin"
-        ],
-        "reconcile the replayed expired grant before a fresh evaluation, without rebinding"
-    );
-    finish_live_root(&restarted, &session_id);
-
-    restarted.shutdown_persist_blocking();
-    drop(_cleanup);
-    drop(restarted);
-    drop(root_guard);
-}
-
-#[test]
-#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_root_restart_after_lost_begin_never_blindly_redelivers() {
-    let fixture = live_root_fixture(
-        "restart-after-begin",
-        [BoundaryFault::DropAfterReply {
-            operation: "turn_begin",
-        }],
-    );
-    let prompt = "Reconcile this original Begin, then hand off its root prompt once.";
-    let dispatch = dispatch_live_root(&fixture.state, &fixture.session_id, prompt, None);
-    deliver_turn_dispatch(&fixture.state, dispatch)
-        .expect("lost begin receipt should leave an uncertain queued admission");
-    assert!(take_live_provider_prompts(&fixture.receiver, &fixture.session_id).is_empty(),
-        "the original provider received zero Prompt commands before the crash");
-    let original_begin = fixture.transport.requests_for("turn_begin");
-    assert_eq!(original_begin.len(), 1);
-    assert_eq!(fixture.transport.requests_for("turn_evaluate").len(), 1);
-
-    // This witness selects the acknowledged replay-schedule SQLite cut.
-    // It does not claim coverage of a crash before that acknowledgement.
-    fixture.state.engram_abort_retry_tick(chrono::Utc::now());
-    let loaded = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
-    let record = &loaded.sessions[loaded.find_session_index(&fixture.session_id).unwrap()];
-    let prompt_id = assert_live_pre_handoff_begin(record, &original_begin[0], prompt);
-    assert!(record.engram.admission_retry.as_ref().unwrap().acknowledged);
-    assert!(engram_session_obligation_locked(&loaded, &fixture.session_id).is_none(),
-        "no unresolved containment duty may be bypassed by this positive branch");
-    drop(loaded);
-    assert_eq!(fixture.transport.requests_for("turn_begin"), original_begin);
-    assert!(take_live_provider_prompts(&fixture.receiver, &fixture.session_id).is_empty());
-
+    let saved = persisted_session_json(&fixture.state, &fixture.session_id);
+    assert!(saved.contains(prompt));
     let restarted = restart_live_root_fixture(fixture);
-    {
-        let inner = restarted.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner
-            .find_session_index(&restarted.session_id).unwrap()];
-        assert_eq!(assert_live_pre_handoff_begin(record, &original_begin[0], prompt), prompt_id);
-    }
-    assert!(restarted.transport.observations().is_empty(), "the constructor has not driven recovery");
-    assert!(take_live_provider_prompts(&restarted.receiver, &restarted.session_id).is_empty());
+    let loaded = persisted_session_json(&restarted.state, &restarted.session_id);
+    assert!(loaded.contains(prompt), "private original history survives restart");
     restarted.state.run_post_listen_boot().unwrap();
-    std::thread::sleep(Duration::from_millis(1_100));
-    // A fresh host owes its normal orientation page. Capture that page through
-    // its existing owner before Resume consumes it, preserving full prompt
-    // equality without disabling the startup context.
-    assert!(matches!(
-        restarted.state.prepare_engram_context_nudge_off_lock(&restarted.session_id),
-        EngramContextNudgePreparation::Ready
-    ));
-    let expected_runtime_prompt = {
-        let inner = restarted.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&restarted.session_id).unwrap()];
-        let context = record.engram.pending_context_nudge.as_deref()
-            .expect("fresh host should prepare its real context page");
-        engram_context_runtime_prompt(context, prompt)
-    };
-    let _resume = restarted.state.resume_session_queue(&restarted.session_id);
-    let prompts = take_live_provider_prompts(&restarted.receiver, &restarted.session_id);
-    assert_eq!(prompts.len(), 1, "ordinary fenced dispatch must perform the first handoff");
-    assert_eq!(prompts[0].prompt, expected_runtime_prompt);
-    {
-        let inner = restarted.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&restarted.session_id).unwrap()];
-        assert!(record.queued_prompts.is_empty());
-        assert_eq!(record.engram.active_grant_id.as_deref(), original_begin[0]["grant_id"].as_str());
-        assert_eq!(prompts[0].active_turn_generation, record.active_turn_generation);
-    }
     for _ in 0..3 {
         let _resume = restarted.state.resume_session_queue(&restarted.session_id);
-        restarted.state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(30));
-        assert!(take_live_provider_prompts(&restarted.receiver, &restarted.session_id).is_empty(),
-            "later Resume/ticks cannot hand off the original head twice");
+        assert!(take_live_provider_prompts(&restarted.receiver, &restarted.session_id).is_empty());
     }
-    assert_eq!(restarted.transport.requests_for("turn_begin"), original_begin,
-        "the fresh producer process must replay the exact key, grant and tokens once");
-    for operation in ["session_bind", "turn_evaluate", "turn_checkpoint"] {
-        assert!(restarted.transport.requests_for(operation).is_empty(),
-            "{operation} cannot substitute for exact Begin reconciliation");
-    }
-    // Ordinary completion is outside the recovery operation-count window.
-    finish_live_root(&restarted.state, &restarted.session_id);
+    assert_no_live_turn_gate(&restarted.transport);
     restarted.state.shutdown_persist_blocking();
 }
 
-#[test]
-#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_root_restart_keeps_post_handoff_and_unknown_position_from_redelivery() {
-    for unknown_position in [false, true] {
-        let fixture = live_root_fixture(
-            if unknown_position { "restart-unknown-position" } else { "restart-after-handoff" },
-            if unknown_position { vec![BoundaryFault::DropAfterReply { operation: "turn_begin" }] }
-            else { Vec::new() },
-        );
-        let prompt = "Do not infer another delivery from an ambiguous recovered position.";
-        let dispatch = dispatch_live_root(&fixture.state, &fixture.session_id, prompt, None);
-        deliver_turn_dispatch(&fixture.state, dispatch).unwrap();
-        let original_prompts = take_live_provider_prompts(&fixture.receiver, &fixture.session_id);
-        assert_eq!(original_prompts.len(), usize::from(!unknown_position));
-        if let Some(command) = original_prompts.first() { assert_eq!(command.prompt, prompt); }
-        let original_begin = fixture.transport.requests_for("turn_begin");
-        assert_eq!(original_begin.len(), 1);
-
-        if unknown_position {
-            // Separately labelled legacy mutation fixture: the saved head
-            // lacks promotion-position evidence, and its original transcript
-            // position is outside the loader's actual resident tail. Use the
-            // existing trimmed-history fixture pattern, not a metadata offset
-            // that the transcript loader recomputes from normalized rows.
-            {
-                let mut inner = fixture.state.inner.lock().unwrap();
-                let index = inner.find_session_index(&fixture.session_id).unwrap();
-                let record = inner.session_mut_by_index(index).unwrap();
-                for sequence in 0..=SQLITE_SESSION_TAIL_MESSAGES {
-                    push_message_on_record(record, Message::Text {
-                        id: format!("unknown-position-history-{sequence}"),
-                        timestamp: stamp_now(),
-                        author: Author::Assistant,
-                        text: "retained later history".to_owned(),
-                        expanded_text: None,
-                        attachments: Vec::new(),
-                        source: None,
-                    });
-                }
-                fixture.state.commit_locked(&mut inner).unwrap();
-            }
-            let mut saved: PersistedSessionRecord = serde_json::from_str(
-                &persisted_session_json(&fixture.state, &fixture.session_id),
-            ).unwrap();
-            saved.queued_prompts[0].promotion_disposition_known = false;
-            saved.queued_prompts[0].promoted_message_index = None;
-            let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
-            assert_eq!(connection.execute("UPDATE sessions SET value_json = ?1 WHERE id = ?2",
-                rusqlite::params![serde_json::to_string(&saved).unwrap(), fixture.session_id]).unwrap(), 1);
-        }
-        let loaded = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
-        let record = &loaded.sessions[loaded.find_session_index(&fixture.session_id).unwrap()];
-        if unknown_position {
-            let head = record.queued_prompts.front().unwrap();
-            assert_eq!(head.pending_prompt.text, prompt);
-            assert!(record.message_start_index > 0);
-            assert!(cached_message_index_on_record(record, &head.pending_prompt.id).is_none());
-            assert!(head.engram_interrupted);
-            assert!(!head.promotion_disposition_known);
-        } else {
-            assert!(record.queued_prompts.is_empty(), "genuine persisted post-handoff cut");
-            assert_eq!(record.engram.active_grant_id.as_deref(), original_begin[0]["grant_id"].as_str());
-        }
-        drop(loaded);
-        let restarted = restart_live_root_fixture(fixture);
-        if unknown_position {
-            let inner = restarted.state.inner.lock().unwrap();
-            let head = inner.sessions[inner.find_session_index(&restarted.session_id).unwrap()]
-                .queued_prompts.front().unwrap();
-            assert!(head.engram_interrupted);
-            assert!(!head.promotion_disposition_known);
-        }
-        restarted.state.run_post_listen_boot().unwrap();
-        for _ in 0..3 {
-            let _resume = restarted.state.resume_session_queue(&restarted.session_id);
-            restarted.state.engram_abort_retry_tick(chrono::Utc::now() + chrono::Duration::seconds(30));
-            assert!(take_live_provider_prompts(&restarted.receiver, &restarted.session_id).is_empty(),
-                "fresh host must produce zero additional typed Prompt commands");
-        }
-        assert!(restarted.transport.requests_for("turn_begin").is_empty());
-        assert!(restarted.transport.requests_for("turn_evaluate").is_empty());
-        if unknown_position {
-            let inner = restarted.state.inner.lock().unwrap();
-            let head = inner.sessions[inner.find_session_index(&restarted.session_id).unwrap()]
-                .queued_prompts.front().expect("unknown-position custody remains retained");
-            assert_eq!(head.pending_prompt.text, prompt);
-            assert!(head.engram_interrupted);
-        }
-        restarted.state.shutdown_persist_blocking();
-    }
-}
-
-// Carried background gates against the real store, a child module so the
-// launcher's `live` mode runs them.
 #[path = "engram_carried_gate_live.rs"]
 mod carried_gate_live;
 
-// Claim recovery and named-root completion through the real control plane.
 #[path = "engram_named_root_completion_live.rs"]
 mod named_root_completion_live;

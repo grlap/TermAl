@@ -14,6 +14,8 @@ struct TestRunEvidenceAssociation {
     reported_outcome: EngramExecutionOutcome,
     #[serde(default)]
     verification_record_id: Option<String>,
+    // Historical checkpoint provenance survives as data. Registered native
+    // verification uses its own checked receipt and has no checkpoint.
     #[serde(default)]
     checkpoint_id: Option<String>,
     #[serde(default)]
@@ -42,18 +44,6 @@ mod test_run_shared_lifecycle_read {
     }
 }
 
-/// Where a settled verification record came from: a turn checkpoint's
-/// receipt, with its checkpoint and confirmed cursor, or a launcher run's own
-/// verification record receipt, which names neither.
-#[derive(Clone, Copy, Debug)]
-enum TestRunRecordSettlement<'a> {
-    Checkpoint {
-        checkpoint: &'a String,
-        confirmed_cursor: i64,
-    },
-    VerificationRecord,
-}
-
 fn test_run_lifecycle_binding_matches(
     association: &TestRunEvidenceAssociation,
     store: &EngramAuthorityStoreKey,
@@ -74,209 +64,9 @@ fn test_run_object_id_valid(value: &str) -> bool {
 }
 
 impl AppState {
-    fn associate_reported_test_checks_locked(
-        &self,
-        inner: &mut StateInner,
-        index: usize,
-        checks: &[EngramResolvedCheck],
-    ) {
-        let record = &inner.sessions[index];
-        let session_id = record.session.id.clone();
-        let Some(binding) = record.engram.work_binding.clone() else {
-            return;
-        };
-        let Some(store) = engram_project_for_session_locked(inner, &session_id)
-            .and_then(|project| project.engram.as_ref())
-            .and_then(|settings| settings.authority_store_key.clone())
-        else {
-            return;
-        };
-        let mut updates = BTreeMap::new();
-        for check in checks
-            .iter()
-            .filter(|check| check.check.command.kind == EngramVerificationKind::Test)
-        {
-            let producer_observation_id = sha256_hex(
-                format!(
-                    "termal-turn-check:{}:{}:{}:{}",
-                    session_id, check.check.grant_id, check.check.sequence, check.check.key
-                )
-                .as_bytes(),
-            );
-            let grant_identity = sha256_hex(check.check.grant_id.as_bytes());
-            let tool_identity = sha256_hex(check.check.key.as_bytes());
-            let fingerprint = EngramHost::check_fingerprint(&check.check.command);
-            // The owner/grant/tool bucket narrows candidates in key order;
-            // every original predicate still decides, and the multiplicity
-            // test below counts full-predicate matches, not the bucket.
-            let bucket = (Some(session_id.clone()), Some(grant_identity.clone()), tool_identity.clone());
-            #[cfg(test)]
-            TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.set(count.get()
-                + inner.test_run_observations.index().check(&bucket).count()));
-            let candidates: Vec<String> = inner
-                .test_run_observations
-                .index()
-                .check(&bucket)
-                .filter_map(|key| inner.test_run_observations.get(key))
-                .filter(|row| {
-                    row.summary.owner_session_id.as_deref() == Some(&session_id)
-                        && row.grant_identity.as_deref() == Some(&grant_identity)
-                        && row.tool_identity == tool_identity
-                        && row.command_fingerprint == fingerprint
-                        && row.summary.started_at.as_deref() == Some(&check.check.started_at)
-                        && test_run_path_key(&row.summary.worktree)
-                            == test_run_path_key(&test_run_display_path(&check.check.target.root))
-                })
-                .map(|row| row.execution_id.clone())
-                .collect();
-            // A provider key without an unambiguous original execution cannot
-            // establish a correlation. Keep its warning rather than guessing.
-            if candidates.len() != 1 {
-                continue;
-            }
-            let Some(row) = inner.test_run_observations.update(&candidates[0], |row| {
-                // The existing declared-artifact adapter owns this verdict. Its
-                // failure may override a native exit 0; the UI must retain both
-                // that actual judged outcome and the original native exit code.
-                if check.check.declared.is_some() {
-                    row.summary.state = match check.outcome {
-                        EngramExecutionOutcome::Succeeded => TestRunState::Passed,
-                        EngramExecutionOutcome::Failed => TestRunState::Failed,
-                        _ => TestRunState::Unknown,
-                    };
-                }
-                if !row.evidence.iter().any(|association| {
-                    association.producer_observation_id == producer_observation_id
-                        && association.store == store
-                        && association.binding == binding
-                        && association.source_basis == check.basis
-                }) {
-                    row.validated_unbound = false;
-                    row.final_unbound_proof = None;
-                    row.evidence.push(TestRunEvidenceAssociation {
-                        store: store.clone(),
-                        binding: binding.clone(),
-                        source_basis: check.basis.clone(),
-                        producer_observation_id,
-                        reported_outcome: check.outcome,
-                        action_fingerprint: fingerprint.clone(),
-                        verification_record_id: None,
-                        checkpoint_id: None,
-                        confirmed_cursor: None,
-                        lifecycle_read: None,
-                    });
-                }
-                row.clone()
-            }) else {
-                continue;
-            };
-            updates.insert(row.execution_id.clone(), row);
-        }
-        self.persist_test_run_evidence_batch_locked(
-            inner,
-            updates.into_values().collect(),
-            Vec::new(),
-        );
-    }
-
-    fn settle_test_run_verification_receipt(
-        &self,
-        report: &EngramTurnReport,
-        receipt: &EngramCheckpointReceipt,
-        store: &EngramAuthorityStoreKey,
-        binding: &EngramControlWorkBinding,
-    ) {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let changed = Self::settle_test_run_verification_receipt_locked(
-            &mut inner, report, receipt, store, binding,
-        );
-        self.persist_test_run_evidence_batch_locked(&mut inner, changed, Vec::new());
-    }
-
-    // The recovery publisher includes these exact mutations in its first
-    // Accepted transaction, together with batch conversion and confirmation.
-    fn settle_test_run_verification_receipt_locked(
-        inner: &mut StateInner,
-        report: &EngramTurnReport,
-        receipt: &EngramCheckpointReceipt,
-        store: &EngramAuthorityStoreKey,
-        binding: &EngramControlWorkBinding,
-    ) -> Vec<TestRunCommandObservation> {
-        // Engram's transactional TurnCheckpointReceipt returns one verification
-        // ObjectId per input in input order. Missing legacy fields, partial
-        // lists, repeated IDs or malformed IDs never constitute settlement.
-        // These are Engram record ids (32 hex, or 64 for older records), not
-        // content fingerprints: `is_engram_record_id` is their one validator.
-        let Some(checkpoint) = receipt
-            .checkpoint
-            .as_ref()
-            .filter(|id| is_engram_record_id(id))
-        else {
-            return Vec::new();
-        };
-        if receipt.verification_evidence.len() != report.verification_evidence.len()
-            || receipt._confirmed_cursor < receipt._cursor
-            || receipt
-                .verification_evidence
-                .iter()
-                .any(|id| !is_engram_record_id(id))
-            || receipt
-                .verification_evidence
-                .iter()
-                .collect::<HashSet<_>>()
-                .len()
-                != receipt.verification_evidence.len()
-        {
-            return Vec::new();
-        }
-        // Resolve the report once. Keep the first
-        // producer and the original input order, including repeated references:
-        // an already-settled association may match a later receipt input.
-        let mut producers = HashMap::new();
-        for producer in &report.observations {
-            producers
-                .entry(producer.observation_id.as_str())
-                .or_insert(producer);
-        }
-        let mut settlements = HashMap::<_, Vec<_>>::new();
-        for (input, record_id) in report
-            .verification_evidence
-            .iter()
-            .zip(&receipt.verification_evidence)
-        {
-            if input.check_kind != EngramVerificationKind::Test {
-                continue;
-            }
-            let EngramObservationReference::ObservationId { observation_id } =
-                &input.producer_observation;
-            let Some(producer) = producers.get(observation_id.as_str()) else {
-                continue;
-            };
-            settlements
-                .entry(observation_id.as_str())
-                .or_default()
-                .push((*producer, record_id));
-        }
-        Self::settle_test_run_producer_records_locked(
-            inner,
-            settlements,
-            TestRunRecordSettlement::Checkpoint {
-                checkpoint,
-                confirmed_cursor: receipt._confirmed_cursor,
-            },
-            store,
-            binding,
-        )
-    }
-
-    // The association writes both settlement sources share: a turn
-    // checkpoint's receipt (above) and a launcher run's verification record
-    // receipt (`engram_verification_record.rs`). `settlements` maps each
-    // producer observation id to its producers and the record each received.
     fn settle_test_run_producer_records_locked(
         inner: &mut StateInner,
         settlements: HashMap<&str, Vec<(&EngramExecutionObservationInput, &String)>>,
-        settled_by: TestRunRecordSettlement<'_>,
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
     ) -> Vec<TestRunCommandObservation> {
@@ -329,13 +119,8 @@ impl AppState {
                             continue;
                         }
                         association.verification_record_id = Some((*record_id).clone());
-                        // A record sent outside any checkpoint names none: its
-                        // association keeps no checkpoint or cursor, so the
-                        // restart-risk projection stays conservative for it.
-                        if let TestRunRecordSettlement::Checkpoint { checkpoint, confirmed_cursor } = settled_by {
-                            association.checkpoint_id = Some(checkpoint.clone());
-                            association.confirmed_cursor = Some(confirmed_cursor);
-                        }
+                        // Native registration writes the record; historical checkpoint
+                        // provenance is read-only and cannot be manufactured here.
                         updated = true;
                         break;
                     }
@@ -425,7 +210,7 @@ fn test_run_evidence_impact(inner: &impl TestRunProjectionSource, row: &TestRunC
             unknown = true;
             continue;
         }
-        if association.verification_record_id.is_none() || association.checkpoint_id.is_none() {
+        if association.verification_record_id.is_none() {
             return Some(true);
         }
         if association.reported_outcome != EngramExecutionOutcome::Succeeded {

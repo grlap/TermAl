@@ -955,15 +955,14 @@ fn test_run_registration_view_from_observations<'a>(
         view.restart_evidence_reason =
             "Validated launch without a work binding; no work verification is pending.".to_owned();
     }
-    // The existing carried-check path has already correlated the exact
-    // artifact locator, first terminal digest, root, owner and claim. Its
-    // positive hazard outlives artifact PASS and dominates weaker guesses.
+    // A carried locator/digest identifies retained execution facts. It does
+    // not establish a pending native verification or make their loss safe.
     let carried = test_run_projection_carried_matches(
-        inner, &disk.run_dir, disk.results.as_ref().map(|row| row.digest.as_str()), true,
+        inner, &disk.run_dir, disk.results.as_ref().map(|row| row.digest.as_str()), false,
     );
     if carried {
-        view.restart_would_void_evidence = Some(true);
-        view.restart_evidence_reason = "Exact carried run is awaiting host verification settlement; restarting would lose its pending credit.".to_owned();
+        view.restart_would_void_evidence = None;
+        view.restart_evidence_reason = "Carried execution facts retain an exact artifact identity; they do not establish verification or work completion.".to_owned();
     }
     view
 }

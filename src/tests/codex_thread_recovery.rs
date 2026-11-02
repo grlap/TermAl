@@ -280,10 +280,9 @@ impl ResumeRecoveryFixture {
                 .engram = Some(EngramProjectSettings {
                 acceptance_evaluation: None,
                 enabled: true,
-                turn_gated_control: false,
+                execution_observability: false,
                 binary_path: Some("engram".to_owned()),
                 home: Some("test-engram-home".to_owned()),
-                work_authority_grant: None,
                 authority_store_key: None,
                 deadline_ms: None,
             });

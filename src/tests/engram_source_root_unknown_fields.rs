@@ -1,6 +1,6 @@
 // Owns unknown-field refusal witnesses through the MCP adapter and the real
-// HTTP naming handler, plus valid-call controls. Uses the parent naming
-// fixtures; does not replace their authority, timing or publication tests.
+// HTTP naming handler, plus valid-call controls. Uses the shared idle EO owner and real public naming API;
+// does not replace the authority, timing or publication tests.
 use super::*;
 
 struct NamingServer {
@@ -75,7 +75,27 @@ impl Drop for NamingServer {
     }
 }
 
-fn naming_snapshot(claimed: &ClaimedRoot) -> Value {
+// Actual work-service naming on the shared idle owner, before provider handoff.
+// The constructor scripts a current claim; this is not an external attestation.
+fn named_observed_root(label: &str) -> (EOCheckedTurn, PathBuf) {
+    let turn = EOCheckedTurn::idle(label, true);
+    let worktree = turn.root.join(".worktrees").join("unknown-fields");
+    run_git_test_command(&turn.root, &[
+        "worktree", "add", "--quiet", "-b", "unknown-fields", worktree.to_str().unwrap(),
+    ]);
+    turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
+        work: naming_work(&turn),
+        path: Some(Some(worktree.to_string_lossy().into_owned())),
+    }).unwrap();
+    turn.begin("Inspect the named worktree.");
+    (turn, worktree)
+}
+
+fn naming_work(turn: &EOCheckedTurn) -> String {
+    turn.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone())
+}
+
+fn naming_snapshot(claimed: &EOCheckedTurn) -> Value {
     let inner = claimed.state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&claimed.session_id).unwrap()];
     json!({
@@ -83,9 +103,8 @@ fn naming_snapshot(claimed: &ClaimedRoot) -> Value {
         "generation": inner.engram_source_root_generation,
         "journals": inner.engram_named_root_journal,
         "history": inner.engram_work_naming_history,
-        "turnRoot": format!("{:?}", record.engram.active_turn_source_root),
-        "basis": record.engram.active_turn_start_basis,
-        "rootBasis": record.engram.active_turn_observation_root_basis,
+        "turnRoot": record.engram.observed_source_root(),
+        "observedTurn": record.engram.unadmitted_active_turn,
         "line": record.engram.pending_source_root_line,
         "namedRoot": record.engram.named_root,
     })
@@ -114,13 +133,12 @@ fn assert_naming_unchanged(before: &Value, after: &Value, context: &str) {
 #[test]
 fn source_root_unknown_fields_mcp_typo_cannot_clear_or_seal_the_named_root() {
     let label = "unknown-field-typo";
-    let (claimed, worktree, _token) = named_root_turn(label, true);
-    assert!(claimed.record(|record| record.engram.active_turn_start_basis.is_some()));
+    let (claimed, worktree) = named_observed_root(label);
+    assert!(claimed.record(|record| record.engram.observed_opening().is_some()));
     assert!(claimed.record(|record| {
         record
             .engram
-            .active_turn_source_root
-            .as_ref()
+            .observed_source_root()
             .unwrap()
             .sealed_revision
             .is_none()
@@ -130,7 +148,7 @@ fn source_root_unknown_fields_mcp_typo_cannot_clear_or_seal_the_named_root() {
     let server = NamingServer::start(claimed.state.clone());
     let bridge = server.bridge(&claimed.session_id);
     let result = bridge.tool_name_source_root(
-        json!({"work": format!("w-{label}"), "root": worktree.to_string_lossy()}),
+        json!({"work": naming_work(&claimed), "root": worktree.to_string_lossy()}),
     );
     let after = naming_snapshot(&claimed);
     let posts = server.posts();
@@ -154,14 +172,14 @@ fn source_root_unknown_fields_mcp_typo_cannot_clear_or_seal_the_named_root() {
 #[test]
 fn source_root_unknown_fields_mcp_extras_cannot_mutate_even_with_a_valid_path() {
     let label = "unknown-field-extra";
-    let (claimed, worktree, _token) = named_root_turn(label, true);
+    let (claimed, worktree) = named_observed_root(label);
     let server = NamingServer::start(claimed.state.clone());
     let bridge = server.bridge(&claimed.session_id);
     for field in ["root", "bogus", "clear", "Path", "WORK"] {
         let before = naming_snapshot(&claimed);
         let reads = claimed.transport.requests().len();
         let mut arguments =
-            json!({"work": format!("w-{label}"), "path": worktree.to_string_lossy()});
+            json!({"work": naming_work(&claimed), "path": worktree.to_string_lossy()});
         arguments[field] = json!(true);
         let result = bridge.tool_name_source_root(arguments);
         assert_naming_unchanged(
@@ -179,9 +197,11 @@ fn source_root_unknown_fields_mcp_extras_cannot_mutate_even_with_a_valid_path() 
 #[test]
 fn source_root_unknown_fields_preserve_a_pending_intent_at_both_boundaries() {
     let label = "unknown-field-pending";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = claimed.root.join(".worktrees").join("unknown-pending");
+    run_git_test_command(&claimed.root, &[
+        "worktree", "add", "--quiet", "-b", "unknown-pending", worktree.to_str().unwrap(),
+    ]);
     claimed
         .transport
         .named_roots
@@ -190,13 +210,10 @@ fn source_root_unknown_fields_preserve_a_pending_intent_at_both_boundaries() {
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![claimed_root_held(label)],
-    )
-    .unwrap_err();
+    claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
+        work: naming_work(&claimed),
+        path: Some(Some(worktree.to_string_lossy().into_owned())),
+    }).unwrap_err();
     assert!(
         claimed
             .state
@@ -211,7 +228,7 @@ fn source_root_unknown_fields_preserve_a_pending_intent_at_both_boundaries() {
     let reads = claimed.transport.requests().len();
     let server = NamingServer::start(claimed.state.clone());
     let bridge = server.bridge(&claimed.session_id);
-    let arguments = json!({"work": format!("w-{label}"), "root": worktree.to_string_lossy()});
+    let arguments = json!({"work": naming_work(&claimed), "root": worktree.to_string_lossy()});
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -253,13 +270,13 @@ fn source_root_unknown_fields_preserve_a_pending_intent_at_both_boundaries() {
 #[test]
 fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() {
     let label = "unknown-field-valid";
-    let (claimed, worktree, _token) = named_root_turn(label, true);
-    let admitted = claimed.record(|record| record.engram.active_turn_source_root.clone().unwrap());
+    let (claimed, worktree) = named_observed_root(label);
+    let admitted = claimed.record(|record| record.engram.observed_source_root().cloned().unwrap());
     let server = NamingServer::start(claimed.state.clone());
     let bridge = server.bridge(&claimed.session_id);
     let named = bridge
         .tool_name_source_root(
-            json!({"work": format!("w-{label}"), "path": worktree.to_string_lossy()}),
+            json!({"work": naming_work(&claimed), "path": worktree.to_string_lossy()}),
         )
         .unwrap();
     assert!(named["root"].is_string());
@@ -270,7 +287,7 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
     );
     assert!(named["notice"].as_str().unwrap().contains("next turn"));
     claimed.record(|record| {
-        let current = record.engram.active_turn_source_root.as_ref().unwrap();
+        let current = record.engram.observed_source_root().unwrap();
         assert_eq!(current.root, admitted.root);
         assert_eq!(
             current.generation, admitted.generation,
@@ -292,14 +309,14 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
         1
     );
     let cleared = bridge
-        .tool_name_source_root(json!({"work": format!("w-{label}")}))
+        .tool_name_source_root(json!({"work": naming_work(&claimed)}))
         .unwrap();
     assert_eq!(cleared["generation"], 0);
     assert!(cleared.get("root").is_none());
-    let revision = content_revision_of(&worktree);
+    let revision = content_revision(&worktree).unwrap().1;
     assert_eq!(cleared["sealed"]["sourceRevision"], revision);
     claimed.record(|record| {
-        let current = record.engram.active_turn_source_root.as_ref().unwrap();
+        let current = record.engram.observed_source_root().unwrap();
         assert_eq!(current.root, admitted.root);
         assert_eq!(current.generation, admitted.generation);
         assert_eq!(
@@ -331,7 +348,7 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
     // not pass merely because the original name was already present.
     let renamed = bridge
         .tool_name_source_root(
-            json!({"work": format!("w-{label}"), "path": worktree.to_string_lossy()}),
+            json!({"work": naming_work(&claimed), "path": worktree.to_string_lossy()}),
         )
         .unwrap();
     let generation = renamed["generation"].as_u64().unwrap();
@@ -349,7 +366,7 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
         );
     }
     claimed.record(|record| {
-        let current = record.engram.active_turn_source_root.as_ref().unwrap();
+        let current = record.engram.observed_source_root().unwrap();
         assert_eq!(
             current.generation, admitted.generation,
             "re-naming takes effect next turn"
@@ -357,6 +374,7 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
         assert_eq!(current.sealed_revision.as_deref(), Some(revision.as_str()));
     });
     assert_eq!(server.posts(), 3);
+    assert_ordinary_turn_has_no_native_requests(&claimed);
 }
 
 #[test]

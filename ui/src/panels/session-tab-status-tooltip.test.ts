@@ -158,13 +158,5 @@ describe("session tab status tooltip location", () => {
     ).toContainEqual({ key: "Speed", value: "Fast" });
   });
 
-  it("shows Engram boot recovery readiness", () => {
-    expect(
-      buildSessionTooltipRows(
-        createSessionSummary({ engramBootRecoveryPending: true }),
-        new Map(),
-        remoteLookup,
-      ),
-    ).toContainEqual({ key: "Readiness", value: "Restoring Engram" });
-  });
+
 });

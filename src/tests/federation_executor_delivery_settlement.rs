@@ -419,7 +419,7 @@ async fn federation_m4_runtime_provider_handoff_is_once_and_queueing_is_not_a_ru
         active_turn_generation: 1, opening_prompt: None,
         command: ClaudePromptCommand { attachments: Vec::new(), replay_generation: "one-logical-effect".into(),
             text: "ordinary mailbox wake".into(), turn_generation: 1 },
-        engram_dispatch_generation: None, mailbox_notification: None, runtime_token: token.clone(),
+        mailbox_notification: None, runtime_token: token.clone(),
         sender: sender.clone(), session_id: fixture.native.clone(),
     };
     assert!(matches!(handoff_prepared_turn_dispatch(&fixture.satellite, dispatch()).unwrap(),

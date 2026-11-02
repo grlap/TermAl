@@ -25,12 +25,8 @@ fn history_note(index: u64) -> Value {
 /// `newer` newest, cut at `position`, continuing at `page-<next>`.
 fn history_window(total: u64, newer: u64, shown: u64, position: i64, next: u64) -> Value {
     let older = total - newer - shown;
-    json!({"selection": "newest_first", "order": "oldest_first", "newer": newer,
-        "older": older, "shown": shown, "total": total,
-        "after": (older > 0).then(|| format!("page-{next}")),
-        "includes_gates": true, "read_cut": {"project_position": position,
-            "observed_at": format!("2026-10-05T22:00:{:02}Z", next % 60),
-            "valid_until_ms": 1_790_000_000_000_i64}})
+    let after = (older > 0).then(|| format!("page-{next}"));
+    canonical_notes_window(total, newer, shown, position, after.as_deref())
 }
 
 fn history_notes(newer: u64, shown: u64) -> Value {
@@ -259,6 +255,17 @@ impl EngramControlTransport for SlowBindingTransport {
             return Ok(scripted_no_root_sighting(
                 connection, work_ref, run_id, *run_cut,
             ));
+        }
+        if matches!(request, EngramControlRequest::WorkSessionRead { .. }) {
+            // Ordinary binding discovery reads the actual session identity
+            // before its pages. It spends the same store latency and budget.
+            if let Err(error) = self.clock.read(timeout) {
+                self.timed_out.fetch_add(1, Ordering::SeqCst);
+                return Err(error);
+            }
+            return Ok(json!({"project_id":"established-project",
+                "session_id":connection.session_id, "work_session":true,
+                "capabilities":["host_work_v1", "verification_record_v1"]}));
         }
         assert!(matches!(
             request,

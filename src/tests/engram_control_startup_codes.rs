@@ -1,19 +1,7 @@
-//! Engram's terminal control-startup codes, `control_startup_busy` and
-//! `control_startup_refused`, at the transport: each is one error line
-//! answering the first frame followed by a nonzero exit, so the host evicts
-//! and reaps that control worker and a later call starts a new one, while an
-//! ordinary request-level error (a live `storage_error`, an unknown code)
-//! keeps its worker as before. Also owns the classification of the two codes
-//! as terminal remote errors that are neither "never started" nor certified
-//! non-application, matched on the code and never on the message, and as no
-//! refusal of a recovery checkpoint's report.
-//!
-//! Does not own the host's re-admission of a busy head or the hold of a
-//! refused one (src/tests/engram_control_startup_admission.rs), the closing
-//! checkpoint that keeps its report
-//! (src/tests/engram_turn_checks.rs), or the fixture's other lifecycle modes
-//! (src/tests/engram_control_transport.rs).
-//! New module.
+//! Ordinary work-session transport startup and request-level error lifecycles.
+//! Terminal startup errors retire the exact worker; healthy request-level
+//! errors retain it. Neither startup code is a no-write certificate or a
+//! definitive refusal of an ordinary observation report.
 
 use super::*;
 
@@ -50,23 +38,11 @@ fn fixture_transport(host_workdir: &FsPath) -> ProcessEngramControlTransport {
     )
 }
 
-fn bind_request(key: &str) -> EngramControlRequest {
-    EngramControlRequest::SessionBind {
-        external_ref: "termal:startup-codes".to_owned(),
-        title: "Startup codes".to_owned(),
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: vec![EngramEffect::Observe],
-        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-        work_binding: None,
-        idempotency_key: key.to_owned(),
-    }
-}
-
 /// The two startup codes are terminal remote errors: the worker is not kept
 /// alive. Neither proves the process never started, neither certifies that
 /// nothing was applied, and the decision rests on the code alone, whatever
 /// the message says. Refused fails closed (it disables the session); busy
-/// does not, so the safe re-admission can take it.
+/// does not. This classification grants no turn admission or replay authority.
 #[test]
 fn control_startup_codes_are_terminal_remote_errors_classified_by_code() {
     for code in STARTUP_CODES {
@@ -96,23 +72,25 @@ fn control_startup_codes_are_terminal_remote_errors_classified_by_code() {
     }
 }
 
-/// A recovery checkpoint answered by a startup code was never dispatched, so
-/// it is no refusal of the report it carries; a definitive refusal (a code
-/// Engram uses to refuse the report) still is.
+/// A startup error proves nothing about an ordinary observation's write.
+/// Only the remaining observation protocol's documented payload refusal is final.
 #[test]
-fn a_recovery_checkpoint_startup_reply_is_not_a_report_refusal() {
-    for code in STARTUP_CODES {
-        let reply: std::result::Result<EngramTurnCheckpointResponse, EngramTransportError> =
-            Err(remote_error(code, "Engram control startup could not acquire the store."));
-        assert_eq!(engram_recovery_checkpoint_refusal(&reply), None, "{code}");
+fn startup_errors_do_not_refuse_an_ordinary_observation_report() {
+    let message = "Engram control startup could not acquire the store.";
+    for code in STARTUP_CODES.into_iter().chain(["storage_error", "control_projection_invalid"]) {
+        let delivery = engram_runtime_observation_failure_delivery(
+            remote_error(code, message), "ordinary-observation-key");
+        assert_eq!(delivery, EngramRuntimeObservationDelivery::Pending {
+            last_error: Some(message.to_owned()),
+        }, "{code}: no definitive ordinary report refusal or write certificate");
     }
-    let refusal: std::result::Result<EngramTurnCheckpointResponse, EngramTransportError> =
-        Err(remote_error("control_projection_invalid", "report payload refused"));
-    assert_eq!(
-        engram_recovery_checkpoint_refusal(&refusal),
-        Some(Some("control_projection_invalid")),
-        "a definitive refusal keeps its meaning"
-    );
+    let code = "execution_observation_invalid";
+    let message = "ordinary report payload refused";
+    assert_eq!(engram_runtime_observation_failure_delivery(
+        remote_error(code, message), "ordinary-observation-key"),
+        EngramRuntimeObservationDelivery::Refused {
+            code: code.to_owned(), message: message.to_owned(),
+        }, "the remaining protocol's documented no-write refusal stays final");
 }
 
 /// Every other request-level error keeps today's meaning: a live
@@ -131,6 +109,11 @@ fn ordinary_remote_errors_keep_their_worker_as_before() {
         let error = remote_error(code, "Engram control startup could not acquire the store.");
         assert!(error.keeps_control_process_alive(), "{code}: the worker is kept");
         assert!(!error.disables_session(), "{code}: not fatal");
+        let expected = if matches!(code, "control_request_expired" | "control_store_busy") {
+            EngramInvocationApplication::CertifiedNotApplied
+        } else { EngramInvocationApplication::Unknown };
+        assert_eq!(error.invocation_application(), expected,
+            "{code}: only the typed remote certificate proves non-application");
     }
 }
 
@@ -152,7 +135,7 @@ fn real_process_startup_code_evicts_and_reaps_the_worker() {
 
         fs::write(&project_file, format!("{mode}\n")).unwrap();
         let error = transport
-            .request(&connection, &bind_request("startup-bind"), DEADLOCK_GUARD)
+            .request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
             .expect_err("the startup code is an error");
         assert_eq!(error.kind, EngramTransportErrorKind::Remote, "{code}");
         assert_eq!(error.code.as_deref(), Some(code));
@@ -176,9 +159,11 @@ fn real_process_startup_code_evicts_and_reaps_the_worker() {
 
         fs::write(&project_file, "fixture-ok\n").unwrap();
         let next = transport
-            .request(&connection, &bind_request("startup-bind-next"), DEADLOCK_GUARD)
+            .request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
             .expect("a later call starts a new worker");
-        assert_eq!(next["routing_token"], "fixture-token");
+        assert_eq!(next, json!({"binding":null}), "framing-only ordinary read, no identity or capability proof");
+        assert!(worker.cleanup_finished.load(std::sync::atomic::Ordering::Acquire),
+            "{code}: successor service waits for the old cleanup owner");
         assert_ne!(
             transport.process_for(&connection).unwrap().process.id(),
             pid,
@@ -204,7 +189,7 @@ fn real_process_ordinary_remote_error_keeps_the_worker() {
 
         fs::write(&project_file, format!("{mode}\n")).unwrap();
         let error = transport
-            .request(&connection, &bind_request("ordinary-bind"), DEADLOCK_GUARD)
+            .request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
             .expect_err("the request-level error is reported");
         assert_eq!(error.code.as_deref(), Some(code));
         assert!(
@@ -214,7 +199,7 @@ fn real_process_ordinary_remote_error_keeps_the_worker() {
 
         fs::write(&project_file, "fixture-ok\n").unwrap();
         transport
-            .request(&connection, &bind_request("ordinary-bind-next"), DEADLOCK_GUARD)
+            .request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
             .expect("the same worker answers the next call");
         assert!(
             Arc::ptr_eq(&worker, &transport.process_for(&connection).unwrap()),

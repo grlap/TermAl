@@ -163,6 +163,18 @@ function resolveAuthoritativePendingPromptId(
   ]?.id;
 }
 
+// A projected historical row or attempted delivery does not identify the
+// next runnable input. Leave that choice to ordinary backend Resume; these
+// observations never authorize replay. Plain human input still uses the
+// existing exact-content/stamp choice and optimistic hydration fence.
+function canSelectPlainQueueHead(session: Session | undefined, prompt: PendingPrompt | undefined) {
+  return prompt != null && prompt.source == null &&
+    prompt.engramInterrupted !== true && prompt.isEngramRetained !== true &&
+    !session?.promptDeliveries?.some((delivery) =>
+      delivery.promptId === prompt.id && delivery.disposition !== "pending",
+    );
+}
+
 export function useAppSessionActions(
   params: UseAppSessionActionsParams,
 ): UseAppSessionActionsReturn {
@@ -1155,11 +1167,10 @@ export function useAppSessionActions(
   // reports `queuePaused: false`.
   async function handleResumeSessionQueue(sessionId: string) {
     try {
-      const session = sessionsRef.current.find((entry) => entry.id === sessionId);
-      const controlOff = session?.engramControlOff === true;
+      let session = sessionsRef.current.find((entry) => entry.id === sessionId);
       let prompt = session?.pendingPrompts?.[0];
       let stamp = session?.sessionMutationStamp;
-      if (!controlOff && prompt?.localOnly === true) {
+      if (canSelectPlainQueueHead(session, prompt) && prompt?.localOnly === true) {
         const response = await fetchSessionTail(sessionId);
         if (!isMountedRef.current) {
           return;
@@ -1172,10 +1183,11 @@ export function useAppSessionActions(
           setRequestError("The queued prompt changed; refresh before resuming.");
           return;
         }
+        session = response.session;
         prompt = head;
         stamp = response.session.sessionMutationStamp;
       }
-      const state = !controlOff && prompt && prompt.source == null && typeof stamp === "number"
+      const state = canSelectPlainQueueHead(session, prompt) && prompt && typeof stamp === "number"
         ? await resumeSessionQueue(sessionId, { prompt, sessionMutationStamp: stamp })
         : await resumeSessionQueue(sessionId);
       if (!isMountedRef.current) {

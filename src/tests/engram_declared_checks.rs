@@ -3,7 +3,7 @@
 // result artifact it writes (docs/features/declared-test-commands.md).
 //
 // Owns: end-to-end turn tests of the declared route through the real
-// command-start, completion and checkpoint path, the guards that the built-in
+// command-start, completion and ordinary observation path, the guards that the built-in
 // recognition is unchanged beside it, and the unit tests of the declaration
 // (`engram_declared_tests.rs`), the artifact rules and the TRX reading
 // (`engram_trx_artifact.rs`), on real captured TRX files
@@ -44,7 +44,7 @@ const MIXED_TRX: &[u8] = include_bytes!(concat!(
 /// Commits a termal-tests.toml declaring `command` with `artifact`, and a
 /// .gitignore for the result directory, so neither is a change the test
 /// makes to its own source.
-pub(super) fn declare(turn: &CheckedTurn, command: &str, artifact: &str) {
+pub(super) fn declare(turn: &EOCheckedTurn, command: &str, artifact: &str) {
     let declaration = format!(
         "[[test]]\ncommand = {}\ncwd = \".\"\nartifact = {}\n",
         toml_string(command),
@@ -63,56 +63,56 @@ fn toml_string(value: &str) -> String {
 
 /// Writes the result file the declared command produces, as the command
 /// would while it runs.
-pub(super) fn write_artifact(turn: &CheckedTurn, content: &[u8]) {
+pub(super) fn write_artifact(turn: &EOCheckedTurn, content: &[u8]) {
     let path = turn.root.join(DECLARED_ARTIFACT);
     fs::create_dir_all(path.parent().expect("artifact has a directory"))
         .expect("result directory creates");
     fs::write(path, content).expect("artifact writes");
 }
 
-/// The outcome of the observation the first verification record was minted
-/// from: the check's own, not the turn's change observation beside it.
-fn producer_outcome(checkpoint: &Value) -> Value {
-    let id = &checkpoint["verification_evidence"][0]["producer_observation"]["observation_id"];
-    observations(checkpoint)
-        .into_iter()
-        .find(|observation| observation["observation_id"] == *id)
-        .map(|observation| observation["outcome"].clone())
-        .unwrap_or_else(|| panic!("no producer observation: {checkpoint:#}"))
+fn finish_observation(turn: &EOCheckedTurn) -> Value {
+    let request = turn.finish();
+    assert_ordinary_observation_has_no_native_credit(turn, &request);
+    request
 }
 
-fn refs(evidence: &Value) -> Vec<String> {
-    evidence["refs"]
-        .as_array()
-        .expect("refs")
-        .iter()
-        .map(|reference| reference.as_str().expect("a ref").to_owned())
-        .collect()
+/// The ordinary observed check's result, separate from its turn outcome.
+fn observed_result(request: &Value) -> Value {
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "{request:#}");
+    assert_eq!(checks[0]["check_kind"], "test");
+    checks[0]["observed_result"].clone()
+}
+
+/// Read the existing diagnostic artifact owner, never a native receipt.
+fn declared_diagnostic(turn: &EOCheckedTurn) -> (EngramTurnCheck, EngramDeclaredResult) {
+    let check = turn.record(|record| record.engram.active_turn_checks.last().unwrap().clone());
+    let result = engram_declared_result_of(check.end.as_ref().expect("a completed diagnostic"))
+        .expect("the diagnostic has a declared artifact result");
+    (check, result)
+}
+
+fn diagnostic_refs(turn: &EOCheckedTurn) -> Vec<String> {
+    let (check, result) = declared_diagnostic(turn);
+    engram_declared_refs(&check.command, check.declared.as_deref(),
+        check.end.as_ref().unwrap().exit, &result)
 }
 
 #[test]
 fn a_declared_command_with_a_passing_trx_is_reported_as_test_evidence() {
-    let turn = CheckedTurn::start("declared-pass", true);
+    let turn = EOCheckedTurn::start("declared-pass", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {
         write_artifact(&turn, PASSING_TRX);
     });
-    let checkpoint = turn.finish();
-
-    assert_eq!(producer_outcome(&checkpoint), "succeeded", "{checkpoint:#}");
-    let evidence = &checkpoint["verification_evidence"][0];
-    assert_eq!(evidence["check_kind"], "test", "{checkpoint:#}");
-    assert!(
-        refs(evidence)
-            .iter()
-            .any(|reference| reference == "kind:declared"),
-        "{evidence:#}"
-    );
+    assert!(diagnostic_refs(&turn).iter().any(|reference| reference == "kind:declared"));
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "passed", "{request:#}");
 }
 
 /// Another Git repository beside the turn's, as the directory a runtime
 /// reports for a command of the session that runs there.
-fn elsewhere_repository(turn: &CheckedTurn, label: &str) -> String {
+fn elsewhere_repository(turn: &EOCheckedTurn, label: &str) -> String {
     let other = turn
         .root
         .parent()
@@ -127,7 +127,7 @@ fn elsewhere_repository(turn: &CheckedTurn, label: &str) -> String {
 }
 
 /// What overlapped the turn's only check, as its holder is told.
-fn declared_overlap_cause(turn: &CheckedTurn) -> Option<String> {
+fn declared_overlap_cause(turn: &EOCheckedTurn) -> Option<String> {
     turn.record(|record| record.engram.active_turn_checks[0].overlap_cause.clone())
 }
 
@@ -137,7 +137,7 @@ fn a_declared_check_is_marked_by_an_own_command_that_runs_in_another_worktree() 
     // snapshot sees. A command of the session placed in another worktree may
     // still write that artifact by path, so it marks the declared check,
     // where an ordinary check in this worktree is left as it was.
-    let turn = CheckedTurn::start("declared-elsewhere-writer", true);
+    let turn = EOCheckedTurn::start("declared-elsewhere-writer", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let elsewhere = elsewhere_repository(&turn, "declared-elsewhere-writer");
     let copy = "cp -f passing.trx results.trx";
@@ -158,7 +158,7 @@ fn a_declared_check_is_marked_by_an_own_command_that_runs_in_another_worktree() 
 fn a_declared_check_started_beside_an_own_writer_in_another_worktree_is_marked() {
     // The same holds for a command of the session still running elsewhere
     // when the declared check starts.
-    let turn = CheckedTurn::start("declared-elsewhere-running", true);
+    let turn = EOCheckedTurn::start("declared-elsewhere-running", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let elsewhere = elsewhere_repository(&turn, "declared-elsewhere-running");
     let watch = "npm run watch";
@@ -179,71 +179,66 @@ fn a_declared_check_started_beside_an_own_writer_in_another_worktree_is_marked()
 
 #[test]
 fn a_declared_run_whose_trx_records_a_failure_is_reported_failed_even_at_exit_0() {
-    let turn = CheckedTurn::start("declared-fail", true);
+    let turn = EOCheckedTurn::start("declared-fail", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {
         write_artifact(&turn, FAILING_TRX);
     });
-    let checkpoint = turn.finish();
+    let request = finish_observation(&turn);
 
-    assert_eq!(producer_outcome(&checkpoint), "failed", "{checkpoint:#}");
-    assert_eq!(checkpoint["verification_evidence"][0]["check_kind"], "test");
+    assert_eq!(observed_result(&request), "failed", "{request:#}");
 }
 
 #[test]
 fn a_declared_run_that_writes_no_artifact_is_withheld_as_unknown_with_its_reason() {
-    let turn = CheckedTurn::start("declared-missing", true);
+    let turn = EOCheckedTurn::start("declared-missing", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {});
-    let checkpoint = turn.finish();
-
-    assert!(
-        checkpoint.get("verification_evidence").is_none(),
-        "{checkpoint:#}"
-    );
-    let line = turn
-        .record(|record| record.engram.pending_source_root_line.clone())
-        .expect("the holder should be told");
-    assert!(
-        line.contains("Declared test command earned no credit and was not recorded: UNKNOWN")
-            && line.contains("missing"),
-        "{line}"
-    );
+    let (check, result) = declared_diagnostic(&turn);
+    assert!(unknown_reason(&result).contains("missing"));
+    assert!(engram_declared_unknown_reason(check.end.as_ref().unwrap())
+        .is_some_and(|reason| reason.contains("missing")));
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "indeterminate", "{request:#}");
 }
 
 #[test]
 fn a_built_in_test_command_keeps_its_own_recognition_when_it_is_also_declared() {
-    let turn = CheckedTurn::start("declared-built-in", true);
+    let turn = EOCheckedTurn::start("declared-built-in", true);
     declare(&turn, SIZE_TEST, DECLARED_ARTIFACT);
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
-    let checkpoint = turn.finish();
-
-    let evidence = &checkpoint["verification_evidence"][0];
+    let check = turn.record(|record| record.engram.active_turn_checks[0].clone());
+    assert!(check.declared.is_none(), "built-in recognition wins");
+    let end = check.end.as_ref().unwrap();
     assert_eq!(
-        refs(evidence),
+        engram_check_refs(&check.command, end.exit, &end.result_lines),
         vec![format!("command:{SIZE_TEST}"), "exit:0".to_owned()],
-        "built-in recognition wins and is unchanged: {checkpoint:#}"
+        "built-in recognition is unchanged"
     );
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "passed", "{request:#}");
 }
 
 #[test]
 fn a_command_that_differs_from_its_declaration_is_not_a_check() {
-    let turn = CheckedTurn::start("declared-differs", true);
+    let turn = EOCheckedTurn::start("declared-differs", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     turn.run("check-1", "dotnet test", EngramCommandExit::Code(0), || {
         write_artifact(&turn, PASSING_TRX);
     });
-    let checkpoint = turn.finish();
+    let request = finish_observation(&turn);
 
     assert!(
-        checkpoint.get("verification_evidence").is_none(),
-        "{checkpoint:#}"
+        request.get("verification_evidence").is_none(),
+        "{request:#}"
     );
+    assert_eq!(request["occurrence"]["observed_checks"], json!([]),
+        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}");
 }
 
 #[test]
 fn a_disabled_declaration_is_told_in_a_host_line_and_recognises_nothing() {
-    let turn = CheckedTurn::start("declared-disabled", true);
+    let turn = EOCheckedTurn::start("declared-disabled", true);
     declare(&turn, "dotnet test --no-build", DECLARED_ARTIFACT);
     turn.run(
         "check-1",
@@ -253,12 +248,14 @@ fn a_disabled_declaration_is_told_in_a_host_line_and_recognises_nothing() {
             write_artifact(&turn, PASSING_TRX);
         },
     );
-    let checkpoint = turn.finish();
+    let request = finish_observation(&turn);
 
     assert!(
-        checkpoint.get("verification_evidence").is_none(),
-        "{checkpoint:#}"
+        request.get("verification_evidence").is_none(),
+        "{request:#}"
     );
+    assert_eq!(request["occurrence"]["observed_checks"], json!([]),
+        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}");
     let line = turn
         .record(|record| record.engram.pending_source_root_line.clone())
         .expect("the holder should be told");
@@ -272,27 +269,24 @@ fn a_disabled_declaration_is_told_in_a_host_line_and_recognises_nothing() {
 
 #[test]
 fn a_declared_run_that_exits_non_zero_with_no_artifact_is_reported_failed() {
-    let turn = CheckedTurn::start("declared-exit-1", true);
+    let turn = EOCheckedTurn::start("declared-exit-1", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(1), || {});
-    let checkpoint = turn.finish();
-
-    assert_eq!(producer_outcome(&checkpoint), "failed", "{checkpoint:#}");
-    let refs = refs(&checkpoint["verification_evidence"][0]);
+    let refs = diagnostic_refs(&turn);
     assert!(refs.contains(&"exit:1".to_owned()) && refs.contains(&"kind:declared".to_owned()));
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "failed", "{request:#}");
 }
 
 #[test]
 fn a_passing_declared_record_carries_the_declaration_artifact_and_counters() {
-    let turn = CheckedTurn::start("declared-record", true);
+    let turn = EOCheckedTurn::start("declared-record", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {
         write_artifact(&turn, PASSING_TRX);
     });
-    let checkpoint = turn.finish();
-
-    let evidence = &checkpoint["verification_evidence"][0];
-    let refs = refs(evidence);
+    let (check, result) = declared_diagnostic(&turn);
+    let refs = diagnostic_refs(&turn);
     let has = |prefix: &str| refs.iter().any(|reference| reference.starts_with(prefix));
     for prefix in [
         "declared-cwd:.",
@@ -305,14 +299,15 @@ fn a_passing_declared_record_carries_the_declaration_artifact_and_counters() {
         "trx-outcome:Completed",
         "trx-counters:total=3,executed=3,passed=3,failed=0",
     ] {
-        assert!(has(prefix), "{prefix} missing: {evidence:#}");
+        assert!(has(prefix), "{prefix} missing: {refs:#?}");
     }
+    let summary = engram_declared_summary(&check.command, check.declared.as_deref(),
+        check.end.as_ref().unwrap().exit, &result);
     assert!(
-        evidence["summary"]
-            .as_str()
-            .is_some_and(|summary| summary.contains("PASS") && summary.contains("passed=3")),
-        "{evidence:#}"
+        summary.contains("PASS") && summary.contains("passed=3"), "{summary}"
     );
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "passed", "{request:#}");
 }
 
 // Unit tests of the declaration, the artifact rules and the TRX reading.
@@ -1018,7 +1013,7 @@ fn malformed_xml_anywhere_in_the_trx_is_unknown_never_pass() {
 fn a_declared_check_survives_a_description_that_repeats_its_command() {
     // ACP runtimes describe a running command again (its raw input) before
     // they report its end.
-    let turn = CheckedTurn::start("declared-described", true);
+    let turn = EOCheckedTurn::start("declared-described", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let mut recorder = turn.recorder();
     recorder
@@ -1039,9 +1034,64 @@ fn a_declared_check_survives_a_description_that_repeats_its_command() {
         )
         .expect("the end should record");
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
+    let request = finish_observation(&turn);
 
-    assert_eq!(producer_outcome(&checkpoint), "succeeded", "{checkpoint:#}");
+    assert_eq!(observed_result(&request), "passed", "{request:#}");
+}
+
+#[test]
+fn a_declared_result_for_an_earlier_same_key_occurrence_cannot_finish_its_successor() {
+    let turn = EOCheckedTurn::start("declared-reused-key-owner", true);
+    declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
+    turn.run("same-key", DECLARED_TEST, EngramCommandExit::Code(0), || {
+        write_artifact(&turn, PASSING_TRX);
+    });
+    let (turn_ref, first) = turn.record(|record| {
+        let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        (trace.host_turn_ref.clone(), trace.commands[0].clone())
+    });
+    assert_eq!(first.check.observed_result, EngramObservedCheckResult::Passed);
+    let first_binding = first.declared.clone().expect("the original declared start owns its binding");
+    let mut recorder = turn.recorder();
+    recorder.command_started("same-key", DECLARED_TEST).unwrap();
+    turn.wait_for_snapshots();
+    let before = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
+        .unwrap().commands.clone());
+    assert_eq!(before.len(), 2);
+    assert_eq!(before[0], first);
+    assert_ne!(before[1].check.host_check_id, first.check.host_check_id);
+    assert!(before[1].check.finished_at.is_none());
+    let apply_stale = || turn.record_mut(|record| {
+        // Model an artifact result read off lock for the first occurrence,
+        // arriving only after a new start reused the runtime's tool key.
+        observe_runtime_unadmitted_declared_end(record, &EngramObservationProvenance::Ambient,
+            &EngramRecorderObservation::CommandFinished {
+                key: "same-key", command: DECLARED_TEST, reported_command: Some(DECLARED_TEST),
+                output: "", exit: Some(EngramCommandExit::Code(0)), runtime_output_cut: false,
+            }, &turn_ref, &first.check.host_check_id, &first_binding,
+            Some(EngramExecutionOutcome::Succeeded));
+    });
+    apply_stale();
+    assert_eq!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
+        .unwrap().commands.clone()), before, "a stale result cannot close the new occurrence");
+    write_artifact(&turn, FAILING_TRX);
+    recorder.command_completed_with_exit("same-key", DECLARED_TEST, "",
+        CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    turn.wait_for_snapshots();
+    let ended = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
+        .unwrap().commands.clone());
+    assert_eq!(ended[0], first, "the earlier fact remains immutable");
+    assert_eq!(ended[1].check.observed_result, EngramObservedCheckResult::Failed,
+        "the latest invocation uses its own failing artifact despite exit0");
+    apply_stale();
+    assert_eq!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
+        .unwrap().commands.clone()), ended, "a duplicate old result cannot revise the failed successor");
+    let request = finish_observation(&turn);
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 2, "{request:#}");
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert_eq!(checks[1]["observed_result"], "failed");
+    assert_ne!(checks[0]["host_check_id"], checks[1]["host_check_id"]);
 }
 
 /// Removes the directory link `link` (`link_directory`), not its target.
@@ -1079,7 +1129,7 @@ fn an_artifact_reached_through_a_retargeted_link_is_unknown() {
 
 #[test]
 fn a_check_stays_open_to_writes_until_its_artifact_is_read() {
-    let turn = CheckedTurn::start("declared-read-pending", true);
+    let turn = EOCheckedTurn::start("declared-read-pending", true);
     let settled = Arc::new(EngramBasisCapture::default());
     settled.finish(None);
     let reading: Arc<EngramCapture<EngramDeclaredResult>> = Arc::new(EngramCapture {
@@ -1144,18 +1194,20 @@ fn the_cmd_dialect_and_ambiguous_characters_are_refused_on_the_declared_route() 
 
 #[test]
 fn a_declared_command_wrapped_in_cmd_is_no_check_end_to_end() {
-    let turn = CheckedTurn::start("declared-cmd", true);
+    let turn = EOCheckedTurn::start("declared-cmd", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let wrapped = format!("cmd /c {DECLARED_TEST}");
     turn.run("check-1", &wrapped, EngramCommandExit::Code(0), || {
         write_artifact(&turn, PASSING_TRX);
     });
-    let checkpoint = turn.finish();
+    let request = finish_observation(&turn);
 
     assert!(
-        checkpoint.get("verification_evidence").is_none(),
-        "{checkpoint:#}"
+        request.get("verification_evidence").is_none(),
+        "{request:#}"
     );
+    assert_eq!(request["occurrence"]["observed_checks"], json!([]),
+        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}");
 }
 
 #[test]
@@ -1185,7 +1237,7 @@ fn a_passing_summary_names_inconclusive_tests() {
 
 #[test]
 fn a_disabled_declaration_is_told_once_per_content() {
-    let turn = CheckedTurn::start("declared-disabled-once", true);
+    let turn = EOCheckedTurn::start("declared-disabled-once", true);
     declare(&turn, "dotnet test --no-build", DECLARED_ARTIFACT);
     let pending = || turn.record(|record| record.engram.pending_source_root_line.clone());
     let clear = || turn.record_mut(|record| record.engram.pending_source_root_line = None);
@@ -1223,7 +1275,7 @@ fn a_disabled_declaration_is_told_once_per_content() {
 
 #[test]
 fn a_declared_run_whose_declaration_changed_is_withheld_even_at_a_non_zero_exit() {
-    let turn = CheckedTurn::start("declared-changed-exit-1", true);
+    let turn = EOCheckedTurn::start("declared-changed-exit-1", true);
     // An ignored declaration, so editing it mid-run moves no source basis
     // and only the declared route can see the change.
     fs::write(
@@ -1243,20 +1295,12 @@ fn a_declared_run_whose_declaration_changed_is_withheld_even_at_a_non_zero_exit(
         )
         .expect("declaration changes");
     });
-    let checkpoint = turn.finish();
-
-    assert!(
-        checkpoint.get("verification_evidence").is_none(),
-        "{checkpoint:#}"
-    );
-    let line = turn
-        .record(|record| record.engram.pending_source_root_line.clone())
-        .expect("the holder should be told");
-    assert!(
-        line.contains("earned no credit and was not recorded: UNKNOWN")
-            && line.contains("declaration changed"),
-        "{line}"
-    );
+    let (check, result) = declared_diagnostic(&turn);
+    assert!(unknown_reason(&result).contains("declaration changed"));
+    assert!(engram_declared_unknown_reason(check.end.as_ref().unwrap())
+        .is_some_and(|reason| reason.contains("declaration changed")));
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "indeterminate", "{request:#}");
 }
 
 // Freeze-3 review findings (pair 2): each control below failed on freeze 3.
@@ -1540,7 +1584,7 @@ fn forbidden_words_are_caught_in_their_other_spellings() {
 
 #[test]
 fn the_one_call_form_runs_a_declared_command_end_to_end() {
-    let turn = CheckedTurn::start("declared-one-call", true);
+    let turn = EOCheckedTurn::start("declared-one-call", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let line = format!("pushd \"{}\" && {DECLARED_TEST}", turn.root.display());
     let (command, words) = engram_declared_candidate(&line).expect("a one-call candidate");
@@ -1555,9 +1599,9 @@ fn the_one_call_form_runs_a_declared_command_end_to_end() {
     turn.run("check-1", &line, EngramCommandExit::Code(0), || {
         write_artifact(&turn, PASSING_TRX);
     });
-    let checkpoint = turn.finish();
+    let request = finish_observation(&turn);
 
-    assert_eq!(producer_outcome(&checkpoint), "succeeded", "{checkpoint:#}");
+    assert_eq!(observed_result(&request), "passed", "{request:#}");
 }
 
 #[test]
@@ -1861,50 +1905,38 @@ fn one_program_word_rule_reads_the_bare_and_the_wrapped_route_alike() {
 }
 
 #[test]
-fn a_declared_unknown_is_withheld_as_declared_even_when_its_output_was_cut() {
-    let mut check = finished_check(0, engram_ready_basis_capture());
-    check.runtime_output_cut = true;
-    let mut end = check.end.clone().expect("a finished check");
-    end.declared = Some(EngramCapture::settled(EngramDeclaredResult {
-        verdict: EngramTrxVerdict::Unknown("the artifact is missing at the end".to_owned()),
-        artifact: None,
-        outcome: None,
-        counters: None,
-    }));
-    let mut checks = vec![EngramResolvedCheck {
-        check,
-        end,
-        outcome: EngramExecutionOutcome::Unknown,
-        basis: EngramExecutionSourceBasis {
-            workspace_id: "C:/w".to_owned(),
-            source_revision: "revision".to_owned(),
-            source_root_generation: None,
-            source_root_state: None,
-        },
-        toolchain: None,
-        ran_successfully: true,
-    }];
-    let withheld = engram_withhold_unjudged_successes(&mut checks);
-    assert_eq!(withheld[0].reason, EngramWithheldReason::Declared);
-    assert!(
-        engram_withheld_check_line(&withheld[0]).contains("missing at the end"),
-        "{}",
-        engram_withheld_check_line(&withheld[0])
-    );
+fn a_declared_unknown_reason_survives_output_cut_without_verification() {
+    let turn = EOCheckedTurn::start("declared-cut-missing", true);
+    declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
+    turn.recorder().command_started("cut", DECLARED_TEST).unwrap();
+    turn.wait_for_snapshots();
+    turn.state.engram_host().observe(&turn.session_id, &EngramObservationProvenance::Ambient,
+        EngramRecorderObservation::CommandFinished {
+            key: "cut", command: DECLARED_TEST, reported_command: Some(DECLARED_TEST),
+            output: "truncated output", exit: Some(EngramCommandExit::Code(0)),
+            runtime_output_cut: true,
+        });
+    turn.wait_for_snapshots();
+    let (check, result) = declared_diagnostic(&turn);
+    assert!(check.runtime_output_cut);
+    assert!(unknown_reason(&result).contains("missing"));
+    assert!(engram_declared_unknown_reason(check.end.as_ref().unwrap())
+        .is_some_and(|reason| reason.contains("missing")));
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "indeterminate", "{request:#}");
 }
 
 #[test]
 fn a_wrapped_declared_line_runs_end_to_end() {
-    let turn = CheckedTurn::start("declared-wrapped", true);
+    let turn = EOCheckedTurn::start("declared-wrapped", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let wrapped = format!("bash -c '{DECLARED_TEST}'");
     turn.run("check-1", &wrapped, EngramCommandExit::Code(0), || {
         write_artifact(&turn, PASSING_TRX);
     });
-    let checkpoint = turn.finish();
-
-    assert_eq!(producer_outcome(&checkpoint), "succeeded", "{checkpoint:#}");
-    assert!(refs(&checkpoint["verification_evidence"][0]).contains(&"kind:declared".to_owned()));
+    assert!(diagnostic_refs(&turn).contains(&"kind:declared".to_owned()));
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "passed", "{request:#}");
 }
 
 const CODEX_WINDOWS_PWSH: &str =
@@ -1938,16 +1970,15 @@ fn codex_windows_pwsh_exact_wrapper_shapes_are_recognized() {
 
 #[test]
 fn codex_windows_pwsh_records_a_declared_pass_end_to_end() {
-    let turn = CheckedTurn::start("declared-codex-windows-pwsh", true);
+    let turn = EOCheckedTurn::start("declared-codex-windows-pwsh", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let wrapped = format!("\"{CODEX_WINDOWS_PWSH}\" -Command '{DECLARED_TEST}'");
     turn.run("check-1", &wrapped, EngramCommandExit::Code(0), || {
         write_artifact(&turn, PASSING_TRX);
     });
-    let checkpoint = turn.finish();
-
-    assert_eq!(producer_outcome(&checkpoint), "succeeded", "{checkpoint:#}");
-    assert!(refs(&checkpoint["verification_evidence"][0]).contains(&"kind:declared".to_owned()));
+    assert!(diagnostic_refs(&turn).contains(&"kind:declared".to_owned()));
+    let request = finish_observation(&turn);
+    assert_eq!(observed_result(&request), "passed", "{request:#}");
 }
 
 #[test]

@@ -2,19 +2,6 @@
 // receipts, authoritative lifecycle reconciliation and capture provenance.
 // Path validation and the agent's naming request live in engram_source_roots.rs.
 
-/// The reason Engram gives, inside a `named_root_binding_refused` refusal,
-/// when the session's control session is not active: it is exited, or acts
-/// for another session. Engram's other causes for that code carry other
-/// reasons, and only this one is cured by re-binding the session.
-const ENGRAM_INACTIVE_CONTROL_SESSION_REASON: &str = "requires an active host session";
-
-/// The precondition and remedy a refused named-root bind names when the
-/// session's binding token was replaced while that bind was in flight: the
-/// refusal was for a token the session no longer holds, so nothing is flagged.
-const ENGRAM_NAMED_ROOT_TOKEN_REPLACED_REMEDY: &str = "The session's Engram binding token was \
-     replaced while this naming's bind was in flight, so the refusal was for a token the \
-     session no longer holds; name the root again to use its current binding.";
-
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EngramNamedRootKind {
@@ -216,7 +203,7 @@ struct EngramNamedRootEvent {
 }
 
 impl EngramNamedRootEvent {
-    fn request(&self, routing_token: &str) -> Result<EngramControlRequest, EngramTransportError> {
+    fn request(&self) -> Result<EngramControlRequest, EngramTransportError> {
         let generation = i64::try_from(self.root.generation)
             .ok()
             .filter(|generation| *generation > 0)
@@ -228,7 +215,6 @@ impl EngramNamedRootEvent {
             EngramNamedRootKind::Ended => "ended",
         };
         Ok(EngramControlRequest::NamedRootBind {
-            routing_token: routing_token.to_owned(),
             claim_id: self.root.claim_id.clone(),
             claim_fence: self.root.claim_fence,
             workspace_id: self.root.root.clone(),
@@ -818,15 +804,15 @@ fn engram_compact_root_journal(inner: &mut StateInner) {
         inner.sessions.iter().any(|record| {
             let runtime = &record.engram;
             runtime.work_binding.as_ref().is_some_and(|binding| binding.claim_id == journal.claim_id)
-                || runtime.active_turn_source_root.as_ref().is_some_and(|root|
+                || runtime.observed_source_root().is_some_and(|root|
                     root.claim_id == journal.claim_id)
-                || matches!(&runtime.active_turn_root_capture,
-                    Some(EngramRootCapture::Recorded { generation, .. })
-                    if event.is_some_and(|event| i64::try_from(event.root.generation).ok() == Some(*generation)))
-                || runtime.active_turn_start_basis.as_ref().is_some_and(&references_basis)
-                || [&runtime.active_turn_report, &runtime.active_turn_report_fallback]
-                    .into_iter().flatten().any(|(_, report)| report.observations.iter()
-                        .any(|observation| observation.source_basis.as_ref().is_some_and(&references_basis)))
+                || runtime.observed_opening().is_some_and(|opening|
+                    opening.binding.claim_id == journal.claim_id)
+                || runtime.unadmitted_closing_jobs.iter().any(|job|
+                    job.scope.binding.as_ref().is_some_and(|binding| binding.claim_id == journal.claim_id))
+                || runtime.unadmitted_reports.iter().any(|report| report.envelopes.iter().any(|envelope|
+                    envelope.request.get("binding").and_then(|binding| binding.get("claim_id"))
+                        .and_then(Value::as_str) == Some(journal.claim_id.as_str())))
                 || runtime.active_turn_checks.iter().any(|check|
                     references_capture(&check.start_basis)
                     || check.end.as_ref().is_some_and(|end| references_capture(&end.end_basis)))
@@ -933,7 +919,7 @@ fn engram_named_root_read_obsoletes(
 
 /// A capture's provenance is decided before its filesystem read, and checked
 /// again afterward. Pending transport never creates creditable evidence.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 enum EngramRootCapture {
     Unnamed,
     Recorded {
@@ -1085,78 +1071,35 @@ fn engram_root_capture_locked(inner: &StateInner, session_id: &str) -> EngramRoo
     }
 }
 
-/// An admitted turn keeps the generation and workspace it began with. A
-/// naming request changes the next turn; it must not relabel earlier checks
-/// or the closing sighting. Pending/unknown authority still withholds credit.
+/// A running observation keeps the exact root image it opened with.
+/// Naming during the turn cannot relabel its checks or closing capture.
 fn engram_turn_root_capture_locked(inner: &StateInner, session_id: &str) -> EngramRootCapture {
     let current = engram_root_capture_locked(inner, session_id);
-    let Some(index) = inner.find_session_index(session_id) else {
-        return current;
-    };
-    let record = &inner.sessions[index].engram;
-    if record.active_grant_id.is_some()
-        && record.active_turn_root_capture.is_some()
-        && record.active_turn_naming_identity.is_none()
+    let Some(index) = inner.find_session_index(session_id) else { return current; };
+    let record = &inner.sessions[index];
+    if record.engram.unadmitted_active_turn.as_ref().is_some_and(|trace|
+        trace.generation == record.active_turn_generation
+            && trace.opening_prepared && trace.opening_root.is_none())
     {
         return EngramRootCapture::Unconfirmed;
     }
-    // Immutable admitted provenance has its own store/work identity. A focus
-    // change must not let an unsettled earlier work release checkpoint credit.
-    if let Some((store, work)) = &record.active_turn_naming_identity {
-        if engram_authority_work_unresolved(inner, store, work) {
-            return EngramRootCapture::Unconfirmed;
-        }
+    let Some(opening) = record.engram.unadmitted_active_turn.as_ref()
+        .filter(|trace| trace.generation == record.active_turn_generation)
+        .and_then(|trace| trace.opening_root.as_ref())
+    else { return current; };
+    if engram_authority_work_unresolved(inner, &opening.store, &opening.binding.work_id) {
+        return EngramRootCapture::Unconfirmed;
     }
     if current == EngramRootCapture::Unconfirmed {
-        // Retirement denies future admission, not an already admitted
-        // confirmed snapshot. Pending or unknown authority still withholds it.
-        let store = engram_project_for_session_locked(inner, session_id)
-            .and_then(|project| project.engram.as_ref())
-            .and_then(|settings| settings.authority_store_key.as_ref());
-        let known_retirement = record
-            .active_turn_source_root
-            .as_ref()
-            .zip(store)
-            .is_some_and(|(root, store)| {
-                engram_root_journal(&inner.engram_named_root_journal, store, &root.claim_id)
-                    .is_some_and(|journal| {
-                        journal.obsolete
-                            && journal.retirement.is_some()
-                            && journal.pending.is_none()
-                            && journal.reconciliation.is_none()
-                    })
-            });
-        if !known_retirement || record.named_root == Some(EngramNamedRootState::Unknown) {
+        let retired = engram_root_journal(&inner.engram_named_root_journal,
+            &opening.store, &opening.binding.claim_id).is_some_and(|journal|
+                journal.obsolete && journal.retirement.is_some()
+                    && journal.pending.is_none() && journal.reconciliation.is_none());
+        if !retired || record.engram.named_root == Some(EngramNamedRootState::Unknown) {
             return current;
         }
     }
-    if record.active_grant_id.is_none() {
-        return current;
-    }
-    if record.active_turn_root_capture == Some(EngramRootCapture::Unconfirmed) {
-        return EngramRootCapture::Unconfirmed;
-    }
-    if let Some(root) = &record.active_turn_source_root {
-        return EngramRootCapture::Recorded {
-            generation: root.generation as i64,
-            state: EngramSourceRootState::Named,
-            workspace_id: root.root.clone(),
-        };
-    }
-    if let Some(provenance) = &record.active_turn_root_capture {
-        return provenance.clone();
-    }
-    match record.active_turn_start_basis.as_ref() {
-        Some(basis) => match (basis.source_root_generation, basis.source_root_state) {
-            (Some(generation), Some(state)) => EngramRootCapture::Recorded {
-                generation,
-                state,
-                workspace_id: basis.workspace_id.clone(),
-            },
-            _ => EngramRootCapture::Unnamed,
-        },
-        None => EngramRootCapture::Unconfirmed,
-    }
+    opening.provenance.clone()
 }
 
 fn engram_removed_root_read_now(clock: &EngramBudgetClock) -> std::time::Instant {
@@ -1202,9 +1145,6 @@ impl AppState {
             let Some(store) = target.settings.authority_store_key.as_ref() else {
                 return;
             };
-            if target.routing_token.is_none() {
-                return;
-            }
             let mut journals = inner
                 .engram_named_root_journal
                 .iter()
@@ -1278,7 +1218,6 @@ impl AppState {
                 .request(
                     &target.connection,
                     &EngramControlRequest::NamedRootRead {
-                        routing_token: target.routing_token.clone().expect("bound reader"),
                         run_id: binding.run_id.clone(),
                         claim_id: binding.claim_id.clone(),
                     },
@@ -1306,7 +1245,6 @@ impl AppState {
                     .flatten();
             if !current.is_some_and(|current| {
                 current.connection == target.connection
-                    && current.routing_token == target.routing_token
                     && current.settings.authority_store_key.as_ref() == Some(&before.store)
             }) {
                 continue;
@@ -1373,7 +1311,7 @@ impl AppState {
     // target would clone every root, journal and project store.
     fn engram_root_reporter_available(inner: &StateInner, event: &EngramNamedRootEvent) -> bool {
         engram_session_reader_view_locked(inner, &event.reporter).is_some_and(|view| {
-            view.store == Some(&event.root.store) && view.routing_token.is_some()
+            view.store == Some(&event.root.store)
         })
     }
 
@@ -1389,105 +1327,6 @@ impl AppState {
                 !event.reporter.is_empty() && !Self::engram_root_reporter_available(&inner, event)
             })
             .cloned()
-    }
-
-    /// A queued delta is not durable. This fence names one claim's exact
-    /// journal and selection, so unrelated sessions cannot prevent its ack.
-    /// Never wait while holding StateInner: the writer needs that lock.
-    /// Begin receipts are replayed as originally stored. When one disagrees
-    /// with a local selection, a fresh status read decides; the receipt must
-    /// not erase a name made after that begin was first issued.
-    #[cfg(test)]
-    fn reconcile_engram_begin_root(
-        &self,
-        target: &EngramBindingTarget,
-        routing_token: &str,
-        binding: Option<&EngramControlWorkBinding>,
-        state: Option<EngramNamedRootState>,
-        budget: Duration,
-    ) -> Result<(), EngramTransportError> {
-        let clock = self.engram_budget_clock();
-        self.reconcile_engram_begin_root_until(
-            target,
-            routing_token,
-            binding,
-            state,
-            clock.now() + budget,
-            None,
-            None,
-        )
-        .map(|_| ())
-    }
-
-    fn reconcile_engram_begin_root_until(
-        &self,
-        target: &EngramBindingTarget,
-        routing_token: &str,
-        binding: Option<&EngramControlWorkBinding>,
-        mut state: Option<EngramNamedRootState>,
-        deadline: std::time::Instant,
-        mut guard: Option<EngramAcknowledgedRootGuard>,
-        admission_owner: Option<&EngramQueuedAdmissionOwner>,
-    ) -> Result<EngramRootReconcileOutcome, EngramTransportError> {
-        let clock = self.engram_budget_clock();
-        let (read_generation, needs_status) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let entry = target
-                .settings
-                .authority_store_key
-                .as_ref()
-                .zip(binding)
-                .and_then(|(store, binding)| {
-                    engram_work_source_root_for_claim(
-                        &inner.engram_work_source_roots,
-                        store,
-                        &binding.work_id,
-                        &binding.claim_id,
-                    )
-                });
-            let needs_status = entry.is_some_and(|entry| !matches!(&state,
-                Some(EngramNamedRootState::Bound {workspace_id, generation, named_at})
-                if *workspace_id == entry.root && u64::try_from(*generation).ok() == Some(entry.generation) && engram_named_at_matches(named_at, &entry.named_at)));
-            (EngramRootReadFence::capture(&inner), needs_status)
-        };
-        if needs_status {
-            if clock.now() >= deadline {
-                state = Some(EngramNamedRootState::Unknown);
-            } else {
-                if guard.as_ref().is_none_or(|guard| {
-                    !guard.still_withholding(&self.inner.lock().expect("state mutex poisoned"))
-                }) {
-                    guard = self.guard_engram_root_read_until(target, binding, deadline)?;
-                }
-                state = match target
-                    .adapter
-                    .request(
-                        &target.connection,
-                        &EngramControlRequest::SessionStatus {
-                            routing_token: routing_token.to_owned(),
-                        },
-                        target.rpc_timeout_until(deadline)?,
-                    )
-                    .and_then(parse_engram_result::<EngramSessionStatusResponse>)
-                {
-                    Ok(status) => status.named_root,
-                    Err(error) if engram_status_error_requires_fresh_bind(&error) => {
-                        return Err(error);
-                    }
-                    Err(_) => Some(EngramNamedRootState::Unknown),
-                };
-            }
-        }
-        self.reconcile_engram_root_for_admission_until(
-            target,
-            routing_token,
-            binding,
-            state,
-            &read_generation,
-            guard,
-            admission_owner,
-            deadline,
-        )
     }
 
     fn retire_engram_root_replay(
@@ -1555,7 +1394,6 @@ impl AppState {
             if !fence.same_store(&inner, &target.project_id)
                 || current.as_ref().is_none_or(|current| {
                     current.connection != target.connection
-                        || current.routing_token != target.routing_token
                         || current.work_binding != target.work_binding
                         || current.settings.authority_store_key
                             != target.settings.authority_store_key
@@ -1610,6 +1448,7 @@ impl AppState {
     /// At most one cleanup per admitted turn, sharing the source-capture
     /// budget. It never grows admission's bind path or holds the state lock
     /// across Engram I/O. A failed send remains in the durable journal.
+    #[cfg(test)]
     fn flush_engram_root_cleanup(&self, session_id: &str, budget: Duration) {
         let clock = self.engram_budget_clock();
         let deadline = clock.now() + budget;
@@ -1808,91 +1647,6 @@ impl AppState {
         )
     }
 
-    /// The remedy for a `named_root_binding_refused` answer that a re-bind of
-    /// this session does not apply to, decided before the session's token is
-    /// considered: a refusal for another cause than an inactive control
-    /// session, or one under turn-gated control. `None` is an inactive control
-    /// session under control off, which the session's token then decides.
-    fn engram_named_root_refusal_remedy_without_rebind(
-        refusal: &EngramTransportError,
-        target: &EngramBindingTarget,
-    ) -> Option<&'static str> {
-        if !refusal
-            .message
-            .contains(ENGRAM_INACTIVE_CONTROL_SESSION_REASON)
-        {
-            return Some(
-                "Re-binding the session does not cure this refusal; address Engram's \
-                 reason above, then name the root again.",
-            );
-        }
-        if target.settings.turn_gated_control {
-            return Some(
-                "The named-root binding needs an active Engram control session acting \
-                 for this session on the claim's live run. Under turn-gated control the \
-                 session's own binder re-establishes it; name the root again once the \
-                 session has been re-bound.",
-            );
-        }
-        None
-    }
-
-    /// What a session whose named-root bind Engram refused with
-    /// `named_root_binding_refused` should do next, applying the one remedy
-    /// TermAl can apply itself.
-    ///
-    /// Engram uses that code for several causes: malformed fields, a claim
-    /// that is no longer current or active, a stale generation, and a
-    /// session whose control session is not active. Only the last is cured
-    /// by re-binding, and Engram names it by
-    /// `ENGRAM_INACTIVE_CONTROL_SESSION_REASON`. A session bound before
-    /// turn-gated control was switched off keeps that exited control session,
-    /// and with control off nothing else re-binds it. So under control off,
-    /// for that reason only and while the reporting session still holds the
-    /// token Engram refused, the token is flagged for rebinding; the
-    /// session's next naming then sends its flagged-token naming bind, which
-    /// leaves Engram with an active control session under a new token.
-    /// Engram grants no turn authority for a bind. Every other refusal keeps
-    /// the binding as it is: under turn-gated control the session's binder
-    /// owns it, a token that changed meanwhile is no longer the refused one,
-    /// and any other cause is not cured by a bind.
-    fn engram_named_root_refusal_remedy_locked(
-        inner: &mut StateInner,
-        target: &EngramBindingTarget,
-        caller_session_id: &str,
-        refused_token: &str,
-        refusal: &EngramTransportError,
-    ) -> String {
-        if let Some(remedy) = Self::engram_named_root_refusal_remedy_without_rebind(refusal, target)
-        {
-            return remedy.to_owned();
-        }
-        let reporter = &target.connection.session_id;
-        let Some(index) = inner.find_session_index(reporter).filter(|&index| {
-            inner.sessions[index].engram.routing_token.as_deref() == Some(refused_token)
-        }) else {
-            return ENGRAM_NAMED_ROOT_TOKEN_REPLACED_REMEDY.to_owned();
-        };
-        inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid")
-            .engram
-            .rebind_required = true;
-        if reporter == caller_session_id {
-            "This session's Engram control session is no longer active, which happens to a \
-             session bound before turn-gated control was switched off. Its binding is now \
-             marked for renewal: name the root again to re-bind the session and bind the root."
-                .to_owned()
-        } else {
-            format!(
-                "The Engram control session of session {reporter}, which reported this root, \
-                 is no longer active, which happens to a session bound before turn-gated \
-                 control was switched off. Its binding is now marked for renewal: name the \
-                 root again from session {reporter} to re-bind it and bind the root."
-            )
-        }
-    }
-
     fn send_engram_root_event_until(
         &self,
         target: &EngramBindingTarget,
@@ -1913,7 +1667,6 @@ impl AppState {
             })?
         };
         let owner = self.prepare_engram_root_event_authority_until(event, &binding, deadline)?;
-        let caller_session_id = target.connection.session_id.clone();
         let original_reporter;
         let target = if target.connection.session_id == event.reporter {
             target
@@ -1924,16 +1677,13 @@ impl AppState {
                 .ok_or_else(|| ApiError::conflict("the pending named-root event needs its original reporting session's connection"))?;
             &original_reporter
         };
-        let token = target.routing_token.as_deref().ok_or_else(|| {
-            ApiError::conflict("Engram session is not bound; source-root naming requires an established binding")
-        })?;
         if clock.now() >= deadline {
             return Err(ApiError::bad_gateway(
                 "named-root transition is pending; its naming budget expired before transport",
             ));
         }
         let request = event
-            .request(token)
+            .request()
             .map_err(|e| ApiError::conflict(e.to_string()))?;
         let result = target
             .adapter
@@ -1948,38 +1698,17 @@ impl AppState {
         let receipt = match result {
             Ok(receipt) => receipt,
             Err(error) => {
-                // A definitive lifecycle refusal has no event to retry. A
-                // timeout, malformed receipt or persistence failure does.
+                // A refusal alone does not settle the immutable event. Only
+                // covering intent or lifecycle proof can end its retry custody.
                 if error.code.as_deref() == Some("named_root_binding_refused") {
                     let proof = match self.read_engram_authority_fact_until(
                         target, &binding, deadline,
                     ) {
                         Ok(proof) => proof,
-                        // The authority read refuses a token that is no longer the
-                        // session's. When that is why it failed, the refusal says so
-                        // and what to do, as the remedy below does for a token
-                        // replaced after the read.
                         Err(read_error) => {
-                            let inner = self.inner.lock().expect("state mutex poisoned");
-                            let still_held = inner
-                                .find_session_index(&target.connection.session_id)
-                                .is_some_and(|index| {
-                                    inner.sessions[index].engram.routing_token.as_deref()
-                                        == Some(token)
-                                });
-                            drop(inner);
-                            if still_held {
-                                return Err(read_error);
-                            }
-                            let remedy = Self::engram_named_root_refusal_remedy_without_rebind(
-                                &error, target,
-                            )
-                            .unwrap_or(ENGRAM_NAMED_ROOT_TOKEN_REPLACED_REMEDY);
-                            return Err(ApiError::conflict(format!(
-                                "named_root_binding_refused: {error}. {remedy} (The authority \
-                                 read for the refused token reported: {})",
-                                read_error.message
-                            )));
+                            // A refusal does not settle the immutable intent
+                            // without canonical lifecycle proof.
+                            return Err(read_error);
                         }
                     };
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1989,17 +1718,11 @@ impl AppState {
                         &owner,
                         &proof,
                     )?;
-                    let remedy = Self::engram_named_root_refusal_remedy_locked(
-                        &mut inner,
-                        target,
-                        &caller_session_id,
-                        token,
-                        &error,
-                    );
                     if let Some(index) = inner
                         .engram_named_root_journal
                         .iter()
                         .position(|journal| journal.pending.as_ref() == Some(event))
+                        && proof.settles_intent(event)
                     {
                         inner.engram_named_root_journal[index].pending = None;
                         if proof.definitively_unbound() {
@@ -2013,7 +1736,7 @@ impl AppState {
                     drop(inner);
                     self.publish_engram_authority_until(&event.root.store, &owner, deadline)?;
                     return Err(ApiError::conflict(format!(
-                        "named_root_binding_refused: {error}. {remedy}"
+                        "named_root_binding_refused: {error}. Refresh the held claim before naming again."
                     )));
                 }
                 return Err(ApiError::bad_gateway(format!(
@@ -2112,6 +1835,7 @@ impl AppState {
         )
     }
 
+    #[cfg(test)]
     fn engram_turn_root_capture(&self, session_id: &str) -> EngramRootCapture {
         engram_turn_root_capture_locked(
             &self.inner.lock().expect("state mutex poisoned"),
@@ -2119,123 +1843,17 @@ impl AppState {
         )
     }
 
-    /// Reads already returned by Engram govern local selection. A fence or
-    /// missing held-claims row never stands in for a release. Absence and a
-    /// future variant carry no lifecycle conclusion.
-    #[cfg(test)]
-    fn reconcile_engram_named_root(
+    fn reconcile_engram_named_root_with_route_classified_until(
         &self,
         session_id: &str,
-        expected_token: &str,
-        binding: Option<&EngramControlWorkBinding>,
-        state: Option<EngramNamedRootState>,
-        read_generation: u64,
-    ) -> Result<(), EngramTransportError> {
-        let mut fence =
-            EngramRootReadFence::capture(&self.inner.lock().expect("state mutex poisoned"));
-        fence.generation = read_generation;
-        self.reconcile_engram_named_root_with_fence(
-            session_id,
-            expected_token,
-            binding,
-            state,
-            &fence,
-            None,
-        )
-    }
-
-    #[cfg(test)]
-    fn reconcile_engram_named_root_with_fence(
-        &self,
-        session_id: &str,
-        expected_token: &str,
-        binding: Option<&EngramControlWorkBinding>,
-        state: Option<EngramNamedRootState>,
-        fence: &EngramRootReadFence,
-        expected_connection: Option<&EngramConnectionConfig>,
-    ) -> Result<(), EngramTransportError> {
-        let budget = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            Self::engram_source_root_target_locked(&inner, session_id)
-                .ok()
-                .flatten()
-                .map(|target| {
-                    target
-                        .test_dispatch_budget
-                        .unwrap_or_else(|| target.settings.call_timeout())
-                })
-                .unwrap_or(Duration::ZERO)
-        };
-        self.reconcile_engram_named_root_with_fence_within(
-            session_id,
-            expected_token,
-            binding,
-            state,
-            fence,
-            expected_connection,
-            budget,
-        )
-    }
-
-    #[cfg(test)]
-    fn reconcile_engram_named_root_with_fence_within(
-        &self,
-        session_id: &str,
-        expected_token: &str,
-        binding: Option<&EngramControlWorkBinding>,
-        state: Option<EngramNamedRootState>,
-        fence: &EngramRootReadFence,
-        expected_connection: Option<&EngramConnectionConfig>,
-        budget: Duration,
-    ) -> Result<(), EngramTransportError> {
-        let clock = self.engram_budget_clock();
-        self.reconcile_engram_named_root_with_fence_until(
-            session_id,
-            expected_token,
-            binding,
-            state,
-            fence,
-            expected_connection,
-            clock.now() + budget,
-        )
-    }
-
-    #[cfg(test)]
-    fn reconcile_engram_named_root_with_fence_until(
-        &self,
-        session_id: &str,
-        expected_token: &str,
-        binding: Option<&EngramControlWorkBinding>,
-        state: Option<EngramNamedRootState>,
-        fence: &EngramRootReadFence,
-        expected_connection: Option<&EngramConnectionConfig>,
-        deadline: std::time::Instant,
-    ) -> Result<(), EngramTransportError> {
-        self.reconcile_engram_named_root_with_fence_classified_until(
-            session_id,
-            expected_token,
-            binding,
-            state,
-            fence,
-            expected_connection,
-            deadline,
-        )
-        .map_err(EngramRootReconcileFailure::into_transport)
-    }
-
-    fn reconcile_engram_named_root_with_fence_classified_until(
-        &self,
-        session_id: &str,
-        expected_token: &str,
         binding: Option<&EngramControlWorkBinding>,
         state: Option<EngramNamedRootState>,
         fence: &EngramRootReadFence,
         expected_connection: Option<&EngramConnectionConfig>,
         deadline: std::time::Instant,
     ) -> Result<(), EngramRootReconcileFailure> {
-        let outcome = self.reconcile_engram_named_root_classified_until(
+        let outcome = self.reconcile_engram_named_root_route_classified_until(
             session_id,
-            expected_token,
             binding,
             state,
             fence,
@@ -2243,10 +1861,9 @@ impl AppState {
             deadline,
             None,
             None,
-            None,
         )?;
         match outcome {
-            EngramRootReconcileOutcome::Confirmed | EngramRootReconcileOutcome::NoClaim => Ok(()),
+            EngramRootReconcileOutcome::Confirmed { .. } | EngramRootReconcileOutcome::NoClaim => Ok(()),
             EngramRootReconcileOutcome::EvidenceWithheld {
                 guard,
                 reason:
@@ -2261,12 +1878,10 @@ impl AppState {
                             EngramTransportError::local_state("source-root reader disappeared")
                         })?
                 };
-                self.apply_engram_root_withholding_classified_until(
+                self.apply_engram_root_withholding_until(
                     &target,
-                    expected_token,
                     binding,
                     guard,
-                    None,
                     deadline,
                 )
             }
@@ -2280,17 +1895,15 @@ impl AppState {
         }
     }
 
-    fn reconcile_engram_named_root_classified_until(
+    fn reconcile_engram_named_root_route_classified_until(
         &self,
         session_id: &str,
-        expected_token: &str,
         binding: Option<&EngramControlWorkBinding>,
         state: Option<EngramNamedRootState>,
         fence: &EngramRootReadFence,
         expected_connection: Option<&EngramConnectionConfig>,
         deadline: std::time::Instant,
         guard: Option<EngramAcknowledgedRootGuard>,
-        admission_owner: Option<&EngramQueuedAdmissionOwner>,
         expected_runtime: Option<&Option<RuntimeToken>>,
     ) -> Result<EngramRootReconcileOutcome, EngramRootReconcileFailure> {
         let read_generation = fence.generation;
@@ -2300,15 +1913,14 @@ impl AppState {
         };
         if expected_runtime.is_some_and(|runtime| {
             !Self::engram_root_runtime_is_current(&inner.sessions[index], runtime)
-        }) || admission_owner.is_some_and(|owner| !owner.matches(&inner.sessions[index]))
+        })
         {
             return Err(EngramTransportError::local_state(
                 "source-root reply belongs to an earlier runtime or queued owner",
             )
             .into());
         }
-        if inner.sessions[index].engram.routing_token.as_deref() != Some(expected_token)
-            || inner.sessions[index].engram.work_binding.as_ref() != binding
+        if inner.sessions[index].engram.work_binding.as_ref() != binding
         {
             return Err(EngramTransportError::local_state(
                 "named-root read belongs to an earlier binding",
@@ -2401,13 +2013,11 @@ impl AppState {
                     .ok_or_else(|| {
                         EngramTransportError::local_state("named-root reader disappeared")
                     })?;
-            if !Self::engram_root_admission_is_current_locked(
+            if !Self::engram_root_work_is_current_locked(
                 &inner,
                 &target,
-                expected_token,
-                Some(binding),
+                    Some(binding),
                 guard.as_ref(),
-                admission_owner,
             ) {
                 return Err(EngramTransportError::local_state(
                     "source-root recovery no longer owns admission",
@@ -2451,13 +2061,11 @@ impl AppState {
                 }
             };
             inner = self.inner.lock().expect("state mutex poisoned");
-            if !Self::engram_root_admission_is_current_locked(
+            if !Self::engram_root_work_is_current_locked(
                 &inner,
                 &target,
-                expected_token,
-                Some(binding),
+                    Some(binding),
                 Some(&guard),
-                admission_owner,
             ) {
                 return Err(EngramTransportError::local_state(
                     "canonical source reply belongs to invalid admission authority",
@@ -2593,18 +2201,20 @@ impl AppState {
         engram_compact_root_journal(&mut inner);
         drop(inner);
         if let (Some(store), Some((guard, _, deadline))) = (&store, canonical) {
-            if let Err(error) = self.publish_engram_authority_until(store, &guard.owner, deadline) {
-                return Ok(EngramRootReconcileOutcome::EvidenceWithheld {
+            let published = self.recover_engram_authority_batch_until(
+                store, &guard.owner, deadline, false, None,
+            ).and_then(|()| self.publish_engram_authority_image_with_result_until(
+                store, &guard.owner, deadline, EngramRootReadFence::capture,
+            ));
+            return Ok(match published {
+                Ok(fence) => EngramRootReconcileOutcome::Confirmed { fence },
+                Err(error) => EngramRootReconcileOutcome::EvidenceWithheld {
                     guard: Some(guard),
                     reason: EngramRootEvidenceUncertainty::Publication(error),
-                });
-            }
+                },
+            });
         }
-        Ok(if binding.is_some() {
-            EngramRootReconcileOutcome::Confirmed
-        } else {
-            EngramRootReconcileOutcome::NoClaim
-        })
+        Ok(EngramRootReconcileOutcome::NoClaim)
     }
 }
 

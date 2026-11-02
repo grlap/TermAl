@@ -33,7 +33,7 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
         record.runtime = SessionRuntime::Acp(runtime);
         record.session.status = SessionStatus::Idle;
         let started = state.start_turn_on_record(record, message,
-            "queued before stop".into(), Vec::new(), None, None, None, None, false).unwrap();
+            "queued before stop".into(), Vec::new(), None, None, None, false).unwrap();
         state.commit_locked(&mut inner).unwrap();
         started.dispatch
     };

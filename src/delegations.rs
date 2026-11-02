@@ -259,11 +259,8 @@ fn validate_delegation_followup_child_locked(
         ApiError::conflict("delegation child session no longer exists and cannot be resumed")
     })?;
     let record = &inner.sessions[index];
-    if record.engram.source_observation_delete_requested {
+    if record.engram.observation_delete_requested {
         return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
-    }
-    if record.engram_boot_recovery_pending {
-        return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
     }
     if record.runtime_stop_in_progress || record.session.status == SessionStatus::Stopping {
         return Err(ApiError::conflict("session is stopping"));
@@ -515,7 +512,7 @@ impl AppState {
                 .find_visible_session_index(&parent_session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
             let parent_record = &inner.sessions[parent_index];
-            if parent_record.engram.source_observation_delete_requested {
+            if parent_record.engram.observation_delete_requested {
                 return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
             }
             let parent = &parent_record.session;
@@ -663,7 +660,7 @@ impl AppState {
         let parent_index = inner
             .find_visible_session_index(&parent_session_id)
             .ok_or_else(ApiError::local_session_missing)?;
-        if inner.sessions[parent_index].engram.source_observation_delete_requested {
+        if inner.sessions[parent_index].engram.observation_delete_requested {
             return Err(ApiError::conflict(SOURCE_OBSERVATION_DELETE_RETAINED));
         }
         if inner.sessions[parent_index].session.project_id != parent_project_id {
@@ -714,8 +711,8 @@ impl AppState {
             child_record.session.parent_delegation_id = Some(delegation_id.clone());
         }
         let child_session =
-            Self::wire_session_for_inner(&inner, &self.server_instance_id, &inner.sessions[child_index]);
-        let child_delta_session = Self::wire_session_summary_for_inner(&inner,
+            Self::wire_session_from_record( &self.server_instance_id, &inner.sessions[child_index]);
+        let child_delta_session = Self::wire_session_summary_from_record(
             &self.server_instance_id,
             &inner.sessions[child_index],
         );
@@ -824,7 +821,6 @@ impl AppState {
                 return Err(self.retire_unacknowledged_acceptance_evaluator(&record, &reason));
             }
         }
-        self.bind_engram_delegation_best_effort(&record);
 
         #[cfg(test)]
         if record
@@ -889,7 +885,7 @@ impl AppState {
         let child_session = inner
             .find_session_index(&delegation.child_session_id)
             .and_then(|index| inner.sessions.get(index))
-            .map(|record| Self::wire_session_for_inner(&inner, &self.server_instance_id, record))
+            .map(|record| Self::wire_session_from_record( &self.server_instance_id, record))
             .ok_or_else(|| ApiError::not_found("delegation child session not found"))?;
         Ok(DelegationResponse {
             revision: inner.revision,
@@ -1709,22 +1705,6 @@ impl AppState {
         let dispatch = match started {
             Ok(dispatch) => dispatch,
             Err(mut error) => {
-                if error.kind == Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) {
-                    // The follow-up is admitted and retained; only its turn is
-                    // held. Report it with the delegation, not as a failure.
-                    admission.release().map_err(|wait_error| {
-                        ApiError::internal(format!(
-                            "{}; failed to refresh follow-up waits: {wait_error:#}",
-                            error.message
-                        ))
-                    })?;
-                    drop(admission);
-                    return self.delegation_status_after_followup_turn(
-                        parent_session_id,
-                        delegation_id,
-                        TurnDispatchDeliveryOutcome::Held { error: Some(error) },
-                    );
-                }
                 admission.fail_queued_start(&error.message);
                 match admission.rollback_before_prompt() {
                     Ok(true) => error.message.push_str(
@@ -2496,11 +2476,6 @@ impl AppState {
             None,
         ) {
             Ok(dispatch) => dispatch,
-            Err(error)
-                if error.kind == Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) =>
-            {
-                return TurnDispatchDeliveryOutcome::Held { error: Some(error) };
-            }
             Err(error) => return TurnDispatchDeliveryOutcome::Rejected(error),
         };
         match dispatch {
@@ -3066,11 +3041,7 @@ fn queue_delegation_wait_resume_locked(
             record.session.status,
             SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
         ) && !record.orchestrator_auto_dispatch_blocked
-            && (if !ordinary_off_execution_applies(inner, parent_session_id) {
-                record.queued_prompts.is_empty()
-            } else {
-                ordinary_queue_position(record).is_none()
-            })
+            && ordinary_queue_position(record).is_none()
             && !record_has_archived_codex_thread(record)
     };
     let message_id = inner.next_message_id();
@@ -4154,9 +4125,7 @@ fn clear_delegation_child_queue_locked(inner: &mut StateInner, child_session_id:
     let child = inner
         .session_mut_by_index(child_index)
         .expect("child session index should be valid");
-    let dropped_begin = dropped_engram_intent_grant(child, child.queued_prompts.iter());
     child.queued_prompts.clear();
-    record_dropped_engram_intent(child, dropped_begin);
     sync_pending_prompts(child);
 }
 
@@ -4220,7 +4189,6 @@ fn detach_delegation_child_runtime_locked(
     child.active_turn_start_message_count = None;
     child.active_turn_file_changes.clear();
     child.active_turn_file_change_grace_deadline = None;
-    let dropped_begin = dropped_engram_intent_grant(child, child.queued_prompts.iter());
     let removed_head = handing_off_head(child);
     child.queued_prompts.clear();
     // The queue is gone, so a head promoted for its hand-off and any deferred
@@ -4229,7 +4197,6 @@ fn detach_delegation_child_runtime_locked(
     discard_deferred_stop_callbacks(child);
     settle_removed_handing_off_head(child, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
     settle_retired_runtime_attempt(child, ending_turn);
-    record_dropped_engram_intent(child, dropped_begin);
     sync_pending_prompts(child);
     clear_all_pending_requests(child);
     let changed_message_indices = cancel_pending_interaction_messages(&mut child.session.messages);
@@ -4752,7 +4719,7 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
         && child
             .queued_prompts
             .front()
-            .is_some_and(QueuedPromptRecord::is_engram_retained)
+            .is_some_and(QueuedPromptRecord::has_stored_history)
     {
         return DelegationChildOutcome::Running;
     }

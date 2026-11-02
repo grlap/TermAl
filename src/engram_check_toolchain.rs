@@ -7,7 +7,12 @@
 
 /// How long one toolchain command may take, within the checkpoint's shared
 /// budget, before the check goes without a toolchain label.
+#[cfg(test)]
 const ENGRAM_TOOLCHAIN_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Maximum UTF-8 length of the retained toolchain label.
+#[cfg(test)]
+const ENGRAM_ENVIRONMENT_LABEL_MAX_BYTES: usize = 256;
 
 /// The toolchain selector of a check whose toolchain TermAl can name without
 /// running anything the workspace chose: `Some(None)` for `cargo` run by name
@@ -23,6 +28,7 @@ const ENGRAM_TOOLCHAIN_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// - not for a selector that is not a plain toolchain name.
 ///
 /// A `+` selector counts only as cargo's first argument, as rustup reads it.
+#[cfg(test)]
 fn engram_cargo_toolchain_selector(check: &EngramCheckCommand) -> Option<Option<String>> {
     if check.program != "cargo" {
         return None;
@@ -49,6 +55,7 @@ fn engram_plain_toolchain_name(name: &str) -> bool {
 /// Whether the rustup that printed `version` (`rustup 1.29.1 (…)`) installs
 /// nothing when it is only asked to show or locate a toolchain: 1.28 stopped
 /// `rustup show` from installing and honours `RUSTUP_AUTO_INSTALL`.
+#[cfg(test)]
 fn engram_rustup_never_installs(version: &str) -> bool {
     version
         .strip_prefix("rustup ")
@@ -63,6 +70,7 @@ fn engram_rustup_never_installs(version: &str) -> bool {
 /// The toolchain `rustup show active-toolchain` printed, when it is a plain
 /// name (`stable-x86_64-pc-windows-msvc (default)`). A toolchain file can
 /// name a directory instead, whose binaries the workspace may hold.
+#[cfg(test)]
 fn engram_rustup_active_toolchain(output: &str) -> Option<String> {
     let name = output.split_whitespace().next()?;
     engram_plain_toolchain_name(name).then(|| name.to_owned())
@@ -77,6 +85,7 @@ fn engram_rustup_active_toolchain(output: &str) -> Option<String> {
 /// order, so a `cargo.cmd` or `cargo.bat` shim ahead of a `cargo.exe` is what
 /// runs; TermAl names only a plain `.exe`, and nothing when a shim comes
 /// first.
+#[cfg(test)]
 fn engram_host_program(
     search_path: &std::ffi::OsStr,
     name: &str,
@@ -112,6 +121,7 @@ fn engram_host_program(
     (!engram_path_within(&engram_canonical_path_key(&program), workspace)).then_some(program)
 }
 
+#[cfg(test)]
 fn engram_is_executable_file(path: &FsPath) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
@@ -135,6 +145,7 @@ fn engram_is_executable_file(path: &FsPath) -> bool {
 /// (`engram_cargo_toolchain_selector`), when a command fails, or when
 /// `deadline` passes first, so the check goes without environment evidence
 /// rather than with a guessed one.
+#[cfg(test)]
 fn engram_toolchain_label(
     command: &EngramCheckCommand,
     directory: &FsPath,
@@ -152,6 +163,7 @@ fn engram_toolchain_label(
 
 /// Runs a version command: `program` with `args` in a directory, giving the
 /// first line it prints (`engram_probe_output`).
+#[cfg(test)]
 type EngramToolchainProbe<'a> = &'a dyn Fn(&FsPath, &[&str], &FsPath) -> Option<String>;
 
 /// The label of the cargo toolchain `selector` names, or with none the one
@@ -165,6 +177,7 @@ type EngramToolchainProbe<'a> = &'a dyn Fn(&FsPath, &[&str], &FsPath) -> Option<
 /// through `probe`, in the directory of the program it runs, never in the
 /// workspace, but for rustup's `show active-toolchain`, which reads the
 /// overrides of the check's directory.
+#[cfg(test)]
 fn engram_cargo_toolchain_label(
     search_path: &std::ffi::OsStr,
     selector: Option<&str>,
@@ -229,6 +242,7 @@ fn engram_cargo_toolchain_label(
 }
 
 /// At most this much of a version command's output is kept.
+#[cfg(test)]
 const ENGRAM_TOOLCHAIN_PROBE_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 
 /// The first non-empty line `program` with `args` prints in `directory`, if
@@ -237,6 +251,7 @@ const ENGRAM_TOOLCHAIN_PROBE_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 /// without a console window, a Unix process group), so a timeout or an early
 /// exit ends every process it started. Rustup's automatic installs are
 /// off, so a probe downloads nothing; output past the bound fails the probe.
+#[cfg(test)]
 fn engram_probe_output(
     program: &FsPath,
     args: &[&str],

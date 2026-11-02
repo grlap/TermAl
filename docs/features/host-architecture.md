@@ -16,6 +16,18 @@ changes how six existing references are built, and each links back here:
 changes no behaviour. It describes the backend as it stands on `master` at
 commit `28e9ed5` and the structure the backend moves to.
 
+Since 2026-11-01 TermAl asks Engram for no per-turn authorization
+([Execution Observability](./execution-observability.md)); turn gating has
+been removed. Turn admission in
+section 2.3 and rows 1, 3, 4, 7, 10 and 14 of the conformance table in
+section 5 describe the build at `28e9ed5`, not current behaviour. The field
+inventories in sections 6.2–6.4 also describe that historical build; they are
+not the current stored-state or client contract. Current batch credit limits
+are stated below and in [batch full gates](batch-full-gates.md).
+References elsewhere in this proposal to per-turn grants, admission or
+gated recovery are historical design context; the linked Execution
+Observability and host-adapter contracts describe the current implementation.
+
 **Why now.** New feature work in the Engram host area (the adapter, turn
 checks, carried checks, acceptance evaluation) is frozen until this brief is
 agreed. Bug fixes with regression tests continue. The project's coordinator
@@ -116,7 +128,7 @@ file is a place to put code, not a boundary:
 | `engram_queued_admission.rs` | 1,181 | Retained bind and evaluate on queued prompts |
 | `engram_check_paths.rs`, `engram_check_recognition.rs`, `engram_write_places.rs`, `engram_one_call.rs`, `engram_check_toolchain.rs` | 3,056 | Which commands are tests, where they ran, where they may write |
 | `engram_turn_observations.rs` | 664 | Source basis at begin and close, report fallback |
-| `engram_mcp_config.rs`, `codex_engram_bootstrap.rs` | 830 | Base tier: MCP composition, orientation read |
+| `engram_mcp_config.rs`, `codex_engram_bootstrap.rs` | 830 | Engram MCP composition, orientation read |
 | `engram_control_transport.rs` | 461 | The control sidecar process per session |
 | `engram_readiness.rs`, `engram_session_reconciliation.rs`, `engram_work_binding_refresh.rs`, `engram_held_claims.rs`, `engram_evaluation_refusal.rs` | 1,361 | Readiness, absence inspection, work-binding reads |
 
@@ -141,7 +153,7 @@ field. They belong to seven concerns:
    shell's presumed directory (4);
 5. the turn's source root and the host lines waiting for the agent (3);
 6. the settings-transition fence (1);
-7. the Base tier's orientation read (9).
+7. the orientation read (9).
 
 Further Engram state sits on `SessionRecord` (six more fields), on
 `StateInner` (ten), on `AppState` (`engram_carried_poll_lock`), on each
@@ -358,16 +370,15 @@ The rest of the brief follows these.
 10. **Every work-scoped measurement and evidence record names the work it is
     for.** Its authority and attribution are resolved from that work's own
     claim and root, never from whatever the session happens to be bound to
-    at the moment. A request that names a held work the turn is not bound
-    to is refused with the rebind it needs or, for an evaluation, resolved
-    under that work's own claim; it is never carried by the bound work's
-    grant in its place (section 5.4). A generic host or execution
+    at the moment. A request for held work must resolve that work's own
+    claim and source root; another work's authority cannot stand in for it
+    (section 5.4). A generic host or execution
     observation may stay unattributed, or be linked to several separately
-    attributed executions; it invents no claim and no credit. A passed full
-    gate bound to another held work through Engram's `verification_bind`
-    keeps this rule: Engram writes the bound record on that work's own run,
-    after checking that work's claim, root and sighting itself, and the
-    gate's grant carries nothing for it ([batch full gates](batch-full-gates.md)).
+    attributed executions; it invents no claim and no credit. A current full
+    gate earns credit only for the item whose registered verification records
+    it. TermAl sends no `verification_bind` to other held works; each needs
+    its own registered run. Previously bound producer records remain readable
+    under their original attribution ([batch full gates](batch-full-gates.md)).
 
 ### 3.1 Real modules or fragments
 
@@ -802,7 +813,7 @@ Names are provisional. Each row is a module under one `engram_host` parent.
 | `verification` | Checks and carried checks; recognition, places and toolchain; the source basis at begin and close; the report, its cache and fallback; the checkpoint | `engram_turn_checks.rs`, `engram_check_*.rs`, `engram_write_places.rs`, `engram_one_call.rs`, `engram_carried_checks.rs`, `engram_turn_observations.rs`, `checkpoint_engram_turn_off_lock` and `finish_engram_checkpoint_record` |
 | `recovery` | Boot recovery, uncertain grants, absence inspection | the boot-recovery functions, `engram_session_reconciliation.rs` |
 | `settings` | Project and host settings, readiness and audit, the settings-transition fence | From `engram_host_adapter.rs`: `EngramProjectSettings`, the enablement and path validation, and the doctor and diagnostic runners (`run_engram_doctor_result_within`, `run_engram_diagnostic_within` and their output readers). `engram_readiness.rs`. The Engram parts of `session_crud.rs` |
-| `context` | The Base tier: MCP composition, the orientation read | `engram_mcp_config.rs`, `codex_engram_bootstrap.rs` |
+| `context` | Engram MCP composition, the orientation read | `engram_mcp_config.rs`, `codex_engram_bootstrap.rs` |
 
 Acceptance evaluation (`acceptance_evaluation*.rs`) stays a separate area
 that calls the facade. The test transports move to the component's tests.
@@ -919,7 +930,7 @@ from source for this brief.
 | --- | --- | --- |
 | 1 | Declare mediated capabilities and assurance honestly | Binds with `turn_gated` and the effects the session's write policy allows |
 | 2 | Bind a unique durable session and work run before task prompts | Binds under the TermAl session id; the work binding comes from `work core held`; a session may be bound without work |
-| 3 | Evaluate each turn and surface a blocking directive | Yes, for projects with turn-gated control; the directive is a control card |
+| 3 | Evaluate each turn and surface a blocking directive | Yes, for projects that opted into per-turn control; the directive is a control card |
 | 4 | Prevent prompts while the session is not ready | A prompt is delivered only after the matching begin receipt |
 | 5, 6 | Action gating and action outcomes | Not built in Engram |
 | 7 | Checkpoint before the next turn | Yes; a failed checkpoint leaves the grant open and the following bind closes it |
@@ -981,15 +992,12 @@ component, so that whoever completes it keeps the following.
   resolution per session to this is a behaviour change with its own named
   proof (step 7 in section 10); the first extraction keeps today's
   resolution unchanged.
-- **Batch full gates.** A carried gate's members are the other held works
-  the session named on the gate's worktree; each is recorded at the launch
-  with its claim's fence then. After the gate's own credit, its passed record
-  is bound to each member through `verification_bind`, on the member's own
-  run, only while the member's claim is held at that fence, its root names the
-  gate's worktree at the same generation, and its newest sighting is at the
-  gate's revision. This is not substitution: no grant is opened and no
-  evidence moves through the bound work's grant; Engram checks each member
-  itself and writes its record there ([batch full gates](batch-full-gates.md)).
+- **Batch full gates.** Recorded launch members and previously owed member
+  binds are history only. TermAl neither sends `verification_bind` nor
+  retries or settles those stored binds. A current gate supplies registered
+  verification only for its own item; other items need their own registered
+  runs. Producer records bound before removal remain readable on their
+  members' runs ([batch full gates](batch-full-gates.md)).
 - **Scope and keys.** A selection is shared by (authority store, work,
   claim). It is not an evictable cache entry. The generation allocator and
   its high-water mark are host-wide and persisted, and generations seen from
@@ -1109,19 +1117,26 @@ included; it should be named for what it is when its owner is extracted.
 
 ### 6.4 What is persisted and what the client sees
 
-Persisted per session today: the routing token, the open grant, the
+Current Execution Observability retains ordinary observation reports and
+closing jobs alongside work and source-root state. The client no longer has
+`engramBootRecoveryPending` or an actionable gated recovery view. Earlier
+control requests and transcript cards remain passive history, subject to
+the [records-from-earlier-builds contract](engram-host-adapter.md#records-from-earlier-builds).
+
+The following inventory describes `28e9ed5`, not the current wire contract.
+Persisted per session at that build: the routing token, the open grant, the
 uncertain grant, whether begins were recorded, the dispatch generation, a
 marker per carried launch, and, with the session's queue
 (`persisted_state.rs:331`), the retained intents and interrupted marker of
 each queued prompt. Persisted per host: the named roots and their generation
 counter, and the dead ledger. Everything else is per process.
 
-Per session, a client sees one Engram field, `engramBootRecoveryPending`,
+Per session, a client at that build saw `engramBootRecoveryPending`,
 the queue's retained and interrupted dispositions, and the control cards in
-the transcript. Per host it sees the sessions whose MCP revocation is
-pending. Per project it sees the settings, whether the repository declares
+the transcript. Per host it saw the sessions whose MCP revocation was
+pending. Per project it saw the settings, whether the repository declared
 Engram, whether the operator disabled it, and a cleanup warning. The views
-of section 5.2 are exactly these.
+of section 5.2 describe that earlier snapshot.
 
 ### 6.5 Locks
 

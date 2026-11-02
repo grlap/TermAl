@@ -266,9 +266,7 @@ function sameSessionSummary(previous: Session, next: Session) {
       (next.liveActivity?.commandStatus ?? null) &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.queueProjectionHash === next.queueProjectionHash &&
-    sameQueueHold(previous.queueHold, next.queueHold) &&
     sameSessionControlFlags(previous, next) &&
-    previous.engramBootRecoveryPending === next.engramBootRecoveryPending &&
     previous.status === next.status &&
     previous.preview === next.preview &&
     sameOptionalStringArray(previous.promptHistory, next.promptHistory) &&
@@ -279,22 +277,10 @@ function sameSessionSummary(previous: Session, next: Session) {
   );
 }
 
-// The queue projection hash covers the latch and the prompts, not the hold's
-// cause or due time, so the hold is compared on its own.
-function sameQueueHold(previous: Session["queueHold"], next: Session["queueHold"]) {
-  return (
-    (previous?.kind ?? null) === (next?.kind ?? null) &&
-    (previous?.cause ?? null) === (next?.cause ?? null) &&
-    (previous?.retryAt ?? null) === (next?.retryAt ?? null)
-  );
-}
-
 // These flags affect pane controls even when a legacy peer has no stamp or
-// record-derived state changes under the same stamp. OFF policy preserves
-// unknown separately; omission means false for the other boolean flags.
+// record-derived state changes under the same stamp. Omission means false.
 function sameSessionControlFlags(previous: Session, next: Session) {
   return (
-    previous.engramControlOff === next.engramControlOff &&
     Boolean(previous.queuePaused) === Boolean(next.queuePaused) &&
     Boolean(previous.providerCapacityWaiting) === Boolean(next.providerCapacityWaiting) &&
     Boolean(previous.sourceTrackingRecovery) === Boolean(next.sourceTrackingRecovery)
@@ -352,9 +338,8 @@ function reconcileSession(
     previous.sessionMutationStamp === nextSession.sessionMutationStamp &&
     previous.remoteId === nextSession.remoteId &&
     sameOptionalStringArray(previous.promptHistory, nextSession.promptHistory) &&
-    // The hold is derived from retry state that can change under one stamp.
-    sameQueueHold(previous.queueHold, nextSession.queueHold) &&
     sameSessionControlFlags(previous, nextSession) &&
+    JSON.stringify(previous.promptDeliveries) === JSON.stringify(nextSession.promptDeliveries) &&
     (nextSession.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
@@ -369,6 +354,7 @@ function reconcileSession(
     sameSessionSummary(previous, nextSession) &&
     messages === previous.messages &&
     pendingPrompts === previous.pendingPrompts &&
+    JSON.stringify(previous.promptDeliveries) === JSON.stringify(nextSession.promptDeliveries) &&
     (nextSession.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
@@ -402,9 +388,8 @@ function reconcileSummarySession(
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.remoteId === next.remoteId &&
     sameOptionalStringArray(previous.promptHistory, next.promptHistory) &&
-    // The hold is derived from retry state that can change under one stamp.
-    sameQueueHold(previous.queueHold, next.queueHold) &&
-    sameSessionControlFlags(previous, next)
+    sameSessionControlFlags(previous, next) &&
+    (options?.adoptPartialMessages !== true || JSON.stringify(previous.promptDeliveries) === JSON.stringify(next.promptDeliveries))
   ) {
     return previous;
   }
@@ -554,13 +539,15 @@ function reconcileSummarySession(
     sameSessionSummary(previous, next) &&
     pendingPrompts === previous.pendingPrompts &&
     messages === previous.messages &&
-    previous.messagesLoaded === messagesLoaded
+    previous.messagesLoaded === messagesLoaded &&
+    (options?.adoptPartialMessages !== true || JSON.stringify(previous.promptDeliveries) === JSON.stringify(next.promptDeliveries))
   ) {
     return previous;
   }
 
   const base = {
     ...next,
+    promptDeliveries: options?.adoptPartialMessages === true ? next.promptDeliveries : previous.promptDeliveries,
     messages,
     messagesLoaded,
     messageStartIndex: mergedMessageStartIndex,
@@ -1345,10 +1332,6 @@ function reconcilePendingPrompts(
       previousPrompt.text === nextPrompt.text &&
       (previousPrompt.expandedText ?? null) ===
         (nextPrompt.expandedText ?? null) &&
-      Boolean(previousPrompt.isEngramRetained) ===
-        Boolean(nextPrompt.isEngramRetained) &&
-      Boolean(previousPrompt.engramInterrupted) ===
-        Boolean(nextPrompt.engramInterrupted) &&
       attachments === previousPrompt.attachments
     ) {
       if (previous[index]?.id !== nextPrompt.id) {

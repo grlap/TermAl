@@ -331,7 +331,7 @@ fn failed_transaction_does_not_publish_a_baseline_and_reopen_retries_exact_conte
     .unwrap_err();
     assert!(format!("{error:#}").contains("injected precommit failure"));
     assert!(fixture.cache.connection.is_none());
-    assert!(fixture.cache.transcripts.is_empty());
+    assert!(fixture.cache.transcripts.values().all(|row| !row.transcript_valid && row.identities.is_empty()));
     fixture.assert_reload(&before);
     // The same captured delta is still authoritative; failed work did not
     // advance its watermark or its immutable-body predecessor.
@@ -506,7 +506,7 @@ fn external_commit_during_preparation_refuses_sparse_write_and_retries_full_capt
     .unwrap_err();
     assert!(format!("{error:#}").contains("transcript predecessor changed"));
     assert!(fixture.cache.connection.is_none());
-    assert!(fixture.cache.transcripts.is_empty());
+    assert!(fixture.cache.transcripts.values().all(|row| !row.transcript_valid && row.identities.is_empty()));
     persist_delta_via_cache(
         &mut fixture.cache,
         fixture.state.persistence_path.as_path(),
@@ -688,6 +688,8 @@ fn postcommit_integrity_failure_discards_baseline_before_full_retry() {
     });
     let delta = collect_persist_delta_from_shared_state(&fixture.state.inner, fixture.watermark);
     METADATA_COMMIT_INTEGRITY_FAULT.with(|fault| fault.set(true));
+    let minimum = delta.changed_sessions.iter().find(|row| row.session.id == fixture.id)
+        .unwrap().source_stamp.clone().unwrap();
     let error = persist_delta_via_cache(
         &mut fixture.cache,
         fixture.state.persistence_path.as_path(),
@@ -696,8 +698,10 @@ fn postcommit_integrity_failure_discards_baseline_before_full_retry() {
     .unwrap_err();
     assert!(format!("{error:#}").contains("injected metadata post-commit integrity failure"));
     assert!(fixture.cache.connection.is_none());
-    assert!(fixture.cache.transcripts.is_empty());
+    assert!(fixture.cache.transcripts.values().all(|row| !row.transcript_valid && row.identities.is_empty()));
     assert!(fixture.cache.transcript_data_version.is_none());
+    assert!(!fixture.cache.transcripts[&fixture.id].row_stamp.as_ref().unwrap().covers(&minimum),
+        "COMMIT without integrity verification cannot advance the own-row receipt");
     // COMMIT happened, but neither its predecessor nor its watermark was
     // accepted. Retrying must prepare all bodies even though SQL is identical.
     let loaded = load_state(fixture.state.persistence_path.as_path())

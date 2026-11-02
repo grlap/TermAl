@@ -244,36 +244,36 @@ struct EngramRootNamedInTurn {
     store: EngramAuthorityStoreKey,
     claim_id: String,
     generation: u64,
-    grant_id: String,
+    host_turn_ref: String,
 }
 
 /// Records a named-root transition of the naming session on its marks. Each
 /// claim keeps its own mark, replaced or removed by that claim's next
 /// transition, so naming or clearing another claim's root leaves it; marks of
-/// a turn that has ended are dropped. A Bound transition is marked with
-/// `naming_grant`, and only while that turn still runs. The naming path passes
-/// the grant active as it installs the selection, under the same lock, so the
-/// check against the active grant guards other callers only.
+/// a turn that has ended are dropped. A Bound transition is marked with the
+/// current observed host turn's identity. The naming path captures that
+/// identity as it installs the selection under the same state lock; other
+/// callers must still identify that same running turn.
 fn record_engram_root_named_in_turn(
     engram: &mut EngramSessionState,
     store: &EngramAuthorityStoreKey,
     event: &EngramNamedRootEvent,
-    naming_grant: Option<String>,
+    naming_host_turn_ref: Option<String>,
 ) {
-    let active = engram.active_grant_id.clone();
+    let active = engram.observed_turn_ref().map(str::to_owned);
     engram.roots_named_in_turn.retain(|named| {
-        active.as_ref() == Some(&named.grant_id)
+        active.as_ref() == Some(&named.host_turn_ref)
             && !(named.store == *store && named.claim_id == event.root.claim_id)
     });
     if event.kind != EngramNamedRootKind::Bound {
         return;
     }
-    if let Some(grant_id) = naming_grant.filter(|grant| active.as_ref() == Some(grant)) {
+    if let Some(host_turn_ref) = naming_host_turn_ref.filter(|turn| active.as_ref() == Some(turn)) {
         engram.roots_named_in_turn.push(EngramRootNamedInTurn {
             store: store.clone(),
             claim_id: event.root.claim_id.clone(),
             generation: event.root.generation,
-            grant_id,
+            host_turn_ref,
         });
     }
 }
@@ -282,10 +282,10 @@ fn record_engram_root_named_in_turn(
 /// during its naming session's turn that is still that session's turn, and
 /// that turn did not open in it. A named root takes effect at the session's
 /// next turn (`engram_turn_observations.rs`), and Engram's sighting of it is
-/// the capture taken when such a turn opens. Told by turn identity, the grant
-/// the naming turn held when the name was committed, never by clock order, and
-/// only for a turn-gated session. A turn whose capture took the new root after
-/// its begin opened in it, so it is left to Engram, as is every other case: a
+/// the capture taken when such a turn opens. The observed host-turn identity
+/// recorded when naming committed decides this, never clock order. A turn
+/// whose opening capture took the new root is left to Engram's sighting read,
+/// as is every other case: a
 /// name given between turns, any later turn whatever its focus, and a name the
 /// host no longer remembers after a restart. Only the naming session's turns
 /// open in its claim's root: a turn selects the root by the claim it is bound
@@ -304,17 +304,17 @@ fn acceptance_named_root_turn_pending_locked(
     .filter(|entry| entry.generation == root.generation && entry.root == root.root) else {
         return false;
     };
-    let gated = engram_project_for_session_locked(inner, &entry.named_by_session)
+    let enabled = engram_project_for_session_locked(inner, &entry.named_by_session)
         .and_then(|project| project.engram.as_ref())
-        .is_some_and(EngramProjectSettings::is_control_enabled);
+        .is_some_and(EngramProjectSettings::is_base_enabled);
     let Some(index) = inner.find_session_index(&entry.named_by_session) else {
         return false;
     };
-    if !gated {
+    if !enabled {
         return false;
     }
     let engram = &inner.sessions[index].engram;
-    let opened_in_root = engram.active_turn_source_root.as_ref().is_some_and(|turn| {
+    let opened_in_root = engram.observed_source_root().is_some_and(|turn| {
         turn.root == entry.root
             && turn.claim_id == entry.claim_id
             && turn.generation == entry.generation
@@ -324,7 +324,7 @@ fn acceptance_named_root_turn_pending_locked(
             named.store == *store
                 && named.claim_id == entry.claim_id
                 && named.generation == entry.generation
-                && engram.active_grant_id.as_ref() == Some(&named.grant_id)
+                && engram.observed_turn_ref() == Some(named.host_turn_ref.as_str())
         })
 }
 

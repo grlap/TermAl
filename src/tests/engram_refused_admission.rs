@@ -1,28 +1,34 @@
 // Recognized commands refused at worktree admission must leave feedback.
-// Drive the Codex item handlers and checkpoint without running a real gate.
+// Drive the actual Codex/ACP handlers and ordinary observation without
+// running a gate or registering native verification.
 use super::*;
 
 const LAUNCHER: &str = "node scripts/test-launcher.mjs focused -- node --test";
 
-fn named_turn(label: &str) -> (CheckedTurn, String) {
-    let turn = CheckedTurn::start_with_opening(
-        label,
-        true,
-        None,
-        vec![checkpoint_reply(CHECK_GRANT)],
-        1,
-        true,
-    );
+fn named_turn(label: &str) -> (EOCheckedTurn, String) {
+    let turn = EOCheckedTurn::start_named(label);
     let root = turn.record(|record| {
         record
             .engram
-            .active_turn_source_root
+            .unadmitted_active_turn
             .as_ref()
             .unwrap()
+            .opening_root.as_ref().unwrap()
+            .source_root.as_ref().unwrap()
             .root
             .clone()
     });
     (turn, root)
+}
+
+fn finish_uncredited(turn: &EOCheckedTurn) -> Value {
+    let request = turn.finish();
+    assert_eq!(request["occurrence"]["kind"], "unadmitted_turn");
+    assert!(request["occurrence"]["host_turn_ref"].is_string());
+    // Raw command facts may be observed even when the diagnostic capture
+    // refuses its arguments. They never create native verification credit.
+    assert_ordinary_observation_has_no_native_credit(turn, &request);
+    request
 }
 
 fn command_item(command: &str, cwd: &str) -> Value {
@@ -30,7 +36,7 @@ fn command_item(command: &str, cwd: &str) -> Value {
         "cwd":cwd, "status":"inProgress"})
 }
 
-fn complete(turn: &CheckedTurn, recorder: &mut SessionRecorder, item: &Value) {
+fn complete(turn: &EOCheckedTurn, recorder: &mut SessionRecorder, item: &Value) {
     let mut ended = item.clone();
     ended["status"] = json!("completed");
     ended["exitCode"] = json!(0);
@@ -45,14 +51,14 @@ fn complete(turn: &CheckedTurn, recorder: &mut SessionRecorder, item: &Value) {
     .unwrap();
 }
 
-fn take_notice(turn: &CheckedTurn) -> Option<String> {
+fn take_notice(turn: &EOCheckedTurn) -> Option<String> {
     let mut notice = None;
     turn.record_mut(|record| notice = record.engram.pending_source_root_line.take());
     notice
 }
 
 fn acp_update(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     recorder: &mut SessionRecorder,
     turn_state: &mut AcpTurnState,
     update: &Value,
@@ -106,16 +112,7 @@ fn refused_admission_acp_first_description_reports_arguments_once_without_a_late
         acp_update(&turn, &mut recorder, &mut turn_state, &update);
         assert_eq!(take_notice(&turn), None, "one notice per command key");
         assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
-        let checkpoint = turn.finish();
-        assert!(
-            checkpoint.get("verification_evidence").is_none(),
-            "{checkpoint:#}"
-        );
-        assert_eq!(
-            observations(&checkpoint).len(),
-            1,
-            "only the turn observation"
-        );
+        finish_uncredited(&turn);
     }
 }
 
@@ -161,16 +158,7 @@ fn refused_admission_acp_changed_description_drops_the_check_and_reports_argumen
         update["status"] = json!("completed");
         acp_update(&turn, &mut recorder, &mut turn_state, &update);
         assert_eq!(take_notice(&turn), None, "one notice per command key");
-        let checkpoint = turn.finish();
-        assert!(
-            checkpoint.get("verification_evidence").is_none(),
-            "{checkpoint:#}"
-        );
-        assert_eq!(
-            observations(&checkpoint).len(),
-            1,
-            "only the turn observation"
-        );
+        finish_uncredited(&turn);
     }
 }
 
@@ -236,16 +224,7 @@ fn refused_admission_acp_invalidation_before_refusal_does_not_consume_the_notice
             );
             assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
         }
-        let checkpoint = turn.finish();
-        assert!(
-            checkpoint.get("verification_evidence").is_none(),
-            "{checkpoint:#}"
-        );
-        assert_eq!(
-            observations(&checkpoint).len(),
-            1,
-            "only the turn observation"
-        );
+        finish_uncredited(&turn);
     }
 }
 
@@ -289,7 +268,7 @@ fn refused_admission_codex_caret_and_arguments_have_one_actionable_outcome() {
                     &check,
                     &turn.root,
                     Some(&root),
-                    turn.record(|record| record.engram.active_turn_source_root.clone())
+                    turn.record(|record| record.engram.unadmitted_active_turn.as_ref().and_then(|trace| trace.opening_root.as_ref()).and_then(|opening| opening.source_root.clone()))
                         .as_ref()
                         .map(|named| (FsPath::new(&named.root), named.common_dir_key.as_str()))
                 )
@@ -317,26 +296,10 @@ fn refused_admission_codex_caret_and_arguments_have_one_actionable_outcome() {
                 None,
                 "repeated lifecycle events must not repeat feedback"
             );
-            let checkpoint = turn.finish();
-            assert!(
-                checkpoint.get("verification_evidence").is_none(),
-                "{checkpoint:#}"
-            );
+            let request = finish_uncredited(&turn);
             assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
-            let rows = observations(&checkpoint);
-            // The named turn still reports its own source observation. The
-            // refused command must contribute no additional check outcome.
-            assert_eq!(rows.len(), 1, "only the turn observation: {checkpoint:#}");
-            assert_eq!(
-                rows[0]["observation_id"],
-                engram_turn_observation_id(&turn.session_id, CHECK_GRANT),
-                "a refusal cannot create a check execution observation: {checkpoint:#}"
-            );
-            assert_ne!(
-                rows[0]["action_fingerprint"],
-                engram_check_fingerprint(&check),
-                "the turn observation must not credit the refused command"
-            );
+            assert!(request.get("verification_evidence").is_none(),
+                "the refused command supplies no automatic verification: {request:#}");
         }
     }
 }
@@ -354,9 +317,9 @@ fn refused_admission_quoted_caret_codex_control_still_records() {
     assert_eq!(take_notice(&turn), None);
     complete(&turn, &mut recorder, &item);
     turn.wait_for_snapshots();
-    // Synthetic stdout is not producer evidence: admission still yields one
-    // honest Unknown verification, never PASS without validated artifacts.
-    one_node_test(&turn.finish(), "unknown");
+    // A diagnostic capture and synthetic stdout are not native producer
+    // evidence, even for a valid, quoted command.
+    finish_uncredited(&turn);
 }
 
 #[test]
@@ -375,7 +338,7 @@ fn refused_admission_external_root_codex_control_stays_refused() {
     complete(&turn, &mut recorder, &item);
     assert_eq!(take_notice(&turn), None);
     assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
-    assert!(turn.finish().get("verification_evidence").is_none());
+    finish_uncredited(&turn);
 }
 
 #[test]
@@ -385,7 +348,7 @@ fn refused_admission_accumulated_test_and_build_notices_preserve_root_guidance()
         let (turn, root) = if named {
             named_turn("refusal-retention")
         } else {
-            let turn = CheckedTurn::start("unnamed-refusal-retention", true);
+            let turn = EOCheckedTurn::start("unnamed-refusal-retention", true);
             let root = turn.root.to_string_lossy().into_owned();
             (turn, root)
         };
@@ -425,7 +388,7 @@ fn refused_admission_accumulated_test_and_build_notices_preserve_root_guidance()
             complete(&turn, &mut recorder, &item);
         }
         assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
-        assert!(turn.finish().get("verification_evidence").is_none());
+        finish_uncredited(&turn);
     }
 }
 
@@ -450,13 +413,13 @@ fn refused_admission_placement_feedback_does_not_block_later_same_key_admission(
     assert_eq!(take_notice(&turn), None);
     complete(&turn, &mut recorder, &item);
     turn.wait_for_snapshots();
-    one_node_test(&turn.finish(), "unknown");
+    finish_uncredited(&turn);
 }
 
 #[test]
 fn refused_admission_quoted_expansion_characters_get_an_accurate_remedy() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start("literal-expansion-refusal", true);
+    let turn = EOCheckedTurn::start("literal-expansion-refusal", true);
     let root = turn.root.to_string_lossy().into_owned();
     for (index, value) in ["^MCP$", "100%", "case!", "~suite"].into_iter().enumerate() {
         let command = format!("{LAUNCHER} --test-name-pattern \"{value}\" fixture.test.mjs");
@@ -480,18 +443,26 @@ fn refused_admission_quoted_expansion_characters_get_an_accurate_remedy() {
         complete(&turn, &mut recorder, &item);
     }
     assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
-    assert!(turn.finish().get("verification_evidence").is_none());
+    finish_uncredited(&turn);
 }
 
 #[test]
 fn refused_admission_shared_root_notice_keeps_the_primary_check_admitted() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let (turn, root) = named_turn("shared-root-notice");
-    let mut other = turn.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
+    let primary = turn.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
+    let mut other = primary.clone();
     other.short_ref = "other-held-item".to_owned();
     other.work_id = "other-work".to_owned();
     other.claim_id = "other-claim".to_owned();
-    turn.record_mut(|record| record.engram.active_turn_other_source_roots.push(other));
+    turn.transport.replace_held_claims([Ok(serde_json::from_value(json!({
+        "items": [{"work_id":primary.work_id, "short_ref":primary.short_ref,
+            "claim_id":primary.claim_id, "claim_fence":primary.claim_fence},
+            {"work_id":other.work_id, "short_ref":other.short_ref,
+            "claim_id":other.claim_id, "claim_fence":other.claim_fence}],
+        "omitted":0
+    })).unwrap())]);
+    turn.state.inner.lock().unwrap().engram_work_source_roots.push(other);
     let command = format!("{LAUNCHER} --test-name-pattern \"^MCP\" fixture.test.mjs");
     let item = command_item(&command, &root);
     let mut recorder = turn.recorder();
@@ -505,5 +476,5 @@ fn refused_admission_shared_root_notice_keeps_the_primary_check_admitted() {
     assert!(turn.record(|record| record.engram.active_turn_checks.len() == 1));
     complete(&turn, &mut recorder, &item);
     turn.wait_for_snapshots();
-    one_node_test(&turn.finish(), "unknown");
+    finish_uncredited(&turn);
 }

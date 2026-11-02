@@ -127,9 +127,10 @@ fn test_run_compacted_summary(inner: &impl TestRunProjectionSource, row: &TestRu
         if summary.registration.artifact_unavailable == Some(true) {
             summary = test_run_unavailable_artifact(summary);
         }
-        summary.registration.restart_would_void_evidence = test_run_projection_carried_matches(
-            inner, FsPath::new(&summary.run_dir), summary.detail_version.as_deref(), false,
-        ).then_some(true);
+        summary.registration.restart_would_void_evidence = None;
+        summary.registration.restart_evidence_reason =
+            "Retained artifact identity does not establish verification settlement or work completion."
+                .to_owned();
         return summary;
     }
     let mut unknown = !index.compactions_durable.contains(&summary.run_id)

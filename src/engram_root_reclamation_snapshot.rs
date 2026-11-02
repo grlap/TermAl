@@ -31,7 +31,6 @@ struct EngramReclamationSession {
     child_shape: bool,
     local: bool,
     enabled: bool,
-    token: bool,
     idle: bool,
     binding: Option<EngramControlWorkBinding>,
 }
@@ -64,11 +63,10 @@ impl EngramRootReaderSnapshot {
                     project_id: record.session.project_id.clone(),
                     child_shape: record.session.parent_delegation_id.is_some(),
                     local: record.is_local_session(),
-                    enabled: record.engram.disabled_reason.is_none(),
-                    token: record.engram.routing_token.is_some(),
-                    idle: record.engram.active_grant_id.is_none()
-                        && record.engram.uncertain_grant_id.is_none()
-                        && !record.engram.checkpoint_in_progress
+                    enabled: true,
+                    idle: !record.runtime_stop_in_progress
+                        && record.engram.source_root_bind_owner.is_none()
+                        && !session_resource_reset_in_progress(inner, record)
                         && matches!(
                             record.session.status,
                             SessionStatus::Idle | SessionStatus::Error
@@ -165,7 +163,6 @@ impl EngramRootReaderSnapshot {
         self.sessions
             .iter()
             .filter_map(|session| sessions.get(session.id.as_str()).copied())
-            .filter(|session| session.token)
             .filter_map(|session| {
                 self.reader_project(session, &sessions, &parents, &projects)
                     .and_then(|project| project.store.as_ref())

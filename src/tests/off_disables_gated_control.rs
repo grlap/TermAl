@@ -1,98 +1,37 @@
-//! OFF removes control admission from ordinary execution, preserving old debt.
+//! Ordinary queue, Stop, restart and delivery boundaries preserve passive history.
 //! Disposable SQLite, the real queue/wake owners and provider channels are used;
-//! only the control transport is scripted. No live authority is contacted.
+//! Observation transport is scripted; stored control JSON is never executable.
 use super::*;
 
-fn boundary_session(profile: &str) -> RootFixture {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("boundary-route"), grant_reply("boundary-grant"), begin_reply("boundary-grant"),
-    ]);
+type OrdinaryRuntimeFixture = (AppState, String, mpsc::Receiver<CodexRuntimeCommand>, Arc<ScriptedEngramControlTransport>);
+
+fn ordinary_root_fixture() -> OrdinaryRuntimeFixture {
+    let (state, receiver) = test_app_state_with_delegation_codex_runtime("ordinary-queue-runtime");
+    let root = state.test_temp_root.as_ref().unwrap().path().join("ordinary-queue-project");
+    fs::create_dir_all(&root).unwrap();
+    let project = create_test_project(&state, &root, "Ordinary queue");
+    let session = create_test_project_session(&state, Agent::Codex, &project, &root);
+    enable_test_project_engram(&state, &project, &root);
+    let transport = ScriptedEngramControlTransport::new([]);
+    state.install_control_test_transport(transport.clone());
+    (state, session, receiver, transport)
+}
+
+fn boundary_session(profile: &str) -> OrdinaryRuntimeFixture {
+    let (state, session, receiver, transport) = ordinary_root_fixture();
     {
         let mut inner = state.inner.lock().unwrap();
         let project_id = inner.sessions[inner.find_session_index(&session).unwrap()].session.project_id.clone().unwrap();
         let project = inner.projects.iter_mut().find(|p| p.id == project_id).unwrap();
         match profile {
             "plain" => project.engram = None,
-            "base-off" => project.engram.as_mut().unwrap().turn_gated_control = false,
+            "base-off" => project.engram.as_mut().unwrap().execution_observability = false,
             "disabled" => project.engram.as_mut().unwrap().enabled = false,
             "on" => {},
             _ => panic!("unknown boundary profile"),
         }
     }
     (state, session, receiver, transport)
-}
-
-#[test]
-fn off_boundary_reset_marks_retained_heads_when_disabled_or_globally_killed() {
-    const CHILD_MARKER: &str = "TERMAL_TEST_RETAINED_RESET_NEGATIVE_CHILD";
-    let Ok(mode) = std::env::var(CHILD_MARKER) else {
-        let module = module_path!().split_once("::").unwrap().1;
-        let filter = format!("{module}::off_boundary_reset_marks_retained_heads_when_disabled_or_globally_killed");
-        for mode in ["disabled", "kill"] {
-            let mut command = Command::new(std::env::current_exe().unwrap());
-            command.args(["--exact", &filter, "--nocapture"])
-                .env(CHILD_MARKER, mode)
-                .env(ENGRAM_GLOBAL_DISABLE_ENV, if mode == "kill" { "1" } else { "0" });
-            let (status, stderr) = phase_sync::CapturedStderrProcess::spawn(&mut command)
-                .wait_with_stderr("negative reset child publishes its retained-head result");
-            assert!(status.success(), "{mode}: {stderr}");
-            assert!(stderr.contains(&format!("negative reset {mode}: verified")),
-                "the exact child test must execute its assertions: {stderr}");
-            eprintln!("negative reset {mode}: verified by isolated child");
-        }
-        return;
-    };
-    assert!(matches!(mode.as_str(), "disabled" | "kill"));
-    assert_eq!(engram_globally_disabled(), mode == "kill");
-    let (state, session, receiver, transport) = boundary_session("on");
-    let (project, root) = {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        (record.session.project_id.clone().unwrap(), PathBuf::from(&record.session.workdir))
-    };
-    fs::write(root.join(".engram-project"), "fixture-ready\n").unwrap();
-    let mut admitted = real_fixture_engram_settings(&root);
-    admitted.authority_store_key = Some(materialize_fixture_engram_store(&root, &root));
-    {
-        let mut inner = state.inner.lock().unwrap();
-        inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram = Some(admitted);
-        state.commit_locked(&mut inner).unwrap();
-    }
-    queue_test_engram_prompt(&state, &session, "original retained reset input", QueuedPromptSource::User, None);
-    let (project, mut settings, original) = {
-        let mut inner = state.inner.lock().unwrap();
-        let record = inner.session_mut(&session).unwrap();
-        record.runtime = SessionRuntime::None;
-        record.session.status = SessionStatus::Idle;
-        record.queued_prompts[0].engram_waiting = true;
-        record.queued_prompts[0].engram_interrupted = false;
-        record.set_auto_dispatch_blocked(false);
-        sync_pending_prompts(record);
-        assert!(record.queued_prompts[0].is_engram_retained());
-        assert!(!record.session.queue_paused);
-        assert!(!record.session.pending_prompts[0].engram_interrupted);
-        let original = serde_json::to_value(&record.queued_prompts[0]).unwrap();
-        let project = record.session.project_id.clone().unwrap();
-        let settings = inner.find_project(&project).unwrap().engram.clone().unwrap();
-        state.commit_locked(&mut inner).unwrap();
-        (project, settings, original)
-    };
-    if mode == "disabled" { settings.enabled = false; }
-    else { settings.turn_gated_control = false; }
-    state.update_project_engram_settings(&project, settings).unwrap();
-    let inner = state.inner.lock().unwrap();
-    assert!(!ordinary_off_execution_applies(&inner, &session));
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.queued_prompts.len(), 1);
-    let mut expected = original;
-    expected["engram_interrupted"] = json!(true);
-    assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), expected);
-    assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused);
-    assert!(record.session.pending_prompts[0].engram_interrupted);
-    assert_eq!(record.session.preview, "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing.");
-    assert!(receiver.try_recv().is_err());
-    assert!(transport.requests().is_empty());
-    eprintln!("negative reset {mode}: verified");
 }
 
 #[test]
@@ -224,7 +163,7 @@ fn off_boundary_ordinary_characterization_matrix() {
                 inner.session_mut(id).unwrap().session.project_id = Some(project.clone());
             }
             let settings = inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram.as_mut().unwrap();
-            settings.turn_gated_control = profile == "on";
+            settings.execution_observability = profile == "on";
             settings.enabled = profile != "disabled";
         }
         state.install_control_test_transport(ScriptedEngramControlTransport::new([]));
@@ -260,119 +199,7 @@ fn off_boundary_remote_project_does_not_assert_local_off_authority() {
     assert!(project.get("engramControlEnabled").is_none(), "a proxy cannot derive its owner's control mode");
 }
 
-#[test]
-fn off_boundary_session_projection_forwards_the_remote_owner_and_refreshes_local_settings() {
-    let (state, session, _receiver, _transport) = boundary_session("base-off");
-    let mut inner = state.inner.lock().unwrap();
-    let index = inner.find_session_index(&session).unwrap();
-    let mut upstream = AppState::wire_session_for_inner(&inner, &state.server_instance_id, &inner.sessions[index]);
-    assert_eq!(upstream.engram_control_off, Some(true));
-    let first = state.immutable_state_snapshot_locked(&inner);
-    assert_eq!(first.sessions.iter().find(|s| s.id == session).unwrap().engram_control_off, Some(true));
-    let project = upstream.project_id.clone().unwrap();
-    inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram.as_mut().unwrap().enabled = false;
-    let changed = state.immutable_state_snapshot_locked(&inner);
-    assert_eq!(changed.sessions.iter().find(|s| s.id == session).unwrap().engram_control_off, Some(false));
-    for effective in [Some(false), Some(true), None] {
-        upstream.engram_control_off = effective;
-        let proxy = upsert_remote_proxy_session_record(&mut inner, "remote-owner", &upstream, None);
-        let record = &inner.sessions[inner.find_session_index(&proxy).unwrap()];
-        assert!(!ordinary_off_execution_applies(&inner, &proxy));
-        assert_eq!(AppState::wire_session_for_inner(&inner, &state.server_instance_id, record).engram_control_off, effective);
-        let summary = AppState::wire_session_summary_for_inner(&inner, &state.server_instance_id, record);
-        let localized = localize_remote_session_summary("second-proxy", "localized", None, &summary);
-        assert_eq!(localized.engram_control_off, effective);
-        let cut = state.immutable_state_snapshot_locked(&inner);
-        assert_eq!(cut.sessions.iter().find(|s| s.id == proxy).unwrap().engram_control_off, effective);
-        let cold = state.snapshot_from_inner(&inner);
-        assert_eq!(cold.sessions.iter().find(|s| s.id == proxy).unwrap().engram_control_off, effective);
-    }
-}
 
-#[test]
-fn off_boundary_session_projection_uses_the_existing_inherited_project() {
-    let (state, session, receiver, _transport) = boundary_session("plain");
-    let (outer, nested) = create_test_nested_delegations_before_engram(&state, &receiver, &session);
-    let (project, root) = {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        (record.session.project_id.clone().unwrap(), PathBuf::from(&record.session.workdir))
-    };
-    enable_test_project_engram(&state, &project, &root);
-    let mut inner = state.inner.lock().unwrap();
-    inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram.as_mut().unwrap().turn_gated_control = false;
-    for child in [&outer.child_session_id, &nested.child_session_id] {
-        inner.session_mut(child).unwrap().session.project_id = None;
-    }
-    let index = inner.find_session_index(&nested.child_session_id).unwrap();
-    assert!(ordinary_off_execution_applies(&inner, &nested.child_session_id));
-    assert_eq!(AppState::wire_session_summary_for_inner(&inner, &state.server_instance_id, &inner.sessions[index]).engram_control_off, Some(true));
-    inner.session_mut(&nested.child_session_id).unwrap().session.project_id = Some("missing-project".into());
-    assert!(!ordinary_off_execution_applies(&inner, &nested.child_session_id));
-}
-
-#[test]
-fn off_boundary_indexed_projection_tracks_ancestry_and_inventory_without_session_stamps() {
-    fn assert_modes(state: &AppState, inner: &StateInner, expected: &[(&str, bool)]) {
-        let first = state.immutable_state_snapshot_locked(inner);
-        let warm = state.immutable_state_snapshot_locked(inner);
-        let cold = state.snapshot_from_inner(inner);
-        let full = state.full_snapshot_from_inner(inner);
-        for &(id, off) in expected {
-            let cached = first.sessions.iter().find(|s| s.id == id).unwrap();
-            let reused = warm.sessions.iter().find(|s| s.id == id).unwrap();
-            assert_eq!(cached.engram_control_off, Some(off), "cached {id}");
-            assert!(Arc::ptr_eq(cached, reused), "an unchanged cut reuses {id}");
-            assert_eq!(cold.sessions.iter().find(|s| s.id == id).unwrap().engram_control_off, Some(off), "cold {id}");
-            assert_eq!(full.sessions.iter().find(|s| s.id == id).unwrap().engram_control_off, Some(off), "full {id}");
-            let record = &inner.sessions[inner.find_session_index(id).unwrap()];
-            assert_eq!(AppState::wire_session_for_inner(inner, &state.server_instance_id, record).engram_control_off,
-                Some(off), "targeted {id}");
-        }
-    }
-    let (state, session, receiver, transport) = boundary_session("plain");
-    let (outer, nested) = create_test_nested_delegations_before_engram(&state, &receiver, &session);
-    let (project, root) = {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        (record.session.project_id.clone().unwrap(), PathBuf::from(&record.session.workdir))
-    };
-    enable_test_project_engram(&state, &project, &root);
-    let source = delegation_inventory_file_identity(state.persistence_path.as_path()).unwrap();
-    let mut inner = state.inner.lock().unwrap();
-    for child in [&outer.child_session_id, &nested.child_session_id] {
-        inner.session_mut(child).unwrap().session.project_id = None;
-    }
-    let stamps = inner.sessions.iter().map(|record| record.mutation_stamp).collect::<Vec<_>>();
-    inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram.as_mut().unwrap().turn_gated_control = false;
-    let ready = [(&*session, true), (&*outer.child_session_id, true), (&*nested.child_session_id, true)];
-    assert_modes(&state, &inner, &ready);
-    inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram.as_mut().unwrap().enabled = false;
-    let unavailable = [(&*session, false), (&*outer.child_session_id, false), (&*nested.child_session_id, false)];
-    assert_modes(&state, &inner, &unavailable);
-    inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram.as_mut().unwrap().enabled = true;
-    assert_modes(&state, &inner, &ready);
-    // A cycle is unresolved, even when another root in the cut is Base/OFF.
-    let edge = inner.delegations.iter_mut().find(|d| d.child_session_id == outer.child_session_id).unwrap();
-    let original_parent = std::mem::replace(&mut edge.parent_session_id, nested.child_session_id.clone());
-    assert_modes(&state, &inner, &[(&session, true), (&outer.child_session_id, false), (&nested.child_session_id, false)]);
-    inner.delegations.iter_mut().find(|d| d.child_session_id == outer.child_session_id).unwrap().parent_session_id = original_parent;
-    assert_modes(&state, &inner, &ready);
-    let nested_index = inner.find_session_index(&nested.child_session_id).unwrap();
-    inner.sessions[nested_index].session.project_id = Some("missing-project".into());
-    assert_modes(&state, &inner, &[(&session, true), (&outer.child_session_id, true), (&nested.child_session_id, false)]);
-    inner.sessions[nested_index].session.project_id = None;
-    assert_modes(&state, &inner, &ready);
-    inner.delegation_inventory = DelegationInventoryState::Loading {
-        token: "projection-loading".into(), source, worker_started: false, queue_pause_images: Vec::new(),
-    };
-    assert_modes(&state, &inner, &unavailable);
-    inner.delegation_inventory = DelegationInventoryState::Ready;
-    assert_modes(&state, &inner, &ready);
-    assert_eq!(inner.sessions.iter().map(|record| record.mutation_stamp).collect::<Vec<_>>(), stamps,
-        "project, ancestry and inventory inputs change independently of session stamps");
-    assert!(transport.requests().is_empty());
-}
 
 #[test]
 fn off_pair_started_turn_releases_the_operator_pause() {
@@ -462,120 +289,43 @@ fn off_pair_locked_orphan_check_runs_workflow_after_unknown_history() {
     off_orphaned_workflow_after_history(false);
 }
 
-#[test]
-fn off_pair_session_snapshot_keeps_disabled_integration_outside_the_off_lane() {
-    let f = fixture();
-    {
-        let mut inner = f.state.inner.lock().unwrap();
-        let settings = inner.projects.iter_mut().find(|p| p.id == f.target.project_id)
-            .unwrap().engram.as_mut().unwrap();
-        settings.turn_gated_control = true;
-        settings.enabled = false;
-    }
-    let wire = serde_json::to_value(f.state.snapshot()).unwrap();
-    let project = wire["projects"].as_array().unwrap().iter()
-        .find(|p| p["id"] == f.target.project_id).unwrap();
-    assert_eq!(project["engram"]["turnGatedControl"], true);
-    let session = wire["sessions"].as_array().unwrap().iter()
-        .find(|session| session["id"] == f.session).unwrap();
-    assert_eq!(session["engramControlOff"], false);
-    assert!(project.get("engramControlEnabled").is_none());
-}
+#[derive(Clone)]
+struct OrdinaryProject { project_id: String }
 
 struct OffFixture {
     state: AppState,
     session: String,
     receiver: mpsc::Receiver<CodexRuntimeCommand>,
     transport: Arc<ScriptedEngramControlTransport>,
-    target: EngramBindingTarget,
+    target: OrdinaryProject,
     debt: Value,
 }
 
 fn fixture() -> OffFixture {
-    let (state, session, receiver, transport) = root_fixture([]);
-    let target = {
+    let (state, session, receiver, transport) = ordinary_root_fixture();
+    let project_id = {
         let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let project = inner.sessions[index].session.project_id.clone().unwrap();
-        let root = PathBuf::from(&inner.find_project(&project).unwrap().root_path);
-        let authority = materialize_fixture_engram_store(&root, &root);
-        inner
-            .projects
-            .iter_mut()
-            .find(|p| p.id == project)
-            .unwrap()
-            .engram
-            .as_mut()
-            .unwrap()
-            .authority_store_key = Some(authority);
-        let record = inner.session_mut_by_index(index).unwrap();
-        record.engram.routing_token = Some("original-routing-token".into());
-        record.engram.active_grant_id = Some("original-open-grant".into());
-        record.engram.begins_recorded = true;
-        record.engram.dispatch_generation = 1;
-        record.active_turn_generation = 1;
+        let record = inner.session_mut(&session).unwrap();
+        record.engram.historical_control.insert("engramOpenGrantId".into(), json!("original-open-grant"));
+        record.engram.historical_control.insert("engramRoutingToken".into(), json!("original-routing-token"));
+        record.engram.historical_control.insert("engramAdmissionRetry".into(),
+            json!({"original": "passive historical retry", "requestKey": "original-key"}));
         record.set_auto_dispatch_blocked(true);
-        let target =
-            AppState::engram_binding_target_for_session_shape_locked(&inner, &session, false)
-                .unwrap()
-                .unwrap();
-        let original = EngramExistingCheckpoint {
-            id: "original-checkpoint".into(),
-            authority: engram_abort_authority(&target),
-            connection: target.connection.clone(),
-            settings: target.settings.clone(),
-            work_binding: target.work_binding.clone(),
-            request: EngramControlRequest::TurnCheckpoint {
-                routing_token: "original-routing-token".into(),
-                grant_id: "original-open-grant".into(),
-                next_intent: EngramNextIntent::Wait,
-                report: EngramTurnReport::default(),
-                idempotency_key: "original-checkpoint-key".into(),
-            },
-            dispatch_generation: 1,
-            active_turn_generation: 1,
-            runtime_episode: format!("{:?}", inner.sessions[index].runtime.runtime_token()),
-            checkpoint_owner_generation: None,
-        };
-        let operation = state
-            .prepare_existing_checkpoint_protection(&inner, &session, &target, original)
-            .unwrap();
-        operation.validate().unwrap();
-        assert_eq!(
-            operation.protection.phase,
-            EngramSessionObligationPhase::Intended
-        );
-        assert!(matches!(
-            operation.progress,
-            EngramExistingCheckpointProgress::Retained
-        ));
-        inner
-            .engram_session_obligations
-            .checkpoint_operations
-            .push(operation.clone());
-        inner.engram_session_obligations.validate().unwrap();
-        inner
-            .session_mut_by_index(index)
-            .unwrap()
-            .engram
-            .checkpoint_operation = Some(operation);
+        let project = record.session.project_id.clone().unwrap();
         state.commit_locked(&mut inner).unwrap();
-        target
+        project
     };
     let debt = ledger(&state);
     assert!(transport.requests().is_empty());
-    OffFixture {
-        state,
-        session,
-        receiver,
-        transport,
-        target,
-        debt,
-    }
+    OffFixture { state, session, receiver, transport,
+        target: OrdinaryProject { project_id }, debt }
 }
 
 fn ledger(state: &AppState) -> Value {
-    serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap()
+    let inner = state.inner.lock().unwrap();
+    serde_json::to_value(&inner.sessions.iter()
+        .find(|record| record.engram.historical_control.contains_key("engramOpenGrantId"))
+        .expect("fixture history remains on its original session").engram.historical_control).unwrap()
 }
 
 fn switch_off(f: &OffFixture) {
@@ -589,70 +339,32 @@ fn switch_off(f: &OffFixture) {
         .engram
         .as_mut()
         .unwrap()
-        .turn_gated_control = false;
+        .execution_observability = false;
     f.state.commit_locked(&mut inner).unwrap();
 }
 
 fn assert_debt_unchanged(f: &OffFixture) {
-    assert_eq!(
-        ledger(&f.state),
-        f.debt,
-        "OFF must not settle or rewrite historical evidence"
-    );
-    let loaded = load_state(f.state.persistence_path.as_path())
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(&loaded.engram_session_obligations).unwrap(),
-        f.debt
-    );
-    let inner = f.state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&f.session).unwrap()];
-    assert_eq!(
-        record.engram.active_grant_id.as_deref(),
-        Some("original-open-grant")
-    );
-    assert_eq!(
-        record.engram.routing_token.as_deref(),
-        Some("original-routing-token")
-    );
-    assert_eq!(
-        serde_json::to_value(&record.engram.checkpoint_operation).unwrap(),
-        f.debt["checkpointOperations"][0]
-    );
+    assert_eq!(ledger(&f.state), f.debt);
+    let loaded = load_state(f.state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &loaded.sessions[loaded.find_session_index(&f.session).unwrap()];
+    assert_eq!(serde_json::to_value(&record.engram.historical_control).unwrap(), f.debt,
+        "ordinary execution preserves the exact stored history after SQLite reload");
 }
 
 fn queue_retained(f: &OffFixture, text: &str, never_promoted: bool) -> QueuedPromptRecord {
     queue_test_engram_prompt(&f.state, &f.session, text, QueuedPromptSource::User, None);
     let mut inner = f.state.inner.lock().unwrap();
-    let index = inner.find_session_index(&f.session).unwrap();
-    let record = inner.session_mut_by_index(index).unwrap();
+    let record = inner.session_mut(&f.session).unwrap();
     let queued = record.queued_prompts.back_mut().unwrap();
     queued.engram_waiting = true;
     queued.engram_interrupted = true;
     queued.promotion_disposition_known = never_promoted;
     queued.promoted_message_index = None;
     queued.engram_ordinary_handoff = !never_promoted;
-    queued.engram_bind = Some(EngramQueuedBind {
-        connection: f.target.connection.clone(),
-        settings: f.target.settings.clone(),
-        request: EngramControlRequest::SessionBind {
-            external_ref: f.target.external_ref.clone(),
-            title: "Original retained prompt".into(),
-            assurance: ENGRAM_CONTROL_ASSURANCE.into(),
-            mediated_effects: Vec::new(),
-            capability_map_revision: 1,
-            work_binding: None,
-            idempotency_key: format!("original-bind-{}", queued.pending_prompt.id),
-        },
-        operation_generation: Some(1),
-    });
+    queued.engram_bind = Some(json!({"connection":{"session_id":f.session},
+        "request":{"operation":"session_bind", "idempotency_key":format!("original-bind-{}",queued.pending_prompt.id)},
+        "historicalExtension":{"preserve":[1,2,3]}}));
     let saved = queued.clone();
-    if record.orchestrator_auto_dispatch_blocked && !record.engram.operator_paused {
-        // Use the existing control owner, rather than infer pause provenance
-        // from the mere presence of old authorization in the queue.
-        assert!(hold_engram_queued_authorization_for_resume(record));
-    }
     sync_pending_prompts(record);
     f.state.commit_locked(&mut inner).unwrap();
     saved
@@ -881,64 +593,39 @@ fn off_local_runtime_reset_keeps_original_checkpoint_identity_and_evidence() {
 }
 
 #[test]
-fn off_fresh_human_send_ignores_control_holds_and_resumes_operator_pause_but_preserves_stop() {
-    for (stopping, operator_pause, control_pause) in [
-        (false, false, false), (true, false, false),
-        (false, true, false), (false, false, true),
-    ] {
+fn ordinary_human_send_resumes_operator_pause_but_preserves_real_stop() {
+    for (stopping, operator_pause) in [(false,false),(true,false),(false,true)] {
         let f = fixture();
         switch_off(&f);
         {
             let mut inner = f.state.inner.lock().unwrap();
-            let index = inner.find_session_index(&f.session).unwrap();
-            let record = &mut inner.sessions[index];
-            record.set_auto_dispatch_blocked(operator_pause || control_pause);
+            let record = inner.session_mut(&f.session).unwrap();
+            record.set_auto_dispatch_blocked(operator_pause);
             record.engram.operator_paused = operator_pause;
-            record.engram.admission_in_progress =
-                Some(Arc::new(std::sync::atomic::AtomicBool::new(false)));
-            record.engram.bind_in_progress = true;
-            record.engram.checkpoint_in_progress = true;
-            record.engram.source_observation_preparations = 1;
-            record.engram_boot_recovery_pending = true;
             record.runtime_stop_in_progress = stopping;
             f.state.commit_locked(&mut inner).unwrap();
         }
-        let result = f
-            .state
-            .dispatch_human_turn(
-                &f.session,
-                SendMessageRequest {
-                    text: "fresh human without old control admission".into(),
-                    expanded_text: None,
-                    attachments: Vec::new(),
-                    source_session_id: None,
-                    source_mailbox: None,
-                },
-            )
-            .unwrap();
+        let result = f.state.dispatch_human_turn(&f.session, SendMessageRequest {
+            text:"fresh ordinary human input".into(), expanded_text:None, attachments:Vec::new(),
+            source_session_id:None, source_mailbox:None,
+        }).unwrap();
         if stopping {
-            assert!(matches!(result, DispatchTurnResult::Queued));
+            assert!(matches!(result,DispatchTurnResult::Queued));
             assert!(f.receiver.try_recv().is_err());
         } else {
             let dispatch = match result {
-                DispatchTurnResult::Dispatched(dispatch)
-                | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-                DispatchTurnResult::Queued => {
-                    panic!("a control RPC must not hold a fresh OFF turn")
-                }
+                DispatchTurnResult::Dispatched(dispatch)|DispatchTurnResult::DispatchedAfterQueue(dispatch)=>dispatch,
+                DispatchTurnResult::Queued=>panic!("historical data cannot block a fresh Human turn"),
             };
-            deliver_turn_dispatch(&f.state, dispatch).unwrap();
-            receive_prompt(&f, "fresh human without old control admission");
+            deliver_turn_dispatch(&f.state,dispatch).unwrap();
+            receive_prompt(&f,"fresh ordinary human input");
             let token = {
-                let inner = f.state.inner.lock().unwrap();
-                let record = &inner.sessions[inner.find_session_index(&f.session).unwrap()];
-                assert_eq!(record.engram.dispatch_generation, 1);
-                assert!(record.engram.bind_in_progress && record.engram.checkpoint_in_progress);
+                let inner=f.state.inner.lock().unwrap();
+                let record=&inner.sessions[inner.find_session_index(&f.session).unwrap()];
+                assert!(!record.engram.operator_paused);
                 record.runtime.runtime_token().unwrap()
             };
-            f.state
-                .finish_turn_ok_if_runtime_matches(&f.session, &token)
-                .unwrap();
+            f.state.finish_turn_ok_if_runtime_matches(&f.session,&token).unwrap();
             assert!(f.receiver.try_recv().is_err());
         }
         assert!(f.transport.requests().is_empty());
@@ -991,7 +678,11 @@ fn off_startup_reload_preserves_unknown_head_and_wakes_ordinary_fifo_without_con
     );
     switch_off(&f);
     let workdir = {
-        let inner = f.state.inner.lock().unwrap();
+        let mut inner = f.state.inner.lock().unwrap();
+        let record = inner.session_mut(&f.session).unwrap();
+        record.session.status = SessionStatus::Idle;
+        record.session.preview = "Engram recovered authorization retained. Resume to recover the exact queued prompt.".into();
+        f.state.commit_locked(&mut inner).unwrap();
         inner
             .find_project(&f.target.project_id)
             .unwrap()
@@ -1002,14 +693,12 @@ fn off_startup_reload_preserves_unknown_head_and_wakes_ordinary_fifo_without_con
     // the old writer before reopening its disposable SQLite store.
     f.state.shutdown_persist_blocking();
     let transport = ScriptedEngramControlTransport::new([]);
-    let state = AppState::new_with_paths_engram_transport_and_clock_for_test(
-        workdir,
-        f.state.persistence_path.as_ref().clone(),
-        f.state.orchestrator_templates_path.as_ref().clone(),
-        transport.clone(),
-        EngramBudgetClock::scripted(),
-    )
+    let state = boot_on_test_temp_root(f.state.test_temp_root.as_ref().unwrap(), ||
+        AppState::new_with_paths(workdir,
+            f.state.persistence_path.as_ref().clone(),
+            f.state.orchestrator_templates_path.as_ref().clone()))
     .expect("OFF state should restart without settling historical control");
+    state.install_control_test_transport(transport.clone());
     let (runtime, receiver, _process) = test_shared_codex_runtime("off-reloaded-ordinary-runtime");
     install_single_wire_codex_fixture(&state, Some(runtime));
     let restarted = OffFixture {
@@ -1027,7 +716,6 @@ fn off_startup_reload_preserves_unknown_head_and_wakes_ordinary_fifo_without_con
     {
         let inner = restarted.state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&restarted.session).unwrap()];
-        assert!(!record.engram_boot_recovery_pending);
         assert!(
             !record.orchestrator_auto_dispatch_blocked,
             "OFF boot must not derive a queue pause from historical control"
@@ -1074,154 +762,63 @@ fn off_startup_reload_preserves_unknown_head_and_wakes_ordinary_fifo_without_con
 }
 
 #[test]
-fn off_startup_resolves_the_lane_after_inventory_and_preserves_a_new_operator_pause() {
-    for new_pause in [false, true] {
-        let f = fixture();
-        queue_retained(&f, "unknown provider attempt during startup", false);
-        switch_off(&f);
-        f.state.shutdown_persist_blocking();
-        let workdir = {
-            let inner = f.state.inner.lock().unwrap();
-            inner.find_project(&f.target.project_id).unwrap().root_path.clone()
-        };
-        let state = boot_on_test_temp_root(f.state.test_temp_root.as_ref().unwrap(), || {
-            AppState::new_before_listen_with_paths(workdir,
-                f.state.persistence_path.as_ref().clone(),
-                f.state.orchestrator_templates_path.as_ref().clone())
-        }).unwrap();
-        let transport = ScriptedEngramControlTransport::new([]);
-        state.install_control_test_transport(transport.clone());
-        {
-            let inner = state.inner.lock().unwrap();
-            assert!(!inner.delegation_inventory_complete());
-            assert!(!ordinary_off_execution_applies(&inner, &f.session));
-            assert!(inner.sessions[inner.find_session_index(&f.session).unwrap()].orchestrator_auto_dispatch_blocked);
-        }
-        let observed = AtomicBool::new(false);
-        state.load_delegation_inventory_observed(|phase| {
-            if phase == "before_publish" {
-                observed.store(true, Ordering::SeqCst);
-                if new_pause {
-                    let mut inner = state.inner.lock().unwrap();
-                    let record = inner.session_mut(&f.session).unwrap();
-                    record.set_auto_dispatch_blocked(true);
-                    record.engram.operator_paused = true;
-                }
+fn ordinary_deferred_inventory_restores_normalized_pause_and_respects_new_epoch() {
+    for owner in ["retired", "operator", "failed-mailbox", "unresolved-codex"] {
+        let original_pause = owner != "retired";
+        for successor in [None,Some(false),Some(true)] {
+            let f=if owner == "failed-mailbox" { failed_mailbox_pause_fixture() } else { fixture() };
+            if owner != "failed-mailbox" {
+                queue_retained(&f,"unknown provider attempt during startup",false);
             }
-        }).unwrap();
-        assert!(observed.load(Ordering::SeqCst));
-        {
-            let inner = state.inner.lock().unwrap();
+            {
+                let mut inner=f.state.inner.lock().unwrap();
+                let record=inner.session_mut(&f.session).unwrap();
+                record.engram.operator_paused=owner == "operator";
+                if owner == "unresolved-codex" {
+                    record.session.status=SessionStatus::Active;
+                    record.external_session_id=Some("unresolved-ordinary-codex-thread".into());
+                    record.session.external_session_id=record.external_session_id.clone();
+                    // A persisted external Codex thread requires its native
+                    // state; keep the same quarantine validation on reload.
+                    set_record_codex_thread_state(record, CodexThreadState::Active);
+                    record.session.preview="Ordinary provider connection interrupted; inspect before retry.".into();
+                } else if owner != "failed-mailbox" {
+                    record.session.status=SessionStatus::Idle;
+                    record.session.preview="Engram recovered authorization retained. Resume to recover the exact queued prompt.".into();
+                }
+                record.set_auto_dispatch_blocked(true);
+                f.state.commit_locked(&mut inner).unwrap();
+            }
+            f.state.shutdown_persist_blocking();
+            let workdir=f.state.inner.lock().unwrap().find_project(&f.target.project_id).unwrap().root_path.clone();
+            let state=boot_on_test_temp_root(f.state.test_temp_root.as_ref().unwrap(),|| {
+                AppState::new_before_listen_with_paths(workdir,
+                    f.state.persistence_path.as_ref().clone(),f.state.orchestrator_templates_path.as_ref().clone())
+            }).unwrap();
+            let reached=AtomicBool::new(false);
+            state.load_delegation_inventory_observed(|phase| {
+                if phase=="before_publish" {
+                    reached.store(true,Ordering::SeqCst);
+                    if let Some(paused)=successor {
+                        let mut inner=state.inner.lock().unwrap();
+                        let record=inner.session_mut(&f.session).unwrap();
+                        record.set_auto_dispatch_blocked(paused);
+                        record.engram.operator_paused=paused;
+                    }
+                }
+            }).unwrap();
+            assert!(reached.load(Ordering::SeqCst));
+            let inner=state.inner.lock().unwrap();
             assert!(inner.delegation_inventory_complete());
-            assert!(ordinary_off_execution_applies(&inner, &f.session));
-            let record = &inner.sessions[inner.find_session_index(&f.session).unwrap()];
-            assert_eq!(record.orchestrator_auto_dispatch_blocked, new_pause);
-            assert_eq!(record.engram.operator_paused, new_pause);
-            assert!(record.queued_prompts[0].engram_ordinary_handoff);
+            let record=&inner.sessions[inner.find_session_index(&f.session).unwrap()];
+            assert_eq!(record.orchestrator_auto_dispatch_blocked,successor.unwrap_or(original_pause),"owner={owner}, successor={successor:?}");
+            assert_eq!(record.session.queue_paused,successor.unwrap_or(original_pause));
+            assert!(record.queued_prompts.iter().any(|queued| queued.engram_ordinary_handoff));
+            assert_eq!(serde_json::to_value(&record.engram.historical_control).unwrap(),f.debt);
+            drop(inner);
+            state.shutdown_persist_blocking();
         }
-        assert!(transport.requests().is_empty());
-        state.shutdown_persist_blocking();
     }
-}
-
-#[test]
-fn on_retained_debt_still_blocks_and_clean_turn_still_evaluates_and_begins() {
-    for scenario in [
-        "empty",
-        "never_promoted",
-        "unknown_handoff",
-        "mailbox",
-        "reset",
-    ] {
-        let mut f = fixture();
-        let saved_head = match scenario {
-            "never_promoted" => Some(queue_retained(&f, "ON retained head", true)),
-            "unknown_handoff" => {
-                let head = queue_retained(&f, "ON unknown handoff", false);
-                queue_test_engram_prompt(
-                    &f.state,
-                    &f.session,
-                    "ON successor stays held",
-                    QueuedPromptSource::User,
-                    None,
-                );
-                Some(head)
-            }
-            _ => None,
-        };
-        match scenario {
-            "mailbox" => {
-                let path = resolve_coordination_persistence_path(f.state.persistence_path.as_ref());
-                f.state.mailbox_store = Arc::new(MailboxStore::open(&path).unwrap());
-                let sender = test_session_id(&f.state, Agent::Claude);
-                {
-                    let mut inner = f.state.inner.lock().unwrap();
-                    let index = inner.find_session_index(&f.session).unwrap();
-                    inner
-                        .session_mut_by_index(index)
-                        .unwrap()
-                        .set_auto_dispatch_blocked(false);
-                    f.state.commit_locked(&mut inner).unwrap();
-                }
-                f.state
-                    .append_mailbox_message_and_notify(
-                        &sender,
-                        SendMailboxMessageRequest {
-                            target_session_id: f.session.clone(),
-                            message: "ON mailbox stays held".into(),
-                            idempotency_key: "on-original-mail".into(),
-                            topic: None,
-                            state_stamp: None,
-                            class: None,
-                        },
-                    )
-                    .unwrap();
-            }
-            "reset" => assert!(
-                f.state
-                    .prepare_dedicated_runtime_reset_off_lock(&f.session, false)
-                    .is_err()
-            ),
-            _ => assert!(
-                f.state.resume_session_queue(&f.session).is_err(),
-                "ON {scenario} must still refuse unresolved control debt"
-            ),
-        }
-        assert!(
-            f.receiver.try_recv().is_err(),
-            "ON {scenario} must not deliver"
-        );
-        if let Some(head) = saved_head {
-            let inner = f.state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&f.session).unwrap()];
-            assert_eq!(
-                record.queued_prompts[0].pending_prompt.id,
-                head.pending_prompt.id
-            );
-            assert!(record.orchestrator_auto_dispatch_blocked);
-        }
-        assert_eq!(
-            ledger(&f.state)["checkpointOperations"][0]["original"],
-            f.debt["checkpointOperations"][0]["original"],
-            "ON keeps the original checkpoint identity"
-        );
-    }
-
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("on-token"),
-        grant_reply("on-grant"),
-        begin_reply("on-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert_eq!(
-        operations(&transport),
-        ["session_bind", "turn_evaluate", "turn_begin"]
-    );
 }
 
 #[test]
@@ -1232,7 +829,8 @@ fn off_review_stop_preserves_the_historical_pending_dispatch() {
         let mut inner = f.state.inner.lock().unwrap();
         let record = inner.session_mut(&f.session).unwrap();
         record.set_auto_dispatch_blocked(false);
-        record.engram.pending_dispatch = Some(pending_engram_grant(1, "old-pending-grant"));
+        record.engram.historical_control.insert("engramDispatchGeneration".into(), json!(1));
+        // This independent passive field has no current dispatch owner.
         f.state.commit_locked(&mut inner).unwrap();
     }
     let dispatch = match f.state.dispatch_turn(&f.session, SendMessageRequest {
@@ -1247,24 +845,25 @@ fn off_review_stop_preserves_the_historical_pending_dispatch() {
     {
         let mut inner = f.state.inner.lock().unwrap();
         let record = inner.session_mut(&f.session).unwrap();
-        assert_eq!(record.unmediated_turn_generation, Some(record.active_turn_generation));
         // Exercise the canonical missing-runtime Stop completion; physical
         // provider cleanup has separate real-process Stop coverage.
         record.runtime = SessionRuntime::None;
         f.state.commit_locked(&mut inner).unwrap();
     }
     f.state.stop_session(&f.session).unwrap();
-    let observed = {
-        let inner = f.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&f.session).unwrap()];
-        (record.engram.pending_dispatch.as_ref().map(|pending| pending.intent_fingerprint.clone()),
-            record.engram.dispatch_generation, record.engram.rebind_required,
-            record.engram.uncertain_grant_id.clone(), record.engram.operator_paused)
-    };
-    assert_eq!(observed, (Some("pending-grant-1".into()), 1, false, None, true));
+    {
+        let inner=f.state.inner.lock().unwrap();
+        let record=&inner.sessions[inner.find_session_index(&f.session).unwrap()];
+        assert_eq!(record.engram.historical_control["engramDispatchGeneration"], json!(1));
+        assert!(record.engram.operator_paused && record.orchestrator_auto_dispatch_blocked);
+    }
     assert!(f.receiver.try_recv().is_err());
     assert!(f.transport.requests().is_empty());
-    assert_debt_unchanged(&f);
+    let mut expected=f.debt.clone();
+    expected["engramDispatchGeneration"]=json!(1);
+    assert_eq!(ledger(&f.state),expected);
+    let loaded=load_state(f.state.persistence_path.as_path()).unwrap().unwrap();
+    assert_eq!(serde_json::to_value(&loaded.sessions[loaded.find_session_index(&f.session).unwrap()].engram.historical_control).unwrap(),expected);
 }
 
 #[test]
@@ -1328,10 +927,9 @@ fn off_review_failed_mailbox_pause_survives_reset_release() {
     let generation = {
         let mut inner = f.state.inner.lock().unwrap();
         let generation = inner.engram_project_resets.claim(&f.target.project_id).unwrap();
-        inner.session_mut(&f.session).unwrap().engram.project_reset_in_progress = true;
         generation
     };
-    f.state.release_engram_project_reset_fence(&f.target.project_id, generation, std::slice::from_ref(&f.session));
+    assert!(f.state.inner.lock().unwrap().engram_project_resets.release(&f.target.project_id, generation));
     let paused = {
         let inner = f.state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&f.session).unwrap()];
@@ -1370,46 +968,57 @@ fn resume_failed_mailbox(f: &OffFixture) {
 }
 
 #[test]
-fn off_review_positive_control_pause_releases_at_off() {
-    for (legacy_preview, reload) in [(false, false), (false, true), (true, false), (true, true)] {
-        let mut f = fixture();
-        queue_retained(&f, "positively control-owned pause", true);
+fn ordinary_load_retires_only_proven_historical_pause_and_preserves_ordinary_owners() {
+    let retired = [
+        "Engram recovered authorization retained. Resume to recover the exact queued prompt.",
+        "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing.",
+        "Engram settings changed. Authorization retained; cancel or reconcile before continuing.",
+    ];
+    for (preview,status,operator,stopped,capacity,released) in [
+        (retired[0],SessionStatus::Idle,false,false,false,true),
+        (retired[1],SessionStatus::Idle,false,false,false,true),
+        (retired[2],SessionStatus::Idle,false,false,false,true),
+        ("arbitrary stored preview",SessionStatus::Idle,false,false,false,false),
+        ("Engram control is off",SessionStatus::Idle,false,false,false,false),
+        ("Ready for a prompt.",SessionStatus::Idle,false,false,false,false),
+        (retired[0],SessionStatus::Error,false,false,false,false),
+        (retired[0],SessionStatus::Active,false,false,false,false),
+        (retired[0],SessionStatus::Idle,true,false,false,false),
+        (retired[0],SessionStatus::Idle,false,true,false,false),
+        (retired[0],SessionStatus::Idle,false,false,true,false),
+    ] {
+        let f=fixture();
+        queue_retained(&f,"known ordinary input",true);
         {
-            let mut inner = f.state.inner.lock().unwrap();
-            let record = inner.session_mut(&f.session).unwrap();
-            assert!(if legacy_preview {
-                hold_engram_queued_authorization_when_control_off(record)
-            } else {
-                hold_engram_queued_authorization_for_resume(record)
-            });
+            let mut inner=f.state.inner.lock().unwrap();
+            let record=inner.session_mut(&f.session).unwrap();
+            record.session.preview=preview.into();
+            record.session.status=status;
+            record.set_auto_dispatch_blocked(true);
+            record.engram.operator_paused=operator;
+            record.engram.stopped_prompt_id=stopped.then(|| "original-stopped-prompt".into());
+            if capacity {
+                record.provider_capacity_retry=Some(ProviderCapacityRetry {
+                    nonce:"ordinary-capacity-owner".into(),
+                    server_instance:f.state.server_instance_id.clone(),
+                    runtime_id:"ordinary-capacity-runtime".into(),
+                    generation:record.active_turn_generation,
+                    stop_generation:record.runtime_stop_generation,
+                    pause_epoch:record.auto_dispatch_pause_epoch,
+                    settings:provider_capacity_settings(record),attempts:0,due_at:None,
+                    recovering:false,dispatched:false,original_preview:preview.into(),
+                    saved:false,fence:None,
+                });
+            }
             f.state.commit_locked(&mut inner).unwrap();
         }
-        switch_off(&f);
-        assert!(f.state.ordinary_off_execution_applies(&f.session));
-        let (paused, preview) = if reload {
-            f.state.shutdown_persist_blocking();
-            let loaded = load_state(f.state.persistence_path.as_path()).unwrap().unwrap();
-            let record = &loaded.sessions[loaded.find_session_index(&f.session).unwrap()];
-            let presentation = (record.orchestrator_auto_dispatch_blocked, record.session.preview.clone());
-            *f.state.inner.lock().unwrap() = loaded;
-            let (runtime, receiver, _process) = test_shared_codex_runtime("off-control-pause-reloaded");
-            install_single_wire_codex_fixture(&f.state, Some(runtime));
-            f.receiver = receiver;
-            presentation
-        } else {
-            let generation = f.state.inner.lock().unwrap().engram_project_resets.claim(&f.target.project_id).unwrap();
-            f.state.release_engram_project_reset_fence(&f.target.project_id, generation, std::slice::from_ref(&f.session));
-            let inner = f.state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&f.session).unwrap()];
-            (record.orchestrator_auto_dispatch_blocked, record.session.preview.clone())
-        };
-        assert!(!paused, "a positively control-owned pause releases at OFF, reload={reload}");
-        assert_eq!(preview, "Engram recovered authorization retained. Resume to recover the exact queued prompt.",
-            "positive OFF must not tell the operator to cancel recoverable input");
-        f.state.resume_session_queue(&f.session).unwrap();
-        receive_prompt(&f, "positively control-owned pause");
+        let loaded=load_state(f.state.persistence_path.as_path()).unwrap().unwrap();
+        let record=&loaded.sessions[loaded.find_session_index(&f.session).unwrap()];
+        assert_eq!(record.orchestrator_auto_dispatch_blocked,!released,"preview={preview}, operator={operator}, stopped={stopped}, capacity={capacity}");
+        assert_eq!(record.session.queue_paused,!released);
+        assert_eq!(serde_json::to_value(&record.engram.historical_control).unwrap(),f.debt);
+        assert_eq!(record.queued_prompts[0].pending_prompt.text,"known ordinary input");
         assert!(f.transport.requests().is_empty());
-        eprintln!("positive OFF recovery preview legacy={legacy_preview} reload={reload}: verified");
     }
 }
 
@@ -1421,6 +1030,8 @@ fn off_review_reload_keeps_receipt_settlement_and_legacy_normalization() {
     {
         let mut inner = f.state.inner.lock().unwrap();
         let record = inner.session_mut(&f.session).unwrap();
+        record.session.status=SessionStatus::Idle;
+        record.session.preview="Engram recovered authorization retained. Resume to recover the exact queued prompt.".into();
         record.prompt_deliveries.insert(head.pending_prompt.id.clone(), PromptDelivery {
             federation_operation: None, federation_handoff_started: false,
             disposition: PromptDeliveryDisposition::HandingOff, attempt: 1,
@@ -1435,6 +1046,8 @@ fn off_review_reload_keeps_receipt_settlement_and_legacy_normalization() {
     f.state.shutdown_persist_blocking();
     let loaded = load_state(f.state.persistence_path.as_path()).unwrap().unwrap();
     let record = &loaded.sessions[loaded.find_session_index(&f.session).unwrap()];
+    assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused,
+        "ordinary ambiguous receipt settlement independently restores its hold");
     let delivery = &record.prompt_deliveries[&head.pending_prompt.id];
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Ambiguous);
     assert_eq!(delivery.write_ahead, "original-unknown-write-ahead");
@@ -1658,12 +1271,14 @@ fn plain_handoff_keeps_the_final_state_fence(agent: Agent, profile: &str) {
                 record.runtime = runtime;
                 record.session.status = SessionStatus::Idle;
                 record.set_auto_dispatch_blocked(false);
-                let started = state.start_turn_on_record_with_control_mode(record, message,
-                    "ordinary final handoff payload".into(), Vec::new(), None, None, None, None, false, profile != "base-off").unwrap();
+                let started = state.start_turn_on_record(record, message,
+                    "ordinary final handoff payload".into(), Vec::new(), None, None, None, false).unwrap();
                 state.commit_locked(&mut inner).unwrap();
                 started.dispatch
             };
-            assert!(dispatch.human_prompt_id().is_none() && dispatch.engram_dispatch_generation().is_none());
+            assert!(dispatch.human_prompt_id().is_none());
+            let expected_runtime = dispatch.runtime_token().clone();
+            let expected_generation = dispatch.active_turn_generation();
             {
                 let mut inner = state.inner.lock().unwrap();
                 let record = inner.session_mut(&session).unwrap();
@@ -1680,6 +1295,19 @@ fn plain_handoff_keeps_the_final_state_fence(agent: Agent, profile: &str) {
                 assert!(matches!(outcome, HandoffPreparedTurnDispatchOutcome::Delivered));
                 let payload = receive().expect("the current ordinary owner delivers once");
                 assert!(payload.ends_with("ordinary final handoff payload"));
+            } else if change == "stop" {
+                assert!(matches!(outcome, HandoffPreparedTurnDispatchOutcome::Scheduled));
+                let inner = state.inner.lock().unwrap();
+                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+                let [DeferredStopCallback::TurnHandoff { active_turn_generation, dispatch }] =
+                    record.deferred_stop_callbacks.as_slice() else {
+                        panic!("the current Stop must retain exactly one ordinary handoff");
+                    };
+                assert_eq!(*active_turn_generation, expected_generation);
+                let held = dispatch.0.lock().unwrap();
+                let held = held.as_ref().expect("Stop still owns the unsent dispatch");
+                assert_eq!(held.runtime_token(), &expected_runtime);
+                assert_eq!(held.active_turn_generation(), expected_generation);
             } else {
                 assert!(matches!(outcome, HandoffPreparedTurnDispatchOutcome::Superseded),
                     "agent={agent:?}, change={change} must not enqueue a stale ordinary turn");
@@ -1687,4 +1315,40 @@ fn plain_handoff_keeps_the_final_state_fence(agent: Agent, profile: &str) {
             assert!(receive().is_none(), "agent={agent:?}, change={change}: no duplicate or stale command");
             assert!(transport.requests().is_empty());
         }
+}
+
+#[test]
+fn ordinary_wire_omits_removed_control_selectors_and_imported_flags_cannot_gate_turns() {
+    for imported in [false, true] {
+        let (state, session, receiver, transport) = ordinary_root_fixture();
+        let (project, settings) = {
+            let inner = state.inner.lock().unwrap();
+            let project = inner.sessions[inner.find_session_index(&session).unwrap()].session.project_id.clone().unwrap();
+            let mut raw = serde_json::to_value(inner.find_project(&project).unwrap().engram.as_ref().unwrap()).unwrap();
+            raw["turnGatedControl"] = json!(imported);
+            raw["assurance"] = json!("turn_gated");
+            (project, serde_json::from_value::<EngramProjectSettings>(raw).unwrap())
+        };
+        state.update_project_engram_settings(&project, settings).unwrap();
+        let wire = serde_json::to_value(state.snapshot()).unwrap();
+        for session in wire["sessions"].as_array().unwrap() {
+            assert!(session.get("engramControlOff").is_none());
+        }
+        let project = wire["projects"].as_array().unwrap().iter().find(|item| item["id"] == project).unwrap();
+        assert!(project.get("engramControlEnabled").is_none());
+        assert!(project["engram"].get("turnGatedControl").is_none());
+        assert!(project["engram"].get("assurance").is_none());
+        let dispatch = match state.dispatch_turn(&session, SendMessageRequest {
+            text: "ordinary imported-settings input".into(), expanded_text: None, attachments: Vec::new(),
+            source_session_id: None, source_mailbox: None,
+        }).unwrap() {
+            DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+            DispatchTurnResult::Queued => panic!("imported gating flags cannot block ordinary input"),
+        };
+        deliver_turn_dispatch(&state, dispatch).unwrap();
+        assert!(matches!(receiver.try_recv(), Ok(CodexRuntimeCommand::Prompt { command, .. })
+            if command.prompt.contains("ordinary imported-settings input")));
+        assert!(receiver.try_recv().is_err());
+        assert!(transport.requests().is_empty());
+    }
 }

@@ -3,7 +3,7 @@
 
 #[derive(Clone)]
 struct FederationExecutorLiveOwner {
-    queue: EngramQueuedAdmissionOwner,
+    queue: QueuedTurnOwner,
     operation: FederationExecutorOperation,
     stop_generation: u64,
     pause_epoch: u64,
@@ -96,7 +96,7 @@ impl AppState {
                     },
                 _ => { live.remove(&key); return; }
             }
-            let Some(queue) = EngramQueuedAdmissionOwner::capture(record).filter(|owner| owner.prompt_id == prompt)
+            let Some(queue) = QueuedTurnOwner::capture(record).filter(|owner| owner.prompt_id == prompt)
             else { return; };
             // The same-boot intent stays until the receipt settles or a fence
             // above ends it, not merely until this drive: a hand-off record

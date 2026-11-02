@@ -6,6 +6,9 @@ pub(crate) use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 #[cfg(windows)]
 static INHERITANCE_LOCK: Mutex<()> = Mutex::new(());
+#[cfg(all(windows, test))]
+#[path = "host_command_telemetry.rs"]
+pub(crate) mod telemetry;
 #[cfg(windows)]
 pub(crate) fn inheritance_lock() -> MutexGuard<'static, ()> {
     let guard = INHERITANCE_LOCK
@@ -107,13 +110,19 @@ impl Command {
     }
     pub(crate) fn spawn(&mut self) -> std::io::Result<std::process::Child> {
         self.defaults(false);
+        #[cfg(not(test))]
         let _guard = inheritance_lock();
+        #[cfg(test)]
+        let _guard = telemetry::acquire("command_spawn");
         self.inner.spawn()
     }
     pub(crate) fn output(&mut self) -> std::io::Result<std::process::Output> {
         self.defaults(true);
         let child = {
+            #[cfg(not(test))]
             let _guard = inheritance_lock();
+            #[cfg(test)]
+            let _guard = telemetry::acquire("command_output");
             self.inner.spawn()?
         };
         // Waiting under the launch lock can deadlock a child calling the host.
@@ -140,7 +149,7 @@ pub(crate) fn spawn_shared(command: &mut Command) -> std::io::Result<shared_chil
     #[cfg(windows)]
     {
         command.defaults(false);
-        let _guard = inheritance_lock();
+        let _guard = telemetry::acquire("shared_child_spawn");
         shared_child::SharedChild::spawn(&mut command.inner)
     }
     #[cfg(not(windows))]
@@ -159,7 +168,7 @@ pub(crate) fn reference_output(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let child = {
-        let _guard = inheritance_lock();
+        let _guard = telemetry::acquire("reference_output");
         command.spawn()?
     };
     child.wait_with_output()

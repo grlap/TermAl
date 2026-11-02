@@ -71,6 +71,7 @@ impl EngramTrxCounters {
 
     /// `total=3,executed=3,…`, the counters real files carry in their order;
     /// a name only the file gives is not repeated.
+    #[cfg(test)]
     fn describe(&self) -> String {
         ENGRAM_TRX_COUNTERS
             .iter()
@@ -815,6 +816,7 @@ fn engram_declared_outcome(
 /// verdict first, then its line, where it ran, how it ended and what its TRX
 /// said. Only the command line is shortened to fit, so a long line never
 /// cuts the verdict or the counters away.
+#[cfg(test)]
 fn engram_declared_summary(
     check: &EngramCheckCommand,
     binding: Option<&EngramDeclaredBinding>,
@@ -883,6 +885,7 @@ fn engram_declared_summary(
 /// built-in's, then `kind:declared`, the entry's cwd, the declaration's hash
 /// and size, the artifact's facts and the TRX outcome and counters. A
 /// reference past Engram's bound is left out, as a built-in's command is.
+#[cfg(test)]
 fn engram_declared_refs(
     check: &EngramCheckCommand,
     binding: Option<&EngramDeclaredBinding>,

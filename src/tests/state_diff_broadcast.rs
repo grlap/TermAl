@@ -154,17 +154,10 @@ fn state_diff_without_a_base_sends_a_full_state_then_diffs_from_it() {
         ..(*b).clone()
     });
     let mut updated_cut = cut(11, &[&a, &b_changed]);
-    updated_cut.header.engram_control_recovery = vec![EngramControlRecoverySummary {
-        project_id: "project".to_owned(),
-        session_id: "a".to_owned(),
-        operation: "turn_checkpoint".to_owned(),
-        code: "checkpoint_failed".to_owned(),
-        excluded: true,
-        settlement_confirmed: false,
-        next_actions: vec!["inspect_session".to_owned()],
-    }];
-    let expected_recovery =
-        serde_json::to_value(&updated_cut.header.engram_control_recovery).unwrap();
+    updated_cut.header.pending_engram_mcp_revocation_session_ids = vec!["a".to_owned()];
+    let expected_revocations =
+        serde_json::to_value(&updated_cut.header.pending_engram_mcp_revocation_session_ids)
+            .unwrap();
     forward_cut(&mut producer, &senders, updated_cut);
     let diff = only_diff(&mut receiver);
     assert_eq!(diff["baseRevision"], 10);
@@ -176,7 +169,6 @@ fn state_diff_without_a_base_sends_a_full_state_then_diffs_from_it() {
     assert!(diff["sessions"].get("order").is_none());
     // Every header slice is absolute in every diff, even when empty.
     for slice in [
-        "engramControlRecovery",
         "codex",
         "agentReadiness",
         "preferences",
@@ -192,14 +184,20 @@ fn state_diff_without_a_base_sends_a_full_state_then_diffs_from_it() {
     let full = serde_json::to_value(cut(11, &[&a, &b_changed]).materialize()).unwrap();
     assert_eq!(diff["header"]["preferences"], full["preferences"]);
     assert_eq!(diff["header"]["codex"], full["codex"]);
-    assert_eq!(diff["header"]["engramControlRecovery"], expected_recovery);
+    assert_eq!(
+        diff["header"]["pendingEngramMcpRevocationSessionIds"],
+        expected_revocations
+    );
     assert_eq!(diff["delegations"], json!({"changed": [], "removed": []}));
     assert_eq!(diff["testRuns"], json!({"changed": [], "removed": []}));
 
     forward_cut(&mut producer, &senders, cut(12, &[&a, &b_changed]));
     let cleared = only_diff(&mut receiver);
     assert_eq!(cleared["baseRevision"], 11);
-    assert_eq!(cleared["header"]["engramControlRecovery"], json!([]));
+    assert_eq!(
+        cleared["header"]["pendingEngramMcpRevocationSessionIds"],
+        json!([])
+    );
 }
 
 #[test]

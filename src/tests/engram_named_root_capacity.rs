@@ -12,15 +12,15 @@
 // New module.
 use super::*;
 
-fn retain(claimed: &ClaimedRoot, root: &EngramWorkSourceRoot) {
+fn retain(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) {
     claimed.state.inner.lock().unwrap().engram_work_source_roots.push(root.clone());
 }
 
-fn retained(claimed: &ClaimedRoot, root: &EngramWorkSourceRoot) -> bool {
+fn retained(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) -> bool {
     claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(root)
 }
 
-fn audit(claimed: &ClaimedRoot) -> Vec<EngramNamedRootReleaseAudit> {
+fn audit(claimed: &EOCheckedTurn) -> Vec<EngramNamedRootReleaseAudit> {
     claimed.state.inner.lock().unwrap().engram_named_root_release_audit.clone()
 }
 
@@ -48,28 +48,23 @@ fn release_request(root: &EngramWorkSourceRoot, reason: &str) -> EngramNamedRoot
     }
 }
 
-fn set_session_in_turn(claimed: &ClaimedRoot, in_turn: bool) {
-    claimed.record(|record| {
-        record.session.status = if in_turn { SessionStatus::Active } else { SessionStatus::Idle };
-        record.engram.active_grant_id = None;
-        record.engram.uncertain_grant_id = None;
-        record.engram.checkpoint_in_progress = false;
-    });
+fn set_session_in_turn(claimed: &EOCheckedTurn, in_turn: bool) {
+    if in_turn { claimed.begin("Continue ordinary work."); } else { claimed.end(); }
 }
 
 /// The canonical read the fixture serves for `entry`'s claim.
-fn served_read(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot) -> Value {
+fn served_read(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) -> Value {
     claimed.transport.named_roots.lock().unwrap().as_ref().unwrap()
         .root_reads.get(&entry.claim_id).cloned().expect("a served read")
 }
 
-fn serve_read(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot, read: Value) {
+fn serve_read(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot, read: Value) {
     claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
         .root_reads.insert(entry.claim_id.clone(), read);
 }
 
 /// The live proof of `entry` with `claim` as Engram's claim block.
-fn proof_with_claim(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot, claim: Value) -> EngramNamedRootReadResponse {
+fn proof_with_claim(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot, claim: Value) -> EngramNamedRootReadResponse {
     let mut read = served_read(claimed, entry);
     read["claim"] = claim;
     serde_json::from_value(read).expect("a valid read")
@@ -151,7 +146,7 @@ fn the_automatic_pass_keeps_a_bound_root_whose_claim_was_recovered_after_a_long_
     let binding = engram_named_root_association(&claimed.state.inner.lock().unwrap(), &entry)
         .cloned()
         .expect("the root's run binding");
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding.clone());
         record.session.status = SessionStatus::Idle;
     });
@@ -284,7 +279,7 @@ fn the_automatic_pass_retires_a_root_whose_claim_was_released() {
 /// kind matters while something else keeps the journal: Displaced, unlike
 /// Unbound, makes an evaluation under that claim stale.
 fn assert_closed_claim_journal_compacts(
-    claimed: &ClaimedRoot,
+    claimed: &EOCheckedTurn,
     root: &EngramWorkSourceRoot,
     retirement: EngramRootRetirement,
 ) {
@@ -427,9 +422,8 @@ fn another_session_cannot_release_a_root_as_its_own() {
 #[test]
 fn a_root_whose_claim_is_bound_is_never_released_as_ones_own() {
     let label = "capacity-own-live";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let tree = add_claimed_root_worktree(&claimed.root);
-    name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
+    let (claimed, tree) = root_fixture(label);
+    request_fixture_name(&claimed, Some(&tree)).unwrap();
     let entry = claimed.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
     let error = claimed
         .state

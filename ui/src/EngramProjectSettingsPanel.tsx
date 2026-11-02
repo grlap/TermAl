@@ -1,6 +1,6 @@
 // Shared per-project Engram editor. Repository declaration comes from
-// `.engram-project`; this surface enables the base MCP/context tier and keeps
-// premium turn-gated control as a separate explicit opt-in.
+// `.engram-project`; this surface configures work context and non-blocking
+// execution observations independently of turn admission.
 // Owns independent connection/defaults drafts; hosts the policy editor owned by
 // AcceptanceEvaluationSettings.tsx without borrowing its save-and-close lifecycle.
 
@@ -47,11 +47,9 @@ export function describeProjectEngramState(
   if (project.engramOperatorDisabled) {
     return "Declared · turned off in TermAl";
   }
-  if (project.engram?.enabled && project.engram.turnGatedControl) {
-    return "Enabled · turn-gated control";
-  }
   if (project.engram?.enabled) {
-    return "Enabled · base";
+    return project.engram.executionObservability !== false
+      ? "Enabled · observations on" : "Enabled · observations off";
   }
   return "Declared · ready to enable";
 }
@@ -94,8 +92,8 @@ export function EngramProjectSettingsPanel({
   ) => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const [turnGatedControl, setTurnGatedControl] = useState(
-    project.engram?.turnGatedControl === true,
+  const [executionObservability, setExecutionObservability] = useState(
+    project.engram?.executionObservability !== false,
   );
   const [verification, setVerification] =
     useState<EngramProjectVerification | null>(null);
@@ -113,10 +111,13 @@ export function EngramProjectSettingsPanel({
   }, [busy, onBusyChange]);
 
   useEffect(() => {
-    setTurnGatedControl(project.engram?.turnGatedControl === true);
     setVerification(null);
     setError(null);
-  }, [project.id, project.engram?.turnGatedControl]);
+  }, [project.id]);
+
+  useEffect(() => {
+    setExecutionObservability(project.engram?.executionObservability !== false);
+  }, [project.id, project.engram?.executionObservability]);
 
   // Independent preference saves/SSE updates must not reset the connection
   // draft or its verification; connection updates must not reset this draft.
@@ -125,15 +126,10 @@ export function EngramProjectSettingsPanel({
   }, [project.id, project.engram?.acceptanceEvaluation?.defaultMode,
     project.engram?.acceptanceEvaluation?.evaluatorAgent, project.engram?.acceptanceEvaluation?.evaluatorModel]);
 
-  function invalidateVerification() {
-    setVerification(null);
-    setError(null);
-  }
-
   function buildEnablePayload(): EngramProjectSettings {
     return {
       enabled: true,
-      turnGatedControl,
+      executionObservability,
     };
   }
 
@@ -179,11 +175,9 @@ export function EngramProjectSettingsPanel({
         project.id,
         buildEnablePayload(),
       );
-      const savedProject = state.projects?.find(
-        (candidate) => candidate.id === project.id,
-      );
+      const savedProject = state.projects?.find(candidate => candidate.id === project.id);
       if (savedProject) {
-        setTurnGatedControl(savedProject.engram?.turnGatedControl === true);
+        setExecutionObservability(savedProject.engram?.executionObservability !== false);
       }
       onSaved(state);
       onVerified(project.id, {
@@ -205,13 +199,11 @@ export function EngramProjectSettingsPanel({
       const state = await updateProjectEngramSettings(project.id, {
         enabled: false,
       });
-      const savedProject = state.projects?.find(
-        (candidate) => candidate.id === project.id,
-      );
-      if (savedProject) {
-        setTurnGatedControl(savedProject.engram?.turnGatedControl === true);
-      }
       setVerification(null);
+      const savedProject = state.projects?.find(candidate => candidate.id === project.id);
+      if (savedProject) {
+        setExecutionObservability(savedProject.engram?.executionObservability !== false);
+      }
       onSaved(state);
       onVerified(project.id, {
         verified: true,
@@ -250,8 +242,8 @@ export function EngramProjectSettingsPanel({
           <div className="card-label">Repository-declared Engram</div>
           <h3>{project.name}</h3>
           <p className="settings-panel-copy">
-            <code>.engram-project</code> declares this repository. Base mode
-            injects Engram MCP and fresh work context into local sessions.
+            <code>.engram-project</code> declares this repository. Engram
+            supplies work context and records host observations without blocking turns.
           </p>
         </div>
         <span className="remote-settings-badge">
@@ -265,26 +257,16 @@ export function EngramProjectSettingsPanel({
         </p>
       ) : null}
 
-      <label
-        className="remote-settings-toggle"
-        htmlFor={`${idPrefix}-turn-gated-control`}
-      >
-        <input
-          id={`${idPrefix}-turn-gated-control`}
-          aria-label="Turn-gated control"
-          type="checkbox"
-          checked={turnGatedControl}
-          disabled={busy}
-          onChange={(event) => {
-            setTurnGatedControl(event.target.checked);
-            invalidateVerification();
-          }}
-        />
+      <label className="remote-settings-toggle" htmlFor={`${idPrefix}-execution-observability`}>
+        <input id={`${idPrefix}-execution-observability`} aria-label="Execution Observability"
+          type="checkbox" checked={executionObservability} disabled={busy}
+          onChange={event => setExecutionObservability(event.target.checked)} />
         <span>
-          <strong>Turn-gated control</strong>
+          <strong>Execution Observability</strong>
           <small>
-            Premium opt-in. Engram may evaluate and withhold turns. Base MCP
-            and context stay available when this is off.
+            Record host-observed execution and source changes in Engram.
+            Turns never wait for observations. Turning this off stops new automatic
+            observations; current turns and already recorded facts are preserved.
           </small>
         </span>
       </label>
@@ -317,14 +299,6 @@ export function EngramProjectSettingsPanel({
             <div>
               <dt>Host home</dt>
               <dd>{formatOptionalStatus(verification.home)}</dd>
-            </div>
-            <div>
-              <dt>Required assurance</dt>
-              <dd>{formatOptionalStatus(verification.requiredAssurance)}</dd>
-            </div>
-            <div>
-              <dt>Selected host tier</dt>
-              <dd>{turnGatedControl ? "Turn-gated control" : "Base · advisory / unmediated (does not satisfy a turn-gated control floor)"}</dd>
             </div>
             <div>
               <dt>Readiness</dt>
@@ -407,7 +381,7 @@ export function EngramProjectSettingsPanel({
         </p>
       ) : null}
       <p className="create-session-field-hint">
-        Disable is the global per-project kill switch for both tiers.
+        Disable turns off Engram for this project.
         Re-enabling requires a successful Verify followed by Save &amp; enable.
       </p>
     </div>

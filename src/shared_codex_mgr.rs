@@ -420,16 +420,10 @@ impl AppState {
                 return Ok(());
             }
         }
-        // The profile of the slot the runtime held: a lost app-server
-        // requires a rebind only of the sessions that run on that profile.
-        let (claimed_profile, removed_runtime) =
-            match self.take_shared_codex_runtime_if_matches(runtime_id) {
-                Some((profile, runtime)) => (Some(profile), Some(runtime)),
-                None => (None, None),
-            };
-
-        let (session_exits, engram_rebind_session_ids) = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let removed_runtime = self.take_shared_codex_runtime_if_matches(runtime_id)
+            .map(|(_, runtime)| runtime);
+        let session_exits = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
             let session_exits = inner
                 .sessions
                 .iter()
@@ -444,31 +438,7 @@ impl AppState {
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            let engram_rebind_session_ids = inner
-                .sessions
-                .iter()
-                .filter(|record| {
-                    record.session.agent == Agent::Codex
-                        && record.engram.routing_token.is_some()
-                        && (claimed_profile == Some(record.shared_codex_profile())
-                            || matches!(
-                                &record.runtime,
-                                SessionRuntime::Codex(handle)
-                                    if handle.runtime_id == runtime_id
-                            ))
-                })
-                .map(|record| record.session.id.clone())
-                .collect::<Vec<_>>();
-            for session_id in &engram_rebind_session_ids {
-                if let Some(index) = inner.find_session_index(session_id) {
-                    inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid")
-                        .engram
-                        .rebind_required = true;
-                }
-            }
-            (session_exits, engram_rebind_session_ids)
+            session_exits
         };
 
         let token = RuntimeToken::Codex(runtime_id.to_owned());
@@ -482,9 +452,6 @@ impl AppState {
                     exit_error = Some(error);
                 }
             }
-        }
-        for session_id in engram_rebind_session_ids {
-            self.rebind_engram_session_after_runtime_loss(&session_id);
         }
         if let Some(removed_runtime) = removed_runtime {
             removed_runtime.kill().with_context(|| {

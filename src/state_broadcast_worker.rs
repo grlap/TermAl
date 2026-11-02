@@ -115,14 +115,11 @@ impl AppState {
             agent_commands_revision,
             codex_thread_state,
             live_activity,
-            engram_boot_recovery_pending,
-            engram_control_off: _,
             status,
             preview,
             message_count,
             markers,
             queue_paused,
-            queue_hold,
             provider_capacity_waiting,
             source_tracking_recovery,
             queue_projection_hash,
@@ -190,15 +187,11 @@ impl AppState {
             };
         remote_id == &record.remote_id
             && *session_mutation_stamp == Some(record.mutation_stamp)
-            && *engram_boot_recovery_pending == record.engram_boot_recovery_pending
             && *message_count == session_message_count(record)
             && *queue_paused == record.orchestrator_auto_dispatch_blocked
-            // Derived from the record's retry state, which can change without
-            // a mutation stamp (`engram_automatic_retry_hold`).
-            && *queue_hold == engram_automatic_retry_hold(record)
             && *source_tracking_recovery
                 == if local {
-                    record.engram.source_observation_delete_requested
+                    record.engram.observation_delete_requested
                 } else {
                     session.source_tracking_recovery
                 }
@@ -238,19 +231,16 @@ impl AppState {
                 .clone_from(&self.server_instance_id);
         }
         let mut live = HashSet::new();
-        let control_projection = OrdinaryOffProjection::new(inner);
         let sessions = inner
             .sessions
             .iter()
             .filter(|record| !record.hidden)
             .map(|record| {
                 let id = record.session.id.as_str();
-                let control_off = control_projection.for_record(record);
                 live.insert(id);
                 let key = StateProjectionKey::for_record(record);
                 if let Some((cached_key, summary)) = cache.sessions.get(id) {
                     if *cached_key == key
-                        && summary.engram_control_off == control_off
                         && Self::cached_state_summary_matches_record(
                             &self.server_instance_id,
                             record,
@@ -260,12 +250,10 @@ impl AppState {
                         return summary.clone();
                     }
                 }
-                let mut summary = Self::wire_session_summary_from_record(
+                let summary = Arc::new(Self::wire_session_summary_from_record(
                     &self.server_instance_id,
                     record,
-                );
-                summary.engram_control_off = control_off;
-                let summary = Arc::new(summary);
+                ));
                 cache.sessions.insert(id.to_owned(), (key, summary.clone()));
                 summary
             })

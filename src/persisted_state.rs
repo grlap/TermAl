@@ -409,28 +409,21 @@ impl PersistedState {
     /// Converts the value into inner.
     fn into_inner(self) -> Result<StateInner> {
         self.engram_session_obligations.validate()?;
-        // Stage persisted inputs until the canonical ledger, mirrors and
-        // project provenance can all be checked. Per-row boot conversion must
-        // not replace these inputs with irreversible lost-credit notices.
-        let mut pending_checkpoint_inputs = Vec::new();
-        let mut ordinary_load_images = Vec::new();
-        let sessions = self.sessions.into_iter().map(|mut persisted| {
-            let control_pause = !persisted.engram_operator_paused
-                && persisted.provider_capacity_retry.is_none()
-                && persisted.queued_prompts.iter().any(QueuedPromptRecord::is_engram_retained)
-                && control_pause_preview_is_owned(&persisted.session.preview);
-            ordinary_load_images.push((persisted.session.id.clone(),
-                persisted.orchestrator_auto_dispatch_blocked, control_pause));
-            if let Some(mirror) = &persisted.engram_checkpoint_operation
-                && !self.engram_session_obligations.checkpoint_operations.iter().any(|operation|
-                    operation.protection.local_session_id == persisted.session.id
-                        && serde_json::to_value(operation).ok() == serde_json::to_value(mirror).ok()) {
-                bail!("Checkpoint mirror lacks its canonical original during restore")
+        // Historical mirrors are validated before any row is converted. They
+        // remain passive JSON and cannot reconstruct dispatch ownership.
+        let sessions = self.sessions.into_iter().map(|persisted| {
+            if let Some(raw) = persisted.historical_control.get("engramCheckpointOperation")
+                .filter(|value| !value.is_null())
+            {
+                let mirror: EngramCheckpointOperation = serde_json::from_value(raw.clone())?;
+                if mirror.protection.local_session_id != persisted.session.id
+                    || !self.engram_session_obligations.checkpoint_operations.iter().any(|operation|
+                        serde_json::to_value(operation).ok().as_ref() == Some(raw))
+                {
+                    bail!("Checkpoint mirror lacks its canonical original during restore");
+                }
             }
-            let pending = std::mem::take(&mut persisted.engram_pending_batches);
-            let record = persisted.into_record()?;
-            pending_checkpoint_inputs.push((record.session.id.clone(), pending));
-            Ok(record)
+            persisted.into_record()
         }).collect::<Result<Vec<_>>>()?;
         let terminal_unbound_registrations: HashSet<_> = self
             .test_run_registrations
@@ -513,8 +506,6 @@ impl PersistedState {
             test_engram_authority_ack_boundary: None,
             #[cfg(test)]
             test_delegation_child_admission_stall: None,
-            #[cfg(test)]
-            test_engram_dispatch_budget: None,
             engram_declared_project_ids: HashSet::new(),
             engram_declaration_checked_project_ids: HashSet::new(),
             engram_project_resets: EngramProjectResetFences::default(),
@@ -531,8 +522,6 @@ impl PersistedState {
             engram_source_sightings: self.engram_source_sightings.into(),
             engram_session_obligations: self.engram_session_obligations,
             engram_import_reconciliation: self.engram_import_reconciliation.into(),
-            engram_confirmed_containment_ids: BTreeSet::new(),
-            engram_pending_checkpoint_receipts: EngramPendingCheckpointReceipts::default(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
             engram_root_reclamation: EngramRootReclamationSchedule::default(),
@@ -646,31 +635,6 @@ impl PersistedState {
             .collect::<HashSet<_>>();
         inner.normalize_local_paths();
         inner.validate_projects_consistent()?;
-        let queue_pause_images = ordinary_load_images.into_iter().filter_map(|(session_id, paused, control_pause)| {
-            let index = inner.find_session_index(&session_id)?;
-            Some(OrdinaryQueueLoadPause { session_id, paused, control_pause,
-                pause_epoch: inner.sessions[index].auto_dispatch_pause_epoch })
-        }).collect();
-        if let DelegationInventoryState::Loading { queue_pause_images: pending, .. } = &mut inner.delegation_inventory {
-            *pending = queue_pause_images;
-        } else {
-            restore_ordinary_queue_load_pauses(&mut inner, queue_pause_images);
-        }
-        for (session_id, batches) in pending_checkpoint_inputs {
-            let Some(index) = inner.find_session_index(&session_id) else { continue };
-            for batch in batches {
-                if pending_checkpoint_batch_owner(&inner, &session_id, &batch).is_some() {
-                    inner.sessions[index].engram.pending_batches.push(batch);
-                } else {
-                    for target in &batch.targets {
-                        let line = engram_batch_member_lost_line(&target.short_ref,
-                            "before Engram's answer named the batch gate's record");
-                        eprintln!("engram> session={session_id} {line}");
-                        inner.sessions[index].engram.set_pending_source_root_line(line);
-                    }
-                }
-            }
-        }
         inner.recover_interrupted_sessions();
         if inner.delegation_inventory_complete() {
             inner.repair_delegation_child_session_links();
@@ -750,12 +714,6 @@ impl PersistedState {
         engram_end_orphaned_work_source_roots(&mut inner.engram_work_source_roots, |named_by| {
             session_ids.contains(named_by)
         });
-        inner.engram_confirmed_containment_ids = inner
-            .engram_session_obligations
-            .all_protections()
-            .filter(|entry| engram_containment_confirmation_materialized(&inner, entry))
-            .map(|entry| entry.id.clone())
-            .collect();
         Ok(inner)
     }
 }
@@ -766,6 +724,16 @@ fn engram_source_root_generation_is_unset(value: &u64) -> bool {
 
 fn session_flag_is_false(value: &bool) -> bool {
     !*value
+}
+
+// Load-only recognition of old queue metadata. These bytes are history, never
+// an admission owner or permission to execute the stored control request.
+fn stored_queue_has_control_history(queued: &QueuedPromptRecord) -> Result<bool> {
+    let raw = serde_json::to_value(queued)?;
+    Ok(raw.get("engram_bind").is_some_and(|value| !value.is_null())
+        || raw.get("engram_evaluate").is_some_and(|value| !value.is_null())
+        || raw["engram_waiting"] == true
+        || raw["engram_interrupted"] == true)
 }
 
 /// Returns whether the same Codex notice identity applies.
@@ -781,6 +749,10 @@ fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionRecord {
+    // Only the writer that committed this captured row may acknowledge it.
+    // The stamp and its incarnation are never stored or restored as proof.
+    #[serde(skip)]
+    source_stamp: Option<PersistSessionWriteStamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     federation_mailbox_binding: Option<FederationMailboxBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -815,7 +787,7 @@ struct PersistedSessionRecord {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     prompt_deliveries: BTreeMap<String, PromptDelivery>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    human_queue_choices: BTreeMap<String, HumanQueuedChoice>,
+    human_queue_choices: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -824,62 +796,21 @@ struct PersistedSessionRecord {
     orchestrator_auto_dispatch_blocked: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     provider_capacity_retry: Option<ProviderCapacityRetry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_routing_token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_open_grant_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_uncertain_grant_id: Option<String>,
-    /// Absent from records written before uncertain begins were recorded, so
-    /// such a record loads as not yet settled and boot recovery keeps
-    /// recovering it until an accepted bind sets this.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    engram_begins_recorded: bool,
-    #[serde(default)]
-    engram_dispatch_generation: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_checkpoint_operation: Option<EngramCheckpointOperation>,
+    /// Original keys of removed control-only fields, retained without live
+    /// tokens, grants, retry schedules or recovery owners.
+    #[serde(flatten)]
+    historical_control: BTreeMap<String, Value>,
     /// One marker per background full gate carried when the record was
     /// written (`engram_carried_checks.rs`). A host restart loses the carried
     /// checks themselves; loading tells each holder its run lost its credit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_carried_launches: Vec<EngramCarriedLaunchMarker>,
-    /// The members a passed batch gate's own record was still to be bound
-    /// to when the record was written (`engram_batch_binds.rs`). Loading
-    /// keeps them owed: Engram replays a committed bind by its key, so
-    /// sending one again never binds twice.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_owed_binds: Vec<EngramOwedBind>,
-    /// Passed batch gates whose checkpoint had not answered when the record
-    /// was written (`engram_batch_binds.rs`). Loading cannot learn the
-    /// gate's record any more, so it tells each member's holder.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_pending_batches: Vec<EngramPendingBatch>,
-    /// A queue head whose delivery was withheld before provider handoff and
-    /// whose authority is settled (`engram_abort_retry.rs`). Read back, it
-    /// was durable, so loading rebuilds its retry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_abort_retry: Option<EngramAbortRetry>,
-    /// Live non-delivery proof never survives restart. Read back
-    /// acknowledged, it becomes the parked-admission retry of its head.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_bind_retry: Option<EngramBindRetry>,
-    /// A parked head whose unknown admission is replayed automatically
-    /// (`engram_admission_retry.rs`). Read back acknowledged, loading
-    /// rebuilds its retry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_admission_retry: Option<EngramAdmissionRetry>,
-    /// The queue head's overall admission budget, kept across retries and
-    /// restarts (`EngramSessionState::begin_preparation_lineage`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_begin_preparation_lineage: Option<EngramBeginPreparationLineage>,
     /// An operator queue pause (`EngramSessionState::operator_paused`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     engram_operator_paused: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_source_observation_gate: Option<EngramSourceObservationGate>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    engram_source_observation_delete_requested: bool,
+    /// Ordinary captured-observation deletion custody, independent of control history.
+    #[serde(default, skip_serializing_if = "session_flag_is_false")]
+    engram_observation_delete_requested: bool,
     /// Immutable observation history survives a host restart; no grant is restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
@@ -911,7 +842,6 @@ fn serialize_persisted_session_view<S: serde::Serializer>(
     let mut projected = session.clone();
     // Provider observations are process-local, not a durable receipt ledger.
     projected.provider_handoffs.clear();
-    projected.prompt_admission_budgets.clear();
     projected.provider_handoff_history = None;
     for index in 0..projected.messages.len() {
         if matches!(projected.messages.get(index), Some(Message::EngramControl { card, .. })
@@ -987,6 +917,7 @@ impl PersistedSessionRecord {
 
     fn clone_without_messages(&self) -> Self {
         Self {
+            source_stamp: self.source_stamp.clone(),
             federation_mailbox_binding: self.federation_mailbox_binding.clone(),
             federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding.clone(),
             federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings.clone(),
@@ -1008,24 +939,10 @@ impl PersistedSessionRecord {
             remote_session_id: self.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked.clone(),
             provider_capacity_retry: self.provider_capacity_retry.clone(),
-            engram_routing_token: self.engram_routing_token.clone(),
-            engram_open_grant_id: self.engram_open_grant_id.clone(),
-            engram_uncertain_grant_id: self.engram_uncertain_grant_id.clone(),
-            engram_begins_recorded: self.engram_begins_recorded.clone(),
-            engram_dispatch_generation: self.engram_dispatch_generation.clone(),
-            engram_checkpoint_operation: self.engram_checkpoint_operation.clone(),
+            historical_control: self.historical_control.clone(),
             engram_carried_launches: self.engram_carried_launches.clone(),
-            engram_owed_binds: self.engram_owed_binds.clone(),
-            engram_pending_batches: self.engram_pending_batches.clone(),
-            engram_abort_retry: self.engram_abort_retry.clone(),
-            engram_bind_retry: self.engram_bind_retry.clone(),
-            engram_admission_retry: self.engram_admission_retry.clone(),
-            engram_begin_preparation_lineage: self.engram_begin_preparation_lineage.clone(),
             engram_operator_paused: self.engram_operator_paused.clone(),
-            engram_source_observation_gate: self.engram_source_observation_gate.clone(),
-            engram_source_observation_delete_requested: self
-                .engram_source_observation_delete_requested
-                .clone(),
+            engram_observation_delete_requested: self.engram_observation_delete_requested,
             engram_runtime_checkpoint: self.engram_runtime_checkpoint.clone(),
             engram_unadmitted_active_turn: self.engram_unadmitted_active_turn.clone(),
             engram_unadmitted_closing_jobs: self.engram_unadmitted_closing_jobs.clone(),
@@ -1047,6 +964,7 @@ impl PersistedSessionRecord {
         session.session_mutation_stamp = None;
 
         Self {
+            source_stamp: Some(PersistSessionWriteStamp::capture(record)),
             active_codex_approval_policy: record.active_codex_approval_policy,
             federation_mailbox_binding: record.federation_mailbox_binding.clone(),
             federation_automatic_mailbox_binding: record.federation_automatic_mailbox_binding.clone(),
@@ -1068,34 +986,20 @@ impl PersistedSessionRecord {
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
             provider_capacity_retry: record.provider_capacity_retry.clone(),
-            engram_routing_token: record.engram.routing_token.clone(),
-            engram_open_grant_id: record.engram.active_grant_id.clone(),
-            engram_uncertain_grant_id: record.engram.uncertain_grant_id.clone(),
-            engram_begins_recorded: record.engram.begins_recorded,
-            engram_dispatch_generation: record.engram.dispatch_generation,
-            engram_checkpoint_operation: record.engram.checkpoint_operation.clone(),
+            historical_control: record.engram.historical_control.clone(),
             engram_carried_launches: record
                 .engram
                 .carried_checks
                 .iter()
                 .map(EngramCarriedCheck::marker)
                 .collect(),
-            engram_owed_binds: record.engram.owed_binds.clone(),
-            engram_pending_batches: record.engram.pending_batches.clone(),
-            engram_abort_retry: record.engram.abort_retry.clone(),
-            engram_bind_retry: record.engram.bind_retry.clone(),
-            engram_source_observation_gate: record.engram.source_observation_gate.clone(),
-            engram_source_observation_delete_requested: record
-                .engram
-                .source_observation_delete_requested,
             engram_runtime_checkpoint: record.engram.runtime_checkpoint.clone(),
             engram_unadmitted_active_turn: record.engram.unadmitted_active_turn.clone(),
             engram_unadmitted_closing_jobs: record.engram.unadmitted_closing_jobs.clone(),
             engram_unadmitted_reports: record.engram.unadmitted_reports.clone(),
             engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
-            engram_admission_retry: record.engram.admission_retry.clone(),
-            engram_begin_preparation_lineage: record.engram.begin_preparation_lineage.clone(),
             engram_operator_paused: record.engram.operator_paused,
+            engram_observation_delete_requested: record.engram.observation_delete_requested,
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
             session,
@@ -1133,15 +1037,16 @@ impl PersistedSessionRecord {
         })?;
         let mut session = self.session;
         session.provider_handoffs.clear();
-        session.prompt_admission_budgets.clear();
         session.provider_handoff_history = None;
         normalize_persisted_session_prompt_history(&mut session);
         validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
         session.session_mutation_stamp = None;
         session.external_session_id = self.external_session_id.clone();
         session.live_activity = None;
-        // No project-reset fence survives a restart (`engram_project_reset_wait.rs`).
-        session.preview = engram_project_reset_wait_preview_after_restart(session.preview);
+        // A saved settings-change preview carries no live reset fence.
+        if session.preview.starts_with("Waiting: Engram project settings are changing") {
+            session.preview = "Ready for a prompt.".to_owned();
+        }
         if session.agent.acp_runtime().is_none() {
             session.model_options.clear();
             session.opencode_effort_options.clear();
@@ -1153,10 +1058,34 @@ impl PersistedSessionRecord {
             session.pending_prompts.clear();
         }
 
-        let recovered_admission = self
-            .queued_prompts
-            .iter()
-            .any(QueuedPromptRecord::has_engram_intent);
+        let mut historical_control_hold = [
+            "engramAbortRetry", "engramBindRetry", "engramAdmissionRetry",
+            "engramBeginPreparationLineage", "engramSourceObservationGate",
+        ].iter().any(|key| self.historical_control.get(*key)
+            .is_some_and(|value| !value.is_null()));
+        for queued in &self.queued_prompts {
+            historical_control_hold |= stored_queue_has_control_history(queued)?;
+        }
+        // A historical operation is not the owner of an ordinary pause.
+        // Only these exact retired presentation cuts identify the last pause
+        // writer. Errors, active/unknown runtimes, operator/resource holds and
+        // unproven older pauses remain held until ordinary explicit Resume.
+        // This is load-only migration evidence, never a live dispatch policy.
+        let retired_pause_owned = historical_control_hold
+            && session.status == SessionStatus::Idle
+            && !self.engram_operator_paused
+            && self.engram_stopped_prompt_id.is_none()
+            && self.provider_capacity_retry.is_none()
+            && !self.prompt_deliveries.values().any(|delivery| matches!(
+                delivery.disposition,
+                PromptDeliveryDisposition::HandingOff | PromptDeliveryDisposition::Ambiguous
+            ))
+            && matches!(session.preview.as_str(),
+                "Engram recovered authorization retained. Resume to recover the exact queued prompt."
+                | "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing."
+                | "Engram settings changed. Authorization retained; cancel or reconcile before continuing.");
+        let ordinary_paused = self.orchestrator_auto_dispatch_blocked && !retired_pause_owned;
+
         // Read back from the durable row, every held entry's content is
         // durable: each hold loads acknowledged, so it holds nothing back and
         // only keeps its still-queued entry standalone.
@@ -1175,7 +1104,6 @@ impl PersistedSessionRecord {
             })
             .collect();
         let mut record = SessionRecord {
-            unmediated_turn_generation: None,
             federation_mailbox_binding: self.federation_mailbox_binding,
             federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding,
             federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings,
@@ -1226,61 +1154,22 @@ impl PersistedSessionRecord {
             #[cfg(windows)]
             retained_dedicated_owners: Vec::new(),
             engram_mcp_runtime_quarantined: false,
-            orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
+            orchestrator_auto_dispatch_blocked: ordinary_paused,
             provider_capacity_retry: self.provider_capacity_retry,
             codex_terminal_identity_unresolved: false,
             engram: EngramSessionState {
-                recovered_admission,
-                routing_token: self.engram_routing_token.clone(),
-                active_grant_id: self.engram_open_grant_id,
-                uncertain_grant_id: self.engram_uncertain_grant_id,
-                begins_recorded: self.engram_begins_recorded,
-                dispatch_generation: self.engram_dispatch_generation,
-                // Flight ownership is process-local. The mandatory ledger,
-                // not a reconstructed live caller, retains dispatch exclusion.
-                checkpoint_in_progress: false,
-                checkpoint_operation: self.engram_checkpoint_operation,
-                checkpoint_status_owner: None,
-                rebind_required: self.engram_routing_token.is_some(),
-                abort_retry: self.engram_abort_retry.clone(),
-                // Sent again after the restart, however long it took.
-                owed_binds: {
-                    let now =
-                        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-                    self.engram_owed_binds
-                        .iter()
-                        .cloned()
-                        .map(|owed| engram_owed_bind_after_load(owed, &now))
-                        .collect()
-                },
-                source_observation_gate: self.engram_source_observation_gate.clone(),
-                source_observation_delete_requested: self
-                    .engram_source_observation_delete_requested,
+                historical_control: self.historical_control,
                 runtime_checkpoint: self.engram_runtime_checkpoint,
                 unadmitted_active_turn: self.engram_unadmitted_active_turn,
                 unadmitted_closing_jobs: self.engram_unadmitted_closing_jobs,
                 unadmitted_reports: self.engram_unadmitted_reports,
                 stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
-                admission_retry: self.engram_admission_retry.clone(),
-                // A saved pending marker proves nothing after a restart: the
-                // begin may have been sent after it was last saved, so a
-                // loaded one is dropped (`engram_begin_preparation_retry.rs`).
-                begin_preparation_lineage: self.engram_begin_preparation_lineage.clone().map(
-                    |mut lineage| {
-                        lineage.pending_grant_id = None;
-                        lineage
-                    },
-                ),
                 operator_paused: self.engram_operator_paused,
+                observation_delete_requested: self.engram_observation_delete_requested,
                 ..EngramSessionState::default()
             },
-            engram_boot_recovery_pending: false,
-            engram_boot_recovery_dispatch_pending: false,
-            engram_boot_recovery_retry_in_progress: false,
-            engram_queue_schedule: EngramQueueSchedule::default(),
             runtime_stop_in_progress: false,
             runtime_stop_owner: None,
-            engram_containment_stop: None,
             runtime_stop_generation: 0,
             auto_dispatch_pause_epoch: 0,
             engram_mcp_revocation_pending: false,
@@ -1290,6 +1179,7 @@ impl PersistedSessionRecord {
             // since the on-disk snapshot so nothing needs to be persisted.
             body_sequence: SessionBodySequence::default(),
             mutation_stamp: 0,
+            persist_incarnation: Arc::new(()),
             prompt_history_mutation_stamp: 0,
             session,
         };
@@ -1304,6 +1194,23 @@ impl PersistedSessionRecord {
         // entry never runs again; this happens before any recovery below
         // reads the queue head.
         settle_prompt_deliveries_after_load(&mut record);
+        for queued in &mut record.queued_prompts {
+            if queued.promoted_message_index.is_some() {
+                queued.promotion_disposition_known = true;
+            } else if !queued.promotion_disposition_known {
+                queued.promoted_message_index = record.message_positions
+                    .get(&queued.pending_prompt.id)
+                    .map(|index| record.message_start_index + index);
+                if queued.promoted_message_index.is_some() || record.message_start_index == 0 {
+                    queued.promotion_disposition_known = true;
+                } else {
+                    // Missing evicted transcript evidence proves no delivery
+                    // disposition. Preserve the head as an ordinary unknown
+                    // hand-off; never replay it as a new user operation.
+                    queued.engram_ordinary_handoff = true;
+                }
+            }
+        }
         // A background full gate carried when the host went down lost its
         // credit: the host could not watch its worktree meanwhile.
         for marker in &self.engram_carried_launches {
@@ -1311,9 +1218,9 @@ impl PersistedSessionRecord {
             eprintln!("engram> session={} {line}", record.session.id);
             record.engram.set_pending_source_root_line(line);
         }
-        // A batch gate's members whose bind was not owed yet: the gate's
-        // record can no longer be learned, so each holder is told; owed
-        // binds load as they were and are sent again (`engram_batch_binds.rs`).
+        // A carried launch's members lost their artifact observation across
+        // restart. Historical owed-bind entries stay in historical_control;
+        // loading never decides, retries or sends them.
         let unbound = self
             .engram_carried_launches
             .iter()
@@ -1322,111 +1229,14 @@ impl PersistedSessionRecord {
                     engram_batch_member_lost_line(member, "before the batch gate settled")
                 })
             })
-            .chain(self.engram_pending_batches.iter().flat_map(|batch| {
-                batch.targets.iter().map(|target| {
-                    engram_batch_member_lost_line(
-                        &target.short_ref,
-                        "before Engram's answer named the batch gate's record",
-                    )
-                })
-            }))
             .collect::<Vec<_>>();
         for line in unbound {
             eprintln!("engram> session={} {line}", record.session.id);
             record.engram.set_pending_source_root_line(line);
         }
-        // Migrate older retained entries only when their transcript position
-        // is still known. Current records explicitly distinguish a definitive
-        // unpromoted disposition from missing legacy evidence; only the latter
-        // must fail closed once earlier transcript positions were evicted.
-        for queued in &mut record.queued_prompts {
-            if queued.engram_ordinary_handoff {
-                queued.engram_interrupted = true;
-                record.engram.recovered_admission = false;
-                record.orchestrator_auto_dispatch_blocked = true;
-                record.session.queue_paused = true;
-            }
-            if queued.promoted_message_index.is_some() {
-                queued.promotion_disposition_known = true;
-            } else if queued.is_engram_retained() && !queued.promotion_disposition_known {
-                queued.promoted_message_index = record
-                    .message_positions
-                    .get(&queued.pending_prompt.id)
-                    .map(|index| record.message_start_index + index);
-                if queued.promoted_message_index.is_some() || record.message_start_index == 0 {
-                    queued.promotion_disposition_known = true;
-                } else {
-                    queued.engram_interrupted = true;
-                    record.engram.recovered_admission = false;
-                    record.orchestrator_auto_dispatch_blocked = true;
-                    record.session.queue_paused = true;
-                }
-            }
-        }
-        // A prepared Engram request can be persisted before the admission
-        // worker parks the queue. Re-establish the explicit-resume barrier
-        // while reconstructing the record, before boot recovery polls child
-        // delegations or settles orchestrator state. Otherwise an unpaused
-        // bind/evaluate snapshot can look like an idle child with no result
-        // and be terminalized before the retained authorization is visible.
-        if record.engram.recovered_admission {
-            record.set_auto_dispatch_blocked(true);
-        }
-        if self.engram_bind_retry.as_ref().is_some_and(|retry| {
-            record
-                .queued_prompts
-                .front()
-                .is_some_and(|head| head.pending_prompt.id == retry.proof.prompt_id)
-        }) {
-            // Even a pre-preparation snapshot has no live phase proof after
-            // restart. Retain the prompt behind the conservative barrier;
-            // preserve existing explicit retained-bind recovery eligibility.
-            record.set_auto_dispatch_blocked(true);
-            if let Some(head) = record.queued_prompts.front_mut() {
-                head.engram_waiting = true;
-            }
-        }
-        // A saved abort record whose acknowledgement was saved too, in exactly
-        // the shape that acknowledgement writes: the head it names is still
-        // in the record's own interrupted hold (no wire intent, not parked,
-        // its transcript position known) and nothing moved the dispatch
-        // generation since the settlement. Its retry is rebuilt; the head
-        // stays interrupted, and the tick admits it when due. Anything else
-        // is dropped and keeps the conservative hold: a record saved before
-        // its acknowledgement (a crash between the settlement write and the
-        // fence), one beside a later hold (a Stop moves the generation), or
-        // one naming another head.
-        let abort_head = record.engram.abort_retry.as_ref().and_then(|retry| {
-            record
-                .queued_prompts
-                .front()
-                .filter(|queued| {
-                    retry.acknowledged
-                        && retry.generation == record.engram.dispatch_generation
-                        && queued.pending_prompt.id == retry.prompt_id
-                        && queued.engram_interrupted
-                        && !queued.engram_waiting
-                        && queued.promotion_disposition_known
-                        && !queued.has_engram_intent()
-                })
-                .map(|_| ())
-        });
-        if abort_head.is_some() {
-            record.engram.abort_retry_acknowledged = true;
-            record.set_auto_dispatch_blocked(true);
-        } else {
-            record.engram.abort_retry = None;
-        }
-        // An acknowledged parked-admission retry, or a bind retry left on the
-        // head it names, is rebuilt while the head is still exactly that
-        // park; anything else keeps the conservative hold.
-        let bind_for_head = self.engram_bind_retry.as_ref().filter(|retry| {
-            record
-                .queued_prompts
-                .front()
-                .is_some_and(|head| head.pending_prompt.id == retry.proof.prompt_id)
-        });
-        rebuild_engram_admission_retry_on_load(&mut record, bind_for_head);
+        // Queue hand-off ambiguity is settled above by the ordinary delivery
+        // owner. Historical control images never replace that settled queue
+        // or rebuild a token, grant, retry or admission barrier.
         sync_codex_thread_state(&mut record);
         sync_pending_prompts(&mut record);
         Ok(record)

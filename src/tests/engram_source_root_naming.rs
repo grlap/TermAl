@@ -5,7 +5,7 @@
 // within its budget, and when the line counts as delivered. Does not own the
 // validation, the end rules or the basis taken on a named root
 // (src/tests/engram_source_roots.rs), or turns measured in a named root
-// (src/tests/engram_turn_observations.rs, whose `ClaimedRoot` fixture this
+// (src/tests/engram_turn_observations.rs, whose `EOCheckedTurn` fixture this
 // child module uses). New module.
 use super::*;
 
@@ -29,13 +29,12 @@ mod unknown_fields;
 #[path = "engram_source_root_off_rebind.rs"]
 mod off_rebind;
 
-impl ClaimedRoot {
+impl EOCheckedTurn {
     /// These reconciliation fixtures script BOTH producer operations. A
     /// status tuple alone cannot invent the canonical run/event carrier.
-    fn reconcile_root_readback(
+    fn canonical_root_readback(
         &self,
         session: &str,
-        token: &str,
         binding: Option<&EngramControlWorkBinding>,
         state: Option<EngramNamedRootState>,
         generation: u64,
@@ -45,7 +44,7 @@ impl ClaimedRoot {
                 .as_ref()
                 .filter(|state| **state != EngramNamedRootState::Unknown)
         {
-            let store = claimed_root_store(self);
+            let store = naming_store(self);
             let local = engram_work_source_root_for_claim(
                 &self.state.inner.lock().unwrap().engram_work_source_roots,
                 &store,
@@ -139,8 +138,18 @@ impl ClaimedRoot {
                 "read_cut":{"feed":{"kind":"run_execution","id":binding.run_id},"position":cut}});
             roots.root_reads.insert(binding.claim_id.clone(), proof);
         }
-        self.state
-            .reconcile_engram_named_root(session, token, binding, state, generation)
+        let (target, mut fence) = {
+            let inner = self.state.inner.lock().unwrap();
+            (AppState::engram_source_root_target_locked(&inner, session)
+                .map_err(EngramTransportError::local_state)?
+                .ok_or_else(|| EngramTransportError::local_state("no current ordinary root reader"))?,
+                EngramRootReadFence::capture(&inner))
+        };
+        fence.generation = generation;
+        self.state.reconcile_engram_named_root_with_route_classified_until(
+            session, binding, state, &fence, Some(&target.connection),
+            self.state.engram_budget_clock().now() + Duration::from_secs(2),
+        ).map_err(EngramRootReconcileFailure::into_transport)
     }
 }
 
@@ -175,17 +184,17 @@ fn partial_root_reader_keeps_progress(interleave_filtered: bool) {
     // from TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK, a deterministic sample
     // sequence that the reader consults only on the real clock (a scripted
     // clock would bypass it and the deadline would never pass).
-    let mut claimed = ClaimedRoot::new_real(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let mut claimed = EOCheckedTurn::idle_real(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     replace_naming_session(&mut claimed, label);
-    claimed.record(|record| record.engram.work_binding = None);
+    claimed.record_mut(|record| record.engram.work_binding = None);
     let original = claimed
         .state
         .inner
@@ -251,7 +260,7 @@ fn partial_root_reader_keeps_progress(interleave_filtered: bool) {
     );
 }
 
-fn resolve_removed_roots_with_one_attempt(claimed: &ClaimedRoot, claim: Option<&str>) {
+fn resolve_removed_roots_with_one_attempt(claimed: &EOCheckedTurn, claim: Option<&str>) {
     struct ClearClock;
     impl Drop for ClearClock {
         fn drop(&mut self) {
@@ -279,14 +288,13 @@ fn resolve_removed_roots_with_one_attempt(claimed: &ClaimedRoot, claim: Option<&
 #[test]
 fn source_root_review_round_six_rejects_a_receipt_for_another_run_and_retries() {
     let label = "receipt-wrong-run";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
-    let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
-    claimed_root_store(&claimed);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let binding = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap());
+    naming_store(&claimed);
     claimed
         .transport
-        .replace_held_claims([Ok(claimed_root_held(label))]);
+        .replace_held_claims([Ok(naming_claim(label))]);
     claimed
         .transport
         .named_roots
@@ -323,11 +331,11 @@ fn source_root_review_round_six_rejects_a_receipt_for_another_run_and_retries() 
         roots.latest.get_mut(&binding.claim_id).unwrap()["position"]["feed"]["id"] =
             json!(binding.run_id);
     }
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     assert_eq!(
@@ -347,12 +355,10 @@ fn source_root_review_round_six_rejects_a_receipt_for_another_run_and_retries() 
 #[test]
 fn source_root_review_round_six_release_read_persists_new_history_and_rolls_back_failure() {
     let label = "learn-released-history";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    prepare_claimed_root_naming(&claimed, label);
-    let store = claimed_root_store(&claimed);
-    let (token, binding) = claimed.record(|record| {
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let store = naming_store(&claimed);
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone().unwrap(),
         )
     });
@@ -370,9 +376,8 @@ fn source_root_review_round_six_release_read_persists_new_history_and_rolls_back
     fs::create_dir_all(&failing_path).unwrap();
     claimed.state.persistence_path = Arc::new(failing_path);
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             Some(&binding),
             read.clone(),
             u64::MAX,
@@ -389,9 +394,8 @@ fn source_root_review_round_six_release_read_persists_new_history_and_rolls_back
     claimed.state.persistence_path = durable_path;
     for _ in 0..2 {
         claimed
-            .reconcile_root_readback(
+            .canonical_root_readback(
                 &claimed.session_id,
-                &token,
                 Some(&binding),
                 read.clone(),
                 u64::MAX,
@@ -414,7 +418,7 @@ fn source_root_review_round_six_release_read_persists_new_history_and_rolls_back
     );
 }
 
-fn replace_naming_session(claimed: &mut ClaimedRoot, label: &str) {
+fn replace_naming_session(claimed: &mut EOCheckedTurn, label: &str) {
     replace_or_unbind_naming_session(claimed, label, true);
 }
 
@@ -442,13 +446,13 @@ fn covering_removed_root_read(journal: &EngramNamedRootJournal, released: bool) 
 #[test]
 fn source_root_review_naming_history_tracks_publication_and_keeps_exact_replay_idempotent() {
     let label = "naming-history-publication";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let named = name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let (store, work_id) = {
@@ -460,11 +464,11 @@ fn source_root_review_naming_history_tracks_publication_and_keeps_exact_replay_i
     };
     let token = || engram_work_naming_token(&claimed.state.inner.lock().unwrap(), &store, &work_id);
     assert_eq!(token().revision, 1);
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     assert_eq!(
@@ -480,11 +484,11 @@ fn source_root_review_naming_history_tracks_publication_and_keeps_exact_replay_i
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&claimed.root),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     assert_eq!(
@@ -508,11 +512,11 @@ fn source_root_review_naming_history_tracks_publication_and_keeps_exact_replay_i
         .unwrap()
         .engram_source_root_generation;
     assert!(pending_generation > named.generation);
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&claimed.root),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     assert_eq!(
@@ -520,15 +524,15 @@ fn source_root_review_naming_history_tracks_publication_and_keeps_exact_replay_i
         2,
         "confirmed publication after allocation advances history"
     );
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&claimed.root),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     assert_eq!(token().revision, 2, "exact replay is idempotent");
-    name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap();
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
     assert_eq!(token().revision, 2, "clear does not reset naming history");
 }
 
@@ -549,18 +553,18 @@ fn source_root_review_removed_root_reclamation_requires_covering_lifecycle_proof
         "persist-failure",
     ] {
         let label = "removed-root-read";
-        let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-        let worktree = add_claimed_root_worktree(&claimed.root);
-        name_root(
+        let mut claimed = EOCheckedTurn::idle(label, true);
+        let worktree = naming_worktree(&claimed.root);
+        request_naming(
             &claimed,
             label,
             Some(&worktree),
-            vec![claimed_root_held(label)],
+            vec![naming_claim(label)],
         )
         .unwrap();
         replace_naming_session(&mut claimed, label);
         // The live same-store reader does not focus or bind the historical claim.
-        claimed.record(|record| record.engram.work_binding = None);
+        claimed.record_mut(|record| record.engram.work_binding = None);
         let before = claimed
             .state
             .inner
@@ -688,20 +692,19 @@ fn source_root_review_removed_root_reclamation_requires_covering_lifecycle_proof
 #[test]
 fn source_root_review_released_removed_sessions_make_progress_past_journal_capacity() {
     let label = "removed-root-capacity";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    prepare_claimed_root_naming(&claimed, label);
-    claimed_root_store(&claimed);
-    let worktree = add_claimed_root_worktree(&claimed.root);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    naming_store(&claimed);
+    let worktree = naming_worktree(&claimed.root);
     let mut store_work = None;
     for sequence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
-        let mut held = claimed_root_held(label);
+        let mut held = naming_claim(label);
         let binding = held.items[0].control_binding.as_mut().unwrap();
         binding.claim_id = format!("removed-claim-{sequence}");
         binding.run_id = format!("removed-run-{sequence}");
         binding.root_execution_id = format!("removed-execution-{sequence}");
         let binding = binding.clone();
         held.items[0].claim_id = binding.claim_id.clone();
-        claimed.record(|record| {
+        claimed.record_mut(|record| {
             record.engram.work_binding = Some(binding.clone());
             record.engram.named_root = None;
         });
@@ -752,7 +755,7 @@ fn source_root_review_released_removed_sessions_make_progress_past_journal_capac
             .insert(journal.claim_id.clone(), released_read);
         replace_naming_session(&mut claimed, label);
     }
-    claimed.record(|record| record.engram.work_binding = None);
+    claimed.record_mut(|record| record.engram.work_binding = None);
     claimed
         .state
         .resolve_removed_engram_roots(&claimed.session_id, None, Duration::from_secs(2));
@@ -774,8 +777,8 @@ fn source_root_review_released_removed_sessions_make_progress_past_journal_capac
     );
 }
 
-fn replace_or_unbind_naming_session(claimed: &mut ClaimedRoot, label: &str, remove: bool) {
-    let project = claimed.record(|record| record.session.project_id.clone().unwrap());
+fn replace_or_unbind_naming_session(claimed: &mut EOCheckedTurn, label: &str, remove: bool) {
+    let project = claimed.record_mut(|record| record.session.project_id.clone().unwrap());
     let successor =
         create_test_project_session(&claimed.state, Agent::Codex, &project, &claimed.root);
     {
@@ -784,12 +787,17 @@ fn replace_or_unbind_naming_session(claimed: &mut ClaimedRoot, label: &str, remo
         if remove {
             inner.remove_session_at(old);
         } else {
-            inner.sessions[old].engram.routing_token = None;
+            inner.sessions[old].session.project_id = None;
             inner.sessions[old].engram.work_binding = None;
         }
     }
     claimed.session_id = successor;
-    prepare_claimed_root_naming(claimed, label);
+    let binding = test_control_work_binding(&format!("eo-check-{label}"), 1);
+    claimed.record_mut(|record| record.engram.work_binding = Some(binding.clone()));
+    claimed.transport.enable_named_roots(&claimed.session_id, &binding);
+    claimed.transport.set_current_work_binding(Some(binding));
+    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .work_session_read_reply = Some(Ok(ordinary_naming_reply(claimed)));
 }
 
 #[test]
@@ -816,15 +824,14 @@ fn source_root_orphaned_explicit_clear_recovers_without_reassigning_its_reporter
 
 fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool) {
     let label = "orphaned-intent-recovery";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     if cleanup {
-        name_root(
+        request_naming(
             &claimed,
             label,
             Some(&worktree),
-            vec![claimed_root_held(label)],
+            vec![naming_claim(label)],
         )
         .unwrap();
         if explicit_clear {
@@ -836,7 +843,7 @@ fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool
                 .as_mut()
                 .unwrap()
                 .lose_next_reply = true;
-            name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap_err();
+            request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap_err();
         } else {
             // Only a real restore with the naming session absent queues this reason.
             let encoded = {
@@ -875,11 +882,11 @@ fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool
             .as_mut()
             .unwrap()
             .lose_next_reply = true;
-        name_root(
+        request_naming(
             &claimed,
             label,
             Some(&worktree),
-            vec![claimed_root_held(label)],
+            vec![naming_claim(label)],
         )
         .unwrap_err();
     }
@@ -901,9 +908,8 @@ fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool
         }
     );
     replace_or_unbind_naming_session(&mut claimed, label, remove);
-    let (token, binding) = claimed.record(|record| {
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
         )
     });
@@ -920,9 +926,8 @@ fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool
         .insert(binding.as_ref().unwrap().claim_id.clone());
     for unknown in [None, Some(EngramNamedRootState::Unknown)] {
         let omitted = unknown.is_none();
-        let result = claimed.reconcile_root_readback(
+        let result = claimed.canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             unknown,
             u64::MAX,
@@ -964,11 +969,11 @@ fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool
         .filter(|r| r.request["operation"] == "named_root_bind")
         .count();
     let read_started = chrono::Utc::now();
-    let recovery = name_root(
+    let recovery = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     let read_finished = chrono::Utc::now();
@@ -1013,11 +1018,11 @@ fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool
         },
         "a covering Ended proof establishes absence; a Bound root without a local selection remains withheld"
     );
-    let recovered = name_root(
+    let recovered = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     assert!(recovered.generation > original.root.generation);
@@ -1040,9 +1045,8 @@ fn source_root_orphaned_intent(cleanup: bool, remove: bool, explicit_clear: bool
 #[test]
 fn source_root_stale_read_cannot_retire_an_orphan_or_replace_a_newer_selection() {
     let label = "orphan-stale-read";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     claimed
         .transport
         .named_roots
@@ -1051,11 +1055,11 @@ fn source_root_stale_read_cannot_retire_an_orphan_or_replace_a_newer_selection()
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     let original = claimed
@@ -1068,9 +1072,8 @@ fn source_root_stale_read_cannot_retire_an_orphan_or_replace_a_newer_selection()
         .clone()
         .unwrap();
     replace_naming_session(&mut claimed, label);
-    let (token, binding) = claimed.record(|record| {
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
         )
     });
@@ -1109,9 +1112,8 @@ fn source_root_stale_read_cannot_retire_an_orphan_or_replace_a_newer_selection()
         }),
     ] {
         claimed
-            .reconcile_root_readback(
+            .canonical_root_readback(
                 &claimed.session_id,
-                &token,
                 binding.as_ref(),
                 state,
                 original.root.generation,
@@ -1135,9 +1137,8 @@ fn source_root_stale_read_cannot_retire_an_orphan_or_replace_a_newer_selection()
 #[test]
 fn source_root_orphan_read_persistence_failure_retains_the_exact_retry_intent() {
     let label = "orphan-persist-failure";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     claimed
         .transport
         .named_roots
@@ -1146,11 +1147,11 @@ fn source_root_orphan_read_persistence_failure_retains_the_exact_retry_intent() 
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     let original = claimed
@@ -1161,9 +1162,8 @@ fn source_root_orphan_read_persistence_failure_retains_the_exact_retry_intent() 
         .engram_named_root_journal[0]
         .clone();
     replace_naming_session(&mut claimed, label);
-    let (token, binding) = claimed.record(|record| {
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
         )
     });
@@ -1173,9 +1173,8 @@ fn source_root_orphan_read_persistence_failure_retains_the_exact_retry_intent() 
     claimed.state.persistence_path = Arc::new(failing_path);
     assert!(
         claimed
-            .reconcile_root_readback(
+            .canonical_root_readback(
                 &claimed.session_id,
-                &token,
                 binding.as_ref(),
                 Some(EngramNamedRootState::None),
                 u64::MAX
@@ -1197,9 +1196,8 @@ fn source_root_orphan_read_persistence_failure_retains_the_exact_retry_intent() 
     );
     claimed.state.persistence_path = durable_path;
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(EngramNamedRootState::None),
             u64::MAX,
@@ -1217,90 +1215,44 @@ fn source_root_orphan_read_persistence_failure_retains_the_exact_retry_intent() 
 }
 
 #[test]
-fn source_root_unknown_at_checkpoint_withholds_previously_finished_check_evidence() {
-    let label = "unknown-at-checkpoint";
-    let (claimed, worktree, token) = named_root_turn(label, true);
-    claimed.state.note_engram_command_started(
-        &claimed.session_id,
-        &EngramObservationProvenance::Ambient,
-        "checked-before-unknown",
-        Some("cargo test"),
-        Some(worktree.to_str().unwrap()),
-    );
-    claimed.state.note_engram_command_finished(
-        &claimed.session_id,
-        &EngramObservationProvenance::Ambient,
-        "checked-before-unknown",
-        "cargo test",
-        "test result: ok. 1 passed",
-        Some(EngramCommandExit::Code(0)),
-    );
-    let captures = claimed.record(|record| {
-        record
-            .engram
-            .active_turn_checks
-            .iter()
-            .flat_map(|check| {
-                std::iter::once(check.start_basis.clone())
-                    .chain(check.end.as_ref().map(|end| end.end_basis.clone()))
-            })
-            .collect::<Vec<_>>()
+fn ordinary_finished_check_facts_do_not_override_an_unknown_root() {
+    let label = "ordinary-check-before-unknown";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("Observe the ordinary check.");
+    let mut recorder = claimed.recorder();
+    let cwd = worktree.to_string_lossy();
+    recorder.command_started_in("checked-before-unknown", "cargo test",
+        Some("cargo test"), Some(&cwd)).unwrap();
+    recorder.command_completed_with_exit("checked-before-unknown", "cargo test",
+        "test result: ok. 1 passed", CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    claimed.wait_for_snapshots();
+    let binding = claimed.record_mut(|record| {
+        assert_eq!(record.engram.active_turn_checks.len(), 1);
+        assert!(record.engram.active_turn_checks[0].end.is_some());
+        record.engram.work_binding.clone().unwrap()
     });
-    assert_eq!(
-        captures.len(),
-        2,
-        "the successful check was captured before authority changed"
-    );
-    for capture in captures {
-        assert!(
-            capture
-                .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
-                .flatten()
-                .is_some()
-        );
-    }
-    claimed.record(|record| record.engram.named_root = Some(EngramNamedRootState::Unknown));
-    claimed
-        .state
-        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &token)
-        .unwrap();
-    let checkpoint = claimed
-        .transport
-        .requests()
-        .into_iter()
-        .find(|request| request.request["operation"] == "turn_checkpoint")
-        .unwrap()
-        .request;
-    assert!(
-        checkpoint
-            .get("verification_evidence")
-            .is_none_or(|value| value.as_array().is_some_and(Vec::is_empty)),
-        "{checkpoint}"
-    );
-    assert!(
-        checkpoint["observations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|observation| observation.get("source_basis").is_none_or(Value::is_null)),
-        "{checkpoint}"
-    );
+    claimed.canonical_root_readback(&claimed.session_id, Some(&binding),
+        Some(EngramNamedRootState::Unknown), u64::MAX).unwrap();
+    assert_eq!(claimed.state.engram_turn_root_capture(&claimed.session_id), EngramRootCapture::Unconfirmed);
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }
 
 #[test]
 fn source_root_review_normalized_wire_timestamp_preserves_the_binding_and_intent() {
     let label = "wire-time-normalization";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let named = name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let millis = "2026-01-01T00:00:00.000Z";
-    let (token, binding, event) = {
+    let (binding, event) = {
         let mut inner = claimed.state.inner.lock().unwrap();
         inner.engram_work_source_roots[0].named_at = millis.to_owned();
         let event = &mut inner.engram_named_root_journal[0]
@@ -1323,7 +1275,6 @@ fn source_root_review_normalized_wire_timestamp_preserves_the_binding_and_intent
             named_at: millis.to_owned(),
         });
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
             event,
         )
@@ -1338,9 +1289,8 @@ fn source_root_review_normalized_wire_timestamp_preserves_the_binding_and_intent
     let remote: EngramNamedRootState = serde_json::from_value(wire).unwrap();
     assert!(engram_root_event_matches_state(&event, Some(&remote)));
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(remote),
             u64::MAX,
@@ -1353,18 +1303,18 @@ fn source_root_review_normalized_wire_timestamp_preserves_the_binding_and_intent
             ..
         }
     ));
-    let repeated = name_root(
+    let repeated = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     assert_eq!(
         repeated.generation, named.generation,
         "same instant must keep the name"
     );
-    name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap();
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
     let events = claimed.transport.requests();
     let clear = events
         .iter()
@@ -1380,9 +1330,8 @@ fn source_root_review_normalized_wire_timestamp_preserves_the_binding_and_intent
 #[test]
 fn source_root_review_missing_retry_normalizes_dot_steps() {
     let label = "missing-root-dot-retry";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     claimed
         .transport
         .named_roots
@@ -1391,19 +1340,19 @@ fn source_root_review_missing_retry_normalizes_dot_steps() {
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     fs::rename(worktree.join(".git"), worktree.join("saved-git-entry")).unwrap();
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree.join("missing/../.")),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     assert!(
@@ -1424,168 +1373,49 @@ fn source_root_review_missing_retry_normalizes_dot_steps() {
 }
 
 #[test]
-fn source_root_review_begin_without_readback_budget_retains_grant_without_evidence() {
-    source_root_review_begin_readback_unknown(false);
+fn source_root_ordinary_reader_without_budget_preserves_uncertainty() {
+    source_root_ordinary_readback_failure(false);
 }
 
 #[test]
-fn source_root_review_begin_failed_readback_retains_grant_without_evidence() {
-    source_root_review_begin_readback_unknown(true);
+fn source_root_ordinary_reader_failure_preserves_uncertainty() {
+    source_root_ordinary_readback_failure(true);
 }
 
-fn source_root_review_begin_readback_unknown(fail_read: bool) {
-    let label = "begin-root-readback-timeout";
-    let (claimed, _, runtime_token) = named_root_turn(label, true);
-    let (target, binding, token, grant) = {
-        let inner = claimed.state.inner.lock().unwrap();
-        let target = AppState::engram_binding_target_for_session_shape_locked(
-            &inner,
-            &claimed.session_id,
-            true,
-        )
-        .unwrap()
-        .unwrap();
-        let record = &inner.sessions[inner.find_session_index(&claimed.session_id).unwrap()];
-        (
-            target.clone(),
-            record.engram.work_binding.clone(),
-            target.routing_token.clone().unwrap(),
-            record.engram.active_grant_id.clone().unwrap(),
-        )
-    };
-    let guard = claimed
-        .state
-        .guard_engram_root_read_until(
-            &target,
-            binding.as_ref(),
-            target.budget_clock.now() + DEADLOCK_GUARD,
-        )
-        .unwrap();
+fn source_root_ordinary_readback_failure(fail_read: bool) {
+    let label = "ordinary-source-readback-failure";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(), &claimed.session_id).unwrap().unwrap();
+    let binding = target.work_binding.as_ref().unwrap();
+    let clock = claimed.state.engram_budget_clock();
+    let deadline = clock.now() + Duration::from_secs(2);
+    let guard = claimed.state.guard_engram_root_read_until(&target, Some(binding), deadline).unwrap().unwrap();
+    assert!(guard.still_withholding(&claimed.state.inner.lock().unwrap()));
+    if fail_read {
+        claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+            .root_read_failures.insert(binding.claim_id.clone());
+    }
     let before = claimed.transport.requests().len();
-    claimed
-        .transport
-        .named_roots
-        .lock()
-        .unwrap()
-        .as_mut()
-        .unwrap()
-        .fail_next_status = fail_read;
-    claimed
-        .state
-        .reconcile_engram_begin_root_until(
-            &target,
-            &token,
-            binding.as_ref(),
-            Some(EngramNamedRootState::None),
-            target.budget_clock.now()
-                + if fail_read {
-                    Duration::from_secs(1)
-                } else {
-                    Duration::ZERO
-                },
-            guard,
-            None,
-        )
-        .unwrap();
-    assert_eq!(
-        claimed.transport.requests().len(),
-        before + usize::from(fail_read)
-    );
-    assert_eq!(
-        claimed.record(|r| r.engram.active_grant_id.clone()),
-        Some(grant.clone())
-    );
-    assert_eq!(
-        claimed.state.engram_root_capture(&claimed.session_id),
-        EngramRootCapture::Unconfirmed
-    );
-    claimed
-        .state
-        .record_engram_turn_start_basis_off_lock(&claimed.session_id, &grant);
-    assert!(claimed.record(|r| r.engram.opening_diagnostic.is_some()));
-    assert_eq!(
-        claimed.state.engram_turn_root_capture(&claimed.session_id),
-        EngramRootCapture::Unconfirmed
-    );
-    // A later readback must not make this turn's previously withheld checks creditable.
-    let recovered = serde_json::from_value(
-        claimed
-            .transport
-            .named_roots
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .state(&claimed.session_id),
-    )
-    .unwrap();
-    claimed
-        .reconcile_root_readback(
-            &claimed.session_id,
-            &token,
-            binding.as_ref(),
-            Some(recovered),
-            u64::MAX,
-        )
-        .unwrap();
-    assert_eq!(
-        claimed.state.engram_turn_root_capture(&claimed.session_id),
-        EngramRootCapture::Unconfirmed
-    );
-    let observation = finish_claimed_turn(&claimed, &runtime_token);
-    assert!(observation.get("source_basis").is_none());
-    let cached = claimed
-        .state
-        .cached_engram_turn_report(&claimed.session_id, &grant);
-    assert!(cached.observations.iter().all(|o| o.source_basis.is_none()));
-    assert!(cached.verification_evidence.is_empty());
-    // Admission refreshes the work binding on every turn; keep the same claim.
-    claimed
-        .transport
-        .work_bindings
-        .lock()
-        .unwrap()
-        .push_back(Ok(binding.clone()));
-    claimed.transport.responses.lock().unwrap().extend([
-        grant_reply("later-confirmed-grant"),
-        begin_reply("later-confirmed-grant"),
-        checkpoint_reply("later-confirmed-grant"),
-    ]);
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).unwrap();
-    assert_eq!(
-        claimed.record(|r| r.engram.active_grant_id.clone()),
-        Some("later-confirmed-grant".to_owned()),
-        "the second admission must begin"
-    );
-    let _ = received_prompt(&claimed);
-    assert!(
-        claimed.record(|r| r.engram.active_turn_start_basis.is_some()),
-        "the next admitted turn refreshes authority instead of inheriting Unknown"
-    );
-    claimed
-        .state
-        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &runtime_token)
-        .unwrap();
-    let requests = claimed.transport.requests();
-    let later = requests
-        .iter()
-        .rev()
-        .find(|request| request.request["operation"] == "turn_checkpoint")
-        .unwrap();
-    assert_eq!(later.request["grant_id"], "later-confirmed-grant");
-    assert!(
-        later.request["observations"][0]
-            .get("source_basis")
-            .is_some()
-    );
+    let read = claimed.state.read_engram_authority_fact_until(&target, binding,
+        if fail_read { deadline } else { clock.now() });
+    assert!(read.is_err());
+    if !fail_read { assert_eq!(claimed.transport.requests().len(), before, "an expired budget sends nothing"); }
+    assert_eq!(claimed.state.engram_root_capture(&claimed.session_id), EngramRootCapture::Unconfirmed);
+    let inner = claimed.state.inner.lock().unwrap();
+    assert_eq!(inner.engram_work_source_roots[0].generation, named.generation);
+    assert!(engram_authority_work_unresolved(&inner, &guard.store, &binding.work_id));
+    drop(inner);
+    assert_ordinary_turn_has_no_native_requests(&claimed);
 }
 
 #[test]
 fn source_root_waits_for_the_real_writer_before_transport_and_before_success() {
     let label = "binding-writer-fences";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     let (tx, rx) = std::sync::mpsc::channel();
     claimed.state.persist_tx = tx;
     let state = claimed.state.clone();
@@ -1594,11 +1424,11 @@ fn source_root_waits_for_the_real_writer_before_transport_and_before_success() {
     let mut batch = PersistFenceBatch::default();
     let mut cache = SqlitePersistConnectionCache::new();
     let task = std::thread::spawn(move || {
-        let result = name_root(
+        let result = request_naming(
             &claimed,
             label,
             Some(&worktree),
-            vec![claimed_root_held(label)],
+            vec![naming_claim(label)],
         );
         (claimed, result)
     });
@@ -1620,7 +1450,7 @@ fn source_root_waits_for_the_real_writer_before_transport_and_before_success() {
         &mut batch,
     )
     .unwrap();
-    receive_naming_authority_fence(&rx, &mut batch, &task);
+    receive_prepared_naming_intent(&state, &rx, &mut batch, &mut cache, &task);
     assert!(
         !transport
             .requests()
@@ -1720,22 +1550,48 @@ fn receive_naming_authority_fence<T>(
     }
 }
 
+// Identity and canonical reads can each prepare an authority image. Select
+// the actual staged intent, acknowledging only the preceding empty images.
+fn receive_prepared_naming_intent<T>(
+    state: &AppState,
+    rx: &std::sync::mpsc::Receiver<PersistRequest>,
+    batch: &mut PersistFenceBatch,
+    cache: &mut SqlitePersistConnectionCache,
+    task: &std::thread::JoinHandle<T>,
+) {
+    loop {
+        receive_naming_authority_fence(rx, batch, task);
+        let image = match &batch.pending[0].target {
+            PersistFenceTarget::EngramWorkAuthority(image) => image,
+            _ => panic!("naming must request an exact authority-image fence"),
+        };
+        if image.journals.iter().any(|journal| journal.pending.is_some()) {
+            assert_eq!(image.history.transition.as_ref().unwrap().phase,
+                EngramAuthorityPhase::Prepared);
+            return;
+        }
+        assert!(image.journals.iter().all(|journal| journal.confirmed.is_none()),
+            "a completed event is not a preparatory guard");
+        let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
+        persist_delta_with_fences(cache, state.persistence_path.as_path(), &delta, batch).unwrap();
+    }
+}
+
 #[test]
 fn source_root_writer_failure_keeps_the_intent_and_sends_no_binding() {
     let label = "binding-writer-failure";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     let (tx, rx) = std::sync::mpsc::channel();
     claimed.state.persist_tx = tx;
     let state = claimed.state.clone();
     let transport = claimed.transport.clone();
     let task = std::thread::spawn(move || {
-        let result = name_root(
+        let result = request_naming(
             &claimed,
             label,
             Some(&worktree),
-            vec![claimed_root_held(label)],
+            vec![naming_claim(label)],
         );
         (claimed, result)
     });
@@ -1752,7 +1608,7 @@ fn source_root_writer_failure_keeps_the_intent_and_sends_no_binding() {
         &mut batch,
     )
     .unwrap();
-    receive_naming_authority_fence(&rx, &mut batch, &task);
+    receive_prepared_naming_intent(&state, &rx, &mut batch, &mut cache, &task);
     batch.fail(PersistFenceError::WriteFailed("disk failure".to_owned()));
     let (claimed, result) = task.join().unwrap();
     assert!(
@@ -1775,9 +1631,8 @@ fn source_root_writer_failure_keeps_the_intent_and_sends_no_binding() {
 #[test]
 fn source_root_missing_after_a_lost_reply_replays_then_queues_the_exact_cleanup() {
     let label = "binding-lost-then-missing";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     claimed
         .transport
         .named_roots
@@ -1786,19 +1641,19 @@ fn source_root_missing_after_a_lost_reply_replays_then_queues_the_exact_cleanup(
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     fs::rename(worktree.join(".git"), worktree.join("saved-git-entry")).unwrap();
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     assert!(error.message.contains("root_invalid end is queued"));
@@ -1843,96 +1698,60 @@ fn source_root_missing_after_a_lost_reply_replays_then_queues_the_exact_cleanup(
 }
 
 #[test]
-fn a_source_root_clear_keeps_the_closing_turns_original_named_generation() {
-    let label = "binding-clear-turn-provenance";
-    let (claimed, _worktree, runtime_token) = named_root_turn(label, true);
-    let generation = claimed.record(|record| {
-        record
-            .engram
-            .active_turn_source_root
-            .as_ref()
-            .unwrap()
-            .generation
+fn a_source_root_clear_keeps_the_ordinary_turns_original_named_generation() {
+    let label = "ordinary-clear-provenance";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("Observe the original named root.");
+    let opening = claimed.record_mut(|record| record.engram.observed_opening().unwrap().clone());
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
+    claimed.record_mut(|record| {
+        assert_eq!(record.engram.observed_opening().unwrap().provenance, opening.provenance);
+        let root = record.engram.observed_source_root().unwrap();
+        assert_eq!(root.generation, named.generation);
+        assert!(root.sealed_revision.is_some());
     });
-    name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap();
-    let observation = finish_claimed_turn(&claimed, &runtime_token);
-    assert_eq!(
-        observation["source_basis"]["source_root_generation"],
-        generation
-    );
-    assert_eq!(
-        observation["source_basis"]["source_root_state"], "named",
-        "clearing must not retroactively turn the running turn's capture into an ended-workdir capture"
-    );
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }
 
 #[test]
-fn a_stale_source_root_begin_receipt_uses_fresh_status_before_removing_a_later_name() {
-    let label = "binding-replayed-begin";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let named = name_root(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![claimed_root_held(label)],
-    )
-    .unwrap();
-    let (target, binding, token) = {
-        let inner = claimed.state.inner.lock().unwrap();
-        let target = AppState::engram_binding_target_for_session_shape_locked(
-            &inner,
-            &claimed.session_id,
-            true,
-        )
-        .unwrap()
-        .unwrap();
-        let index = inner.find_session_index(&claimed.session_id).unwrap();
-        (
-            target.clone(),
-            inner.sessions[index].engram.work_binding.clone(),
-            target.routing_token.clone().unwrap(),
-        )
-    };
+fn a_stale_root_projection_cannot_remove_a_later_canonically_named_root() {
+    let label = "ordinary-stale-projection";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(), &claimed.session_id).unwrap().unwrap();
+    let fence = EngramRootReadFence::capture(&claimed.state.inner.lock().unwrap());
     let before = claimed.transport.requests().len();
-    claimed
-        .state
-        .reconcile_engram_begin_root(
-            &target,
-            &token,
-            binding.as_ref(),
-            Some(EngramNamedRootState::None),
-            Duration::from_secs(1),
-        )
-        .unwrap();
-    let requests = claimed.transport.requests();
-    assert_eq!(requests.len(), before + 2);
-    assert_eq!(requests[before].request["operation"], "session_status");
-    assert_eq!(requests[before + 1].request["operation"], "named_root_read");
-    let inner = claimed.state.inner.lock().unwrap();
-    assert_eq!(
-        inner.engram_work_source_roots[0].generation, named.generation,
-        "a replayed pre-name begin receipt is not current lifecycle evidence"
-    );
+    claimed.state.reconcile_engram_named_root_with_route_classified_until(
+        &claimed.session_id, target.work_binding.as_ref(), Some(EngramNamedRootState::None),
+        &fence, Some(&target.connection), claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+    ).unwrap_or_else(|failure| panic!("canonical root reconciliation failed: {}", failure.into_transport()));
+    assert_eq!(claimed.transport.requests()[before..].iter()
+        .filter(|request| request.request["operation"] == "named_root_read").count(), 1);
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    assert_eq!(claimed.state.inner.lock().unwrap().engram_work_source_roots[0].generation, named.generation,
+        "only the current canonical read can displace the root; a stale tuple cannot");
 }
 
 #[test]
 fn source_root_reconciliation_persistence_failure_withholds_until_repaired() {
     let label = "binding-reconcile-persist";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    let (token, binding, roots) = {
+    let (binding, roots) = {
         let inner = claimed.state.inner.lock().unwrap();
         let index = inner.find_session_index(&claimed.session_id).unwrap();
         (
-            inner.sessions[index].engram.routing_token.clone().unwrap(),
             inner.sessions[index].engram.work_binding.clone(),
             inner.engram_work_source_roots.clone(),
         )
@@ -1943,9 +1762,8 @@ fn source_root_reconciliation_persistence_failure_withholds_until_repaired() {
     claimed.state.persistence_path = Arc::new(failing_path);
     assert!(
         claimed
-            .reconcile_root_readback(
+            .canonical_root_readback(
                 &claimed.session_id,
-                &token,
                 binding.as_ref(),
                 Some(EngramNamedRootState::None),
                 u64::MAX
@@ -1962,9 +1780,8 @@ fn source_root_reconciliation_persistence_failure_withholds_until_repaired() {
     );
     claimed.state.persistence_path = durable_path;
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(EngramNamedRootState::None),
             u64::MAX,
@@ -1983,19 +1800,16 @@ fn source_root_reconciliation_persistence_failure_withholds_until_repaired() {
 
 #[test]
 fn source_root_readback_requires_durable_guards_and_keeps_known_history_idempotent() {
-    let claimed = ClaimedRoot::new_scripted("binding-readback-owner", Vec::new());
-    prepare_claimed_root_naming(&claimed, "binding-readback-owner");
-    let store = claimed_root_store(&claimed);
-    let (token, binding) = claimed.record(|record| {
+    let claimed = EOCheckedTurn::idle("binding-readback-owner", true);
+    let store = naming_store(&claimed);
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone().unwrap(),
         )
     });
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             Some(&binding),
             Some(EngramNamedRootState::Unknown),
             u64::MAX,
@@ -2017,9 +1831,8 @@ fn source_root_readback_requires_durable_guards_and_keeps_known_history_idempote
         named_at: "2026-01-01T00:00:00Z".to_owned(),
     });
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             Some(&binding),
             bound.clone(),
             u64::MAX,
@@ -2032,7 +1845,7 @@ fn source_root_readback_requires_durable_guards_and_keeps_known_history_idempote
     );
     assert_eq!(named.revision, 1);
     claimed
-        .reconcile_root_readback(&claimed.session_id, &token, Some(&binding), bound, u64::MAX)
+        .canonical_root_readback(&claimed.session_id, Some(&binding), bound, u64::MAX)
         .unwrap();
     assert_eq!(
         engram_work_naming_token(
@@ -2107,13 +1920,13 @@ fn source_root_control_phases_share_the_remaining_allowance_and_reject_late_repl
 #[test]
 fn newer_source_root_readback_cannot_be_stamped_with_the_old_journal_generation() {
     let label = "binding-newer-provenance";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let named = name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let basis = engram_execution_source_basis(&worktree).unwrap();
@@ -2148,14 +1961,13 @@ fn newer_source_root_readback_cannot_be_stamped_with_the_old_journal_generation(
 #[test]
 fn source_root_staging_failure_sends_nothing_and_retains_the_same_retry_intent() {
     let label = "binding-staging-failure";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
-    name_root(
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let (binding, mut root) = {
@@ -2193,11 +2005,11 @@ fn source_root_staging_failure_sends_nothing_and_retains_the_same_retry_intent()
     let failing_path = claimed.root.join("persistence-is-directory");
     fs::create_dir_all(&failing_path).unwrap();
     claimed.state.persistence_path = Arc::new(failing_path);
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     assert!(
@@ -2224,11 +2036,11 @@ fn source_root_staging_failure_sends_nothing_and_retains_the_same_retry_intent()
         .clone()
         .unwrap();
     claimed.state.persistence_path = durable_path;
-    let named = name_root(
+    let named = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let inner = claimed.state.inner.lock().unwrap();
@@ -2246,9 +2058,8 @@ fn source_root_staging_failure_sends_nothing_and_retains_the_same_retry_intent()
 #[test]
 fn a_lost_receipt_replayed_after_release_cannot_revive_the_old_generation() {
     let label = "binding-released-replay";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     claimed
         .transport
         .named_roots
@@ -2257,11 +2068,11 @@ fn a_lost_receipt_replayed_after_release_cannot_revive_the_old_generation() {
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     let (claim, generation) = {
@@ -2278,11 +2089,11 @@ fn a_lost_receipt_replayed_after_release_cannot_revive_the_old_generation() {
         .unwrap()
         .released
         .insert(claim, generation as i64);
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     assert!(
@@ -2299,11 +2110,11 @@ fn a_lost_receipt_replayed_after_release_cannot_revive_the_old_generation() {
             .engram_work_source_roots
             .is_empty()
     );
-    let next = name_root(
+    let next = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     assert!(next.generation > generation);
@@ -2328,35 +2139,30 @@ fn a_lost_receipt_replayed_after_release_cannot_revive_the_old_generation() {
     );
     assert_eq!(
         requests[replay + 1]["run_id"],
-        test_control_work_binding(&format!("turn-observation-{label}"), 1).run_id
+        test_control_work_binding(&format!("eo-check-{label}"), 1).run_id
     );
 }
 
 #[test]
 fn source_root_review_delayed_read_cannot_overwrite_a_same_generation_end() {
     let label = "review-same-generation-read";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    let (fence, connection, token, binding, earlier) = {
+    let (fence, connection, binding, earlier) = {
         let inner = claimed.state.inner.lock().unwrap();
-        let target = AppState::engram_binding_target_for_session_shape_locked(
-            &inner,
-            &claimed.session_id,
-            true,
-        )
+        let target = AppState::engram_source_root_target_locked(&inner, &claimed.session_id)
         .unwrap()
         .unwrap();
         (
             EngramRootReadFence::capture(&inner),
             target.connection,
-            target.routing_token.unwrap(),
             target.work_binding,
             inner.sessions[inner.find_session_index(&claimed.session_id).unwrap()]
                 .engram
@@ -2364,7 +2170,7 @@ fn source_root_review_delayed_read_cannot_overwrite_a_same_generation_end() {
                 .clone(),
         )
     };
-    name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap();
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
     let settled = claimed
         .state
         .inner
@@ -2374,15 +2180,11 @@ fn source_root_review_delayed_read_cannot_overwrite_a_same_generation_end() {
         .clone();
     claimed
         .state
-        .reconcile_engram_named_root_with_fence(
-            &claimed.session_id,
-            &token,
-            binding.as_ref(),
-            earlier,
-            &fence,
-            Some(&connection),
+        .reconcile_engram_named_root_with_route_classified_until(
+            &claimed.session_id, binding.as_ref(), earlier, &fence, Some(&connection),
+            claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
         )
-        .unwrap();
+        .unwrap_or_else(|failure| panic!("canonical root reconciliation failed: {}", failure.into_transport()));
     let inner = claimed.state.inner.lock().unwrap();
     assert_eq!(inner.engram_named_root_journal, settled);
     assert!(inner.engram_work_source_roots.is_empty());
@@ -2396,20 +2198,21 @@ fn source_root_review_delayed_read_cannot_overwrite_a_same_generation_end() {
 }
 
 #[test]
-fn source_root_review_known_retirement_preserves_the_admitted_snapshot() {
+fn source_root_review_known_retirement_preserves_the_ordinary_snapshot() {
     let label = "review-admitted-retirement";
-    let (claimed, _, _) = named_root_turn(label, true);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("Observe the named root.");
     let admitted = claimed.state.engram_turn_root_capture(&claimed.session_id);
-    let (token, binding) = claimed.record(|record| {
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
         )
     });
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(EngramNamedRootState::None),
             u64::MAX,
@@ -2429,9 +2232,8 @@ fn source_root_review_known_retirement_preserves_the_admitted_snapshot() {
         .root_read_failures
         .insert(binding.as_ref().unwrap().claim_id.clone());
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             None,
             u64::MAX,
@@ -2447,9 +2249,8 @@ fn source_root_review_known_retirement_preserves_the_admitted_snapshot() {
         "a failed canonical recovery cannot discharge the admitted work's guard"
     );
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(EngramNamedRootState::Unknown),
             u64::MAX,
@@ -2464,25 +2265,23 @@ fn source_root_review_known_retirement_preserves_the_admitted_snapshot() {
 #[test]
 fn source_root_review_different_active_guard_survives_focus_away() {
     let label = "review-other-active";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    let (token, binding) = claimed.record(|record| {
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
         )
     });
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(EngramNamedRootState::Bound {
                 workspace_id: claimed.root.to_string_lossy().into_owned(),
@@ -2492,9 +2291,9 @@ fn source_root_review_different_active_guard_survives_focus_away() {
             u64::MAX,
         )
         .unwrap();
-    let store = claimed_root_store(&claimed);
+    let store = naming_store(&claimed);
     let binding = binding.unwrap();
-    claimed.record(|record| record.engram.work_binding = None);
+    claimed.record_mut(|record| record.engram.work_binding = None);
     let mut inner = claimed.state.inner.lock().unwrap();
     engram_compact_root_journal(&mut inner);
     let claim = AcceptanceEvaluationSourceClaim {
@@ -2532,27 +2331,24 @@ fn source_root_review_different_active_guard_survives_focus_away() {
 #[test]
 fn source_root_review_stale_replay_retires_without_a_replacement_name() {
     let label = "review-retired-replay";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
-    let (token, binding) = claimed.record(|record| {
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone().unwrap(),
         )
     });
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             Some(&binding),
             Some(EngramNamedRootState::None),
             u64::MAX,
         )
         .unwrap();
-    let store = claimed_root_store(&claimed);
+    let store = naming_store(&claimed);
     let work =
-        claimed.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
+        claimed.record_mut(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
     let prepared = engram_work_naming_token(&claimed.state.inner.lock().unwrap(), &store, &work);
     let seed = AcceptanceEvaluationTargetSeed {
         reuse_identity: None,
@@ -2589,11 +2385,11 @@ fn source_root_review_stale_replay_retires_without_a_replacement_name() {
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     let intent = claimed
@@ -2651,11 +2447,11 @@ fn source_root_review_stale_replay_retires_without_a_replacement_name() {
         .unwrap()
         .released
         .insert(intent.root.claim_id.clone(), intent.root.generation as i64);
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     let receipt = {
@@ -2713,25 +2509,23 @@ fn source_root_review_stale_replay_retires_without_a_replacement_name() {
 #[test]
 fn source_root_review_obsolete_main_checkout_cannot_stamp_an_absent_projection() {
     let label = "review-obsolete-checkout";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    add_claimed_root_worktree(&claimed.root);
-    let named = name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    naming_worktree(&claimed.root);
+    let named = request_naming(
         &claimed,
         label,
         Some(&claimed.root),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    let (token, binding) = claimed.record(|record| {
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
         )
     });
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(EngramNamedRootState::UnboundByRelease {
                 last_generation: named.generation as i64,
@@ -2754,9 +2548,8 @@ fn source_root_review_obsolete_main_checkout_cannot_stamp_an_absent_projection()
         .root_read_failures
         .insert(binding.as_ref().unwrap().claim_id.clone());
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             None,
             u64::MAX,
@@ -2778,9 +2571,8 @@ fn source_root_review_obsolete_main_checkout_cannot_stamp_an_absent_projection()
 #[test]
 fn source_root_review_reconciliation_survives_focus_away_and_restore() {
     let label = "review-reconciliation-focus";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     claimed
         .transport
         .named_roots
@@ -2789,11 +2581,11 @@ fn source_root_review_reconciliation_survives_focus_away_and_restore() {
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     let intent = claimed
@@ -2806,16 +2598,14 @@ fn source_root_review_reconciliation_survives_focus_away_and_restore() {
         .clone()
         .unwrap();
     replace_naming_session(&mut claimed, label);
-    let (token, binding) = claimed.record(|record| {
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
         )
     });
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(EngramNamedRootState::Bound {
                 workspace_id: intent.root.root.clone(),
@@ -2863,13 +2653,13 @@ fn source_root_review_reconciliation_survives_focus_away_and_restore() {
 #[test]
 fn source_root_review_live_removal_never_reports_a_restore_end() {
     let label = "review-live-removal";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let mut inner = claimed.state.inner.lock().unwrap();
@@ -2896,20 +2686,19 @@ fn source_root_review_live_removal_never_reports_a_restore_end() {
 #[test]
 fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
     let label = "review-successive-claims";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
-    claimed_root_store(&claimed);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    naming_store(&claimed);
     let mut last_generation = 0;
     for occurrence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
-        let mut held = claimed_root_held(label);
+        let mut held = naming_claim(label);
         let mut binding = held.items[0].control_binding.clone().unwrap();
         binding.claim_id = format!("successive-claim-{occurrence}");
         binding.run_id = format!("successive-run-{occurrence}");
         binding.root_execution_id = format!("successive-execution-{occurrence}");
         held.items[0].claim_id = binding.claim_id.clone();
         held.items[0].control_binding = Some(binding.clone());
-        claimed.record(|record| {
+        claimed.record_mut(|record| {
             record.engram.work_binding = Some(binding.clone());
             record.engram.named_root = None;
         });
@@ -2957,23 +2746,23 @@ fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
 #[test]
 fn source_root_review_other_claim_clear_retires_only_local_authorization() {
     let label = "review-other-claim-clear";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    let mut held = claimed_root_held(label);
+    let mut held = naming_claim(label);
     let mut binding = held.items[0].control_binding.clone().unwrap();
     binding.claim_id = "new-clear-claim".to_owned();
     binding.run_id = "new-clear-run".to_owned();
     binding.root_execution_id = "new-clear-execution".to_owned();
     held.items[0].claim_id = binding.claim_id.clone();
     held.items[0].control_binding = Some(binding.clone());
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding.clone());
         record.engram.named_root = None;
     });
@@ -3020,13 +2809,13 @@ fn source_root_review_other_claim_clear_retires_only_local_authorization() {
 #[test]
 fn source_root_review_cleanup_assignment_persist_failure_retains_guarded_intent_without_send() {
     let label = "review-cleanup-assignment";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let original = {
@@ -3053,8 +2842,8 @@ fn source_root_review_cleanup_assignment_persist_failure_retains_guarded_intent_
     assert_eq!(pending.kind, original_intent.kind);
     assert_eq!(pending.end_reason, original_intent.end_reason);
     assert_eq!(
-        serde_json::to_value(pending.request("same-token").unwrap()).unwrap(),
-        serde_json::to_value(original_intent.request("same-token").unwrap()).unwrap()
+        serde_json::to_value(pending.request().unwrap()).unwrap(),
+        serde_json::to_value(original_intent.request().unwrap()).unwrap()
     );
     assert!(engram_authority_work_unresolved(
         &inner,
@@ -3072,13 +2861,13 @@ fn source_root_review_cleanup_assignment_persist_failure_retains_guarded_intent_
 #[test]
 fn an_orphaned_name_queues_its_exact_end_before_restore_drops_the_path() {
     let label = "binding-orphan";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let encoded = {
@@ -3104,9 +2893,8 @@ fn an_orphaned_name_queues_its_exact_end_before_restore_drops_the_path() {
 #[test]
 fn a_lost_named_root_reply_replays_the_persisted_intent_after_restore() {
     let label = "binding-lost-reply";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     claimed
         .transport
         .named_roots
@@ -3115,11 +2903,11 @@ fn a_lost_named_root_reply_replays_the_persisted_intent_after_restore() {
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     assert!(error.message.contains("retained"));
@@ -3142,11 +2930,11 @@ fn a_lost_named_root_reply_replays_the_persisted_intent_after_restore() {
         inner.engram_named_root_journal = restored.engram_named_root_journal;
         inner.engram_source_root_generation = restored.engram_source_root_generation;
     }
-    let result = name_root(
+    let result = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let requests = claimed
@@ -3176,9 +2964,8 @@ fn a_lost_named_root_reply_replays_the_persisted_intent_after_restore() {
 #[test]
 fn a_named_root_refusal_publishes_no_root_and_allows_a_repaired_request() {
     let label = "binding-refused";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     claimed
         .transport
         .named_roots
@@ -3187,58 +2974,77 @@ fn a_named_root_refusal_publishes_no_root_and_allows_a_repaired_request() {
         .as_mut()
         .unwrap()
         .refuse_next = true;
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     assert!(error.message.contains("named_root_binding_refused"));
-    {
+    let pending = {
         let inner = claimed.state.inner.lock().unwrap();
         assert!(inner.engram_work_source_roots.is_empty());
         assert!(
             inner
                 .engram_named_root_journal
                 .iter()
-                .all(|j| j.pending.is_none() && j.confirmed.is_none())
+                .all(|j| j.confirmed.is_none())
         );
-    }
-    name_root(
+        inner.engram_named_root_journal.iter()
+            .find_map(|journal| journal.pending.clone())
+            .expect("a refusal without covering lifecycle proof retains the exact intent")
+    };
+    let pending_request = serde_json::to_value(pending.request().unwrap()).unwrap();
+    let refused = claimed.transport.requests().into_iter()
+        .find(|request| request.request["operation"] == "named_root_bind")
+        .expect("the refusal belongs to the actual naming send").request;
+    assert_eq!(pending_request, refused,
+        "retained generation, content and idempotency key equal the refused send");
+    let repaired = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
+    let sends = claimed.transport.requests().into_iter()
+        .filter(|request| request.request["operation"] == "named_root_bind")
+        .map(|request| request.request).collect::<Vec<_>>();
+    assert_eq!(sends, vec![pending_request.clone(), pending_request],
+        "repair retries the immutable intent and key rather than minting a new event");
+    assert_eq!(repaired.generation, pending.root.generation);
+    let inner = claimed.state.inner.lock().unwrap();
+    assert!(inner.engram_work_source_roots.contains(&pending.root),
+        "the repaired acknowledgement publishes the original root");
+    assert!(inner.engram_named_root_journal.iter().all(|journal| journal.pending.is_none()));
+    assert!(inner.engram_named_root_journal.iter().any(|journal|
+        journal.confirmed.as_ref().is_some_and(|(event, _)| event == &pending)));
 }
 
 #[test]
 fn named_root_readback_distinguishes_release_from_fence_changes() {
     let label = "binding-lifecycle";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let named = name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    let (mut binding, token, state) = claimed.record(|record| {
+    let (mut binding, state) = claimed.record_mut(|record| {
         (
             record.engram.work_binding.clone().unwrap(),
-            record.engram.routing_token.clone().unwrap(),
             record.engram.named_root.clone(),
         )
     });
     binding.claim_fence += 3;
-    claimed.record(|record| record.engram.work_binding = Some(binding.clone()));
+    claimed.record_mut(|record| record.engram.work_binding = Some(binding.clone()));
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             Some(&binding),
             state.clone(),
             u64::MAX,
@@ -3256,9 +3062,8 @@ fn named_root_readback_distinguishes_release_from_fence_changes() {
         "handoff/recovery fence advance preserves a bound root"
     );
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             Some(&binding),
             Some(EngramNamedRootState::UnboundByRelease {
                 last_generation: named.generation as i64,
@@ -3278,7 +3083,7 @@ fn named_root_readback_distinguishes_release_from_fence_changes() {
     );
     // A stale fence is not used to reconstruct the removed local selection.
     claimed
-        .reconcile_root_readback(&claimed.session_id, &token, Some(&binding), None, u64::MAX)
+        .canonical_root_readback(&claimed.session_id, Some(&binding), None, u64::MAX)
         .unwrap();
     assert!(
         claimed
@@ -3293,41 +3098,32 @@ fn named_root_readback_distinguishes_release_from_fence_changes() {
 
 #[test]
 fn named_root_response_variants_include_forward_compatible_unknown_and_absence() {
-    for state in [
-        json!({"state":"none"}),
-        json!({"state":"bound","workspace_id":"x","generation":3,"named_at":"time"}),
-        json!({"state":"unbound_by_release","last_generation":3,"released_at_position":9}),
-        json!({"state":"future"}),
+    for (wire, expected) in [
+        (json!({"state":"none"}), EngramNamedRootState::None),
+        (json!({"state":"bound","workspace_id":"x","generation":3,"named_at":"time"}),
+            EngramNamedRootState::Bound { workspace_id: "x".into(), generation: 3, named_at: "time".into() }),
+        (json!({"state":"unbound_by_release","last_generation":3,"released_at_position":9}),
+            EngramNamedRootState::UnboundByRelease { last_generation: 3, released_at_position: 9 }),
+        (json!({"state":"future"}), EngramNamedRootState::Unknown),
     ] {
-        let status: EngramSessionStatusResponse =
-            serde_json::from_value(json!({"phase":"ready","named_root":state})).unwrap();
-        let begin: EngramTurnBeginReceipt =
-            serde_json::from_value(json!({"grant_id":"g","named_root":state})).unwrap();
-        let bind: EngramSessionBindingResponse = serde_json::from_value(
-            json!({"routing_token":"t","status":{"phase":"ready","named_root":state}}),
-        )
-        .unwrap();
-        assert_eq!(status.named_root, begin.named_root);
-        assert_eq!(status.named_root, bind.status.named_root);
+        assert_eq!(serde_json::from_value::<EngramNamedRootState>(wire).unwrap(), expected);
     }
-    let status: EngramSessionStatusResponse =
-        serde_json::from_value(json!({"phase":"ready"})).unwrap();
-    assert_eq!(status.named_root, None);
+    assert_eq!(serde_json::from_value::<Option<EngramNamedRootState>>(Value::Null).unwrap(), None);
 }
 
 #[test]
 fn clearing_a_root_records_its_original_identity_and_stamps_workdir_captures_as_ended() {
     let label = "binding-ended-basis";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap();
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
     let events = claimed
         .transport
         .requests()
@@ -3361,35 +3157,46 @@ fn clearing_a_root_records_its_original_identity_and_stamps_workdir_captures_as_
 
 /// The claimed root's project given the store identity a real Engram
 /// reports, which names a source root in it.
-fn claimed_root_store(claimed: &ClaimedRoot) -> EngramAuthorityStoreKey {
-    let store = EngramAuthorityStoreKey {
-        database_path: claimed.root.join("engram.db"),
-        project_id: "github.com/example/source-root".to_owned(),
-    };
-    let mut inner = claimed.state.inner.lock().expect("state mutex poisoned");
-    for project in &mut inner.projects {
-        if let Some(engram) = project.engram.as_mut() {
-            engram.authority_store_key = Some(store.clone());
-        }
-    }
-    store
+fn naming_store(claimed: &EOCheckedTurn) -> EngramAuthorityStoreKey {
+    let inner = claimed.state.inner.lock().unwrap();
+    engram_project_for_session_locked(&inner, &claimed.session_id).unwrap()
+        .engram.as_ref().unwrap().authority_store_key.clone().unwrap()
+}
+
+fn prepare_naming_worktree_container(root: &FsPath) {
+    // Match the real Git census used by the original claimed-root fixture:
+    // sibling worktrees are not untracked nested repositories in this root.
+    let ignore = root.join(".gitignore");
+    let mut contents = fs::read_to_string(&ignore).unwrap_or_default();
+    if contents.lines().any(|line| line == ".worktrees/") { return; }
+    if !contents.is_empty() && !contents.ends_with('\n') { contents.push('\n'); }
+    contents.push_str(".worktrees/\n");
+    fs::write(ignore, contents).unwrap();
+    run_git_test_command(root, &["add", ".gitignore"]);
+    run_git_test_command(root, &["commit", "--quiet", "-m", "ignore naming worktrees"]);
+}
+
+fn naming_worktree(root: &FsPath) -> PathBuf {
+    prepare_naming_worktree_container(root);
+    let path = root.join(".worktrees").join("naming");
+    run_git_test_command(root, &[
+        "worktree", "add", "--quiet", "-b", "naming", path.to_str().unwrap(),
+    ]);
+    path
 }
 
 #[test]
 fn source_root_compatibility_missing_projection_recovers_owner_without_an_absence_shortcut() {
     let label = "compatibility-missing-projection";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    prepare_claimed_root_naming(&claimed, label);
-    let store = claimed_root_store(&claimed);
-    let (token, binding) = claimed.record(|record| {
+    let claimed = EOCheckedTurn::idle(label, true);
+    let store = naming_store(&claimed);
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone().unwrap(),
         )
     });
     claimed
-        .state
-        .reconcile_engram_named_root(&claimed.session_id, &token, Some(&binding), None, u64::MAX)
+        .canonical_root_readback(&claimed.session_id, Some(&binding), None, u64::MAX)
         .unwrap();
     assert_eq!(
         claimed.state.engram_root_capture(&claimed.session_id),
@@ -3418,27 +3225,25 @@ fn source_root_compatibility_omission_reads_bound_and_released_history_without_r
         } else {
             "compatibility-bound"
         };
-        let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-        let worktree = add_claimed_root_worktree(&claimed.root);
-        let named = name_root(
+        let claimed = EOCheckedTurn::idle(label, true);
+        let worktree = naming_worktree(&claimed.root);
+        let named = request_naming(
             &claimed,
             label,
             Some(&worktree),
-            vec![claimed_root_held(label)],
+            vec![naming_claim(label)],
         )
         .unwrap();
-        let store = claimed_root_store(&claimed);
-        let (token, binding) = claimed.record(|r| {
+        let store = naming_store(&claimed);
+        let (binding,) = claimed.record_mut(|r| {
             (
-                r.engram.routing_token.clone().unwrap(),
                 r.engram.work_binding.clone().unwrap(),
             )
         });
         if released {
             claimed
-                .reconcile_root_readback(
+                .canonical_root_readback(
                     &claimed.session_id,
-                    &token,
                     Some(&binding),
                     Some(EngramNamedRootState::UnboundByRelease {
                         last_generation: named.generation as i64,
@@ -3471,10 +3276,8 @@ fn source_root_compatibility_omission_reads_bound_and_released_history_without_r
         let reads = count("named_root_read");
         let writes = count("named_root_bind");
         claimed
-            .state
-            .reconcile_engram_named_root(
+            .canonical_root_readback(
                 &claimed.session_id,
-                &token,
                 Some(&binding),
                 None,
                 u64::MAX,
@@ -3503,216 +3306,68 @@ fn source_root_compatibility_omission_reads_bound_and_released_history_without_r
 }
 
 #[test]
-fn source_root_compatibility_claimed_without_store_is_uncertain_from_opening() {
-    let label = "compatibility-no-store";
-    let grant = "compatibility-no-store-grant";
-    let fresh_grant = "compatibility-no-store-fresh-grant";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply("compatibility-no-store-token"),
-            grant_reply(grant),
-            begin_reply(grant),
-            checkpoint_reply(grant),
-            grant_reply(fresh_grant),
-            begin_reply(fresh_grant),
-            checkpoint_reply(fresh_grant),
-        ],
-    );
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).unwrap();
-    let prompt = received_prompt(&claimed);
-    assert!(
-        prompt.contains("Engram store identity is missing"),
-        "{prompt}"
-    );
-    claimed.record(|record| {
-        assert_eq!(
-            record.engram.active_turn_root_capture,
-            Some(EngramRootCapture::Unconfirmed)
-        );
-        assert!(record.engram.active_turn_start_basis.is_none());
-        assert!(
-            record
-                .engram
-                .opening_diagnostic
-                .as_ref()
-                .is_some_and(|notice| {
-                    notice.delivered && notice.reason == EngramOpeningRootReason::UnverifiedStore
-                })
-        );
-        assert!(
-            record
-                .engram
-                .pending_source_root_line
-                .as_deref()
-                .is_none_or(|line| !line.contains("unconfirmed"))
-        );
+fn an_ordinary_claim_without_store_identity_has_no_confirmed_opening() {
+    let claimed = EOCheckedTurn::idle("ordinary-no-store", true);
+    change_engram_settings(&claimed.state, |settings| settings.authority_store_key = None);
+    claimed.begin("Ordinary input does not wait for store identity.");
+    claimed.record_mut(|record| {
+        assert!(record.engram.unadmitted_active_turn.is_some());
+        assert!(record.engram.observed_opening().is_none());
     });
-    let observation = finish_claimed_turn(&claimed, &claimed.runtime_token());
-    assert!(observation.get("source_basis").is_none(), "{observation}");
-    prepare_confirmed_claimed_opening(&claimed, label);
-    claimed.transport.enable_named_roots(
-        &claimed.session_id,
-        &test_control_work_binding(&format!("turn-observation-{label}"), 1),
-    );
-    claimed
-        .transport
-        .work_bindings
-        .lock()
-        .unwrap()
-        .push_back(Ok(Some(test_control_work_binding(
-            &format!("turn-observation-{label}"),
-            1,
-        ))));
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).unwrap();
-    let prompt = received_prompt(&claimed);
-    assert!(!prompt.contains("unconfirmed"), "{prompt}");
-    assert!(claimed.record(|r| r.engram.active_turn_start_basis.is_some()));
-    let _ = finish_claimed_turn(&claimed, &claimed.runtime_token());
-    let fresh = claimed
-        .transport
-        .requests()
-        .into_iter()
-        .find(|request| {
-            request.request["operation"] == "turn_checkpoint"
-                && request.request["grant_id"] == fresh_grant
-        })
-        .expect("the fresh grant closes separately")
-        .request["observations"][0]
-        .clone();
-    assert!(fresh.get("source_basis").is_some(), "{fresh}");
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 #[test]
-fn source_root_compatibility_legacy_begin_recovers_only_the_later_fresh_turn() {
-    let label = "compatibility-legacy-begin";
-    let old_grant = "compatibility-legacy-grant";
-    let fresh_grant = "compatibility-fresh-grant";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply("compatibility-token"),
-            grant_reply(old_grant),
-            begin_reply(old_grant),
-            checkpoint_reply(old_grant),
-            grant_reply(fresh_grant),
-            begin_reply(fresh_grant),
-            checkpoint_reply(fresh_grant),
-        ],
-    );
-    let store = claimed_root_store(&claimed);
-    let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
-    claimed
-        .transport
-        .enable_named_roots(&claimed.session_id, &binding);
-    claimed
-        .transport
-        .named_roots
-        .lock()
-        .unwrap()
-        .as_mut()
-        .unwrap()
-        .omitted_begin_projections
-        .insert(old_grant.to_owned());
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).unwrap();
-    let prompt = received_prompt(&claimed);
-    assert!(
-        prompt.contains("begin receipt lacks opening provenance"),
-        "{prompt}"
-    );
-    assert_eq!(
-        claimed.state.engram_root_capture(&claimed.session_id),
-        EngramRootCapture::Unnamed,
-        "the owner recovers, but this is not an opening proof for the old receipt"
-    );
-    claimed.record(|r| {
-        assert_eq!(
-            r.engram.active_turn_root_capture,
-            Some(EngramRootCapture::Unconfirmed)
-        );
-        assert!(r.engram.active_turn_start_basis.is_none());
+fn passive_legacy_begin_history_never_controls_an_ordinary_named_opening() {
+    let label = "ordinary-legacy-history-opening";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.record_mut(|record| {
+        record.engram.historical_control.insert("engramBeginsRecorded".into(), json!(false));
+        record.engram.historical_control.insert("engramBeginRecovery".into(),
+            json!({"unknownOldEnvelope":{"grant_id":"historical-only", "future":[null,true]}}));
     });
-    let first = finish_claimed_turn(&claimed, &claimed.runtime_token());
-    assert!(first.get("source_basis").is_none(), "{first}");
-    let inner = claimed.state.inner.lock().unwrap();
-    assert!(!engram_authority_work_unresolved(
-        &inner,
-        &store,
-        &binding.work_id
-    ));
-    drop(inner);
-    claimed
-        .transport
-        .work_bindings
-        .lock()
-        .unwrap()
-        .push_back(Ok(Some(binding.clone())));
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).unwrap();
-    let prompt = received_prompt(&claimed);
-    assert!(!prompt.contains("unconfirmed"), "{prompt}");
-    claimed.record(|r| {
-        assert!(
-            r.engram.active_turn_start_basis.is_some(),
-            "a fresh begin has its own proof"
-        )
-    });
-    let _ = finish_claimed_turn(&claimed, &claimed.runtime_token());
-    let second = claimed
-        .transport
-        .requests()
-        .into_iter()
-        .find(|r| {
-            r.request["operation"] == "turn_checkpoint" && r.request["grant_id"] == fresh_grant
-        })
-        .expect("the fresh grant closes separately")
-        .request["observations"][0]
-        .clone();
-    assert!(second.get("source_basis").is_some(), "{second}");
+    let history = claimed.record_mut(|record| record.engram.historical_control.clone());
+    for _ in 0..2 {
+        claimed.begin("Historical control bytes remain passive.");
+        claimed.record_mut(|record| {
+            assert_eq!(record.engram.observed_source_root().unwrap().generation, named.generation);
+            assert!(matches!(record.engram.observed_opening().unwrap().provenance.clone(),
+                EngramRootCapture::Recorded { state: EngramSourceRootState::Named, .. }));
+            assert_eq!(record.engram.historical_control, history);
+        });
+        assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
+        claimed.record_mut(|record| assert_eq!(record.engram.historical_control, history));
+    }
 }
 
 #[test]
-fn source_root_compatibility_late_identity_does_not_upgrade_an_uncertain_turn() {
-    let label = "compatibility-late-identity";
-    let grant = "compatibility-late-grant";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply("compatibility-late-token"),
-            grant_reply(grant),
-            begin_reply(grant),
-            checkpoint_reply(grant),
-        ],
-    );
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).unwrap();
-    let _ = received_prompt(&claimed);
-    prepare_claimed_root_naming(&claimed, label);
-    claimed_root_store(&claimed);
-    let (token, binding) = claimed.record(|r| {
-        (
-            r.engram.routing_token.clone().unwrap(),
-            r.engram.work_binding.clone().unwrap(),
-        )
+fn a_late_store_identity_never_upgrades_the_current_ordinary_opening() {
+    let label = "ordinary-late-store-identity";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let store = naming_store(&claimed);
+    let worktree = naming_worktree(&claimed.root);
+    change_engram_settings(&claimed.state, |settings| settings.authority_store_key = None);
+    claimed.begin("Start without attributed store identity.");
+    let original = claimed.record_mut(|record| record.engram.unadmitted_active_turn.clone().unwrap());
+    assert!(original.opening_root.is_none());
+    change_engram_settings(&claimed.state, |settings| settings.authority_store_key = Some(store.clone()));
+    let named = request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.record_mut(|record| {
+        let current = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        assert_eq!(current.host_turn_ref, original.host_turn_ref);
+        assert!(current.opening_root.is_none());
     });
-    claimed
-        .state
-        .reconcile_engram_named_root(&claimed.session_id, &token, Some(&binding), None, u64::MAX)
-        .unwrap();
-    assert_eq!(
-        claimed.state.engram_root_capture(&claimed.session_id),
-        EngramRootCapture::Unnamed
-    );
-    assert_eq!(
-        claimed.state.engram_turn_root_capture(&claimed.session_id),
-        EngramRootCapture::Unconfirmed
-    );
-    let observation = finish_claimed_turn(&claimed, &claimed.runtime_token());
-    assert!(observation.get("source_basis").is_none(), "{observation}");
+    claimed.end();
+    claimed.begin("The next ordinary opening uses the new name.");
+    claimed.record_mut(|record| assert_eq!(record.engram.observed_source_root().unwrap().generation, named.generation));
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }
 
-/// The held-claims list of the claimed root's session: the claim it is bound
-/// to by `ClaimedRoot::new`.
-fn claimed_root_held(label: &str) -> EngramHeldClaims {
-    let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
+fn naming_claim(label: &str) -> EngramHeldClaims {
+    let binding = test_control_work_binding(&format!("eo-check-{label}"), 1);
     EngramHeldClaims {
         items: vec![EngramHeldClaim {
             work_id: binding.work_id.clone(),
@@ -3729,14 +3384,13 @@ fn claimed_root_held(label: &str) -> EngramHeldClaims {
 /// One naming request of the claimed root's session for `w-{label}`, with
 /// Engram answering its held-claims reads with `reads` only (the last
 /// repeats), whatever earlier requests were answered with.
-fn name_root(
-    claimed: &ClaimedRoot,
+fn request_naming(
+    claimed: &EOCheckedTurn,
     label: &str,
     path: Option<&FsPath>,
     reads: Vec<EngramHeldClaims>,
 ) -> std::result::Result<EngramSourceRootResponse, ApiError> {
-    prepare_claimed_root_naming(claimed, label);
-    claimed_root_store(claimed);
+    naming_store(claimed);
     claimed
         .transport
         .replace_held_claims(reads.into_iter().map(Ok));
@@ -3757,15 +3411,26 @@ fn no_held_claims() -> EngramHeldClaims {
     }
 }
 
-fn pending_line(claimed: &ClaimedRoot) -> Option<String> {
-    claimed.record(|record| record.engram.pending_source_root_line.clone())
+
+fn delivered_naming_prompt(turn: &EOCheckedTurn) -> String {
+    match receive(&turn._runtime_rx.lock().unwrap(), "ordinary naming prompt") {
+        CodexRuntimeCommand::Prompt { session_id, command } => {
+            assert_eq!(session_id, turn.session_id);
+            command.prompt
+        }
+        _ => panic!("expected an actual ordinary provider prompt"),
+    }
+}
+
+fn pending_line(claimed: &EOCheckedTurn) -> Option<String> {
+    claimed.record_mut(|record| record.engram.pending_source_root_line.clone())
 }
 
 #[test]
 fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_share() {
     let label = "naming-refusals";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
 
     let other_work = EngramHeldClaims {
         items: vec![EngramHeldClaim {
@@ -3776,7 +3441,7 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
         }],
         omitted: 0,
     };
-    let error = name_root(&claimed, label, Some(&worktree), vec![other_work.clone()])
+    let error = request_naming(&claimed, label, Some(&worktree), vec![other_work.clone()])
         .expect_err("no live claim on the work");
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(
@@ -3790,7 +3455,7 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
         omitted: 3,
         ..other_work
     };
-    let error = name_root(&claimed, label, Some(&worktree), vec![truncated])
+    let error = request_naming(&claimed, label, Some(&worktree), vec![truncated])
         .expect_err("the claim is not on the list Engram gave");
     assert!(
         error.message.contains("3 more were left out of its list"),
@@ -3798,15 +3463,15 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
         error.message
     );
 
-    let mut no_claim_id = claimed_root_held(label);
+    let mut no_claim_id = naming_claim(label);
     no_claim_id.items[0].claim_id.clear();
-    let error = name_root(&claimed, label, Some(&worktree), vec![no_claim_id])
+    let error = request_naming(&claimed, label, Some(&worktree), vec![no_claim_id])
         .expect_err("an Engram without claim ids cannot scope a name");
     assert_eq!(error.status, StatusCode::BAD_GATEWAY);
 
     // Named by its id, since a row without a short reference cannot be
     // found by one.
-    let mut no_short_ref = claimed_root_held(label);
+    let mut no_short_ref = naming_claim(label);
     no_short_ref.items[0].short_ref.clear();
     let work_id = no_short_ref.items[0].work_id.clone();
     claimed.transport.replace_held_claims([Ok(no_short_ref)]);
@@ -3827,32 +3492,32 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
         error.message
     );
 
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(FsPath::new("//server/share/wt")),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect_err("a share is refused");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("network share"), "{}", error.message);
     // So is a verbatim alias of the network redirector, before anything
     // resolves it.
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(FsPath::new(r"\\?\GLOBALROOT\Device\Mup\server\share\wt")),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect_err("a redirector alias is refused");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("network share"), "{}", error.message);
 
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(FsPath::new("   ")),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect_err("a blank path is no clear");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
@@ -3862,25 +3527,25 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
         error.message
     );
 
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(FsPath::new(&"x".repeat(MAX_DELEGATION_CWD_CHARS + 1))),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect_err("an overlong path is refused before it is checked");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("at most"), "{}", error.message);
 
     // A delegated session by its own link, with no delegation row left.
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.session.parent_delegation_id = Some("delegation-gone".to_owned());
     });
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect_err("a session linked to a parent names nothing");
     assert_eq!(error.status, StatusCode::CONFLICT);
@@ -3889,7 +3554,7 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
         "{}",
         error.message
     );
-    claimed.record(|record| record.session.parent_delegation_id = None);
+    claimed.record_mut(|record| record.session.parent_delegation_id = None);
 
     claimed
         .state
@@ -3926,11 +3591,11 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
             acceptance_evaluation: None,
             attempt: DelegationAttemptState::default(),
         });
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect_err("a delegated session names nothing");
     assert_eq!(error.status, StatusCode::CONFLICT);
@@ -3954,17 +3619,17 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
 #[test]
 fn the_same_root_named_again_keeps_its_generation_and_a_name_after_a_clear_gets_a_new_one() {
     let label = "naming-generations";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let held = || vec![claimed_root_held(label)];
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let held = || vec![naming_claim(label)];
 
-    let first = name_root(&claimed, label, Some(&worktree), held()).expect("the first name");
-    let store = claimed_root_store(&claimed);
+    let first = request_naming(&claimed, label, Some(&worktree), held()).expect("the first name");
+    let store = naming_store(&claimed);
     let requested_on = {
         let inner = claimed.state.inner.lock().expect("state mutex poisoned");
         AcceptanceEvaluationSourceRoot::from_entry(&inner.engram_work_source_roots[0])
     };
-    let again = name_root(&claimed, label, Some(&worktree), held()).expect("the same name again");
+    let again = request_naming(&claimed, label, Some(&worktree), held()).expect("the same name again");
     assert_eq!(again.generation, first.generation, "nothing changed");
     assert_eq!(again.sealed, None);
     {
@@ -3975,14 +3640,14 @@ fn the_same_root_named_again_keeps_its_generation_and_a_name_after_a_clear_gets_
         );
     }
 
-    let cleared = name_root(&claimed, label, None, held()).expect("a clear");
+    let cleared = request_naming(&claimed, label, None, held()).expect("a clear");
     assert_eq!(cleared.generation, 0);
     assert_eq!(cleared.root, None);
     assert_eq!(
         cleared.sealed, None,
         "no turn runs in the old root, so the clear reports no seal"
     );
-    let renamed = name_root(&claimed, label, Some(&worktree), held()).expect("named again");
+    let renamed = request_naming(&claimed, label, Some(&worktree), held()).expect("named again");
     assert!(
         renamed.generation > first.generation,
         "a name after a clear is a new one: {} after {}",
@@ -3998,70 +3663,51 @@ fn the_same_root_named_again_keeps_its_generation_and_a_name_after_a_clear_gets_
 
 #[test]
 fn a_clear_during_a_turn_seals_the_root_that_turn_is_measured_in() {
-    let label = "naming-clear-seals";
-    let (claimed, worktree, _runtime_token) = named_root_turn(label, true);
-    assert!(
-        claimed.record(|record| record.engram.active_turn_source_root.is_some()),
-        "the turn was admitted with the named root"
-    );
-
-    let cleared =
-        name_root(&claimed, label, None, vec![claimed_root_held(label)]).expect("a clear");
-
+    let label = "ordinary-clear-seals";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("Observe the named root.");
+    assert!(claimed.record_mut(|record| record.engram.observed_source_root().is_some()));
+    let cleared = request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
     let revision = content_revision_of(&worktree);
-    assert_eq!(
-        cleared.sealed.and_then(|sealed| sealed.source_revision),
-        Some(revision.clone())
-    );
-    assert_eq!(
-        claimed.record(|record| {
-            record
-                .engram
-                .active_turn_source_root
-                .as_ref()
-                .and_then(|turn_root| turn_root.sealed_revision.clone())
-        }),
-        Some(revision),
-        "the running turn keeps its root, sealed at the clear"
-    );
-    assert!(
-        pending_line(&claimed).is_some_and(|line| line.contains("no worktree named")),
-        "the next prompt says the workdir measures the work again"
-    );
+    assert_eq!(cleared.sealed.and_then(|sealed| sealed.source_revision), Some(revision.clone()));
+    assert_eq!(claimed.record_mut(|record| record.engram.observed_source_root()
+        .and_then(|root| root.sealed_revision.clone())), Some(revision));
+    assert!(pending_line(&claimed).is_some_and(|line| line.contains("no worktree named")));
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }
 
 #[test]
 fn a_clear_seals_no_turn_of_another_claim_measured_in_the_same_worktree() {
-    // Two works may name one worktree. A clear of one work's name leaves a
-    // turn of the other work's claim in that tree unsealed: that work still
-    // names the tree, so a seal would hide its later edits there once the
-    // tree is gone.
-    let label = "naming-clear-other-claim";
-    let (claimed, _worktree, _runtime_token) = named_root_turn(label, true);
-    claimed.record(|record| {
-        record
-            .engram
-            .active_turn_source_root
-            .as_mut()
-            .expect("the turn was admitted with the named root")
-            .claim_id = "claim-of-another-work".to_owned();
+    let label = "ordinary-clear-other-claim";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    let original = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap());
+    let other = test_control_work_binding("ordinary-other-named-work", 1);
+    let mut held = naming_claim(label);
+    held.items.push(EngramHeldClaim {
+        work_id: other.work_id.clone(), short_ref: other.work_id.clone(),
+        claim_id: other.claim_id.clone(), claim_fence: other.claim_fence,
+        focused: false, control_binding: Some(other.clone()),
     });
-
-    let cleared =
-        name_root(&claimed, label, None, vec![claimed_root_held(label)]).expect("a clear");
-
-    assert_eq!(cleared.sealed, None, "no turn took a seal");
-    assert_eq!(
-        claimed.record(|record| {
-            record
-                .engram
-                .active_turn_source_root
-                .as_ref()
-                .map(|turn_root| turn_root.sealed_revision.clone())
-        }),
-        Some(None),
-        "the other claim's turn keeps its root, unsealed"
-    );
+    claimed.transport.register_named_root_run(&other);
+    claimed.transport.set_current_work_binding(Some(other.clone()));
+    claimed.transport.replace_held_claims([Ok(held.clone())]);
+    claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
+        work: other.work_id.clone(), path: Some(Some(worktree.to_string_lossy().into_owned())),
+    }).unwrap();
+    claimed.record_mut(|record| record.engram.work_binding = Some(other.clone()));
+    claimed.begin("The other work uses the same physical tree.");
+    assert_eq!(claimed.record_mut(|record| record.engram.observed_source_root().unwrap().claim_id.clone()), other.claim_id);
+    claimed.transport.set_current_work_binding(Some(original));
+    let cleared = request_naming(&claimed, label, None, vec![held]).unwrap();
+    assert!(cleared.sealed.is_none());
+    assert_eq!(claimed.record_mut(|record| record.engram.observed_source_root()
+        .map(|root| root.sealed_revision.clone())), Some(None));
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 /// Changes the Engram settings of the claimed root's project.
@@ -4075,26 +3721,26 @@ fn change_engram_settings(state: &AppState, change: impl Fn(&mut EngramProjectSe
 }
 
 #[test]
-fn source_root_base_mcp_names_and_clears_without_turn_gated_control_or_a_grant() {
+fn source_root_base_mcp_names_and_clears_without_execution_observability_or_a_grant() {
     let label = "naming-base-only";
-    let claimed = ClaimedRoot::new_scripted(label, vec![bind_reply("base-only-token")]);
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_tokenless_base_naming(&claimed, label);
-    claimed.record(|record| {
-        assert!(record.engram.routing_token.is_none());
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    script_ordinary_work_session(&claimed, label);
+    claimed.record_mut(|record| {
+        assert!(!record.engram.historical_control.contains_key("engramRoutingToken"));
         assert!(record.engram.work_binding.is_none());
-        assert!(record.engram.active_grant_id.is_none());
-        assert!(record.engram.active_turn_source_root.is_none());
+        assert!(!record.engram.historical_control.contains_key("engramActiveGrantId"));
+        assert!(record.engram.observed_source_root().is_none());
     });
 
-    let named = name_tokenless_base_root(&claimed, label, Some(&worktree))
+    let named = ordinary_naming_request(&claimed, label, Some(&worktree))
         .expect("Base MCP names a claimed root without turn admission");
     assert!(named.root.is_some());
     assert!(named.generation > 0);
     assert!(named.sealed.is_none());
-    assert_eq!(named.evaluation_notice, Some(EngramSourceRootEvaluationNotice::TurnGatedControlOff));
-    assert_eq!(serde_json::to_value(&named).unwrap()["evaluationNotice"], "turn_gated_control_off");
-    assert!(named.notice.contains("Another ordinary turn does not produce")
+    assert_eq!(named.evaluation_notice, Some(EngramSourceRootEvaluationNotice::NamedRootSightingRequired));
+    assert_eq!(serde_json::to_value(&named).unwrap()["evaluationNotice"], "named_root_sighting_required");
+    assert!(named.notice.contains("Naming the source root does not supply that evidence")
         && named.notice.contains("existing matching sighting")
         && named.notice.contains("eligible measured execution observation")
         && named.notice.contains("(named_root_sighting_unavailable)")
@@ -4106,14 +3752,14 @@ fn source_root_base_mcp_names_and_clears_without_turn_gated_control_or_a_grant()
     assert_eq!(Some(&saved.engram_work_source_roots[0].root), named.root.as_ref());
     {
         let inner = claimed.state.inner.lock().unwrap();
-        assert!(AppState::engram_binding_target_for_session_shape_locked(
-            &inner, &claimed.session_id, true).unwrap().is_none(),
-            "ordinary turn admission remains disabled");
+        assert!(AppState::engram_source_root_target_locked(
+            &inner, &claimed.session_id).unwrap().is_some(),
+            "Base work services remain independent of automatic observations");
         assert!(engram_root_reclamation_session_is_reader(
             &inner, &claimed.session_id, &saved.engram_work_source_roots[0].store));
     }
 
-    let cleared = name_tokenless_base_root(&claimed, label, None)
+    let cleared = ordinary_naming_request(&claimed, label, None)
         .expect("the Base-only holder can clear its name");
     assert!(cleared.root.is_none());
     assert_eq!(cleared.generation, 0);
@@ -4121,32 +3767,51 @@ fn source_root_base_mcp_names_and_clears_without_turn_gated_control_or_a_grant()
     assert_eq!(cleared.evaluation_notice, None);
     let saved = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
     assert!(saved.engram_work_source_roots.is_empty());
-    claimed.record(|record| {
-        assert!(record.engram.active_grant_id.is_none());
-        assert!(record.engram.active_turn_source_root.is_none());
+    claimed.record_mut(|record| {
+        assert!(!record.engram.historical_control.contains_key("engramActiveGrantId"));
+        assert!(record.engram.observed_source_root().is_none());
     });
     assert!(claimed.transport.requests().iter().all(|request| !matches!(
         request.request["operation"].as_str(),
         Some("turn_evaluate" | "turn_begin" | "turn_checkpoint")
     )), "naming never manufactures a mediated turn");
     assert_eq!(claimed.transport.requests().iter().filter(|request|
-        request.request["operation"] == "session_bind").count(), 1,
-        "a fresh session authenticates once, independently of turn admission");
+        request.request["operation"] == "session_bind").count(), 0,
+        "ordinary naming never creates a control binding");
+    claimed.record_mut(|record| assert!(!record.engram.historical_control.contains_key("engramRoutingToken")));
 }
 
-// Configure the canonical held-claim service without installing any local
-// token or work binding. The naming API must obtain its own SessionBind.
-fn prepare_tokenless_base_naming(claimed: &ClaimedRoot, label: &str) {
-    change_engram_settings(&claimed.state, |engram| engram.turn_gated_control = false);
-    claimed_root_store(claimed);
-    let held = claimed_root_held(label);
+fn ordinary_naming_reply(claimed: &EOCheckedTurn) -> Value {
+    json!({"project_id": "github.com/example/source-root",
+        "session_id": claimed.session_id, "work_session": true,
+        "capabilities": ["host_work_v1"]})
+}
+
+// Configure explicit ordinary-child and canonical held-claim reads without
+// installing any control credential or local work association.
+fn script_ordinary_work_session(claimed: &EOCheckedTurn, label: &str) {
+    script_work_session_reply(claimed, label, Ok(ordinary_naming_reply(claimed)));
+}
+
+fn script_work_session_reply(
+    claimed: &EOCheckedTurn, label: &str, reply: Result<Value, EngramTransportError>,
+) {
+    change_engram_settings(&claimed.state, |engram| engram.execution_observability = false);
+    claimed.record_mut(|record| record.engram.work_binding = None);
+    naming_store(claimed);
+    let held = naming_claim(label);
     claimed.transport.enable_named_roots(
         &claimed.session_id, held.items[0].control_binding.as_ref().unwrap());
+    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .work_session_read_reply = Some(reply);
+    let binding = held.items[0].control_binding.as_ref().unwrap().clone();
+    *claimed.transport.work_bindings.lock().unwrap() = (0..4)
+        .map(|_| Ok(Some(binding.clone()))).collect();
     claimed.transport.replace_held_claims([Ok(held)]);
 }
 
-fn name_tokenless_base_root(
-    claimed: &ClaimedRoot, label: &str, path: Option<&FsPath>,
+fn ordinary_naming_request(
+    claimed: &EOCheckedTurn, label: &str, path: Option<&FsPath>,
 ) -> Result<EngramSourceRootResponse, ApiError> {
     claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
         work: format!("w-{label}"),
@@ -4155,106 +3820,102 @@ fn name_tokenless_base_root(
 }
 
 #[test]
-fn source_root_base_only_lost_bind_reply_replays_the_exact_authentication_without_a_grant() {
+fn source_root_unavailable_work_read_retries_without_a_control_key_or_grant() {
     let label = "base-only-lost-bind";
-    let claimed = ClaimedRoot::new_scripted(label, vec![
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport("lost bind reply"))),
-        bind_reply("base-replayed-token"),
-    ]);
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_tokenless_base_naming(&claimed, label);
-    let error = name_tokenless_base_root(&claimed, label, Some(&worktree)).unwrap_err();
-    assert!(error.message.contains("lost bind reply"), "{error:?}");
-    claimed.record(|record| {
-        assert!(record.engram.routing_token.is_none());
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    script_work_session_reply(&claimed, label,
+        Err(EngramTransportError::transport("work read unavailable")));
+    let error = ordinary_naming_request(&claimed, label, Some(&worktree)).unwrap_err();
+    assert!(error.message.contains("work read unavailable"), "{error:?}");
+    claimed.record_mut(|record| {
+        assert!(!record.engram.historical_control.contains_key("engramRoutingToken"));
         assert!(record.engram.work_binding.is_none());
-        assert!(!record.engram.bind_in_progress);
+        assert!(!record.engram.historical_control.contains_key("engramBindInProgress"));
         assert!(record.engram.source_root_bind_owner.is_none());
     });
     assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.is_empty());
-    assert!(name_tokenless_base_root(&claimed, label, Some(&worktree)).unwrap().root.is_some());
+    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .work_session_read_reply = Some(Ok(ordinary_naming_reply(&claimed)));
+    assert!(ordinary_naming_request(&claimed, label, Some(&worktree)).unwrap().root.is_some());
     let requests = claimed.transport.requests();
-    let binds = requests.iter().filter(|request| request.request["operation"] == "session_bind")
+    let reads = requests.iter().filter(|request| request.request["operation"] == "work_session_read")
         .collect::<Vec<_>>();
-    assert_eq!(binds.len(), 2);
-    assert_eq!(binds[0].request, binds[1].request, "unknown bind repeats its exact intent and key");
-    assert_eq!(binds[0].connection, binds[1].connection);
+    assert_eq!(reads.len(), 2);
+    assert_eq!(reads[0].request, reads[1].request, "same ordinary identity read");
+    assert_eq!(reads[0].connection, reads[1].connection);
+    assert!(reads[0].request.get("idempotency_key").is_none());
+    assert!(requests.iter().all(|request| request.request["operation"] != "session_bind"));
     assert!(requests.iter().all(|request| !matches!(request.request["operation"].as_str(),
         Some("turn_evaluate" | "turn_begin" | "turn_checkpoint"))));
 }
 
 #[test]
-fn source_root_base_only_refuses_open_turn_bind_replies_without_adopting_them() {
-    for (case, status) in [
-        ("phase", json!({"phase":"turn_open"})),
-        ("grant", json!({"phase":"ready","open_grant_id":"unsettled-grant"})),
-        ("state", json!({"phase":"ready","open_grant_state":"issued"})),
-    ] {
+fn source_root_refuses_legacy_or_foreign_work_read_replies_without_adopting_them() {
+    for case in ["legacy", "session", "project", "work-session", "capability"] {
         let label = format!("base-only-open-{case}");
-        let claimed = ClaimedRoot::new_scripted(&label, vec![
-            ScriptedEngramControlResponse::Reply(Ok(json!({
-                "routing_token":"must-not-be-adopted", "status":status,
-            }))),
-        ]);
-        prepare_tokenless_base_naming(&claimed, &label);
-        let error = name_tokenless_base_root(&claimed, &label, Some(&claimed.root)).unwrap_err();
-        assert!(error.message.contains("without an open turn"), "{case}: {error:?}");
-        claimed.record(|record| {
-            assert!(record.engram.routing_token.is_none());
+        let claimed = EOCheckedTurn::idle(&label, true);
+        let mut reply = ordinary_naming_reply(&claimed);
+        match case {
+            "legacy" => reply = json!({"routing_token":"must-not-be-adopted", "status":{"phase":"turn_open"}}),
+            "session" => reply["session_id"] = json!("another-session"),
+            "project" => reply["project_id"] = json!("another-project"),
+            "work-session" => reply["work_session"] = json!(false),
+            "capability" => reply["capabilities"] = json!([]),
+            _ => unreachable!(),
+        }
+        script_work_session_reply(&claimed, &label, Ok(reply));
+        let error = ordinary_naming_request(&claimed, &label, Some(&claimed.root)).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_GATEWAY, "{case}: {error:?}");
+        assert!(!claimed.transport.requests().iter().any(|request|
+            request.request["operation"] == "named_root_bind"), "{case}: no write after failed identity proof");
+        claimed.record_mut(|record| {
+            assert!(!record.engram.historical_control.contains_key("engramRoutingToken"));
             assert!(record.engram.work_binding.is_none());
-            assert!(record.engram.active_grant_id.is_none());
-            assert!(!record.engram.bind_in_progress);
+            assert!(!record.engram.historical_control.contains_key("engramActiveGrantId"));
+            assert!(!record.engram.historical_control.contains_key("engramBindInProgress"));
         });
         assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.is_empty());
     }
 }
 
 #[test]
-fn source_root_base_only_does_not_bind_over_unresolved_turn_state() {
-    for case in ["active", "uncertain", "legacy", "checkpoint", "binding"] {
+fn ordinary_naming_preserves_unresolved_control_history_without_rebinding_it() {
+    for (case, key, value) in [
+        ("active", "engramActiveGrantId", json!("keep-active")),
+        ("uncertain", "engramUncertainGrantId", json!("keep-uncertain")),
+        ("legacy", "engramBeginsRecorded", json!(false)),
+        ("checkpoint", "engramCheckpointInProgress", json!(true)),
+        ("binding", "engramBindInProgress", json!(true)),
+    ] {
         let label = format!("base-only-unresolved-{case}");
-        let claimed = ClaimedRoot::new_scripted(&label, Vec::new());
-        prepare_tokenless_base_naming(&claimed, &label);
-        claimed.record(|record| match case {
-            "active" => record.engram.active_grant_id = Some("keep-active".to_owned()),
-            "uncertain" => record.engram.uncertain_grant_id = Some("keep-uncertain".to_owned()),
-            "legacy" => record.engram.begins_recorded = false,
-            "checkpoint" => record.engram.checkpoint_in_progress = true,
-            "binding" => record.engram.bind_in_progress = true,
-            _ => unreachable!(),
-        });
-        let before = claimed.record(|record| (
-            record.engram.active_grant_id.clone(), record.engram.uncertain_grant_id.clone(),
-            record.engram.begins_recorded, record.engram.checkpoint_in_progress,
-            record.engram.bind_in_progress,
-        ));
-        let error = name_tokenless_base_root(&claimed, &label, Some(&claimed.root)).unwrap_err();
-        assert!(error.message.contains("unresolved Engram"), "{case}: {error:?}");
-        assert_eq!(before, claimed.record(|record| (
-            record.engram.active_grant_id.clone(), record.engram.uncertain_grant_id.clone(),
-            record.engram.begins_recorded, record.engram.checkpoint_in_progress,
-            record.engram.bind_in_progress,
-        )));
-        assert!(claimed.transport.requests().is_empty(), "{case}: nothing sent to control");
+        let claimed = EOCheckedTurn::idle(&label, true);
+        script_ordinary_work_session(&claimed, &label);
+        claimed.record_mut(|record| { record.engram.historical_control.insert(key.into(), value); });
+        let before = claimed.record_mut(|record| record.engram.historical_control.clone());
+        let named = ordinary_naming_request(&claimed, &label, Some(&claimed.root)).unwrap();
+        assert!(named.root.is_some(), "{case}");
+        assert_eq!(before, claimed.record_mut(|record| record.engram.historical_control.clone()));
+        assert_ordinary_turn_has_no_native_requests(&claimed);
     }
 }
 
 #[test]
-fn source_root_base_only_preserves_disabled_reset_and_child_shape_refusals() {
-    for case in ["disabled", "reset", "child"] {
+fn source_root_base_only_preserves_base_reset_and_child_shape_refusals() {
+    for case in ["base-off", "reset", "child"] {
         let label = format!("base-only-guard-{case}");
-        let claimed = ClaimedRoot::new_scripted(&label, Vec::new());
-        prepare_tokenless_base_naming(&claimed, &label);
+        let claimed = EOCheckedTurn::idle(&label, true);
+        script_ordinary_work_session(&claimed, &label);
         match case {
-            "disabled" => claimed.record(|record| record.engram.disabled_reason = Some("keep-disabled".to_owned())),
+            "base-off" => change_engram_settings(&claimed.state, |settings| settings.enabled = false),
             "reset" => {
-                let project_id = claimed.record(|record| record.session.project_id.clone().unwrap());
+                let project_id = claimed.record_mut(|record| record.session.project_id.clone().unwrap());
                 assert!(claimed.state.inner.lock().unwrap().engram_project_resets.claim(&project_id).is_some());
             }
-            "child" => claimed.record(|record| record.session.parent_delegation_id = Some("missing-child-link".to_owned())),
+            "child" => claimed.record_mut(|record| record.session.parent_delegation_id = Some("missing-child-link".to_owned())),
             _ => unreachable!(),
         }
-        assert_eq!(name_tokenless_base_root(&claimed, &label, Some(&claimed.root))
+        assert_eq!(ordinary_naming_request(&claimed, &label, Some(&claimed.root))
             .unwrap_err().status, StatusCode::CONFLICT, "{case}");
         assert!(claimed.transport.requests().is_empty(), "{case}: nothing sent to control");
         assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.is_empty());
@@ -4264,9 +3925,9 @@ fn source_root_base_only_preserves_disabled_reset_and_child_shape_refusals() {
 #[test]
 fn a_name_is_refused_when_base_mcp_is_off_or_the_project_changes_meanwhile() {
     let label = "naming-project-fence";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let nothing_named = |claimed: &ClaimedRoot, case: &str| {
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let nothing_named = |claimed: &EOCheckedTurn, case: &str| {
         assert!(
             claimed
                 .state
@@ -4283,13 +3944,13 @@ fn a_name_is_refused_when_base_mcp_is_off_or_the_project_changes_meanwhile() {
     // Base disablement still refuses naming, independently of turn gating.
     change_engram_settings(&claimed.state, |engram| {
         engram.enabled = false;
-        engram.turn_gated_control = false;
+        engram.execution_observability = false;
     });
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect_err("Base MCP is off");
     assert_eq!(error.status, StatusCode::CONFLICT);
@@ -4297,19 +3958,20 @@ fn a_name_is_refused_when_base_mcp_is_off_or_the_project_changes_meanwhile() {
     nothing_named(&claimed, "Base MCP off");
     change_engram_settings(&claimed.state, |engram| {
         engram.enabled = true;
-        engram.turn_gated_control = true;
+        engram.execution_observability = true;
     });
 
-    // A store or control-mode change during the read still invalidates the
-    // captured settings. Retry against one coherent project configuration.
+    // A store or Base-service change during the read invalidates the captured
+    // authority. The observation toggle is independent of this service.
+    let original_store = naming_store(&claimed);
     let changes: [(&str, fn(&mut EngramProjectSettings)); 2] = [
         ("another store", |engram| {
             if let Some(store) = engram.authority_store_key.as_mut() {
                 store.project_id = "github.com/example/another".to_owned();
             }
         }),
-        ("control turned off", |engram| {
-            engram.turn_gated_control = false
+        ("Base turned off", |engram| {
+            engram.enabled = false
         }),
     ];
     for (case, change) in changes {
@@ -4317,11 +3979,11 @@ fn a_name_is_refused_when_base_mcp_is_off_or_the_project_changes_meanwhile() {
         TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| {
             *hook.borrow_mut() = Some(Box::new(move || change_engram_settings(&state, change)));
         });
-        let error = name_root(
+        let error = request_naming(
             &claimed,
             label,
             Some(&worktree),
-            vec![claimed_root_held(label)],
+            vec![naming_claim(label)],
         )
         .expect_err(case);
         assert!(
@@ -4337,84 +3999,75 @@ fn a_name_is_refused_when_base_mcp_is_off_or_the_project_changes_meanwhile() {
             error.message
         );
         nothing_named(&claimed, case);
-        change_engram_settings(&claimed.state, |engram| engram.turn_gated_control = true);
+        change_engram_settings(&claimed.state, |engram| {
+            engram.authority_store_key = Some(original_store.clone());
+            engram.enabled = true;
+            engram.execution_observability = true;
+        });
     }
 }
 
 /// The claimed root's turn record: its grant, and the revision sealed on its
 /// root, if any.
-fn turn_seal(claimed: &ClaimedRoot) -> (Option<String>, Option<String>) {
-    claimed.record(|record| {
-        (
-            record.engram.active_grant_id.clone(),
-            record
-                .engram
-                .active_turn_source_root
-                .as_ref()
-                .and_then(|turn_root| turn_root.sealed_revision.clone()),
-        )
-    })
+fn turn_seal(claimed: &EOCheckedTurn) -> (Option<String>, Option<String>) {
+    claimed.record_mut(|record| (
+        record.engram.observed_turn_ref().map(str::to_owned),
+        record.engram.observed_source_root().and_then(|root| root.sealed_revision.clone()),
+    ))
 }
 
 #[test]
 fn a_clear_after_the_turn_finished_seals_nothing() {
-    // A finished turn keeps its root on the record until the next grant
-    // begins, but a clear after it has no running turn to seal.
-    let label = "naming-clear-after-finish";
-    let (claimed, _worktree, runtime_token) = named_root_turn(label, true);
-    let _ = finish_claimed_turn(&claimed, &runtime_token);
-    assert!(
-        claimed.record(|record| record.engram.active_turn_source_root.is_some()),
-        "the finished turn's root is still on the record"
-    );
-
-    let cleared =
-        name_root(&claimed, label, None, vec![claimed_root_held(label)]).expect("a clear");
-
-    assert_eq!(cleared.sealed, None, "no running turn took a seal");
-    assert_eq!(
-        turn_seal(&claimed),
-        (None, None),
-        "the finished turn stays unsealed"
-    );
+    let label = "ordinary-clear-after-finish";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("Observe before clearing.");
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
+    let cleared = request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
+    assert!(cleared.sealed.is_none());
+    assert_eq!(turn_seal(&claimed), (None, None), "no completed observation can receive a later seal");
 }
 
 #[test]
-fn a_clear_seals_no_turn_admitted_after_the_call_began() {
-    // A turn admitted while the name is being given measures what it finds:
-    // the seal's capture may predate that turn's own start.
-    let label = "naming-clear-later-turn";
-    let (claimed, _worktree, _runtime_token) = named_root_turn(label, true);
-    let (state, session_id) = (claimed.state.clone(), claimed.session_id.clone());
+fn a_clear_seals_no_ordinary_turn_started_after_the_call_began() {
+    let label = "ordinary-clear-later-turn";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("The original ordinary turn.");
+    let original = claimed.record_mut(|record| record.engram.observed_turn_ref().unwrap().to_owned());
+    let state = claimed.state.clone();
+    let session = claimed.session_id.clone();
+    let runtime = claimed._runtime_rx.clone();
     TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| {
         *hook.borrow_mut() = Some(Box::new(move || {
-            // The running turn ends and a later one begins, with the same
-            // root, after the call's first read.
-            let mut inner = state.inner.lock().expect("state mutex poisoned");
-            let index = inner
-                .find_session_index(&session_id)
-                .expect("the session exists");
-            inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid")
-                .engram
-                .active_grant_id = Some("grant-of-a-later-turn".to_owned());
+            let token = {
+                let inner = state.inner.lock().unwrap();
+                inner.sessions[inner.find_session_index(&session).unwrap()].runtime.runtime_token().unwrap()
+            };
+            state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
+            let dispatch = match state.dispatch_turn(&session, SendMessageRequest {
+                text: "The successor ordinary turn.".into(), expanded_text: None, attachments: Vec::new(),
+                source_session_id: None, source_mailbox: None,
+            }).unwrap() {
+                DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+                DispatchTurnResult::Queued => panic!("the real successor must dispatch"),
+            };
+            deliver_turn_dispatch(&state, dispatch).unwrap();
+            assert!(matches!(receive(&runtime.lock().unwrap(), "successor provider handoff"),
+                CodexRuntimeCommand::Prompt { .. }));
         }));
     });
-
-    let cleared =
-        name_root(&claimed, label, None, vec![claimed_root_held(label)]).expect("a clear");
-
-    assert!(
-        TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| hook.borrow().is_none()),
-        "the later turn began inside the call"
-    );
-    assert_eq!(cleared.sealed, None, "no turn took a seal");
-    assert_eq!(
-        turn_seal(&claimed),
-        (Some("grant-of-a-later-turn".to_owned()), None),
-        "the later turn keeps its root unsealed"
-    );
+    let cleared = request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
+    assert!(TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| hook.borrow().is_none()));
+    assert!(cleared.sealed.is_none());
+    let (successor, seal) = turn_seal(&claimed);
+    assert!(successor.is_some());
+    assert_ne!(successor.as_deref(), Some(original.as_str()));
+    assert!(seal.is_none());
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 #[cfg(windows)]
@@ -4423,18 +4076,18 @@ fn a_git_bash_drive_spelling_names_the_worktree() {
     // Git Bash's `pwd` prints `/c/…` for `C:/…`; read as written it would be
     // joined to the workdir.
     let label = "naming-msys-drive";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
     let windows = engram_source_root_display(&canonical.to_string_lossy()).replace('\\', "/");
     let (drive, rest) = windows.split_once(':').expect("a drive path");
     let msys = format!("/{}{rest}", drive.to_ascii_lowercase());
 
-    let named = name_root(
+    let named = request_naming(
         &claimed,
         label,
         Some(FsPath::new(&msys)),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_or_else(|error| panic!("{msys} should name the worktree: {}", error.message));
 
@@ -4449,8 +4102,8 @@ fn a_git_bash_drive_spelling_names_the_worktree() {
 }
 
 /// Another session of the claimed root's project.
-fn other_session(claimed: &ClaimedRoot) -> String {
-    let project_id = claimed.record(|record| {
+fn other_session(claimed: &EOCheckedTurn) -> String {
+    let project_id = claimed.record_mut(|record| {
         record
             .session
             .project_id
@@ -4461,7 +4114,7 @@ fn other_session(claimed: &ClaimedRoot) -> String {
 }
 
 /// A full list, every entry named by `named_by` for a claim that has ended.
-fn fill_list(claimed: &ClaimedRoot, store: &EngramAuthorityStoreKey, named_by: &str) {
+fn fill_list(claimed: &EOCheckedTurn, store: &EngramAuthorityStoreKey, named_by: &str) {
     claimed
         .state
         .inner
@@ -4486,16 +4139,16 @@ fn fill_list(claimed: &ClaimedRoot, store: &EngramAuthorityStoreKey, named_by: &
 #[test]
 fn a_full_list_does_not_infer_release_from_a_holders_missing_claims() {
     let label = "naming-reclaim";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let store = claimed_root_store(&claimed);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let store = naming_store(&claimed);
     let other = other_session(&claimed);
     fill_list(&claimed, &store, &other);
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label), no_held_claims()],
+        vec![naming_claim(label), no_held_claims()],
     )
     .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
@@ -4522,9 +4175,9 @@ fn a_full_list_does_not_infer_release_from_a_holders_missing_claims() {
 #[test]
 fn an_authoritative_end_frees_only_the_matching_claim_for_a_new_name() {
     let label = "naming-reclaim-own";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let store = claimed_root_store(&claimed);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let store = naming_store(&claimed);
     let other = other_session(&claimed);
     fill_list(&claimed, &store, &other);
     let mut binding = test_control_work_binding("ended", 1);
@@ -4534,22 +4187,21 @@ fn an_authoritative_end_frees_only_the_matching_claim_for_a_new_name() {
         let mut inner = claimed.state.inner.lock().unwrap();
         let index = inner.find_session_index(&other).unwrap();
         inner.sessions[index].engram.work_binding = Some(binding.clone());
-        inner.sessions[index].engram.routing_token = Some("other-token".to_owned());
+        inner.sessions[index].engram.historical_control.insert("engramRoutingToken".into(), json!("other-token"));
     }
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &other,
-            "other-token",
             Some(&binding),
             Some(EngramNamedRootState::None),
             1,
         )
         .unwrap();
-    name_root(
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let inner = claimed.state.inner.lock().unwrap();
@@ -4568,47 +4220,45 @@ fn an_authoritative_end_frees_only_the_matching_claim_for_a_new_name() {
 }
 
 #[test]
-fn source_root_journal_keeps_cached_evidence_until_its_last_reference_ends() {
-    let label = "journal-cached-evidence";
-    let (claimed, _, token) = named_root_turn(label, true);
-    let observation = finish_claimed_turn(&claimed, &token);
-    assert!(observation.get("source_basis").is_some());
-    name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap();
-    let mut inner = claimed.state.inner.lock().unwrap();
-    let index = inner.find_session_index(&claimed.session_id).unwrap();
-    let runtime = &mut inner.sessions[index].engram;
-    runtime.work_binding = None;
-    runtime.active_turn_source_root = None;
-    runtime.active_turn_start_basis = None;
-    runtime.active_turn_root_capture = None;
-    assert!(runtime.active_turn_report.is_some());
-    engram_compact_root_journal(&mut inner);
-    assert_eq!(
-        inner.engram_named_root_journal.len(),
-        1,
-        "cached evidence protects its ended generation"
-    );
-    inner.sessions[index].engram.active_turn_report = None;
-    inner.sessions[index].engram.active_turn_report_fallback = None;
-    engram_compact_root_journal(&mut inner);
-    assert!(inner.engram_named_root_journal.is_empty());
+fn source_root_journal_keeps_a_real_cached_observation_until_its_last_reference_ends() {
+    let label = "journal-cached-ordinary-observation";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("Observe this named root.");
+    let observed = claimed.finish();
+    assert_ordinary_observation_has_no_native_credit(&claimed, &observed);
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
+    // Use the real persisted image for the negative reference control,
+    // without deleting live in-flight observation custody.
+    let mut image = PersistedState::from_inner(&claimed.state.inner.lock().unwrap()).into_inner().unwrap();
+    let index = image.find_session_index(&claimed.session_id).unwrap();
+    assert!(!image.sessions[index].engram.unadmitted_reports.is_empty());
+    image.sessions[index].engram.work_binding = None;
+    image.sessions[index].engram.unadmitted_active_turn = None;
+    image.sessions[index].engram.unadmitted_closing_jobs.clear();
+    image.sessions[index].engram.active_turn_checks.clear();
+    engram_compact_root_journal(&mut image);
+    assert_eq!(image.engram_named_root_journal.len(), 1, "the actual immutable observation pins its claim");
+    image.sessions[index].engram.unadmitted_reports.clear();
+    engram_compact_root_journal(&mut image);
+    assert!(image.engram_named_root_journal.is_empty());
 }
 
 #[test]
 fn source_root_journal_reclaims_released_history_only_after_authoritative_readback() {
     let label = "journal-released-history";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let named = name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    let (token, binding) = claimed.record(|record| {
+    let (binding,) = claimed.record_mut(|record| {
         (
-            record.engram.routing_token.clone().unwrap(),
             record.engram.work_binding.clone(),
         )
     });
@@ -4620,9 +4270,8 @@ fn source_root_journal_reclaims_released_history_only_after_authoritative_readba
         assert!(!inner.engram_named_root_journal[0].obsolete);
     }
     claimed
-        .reconcile_root_readback(
+        .canonical_root_readback(
             &claimed.session_id,
-            &token,
             binding.as_ref(),
             Some(EngramNamedRootState::UnboundByRelease {
                 last_generation: named.generation as i64,
@@ -4643,13 +4292,13 @@ fn source_root_journal_reclaims_released_history_only_after_authoritative_readba
 #[test]
 fn source_root_journal_compacts_settled_history_without_losing_generation_on_restore() {
     let label = "journal-compaction";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     let mut inner = claimed.state.inner.lock().unwrap();
@@ -4702,17 +4351,17 @@ fn source_root_journal_compacts_settled_history_without_losing_generation_on_res
     claimed.state.persist_internal_locked(&inner).unwrap();
     drop(inner);
     // The naming path fences the same metadata snapshot before returning.
-    name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap();
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
     let restored = load_state(claimed.state.persistence_path.as_path())
         .unwrap()
         .unwrap();
     assert_eq!(restored.engram_source_root_generation, high_water);
     assert_eq!(restored.engram_named_root_journal.len(), 1);
-    let renamed = name_root(
+    let renamed = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     assert!(
@@ -4724,13 +4373,13 @@ fn source_root_journal_compacts_settled_history_without_losing_generation_on_res
 #[test]
 fn source_root_journal_full_of_pending_intents_refuses_without_discarding_them() {
     let label = "naming-journal-full";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
     {
@@ -4765,11 +4414,11 @@ fn source_root_journal_full_of_pending_intents_refuses_without_discarding_them()
         .iter()
         .filter(|r| r.request["operation"] == "named_root_bind")
         .count();
-    let error = name_root(
+    let error = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap_err();
     assert!(error.message.contains("journal is full"));
@@ -4796,57 +4445,32 @@ fn source_root_journal_full_of_pending_intents_refuses_without_discarding_them()
 }
 
 #[test]
-fn a_bound_claim_tells_the_agent_where_its_turns_are_measured_in_its_first_prompt() {
+fn a_claim_tells_the_agent_where_its_ordinary_turns_are_measured_in_its_first_prompt() {
     let label = "naming-bind-line";
-    let grant_id = "turn-observation-naming-bind-line-grant";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply("turn-observation-naming-bind-line-token"),
-            grant_reply(grant_id),
-            begin_reply(grant_id),
-            checkpoint_reply(grant_id),
-        ],
-    );
-
-    prepare_confirmed_claimed_opening(&claimed, label);
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch())
-        .expect("the begun root turn should reach the runtime");
-
-    let prompt = received_prompt(&claimed);
-    let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
-    assert!(
-        prompt.contains(&format!(
-            "Engram source basis for work {}:",
-            binding.work_id
-        )) && prompt.contains("no worktree named"),
-        "the bind's line, naming the work by its id with no name given: {prompt}"
-    );
-    assert_eq!(
-        pending_line(&claimed),
-        None,
-        "a delivered line is not repeated"
-    );
+    let claimed = EOCheckedTurn::idle(label, true);
+    // A real public name and clear establish the producer's canonical absence.
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
+    let prompt = claimed.begin_prompt("Explain the current source basis.").prompt;
+    assert!(prompt.contains(&format!("Engram source basis for w-{label}:"))
+        && prompt.contains("no worktree named"), "{prompt}");
+    assert_eq!(pending_line(&claimed), None, "a delivered line is not repeated");
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 #[test]
 fn a_line_set_after_the_prompt_was_built_waits_for_the_next_prompt() {
     let label = "naming-late-line";
-    let grant_id = "turn-observation-naming-late-line-grant";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply("turn-observation-naming-late-line-token"),
-            grant_reply(grant_id),
-            begin_reply(grant_id),
-            checkpoint_reply(grant_id),
-        ],
-    );
-    prepare_confirmed_claimed_opening(&claimed, label);
-    let dispatch = claimed.dispatch();
-    // Set between the prompt's build and its delivery, as a rebind during
-    // the begin's recovery sets one.
-    claimed.record(|record| {
+    let claimed = EOCheckedTurn::idle(label, true);
+    let dispatch = match claimed.state.dispatch_turn(&claimed.session_id, SendMessageRequest {
+        text: "Deliver the pending source line.".into(), expanded_text: None,
+        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
+    }).unwrap() { DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("the idle ordinary root must dispatch") };
+    // Set between the prompt's build and its delivery, as a later naming request does.
+    claimed.record_mut(|record| {
         record
             .engram
             .set_pending_source_root_line("[TermAl] a later line".to_owned());
@@ -4855,13 +4479,15 @@ fn a_line_set_after_the_prompt_was_built_waits_for_the_next_prompt() {
     deliver_turn_dispatch(&claimed.state, dispatch)
         .expect("the begun root turn should reach the runtime");
 
-    let prompt = received_prompt(&claimed);
+    let prompt = delivered_naming_prompt(&claimed);
     assert!(!prompt.contains("a later line"), "{prompt}");
     assert_eq!(
         pending_line(&claimed).as_deref(),
         Some("[TermAl] a later line"),
         "the later line is kept for the next prompt, not lost"
     );
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 #[test]
@@ -4870,24 +4496,18 @@ fn a_line_the_prompt_carried_given_again_after_its_build_stays_the_last_line() {
     // cleared and given again. The acceptance must not take the name given
     // again, or the clear would end the next prompt's lines.
     let label = "naming-line-again";
-    let grant_id = "turn-observation-naming-line-again-grant";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply("turn-observation-naming-line-again-token"),
-            grant_reply(grant_id),
-            begin_reply(grant_id),
-            checkpoint_reply(grant_id),
-        ],
-    );
-    prepare_confirmed_claimed_opening(&claimed, label);
-    claimed.record(|record| {
+    let claimed = EOCheckedTurn::idle(label, true);
+    claimed.record_mut(|record| {
         record
             .engram
             .set_pending_source_root_line("[TermAl] named".to_owned());
     });
-    let dispatch = claimed.dispatch();
-    claimed.record(|record| {
+    let dispatch = match claimed.state.dispatch_turn(&claimed.session_id, SendMessageRequest {
+        text: "Deliver the pending source line.".into(), expanded_text: None,
+        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
+    }).unwrap() { DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("the idle ordinary root must dispatch") };
+    claimed.record_mut(|record| {
         record
             .engram
             .set_pending_source_root_line("[TermAl] cleared".to_owned());
@@ -4899,7 +4519,7 @@ fn a_line_the_prompt_carried_given_again_after_its_build_stays_the_last_line() {
     deliver_turn_dispatch(&claimed.state, dispatch)
         .expect("the begun root turn should reach the runtime");
 
-    let prompt = received_prompt(&claimed);
+    let prompt = delivered_naming_prompt(&claimed);
     assert!(prompt.contains("[TermAl] named"), "{prompt}");
     assert!(!prompt.contains("[TermAl] cleared"), "{prompt}");
     assert_eq!(
@@ -4907,46 +4527,25 @@ fn a_line_the_prompt_carried_given_again_after_its_build_stays_the_last_line() {
         Some("[TermAl] cleared\n[TermAl] named"),
         "the next prompt tells the clear and ends on the name given again"
     );
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 #[test]
-fn a_session_that_engram_disables_drops_its_waiting_lines() {
-    // Once Engram disables the session, its turns are measured nowhere: a
-    // line waiting for the next prompt would tell of measurements that no
-    // longer happen. A failure that only delays the session keeps it.
-    let label = "naming-disabled-drops-lines";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    claimed.record(|record| {
-        record
-            .engram
-            .set_pending_source_root_line("[TermAl] a waiting line".to_owned());
-        record.engram.source_root_line_delivery = Some(("[TermAl] a waiting line".to_owned(), 7));
+fn historical_control_disablement_does_not_drop_an_ordinary_waiting_line() {
+    let claimed = EOCheckedTurn::idle("naming-passive-disablement", true);
+    claimed.record_mut(|record| {
+        record.engram.set_pending_source_root_line("[TermAl] a waiting line".into());
+        record.engram.historical_control.insert("engramDisabledReason".into(), json!("unparsable historical control response"));
     });
-
-    claimed.state.record_engram_transport_failure(
-        &claimed.session_id,
-        &EngramTransportError::deadline("control deadline"),
-    );
-    assert_eq!(
-        pending_line(&claimed).as_deref(),
-        Some("[TermAl] a waiting line"),
-        "a failure that does not disable the session keeps the line"
-    );
-
-    claimed.state.record_engram_transport_failure(
-        &claimed.session_id,
-        &EngramTransportError::protocol("unparsable control response"),
-    );
-    assert!(
-        claimed.record(|record| record.engram.disabled_reason.is_some()),
-        "the protocol failure disabled the session"
-    );
-    assert_eq!(pending_line(&claimed), None, "the waiting line is dropped");
-    assert_eq!(
-        claimed.record(|record| record.engram.source_root_line_delivery.clone()),
-        None,
-        "and so is its delivery in flight"
-    );
+    let history = claimed.record_mut(|record| record.engram.historical_control.clone());
+    assert_eq!(pending_line(&claimed).as_deref(), Some("[TermAl] a waiting line"));
+    let prompt = claimed.begin_prompt("Continue the ordinary turn.").prompt;
+    assert!(prompt.contains("[TermAl] a waiting line"), "{prompt}");
+    assert_eq!(pending_line(&claimed), None);
+    claimed.record_mut(|record| assert_eq!(record.engram.historical_control, history));
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 #[test]
@@ -5007,531 +4606,115 @@ fn a_delivered_line_is_cleared_on_a_turn_that_begins_no_grant() {
 }
 
 #[test]
-fn a_clear_during_the_opening_capture_seals_the_root_that_turn_began_with() {
-    opening_capture_keeps_admitted_basis("clear");
+fn a_clear_after_an_ordinary_opening_keeps_and_seals_its_original_root() {
+    ordinary_opening_keeps_its_root("clear");
 }
 
 #[test]
-fn a_rename_during_the_opening_capture_keeps_the_root_that_turn_began_with() {
-    opening_capture_keeps_admitted_basis("rename");
+fn a_rename_after_an_ordinary_opening_keeps_its_original_root() {
+    ordinary_opening_keeps_its_root("rename");
 }
 
 #[test]
-fn a_pending_rename_during_the_opening_capture_withholds_without_a_synthetic_change() {
-    opening_capture_keeps_admitted_basis("pending");
+fn a_pending_rename_preserves_the_ordinary_opening_and_withholds_current_authority() {
+    ordinary_opening_keeps_its_root("pending");
 }
 
 #[test]
-fn an_unknown_read_during_the_opening_capture_withholds_without_a_synthetic_change() {
-    opening_capture_keeps_admitted_basis("unknown");
+fn an_unknown_read_preserves_the_ordinary_opening_and_withholds_current_authority() {
+    ordinary_opening_keeps_its_root("unknown");
 }
 
 #[test]
-fn source_root_stale_opening_capture_cannot_change_a_delivered_successor() {
-    let label = "stale-opening-successor";
-    let old_grant = format!("turn-observation-{label}-grant");
-    let fresh_grant = format!("turn-observation-{label}-fresh-grant");
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply(&format!("turn-observation-{label}-token")),
-            grant_reply(&old_grant),
-            begin_reply(&old_grant),
-            checkpoint_reply(&old_grant),
-            grant_reply(&fresh_grant),
-            begin_reply(&fresh_grant),
-            checkpoint_reply(&fresh_grant),
-        ],
-    );
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![claimed_root_held(label)],
-    )
-    .unwrap();
-    assert!(matches!(
-        deliver_turn_dispatch_now(&claimed.state, claimed.dispatch()),
-        TurnDispatchDeliveryOutcome::Delivered
+fn a_delayed_canonical_read_cannot_replace_a_delivered_ordinary_successor() {
+    let label = "ordinary-delayed-canonical-reader";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    let (target, fence) = {
+        let inner = claimed.state.inner.lock().unwrap();
+        (AppState::engram_source_root_target_locked(&inner, &claimed.session_id).unwrap().unwrap(),
+            EngramRootReadFence::capture(&inner))
+    };
+    claimed.begin("The first real provider turn.");
+    let first = claimed.record_mut(|record| record.engram.observed_turn_ref().unwrap().to_owned());
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
+    claimed.begin("The delivered successor.");
+    let successor = claimed.record_mut(|record| record.engram.unadmitted_active_turn.clone().unwrap());
+    assert_ne!(successor.host_turn_ref, first);
+    claimed.state.reconcile_engram_named_root_with_route_classified_until(
+        &claimed.session_id, target.work_binding.as_ref(), Some(EngramNamedRootState::None),
+        &fence, Some(&target.connection), claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+    ).unwrap_or_else(|failure| panic!("canonical root reconciliation failed: {}", failure.into_transport()));
+    claimed.record_mut(|record| assert_eq!(record.engram.unadmitted_active_turn.as_ref(), Some(&successor)));
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
+}
+
+fn ordinary_opening_keeps_its_root(transition: &str) {
+    let label = format!("ordinary-opening-{transition}");
+    let claimed = EOCheckedTurn::idle(&label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(&claimed, &label, Some(&worktree), vec![naming_claim(&label)]).unwrap();
+    claimed.begin("Observe this turn's original root.");
+    let (turn_ref, opening) = claimed.record_mut(|record| (
+        record.engram.observed_turn_ref().unwrap().to_owned(),
+        record.engram.observed_opening().unwrap().clone(),
     ));
-    assert!(received_prompt(&claimed).contains("Change the root workspace."));
-    let old_generation = claimed.record(|record| record.active_turn_generation);
-    let opening_identity = |record: &SessionRecord| {
-        (
-            record.active_turn_generation,
-            record.engram.active_grant_id.clone(),
-            record.engram.active_turn_root_capture.clone(),
-            record.engram.active_turn_start_basis.clone(),
-            record.engram.active_turn_source_root.as_ref()
-                .map(|root| (root.root.clone(), root.generation)),
-            record.engram.active_turn_naming_identity.clone(),
-            record.engram.opening_diagnostic.is_none(),
-        )
-    };
-    let saved = Arc::new(Mutex::new(None));
-    let (state, session_id, transport, successor) = (
-        claimed.state.clone(),
-        claimed.session_id.clone(),
-        claimed.transport.clone(),
-        saved.clone(),
-    );
-    TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            let (token, binding, runtime) = {
-                let inner = state.inner.lock().unwrap();
-                let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-                (
-                    record.engram.routing_token.clone().unwrap(),
-                    record.engram.work_binding.clone().unwrap(),
-                    record.runtime.runtime_token().unwrap(),
-                )
-            };
-            state
-                .reconcile_engram_named_root(
-                    &session_id,
-                    &token,
-                    Some(&binding),
-                    Some(EngramNamedRootState::Unknown),
-                    u64::MAX,
-                )
-                .unwrap();
-            transport
-                .work_bindings
-                .lock()
-                .unwrap()
-                .push_back(Ok(Some(binding)));
-            // This turn was actually delivered. Finish it through its normal
-            // owner, then admit and deliver a distinct successor while the
-            // old turn's repeated capture is suspended before installation.
-            state
-                .finish_turn_ok_if_runtime_matches(&session_id, &runtime)
-                .unwrap();
-            let dispatch = match state.dispatch_turn(
-                &session_id,
-                SendMessageRequest {
-                    text: "Fresh successor after the delivered turn.".to_owned(),
-                    expanded_text: None,
-                    attachments: Vec::new(),
-                    source_session_id: None,
-                    source_mailbox: None,
-                },
-            ).unwrap() {
-                DispatchTurnResult::Dispatched(dispatch)
-                | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-                DispatchTurnResult::Queued => panic!("the settled turn permits a fresh successor"),
-            };
-            assert!(matches!(
-                deliver_turn_dispatch_now(&state, dispatch),
-                TurnDispatchDeliveryOutcome::Delivered
-            ));
-            let identity = {
-                let inner = state.inner.lock().unwrap();
-                let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-                opening_identity(record)
-            };
-            assert!(identity.0 > old_generation, "a new turn owns the delivered successor");
-            assert!(identity.3.is_some(), "the delivered successor has a start basis");
-            assert!(identity.4.is_some(), "the delivered successor has its named root");
-            assert!(identity.6, "the delivered successor has no opening diagnostic");
-            *successor.lock().unwrap() = Some(identity);
-        }));
-    });
-    // Exercise the existing guarded installation boundary directly; no
-    // fabricated pre-handoff completion or old provider delivery is needed.
-    claimed.state.record_engram_turn_start_basis_off_lock(
-        &claimed.session_id, &old_grant,
-    );
-    assert!(TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| hook.borrow().is_none()));
-    let prompt = received_prompt(&claimed);
-    assert!(prompt.contains("Fresh successor after the delivered turn."), "{prompt}");
-    assert!(!prompt.contains("unconfirmed"), "{prompt}");
-    assert!(
-        matches!(
-            claimed.runtime_rx.try_recv(),
-            Err(std::sync::mpsc::TryRecvError::Empty)
-        ),
-        "the stale capture must not send the old prompt again"
-    );
-    let actual = claimed.record(|record| opening_identity(record));
-    assert_eq!(
-        Some(actual),
-        *saved.lock().unwrap(),
-        "stale finalization cannot alter the delivered successor's opening"
-    );
-    assert_eq!(
-        claimed.record(|record| record.engram.active_grant_id.clone()),
-        Some(fresh_grant)
-    );
-    claimed
-        .state
-        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
-        .unwrap();
-}
-
-fn opening_capture_keeps_admitted_basis(transition: &str) {
-    let label = format!("naming-{transition}-during-capture");
-    let label = label.as_str();
-    let uncertain = matches!(transition, "pending" | "unknown");
-    let grant_id = format!("turn-observation-{label}-grant");
-    let fresh_grant = format!("turn-observation-{label}-fresh-grant");
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply(&format!("turn-observation-{label}-token")),
-            grant_reply(&grant_id),
-            begin_reply(&grant_id),
-            checkpoint_reply(&grant_id),
-            grant_reply(&fresh_grant),
-            begin_reply(&fresh_grant),
-            checkpoint_reply(&fresh_grant),
-        ],
-    );
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![claimed_root_held(label)],
-    )
-    .expect("the root is named before the turn");
-    let opening_proof = {
-        let inner = claimed.state.inner.lock().unwrap();
-        let proof = &inner.engram_work_naming_history[0].proofs[0];
-        json!({ "capture_run_cut": proof.read.read_cut.position,
-            "latest_event": proof.read.latest_event.as_ref().map(|event| &event.event),
-            "state": proof.read.named_root })
-    };
-    let (state, session_id, work) = (
-        claimed.state.clone(),
-        claimed.session_id.clone(),
-        format!("w-{label}"),
-    );
-    let new_path = matches!(transition, "rename" | "pending")
-        .then(|| Some(claimed.root.to_string_lossy().into_owned()));
-    let transport = claimed.transport.clone();
-    let capture_transition = transition.to_owned();
-    // The transition lands after admission and before the opening capture,
-    // without changing the admitted workspace's contents.
-    TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            if capture_transition == "unknown" {
-                let (token, binding) = {
-                    let inner = state.inner.lock().unwrap();
-                    let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-                    (
-                        record.engram.routing_token.clone().unwrap(),
-                        record.engram.work_binding.clone().unwrap(),
-                    )
-                };
-                state
-                    .reconcile_engram_named_root(
-                        &session_id,
-                        &token,
-                        Some(&binding),
-                        Some(EngramNamedRootState::Unknown),
-                        u64::MAX,
-                    )
-                    .unwrap();
-                return;
-            }
-            if capture_transition == "pending" {
-                transport
-                    .named_roots
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .lose_next_reply = true;
-            }
-            let result = state.name_engram_source_root(
-                &session_id,
-                EngramSourceRootRequest {
-                    work,
-                    path: new_path,
-                },
-            );
-            if capture_transition == "pending" {
-                result.expect_err("the lost reply keeps the rename pending");
-            } else {
-                result.expect("a confirmed transition during the opening capture");
-            }
-        }));
-    });
-
-    let outcome = deliver_turn_dispatch(&claimed.state, claimed.dispatch());
-    assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Delivered),
-        "the begun root turn should reach the runtime: {outcome:?}");
-    let prompt = received_prompt(&claimed);
-    assert_eq!(prompt.contains("unconfirmed"), uncertain, "{prompt}");
-
-    assert!(
-        TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| hook.borrow().is_none()),
-        "the clear ran inside the window"
-    );
-    if uncertain {
-        assert!(
-            claimed.record(|record| record.engram.active_turn_start_basis.is_none()),
-            "pending or Unknown authority withholds the opening basis"
-        );
-        let admitted = claimed.record(|record| {
-            let root = record.engram.active_turn_source_root.as_ref().unwrap();
-            (root.root.clone(), root.generation, root.claim_id.clone())
-        });
-        if transition == "pending" {
-            // Retry the exact intent whose reply was lost, through production
-            // naming. Authority recovers while the original grant is active.
-            name_root(
-                &claimed,
-                label,
-                Some(&claimed.root),
-                vec![claimed_root_held(label)],
-            )
-            .expect("the immutable pending rename recovers");
-        } else {
-            let (token, binding) = claimed.record(|record| {
-                (
-                    record.engram.routing_token.clone().unwrap(),
-                    record.engram.work_binding.clone().unwrap(),
-                )
-            });
-            claimed
-                .state
-                .reconcile_engram_named_root(
-                    &claimed.session_id,
-                    &token,
-                    Some(&binding),
-                    None,
-                    u64::MAX,
-                )
-                .expect("the covering canonical read recovers Unknown authority");
+    let before = content_revision_of(&worktree);
+    let binding = opening.binding.clone();
+    match transition {
+        "clear" => { request_naming(&claimed, &label, None, vec![naming_claim(&label)]).unwrap(); }
+        "rename" => { request_naming(&claimed, &label, Some(&claimed.root), vec![naming_claim(&label)]).unwrap(); }
+        "pending" => {
+            claimed.transport.named_roots.lock().unwrap().as_mut().unwrap().lose_next_reply = true;
+            request_naming(&claimed, &label, Some(&claimed.root), vec![naming_claim(&label)]).unwrap_err();
+            assert!(claimed.state.inner.lock().unwrap().engram_named_root_journal[0].pending.is_some());
         }
-        assert!(matches!(
-            claimed.state.engram_root_capture(&claimed.session_id),
-            EngramRootCapture::Recorded { .. }
-        ));
-        claimed.record(|record| {
-            assert_eq!(
-                record.engram.active_grant_id.as_deref(),
-                Some(grant_id.as_str())
-            );
-            let root = record.engram.active_turn_source_root.as_ref().unwrap();
-            assert_eq!(
-                (root.root.clone(), root.generation, root.claim_id.clone()),
-                admitted
-            );
-        });
-        let run_check = |key: &str, root: &FsPath| {
-            claimed.state.note_engram_command_started(
-                &claimed.session_id,
-                &EngramObservationProvenance::Ambient,
-                key,
-                Some("cargo test"),
-                Some(root.to_str().unwrap()),
-            );
-            claimed.state.note_engram_command_finished(
-                &claimed.session_id,
-                &EngramObservationProvenance::Ambient,
-                key,
-                "cargo test",
-                "test result: ok. 1 passed",
-                Some(EngramCommandExit::Code(0)),
-            );
-            let captures = claimed.record(|record| {
-                record
-                    .engram
-                    .active_turn_checks
-                    .iter()
-                    .flat_map(|check| {
-                        std::iter::once(check.start_basis.clone())
-                            .chain(check.end.as_ref().map(|end| end.end_basis.clone()))
-                    })
-                    .collect::<Vec<_>>()
-            });
-            for capture in captures {
-                capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
-            }
-        };
-        run_check("recovered-original-opening", &worktree);
-        // Repeating this grant's capture cannot reset either its opening
-        // eligibility or its admitted workspace to the recovered selection.
-        claimed
-            .state
-            .record_engram_turn_start_basis_off_lock(&claimed.session_id, &grant_id);
-        claimed.record(|record| {
-            assert_eq!(
-                record.engram.active_turn_root_capture,
-                Some(EngramRootCapture::Unconfirmed)
-            );
-            assert!(record.engram.active_turn_start_basis.is_none());
-            let root = record.engram.active_turn_source_root.as_ref().unwrap();
-            assert_eq!(
-                (root.root.clone(), root.generation, root.claim_id.clone()),
-                admitted
-            );
-        });
-        claimed
-            .state
-            .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
-            .unwrap();
-        let first = claimed
-            .transport
-            .requests()
-            .into_iter()
-            .find(|request| {
-                request.request["operation"] == "turn_checkpoint"
-                    && request.request["grant_id"] == grant_id
-            })
-            .unwrap()
-            .request;
-        assert!(
-            first
-                .get("verification_evidence")
-                .is_none_or(|value| value.as_array().is_some_and(Vec::is_empty)),
-            "recovery cannot credit a check of the same uncertain opening: {first}"
-        );
-        assert!(
-            first["observations"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|observation| observation.get("source_basis").is_none_or(Value::is_null)),
-            "{first}"
-        );
-
-        // A new begin takes its own confirmed opening, rather than upgrading
-        // the old one. Both its actual prompt and recognised check agree.
-        let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
-        claimed
-            .transport
-            .work_bindings
-            .lock()
-            .unwrap()
-            .push_back(Ok(Some(binding)));
-        deliver_turn_dispatch(&claimed.state, claimed.dispatch()).unwrap();
-        let prompt = received_prompt(&claimed);
-        assert!(!prompt.contains("unconfirmed"), "{prompt}");
-        assert!(claimed.record(|record| record.engram.active_turn_start_basis.is_some()));
-        let fresh_root = if transition == "pending" {
-            &claimed.root
-        } else {
-            &worktree
-        };
-        run_check("confirmed-fresh-opening", fresh_root);
-        claimed
-            .state
-            .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
-            .unwrap();
-        let fresh = claimed
-            .transport
-            .requests()
-            .into_iter()
-            .find(|request| {
-                request.request["operation"] == "turn_checkpoint"
-                    && request.request["grant_id"] == fresh_grant
-            })
-            .unwrap()
-            .request;
-        assert_eq!(
-            fresh["verification_evidence"].as_array().map(Vec::len),
-            Some(1),
-            "{fresh}"
-        );
-        assert!(
-            fresh["observations"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|observation| observation
-                    .get("source_basis")
-                    .is_some_and(|basis| !basis.is_null())),
-            "{fresh}"
-        );
-        return;
+        "unknown" => {
+            claimed.canonical_root_readback(&claimed.session_id, Some(&binding),
+                Some(EngramNamedRootState::Unknown), u64::MAX).unwrap();
+        }
+        _ => unreachable!(),
     }
-    assert_eq!(
-        claimed.record(|record| {
-            record
-                .engram
-                .active_turn_source_root
-                .as_ref()
-                .and_then(|turn_root| turn_root.sealed_revision.clone())
-        }),
-        Some(content_revision_of(&worktree)),
-        "the turn keeps the root it began with, sealed at the clear"
-    );
-    let start = claimed
-        .record(|record| record.engram.active_turn_start_basis.clone())
-        .expect("a confirmed clear preserves the admitted opening basis");
-    assert_eq!(start.source_revision, content_revision_of(&worktree));
-    assert_eq!(start.source_root_state, Some(EngramSourceRootState::Named));
-    {
-        let inner = claimed.state.inner.lock().unwrap();
-        let owner = &inner.engram_source_sightings[0];
-        let intent = &owner.observations[0];
-        assert_eq!(intent.root_basis, opening_proof);
-        let EngramSourceObservationPhase::Recorded { request, receipt } = &intent.phase else {
-            panic!("the historical observation must be recorded");
-        };
-        assert_eq!(request["root_basis"], opening_proof);
-        assert_eq!(receipt["accounting"], json!({ "kind": "audit_only", "reason": "root_basis_moved" }));
-        assert!(owner.latest.is_none(), "a historical receipt cannot promote a baseline");
-        let saved = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
-        assert!(saved.engram_source_sightings.iter().any(|saved| saved == owner));
+    claimed.record_mut(|record| {
+        assert_eq!(record.engram.observed_turn_ref(), Some(turn_ref.as_str()));
+        let current = record.engram.observed_opening().unwrap();
+        assert_eq!(current.provenance, opening.provenance);
+        assert_eq!(current.binding, opening.binding);
+        let root = record.engram.observed_source_root().unwrap();
+        assert_eq!(root.generation, named.generation);
+        assert_eq!(Some(&root.root), named.root.as_ref());
+        assert_eq!(root.sealed_revision.is_some(), matches!(transition, "clear" | "rename"));
+    });
+    assert_eq!(content_revision_of(&worktree), before, "naming metadata does not synthesize a content edit");
+    if matches!(transition, "pending" | "unknown") {
+        assert_eq!(claimed.state.engram_turn_root_capture(&claimed.session_id), EngramRootCapture::Unconfirmed);
+    } else {
+        assert_eq!(claimed.state.engram_turn_root_capture(&claimed.session_id), opening.provenance);
     }
-    let observation = finish_claimed_turn(&claimed, &claimed.runtime_token());
-    assert_eq!(observation["source_changed"], false, "{observation}");
-    assert_eq!(observation["effect"], "observe", "{observation}");
-    assert_eq!(
-        observation["source_basis"]["source_root_generation"],
-        json!(start.source_root_generation),
-        "closing evidence keeps the opening generation"
-    );
-    assert!(claimed.state.inner.lock().unwrap().engram_source_sightings.iter()
-        .all(|owner| owner.latest.is_none()), "the historical close promotes no scope");
-    claimed.transport.work_bindings.lock().unwrap().push_back(Ok(Some(
-        test_control_work_binding(&format!("turn-observation-{label}"), 1))));
-    let outcome = deliver_turn_dispatch(&claimed.state, claimed.dispatch());
-    assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Delivered), "{outcome:?}");
-    received_prompt(&claimed);
-    let requests = claimed.transport.requests();
-    let fresh = &requests.iter().filter(|request| request.request["operation"] == "execution_observe")
-        .last().unwrap().request;
-    assert_ne!(fresh["root_basis"], opening_proof);
-    assert_eq!(fresh["occurrence"]["source_change"]["detection"], "assumed_missing_baseline");
-    assert!(claimed.state.inner.lock().unwrap().engram_source_sightings.iter()
-        .filter(|owner| owner.scope.source_root_generation == start.source_root_generation)
-        .filter(|owner| owner.scope.source_root_state == start.source_root_state
-            && owner.scope.workspace_id == start.workspace_id)
-        .all(|owner| owner.latest.is_none()));
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 #[test]
-fn a_watcher_event_in_a_named_root_beside_the_workdir_counts_while_the_grant_is_held() {
+fn a_watcher_event_in_a_named_root_beside_the_workdir_counts_only_during_its_ordinary_turn() {
     let label = "naming-watcher-sibling";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
     // The session works in a directory beside the named root, not above it.
     let workdir = claimed.root.join("beside");
     fs::create_dir_all(&workdir).expect("the workdir exists");
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.session.workdir = engram_source_root_display(
             &fs::canonicalize(&workdir)
                 .expect("the workdir canonicalizes")
                 .to_string_lossy(),
         );
-        record.active_turn_start_message_count = Some(record.session.messages.len());
-        record.engram.active_grant_id = Some("grant-watched".to_owned());
-        record.engram.active_turn_source_root = Some(EngramTurnSourceRoot {
-            root: canonical.to_string_lossy().into_owned(),
-            common_dir_key: "unused".to_owned(),
-            short_ref: format!("w-{label}"),
-            claim_id: "claim-watched".to_owned(),
-            generation: 0,
-            sealed_revision: None,
-        });
+
     });
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("Observe edits in the named root.");
     let in_root = engram_source_root_display(&canonical.join("README.md").to_string_lossy());
     let elsewhere = engram_source_root_display(
         &fs::canonicalize(&claimed.root)
@@ -5557,7 +4740,7 @@ fn a_watcher_event_in_a_named_root_beside_the_workdir_counts_while_the_grant_is_
         .state
         .record_active_turn_file_changes(&events(&[&in_root, &elsewhere]));
     assert_eq!(
-        claimed.record(|record| {
+        claimed.record_mut(|record| {
             record
                 .active_turn_file_changes
                 .keys()
@@ -5568,29 +4751,26 @@ fn a_watcher_event_in_a_named_root_beside_the_workdir_counts_while_the_grant_is_
         "the turn's root counts; a path outside it and the workdir does not"
     );
 
-    claimed.record(|record| {
-        record.active_turn_file_changes.clear();
-        record.engram.active_grant_id = None;
-    });
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
+    claimed.record_mut(|record| record.active_turn_file_changes.clear());
     claimed
         .state
         .record_active_turn_file_changes(&events(&[&in_root]));
     assert!(
-        claimed.record(|record| record.active_turn_file_changes.is_empty()),
-        "a root kept from an earlier grant counts for nothing"
+        claimed.record_mut(|record| record.active_turn_file_changes.is_empty()),
+        "a completed ordinary trace cannot own a later watcher event"
     );
 }
 
 #[test]
 fn the_naming_route_answers_with_the_handlers_statuses() {
     let label = "naming-route";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    prepare_claimed_root_naming(&claimed, label);
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    claimed_root_store(&claimed);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    naming_store(&claimed);
     claimed
         .transport
-        .replace_held_claims([Ok(claimed_root_held(label))]);
+        .replace_held_claims([Ok(naming_claim(label))]);
     let app = app_router(claimed.state.clone());
     let post = |session: &str, body: Value| {
         Request::builder()
@@ -5637,30 +4817,23 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
     // routes its events to that session's scope and marks the unscoped copy
     // as a duplicate; the turn measured in the root still counts them.
     let label = "naming-watcher-scoped";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
     let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
     let project_root = fs::canonicalize(&claimed.root).expect("the root canonicalizes");
     let other = other_session(&claimed);
     let workdir = claimed.root.join("beside");
     fs::create_dir_all(&workdir).expect("the workdir exists");
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.session.workdir = engram_source_root_display(
             &fs::canonicalize(&workdir)
                 .expect("the workdir canonicalizes")
                 .to_string_lossy(),
         );
-        record.active_turn_start_message_count = Some(record.session.messages.len());
-        record.engram.active_grant_id = Some("grant-watched".to_owned());
-        record.engram.active_turn_source_root = Some(EngramTurnSourceRoot {
-            root: canonical.to_string_lossy().into_owned(),
-            common_dir_key: "unused".to_owned(),
-            short_ref: format!("w-{label}"),
-            claim_id: "claim-watched".to_owned(),
-            generation: 0,
-            sealed_revision: None,
-        });
+
     });
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("The ordinary named turn receives watcher scopes.");
     let scope_root = canonical_workspace_file_watch_root(&project_root.to_string_lossy())
         .expect("the real watcher scope exists");
     // The other session works in the same tree and has a turn running too.
@@ -5722,7 +4895,7 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
     claimed.state.record_active_turn_file_changes(&events);
 
     assert_eq!(
-        claimed.record(|record| {
+        claimed.record_mut(|record| {
             record
                 .active_turn_file_changes
                 .iter()
@@ -5755,15 +4928,15 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
         workspace_file_changes_from_path(&outside, WorkspaceFileChangeKind::Modified, &scopes);
     assert_eq!(outside_events.len(), 2);
     claimed.state.record_active_turn_file_changes(&outside_events);
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         assert_eq!(
-            record.engram.active_turn_source_root.as_ref().unwrap().root,
+            record.engram.observed_source_root().unwrap().root,
             canonical.to_string_lossy(),
             "watcher comparison never changes the canonical named-root identity"
         );
     });
     // The set is the turn's "files changed" summary, so the card lists it.
-    let card = claimed.record(|record| {
+    let card = claimed.record_mut(|record| {
         assert!(push_active_turn_file_changes_on_record(
             record,
             "message-root-card".to_owned()
@@ -5780,26 +4953,17 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
 }
 
 #[test]
-fn a_turn_admitted_with_a_named_root_marks_a_check_open_in_that_root() {
-    // The turn-start sweep runs before the root is known; the admission that
-    // installs it marks another session's check still open in that root.
+fn an_ordinary_named_opening_marks_a_check_already_open_in_that_root() {
+    // The delivered ordinary opening installs its named root and marks another
+    // session's check that is still open in that root.
     let label = "naming-admission-overlap";
-    let grant_id = "turn-observation-naming-admission-overlap-grant";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply("turn-observation-naming-admission-overlap-token"),
-            grant_reply(grant_id),
-            begin_reply(grant_id),
-            checkpoint_reply(grant_id),
-        ],
-    );
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect("the root is named before the turn");
     let other = other_session(&claimed);
@@ -5819,35 +4983,34 @@ fn a_turn_admitted_with_a_named_root_marks_a_check_open_in_that_root() {
         inner.sessions[index].engram.active_turn_checks[0].overlapped
     };
 
-    let dispatch = claimed.dispatch();
+    let dispatch = match claimed.state.dispatch_turn(&claimed.session_id, SendMessageRequest {
+        text: "Observe the named root.".into(), expanded_text: None, attachments: Vec::new(),
+        source_session_id: None, source_mailbox: None,
+    }).unwrap() {
+        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("the idle ordinary root must dispatch"),
+    };
     assert!(
         !overlapped(),
         "the turn-start sweep sees only the workdir, a worktree of its own"
     );
     deliver_turn_dispatch(&claimed.state, dispatch)
         .expect("the begun root turn should reach the runtime");
-    let _ = received_prompt(&claimed);
+    let _ = delivered_naming_prompt(&claimed);
 
     assert!(
         overlapped(),
-        "the admission that installs the root marks the check"
+        "the ordinary opening that installs the root marks the check"
     );
     pending.finish(None);
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
 }
 
 #[test]
 fn a_delegated_session_is_not_told_to_name_a_root_it_cannot_name() {
-    let child_bound = test_control_work_binding("naming-child-line", 1);
-    assert_eq!(
-        engram_bind_source_root_line(true, &[], None, None, &child_bound, "C:/child", false),
-        None,
-        "a delegated session gets no bind line"
-    );
-    assert!(
-        engram_bind_source_root_line(false, &[], None, None, &child_bound, "C:/root", false)
-            .is_some_and(|line| line.contains("termal_name_source_root")),
-        "a root session is told how to name one"
-    );
+    let root_line = engram_source_root_line(None, "ordinary-work", "C:/root", false);
+    assert!(root_line.contains("termal_name_source_root"));
     let child_line = engram_source_root_withheld_line(
         FsPath::new("C:/elsewhere"),
         "C:/child",
@@ -5871,10 +5034,10 @@ fn a_name_landing_after_the_held_read_is_not_overwritten() {
     // its commit: the call's baseline is the list before the read, so it
     // sees the change and refuses rather than overwrite the newer name.
     let label = "naming-late-other";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let store = claimed_root_store(&claimed);
-    let held = claimed_root_held(label);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let store = naming_store(&claimed);
+    let held = naming_claim(label);
     let newer = EngramWorkSourceRoot {
         store,
         work_id: held.items[0].work_id.clone(),
@@ -5899,7 +5062,7 @@ fn a_name_landing_after_the_held_read_is_not_overwritten() {
         }));
     });
 
-    let error = name_root(&claimed, label, Some(&worktree), vec![held])
+    let error = request_naming(&claimed, label, Some(&worktree), vec![held])
         .expect_err("the newer name is not overwritten");
 
     assert_eq!(error.status, StatusCode::CONFLICT);
@@ -5923,13 +5086,13 @@ fn a_name_landing_after_the_held_read_is_not_overwritten() {
 #[test]
 fn an_explicit_null_path_is_refused_on_the_route() {
     let label = "naming-route-null";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect("a root is named first");
     let app = app_router(claimed.state.clone());
@@ -5973,21 +5136,21 @@ fn a_name_given_again_after_a_clear_is_the_last_line_the_agent_reads() {
     // Name, clear, name the same root again before the next prompt: the
     // pending lines end on the name, the state the turn is measured in.
     let label = "naming-name-clear-name";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect("named");
-    name_root(&claimed, label, None, vec![claimed_root_held(label)]).expect("cleared");
-    name_root(
+    request_naming(&claimed, label, None, vec![naming_claim(label)]).expect("cleared");
+    request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .expect("named again");
 
@@ -6007,11 +5170,10 @@ fn a_name_given_again_after_a_clear_is_the_last_line_the_agent_reads() {
 #[test]
 fn named_claim_fixture_refuses_an_unregistered_run_without_applying_the_name() {
     let label = "unregistered-named-claim";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
-    claimed_root_store(&claimed);
-    let binding = claimed_root_held(label).items[0]
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    naming_store(&claimed);
+    let binding = naming_claim(label).items[0]
         .control_binding
         .clone()
         .unwrap();
@@ -6026,7 +5188,7 @@ fn named_claim_fixture_refuses_an_unregistered_run_without_applying_the_name() {
         .remove(&binding.claim_id);
     claimed
         .transport
-        .replace_held_claims([Ok(claimed_root_held(label))]);
+        .replace_held_claims([Ok(naming_claim(label))]);
     let error = claimed
         .state
         .name_engram_source_root(
@@ -6052,16 +5214,8 @@ fn named_claim_fixture_refuses_an_unregistered_run_without_applying_the_name() {
 fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
     for case in ["distinct", "shared", "expired"] {
         let label = format!("two-claims-{case}");
-        let claimed = ClaimedRoot::new_scripted(
-            &label,
-            vec![
-                bind_reply("two-claims-token"),
-                grant_reply("two-claims-grant"),
-                begin_reply("two-claims-grant"),
-                checkpoint_reply("two-claims-grant"),
-            ],
-        );
-        let first = add_claimed_root_worktree(&claimed.root);
+        let claimed = EOCheckedTurn::idle(&label, true);
+        let first = naming_worktree(&claimed.root);
         let second = if case == "shared" {
             first.clone()
         } else {
@@ -6079,7 +5233,7 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
             );
             second
         };
-        let mut held = claimed_root_held(&label);
+        let mut held = naming_claim(&label);
         let first_ref = held.items[0].short_ref.clone();
         let second_binding = test_control_work_binding("second", 1);
         held.items.push(EngramHeldClaim {
@@ -6090,7 +5244,7 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
             focused: false,
             control_binding: Some(second_binding.clone()),
         });
-        name_root(&claimed, &label, Some(&first), vec![held.clone()]).expect("first root named");
+        request_naming(&claimed, &label, Some(&first), vec![held.clone()]).expect("first root named");
         claimed.transport.register_named_root_run(&second_binding);
         claimed
             .state
@@ -6102,13 +5256,14 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
                 },
             )
             .expect("second root named");
+        request_naming(&claimed, &label, Some(&first), vec![held.clone()])
+            .expect("explicitly select the first claim through the current naming owner");
         if case == "expired" {
             held.items.pop();
             claimed.transport.replace_held_claims([Ok(held)]);
         }
-        deliver_turn_dispatch(&claimed.state, claimed.dispatch()).expect("turn delivered");
-        let _ = received_prompt(&claimed);
-        claimed.record(|record| record.engram.pending_source_root_line = None);
+        claimed.begin("Observe placement for the current held claim.");
+        claimed.record_mut(|record| record.engram.pending_source_root_line = None);
         claimed.state.note_engram_command_started(
             &claimed.session_id,
             &EngramObservationProvenance::Ambient,
@@ -6117,7 +5272,7 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
             Some(second.to_str().expect("UTF-8 fixture path")),
         );
         let line = pending_line(&claimed).expect("test routing is explained");
-        let checks = claimed.record(|record| record.engram.active_turn_checks.len());
+        let checks = claimed.record_mut(|record| record.engram.active_turn_checks.len());
         if case == "expired" {
             assert!(
                 !line.contains("w-second"),
@@ -6146,124 +5301,64 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
         }
         claimed
             .state
-            .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
-            .expect("turn closes without rerouting its grant");
+            .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.record_mut(|record| record.runtime.runtime_token().unwrap()))
+            .expect("the ordinary turn closes without rerouting its facts");
+        assert_ordinary_turn_has_no_native_requests(&claimed);
     }
 }
 
 #[test]
-fn claimed_root_checks_carry_the_fixture_toolchain_label_settled_at_their_start() {
-    // A real toolchain capture runs rustup in the check's worktree on a
-    // detached thread; one still running when the fixture drops keeps its
-    // temporary root from being removed.
-    let label = "fixture-toolchain";
-    let (claimed, worktree, runtime_token) = named_root_turn(label, true);
-    claimed.state.note_engram_command_started(
-        &claimed.session_id,
-        &EngramObservationProvenance::Ambient,
-        "fixture-toolchain-test",
-        Some("cargo test"),
-        Some(worktree.to_str().expect("UTF-8 fixture path")),
-    );
-    let toolchain = claimed.record(|record| {
-        assert_eq!(
-            record.engram.active_turn_checks.len(),
-            1,
-            "the check in the named root is recorded"
-        );
+fn ordinary_root_checks_carry_the_shared_fixture_toolchain_label_settled_at_start() {
+    let label = "ordinary-fixture-toolchain";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.begin("Observe the toolchain-labelled check.");
+    let mut recorder = claimed.recorder();
+    let cwd = worktree.to_string_lossy();
+    recorder.command_started_in("fixture-toolchain-test", "cargo test", Some("cargo test"), Some(&cwd)).unwrap();
+    let toolchain = claimed.record_mut(|record| {
+        assert_eq!(record.engram.active_turn_checks.len(), 1);
         record.engram.active_turn_checks[0].toolchain.clone()
     });
-    assert!(
-        toolchain.is_ready(),
-        "the toolchain capture must be settled when the check starts"
-    );
-    assert_eq!(
-        toolchain.wait_until(std::time::Instant::now()),
-        Some(Some(CLAIMED_ROOT_TOOLCHAIN.to_owned()))
-    );
-    claimed
-        .state
-        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &runtime_token)
-        .expect("the turn closes");
+    assert!(toolchain.is_ready());
+    assert_eq!(toolchain.wait_until(std::time::Instant::now()),
+        Some(Some("rustc 1.90.0 (fixture 2025-09-14); cargo 1.90.0 (fixture 2025-07-30)".into())));
+    recorder.command_completed_with_exit("fixture-toolchain-test", "cargo test",
+        "test result: ok. 1 passed", CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    claimed.wait_for_snapshots();
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }
 
 #[test]
-fn claimed_root_teardown_waits_for_its_capture_workers_before_removing_its_root() {
-    let claimed = ClaimedRoot::new_scripted("teardown-captures", Vec::new());
-    let temp_root = claimed
-        .state
-        .test_temp_root
-        .as_ref()
-        .expect("test root should exist")
-        .path()
-        .to_owned();
-    let workers = claimed.record(|record| record.engram.capture_workers.clone());
-    // One capture worker of the session, held until released, which reports
-    // whether the fixture's temporary root still existed when it finished.
-    let gate = Arc::new((Mutex::new(false), Condvar::new()));
-    let worker_gate = gate.clone();
+fn ordinary_capture_owners_keep_fixture_files_alive_after_the_turn_wrapper_drops() {
+    let claimed = EOCheckedTurn::idle("ordinary-capture-lifetime", true);
+    let temp_root = claimed.state.test_temp_root.as_ref().unwrap().path().to_owned();
+    let workers = claimed.record_mut(|record| record.engram.capture_workers.clone());
+    let state_owner = claimed.state.clone();
     let worker_root = temp_root.clone();
-    let held = EngramCapture::spawn(&workers, move || {
-        let (open, opened) = &*worker_gate;
-        let _ = opened
-            .wait_timeout_while(
-                open.lock().expect("gate mutex poisoned"),
-                DEADLOCK_GUARD,
-                |open| !*open,
-            )
-            .expect("gate mutex poisoned");
-        worker_root.exists()
+    let (ready, started) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let capture = EngramCapture::spawn(&workers, move || {
+        ready.send(()).unwrap();
+        released.recv_timeout(DEADLOCK_GUARD).unwrap();
+        let exists = worker_root.exists();
+        drop(state_owner);
+        exists
     });
-    let (events_tx, events_rx) = std::sync::mpsc::channel();
-    *claimed
-        .teardown_events
-        .lock()
-        .expect("teardown events mutex poisoned") = Some(events_tx.clone());
-    let teardown = std::thread::spawn(move || {
-        drop(claimed);
-        let _ = events_tx.send("dropped");
-    });
-    // Teardown either starts waiting for the held worker or finishes first.
-    let first = events_rx
-        .recv_timeout(DEADLOCK_GUARD)
-        .expect("teardown reports its progress");
-    let (open, opened) = &*gate;
-    *open.lock().expect("gate mutex poisoned") = true;
-    opened.notify_all();
-    let root_outlived_worker = held
-        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
-        .expect("the released worker finishes");
-    teardown.join().expect("teardown should finish");
-    assert_eq!(
-        first, "settling",
-        "teardown must wait for the session's capture workers"
-    );
-    assert!(
-        root_outlived_worker,
-        "the temporary root must outlive the capture workers running in it"
-    );
-    assert!(!temp_root.exists(), "teardown still removes the root");
+    started.recv_timeout(DEADLOCK_GUARD).unwrap();
+    drop(claimed);
+    assert!(temp_root.exists(), "the actual AppState capture owner retains the temporary files");
+    release.send(()).unwrap();
+    assert_eq!(capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD), Some(true));
+    assert!(!temp_root.exists(), "the last actual state owner releases the temporary root");
 }
 
 #[test]
-fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
+fn focusing_another_named_claim_selects_its_next_ordinary_opening_and_check_facts() {
     let label = "focused-named-claim";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![
-            bind_reply("first-token"),
-            grant_reply("first-grant"),
-            begin_reply("first-grant"),
-            checkpoint_reply("first-grant"),
-            // The named-root wire model answers status reads directly;
-            // only grant and binding responses belong in this queue.
-            rebind_reply("second-token"),
-            grant_reply("second-grant"),
-            begin_reply("second-grant"),
-            checkpoint_reply("second-grant"),
-        ],
-    );
-    let first = add_claimed_root_worktree(&claimed.root);
+    let claimed = EOCheckedTurn::idle(label, true);
+    let first = naming_worktree(&claimed.root);
     let second = claimed.root.join(".worktrees/second");
     run_git_test_command(
         &claimed.root,
@@ -6276,7 +5371,7 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
             second.to_str().expect("UTF-8 fixture path"),
         ],
     );
-    let mut held = claimed_root_held(label);
+    let mut held = naming_claim(label);
     let first_binding = held.items[0]
         .control_binding
         .clone()
@@ -6290,7 +5385,7 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
         focused: false,
         control_binding: Some(second_binding.clone()),
     });
-    name_root(&claimed, label, Some(&first), vec![held.clone()]).expect("first root named");
+    request_naming(&claimed, label, Some(&first), vec![held.clone()]).expect("first root named");
     claimed.transport.register_named_root_run(&second_binding);
     claimed
         .state
@@ -6302,11 +5397,13 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
             },
         )
         .expect("second root named");
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).expect("first turn delivered");
-    let _ = received_prompt(&claimed);
+    request_naming(&claimed, label, Some(&first), vec![held.clone()])
+        .expect("explicitly select the first claim before its ordinary opening");
+    claimed.begin("The first ordinary claim owns this opening.");
+    claimed.record(|record| assert_eq!(record.engram.work_binding, Some(first_binding.clone())));
     claimed
         .state
-        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.record_mut(|record| record.runtime.runtime_token().unwrap()))
         .expect("first turn completes");
 
     held.items[0].focused = false;
@@ -6316,7 +5413,6 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
         held.omitted,
         EngramBindingPreference {
             current: Some(&first_binding),
-            refused: &[],
         },
     );
     assert_eq!(
@@ -6324,28 +5420,30 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
         Some(second_binding.clone()),
         "focus wins over current binding"
     );
-    claimed
-        .transport
-        .work_bindings
-        .lock()
-        .expect("binding reads mutex poisoned")
-        .push_back(Ok(selected));
+    claimed.transport.set_current_work_binding(selected.clone());
+    claimed.transport.enable_named_roots(&claimed.session_id, &second_binding);
+    claimed.record_mut(|record| record.engram.work_binding = selected);
     claimed.transport.replace_held_claims([Ok(held)]);
-    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).expect("focused turn delivered");
-    let _ = received_prompt(&claimed);
-    claimed.record(|record| {
+    claimed.begin("A subsequent ordinary opening uses the explicitly selected association.");
+    claimed.record_mut(|record| {
         assert_eq!(record.engram.work_binding, Some(second_binding.clone()));
         assert_eq!(
             record
                 .engram
-                .active_turn_source_root
-                .as_ref()
+                .observed_source_root()
                 .map(|root| root.short_ref.as_str()),
             Some("w-second")
         );
     });
+    let expected_workspace = fs::canonicalize(&second).unwrap().to_string_lossy().into_owned();
+    let opening = claimed.record(|record| record.engram.observed_opening().unwrap().provenance.clone());
+    let EngramRootCapture::Recorded { generation, state, workspace_id } = opening else {
+        panic!("the focused opening has an acknowledged named root");
+    };
+    assert_eq!(state, EngramSourceRootState::Named);
+    assert_eq!(workspace_id, expected_workspace);
     let wait = || {
-        let captures = claimed.record(|record| {
+        let captures = claimed.record_mut(|record| {
             record
                 .engram
                 .active_turn_checks
@@ -6356,9 +5454,9 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
                 })
                 .collect::<Vec<_>>()
         });
-        for capture in captures {
-            capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
-        }
+        captures.into_iter().map(|capture|
+            capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD))
+            .collect::<Vec<_>>()
     };
     claimed.state.note_engram_command_started(
         &claimed.session_id,
@@ -6367,9 +5465,9 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
         Some("cargo test"),
         Some(second.to_str().expect("UTF-8 fixture path")),
     );
-    wait();
+    let _ = wait();
     assert_eq!(
-        claimed.record(|record| record.engram.active_turn_checks.len()),
+        claimed.record_mut(|record| record.engram.active_turn_checks.len()),
         1
     );
     claimed.state.note_engram_command_finished(
@@ -6380,57 +5478,69 @@ fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
         "test result: ok. 1 passed",
         Some(EngramCommandExit::Code(0)),
     );
-    wait();
-    claimed
-        .state
-        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
-        .expect("focused turn completes");
-    let requests = claimed.transport.requests();
-    let rebind = requests
-        .iter()
-        .filter(|r| r.request["operation"] == "session_bind")
-        .last()
-        .unwrap();
-    assert_eq!(rebind.request["work_binding"], json!(second_binding));
-    let checkpoint = requests
-        .iter()
-        .filter(|r| r.request["operation"] == "turn_checkpoint")
-        .last()
-        .unwrap();
-    assert_eq!(
-        checkpoint.request["verification_evidence"]
-            .as_array()
-            .map(Vec::len),
-        Some(1)
-    );
-    assert_eq!(
-        checkpoint.request["observations"][0]["outcome"],
-        "succeeded"
-    );
-    assert_eq!(
-        checkpoint.request["observations"][0]["source_basis"]["workspace_id"].as_str(),
-        fs::canonicalize(&second).unwrap().to_str()
-    );
+    let bases = wait();
+    assert_eq!(bases.len(), 2, "the actual check owns its start and end measurements");
+    for (phase, basis) in ["start", "end"].into_iter().zip(bases) {
+        let basis = basis.expect("the existing capture wait completed")
+            .expect("the actual check source was measured");
+        assert_eq!(basis.workspace_id, expected_workspace, "{phase}: the check measured B");
+    }
+    let turn_ref = claimed.record(|record| record.engram.unadmitted_active_turn.as_ref()
+        .unwrap().host_turn_ref.clone());
+    // Read both real producer occurrences without changing the shared helper ABI.
+    let (notices_tx, notices_rx) = mpsc::channel();
+    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .observation_notices = Some(notices_tx);
+    claimed.end();
+    let request = loop {
+        let observed = receive(&notices_rx, "focused ordinary turn observation");
+        if observed["occurrence"]["kind"] == "unadmitted_turn"
+            && observed["occurrence"]["host_turn_ref"] == turn_ref {
+            break observed;
+        }
+    };
+    assert_eq!(request["binding"], json!(second_binding));
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert!(checks[0].get("source_basis").is_none(),
+        "an ordinary passing check does not claim source verification");
+    let sighting_key = format!("termal-source-sighting:{turn_ref}");
+    let sighting = loop {
+        let observed = receive(&notices_rx, "focused measured source sighting");
+        if observed["occurrence"]["kind"] == "source_sighting"
+            && observed["idempotency_key"] == sighting_key {
+            break observed;
+        }
+    };
+    assert_eq!(sighting["operation"], "execution_observe");
+    assert_eq!(sighting["binding"], json!(second_binding));
+    let basis = &sighting["occurrence"]["source_basis"];
+    assert_eq!(basis["workspace_id"].as_str(), Some(expected_workspace.as_str()));
+    assert_eq!(basis["source_root_generation"], json!(generation));
+    assert_eq!(basis["source_root_state"], "named");
+    assert!(sighting.get("verification_evidence").is_none());
+    assert_ordinary_observation_has_no_native_credit(&claimed, &request);
 }
 
 #[test]
 fn source_root_naming_says_the_root_takes_effect_next_turn_and_evaluation_needs_a_turn_in_it() {
     let label = "naming-notice-next-turn";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    let named = name_root(
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let named = request_naming(
         &claimed,
         label,
         Some(&worktree),
-        vec![claimed_root_held(label)],
+        vec![naming_claim(label)],
     )
     .unwrap();
-    assert_eq!(named.evaluation_notice, None);
-    assert!(serde_json::to_value(&named).unwrap().get("evaluationNotice").is_none());
+    assert_eq!(named.evaluation_notice, Some(EngramSourceRootEvaluationNotice::NamedRootSightingRequired));
+    assert_eq!(serde_json::to_value(&named).unwrap()["evaluationNotice"], "named_root_sighting_required");
     assert!(
         named.notice.contains("takes effect at your next turn")
             && named.notice.contains(
-                "Acceptance evaluation of this work needs a later turn that opens in the named root"
+                EngramSourceRootEvaluationNotice::NamedRootSightingRequired.message()
             ),
         "the naming response says when the root applies and when evaluation can run: {}",
         named.notice
@@ -6438,40 +5548,148 @@ fn source_root_naming_says_the_root_takes_effect_next_turn_and_evaluation_needs_
 }
 
 #[test]
-fn a_root_named_during_a_turn_is_remembered_with_that_turns_grant_and_not_between_turns() {
-    // Through the real dispatch and naming paths: a name given during a turn
-    // is remembered with that turn's grant, which is how an evaluation
-    // requested in that same turn is told no turn has opened in the root yet.
-    let label = "naming-in-turn-grant";
-    let (claimed, _worktree, runtime_token) = named_root_turn(label, false);
-    let (named, grant) = claimed.record(|record| {
-        (
-            record.engram.roots_named_in_turn.clone(),
-            record.engram.active_grant_id.clone(),
-        )
+fn a_root_named_during_an_ordinary_turn_is_prospective_and_never_relabels_its_opening() {
+    let label = "ordinary-in-turn-naming";
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    claimed.begin("Start before a root is named.");
+    let original = claimed.record_mut(|record| record.engram.unadmitted_active_turn.clone().unwrap());
+    assert!(original.opening_root.as_ref().unwrap().source_root.is_none());
+    let named = request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    claimed.record_mut(|record| {
+        let current = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        assert_eq!(current.host_turn_ref, original.host_turn_ref);
+        assert_eq!(current.opening_root, original.opening_root);
     });
-    let [named] = named.as_slice() else {
-        panic!("a name given during a turn is remembered once: {named:?}");
-    };
-    let named = named.clone();
-    assert_eq!(Some(&named.grant_id), grant.as_ref(), "with the grant of its turn");
-    let entry = claimed.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
-    assert_eq!(
-        (named.claim_id.as_str(), named.generation),
-        (entry.claim_id.as_str(), entry.generation),
-        "for the name the work now has"
-    );
-    let _ = finish_claimed_turn(&claimed, &runtime_token);
-    assert_ne!(
-        claimed.record(|record| record.engram.active_grant_id.clone()),
-        Some(named.grant_id),
-        "once the naming turn ends, its grant is no longer the session's"
-    );
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    claimed.end();
+    claimed.begin("The name takes effect on the next real ordinary opening.");
+    claimed.record_mut(|record| {
+        assert_ne!(record.engram.observed_turn_ref(), Some(original.host_turn_ref.as_str()));
+        let root = record.engram.observed_source_root().unwrap();
+        assert_eq!(root.generation, named.generation);
+        assert_eq!(Some(&root.root), named.root.as_ref());
+    });
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
+}
+// These fixtures use the real public naming owner and a real provider opening.
+// The optional placement reader gets its own explicit held-claims replies.
+fn ordinary_other_root_notice_fixture(
+    label: &str,
+) -> (EOCheckedTurn, PathBuf, EngramControlWorkBinding) {
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&claimed.root);
+    let mut held = naming_claim(label);
+    let current = held.items[0].control_binding.clone().unwrap();
+    request_naming(&claimed, label, Some(&worktree), vec![held.clone()]).unwrap();
+    let other = test_control_work_binding(&format!("other-placement-{label}"), 1);
+    held.items.push(EngramHeldClaim {
+        work_id: other.work_id.clone(),
+        short_ref: "w-other-placement".into(),
+        claim_id: other.claim_id.clone(),
+        claim_fence: other.claim_fence,
+        focused: false,
+        control_binding: Some(other.clone()),
+    });
+    claimed.transport.register_named_root_run(&other);
+    claimed.transport.replace_held_claims([Ok(held)]);
+    claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
+        work: other.work_id.clone(),
+        path: Some(Some(worktree.to_string_lossy().into_owned())),
+    }).unwrap();
+    assert_eq!(claimed.record(|record| record.engram.work_binding.clone()), Some(other.clone()),
+        "explicit naming selects the requested held association");
+    claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
+        work: current.work_id.clone(),
+        path: Some(Some(worktree.to_string_lossy().into_owned())),
+    }).unwrap();
+    assert_eq!(claimed.record(|record| record.engram.work_binding.clone()), Some(current),
+        "explicitly naming the own claim restores this fixture's measured association");
+    (claimed, worktree, other)
+}
 
-    // A name given before any turn began has no turn to wait for.
-    let (between, _, _) = named_root_turn("naming-between-turns-grant", true);
-    assert!(
-        between.record(|record| record.engram.roots_named_in_turn.is_empty()),
-        "a name given between turns is left to Engram's sighting"
-    );
+#[test]
+fn a_failed_optional_other_held_root_read_preserves_the_own_root_check_without_a_false_notice() {
+    let (claimed, worktree, _) = ordinary_other_root_notice_fixture("optional-placement-read-failure");
+    claimed.begin("Observe an ordinary check in the current root.");
+    claimed.record_mut(|record| record.engram.pending_source_root_line = None);
+    claimed.transport.replace_held_claims([Err(
+        EngramTransportError::transport("optional held-claims read unavailable"),
+    )]);
+    let mut recorder = claimed.recorder();
+    let cwd = worktree.to_string_lossy();
+    recorder.command_started_in("optional-placement-check", "cargo test", Some("cargo test"), Some(&cwd)).unwrap();
+    claimed.wait_for_snapshots();
+    claimed.record(|record| {
+        assert_eq!(record.engram.active_turn_checks.len(), 1,
+            "failure of optional explanatory context cannot suppress the own-root check");
+        assert_eq!(record.engram.active_turn_checks[0].target.root, fs::canonicalize(&worktree).unwrap());
+        assert_eq!(record.engram.unadmitted_active_turn.as_ref().unwrap().commands.len(), 1);
+    });
+    assert_eq!(pending_line(&claimed), None,
+        "an unavailable held list cannot authorize a notice that another claim is held");
+    recorder.command_completed_with_exit(
+        "optional-placement-check", "cargo test", "running 1 test\ntest result: ok. 1 passed",
+        CommandStatus::Success, EngramCommandExit::Code(0),
+    ).unwrap();
+    claimed.wait_for_snapshots();
+    let request = claimed.finish();
+    assert_eq!(request["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
+    assert_ordinary_observation_has_no_native_credit(&claimed, &request);
+}
+
+#[test]
+fn other_root_notice_is_current_component_rejects_generation_work_and_connection_successors() {
+    // Narrow component control: the scripted held-read seam has no callback
+    // representing concurrent provider handoff. This tests the production
+    // reader's publication predicate, not an end-to-end interleaving or a
+    // claim that an actual concurrent notice was published or suppressed.
+    for case in ["generation", "work-association", "connection"] {
+        let label = format!("notice-read-successor-{case}");
+        let (claimed, _, other) = ordinary_other_root_notice_fixture(&label);
+        claimed.begin("Capture the ordinary owner of the optional notice.");
+        claimed.record_mut(|record| record.engram.pending_source_root_line = None);
+        let captured = {
+            let inner = claimed.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&claimed.session_id).unwrap();
+            EngramOtherRootNoticeRead::capture(&inner, index).unwrap()
+        };
+        let held_roots = captured.read();
+        assert_eq!(held_roots.len(), 1);
+        assert_eq!(held_roots[0].claim_id, other.claim_id);
+        {
+            let inner = claimed.state.inner.lock().unwrap();
+            assert!(captured.is_current(&inner, inner.find_session_index(&claimed.session_id).unwrap()));
+        }
+        match case {
+            "generation" => claimed.record_mut(|record| record.active_turn_generation += 1),
+            "work-association" => claimed.record_mut(|record| record.engram.work_binding = Some(other.clone())),
+            "connection" => change_engram_settings(&claimed.state, |settings| {
+                settings.binary_path = Some("successor-notice-engram.exe".into());
+            }),
+            _ => unreachable!(),
+        }
+        {
+            let inner = claimed.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&claimed.session_id).unwrap();
+            assert!(!captured.is_current(&inner, index),
+                "{case}: completed held-read data cannot authorize publication for a successor");
+        }
+        assert_eq!(pending_line(&claimed), None,
+            "the component probe itself publishes no notice");
+        // Restore only the actual fields changed by this component control
+        // so the original real provider turn can close through its owner.
+        claimed.record_mut(|record| {
+            record.active_turn_generation = captured.turn_generation;
+            record.engram.work_binding = captured.target.work_binding.clone();
+        });
+        change_engram_settings(&claimed.state, |settings| *settings = captured.target.settings.clone());
+        {
+            let inner = claimed.state.inner.lock().unwrap();
+            assert!(captured.is_current(&inner, inner.find_session_index(&claimed.session_id).unwrap()),
+                "{case}: the unchanged original owner is the positive control");
+        }
+        assert_ordinary_turn_has_no_native_requests(&claimed);
+        claimed.end();
+    }
 }

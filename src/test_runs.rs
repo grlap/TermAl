@@ -213,6 +213,7 @@ impl TestRunEntries {
         self.positions.get(run_id).into_iter().flatten().map(|position| &self.entries[*position])
     }
 
+    #[cfg(test)]
     fn push(&mut self, entry: TestRunEntry) {
         self.positions.entry(entry.summary.run_id.clone()).or_default().push(self.entries.len());
         self.entries.push(entry);
@@ -220,6 +221,7 @@ impl TestRunEntries {
 
     /// Removes like Vec::remove; later positions shift, so the lookup is
     /// rebuilt, at the same order of cost as the vector's own shift.
+    #[cfg(test)]
     fn remove(&mut self, position: usize) -> TestRunEntry {
         let removed = self.entries.remove(position);
         self.reposition();
@@ -231,6 +233,7 @@ impl TestRunEntries {
         self.reposition();
     }
 
+    #[cfg(test)]
     fn clear(&mut self) {
         self.entries.clear();
         self.positions.clear();

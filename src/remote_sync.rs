@@ -433,7 +433,6 @@ fn apply_remote_session_to_record(
     );
     record.body_sequence.remote_applied = record.session.body_seq;
     record.body_sequence.remote_epoch = record.session.body_seq_epoch.clone();
-    record.engram_boot_recovery_pending = remote_session.engram_boot_recovery_pending;
     if remote_session.session_mutation_stamp.is_none() {
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
     }
@@ -505,7 +504,6 @@ fn apply_remote_session_summary_to_record(
     );
     record.body_sequence.remote_applied = record.session.body_seq;
     record.body_sequence.remote_epoch = record.session.body_seq_epoch.clone();
-    record.engram_boot_recovery_pending = remote_session.engram_boot_recovery_pending;
     if remote_session.session_mutation_stamp.is_none() {
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
     }
@@ -609,7 +607,6 @@ fn upsert_remote_proxy_session_record(
         inner,
         remote_id,
         &remote_session.id,
-        remote_session.engram_boot_recovery_pending,
         session,
     );
     local_session_id
@@ -619,11 +616,9 @@ fn push_remote_proxy_session_record(
     inner: &mut StateInner,
     remote_id: &str,
     remote_session_id: &str,
-    engram_boot_recovery_pending: bool,
     session: Session,
 ) {
     let mut record = SessionRecord {
-        unmediated_turn_generation: None,
         federation_mailbox_binding: None,
         federation_automatic_mailbox_binding: None,
         federation_retired_automatic_mailbox_bindings: Vec::new(),
@@ -691,16 +686,11 @@ fn push_remote_proxy_session_record(
         codex_terminal_identity_unresolved: false,
         runtime_stop_in_progress: false,
         runtime_stop_owner: None,
-        engram_containment_stop: None,
         runtime_stop_generation: 0,
         auto_dispatch_pause_epoch: 0,
         engram_mcp_revocation_pending: false,
         deferred_stop_callbacks: Vec::new(),
         engram: EngramSessionState::default(),
-        engram_boot_recovery_pending,
-        engram_boot_recovery_dispatch_pending: false,
-        engram_boot_recovery_retry_in_progress: false,
-        engram_queue_schedule: EngramQueueSchedule::default(),
         hidden: false,
         // Freshly created records start unstamped; subsequent edits
         // flow through `session_mut*` which stamps them on access.
@@ -714,6 +704,7 @@ fn push_remote_proxy_session_record(
             ..SessionBodySequence::default()
         },
         mutation_stamp: 0,
+        persist_incarnation: Arc::new(()),
         prompt_history_mutation_stamp: 0,
         session,
     };
@@ -786,7 +777,6 @@ fn upsert_remote_proxy_session_summary_record(
         inner,
         remote_id,
         &remote_session.id,
-        remote_session.engram_boot_recovery_pending,
         session,
     );
     local_session_id
@@ -836,7 +826,6 @@ fn localize_remote_session(
     // These diagnostics belong to the upstream process and its project ids.
     // A local proxy is not another observation of those provider sends.
     session.provider_handoffs.clear();
-    session.prompt_admission_budgets.clear();
     session.provider_handoff_history = None;
     normalize_body_sequence_pair(&mut session.body_seq, &mut session.body_seq_epoch);
     session.id = local_session_id.to_owned();
@@ -925,8 +914,6 @@ fn localize_remote_session_summary(
         agent_commands_revision: remote_session.agent_commands_revision,
         codex_thread_state: remote_session.codex_thread_state,
         live_activity: remote_session.live_activity.clone(),
-        engram_boot_recovery_pending: remote_session.engram_boot_recovery_pending,
-        engram_control_off: remote_session.engram_control_off,
         status: remote_session.status,
         preview: remote_session.preview.clone(),
         messages: MessageSequence::default(),
@@ -953,13 +940,8 @@ fn localize_remote_session_summary(
         pending_prompts: Vec::new(),
         prompt_deliveries: Vec::new(),
         provider_handoffs: Vec::new(),
-        prompt_admission_budgets: BTreeMap::new(),
         provider_handoff_history: None,
         queue_paused: remote_session.queue_paused,
-        // Projected from the local record, which holds no retry records for
-        // a remote proxy (`engram_automatic_retry_hold`); the remote's own
-        // hold is not carried.
-        queue_hold: None,
         provider_capacity_waiting: remote_session.provider_capacity_waiting,
         source_tracking_recovery: remote_session.source_tracking_recovery,
         queue_projection_hash: remote_session.queue_projection_hash.clone(),

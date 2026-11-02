@@ -426,7 +426,7 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/projects/{id}", delete(delete_project))
         .route(
             "/api/projects/{id}/engram",
-            get(get_project_engram_reset).patch(update_project_engram_settings),
+            patch(update_project_engram_settings),
         )
         .route(
             "/api/projects/{id}/engram/verify",
@@ -994,22 +994,13 @@ include!("test_panic_journal.rs");
 include!("state.rs");
 include!("state_lock_observer.rs");
 include!("engram_budget.rs");
+include!("engram_connection_reset.rs");
 include!("engram_host_adapter.rs");
 include!("engram_control_non_application.rs");
 include!("engram_session_authority.rs");
 include!("engram_causal_failure.rs");
-include!("engram_causal_publication.rs");
-include!("engram_bind_retention.rs");
-#[allow(dead_code)]
-mod engram_recovery_format;
-use engram_recovery_format::*;
-#[allow(dead_code)]
-mod engram_recovery_validation;
-#[cfg(test)]
-use engram_recovery_validation::*;
 include!("engram_host_launch.rs");
 include!("engram_turn_observations.rs");
-include!("engram_turn_continuity.rs");
 include!("engram_source_sightings.rs");
 include!("engram_source_observation_protocol.rs");
 include!("engram_unadmitted_observation.rs");
@@ -1018,12 +1009,7 @@ include!("engram_unadmitted_closing.rs");
 include!("engram_unadmitted_delivery.rs");
 include!("engram_unadmitted_worker.rs");
 include!("engram_unadmitted_lifecycle.rs");
-include!("engram_source_observation_recovery.rs");
-include!("engram_source_observation_finalization.rs");
 include!("engram_source_observation_removal.rs");
-include!("engram_source_observation_runtime.rs");
-include!("engram_evaluation_refusal.rs");
-include!("engram_work_binding_refresh.rs");
 include!("engram_held_claims.rs");
 include!("engram_turn_checks.rs");
 include!("engram_carried_checks.rs");
@@ -1052,27 +1038,11 @@ include!("engram_doctor_deadline_test_seam.rs");
 include!("engram_test_child_temp.rs");
 #[cfg(test)]
 include!("terminal_test_child_temp.rs");
-include!("engram_session_reconciliation.rs");
-include!("engram_project_containment.rs");
-include!("engram_containment_plan.rs");
-include!("engram_containment_durability.rs");
-include!("engram_containment_settlement.rs");
 include!("engram_containment_checkpoint.rs");
-include!("engram_checkpoint_replay.rs");
-include!("engram_checkpoint_recovery.rs");
-include!("engram_checkpoint_result_recovery.rs");
-include!("engram_checkpoint_receipts.rs");
-include!("engram_containment_receipts.rs");
 include!("engram_session_obligations.rs");
 include!("engram_import_reconciliation.rs");
 include!("engram_import_hold_decision.rs");
 include!("persist_import_reconciliation.rs");
-include!("engram_containment_admission.rs");
-include!("engram_containment_admission_image.rs");
-include!("engram_containment_admission_progress.rs");
-include!("engram_containment_bind_successor.rs");
-include!("engram_containment_begin_resume.rs");
-include!("engram_containment_queue.rs");
 include!("engram_control_mode.rs");
 include!("human_prompts.rs");
 include!("human_queue_choices.rs");
@@ -1152,15 +1122,7 @@ include!("handoffs.rs");
 include!("prompt_delivery.rs");
 include!("prompt_delivery_shutdown.rs");
 include!("engram_queued_admission.rs");
-include!("engram_ordinary_admission.rs");
-include!("engram_abort_retry.rs");
-include!("engram_begin_preparation_retry.rs");
-include!("engram_bind_retry.rs");
-include!("engram_admission_retry.rs");
-include!("engram_begin_replay.rs");
-include!("engram_begin_boot.rs");
 include!("engram_retry_schedule.rs");
-include!("engram_retry_hold.rs");
 include!("provider_capacity_retry.rs");
 include!("message_sequence.rs");
 include!("messages.rs");
@@ -1191,7 +1153,6 @@ include!("claude_spawn.rs");
 include!("claude_turn_ownership.rs");
 include!("claude_frame_router.rs");
 include!("claude_frame_application.rs");
-include!("claude_gate_write_guard.rs");
 include!("claude_compact_hook.rs");
 include!("claude_runtime_turns.rs");
 include!("claude_outstanding_work.rs");
@@ -1225,7 +1186,6 @@ include!("session_config.rs");
 include!("session_markers.rs");
 include!("turn_dispatch.rs");
 include!("session_crud.rs");
-include!("engram_project_reset_wait.rs");
 include!("sse_broadcast.rs");
 include!("state_broadcast_worker.rs");
 include!("state_broadcast_diff.rs");

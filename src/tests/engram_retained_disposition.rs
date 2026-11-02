@@ -1,2252 +1,516 @@
-//! Durable queue disposition across settings reset, degradation and transcript eviction.
-//! Exercises disposable host persistence and scripted control, never a live store.
+//! Ordinary queue custody beside passive historical operation data.
+//! Real local runtimes and SQLite writes; no admission or replay executor.
 use super::*;
+use crate::tests::prompt_delivery::{DeliveryWriter, HeldFence};
+use super::super::uncertain_begin::OrdinaryRoot;
 
-// Capture the intended crash cut while the original admission is blocked.
-// The old worker keeps its original store and StateMutex; the restarted host
-// receives this coherent SQLite image and a separate StateMutex after joining.
-fn snapshot_retained_admission_restart_store(state: &AppState) -> PathBuf {
-    let snapshot = state
-        .test_temp_root
-        .as_ref()
-        .unwrap()
-        .path()
-        .join("pre-loss-admission.sqlite");
-    let connection = open_sqlite_state_connection_unconfigured(state.persistence_path.as_path())
-        .expect("the original admission store should open");
-    connection
-        .execute(
-            "VACUUM INTO ?1",
-            rusqlite::params![snapshot.to_string_lossy().as_ref()],
-        )
-        .expect("the pre-loss SQLite snapshot should be coherent");
-    snapshot
-}
-
-struct BlockedAdmissionTransport {
-    inner: Arc<ScriptedEngramControlTransport>,
-    operation: &'static str,
-    blocked_error: EngramTransportError,
-    observed_tx: Mutex<Option<mpsc::Sender<Value>>>,
-    release_rx: Mutex<mpsc::Receiver<()>>,
-}
-
-struct LostEvaluateReplyCachingTransport {
-    inner: Arc<ScriptedEngramControlTransport>,
-    cache: Mutex<std::collections::HashMap<String, Value>>,
-    requests: Mutex<Vec<Value>>,
-    first_evaluate: std::sync::atomic::AtomicBool,
-    observed_tx: Mutex<Option<mpsc::Sender<Value>>>,
-    release_rx: Mutex<mpsc::Receiver<()>>,
-}
-
-impl EngramControlTransport for LostEvaluateReplyCachingTransport {
-    fn request(
-        &self,
-        connection: &EngramConnectionConfig,
-        request: &EngramControlRequest,
-        timeout: Duration,
-    ) -> std::result::Result<Value, EngramTransportError> {
-        let encoded = serde_json::to_value(request).unwrap();
-        self.requests.lock().unwrap().push(encoded.clone());
-        let key = encoded["idempotency_key"].as_str().map(str::to_owned);
-        if let Some(cached) = key
-            .as_ref()
-            .and_then(|key| self.cache.lock().unwrap().get(key).cloned())
-        {
-            return Ok(cached);
-        }
-        let response = self.inner.request(connection, request, timeout)?;
-        if let Some(key) = key {
-            self.cache.lock().unwrap().insert(key, response.clone());
-        }
-        if encoded["operation"] == "turn_evaluate"
-            && self
-                .first_evaluate
-                .swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
-            if let Some(observed) = self.observed_tx.lock().unwrap().take() {
-                observed.send(encoded).unwrap();
-            }
-            self.release_rx.lock().unwrap().recv().unwrap();
-            return Err(EngramTransportError::deadline(
-                "evaluate reply was committed remotely but lost locally",
-            ));
-        }
-        Ok(response)
-    }
-
-    fn read_work_binding(
-        &self,
-        connection: &EngramConnectionConfig,
-        preference: EngramBindingPreference<'_>,
-        timeout: Duration,
-    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner
-            .read_work_binding(connection, preference, timeout)
-    }
-
-    fn shutdown_session(&self, session_id: &str) {
-        self.inner.shutdown_session(session_id);
-    }
-}
-
-impl EngramControlTransport for BlockedAdmissionTransport {
-    fn request(
-        &self,
-        connection: &EngramConnectionConfig,
-        request: &EngramControlRequest,
-        timeout: Duration,
-    ) -> std::result::Result<Value, EngramTransportError> {
-        let encoded = serde_json::to_value(request).unwrap();
-        let observer = if encoded["operation"] == self.operation {
-            self.observed_tx.lock().unwrap().take()
-        } else {
-            None
-        };
-        if let Some(observer) = observer {
-            self.inner
-                .requests
-                .lock()
-                .unwrap()
-                .push(RecordedEngramControlRequest {
-                    connection: connection.clone(),
-                    request: encoded.clone(),
-                });
-            observer.send(encoded).unwrap();
-            self.release_rx.lock().unwrap().recv().unwrap();
-            return Err(self.blocked_error.clone());
-        }
-        self.inner.request(connection, request, timeout)
-    }
-
-    fn read_work_binding(
-        &self,
-        connection: &EngramConnectionConfig,
-        preference: EngramBindingPreference<'_>,
-        timeout: Duration,
-    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner
-            .read_work_binding(connection, preference, timeout)
-    }
-
-    fn shutdown_session(&self, session_id: &str) {
-        self.inner.shutdown_session(session_id);
-    }
-}
-
-#[test]
-fn cancel_supersedes_the_exact_explicit_resume_owner_and_all_old_wakes() {
-    for blocked_operation in ["session_bind", "turn_evaluate"] {
-        let replies = if blocked_operation == "session_bind" {
-            vec![
-                rebind_reply("successor-token"),
-                grant_reply("successor-grant"),
-                begin_reply("successor-grant"),
-            ]
-        } else {
-            vec![
-                bind_reply("original-token"),
-                status_reply("sync_required"),
-                rebind_reply("successor-token"),
-                grant_reply("successor-grant"),
-                begin_reply("successor-grant"),
-            ]
-        };
-        let (state, session, receiver, _) = root_fixture([]);
-        let transport = ScriptedEngramControlTransport::new(replies);
-        let (observed_tx, observed_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        state.install_control_test_transport(Arc::new(BlockedAdmissionTransport {
-            inner: transport.clone(),
-            operation: blocked_operation,
-            blocked_error: if blocked_operation == "session_bind" {
-                EngramTransportError::remote(EngramControlErrorBody {
-                    code: "stale_fence".to_owned(),
-                    message: "blocked bind became stale".to_owned(),
-                })
-            } else {
-                EngramTransportError::deadline("lost turn_evaluate reply")
-            },
-            observed_tx: Mutex::new(Some(observed_tx)),
-            release_rx: Mutex::new(release_rx),
+pub(super) fn unknown_retained_entry(turn: &OrdinaryRoot, id: &str, code: &str) -> Value {
+    turn.edit(|record| {
+        let queued = record.queued_prompts.iter_mut()
+            .find(|queued| queued.pending_prompt.id == id).unwrap();
+        queued.engram_evaluate = Some(json!({
+            "request": { "operation": "turn_evaluate", "idempotency_key": "historical-key",
+                "intent_fingerprint": "unknown-before-reload" },
+            "begun_grant_id": "historical-grant", "unknown_code": code
         }));
-        queue_test_engram_prompt(
-            &state,
-            &session,
-            "canceled explicit-resume owner",
-            QueuedPromptSource::User,
-            None,
-        );
-        queue_test_engram_prompt(
-            &state,
-            &session,
-            "successor requires a fresh Resume",
-            QueuedPromptSource::User,
-            None,
-        );
-        let canceled_prompt = {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            let record = inner.session_mut_by_index(index).unwrap();
-            record.set_auto_dispatch_blocked(true);
-            let prompt = record.queued_prompts[0].pending_prompt.id.clone();
-            state.commit_locked(&mut inner).unwrap();
-            prompt
-        };
+        queued.engram_ordinary_handoff = true;
+        queued.engram_interrupted = true;
+        sync_pending_prompts(record);
+        serde_json::to_value(&record.queued_prompts[0]).unwrap()
+    })
+}
 
-        std::thread::scope(|scope| {
-            let first_resume = scope.spawn(|| state.resume_session_queue(&session));
-            phase_sync::receive(&observed_rx, "explicit Resume reaches blocked admission");
+// Join the fixture's real worker before taking over its SQLite connection.
+// This writes through the existing collector/writer, without inventing an ACK.
+pub(super) fn write_retained_state(turn: &OrdinaryRoot) -> StateInner {
+    turn.state.shutdown_persist_blocking();
+    let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
+    persist_delta_with_fences(&mut SqlitePersistConnectionCache::new(),
+        turn.state.persistence_path.as_path(), &delta, &mut PersistFenceBatch::default()).unwrap();
+    load_state(turn.state.persistence_path.as_path()).unwrap().unwrap()
+}
 
-            // A competing explicit drain records a wake on the same owner.
-            // It must not authorize the successor after cancellation either.
-            state.resume_session_queue(&session).unwrap();
-            state
-                .cancel_queued_prompt(&session, &canceled_prompt)
-                .unwrap();
-            release_tx.send(()).unwrap();
-            first_resume.join().unwrap().unwrap();
-        });
-
-        assert!(receiver.try_recv().is_err());
-        {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert!(record.orchestrator_auto_dispatch_blocked);
-            assert_eq!(record.queued_prompts.len(), 1);
-            assert_eq!(
-                record.queued_prompts[0].pending_prompt.text,
-                "successor requires a fresh Resume"
-            );
-            assert!(record.queued_prompts[0].engram_bind.is_none());
-            assert!(record.queued_prompts[0].engram_evaluate.is_none());
-        }
-        assert_eq!(
-            operations(&transport)
-                .iter()
-                .filter(|operation| operation.as_str() == blocked_operation)
-                .count(),
-            1,
-            "the old owner and its competing wake must not authorize the successor"
-        );
-
-        state.resume_session_queue(&session).unwrap();
-        let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
-            panic!("a fresh explicit Resume should deliver the successor");
-        };
-        assert_eq!(command.prompt, "successor requires a fresh Resume");
-        assert!(receiver.try_recv().is_err());
+#[test]
+fn cancel_supersedes_exact_ordinary_resume_owner_and_old_wakes() {
+    let turn = OrdinaryRoot::new("cancel-exact-resume");
+    turn.edit(|record| record.set_auto_dispatch_blocked(true));
+    let canceled = turn.enqueue("canceled explicit Resume", QueuedPromptSource::User);
+    let owner = turn.record(|record| QueuedTurnOwner::capture(record).unwrap());
+    let successor = turn.enqueue("successor needs its own Resume", QueuedPromptSource::User);
+    turn.state.cancel_queued_prompt(&turn.session, &canceled).unwrap();
+    let before = turn.saved();
+    for _ in 0..2 {
+        turn.state.resume_local_session_queue(&turn.session, Some(owner.clone())).unwrap();
     }
-}
-
-#[test]
-fn stale_bind_reply_cannot_reprepare_an_exact_retained_successor() {
-    let (state, session, receiver, _) = root_fixture([]);
-    let transport = ScriptedEngramControlTransport::new([
-        rebind_reply("successor-token"),
-        grant_reply("successor-grant"),
-        begin_reply("successor-grant"),
-    ]);
-    let (observed_tx, observed_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    state.install_control_test_transport(Arc::new(BlockedAdmissionTransport {
-        inner: transport.clone(),
-        operation: "session_bind",
-        blocked_error: EngramTransportError::remote(EngramControlErrorBody {
-            code: "stale_fence".to_owned(),
-            message: "original bind became stale".to_owned(),
-        }),
-        observed_tx: Mutex::new(Some(observed_tx)),
-        release_rx: Mutex::new(release_rx),
-    }));
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "original owner",
-        QueuedPromptSource::User,
-        None,
-    );
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "exact retained successor",
-        QueuedPromptSource::User,
-        None,
-    );
-    let original_id = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
-        record.set_auto_dispatch_blocked(true);
-        let id = record.queued_prompts[0].pending_prompt.id.clone();
-        state.commit_locked(&mut inner).unwrap();
-        id
-    };
-
-    std::thread::scope(|scope| {
-        let first_resume = scope.spawn(|| state.resume_session_queue(&session));
-        let original_bind = phase_sync::receive(&observed_rx, "original blocked bind");
-        state.cancel_queued_prompt(&session, &original_id).unwrap();
-        let retained_bind = {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            let target =
-                AppState::engram_binding_target_for_session_shape_locked(&inner, &session, true)
-                    .unwrap()
-                    .unwrap();
-            let generation = inner.sessions[index]
-                .engram
-                .dispatch_generation
-                .saturating_add(1);
-            let request = EngramControlRequest::SessionBind {
-                external_ref: target.external_ref,
-                title: target.title,
-                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-                mediated_effects: target.effects,
-                capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-                work_binding: None,
-                idempotency_key: "retained-successor-bind-key".to_owned(),
-            };
-            let record = inner.session_mut_by_index(index).unwrap();
-            let queued = record.queued_prompts.front_mut().unwrap();
-            queued.engram_bind = Some(EngramQueuedBind {
-                connection: target.connection,
-                settings: target.settings,
-                request: request.clone(),
-                operation_generation: Some(generation),
-            });
-            sync_pending_prompts(record);
-            state.commit_locked(&mut inner).unwrap();
-            serde_json::to_value(request).unwrap()
-        };
-        assert_ne!(original_bind, retained_bind);
-        state.resume_session_queue(&session).unwrap();
-        release_tx.send(()).unwrap();
-        first_resume.join().unwrap().unwrap();
-
-        assert!(receiver.try_recv().is_err());
-        let before_fresh_resume = {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert!(record.orchestrator_auto_dispatch_blocked);
-            assert_eq!(record.queued_prompts.len(), 1);
-            assert!(record.queued_prompts[0].engram_evaluate.is_none());
-            serde_json::to_value(
-                &record.queued_prompts[0]
-                    .engram_bind
-                    .as_ref()
-                    .unwrap()
-                    .request,
-            )
-            .unwrap()
-        };
-        assert_eq!(before_fresh_resume, retained_bind);
-        assert_eq!(
-            operations(&transport),
-            ["session_bind"],
-            "the stale owner must not bind, evaluate, or begin the successor"
-        );
-
-        state.resume_session_queue(&session).unwrap();
-        let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
-            panic!("fresh Resume should deliver the exact retained successor");
-        };
-        assert_eq!(command.prompt, "exact retained successor");
-        assert!(receiver.try_recv().is_err());
-        let requests = transport.requests();
-        assert_eq!(requests[1].request, retained_bind);
-        assert_eq!(
-            requests
-                .iter()
-                .filter(|request| request.request["operation"] == "session_bind")
-                .count(),
-            2,
-            "one old bind and one fresh-Resume replay are the only bind calls"
-        );
-    });
-}
-
-#[test]
-fn restart_replays_cached_defer_then_resume_uses_a_fresh_evaluate_identity() {
-    let (mut state, session, receiver, _) = root_fixture([]);
-    let scripted = ScriptedEngramControlTransport::new([
-        bind_reply("restart-token"),
-        defer_reply("cached-defer"),
-        status_reply("ready"),
-        status_reply("sync_required"),
-        rebind_reply("fresh-token"),
-        grant_reply("fresh-grant"),
-        begin_reply("fresh-grant"),
-    ]);
-    let (observed_tx, observed_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    let transport = Arc::new(LostEvaluateReplyCachingTransport {
-        inner: scripted,
-        cache: Mutex::new(std::collections::HashMap::new()),
-        requests: Mutex::new(Vec::new()),
-        first_evaluate: std::sync::atomic::AtomicBool::new(true),
-        observed_tx: Mutex::new(Some(observed_tx)),
-        release_rx: Mutex::new(release_rx),
-    });
-    state.install_control_test_transport(transport.clone());
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "restart before promotion then defer",
-        QueuedPromptSource::User,
-        None,
-    );
-
-    let worker_state = state.clone();
-    let worker_session = session.clone();
-    let worker = std::thread::spawn(move || {
-        worker_state.start_next_queued_turn_off_lock(&worker_session, false, false)
-    });
-    let first_evaluate = phase_sync::receive(
-        &observed_rx,
-        "the first evaluate should be cached before its reply is lost",
-    );
-    let mut cache = SqlitePersistConnectionCache::new();
-    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &delta,
-        &mut PersistFenceBatch::default(),
-    )
-    .unwrap();
-    let restart_path = snapshot_retained_admission_restart_store(&state);
-    let mut loaded = load_state(&restart_path)
-        .unwrap()
-        .unwrap();
-    {
-        let index = loaded.find_session_index(&session).unwrap();
-        let record = loaded.session_mut_by_index(index).unwrap();
-        assert!(record.engram.recovered_admission);
-        assert!(record.queued_prompts[0].engram_evaluate.is_some());
+    assert_eq!(turn.saved(), before, "an old drain cannot consume or unpause its successor");
+    turn.assert_no_prompt();
+    turn.record(|record| {
         assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(!record.engram_boot_recovery_pending);
-        record.engram.context_nudge_pending = false;
-    }
-    release_tx.send(()).unwrap();
-    worker.join().unwrap().unwrap();
-    state.persistence_path = Arc::new(restart_path);
-    state.inner = Arc::new(StateMutex::new(loaded));
-    // The restarted state starts on its default clock; it runs on a
-    // scripted one again, chosen before any target exists.
-    state.select_test_scripted_engram_budget_clock();
-    state.install_control_test_transport(transport.clone());
-    assert!(AppState::engram_session_requires_dispatch_card_locked(
-        &state.inner.lock().unwrap(),
-        &session,
-    ));
-
-    state.resume_session_queue(&session).unwrap();
-    assert!(
-        receiver.try_recv().is_err(),
-        "cached Defer must not deliver"
-    );
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.session.queue_paused);
-        assert!(record.queued_prompts[0].engram_waiting);
-        assert!(record.queued_prompts[0].engram_evaluate.is_none());
-    }
-
-    state.resume_session_queue(&session).unwrap();
-    let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
-        panic!("the fresh post-Defer operation should deliver once");
-    };
-    assert_eq!(command.prompt, "restart before promotion then defer");
-    assert!(receiver.try_recv().is_err());
-    let evaluate_requests = transport
-        .requests
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|request| request["operation"] == "turn_evaluate")
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(evaluate_requests.len(), 3);
-    assert_eq!(
-        evaluate_requests[0]["idempotency_key"],
-        first_evaluate["idempotency_key"]
-    );
-    assert_eq!(
-        evaluate_requests[1]["idempotency_key"], first_evaluate["idempotency_key"],
-        "restart must replay the exact remotely cached operation"
-    );
-    assert_ne!(
-        evaluate_requests[2]["idempotency_key"], first_evaluate["idempotency_key"],
-        "terminal Defer retirement must give the later Resume a fresh identity"
-    );
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(record.queued_prompts[0].pending_prompt.id, successor);
+    });
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    assert!(turn.prompt().prompt.contains("successor needs its own Resume"));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn writer_backed_first_defer_commit_is_already_a_visible_held_operation() {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("defer-token"),
-        defer_reply("busy"),
-        grant_reply("resumed-grant"),
-        begin_reply("resumed-grant"),
-    ]);
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "held Orchestrator root prompt",
-        QueuedPromptSource::Orchestrator,
-        None,
-    );
-    let revision_before_admission = state.snapshot().revision;
-    let mut admission_snapshots = state.subscribe_events();
-    let mut admission_deltas = state.subscribe_delta_events();
-    let dispatch = state
-        .start_next_queued_turn_off_lock(&session, false, false)
-        .unwrap()
-        .expect("Orchestrator root prompt should reach admission")
-        .dispatch;
-    let revision_after_admission = state.snapshot().revision;
-    assert_eq!(
-        revision_after_admission,
-        revision_before_admission + 4,
-        "bind retention, accepted-bind retirement, evaluate retention, and promotion are four visible transitions"
-    );
-    let retained_revisions = std::iter::from_fn(|| admission_snapshots.try_recv().ok())
-        .filter_map(|payload| serde_json::from_str::<Value>(&payload).ok())
-        .map(|payload| payload["revision"].as_u64().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        retained_revisions,
-        vec![
-            revision_before_admission + 1,
-            revision_before_admission + 2,
-            revision_before_admission + 3,
-        ],
-        "each public retained projection transition must emit a newer metadata-first revision"
-    );
-    let started: Value = serde_json::from_str(
-        &admission_deltas
-            .try_recv()
-            .expect("queue promotion should publish its one client revision"),
-    )
-    .unwrap();
-    assert_eq!(started["revision"], revision_after_admission);
-    assert!(admission_deltas.try_recv().is_err());
-    let first_generation = dispatch.engram_dispatch_generation().unwrap();
-    let prompt_id = {
-        let inner = state.inner.lock().unwrap();
-        inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts[0]
-            .pending_prompt
-            .id
-            .clone()
-    };
-    let (persist_tx, persist_rx) = mpsc::channel();
-    let state = AppState {
-        persist_tx,
-        ..state
-    };
-    let pre_defer = state.get_session(&session).unwrap();
-    let pre_defer_revision = state.snapshot().revision;
-    assert_eq!(pre_defer.session.status, SessionStatus::Active);
-    assert!(!pre_defer.session.queue_paused);
-    let mut delta_events = state.subscribe_delta_events();
-    let mut cache = SqlitePersistConnectionCache::new();
-    std::thread::scope(|scope| {
-        let worker = scope.spawn(|| deliver_turn_dispatch(&state, dispatch));
-        assert!(matches!(
-            persist_rx
-                .recv_timeout(phase_sync::DEADLOCK_GUARD)
-                .expect("first Defer commit should reach the real writer boundary"),
-            PersistRequest::Delta
-        ));
-        worker.join().unwrap().unwrap();
-        let emitted: Value = serde_json::from_str(
-            &delta_events
-                .try_recv()
-                .expect("the committed Defer transition should emit one transcript delta"),
-        )
-        .unwrap();
-        assert_eq!(emitted["type"], "messageCreated");
-        assert_eq!(emitted["sessionId"], session);
-        assert_eq!(emitted["status"], "idle");
-        assert_eq!(emitted["message"]["type"], "engramControl");
-        assert_eq!(emitted["message"]["decision"], "defer");
-        assert_eq!(emitted["revision"], pre_defer_revision + 1);
-        assert_eq!(emitted["sessionQueue"]["queuePaused"], true);
-        assert!(emitted["sessionQueue"]["queueProjectionHash"].is_string());
-        assert_eq!(
-            emitted["sessionQueue"]["pendingPrompts"][0]["id"],
-            prompt_id
-        );
-        assert_eq!(
-            emitted["sessionQueue"]["pendingPrompts"][0]["isEngramRetained"],
-            true
-        );
-        assert!(
-            emitted["sessionQueue"]["pendingPrompts"][0]["engramInterrupted"].is_null(),
-            "false interrupted disposition is omitted on the wire"
-        );
-        assert!(
-            persist_rx.try_recv().is_err(),
-            "legacy parking must not write a second durable Defer transition"
-        );
-        let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-        let committed = delta
-            .changed_sessions
-            .iter()
-            .find(|record| record.session.id == session)
-            .expect("Defer transition should include its session");
-        assert_eq!(committed.session.status, SessionStatus::Idle);
-        assert!(committed.orchestrator_auto_dispatch_blocked);
-        assert!(committed.session.queue_paused);
-        assert_eq!(committed.engram_dispatch_generation, first_generation + 1);
-        assert!(committed.queued_prompts[0].engram_waiting);
-        assert!(committed.queued_prompts[0].engram_evaluate.is_none());
-        let (committed_revision, committed_mutation_stamp) = {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            (inner.revision, record.mutation_stamp)
-        };
-        assert_eq!(emitted["revision"], committed_revision);
-        assert_eq!(emitted["sessionMutationStamp"], committed_mutation_stamp);
-        persist_delta_with_fences(
-            &mut cache,
-            state.persistence_path.as_path(),
-            &delta,
-            &mut PersistFenceBatch::default(),
-        )
-        .unwrap();
+fn stale_resume_cannot_rewrite_successors_passive_operation() {
+    let turn = OrdinaryRoot::new("stale-retained-successor");
+    turn.edit(|record| record.set_auto_dispatch_blocked(true));
+    let original = turn.enqueue("original", QueuedPromptSource::User);
+    let owner = turn.record(|record| QueuedTurnOwner::capture(record).unwrap());
+    turn.state.cancel_queued_prompt(&turn.session, &original).unwrap();
+    let successor = turn.enqueue("exact successor", QueuedPromptSource::User);
+    let before = unknown_retained_entry(&turn, &successor, "unknown_bind_reply");
+    turn.state.resume_local_session_queue(&turn.session, Some(owner)).unwrap();
+    turn.record(|record| {
+        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before);
+        assert!(record.orchestrator_auto_dispatch_blocked);
+        assert!(QueuedTurnOwner::capture(record).is_none());
     });
-    assert!(receiver.try_recv().is_err());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
 
-    let loaded = load_state(state.persistence_path.as_path())
-        .unwrap()
-        .unwrap();
-    let durable = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-    assert_eq!(durable.session.status, SessionStatus::Idle);
-    assert!(durable.orchestrator_auto_dispatch_blocked);
-    assert!(durable.session.queue_paused);
-    assert_eq!(durable.engram.dispatch_generation, first_generation + 1);
-    assert!(durable.queued_prompts[0].engram_waiting);
-    assert!(durable.queued_prompts[0].engram_evaluate.is_none());
-    assert_eq!(
-        durable
-            .session
-            .messages
-            .iter()
-            .filter(|message| message.id() == prompt_id)
-            .count(),
-        1,
-        "the first Defer boundary retains one promoted transcript entry"
-    );
+#[test]
+fn restart_keeps_unknown_remote_answer_as_data_without_replay() {
+    let turn = OrdinaryRoot::new("unknown-answer-reload");
+    let id = turn.enqueue("Unicode original — żółć 🦀", QueuedPromptSource::User);
+    let original = unknown_retained_entry(&turn, &id, "cached_defer_reply_lost");
+    let loaded = write_retained_state(&turn);
+    let record = &loaded.sessions[loaded.find_session_index(&turn.session).unwrap()];
+    assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), original);
+    assert!(ordinary_queue_position(record).is_none());
+    assert!(record.prompt_deliveries.is_empty(), "old remote history is not a provider receipt");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
 
-    drop(persist_rx);
-    state.resume_session_queue(&session).unwrap();
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err());
-    let evaluations = transport
-        .requests()
-        .into_iter()
-        .filter(|request| request.request["operation"] == "turn_evaluate")
-        .map(|request| request.request)
-        .collect::<Vec<_>>();
-    assert_eq!(evaluations.len(), 2);
-    assert_eq!(
-        evaluations[0]["intent_fingerprint"],
-        evaluations[1]["intent_fingerprint"]
-    );
-    assert_ne!(
-        evaluations[0]["idempotency_key"],
-        evaluations[1]["idempotency_key"]
-    );
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+#[test]
+fn ordinary_promotion_is_visible_and_durable_once_without_defer_transitions() {
+    let turn = OrdinaryRoot::new("visible-ordinary-promotion");
+    let id = turn.enqueue("Orchestrator root content", QueuedPromptSource::Orchestrator);
+    let mut deltas = turn.state.subscribe_delta_events();
+    let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false)
+        .unwrap().unwrap();
+    assert!(matches!(deliver_turn_dispatch(&turn.state, started.dispatch),
+        TurnDispatchDeliveryOutcome::Delivered));
+    assert!(turn.prompt().prompt.contains("Orchestrator root content"));
+    turn.assert_no_prompt();
+    let mut emitted = Vec::new();
+    let published = phase_sync::PollGuard::new();
+    loop {
+        emitted.extend(std::iter::from_fn(|| deltas.try_recv().ok())
+            .filter_map(|payload| serde_json::from_str::<Value>(&payload).ok()));
+        if emitted.iter().any(|event| event["sessionId"] == turn.session
+            && event["type"] == "messageCreated") { break; }
+        published.wait("ordinary promotion message publication");
+    }
+    assert!(emitted.iter().any(|event| event["sessionId"] == turn.session
+        && event["type"] == "messageCreated"), "ordinary promotion must publish its message");
+    let loaded = write_retained_state(&turn);
+    let record = &loaded.sessions[loaded.find_session_index(&turn.session).unwrap()];
     assert!(record.queued_prompts.is_empty());
-    assert_eq!(
-        record
-            .session
-            .messages
-            .iter()
-            .filter(|message| message.id() == prompt_id)
-            .count(),
-        1
-    );
+    assert_eq!(record.session.prompt_history, ["Orchestrator root content"]);
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    let count: usize = connection.query_row(
+        "SELECT COUNT(*) FROM messages WHERE session_id=?1 AND message_id=?2",
+        rusqlite::params![turn.session, id], |row| row.get(0)).unwrap();
+    assert_eq!(count, 1);
+    turn.assert_no_control();
 }
 
 #[test]
-fn failed_legacy_unknown_park_is_published_and_never_falls_through() {
-    let (mut state, session, _receiver, _) = root_fixture([]);
-    let (runtime, provider_receiver) = test_codex_runtime_handle("legacy-park-failure");
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "legacy held head",
-        QueuedPromptSource::User,
-        None,
-    );
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "untouched successor",
-        QueuedPromptSource::User,
-        None,
-    );
-    let (generation, runtime_token, active_turn_generation) = {
-        let mut inner = state.inner.lock().unwrap();
-        let message_id = inner.next_message_id();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
-        record.runtime = SessionRuntime::Codex(runtime);
-        record.session.status = SessionStatus::Active;
-        push_message_on_record(
-            record,
-            Message::EngramControl {
-                id: message_id,
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                card: EngramControlCard {
-                    causal_failure: None,
-                    schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
-                    stage: EngramControlStage::Dispatch,
-                    assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-                    decision: EngramControlCardDecision::Defer,
-                    dispatch: EngramControlCardDispatch::Withheld,
-                    refusal_code: None,
-                    defer_code: Some("legacy-busy".to_owned()),
-                    grant_id: None,
-                    directives: Vec::new(),
-                    delivered_range: None,
-                    latency_ms: EngramControlLatencyCard {
-                        admission_fence: None,
-                        preparation_fence: None,
-                        evaluate: Some(0),
-                        begin: None,
-                        checkpoint: None,
-                        total: 0,
-                    },
-                    fail_mode: EngramControlFailMode::Enforced,
-                    repair_armed: false,
-                    next_intent: None,
-                    source_root: None,
-                },
-            },
-        );
-        (
-            record.engram.dispatch_generation,
-            record.runtime.runtime_token().unwrap(),
-            record.active_turn_generation,
-        )
-    };
-    let durable_path = state.persistence_path.clone();
-    {
-        let inner = state.inner.lock().unwrap();
-        persist_state(durable_path.as_path(), &inner)
-            .unwrap();
-    }
-    state.shutdown_persist_blocking();
-    let failing_path = durable_path.with_extension("park-is-directory");
-    fs::create_dir_all(&failing_path).unwrap();
-    state.persistence_path = Arc::new(failing_path.clone());
-    let mut events = state.subscribe_events();
-
-    assert_eq!(
-        state.park_unknown_engram_authorization(
-            &session,
-            generation,
-            &runtime_token,
-            active_turn_generation,
-        ),
-        EngramAuthorizationParkOutcome::PersistenceUnknown
-    );
-    let payload = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .unwrap()
-        .block_on(async {
-            tokio::time::timeout(phase_sync::DEADLOCK_GUARD, events.recv())
-                .await
-                .expect("park uncertainty publication timed out")
-                .unwrap()
-        });
-    let published: Value = serde_json::from_str(&payload).unwrap();
-    let published_session = published["sessions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|candidate| candidate["id"] == session)
-        .unwrap();
-    assert_eq!(published_session["status"], "idle");
-    assert_eq!(published_session["queuePaused"], true);
-    assert!(
-        published_session["preview"]
-            .as_str()
-            .unwrap()
-            .contains("Waiting/Unknown")
-    );
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.queued_prompts[0].engram_waiting);
-        assert!(!record.queued_prompts[1].engram_waiting);
-        assert!(!record.queued_prompts[1].engram_interrupted);
-    }
-    assert!(provider_receiver.try_recv().is_err());
-
-    let durable = load_state(durable_path.as_path()).unwrap().unwrap();
-    let durable_record = &durable.sessions[durable.find_session_index(&session).unwrap()];
-    assert_eq!(
-        durable_record.session.status,
-        SessionStatus::Error,
-        "boot recovery sees the prior durable Active record, not the failed Idle park"
-    );
-    assert!(!durable_record.session.queue_paused);
-    assert!(!durable_record.queued_prompts[0].engram_waiting);
-    assert!(!durable_record.queued_prompts[1].engram_waiting);
-
-    fs::remove_dir_all(failing_path).unwrap();
-}
-
-/// The settlement of a known Defer whose card cannot be saved is held in
-/// memory until acknowledged; the store keeps the last durable evaluation,
-/// so a restart before the acknowledgement recovers conservatively from it.
-#[test]
-fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
-    let (mut state, session, receiver, _) = root_fixture([]);
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "defer whose card persistence is ambiguous",
-        QueuedPromptSource::User,
-        None,
-    );
-    let target = {
-        let inner = state.inner.lock().unwrap();
-        AppState::engram_binding_target_for_session_shape_locked(&inner, &session, true)
-            .unwrap()
-            .unwrap()
-    };
-    let generation = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
-        let queued = record.queued_prompts.front_mut().unwrap();
-        let fingerprint = engram_turn_intent_fingerprint(
-            &queued.pending_prompt.text,
-            queued.pending_prompt.expanded_text.as_deref(),
-            &queued.attachments,
-            queued.pending_prompt.source.as_ref(),
-            queued.source,
-        );
-        queued.engram_evaluate = Some(EngramQueuedEvaluate {
-            connection: target.connection,
-            settings: target.settings,
-            operation_generation: None,
-            request: EngramControlRequest::TurnEvaluate {
-                routing_token: "defer-persist-token".to_owned(),
-                intent_fingerprint: fingerprint.clone(),
-                requested_effects: target.effects,
-                resource_intents: Vec::new(),
-                purpose: "ordinary".to_owned(),
-                idempotency_key: "defer-persist-old-key".to_owned(),
-            },
-            begun_grant_id: None,
-            prepared_begin: None,
-        });
-        record.engram.routing_token = Some("defer-persist-token".to_owned());
-        record.session.status = SessionStatus::Active;
-        record.engram.pending_dispatch = Some(EngramPendingDispatch {
-            admission_fence_ms: None,
-            causal_failure: None,
-            dispatch_generation: record.engram.dispatch_generation,
-            intent_fingerprint: fingerprint,
-            evaluated: EngramDispatchEvaluation::Defer {
-                code: "busy".to_owned(),
-                retry_after_ms: None,
-                wake_condition: "operator resume".to_owned(),
-            },
-            evaluate_latency_ms: 0,
-            started_at: std::time::Instant::now(),
-            awaiting_runtime_stop_resolution: false,
-            begin_requested: None,
-            evaluated_work_binding: None,
-        });
-        record.engram.dispatch_generation
-    };
-    let durable_path = state.persistence_path.clone();
-    {
-        let inner = state.inner.lock().unwrap();
-        persist_state(durable_path.as_path(), &inner)
-            .unwrap();
-    }
-    state.shutdown_persist_blocking();
-    let failing_path = durable_path.with_extension("defer-card-is-directory");
-    fs::create_dir_all(&failing_path).unwrap();
-    state.persistence_path = Arc::new(failing_path.clone());
-    let mut events = state.subscribe_events();
-
-    assert_eq!(
-        state.finish_engram_dispatch_record(
-            &session,
-            generation,
-            None,
-            None,
-            EngramControlCard {
-                causal_failure: None,
-                schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
-                stage: EngramControlStage::Dispatch,
-                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-                decision: EngramControlCardDecision::Defer,
-                dispatch: EngramControlCardDispatch::Withheld,
-                refusal_code: None,
-                defer_code: Some("busy".to_owned()),
-                grant_id: None,
-                directives: Vec::new(),
-                delivered_range: None,
-                latency_ms: EngramControlLatencyCard {
-                    admission_fence: None,
-                    preparation_fence: None,
-                    evaluate: Some(0),
-                    begin: None,
-                    checkpoint: None,
-                    total: 0,
-                },
-                fail_mode: EngramControlFailMode::Enforced,
-                repair_armed: false,
-                next_intent: None,
-                source_root: None,
-            },
-        ),
-        EngramDispatchRecordFinish::PersistenceUnknown
-    );
-    let payload = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .unwrap()
-        .block_on(async {
-            tokio::time::timeout(phase_sync::DEADLOCK_GUARD, events.recv())
-                .await
-                .expect("Defer uncertainty publication timed out")
-                .unwrap()
-        });
-    let published: Value = serde_json::from_str(&payload).unwrap();
-    let published_session = published["sessions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|candidate| candidate["id"] == session)
-        .unwrap();
-    assert_eq!(published_session["status"], "idle");
-    assert_eq!(published_session["queuePaused"], true);
-    {
-        // In memory the known Defer is settled: its evaluation retired, a
-        // fresh generation, and an abort record that retries it once the
-        // settlement is acknowledged. Until then the head stays interrupted.
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.engram.dispatch_generation > generation);
-        assert!(record.queued_prompts[0].engram_interrupted);
-        assert!(!record.queued_prompts[0].engram_waiting);
-        assert!(record.queued_prompts[0].engram_evaluate.is_none());
-        let retry = record.engram.abort_retry.as_ref().expect("an abort record");
-        assert_eq!(retry.reason, EngramAbortReason::DeferCard);
-        assert_eq!(retry.settled_grant_id, None);
-        assert!(!record.engram.abort_retry_acknowledged);
-    }
-    assert!(receiver.try_recv().is_err());
-
-    let mut loaded = load_state(durable_path.as_path()).unwrap().unwrap();
-    let loaded_record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-    assert_eq!(loaded_record.engram.dispatch_generation, generation);
-    assert!(loaded_record.engram.recovered_admission);
-    assert!(
-        loaded_record.queued_prompts[0]
-            .engram_evaluate
-            .as_ref()
-            .is_some_and(|prepared| matches!(
-                &prepared.request,
-                EngramControlRequest::TurnEvaluate { idempotency_key, .. }
-                    if idempotency_key == "defer-persist-old-key"
-            ))
-    );
-
-    fs::remove_dir_all(failing_path).unwrap();
-    state.persistence_path = durable_path;
-    let recovered = ScriptedEngramControlTransport::new([
-        status_reply("ready"),
-        grant_reply("defer-recovered-grant"),
-        begin_reply("defer-recovered-grant"),
-    ]);
-    state.install_control_test_transport(recovered.clone());
-    let (runtime, recovered_receiver) = test_codex_runtime_handle("defer-persist-recovery");
-    {
-        let loaded_index = loaded.find_session_index(&session).unwrap();
-        let mut loaded_record = loaded.sessions.swap_remove(loaded_index);
-        loaded_record.runtime = SessionRuntime::Codex(runtime);
-        loaded_record.session.status = SessionStatus::Idle;
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index] = loaded_record;
-    }
-    state
-        .resume_session_queue(&session)
-        .expect("public Resume should recover the last durable evaluate key");
-    assert!(matches!(
-        recovered_receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(recovered_receiver.try_recv().is_err());
-    let requests = recovered.requests();
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.request["operation"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        ["session_status", "turn_evaluate", "turn_begin"]
-    );
-    assert_eq!(
-        requests[1].request["idempotency_key"],
-        "defer-persist-old-key"
-    );
+fn failed_cancel_write_does_not_claim_durable_loss_of_unknown_content() {
+    let mut turn = OrdinaryRoot::new("failed-cancel-write");
+    let id = turn.enqueue("last durable unknown input", QueuedPromptSource::User);
+    let original = unknown_retained_entry(&turn, &id, "authorization_unknown");
+    write_retained_state(&turn);
+    let original_path = turn.state.persistence_path.clone();
+    let failed_path = original_path.with_extension("cancel-is-directory");
+    fs::create_dir_all(&failed_path).unwrap();
+    turn.state.persistence_path = Arc::new(failed_path);
+    let result = turn.state.cancel_queued_prompt(&turn.session, &id);
+    // Restore the file path before asserting, so teardown owns a valid store.
+    turn.state.persistence_path = original_path;
+    assert!(result.is_err(), "an unwritten cancel cannot report success");
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &loaded.sessions[loaded.find_session_index(&turn.session).unwrap()];
+    assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), original);
+    assert!(ordinary_queue_position(record).is_none());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn public_disable_after_restoring_begun_receipt_never_replays_prompt() {
+fn disabled_integration_preserves_unknown_history_and_allows_distinct_ordinary_input() {
     for disable_host in [false, true] {
-        let (state, session, receiver, transport) = root_fixture([
-            bind_reply("token"),
-            grant_reply("grant"),
-            begin_reply("grant"),
-            checkpoint_reply("grant"),
-        ]);
+        let turn = OrdinaryRoot::new("disabled-history");
+        let id = turn.enqueue("possibly sent old prompt", QueuedPromptSource::User);
+        let original = unknown_retained_entry(&turn, &id, "unknown_begun");
+        let operation = super::super::turn_checks::checkpoint_result_recovery::passive_checkpoint(
+            &turn.root, &turn.session);
+        let original_operation = serde_json::to_value(&operation).unwrap();
         {
-            let mut inner = state.inner.lock().unwrap();
-            let project = inner.sessions[inner.find_session_index(&session).unwrap()]
-                .session
-                .project_id
-                .clone()
-                .unwrap();
-            fs::write(
-                FsPath::new(&inner.find_project(&project).unwrap().root_path)
-                    .join(".engram-project"),
-                "fixture-doctor-advisory\n",
-            )
-            .unwrap();
-            // The public API also invokes readiness. Use its existing fixture
-            // executable while control traffic remains scripted.
-            inner
-                .projects
-                .iter_mut()
-                .find(|p| p.id == project)
-                .unwrap()
-                .engram
-                .as_mut()
-                .unwrap()
-                .binary_path = Some(
-                real_engram_control_fixture_path()
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-            // This regression begins a real admitted authority before saving
-            // its begun receipt. Supply that local identity in the fixture;
-            // a prospective legacy route cannot prove the old producer store.
-            let root = PathBuf::from(&inner.find_project(&project).unwrap().root_path);
-            let key = materialize_fixture_engram_store(&root, &root);
-            inner.projects.iter_mut().find(|p| p.id == project).unwrap()
-                .engram.as_mut().unwrap().authority_store_key = Some(key);
+            let mut inner = turn.state.inner.lock().unwrap();
+            super::super::turn_checks::checkpoint_result_recovery::install_historical_checkpoint(
+                &mut inner, &turn.session, &operation);
+            turn.state.commit_locked(&mut inner).unwrap();
         }
-        let dispatch = root_dispatch(&state, &session, false);
-        assert!(matches!(
-            state.prepare_engram_turn_delivery_off_lock(
-                &session,
-                dispatch.engram_dispatch_generation().unwrap()
-            ),
-            EngramTurnDeliveryPreparation::Ready
-        ));
-        let (project, mut settings, prompt, before_off_head, before_off_prompt) = {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            let saved: PersistedSessionRecord =
-                serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
-            assert_eq!(
-                saved.queued_prompts[0]
-                    .engram_evaluate
-                    .as_ref()
-                    .unwrap()
-                    .begun_grant_id
-                    .as_deref(),
-                Some("grant")
-            );
-            inner.sessions[index] = saved.into_record().unwrap();
-            inner.recover_interrupted_sessions();
-            let record = &inner.sessions[index];
-            assert!(record.engram.recovered_admission);
-            let project = record.session.project_id.clone().unwrap();
-            (
-                project.clone(),
-                inner
-                    .find_project(&project)
-                    .unwrap()
-                    .engram
-                    .clone()
-                    .unwrap(),
-                record.queued_prompts[0].pending_prompt.id.clone(),
-                serde_json::to_value(&record.queued_prompts[0]).unwrap(),
-                serde_json::to_value(&projected_pending_prompts(record)[0]).unwrap(),
-            )
-        };
         if disable_host {
+            let mut settings = turn.state.inner.lock().unwrap().find_project(&turn.project)
+                .unwrap().engram.clone().unwrap();
             settings.enabled = false;
-        } else {
-            settings.turn_gated_control = false;
+            turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
         }
-        state
-            .update_project_engram_settings(&project, settings)
-            .unwrap();
-        let (old_head, old_debt) = {
-            let inner = state.inner.lock().unwrap();
-            assert_eq!(ordinary_off_execution_applies(&inner, &session), !disable_host);
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            if !disable_host {
-                assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before_off_head,
-                    "positive OFF preserves every original retained-head field");
-                assert_eq!(serde_json::to_value(&projected_pending_prompts(record)[0]).unwrap(), before_off_prompt);
-            }
-            (serde_json::to_value(&inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts[0]).unwrap(),
-                serde_json::to_value(&inner.engram_session_obligations).unwrap())
-        };
-        let old_requests = operations(&transport);
-        if disable_host {
-            assert_eq!(state.resume_session_queue(&session).err()
-                .expect("disabled integration stays outside the ordinary OFF lane").status,
-                StatusCode::CONFLICT);
-        } else {
-            state.resume_session_queue(&session).expect("Base/OFF Resume cannot replay the begun head");
-        }
-        assert!(receiver.try_recv().is_err());
-        assert_eq!(operations(&transport), old_requests);
-        let result = state.dispatch_turn(&session, SendMessageRequest {
-            text: "successor after disable".into(), expanded_text: None,
-            attachments: vec![], source_session_id: None, source_mailbox: None,
-        }).unwrap();
-        if disable_host {
-            assert!(matches!(result, DispatchTurnResult::Queued));
-        } else {
-            let dispatch = match result {
-                DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-                DispatchTurnResult::Queued => panic!("Base/OFF must run distinct ordinary input"),
-            };
-            assert!(dispatch.engram_dispatch_generation().is_none());
-            let token = dispatch.runtime_token().clone();
-            let generation = dispatch.active_turn_generation();
-            assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
-            assert!(matches!(phase_sync::receive(&receiver, "Base/OFF distinct successor"),
-                CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains("successor after disable")
-                    && !command.prompt.contains("Root controlled turn")));
-            assert!(receiver.try_recv().is_err());
-            state.finish_turn_ok_if_runtime_and_generation_match(&session, &token, generation).unwrap();
-            assert!(receiver.try_recv().is_err(), "completion cannot replay the old begun head");
-        }
-        {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert_eq!(record.session.queue_paused, disable_host);
-            if disable_host {
-                assert!(record.session.pending_prompts[0].engram_interrupted,
-                    "disabled integration keeps the original reset barrier");
-            } else {
-                assert_eq!(serde_json::to_value(&record.session.pending_prompts[0]).unwrap(), before_off_prompt,
-                    "ordinary completion cannot rewrite historical interruption evidence");
-            }
-            assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt);
-            assert_eq!(record.queued_prompts.len(), if disable_host { 2 } else { 1 });
-            if disable_host {
-                assert_eq!(record.queued_prompts[1].pending_prompt.text, "successor after disable");
-            }
-            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), old_head);
-            assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), old_debt);
-            assert_eq!(
-                record.queued_prompts[0]
-                    .engram_evaluate
-                    .as_ref()
-                    .unwrap()
-                    .begun_grant_id
-                    .as_deref(),
-                Some("grant")
-            );
-        }
-        assert!(receiver.try_recv().is_err());
-        assert_eq!(
-            operations(&transport)
-                .iter()
-                .filter(|op| *op == "turn_evaluate")
-                .count(),
-            1
-        );
-        let unresolved = {
-            let inner = state.inner.lock().unwrap();
-            engram_session_obligation_locked(&inner, &session).cloned()
-        };
-        state.cancel_queued_prompt(&session, &prompt).unwrap();
-        if let Some(original) = unresolved {
-            // OFF containment has not consumed the scripted checkpoint reply.
-            // Cancel removes the prompt, not its independent begun-grant duty.
-            assert!(!transport.requests().iter().any(|request|
-                request.request["operation"] == "turn_checkpoint"));
-            let original_image: EngramUnsettledControlImage =
-                serde_json::from_value(original.frozen_request.clone()).unwrap();
-            assert_eq!(original_image.queued_prompts[0].engram_evaluate.as_ref()
-                .unwrap().begun_grant_id.as_deref(), Some("grant"));
-            if disable_host {
-                assert!(state.resume_session_queue(&session).is_err());
-            } else {
-                state.resume_session_queue(&session).unwrap();
-            }
-            assert!(receiver.try_recv().is_err());
-            state.shutdown_persist_blocking();
-            let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
-            let kept = engram_session_obligation_locked(&loaded, &session)
-                .expect("Cancel and restart retain the independent duty");
-            assert_eq!(serde_json::to_value(kept).unwrap(), serde_json::to_value(original).unwrap());
-            let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-            assert_eq!(record.queued_prompts.len(), usize::from(disable_host));
-            if disable_host {
-                assert_eq!(record.queued_prompts[0].pending_prompt.text, "successor after disable");
-            }
-            assert_eq!(operations(&transport), old_requests, "ordinary OFF work never settles old control");
-            eprintln!("retained reset disable_host={disable_host}: preservation and branch controls verified");
-            continue;
-        }
-        // The positive branch needs an actually consumed matching checkpoint,
-        // not merely disabled settings or an unused scripted response.
-        let requests = transport.requests();
-        let checkpoints = requests.iter().filter(|request|
-            request.request["operation"] == "turn_checkpoint").collect::<Vec<_>>();
-        assert_eq!(checkpoints.len(), 1);
-        assert_eq!(checkpoints[0].request["grant_id"], "grant");
-        state.resume_session_queue(&session).unwrap();
-        let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
-            panic!("successor should reach provider");
-        };
-        assert!(command.prompt.contains("successor after disable"));
-        assert!(!command.prompt.contains("Root controlled turn"));
-        assert!(receiver.try_recv().is_err());
-        eprintln!("retained reset disable_host={disable_host}: consumed matching checkpoint and successor controls verified");
+        turn.state.resume_session_queue(&turn.session).unwrap();
+        turn.assert_no_prompt();
+        let dispatch = turn.prepare("distinct successor after disable");
+        let token = dispatch.runtime_token().clone();
+        let generation = dispatch.active_turn_generation();
+        assert!(matches!(deliver_turn_dispatch(&turn.state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+        let command = turn.prompt();
+        assert!(command.prompt.contains("distinct successor after disable"));
+        assert!(!command.prompt.contains("possibly sent old prompt"));
+        turn.state.finish_turn_ok_if_runtime_and_generation_match(&turn.session, &token, generation).unwrap();
+        turn.assert_no_prompt();
+        turn.record(|record| {
+            assert_eq!(record.queued_prompts.len(), 1);
+            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), original);
+            assert!(record.prompt_deliveries.is_empty());
+        });
+        turn.state.cancel_queued_prompt(&turn.session, &id).unwrap();
+        let loaded = write_retained_state(&turn);
+        assert!(loaded.sessions[loaded.find_session_index(&turn.session).unwrap()].queued_prompts.is_empty());
+        assert_eq!(serde_json::to_value(&loaded.engram_session_obligations.checkpoint_operations[0]).unwrap(),
+            original_operation, "Cancel removes content, never rewrites independent historical evidence");
+        assert!(matches!(loaded.engram_session_obligations.checkpoint_operations[0].attempts[0].result,
+            Some(EngramCheckpointAttemptResult::Unknown { .. })));
+        assert!(loaded.test_run_observations.is_empty());
+        turn.assert_no_control();
     }
 }
 
 #[test]
-fn degraded_unknown_and_terminal_store_faults_remain_cancelable_without_retry() {
+fn unknown_historical_faults_stay_cancelable_in_roots_and_real_children() {
     for child in [false, true] {
-        for code in [
-            "authorization_unknown",
-            "control_binding_unavailable",
-            "unknown_control_schema",
-            "store_corrupt",
-            "future_unknown_code",
-        ] {
-            let mut replies = Vec::new();
-            if child {
-                replies.push(bind_reply("parent"));
-            }
-            replies.push(bind_reply("token"));
-            let mut error = EngramTransportError::transport("injected uncertain authorization");
-            error.code = Some(code.into());
-            replies.push(ScriptedEngramControlResponse::Reply(Err(error)));
-            let (state, parent, receiver, transport) = root_fixture(replies);
-            let (session, delegation) = if child {
-                let created = state
-                    .create_read_only_delegation(
-                        &parent,
-                        CreateDelegationRequest {
-                            prompt: "held child".into(),
-                            title: None,
-                            cwd: None,
-                            agent: Some(Agent::Codex),
-                            model: None,
-                            mode: Some(DelegationMode::Explorer),
-                            write_policy: Some(DelegationWritePolicy::ReadOnly),
-                        },
-                    )
-                    .unwrap();
-                (
-                    created.delegation.child_session_id,
-                    Some(created.delegation.id),
-                )
-            } else {
-                let dispatch = root_dispatch(&state, &parent, false);
-                deliver_turn_dispatch(&state, dispatch).unwrap();
-                (parent.clone(), None)
+        for code in ["authorization_unknown", "control_binding_unavailable",
+            "unknown_control_schema", "store_corrupt", "future_unknown_code"]
+        {
+            let turn = OrdinaryRoot::new("historical-fault-cancel");
+            let session = if child {
+                let created = turn.state.create_read_only_delegation(&turn.session, CreateDelegationRequest {
+                    prompt: "initial child prompt".into(), title: None, cwd: None,
+                    agent: Some(Agent::Codex), model: None, mode: Some(DelegationMode::Explorer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                }).unwrap();
+                receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "actual initial child handoff").unwrap();
+                created.delegation.child_session_id
+            } else { turn.session.clone() };
+            let id = {
+                let mut inner = turn.state.inner.lock().unwrap();
+                let id = inner.next_message_id();
+                let record = inner.session_mut(&session).unwrap();
+                queue_prompt_on_record(record, PendingPrompt {
+                    id: id.clone(), timestamp: stamp_now(), text: format!("unknown payload {code}"),
+                    expanded_text: None, source: None, attachments: Vec::new(),
+                    engram_interrupted: false, is_engram_retained: false,
+                }, Vec::new());
+                let queued = record.queued_prompts.back_mut().unwrap();
+                queued.engram_evaluate = Some(json!({"unknown_code":code,"request":{"operation":"turn_evaluate"}}));
+                queued.engram_ordinary_handoff = true;
+                sync_pending_prompts(record);
+                turn.state.commit_locked(&mut inner).unwrap();
+                id
             };
-            let (prompt, prepared) = {
-                let inner = state.inner.lock().unwrap();
+            let before = {
+                let inner = turn.state.inner.lock().unwrap();
                 let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-                assert_eq!(record.session.status, SessionStatus::Idle, "{code}");
-                assert!(record.session.queue_paused);
-                assert!(record.session.pending_prompts[0].engram_interrupted);
-                (
-                    record.queued_prompts[0].pending_prompt.id.clone(),
-                    serde_json::to_value(&record.queued_prompts[0]).unwrap(),
-                )
+                serde_json::to_value(&record.queued_prompts).unwrap()
             };
-            let calls = transport.requests().len();
-            assert_eq!(
-                state
-                    .resume_session_queue(&session)
-                    .err()
-                    .expect("retained head must refuse Resume")
-                    .status,
-                StatusCode::CONFLICT
-            );
-            if child {
-                state
-                    .refresh_delegation_for_child_session(&session)
-                    .unwrap();
-            }
+            turn.state.refresh_delegation_for_child_session(&session).unwrap();
             {
-                let inner = state.inner.lock().unwrap();
+                let inner = turn.state.inner.lock().unwrap();
                 let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-                assert!(record.session.queue_paused);
-                assert_eq!(
-                    serde_json::to_value(&record.queued_prompts[0]).unwrap(),
-                    prepared
-                );
-                if let Some(id) = delegation {
-                    assert_eq!(
-                        inner.delegations[inner.find_delegation_index(&id).unwrap()].status,
-                        DelegationStatus::Running
-                    );
-                }
+                assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), before);
             }
-            assert_eq!(transport.requests().len(), calls);
-            assert!(receiver.try_recv().is_err());
-            state.cancel_queued_prompt(&session, &prompt).unwrap();
-            assert!(
-                state
-                    .inner
-                    .lock()
-                    .unwrap()
-                    .sessions
-                    .iter()
-                    .find(|r| r.session.id == session)
-                    .unwrap()
-                    .queued_prompts
-                    .is_empty()
-            );
+            turn.state.cancel_queued_prompt(&session, &id).unwrap();
+            {
+                let inner = turn.state.inner.lock().unwrap();
+                assert!(inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts.is_empty());
+            }
+            turn.assert_no_prompt();
+            turn.assert_no_control();
         }
     }
 }
 
 #[test]
-fn definite_refusal_retires_head_instead_of_hiding_it() {
-    for with_successor in [false, true] {
-        let (state, session, receiver, _) = root_fixture([
-            bind_reply("token"),
-            evaluation_refusal_reply("policy_denied"),
-        ]);
-        let mut deltas = state.subscribe_delta_events();
-        let dispatch = root_dispatch(&state, &session, false);
-        if with_successor {
-            queue_test_engram_prompt(
-                &state,
-                &session,
-                "successor remains queued",
-                QueuedPromptSource::User,
-                None,
-            );
-        }
-        assert!(deliver_turn_dispatch(&state, dispatch).is_err());
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.queued_prompts.len(), usize::from(with_successor));
-        assert_eq!(
-            record.session.pending_prompts.len(),
-            usize::from(with_successor)
-        );
-        if with_successor {
-            assert_eq!(
-                record.queued_prompts[0].pending_prompt.text,
-                "successor remains queued"
-            );
-        }
-        assert!(receiver.try_recv().is_err());
-        drop(inner);
-        let refusal_delta = std::iter::from_fn(|| deltas.try_recv().ok())
-            .filter_map(|payload| serde_json::from_str::<Value>(&payload).ok())
-            .filter(|event| event["type"] == "messageCreated")
-            .find(|event| event.get("sessionQueue").is_some())
-            .expect("terminal refusal must carry the authoritative queue projection");
-        let projected = refusal_delta["sessionQueue"]["pendingPrompts"]
-            .as_array()
-            .unwrap();
-        assert_eq!(projected.len(), usize::from(with_successor));
-        if with_successor {
-            assert_eq!(projected[0]["text"], "successor remains queued");
-        }
-        assert_eq!(refusal_delta["sessionQueue"]["queuePaused"], false);
-        assert!(refusal_delta["sessionQueue"]["queueProjectionHash"].is_string());
-        assert_eq!(
-            state
-                .get_session(&session)
-                .unwrap()
-                .session
-                .pending_prompts
-                .len(),
-            usize::from(with_successor),
-            "last-head retirement and successor preservation must match targeted hydration"
-        );
-    }
-}
-
-#[test]
-fn writer_backed_trimmed_promotion_retries_without_reinserting_transcript_or_history() {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("token"),
-        defer_reply("busy"),
-        grant_reply("grant"),
-        begin_reply("grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    let (prompt, position, history) = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
-        let prompt = record.queued_prompts[0].pending_prompt.id.clone();
-        let position = record.queued_prompts[0].promoted_message_index.unwrap();
-        let history = record.session.prompt_history.clone();
+fn trimmed_promoted_history_keeps_its_sql_position_without_reinsertion() {
+    let turn = OrdinaryRoot::new("trim-promoted-history");
+    let id = turn.enqueue("already promoted user content", QueuedPromptSource::User);
+    turn.edit(|record| {
+        let prompt = record.queued_prompts[0].pending_prompt.clone();
+        let position = session_message_count(record);
+        push_message_on_record(record, Message::Text {
+            id: prompt.id, timestamp: prompt.timestamp, author: Author::You,
+            text: prompt.text, attachments: Vec::new(), expanded_text: None, source: None,
+        });
+        record.queued_prompts[0].promoted_message_index = Some(usize::try_from(position).unwrap());
+        record.session.prompt_history.push("already promoted user content".into());
+    });
+    write_retained_state(&turn);
+    turn.edit(|record| {
         for sequence in 0..80 {
-            push_message_on_record(
-                record,
-                Message::Text {
-                    id: format!("trim-filler-{sequence}"),
-                    timestamp: stamp_now(),
-                    author: Author::Assistant,
-                    text: "unrelated retained history".into(),
-                    attachments: vec![],
-                    expanded_text: None,
-                    source: None,
-                },
-            );
+            push_message_on_record(record, Message::Text {
+                id: format!("trim-filler-{sequence}"), timestamp: stamp_now(), author: Author::Assistant,
+                text: "unrelated history".into(), attachments: Vec::new(), expanded_text: None, source: None,
+            });
         }
-        (prompt, position, history)
-    };
-    let mut cache = SqlitePersistConnectionCache::new();
-    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &delta,
-        &mut PersistFenceBatch::default(),
-    )
-    .unwrap();
-    let before = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
+    });
+    write_retained_state(&turn);
+    let position = turn.record(|record| record.queued_prompts[0].promoted_message_index.unwrap());
+    turn.edit(|record| {
         trim_retained_session_messages(record, SESSION_IN_MEMORY_MESSAGE_LIMIT);
-        assert!(cached_message_index_on_record(record, &prompt).is_none());
-        let roundtrip: QueuedPromptRecord =
-            serde_json::from_value(serde_json::to_value(&record.queued_prompts[0]).unwrap())
-                .unwrap();
-        record.queued_prompts[0] = roundtrip;
-        assert_eq!(
-            record.queued_prompts[0].promoted_message_index,
-            Some(position)
-        );
-        assert!(EngramQueuedAdmissionOwner::capture_promoted(record).is_some());
-        session_message_count(record)
-    };
-    state.resume_session_queue(&session).unwrap();
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err());
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(
-            session_message_count(record),
-            before + 1,
-            "only the new control card is appended"
-        );
+        assert!(cached_message_index_on_record(record, &id).is_none());
+    });
+    let history = turn.record(|record| record.session.prompt_history.clone());
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    turn.assert_no_prompt();
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    let row: (usize, usize) = connection.query_row(
+        "SELECT COUNT(*),MIN(position) FROM messages WHERE session_id=?1 AND message_id=?2",
+        rusqlite::params![turn.session, id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+    assert_eq!(row, (1, position));
+    turn.record(|record| {
         assert_eq!(record.session.prompt_history, history);
-        assert!(cached_message_index_on_record(record, &prompt).is_none());
-    }
-    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &delta,
-        &mut PersistFenceBatch::default(),
-    )
-    .unwrap();
-    let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
-    let (count, persisted_position): (usize, usize) = connection.query_row(
-        "SELECT COUNT(*), MIN(position) FROM messages WHERE session_id = ?1 AND message_id = ?2",
-        rusqlite::params![session, prompt], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
-    assert_eq!((count, persisted_position), (1, position));
-    assert_eq!(
-        operations(&transport),
-        [
-            "session_bind",
-            "turn_evaluate",
-            "turn_evaluate",
-            "turn_begin"
-        ]
-    );
+        assert!(cached_message_index_on_record(record, &id).is_none());
+        assert!(ordinary_queue_position(record).is_none());
+    });
+    turn.assert_no_control();
 }
 
 #[test]
-fn writer_backed_trimmed_unpromoted_admission_replays_after_restart() {
-    for lost_operation in ["session_bind", "turn_evaluate"] {
-        let replies = if lost_operation == "session_bind" {
-            vec![
-                bind_reply("token"),
-                grant_reply("grant"),
-                begin_reply("grant"),
-            ]
-        } else {
-            vec![
-                bind_reply("token"),
-                status_reply("ready"),
-                grant_reply("grant"),
-                begin_reply("grant"),
-            ]
-        };
-        let (mut state, session, receiver, _) = root_fixture([]);
-        let transport = ScriptedEngramControlTransport::new(replies);
-        let (observed_tx, observed_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let blocking_transport = Arc::new(BlockedAdmissionTransport {
-            inner: transport.clone(),
-            operation: lost_operation,
-            blocked_error: EngramTransportError::deadline(format!("lost {lost_operation} reply")),
-            observed_tx: Mutex::new(Some(observed_tx)),
-            release_rx: Mutex::new(release_rx),
-        });
-        state.install_control_test_transport(blocking_transport.clone());
-        let prompt_id = {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            let record = inner.session_mut_by_index(index).unwrap();
-            for sequence in 0..80 {
-                push_message_on_record(
-                    record,
-                    Message::Text {
-                        id: format!("unpromoted-trim-filler-{sequence}"),
-                        timestamp: stamp_now(),
-                        author: Author::Assistant,
-                        text: "unrelated retained history".into(),
-                        attachments: vec![],
-                        expanded_text: None,
-                        source: None,
-                    },
-                );
-            }
-            drop(inner);
-            queue_test_engram_prompt(
-                &state,
-                &session,
-                "exact unpromoted restart prompt",
-                QueuedPromptSource::User,
-                None,
-            );
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            record.queued_prompts[0].pending_prompt.id.clone()
-        };
-        let (project_id, workdir) = {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            (
-                record.session.project_id.clone().unwrap(),
-                PathBuf::from(&record.session.workdir),
-            )
-        };
-
-        let worker_state = state.clone();
-        let worker_session = session.clone();
-        let worker = std::thread::spawn(move || {
-            worker_state.start_next_queued_turn_off_lock(&worker_session, false, false)
-        });
-        let issued = phase_sync::receive(
-            &observed_rx,
-            "prepared unpromoted admission reaches the wire",
-        );
-        assert!(receiver.try_recv().is_err());
-        let fresh = state.get_session(&session).unwrap().session;
-        assert_eq!(fresh.pending_prompts[0].id, prompt_id);
-        assert!(
-            fresh.pending_prompts[0].is_engram_retained,
-            "a fresh client must see retained admission while the wire request is in flight"
-        );
-        create_test_project_session(&state, Agent::Claude, &project_id, &workdir);
-        let after_unrelated_commit = state.get_session(&session).unwrap().session;
-        assert_eq!(after_unrelated_commit.pending_prompts[0].id, prompt_id);
-        assert!(
-            after_unrelated_commit.pending_prompts[0].is_engram_retained,
-            "an unrelated publication must not regress the prepared queue projection"
-        );
-        {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            let queued = &record.queued_prompts[0];
-            assert_eq!(queued.promoted_message_index, None);
-            assert!(queued.promotion_disposition_known);
-            assert!(!queued.engram_interrupted);
-            assert!(cached_message_index_on_record(record, &prompt_id).is_none());
+fn trimmed_unpromoted_known_content_can_dispatch_once_after_reload() {
+    let turn = OrdinaryRoot::new("trim-unpromoted-content");
+    turn.edit(|record| {
+        for sequence in 0..80 {
+            push_message_on_record(record, Message::Text {
+                id: format!("unpromoted-filler-{sequence}"), timestamp: stamp_now(), author: Author::Assistant,
+                text: "unrelated history".into(), attachments: Vec::new(), expanded_text: None, source: None,
+            });
         }
-
-        let mut cache = SqlitePersistConnectionCache::new();
-        let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-        persist_delta_with_fences(
-            &mut cache,
-            state.persistence_path.as_path(),
-            &delta,
-            &mut PersistFenceBatch::default(),
-        )
-        .unwrap();
-        let restart_path = snapshot_retained_admission_restart_store(&state);
-        let mut loaded = load_state(&restart_path)
-            .unwrap()
-            .unwrap();
-        {
-            let index = loaded.find_session_index(&session).unwrap();
-            let record = loaded.session_mut_by_index(index).unwrap();
-            assert!(
-                record.message_start_index > 0,
-                "writer must trim the resident transcript"
-            );
-            assert!(cached_message_index_on_record(record, &prompt_id).is_none());
-            assert_eq!(record.queued_prompts[0].promoted_message_index, None);
-            assert!(record.queued_prompts[0].promotion_disposition_known);
-            assert!(record.queued_prompts[0].has_engram_intent());
-            assert!(!record.queued_prompts[0].engram_interrupted);
-            assert!(record.engram.recovered_admission);
-            record.engram.context_nudge_pending = false;
-        }
-        assert!(AppState::engram_session_requires_dispatch_card_locked(
-            &loaded, &session
-        ));
-        {
-            let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-            assert!(record.orchestrator_auto_dispatch_blocked);
-            assert!(record.session.queue_paused);
-            assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
-        }
-        release_tx.send(()).unwrap();
-        worker.join().unwrap().unwrap();
-        state.persistence_path = Arc::new(restart_path);
-        state.inner = Arc::new(StateMutex::new(loaded));
-        // The restarted state starts on its default clock; it runs on a
-        // scripted one again, chosen before any target exists.
-        state.select_test_scripted_engram_budget_clock();
-        state.install_control_test_transport(blocking_transport);
-
-        state.resume_session_queue(&session).unwrap();
-        let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
-            panic!("recovered unpromoted admission should reach the provider once");
-        };
-        assert_eq!(command.prompt, "exact unpromoted restart prompt");
-        assert!(receiver.try_recv().is_err());
-        let retried = transport
-            .requests()
-            .into_iter()
-            .filter(|request| request.request["operation"] == lost_operation)
-            .map(|request| request.request)
-            .collect::<Vec<_>>();
-        assert_eq!(retried.len(), 2);
-        assert_eq!(retried[0], issued);
-        assert_eq!(
-            retried[1], issued,
-            "restart must replay the exact request and key"
-        );
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(
-            record
-                .session
-                .messages
-                .iter()
-                .filter(|message| message.id() == prompt_id)
-                .count(),
-            1,
-            "promotion after restart must insert one transcript entry"
-        );
-    }
-}
-
-#[test]
-fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_resume() {
-    for lost_operation in ["session_bind", "turn_evaluate"] {
-        let replies = if lost_operation == "session_bind" {
-            vec![
-                ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-                    "lost bind reply",
-                ))),
-                bind_reply("replayed-token"),
-                grant_reply("replayed-grant"),
-                begin_reply("replayed-grant"),
-            ]
-        } else {
-            vec![
-                bind_reply("initial-token"),
-                ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-                    "lost evaluate reply",
-                ))),
-                status_reply("ready"),
-                grant_reply("replayed-grant"),
-                begin_reply("replayed-grant"),
-            ]
-        };
-        let (state, session, receiver, transport) = root_fixture(replies);
-        let attachment_metadata = MessageImageAttachment {
-            byte_size: 1,
-            file_name: "exact.png".to_owned(),
-            media_type: "image/png".to_owned(),
-        };
-        let source = MessageSource::peer("peer-session".to_owned(), "Peer agent".to_owned());
-        let (
-            prompt_id,
-            successor_id,
-            baseline_history,
-            baseline_message_count,
-            baseline_generation,
-        ) = {
-            let mut inner = state.inner.lock().unwrap();
-            let prompt_id = inner.next_message_id();
-            let successor_id = inner.next_message_id();
-            let index = inner.find_session_index(&session).unwrap();
-            let record = inner.session_mut_by_index(index).unwrap();
-            queue_prompt_on_record_with_source(
-                record,
-                PendingPrompt {
-                    engram_interrupted: false,
-                    is_engram_retained: false,
-                    attachments: vec![attachment_metadata.clone()],
-                    id: prompt_id.clone(),
-                    timestamp: stamp_now(),
-                    text: "exact prepared rollback prompt".to_owned(),
-                    expanded_text: Some("expanded exact prepared rollback prompt".to_owned()),
-                    source: Some(source.clone()),
-                },
-                vec![PromptImageAttachment {
-                    data: "AA==".to_owned(),
-                    metadata: attachment_metadata,
-                }],
-                QueuedPromptSource::Orchestrator,
-            );
-            queue_prompt_on_record_with_source(
-                record,
-                PendingPrompt {
-                    engram_interrupted: false,
-                    is_engram_retained: false,
-                    attachments: Vec::new(),
-                    id: successor_id.clone(),
-                    timestamp: stamp_now(),
-                    text: "successor remains queued".to_owned(),
-                    expanded_text: None,
-                    source: None,
-                },
-                Vec::new(),
-                QueuedPromptSource::Orchestrator,
-            );
-            let baseline = (
-                prompt_id,
-                successor_id,
-                record.session.prompt_history.clone(),
-                record.session.message_count,
-                record.active_turn_generation,
-            );
-            state.commit_locked(&mut inner).unwrap();
-            baseline
-        };
-
-        let connection = rusqlite::Connection::open(&*state.persistence_path).unwrap();
-        connection
-            .execute_batch(&format!(
-                "CREATE TRIGGER reject_engram_promotion BEFORE INSERT ON messages
-                 WHEN NEW.message_id = '{}'
-                 BEGIN SELECT RAISE(ABORT, 'injected-promotion-commit-failure'); END;",
-                prompt_id.replace('\'', "''"),
-            ))
-            .unwrap();
-
-        let mut state_events = state.subscribe_events();
-        let error = match state.start_next_queued_turn_off_lock(&session, false, false) {
-            Ok(_) => panic!("the transcript promotion commit must fail"),
-            Err(error) => error,
-        };
-        assert!(
-            format!("{error:#}").contains("injected-promotion-commit-failure"),
-            "{error:#}"
-        );
-        let rollback_revision = state.snapshot().revision;
-        assert!(
-            receiver.try_recv().is_err(),
-            "no provider handoff is durable yet"
-        );
-
-        let rollback_snapshot = std::iter::from_fn(|| state_events.try_recv().ok())
-            .filter_map(|payload| serde_json::from_str::<Value>(&payload).ok())
-            .find(|payload| {
-                payload["revision"] == rollback_revision
-                    && payload["sessions"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .any(|candidate| {
-                            candidate["id"] == session
-                                && candidate["preview"].as_str().is_some_and(|preview| {
-                                    preview.contains("promotion was not persisted")
-                                })
-                        })
-            })
-            .expect("promotion rollback must publish its restored projection immediately");
-        let published_session = rollback_snapshot["sessions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|candidate| candidate["id"] == session)
-            .unwrap();
-        assert_eq!(published_session["status"], "idle");
-        assert_eq!(published_session["queuePaused"], true);
-        assert!(
-            published_session.get("pendingPrompts").is_none(),
-            "metadata-first SSE snapshots do not inline prompt bodies"
-        );
-        let hydrated = serde_json::to_value(state.get_session(&session).unwrap()).unwrap();
-        let hydrated_prompt = &hydrated["session"]["pendingPrompts"][0];
-        assert_eq!(hydrated_prompt["id"], prompt_id);
-        assert_eq!(hydrated_prompt["isEngramRetained"], true);
-        assert!(
-            hydrated_prompt.get("engramBind").is_none()
-                && hydrated_prompt.get("engramEvaluate").is_none(),
-            "host-private prepared payloads must not enter the wire projection"
-        );
-
-        let issued = transport
-            .requests()
-            .into_iter()
-            .find(|request| request.request["operation"] == lost_operation)
-            .expect("the lost operation should have reached the wire")
-            .request;
-        let failed_queue = {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert_eq!(record.session.status, SessionStatus::Idle);
-            assert!(record.orchestrator_auto_dispatch_blocked);
-            assert!(record.session.queue_paused);
-            assert!(
-                record
-                    .session
-                    .preview
-                    .contains("promotion was not persisted")
-            );
-            assert_eq!(record.active_turn_generation, baseline_generation);
-            assert_eq!(record.session.prompt_history, baseline_history);
-            assert_eq!(record.session.message_count, baseline_message_count);
-            assert_eq!(record.queued_prompts.len(), 2);
-            assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
-            assert_eq!(record.queued_prompts[1].pending_prompt.id, successor_id);
-            assert_eq!(record.queued_prompts[0].promoted_message_index, None);
-            assert!(record.queued_prompts[0].promotion_disposition_known);
-            assert!(!record.queued_prompts[0].engram_interrupted);
-            assert!(cached_message_index_on_record(record, &prompt_id).is_none());
-            let prepared = if lost_operation == "session_bind" {
-                &record.queued_prompts[0]
-                    .engram_bind
-                    .as_ref()
-                    .expect("lost bind must remain prepared")
-                    .request
-            } else {
-                &record.queued_prompts[0]
-                    .engram_evaluate
-                    .as_ref()
-                    .expect("lost evaluation must remain prepared")
-                    .request
-            };
-            assert_eq!(serde_json::to_value(prepared).unwrap(), issued);
-            serde_json::to_value(&record.queued_prompts).unwrap()
-        };
-
-        connection
-            .execute_batch("DROP TRIGGER reject_engram_promotion;")
-            .unwrap();
-        drop(connection);
-        let mut loaded = load_state(state.persistence_path.as_path())
-            .unwrap()
-            .unwrap();
-        {
-            let index = loaded.find_session_index(&session).unwrap();
-            let record = loaded.session_mut_by_index(index).unwrap();
-            assert_eq!(
-                serde_json::to_value(&record.queued_prompts).unwrap(),
-                failed_queue
-            );
-            assert!(record.orchestrator_auto_dispatch_blocked);
-            assert!(record.session.queue_paused);
-            assert_eq!(record.session.status, SessionStatus::Idle);
-            assert!(record.engram.recovered_admission);
-            assert!(!record.engram_boot_recovery_pending);
-            assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
-            assert_eq!(record.queued_prompts[1].pending_prompt.id, successor_id);
-            record.engram.context_nudge_pending = false;
-        }
-        assert!(AppState::engram_session_requires_dispatch_card_locked(
-            &loaded, &session
-        ));
-        *state.inner.lock().unwrap() = loaded;
-        // The restarted state starts on its default clock; it runs on a
-        // scripted one again, chosen before any target exists.
-        state.select_test_scripted_engram_budget_clock();
-        state.install_control_test_transport(transport.clone());
-
-        state.resume_session_queue(&session).unwrap();
-        let observed_operations = operations(&transport);
-        assert!(
-            observed_operations
-                .iter()
-                .filter(|operation| **operation == lost_operation)
-                .count()
-                >= 2,
-            "public Resume did not replay {lost_operation}; observed {observed_operations:?}"
-        );
-        let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
-            panic!("public Resume should hand off the exact retained prompt once");
-        };
-        assert!(
-            command
-                .prompt
-                .contains("expanded exact prepared rollback prompt")
-        );
-        assert!(command.prompt.contains("Peer agent"));
-        assert!(command.prompt.contains("peer-session"));
-        assert_eq!(command.attachments.len(), 1);
-        assert!(receiver.try_recv().is_err());
-        let replayed = transport
-            .requests()
-            .into_iter()
-            .filter(|request| request.request["operation"] == lost_operation)
-            .map(|request| request.request)
-            .collect::<Vec<_>>();
-        assert_eq!(replayed.len(), 2);
-        assert_eq!(replayed[0], issued);
-        assert_eq!(
-            replayed[1], issued,
-            "Resume must replay the exact request and key"
-        );
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(record.queued_prompts[0].pending_prompt.id, successor_id);
-        assert_eq!(
-            record
-                .session
-                .messages
-                .iter()
-                .filter(|message| message.id() == prompt_id)
-                .count(),
-            1
-        );
-        assert!(cached_message_index_on_record(record, &successor_id).is_none());
-    }
-}
-
-#[test]
-fn writer_backed_initial_explorer_admission_is_barriered_before_boot_settlement() {
-    let (state, parent, receiver, first_transport) = root_fixture([
-        bind_reply("parent"),
-        bind_reply("child"),
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-            "lost child evaluation reply",
-        ))),
-    ]);
-    let created = state
-        .create_read_only_delegation(
-            &parent,
-            CreateDelegationRequest {
-                prompt: "initial Explorer prompt retained across restart".into(),
-                title: Some("restart explorer".into()),
-                cwd: None,
-                agent: Some(Agent::Codex),
-                model: None,
-                mode: Some(DelegationMode::Explorer),
-                write_policy: Some(DelegationWritePolicy::ReadOnly),
-            },
-        )
-        .unwrap();
-    let child = created.delegation.child_session_id;
-    let delegation = created.delegation.id;
-    let original_evaluate = first_transport
-        .requests()
-        .into_iter()
-        .find(|request| request.request["operation"] == "turn_evaluate")
-        .expect("initial child evaluation should reach the wire")
-        .request;
+    });
+    let id = turn.enqueue("exact unpromoted restart content 🦀", QueuedPromptSource::User);
+    turn.edit(|record| {
+        record.queued_prompts[0].engram_bind = Some(json!({"request":{
+            "operation":"session_bind","idempotency_key":"historical-unsent"}}));
+    });
+    let loaded = write_retained_state(&turn);
+    let mut saved = loaded.sessions[loaded.find_session_index(&turn.session).unwrap()].clone();
+    assert!(saved.message_start_index > 0);
+    assert!(saved.queued_prompts[0].promotion_disposition_known);
+    assert_eq!(saved.queued_prompts[0].promoted_message_index, None);
+    assert_eq!(ordinary_queue_position(&saved), Some(0));
+    saved.runtime = turn.record(|record| record.runtime.clone());
+    saved.session.status = SessionStatus::Idle;
     {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&child).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
-        assert!(record.queued_prompts[0].has_engram_intent());
-        assert!(record.queued_prompts[0].promoted_message_index.is_some());
-        // Model the durable window before the failing admission worker parks
-        // the queue. Boot reconstruction must supply this barrier itself.
-        record.set_auto_dispatch_blocked(false);
+        let mut inner = turn.state.inner.lock().unwrap();
+        *inner.session_mut(&turn.session).unwrap() = saved;
     }
-    let mut cache = SqlitePersistConnectionCache::new();
-    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &delta,
-        &mut PersistFenceBatch::default(),
-    )
-    .unwrap();
-
-    let loaded = load_state(state.persistence_path.as_path())
-        .unwrap()
-        .unwrap();
-    {
-        let record = &loaded.sessions[loaded.find_session_index(&child).unwrap()];
-        assert!(record.engram.recovered_admission);
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(record.session.queue_paused);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert!(
-            record.queued_prompts[0]
-                .pending_prompt
-                .text
-                .contains("initial Explorer prompt retained across restart")
-        );
-        assert_eq!(
-            loaded.delegations[loaded.find_delegation_index(&delegation).unwrap()].status,
-            DelegationStatus::Running,
-            "boot settlement must not terminalize a child with retained authorization",
-        );
-    }
-
-    *state.inner.lock().unwrap() = loaded;
-    // The restarted state starts on its default clock; it runs on a
-    // scripted one again, chosen before any target exists.
-    state.select_test_scripted_engram_budget_clock();
-    let retry_transport = ScriptedEngramControlTransport::new([
-        status_reply("ready"),
-        grant_reply("recovered-child-grant"),
-        begin_reply("recovered-child-grant"),
-    ]);
-    state.install_control_test_transport(retry_transport.clone());
-    state.resume_session_queue(&child).unwrap();
-    let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
-        panic!("public Resume should deliver the retained child prompt");
-    };
-    assert!(
-        command
-            .prompt
-            .contains("initial Explorer prompt retained across restart")
-    );
-    assert!(receiver.try_recv().is_err());
-    let replayed = retry_transport
-        .requests()
-        .into_iter()
-        .find(|request| request.request["operation"] == "turn_evaluate")
-        .expect("public Resume should replay the prepared evaluation")
-        .request;
-    assert_eq!(replayed, original_evaluate);
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    assert!(turn.prompt().prompt.contains("exact unpromoted restart content 🦀"));
+    turn.assert_no_prompt();
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    let count: usize = connection.query_row(
+        "SELECT COUNT(*) FROM messages WHERE session_id=?1 AND message_id=?2",
+        rusqlite::params![turn.session,id], |row| row.get(0)).unwrap();
+    assert_eq!(count, 1);
+    turn.assert_no_control();
 }
 
 #[test]
-fn writer_backed_begun_prehandoff_restart_never_resends_provider_prompt() {
-    let (state, session, receiver, _) = root_fixture([
-        bind_reply("token"),
-        grant_reply("begun-grant"),
-        begin_reply("begun-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    assert!(matches!(
-        state.prepare_engram_turn_delivery_off_lock(
-            &session,
-            dispatch.engram_dispatch_generation().unwrap(),
-        ),
-        EngramTurnDeliveryPreparation::Ready
+fn ordinary_promotion_write_failure_keeps_exact_payload_for_a_later_resume() {
+    let turn = OrdinaryRoot::new("promotion-own-row-failure");
+    turn.edit(|record| record.set_auto_dispatch_blocked(true));
+    let id = turn.enqueue("exact rollback prompt", QueuedPromptSource::Orchestrator);
+    turn.edit(|record| {
+        let head = &mut record.queued_prompts[0];
+        let metadata = MessageImageAttachment {
+            byte_size: 1, file_name: "exact.png".into(), media_type: "image/png".into(),
+        };
+        head.pending_prompt.expanded_text = Some("expanded exact rollback prompt".into());
+        head.pending_prompt.source = Some(MessageSource::peer("peer-session".into(), "Peer agent".into()));
+        head.pending_prompt.attachments = vec![metadata.clone()];
+        head.attachments = vec![PromptImageAttachment { data: "AA==".into(), metadata }];
+        head.engram_evaluate = Some(json!({"request":{"operation":"turn_evaluate","idempotency_key":"old-raw-key"}}));
+        sync_pending_prompts(record);
+    });
+    let successor = turn.enqueue("successor stays queued", QueuedPromptSource::Orchestrator);
+    write_retained_state(&turn);
+    let historical = turn.record(|record| record.queued_prompts[0].clone());
+    let before = turn.record(|record| (
+        serde_json::to_value(&record.queued_prompts).unwrap(), record.session.prompt_history.clone(),
+        session_message_count(record), record.active_turn_generation,
     ));
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.queued_prompts[0].promoted_message_index.is_some());
-        assert_eq!(
-            record.queued_prompts[0]
-                .engram_evaluate
-                .as_ref()
-                .unwrap()
-                .begun_grant_id
-                .as_deref(),
-            Some("begun-grant"),
-        );
-        assert!(!record.orchestrator_auto_dispatch_blocked);
-    }
-    let mut cache = SqlitePersistConnectionCache::new();
-    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &delta,
-        &mut PersistFenceBatch::default(),
-    )
-    .unwrap();
-
-    let loaded = load_state(state.persistence_path.as_path())
-        .unwrap()
-        .unwrap();
-    {
-        let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-        assert!(record.engram.recovered_admission);
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    connection.execute_batch(&format!(
+        "CREATE TRIGGER reject_ordinary_promotion BEFORE INSERT ON messages
+         WHEN NEW.message_id='{}' BEGIN SELECT RAISE(ABORT,'injected-promotion-commit-failure'); END;",
+        id.replace('\'', "''"))).unwrap();
+    let result = turn.state.start_next_queued_turn_off_lock(&turn.session, true, false);
+    assert!(result.err().is_some_and(|error| format!("{error:#}").contains("injected-promotion-commit-failure")));
+    turn.assert_no_prompt();
+    turn.record(|record| {
+        assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), before.0);
+        assert_eq!(record.session.prompt_history, before.1);
+        assert_eq!(session_message_count(record), before.2);
+        assert_eq!(record.active_turn_generation, before.3);
+        assert_eq!(record.session.status, SessionStatus::Idle);
         assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(record.session.queue_paused);
-        assert!(record.queued_prompts[0].promoted_message_index.is_some());
-    }
-    *state.inner.lock().unwrap() = loaded;
-    // The restarted state starts on its default clock; it runs on a
-    // scripted one again, chosen before any target exists.
-    state.select_test_scripted_engram_budget_clock();
-    let recovery_transport = ScriptedEngramControlTransport::new([status_reply("ready")]);
-    state.install_control_test_transport(recovery_transport.clone());
-    assert_eq!(
-        state
-            .resume_session_queue(&session)
-            .err()
-            .expect("retained head must refuse Resume")
-            .status,
-        StatusCode::CONFLICT
-    );
-    assert!(receiver.try_recv().is_err());
-    assert_eq!(operations(&recovery_transport), ["session_status"]);
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert!(record.orchestrator_auto_dispatch_blocked);
-    assert!(record.queued_prompts[0].engram_interrupted);
+        assert!(cached_message_index_on_record(record, &id).is_none());
+    });
+    connection.execute_batch("DROP TRIGGER reject_ordinary_promotion;").unwrap();
+    drop(connection);
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    let command = turn.prompt();
+    assert!(command.prompt.contains("expanded exact rollback prompt"));
+    assert!(command.prompt.contains("Peer agent") && command.prompt.contains("peer-session"));
+    assert_eq!(command.attachments.len(), 1);
+    turn.assert_no_prompt();
+    turn.record(|record| {
+        assert_eq!(record.queued_prompts.len(), 2);
+        let retained = &record.queued_prompts[0];
+        assert_eq!(retained.pending_prompt.id, id);
+        assert!(!ordinary_queue_entry_is_runnable(record, retained));
+        let mut expected = historical.clone();
+        expected.engram_ordinary_handoff = true;
+        expected.promoted_message_index = Some(record.message_start_index
+            + record.session.messages.iter().position(|message| message.id() == id).unwrap());
+        assert_eq!(serde_json::to_value(retained).unwrap(), serde_json::to_value(expected).unwrap());
+        assert_eq!(ordinary_queue_position(record), Some(1));
+        assert_eq!(record.queued_prompts[1].pending_prompt.id, successor);
+        assert_eq!(record.session.messages.iter().filter(|message| message.id() == id).count(), 1);
+    });
+    let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    let next = turn.prompt();
+    assert!(next.prompt.contains("successor stays queued"));
+    assert!(!next.prompt.contains("expanded exact rollback prompt"));
+    turn.assert_no_prompt();
+    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    turn.record(|record| {
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(record.queued_prompts[0].pending_prompt.id, id);
+        assert!(ordinary_queue_position(record).is_none());
+        assert_eq!(record.session.messages.iter().filter(|message| message.id() == id).count(), 1);
+        assert_eq!(record.session.messages.iter().filter(|message| message.id() == successor).count(), 1);
+    });
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn writer_backed_ordinary_queue_restart_does_not_gain_engram_barrier() {
-    let (state, _) = test_app_state_with_delegation_codex_runtime("ordinary-restart-runtime");
-    let root = state
-        .test_temp_root
-        .as_ref()
-        .unwrap()
-        .path()
-        .join("ordinary-project");
-    fs::create_dir_all(&root).unwrap();
-    let project = create_test_project(&state, &root, "Ordinary project");
-    let session = create_test_project_session(&state, Agent::Codex, &project, &root);
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "ordinary queued prompt",
-        QueuedPromptSource::User,
-        None,
-    );
-    let mut cache = SqlitePersistConnectionCache::new();
-    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &delta,
-        &mut PersistFenceBatch::default(),
-    )
-    .unwrap();
-    let loaded = load_state(state.persistence_path.as_path())
-        .unwrap()
-        .unwrap();
-    let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-    assert!(!record.engram.recovered_admission);
+fn real_explorer_initial_delivery_does_not_become_a_restart_admission() {
+    let turn = OrdinaryRoot::new("explorer-restart-custody");
+    let created = turn.state.create_read_only_delegation(&turn.session, CreateDelegationRequest {
+        prompt: "initial Explorer content across restart".into(), title: Some("restart explorer".into()),
+        cwd: None, agent: Some(Agent::Codex), model: None, mode: Some(DelegationMode::Explorer),
+        write_policy: Some(DelegationWritePolicy::ReadOnly),
+    }).unwrap();
+    let delivered = receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "initial Explorer").unwrap();
+    assert!(matches!(delivered, CodexRuntimeCommand::Prompt {command,..}
+        if command.prompt.contains("initial Explorer content across restart")));
+    turn.assert_no_prompt();
+    let loaded = write_retained_state(&turn);
+    let child = &loaded.sessions[loaded.find_session_index(&created.delegation.child_session_id).unwrap()];
+    assert!(child.queued_prompts.is_empty());
+    assert!(child.prompt_deliveries.is_empty(), "ordinary Explorer setup invents no receipt");
+    assert!(matches!(child.runtime, SessionRuntime::None));
+    assert_eq!(child.session.prompt_history.iter()
+        .filter(|text| text.contains("initial Explorer content across restart")).count(), 1);
+    turn.assert_no_control();
+}
+
+#[test]
+fn receipted_handoff_without_provider_ack_is_ambiguous_after_restart() {
+    let mut turn = OrdinaryRoot::new("receipted-reload-unknown");
+    let writer = DeliveryWriter::attach(&mut turn.state);
+    let id = turn.enqueue_durable("receipted prompt without provider ACK", true);
+    assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+    turn.assert_no_prompt();
+    writer.take(HeldFence::Durability).finish(Ok(()));
+    let write_ahead = writer.take(HeldFence::WriteAhead);
+    turn.record(|record| {
+        assert_eq!(record.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::HandingOff);
+        assert!(!record.prompt_deliveries[&id].write_ahead_acknowledged);
+        assert!(record.prompt_deliveries[&id].turn_generation.is_none());
+    });
+    turn.assert_no_prompt();
+    write_ahead.finish(Ok(()));
+    let command = turn.prompt();
+    assert!(command.prompt.contains("receipted prompt without provider ACK"));
+    assert!(command.delivery_receipt.is_some());
+    let loaded = write_retained_state(&turn);
+    let record = &loaded.sessions[loaded.find_session_index(&turn.session).unwrap()];
+    assert_eq!(record.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Ambiguous);
+    assert!(record.prompt_deliveries[&id].resume.is_none());
+    assert!(record.queued_prompts.is_empty());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    drop(writer);
+}
+
+#[test]
+fn writer_backed_ordinary_queue_restart_adds_no_control_barrier() {
+    let turn = OrdinaryRoot::new("ordinary-restart-queue");
+    let id = turn.enqueue("ordinary queued prompt", QueuedPromptSource::User);
+    let loaded = write_retained_state(&turn);
+    let record = &loaded.sessions[loaded.find_session_index(&turn.session).unwrap()];
     assert!(!record.orchestrator_auto_dispatch_blocked);
     assert!(!record.session.queue_paused);
-    assert_eq!(
-        record.queued_prompts[0].pending_prompt.text,
-        "ordinary queued prompt"
-    );
+    assert_eq!(record.queued_prompts[0].pending_prompt.id, id);
+    assert_eq!(record.queued_prompts[0].pending_prompt.text, "ordinary queued prompt");
+    assert!(record.queued_prompts[0].engram_evaluate.is_none());
+    assert!(record.queued_prompts[0].engram_bind.is_none());
+    assert_eq!(ordinary_queue_position(record), Some(0));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn trimmed_legacy_unknown_promotion_disposition_still_fails_closed() {
-    let (state, session, _, _) = root_fixture([]);
-    let prompt_id = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
+fn trimmed_unknown_promotion_stays_unknown_and_never_replays() {
+    let turn = OrdinaryRoot::new("trimmed-unknown-promotion");
+    turn.edit(|record| {
         for sequence in 0..80 {
-            push_message_on_record(
-                record,
-                Message::Text {
-                    id: format!("legacy-trim-filler-{sequence}"),
-                    timestamp: stamp_now(),
-                    author: Author::Assistant,
-                    text: "legacy retained history".into(),
-                    attachments: vec![],
-                    expanded_text: None,
-                    source: None,
-                },
-            );
+            push_message_on_record(record, Message::Text {
+                id: format!("unknown-filler-{sequence}"), timestamp: stamp_now(), author: Author::Assistant,
+                text: "historical transcript".into(), attachments: Vec::new(), expanded_text: None, source: None,
+            });
         }
-        drop(inner);
-        queue_test_engram_prompt(
-            &state,
-            &session,
-            "legacy disposition unknown",
-            QueuedPromptSource::User,
-            None,
-        );
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
-        record.queued_prompts[0].engram_waiting = true;
-        sync_pending_prompts(record);
-        record.queued_prompts[0].pending_prompt.id.clone()
-    };
-    let mut cache = SqlitePersistConnectionCache::new();
-    let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
-    persist_delta_with_fences(
-        &mut cache,
-        state.persistence_path.as_path(),
-        &delta,
-        &mut PersistFenceBatch::default(),
-    )
-    .unwrap();
-    let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
-    let encoded: String = connection
-        .query_row(
-            "SELECT value_json FROM sessions WHERE id = ?1",
-            rusqlite::params![session],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let mut legacy: Value = serde_json::from_str(&encoded).unwrap();
-    legacy["queuedPrompts"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("promotion_disposition_known");
-    connection
-        .execute(
-            "UPDATE sessions SET value_json = ?1 WHERE id = ?2",
-            rusqlite::params![legacy.to_string(), session],
-        )
-        .unwrap();
-
-    let loaded = load_state(state.persistence_path.as_path())
-        .unwrap()
-        .unwrap();
-    let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
+    });
+    let id = turn.enqueue("unknown disposition — źródło 🦀", QueuedPromptSource::User);
+    write_retained_state(&turn);
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    let encoded = persisted_session_json(&turn.state, &turn.session);
+    let mut saved: Value = serde_json::from_str(&encoded).unwrap();
+    saved["queuedPrompts"][0].as_object_mut().unwrap().remove("promotion_disposition_known");
+    connection.execute("UPDATE sessions SET value_json=?1 WHERE id=?2",
+        rusqlite::params![saved.to_string(), turn.session]).unwrap();
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &loaded.sessions[loaded.find_session_index(&turn.session).unwrap()];
     assert!(record.message_start_index > 0);
-    assert!(cached_message_index_on_record(record, &prompt_id).is_none());
-    assert!(record.queued_prompts[0].engram_interrupted);
-    assert!(!record.engram.recovered_admission);
-    assert!(record.orchestrator_auto_dispatch_blocked);
-    assert!(record.session.queue_paused);
+    assert!(cached_message_index_on_record(record, &id).is_none());
+    assert!(!record.queued_prompts[0].promotion_disposition_known);
+    assert!(record.queued_prompts[0].engram_ordinary_handoff);
+    assert_eq!(record.queued_prompts[0].pending_prompt.id, id);
+    assert_eq!(record.queued_prompts[0].pending_prompt.text, "unknown disposition — źródło 🦀");
+    assert!(ordinary_queue_position(record).is_none());
+    assert!(record.prompt_deliveries.is_empty());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }

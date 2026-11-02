@@ -1,341 +1,103 @@
-//! Exact response attribution and observer visibility before writer COMMIT.
-//! Uses the parent's disposable producer, real SQLite writer and root path.
-
+//! Historical diagnostic visibility and the real SQLite projection.
+//! The removed gate publisher is not restarted by these stored-data controls.
 use super::*;
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 
-struct CausalWriterRelease(mpsc::Sender<()>);
-
-impl Drop for CausalWriterRelease {
-    fn drop(&mut self) {
-        // Release before the scoped join even when projection/assertion
-        // unwinds. A disconnected receiver must not cause another panic.
-        let _ = self.0.send(());
-    }
+fn pending_historical_card(turn: &OrdinaryRoot) -> String {
+    let mut card: EngramControlCard = serde_json::from_value(json!({
+        "schemaVersion":1,"stage":"checkpoint","assurance":"historical",
+        "decision":"refuse","dispatch":"withheld","latencyMs":{"total":0},"failMode":"enforced"
+    })).unwrap();
+    card.causal_failure = Some(EngramCausalFailure::local(
+        &EngramTransportError::local_state("historical local write was not acknowledged"),
+        "historical_checkpoint", "historical writer"));
+    let mut inner = turn.state.inner.lock().unwrap();
+    let id = inner.next_message_id();
+    push_message_on_record(inner.session_mut(&turn.session).unwrap(), Message::EngramControl {
+        id: id.clone(), timestamp: stamp_now(), author: Author::Assistant, card,
+    });
+    id
 }
 
-fn visible_causes(fixture: &CausalRoot) -> Vec<Value> {
-    let inner = fixture.state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
-    record.session.messages.iter().filter_map(|message| {
+fn public_causes(turn: &OrdinaryRoot) -> Vec<Value> {
+    turn.record(|record| serde_json::to_value(AppState::wire_session_from_record(
+        &turn.state.server_instance_id, record)).unwrap()["messages"].as_array().unwrap()
+        .iter().filter_map(|message| message.get("causalFailure").cloned()).collect())
+}
+
+#[test]
+fn historical_causal_details_stay_hidden_until_read_from_actual_committed_rows() {
+    let turn = OrdinaryRoot::new("historical-causal-commit");
+    turn.state.shutdown_persist_blocking();
+    let id = pending_historical_card(&turn);
+    assert!(public_causes(&turn).is_empty());
+    let tail = turn.record(|record| serde_json::to_value(AppState::wire_session_tail_from_record(
+        &turn.state.server_instance_id, record, 100, true)).unwrap());
+    assert!(tail["messages"].as_array().unwrap().iter().all(|message| message.get("causalFailure").is_none()));
+    let captured = turn.record(|record| PersistedSessionRecord::from_record(record));
+    assert!(serde_json::to_value(&captured).unwrap()["session"]["messages"].as_array().unwrap()
+        .iter().any(|message| message["id"] == id && message["causalFailure"].is_object()));
+    let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
+    persist_delta_with_fences(&mut SqlitePersistConnectionCache::new(),
+        turn.state.persistence_path.as_path(), &delta, &mut PersistFenceBatch::default()).unwrap();
+    let stored = load_persisted_message_range(&turn.state.persistence_path, &turn.session, 0, 100).unwrap();
+    let cause = stored.iter().find_map(|(_, message)| {
         let wire = serde_json::to_value(message).unwrap();
-        wire.get("causalFailure").cloned()
-    }).collect()
+        (wire["id"] == id).then(|| wire["causalFailure"].clone())
+    }).unwrap();
+    assert_eq!(cause["operation"], "historical_checkpoint");
+    assert!(cause.get("publicationPending").is_none());
+    assert!(public_causes(&turn).is_empty(), "persistence does not recreate a retired publication callback");
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
-fn causal_writer_publication_boundary(fail: bool) {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_checkpoint", 1)));
-    let (token, original_head, generation) = fixture.start_and_queue();
-    let before = fixture.durable_cards();
-    assert!(before.iter().all(|card| card.get("causalFailure").is_none()));
-    let mut events = fixture.state.subscribe_delta_events();
-    let (arrived_tx, arrived_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    *fixture.writer_gate.lock().unwrap() = Some(CausalWriterGate {
-        arrived: arrived_tx, release: release_rx, any_tick: false,
-    });
-    let (before_commit, emitted_before_commit, projections_hidden, persistence_normalized) = std::thread::scope(|scope| {
-        let release = CausalWriterRelease(release_tx);
-        let state = fixture.state.clone();
-        let session = fixture.session.clone();
-        let worker = std::thread::Builder::new().stack_size(8 * 1024 * 1024)
-            .spawn_scoped(scope, move || {
-                state.checkpoint_engram_turn_off_lock(
-                    &session, EngramCheckpointPurpose::TurnTerminal, Some(&token), None,
-                    EngramNextIntent::Continue, Some(EngramExecutionOutcome::Succeeded), None,
-                );
-            }).unwrap();
-        let arrived = arrived_rx.recv_timeout(DEADLOCK_GUARD);
-        // Reject this optional causal-card transaction only. The checkpoint's
-        // mandatory identity/send-intent writes must succeed before its RPC.
-        fixture.fail_writes.store(fail, std::sync::atomic::Ordering::Release);
-        // Always release before asserting or joining, including a failed
-        // diagnostic. No writer survives the scope or temporary store owner.
-        let visible = visible_causes(&fixture);
-        let (projections_hidden, persistence_normalized) = {
-            let inner = fixture.state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
-            let session = AppState::wire_session_from_record(&fixture.state.server_instance_id, record);
-            let tail = AppState::wire_session_tail_from_record(
-                &fixture.state.server_instance_id, record, 100, true,
-            );
-            let hidden = [serde_json::to_value(session).unwrap(), serde_json::to_value(tail).unwrap()]
-                .iter().all(|wire| wire["messages"].as_array().unwrap().iter()
-                    .all(|message| message.get("causalFailure").is_none()));
-            let persisted = serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap();
-            let normalized = !persisted.to_string().contains("publicationPending")
-                && persisted["session"]["messages"].as_array().unwrap().iter()
-                    .any(|message| message.get("causalFailure").is_some());
-            (hidden, normalized)
-        };
-        let history = fixture.state.get_session_history(
-            &fixture.session, None, None, None, None, true, SESSION_HISTORY_PAGE_MAX_MESSAGES,
-        ).unwrap();
-        let history_hidden = serde_json::to_value(history).unwrap()["messages"]
-            .as_array().unwrap().iter().all(|message| message.get("causalFailure").is_none());
-        let emitted = std::iter::from_fn(|| events.try_recv().ok())
-            .any(|event| event.contains("causalFailure"));
-        drop(release);
-        worker.join().unwrap();
-        arrived.expect("writer must reach the causal record before COMMIT");
-        (visible, emitted, projections_hidden && history_hidden, persistence_normalized)
-    });
-    // Publication completes from the writer's ACK, not in the caller; join it
-    // deterministically when the write succeeds. A failed ACK stays hidden.
-    if !fail {
-        fixture.await_causal_publication();
-    }
-    let after = visible_causes(&fixture);
-    let durable_after = if fail {
-        // Observe the actual writer error before inspecting its old rows.
-        loop {
-            if fixture.committed.recv_timeout(DEADLOCK_GUARD).unwrap().is_err() { break; }
-        }
-        let stored = load_persisted_message_range(
-            &fixture.state.persistence_path, &fixture.session, 0, 100,
-        ).unwrap();
-        stored.into_iter().filter_map(|(_, message)| {
-            let wire = serde_json::to_value(message).unwrap();
-            wire.get("causalFailure").cloned()
-        }).collect::<Vec<_>>()
-    } else {
-        fixture.durable_cards().into_iter()
-            .filter_map(|card| card.get("causalFailure").cloned()).collect()
-    };
-    // Restore the fixture connection posture solely for orderly teardown.
-    fixture.fail_writes.store(false, std::sync::atomic::Ordering::Release);
-    assert!(before_commit.is_empty(), "uncommitted cause reached transcript hydration");
-    assert!(!emitted_before_commit, "uncommitted cause reached the normal message delta");
-    assert!(projections_hidden, "uncommitted cause reached session/tail serialization");
-    assert!(persistence_normalized, "ephemeral visibility must not remove the durable cause");
-    if fail {
-        assert!(after.is_empty(), "failed save exposed causal evidence");
-        assert!(durable_after.is_empty(), "failed transaction must leave old rows intact");
-        // A failed causal ACK is local to its optional details, not a
-        // transcript barrier for later messages or generic card visibility.
-        let mut later_events = fixture.state.subscribe_delta_events();
-        let mut inner = fixture.state.inner.lock().unwrap();
-        let index = inner.find_session_index(&fixture.session).unwrap();
-        let id = inner.next_message_id();
-        let record = inner.session_mut_by_index(index).unwrap();
-        let message_index = push_message_on_record(record, Message::Text {
-            id, timestamp: stamp_now(), author: Author::Assistant,
-            text: "Later message remains visible".to_owned(), attachments: vec![],
+#[test]
+fn failed_historical_causal_write_keeps_old_rows_and_does_not_hide_later_text() {
+    let turn = OrdinaryRoot::new("historical-causal-write-failure");
+    turn.state.shutdown_persist_blocking();
+    let id = pending_historical_card(&turn);
+    let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    connection.execute_batch(&format!(
+        "CREATE TRIGGER reject_historical_cause BEFORE INSERT ON messages
+         WHEN NEW.message_id='{}' BEGIN SELECT RAISE(ABORT,'historical-cause-write-failure'); END;",
+        id.replace('\'',"''"))).unwrap();
+    let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
+    let result = persist_delta_with_fences(&mut SqlitePersistConnectionCache::new(),
+        turn.state.persistence_path.as_path(), &delta, &mut PersistFenceBatch::default());
+    connection.execute_batch("DROP TRIGGER reject_historical_cause;").unwrap();
+    assert!(result.err().is_some_and(|error| format!("{error:#}").contains("historical-cause-write-failure")));
+    let count: usize = connection.query_row(
+        "SELECT COUNT(*) FROM messages WHERE session_id=?1 AND message_id=?2",
+        rusqlite::params![turn.session,id], |row| row.get(0)).unwrap();
+    assert_eq!(count, 0);
+    assert!(public_causes(&turn).is_empty());
+    turn.edit(|record| {
+        push_message_on_record(record, Message::Text {
+            id: "later-visible-text".into(), timestamp: stamp_now(), author: Author::Assistant,
+            text: "Later message remains visible".into(), attachments: Vec::new(),
             expanded_text: None, source: None,
         });
-        let creates = message_created_delta_parts_for_indices(record, vec![message_index]);
-        let revision = fixture.state.commit_persisted_delta_locked(&mut inner).unwrap();
-        fixture.state.publish_message_created_delta_parts(&inner, revision, creates);
-        let wire = serde_json::to_value(&inner.sessions[index].session).unwrap();
-        assert!(wire["messages"].as_array().unwrap().last().unwrap()["text"]
-            .as_str().unwrap().contains("Later message"));
-        assert!(wire["messages"].as_array().unwrap().iter()
-            .all(|message| message.get("causalFailure").is_none()));
-        drop(inner);
-        assert!(std::iter::from_fn(|| later_events.try_recv().ok())
-            .any(|event| event.contains("Later message remains visible")));
-    } else {
-        assert_eq!(after, durable_after, "visible evidence must match COMMIT readback");
-        assert_eq!(after.len(), 1);
-        assert_eq!(after[0]["operation"], "turn_checkpoint");
-    }
-    let inner = fixture.state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
-    assert_eq!(serde_json::to_value(&record.queued_prompts.front().unwrap().pending_prompt).unwrap(), original_head);
-    assert_eq!(record.engram.dispatch_generation, generation);
-    assert!(fixture.receiver.try_recv().is_err(), "diagnostic publication cannot deliver a provider prompt");
-}
-
-#[test]
-fn root_causal_publication_waits_for_stalled_writer_commit() {
-    causal_writer_publication_boundary(false);
-}
-
-#[test]
-fn root_causal_publication_withholds_failed_writer_record() {
-    causal_writer_publication_boundary(true);
-}
-
-// Public causes, read under StateInner without panicking there.
-fn published_causes(fixture: &CausalRoot) -> Vec<Value> {
-    let causes = {
-        let inner = fixture.state.inner.lock().unwrap();
-        inner.find_session_index(&fixture.session).map(|index| {
-            inner.sessions[index]
-                .session
-                .messages
-                .iter()
-                .map(serde_json::to_value)
-                .collect::<serde_json::Result<Vec<_>>>()
-        })
-    };
-    causes
-        .expect("the fixture session exists")
-        .unwrap()
-        .into_iter()
-        .filter_map(|wire| wire.get("causalFailure").cloned())
-        .collect()
-}
-
-// A stalled writer must not hold the lifecycle. The writer is held at its
-// first causal record; the caller must return while that cause is still
-// unpublished, and the cause publishes once the writer acknowledges it.
-fn caller_returns_before_publication(fault: (&'static str, usize)) -> Vec<Value> {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(fault));
-    let (token, _, _) = fixture.start_and_queue();
-    let (arrived_tx, arrived_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    *fixture.writer_gate.lock().unwrap() = Some(CausalWriterGate {
-        arrived: arrived_tx,
-        release: release_rx,
-        any_tick: false,
     });
-    let (returned, arrived, hidden_while_held) = std::thread::scope(|scope| {
-        let release = CausalWriterRelease(release_tx);
-        let (done_tx, done_rx) = mpsc::channel();
-        let state = fixture.state.clone();
-        let session = fixture.session.clone();
-        let worker = std::thread::Builder::new()
-            .stack_size(8 * 1024 * 1024)
-            .spawn_scoped(scope, move || {
-                let _ = state.finish_turn_ok_if_runtime_matches(&session, &token);
-                let _ = done_tx.send(());
-            })
-            .unwrap();
-        let returned = done_rx.recv_timeout(DEADLOCK_GUARD).is_ok();
-        // The writer reaches the record on its own and is held there, so no
-        // acknowledgement or publication can have happened yet.
-        let arrived = arrived_rx.recv_timeout(DEADLOCK_GUARD).is_ok();
-        let hidden = published_causes(&fixture).is_empty();
-        drop(release);
-        let _ = worker.join();
-        (returned, arrived, hidden)
-    });
-    assert!(returned, "the caller waited on its optional causal publication");
-    assert!(arrived, "the writer reached the causal record");
-    assert!(hidden_while_held, "a cause was public before its writer ACK");
-    fixture.await_causal_publication();
-    let published = published_causes(&fixture);
-    assert!(!published.is_empty(), "the cause publishes after the ACK");
-    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
-    published
+    let wire = turn.record(|record| serde_json::to_value(AppState::wire_session_from_record(
+        &turn.state.server_instance_id, record)).unwrap());
+    assert!(wire["messages"].as_array().unwrap().iter().any(|message|
+        message["text"] == "Later message remains visible"));
+    assert!(public_causes(&turn).is_empty());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn root_causal_checkpoint_record_does_not_wait_on_publication() {
-    let published = caller_returns_before_publication(("turn_checkpoint", 1));
-    assert!(published.iter().any(|cause| cause["operation"] == "turn_checkpoint"));
-}
-
-#[test]
-fn root_causal_dispatch_record_and_park_do_not_wait_on_publication() {
-    let published = caller_returns_before_publication(("turn_evaluate", 2));
-    assert!(published.iter().any(|cause| cause["operation"] == "turn_evaluate"));
-}
-
-// The teardown's exact identity must be durable before its RPC. Holding the
-// writer before kill blocks that mandatory cut, not optional causal publication.
-#[test]
-fn root_causal_kill_session_waits_for_checkpoint_identity_before_sending() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_checkpoint", 1)));
-    let _ = fixture.start_and_queue();
-    let (arrived_tx, arrived_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    *fixture.writer_gate.lock().unwrap() = Some(CausalWriterGate {
-        arrived: arrived_tx,
-        release: release_rx,
-        any_tick: true,
-    });
-    let _ = fixture.state.persist_tx.send(PersistRequest::Delta);
-    let (held, prepared, returned_early, checkpointed_early, result) = std::thread::scope(|scope| {
-        let release = CausalWriterRelease(release_tx);
-        let held = arrived_rx.recv_timeout(DEADLOCK_GUARD).is_ok();
-        let (prepared_tx, prepared_rx) = mpsc::channel();
-        let (done_tx, done_rx) = mpsc::channel();
-        let state = fixture.state.clone();
-        let session = fixture.session.clone();
-        let worker = std::thread::Builder::new()
-            .stack_size(8 * 1024 * 1024)
-            .spawn_scoped(scope, move || {
-                TEST_ENGRAM_BEFORE_TURN_CHECKPOINT_REQUEST.with(|hook| {
-                    *hook.borrow_mut() = Some(Box::new(move || {
-                        prepared_tx.send(()).unwrap();
-                    }));
-                });
-                let _ = done_tx.send(state.kill_session(&session));
-            })
-            .unwrap();
-        let prepared = prepared_rx.recv_timeout(DEADLOCK_GUARD).is_ok();
-        let returned_early = done_rx.try_recv().is_ok();
-        let checkpointed_early = fixture.transport.lost_request.lock().unwrap().is_some();
-        drop(release);
-        worker.join().unwrap();
-        let result = done_rx.recv_timeout(DEADLOCK_GUARD);
-        (held, prepared, returned_early, checkpointed_early, result)
-    });
-    assert!(held, "the writer was held before kill");
-    assert!(prepared, "kill published its original checkpoint identity");
-    assert!(!checkpointed_early, "no RPC precedes the mandatory writer ACK");
-    assert!(!returned_early, "kill still owns its checkpoint durability wait");
-    result.expect("kill returned after writer release").expect("kill completed");
-    assert!(fixture.transport.lost_request.lock().unwrap().is_some(),
-        "the original teardown checkpoint is sent after its identity ACK");
-    assert_eq!(fixture.transport.attempts.lock().unwrap()["turn_checkpoint"], 1);
-    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
-}
-
-fn queued_binding_validation(mode: CausalFaultMode) {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("session_bind", 2)));
-    *fixture.transport.mode.lock().unwrap() = mode;
-    let (token, original_head, _) = fixture.start_and_queue();
-    {
-        let mut inner = fixture.state.inner.lock().unwrap();
-        let index = inner.find_session_index(&fixture.session).unwrap();
-        inner.session_mut_by_index(index).unwrap().engram.rebind_required = true;
-    }
-    let _completion = fixture.state.finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-    let request = fixture.transport.lost_request.lock().unwrap().clone()
-        .expect("queued binding validation fault must be reached");
-    assert_eq!(request["operation"], "session_bind");
-    let cards = fixture.durable_cards();
-    let cause = &cards.last().unwrap()["causalFailure"];
-    assert_eq!(cause["operation"], "session_bind");
-    assert_eq!(cause["attemptId"], request["idempotency_key"]);
-    assert_eq!(cause["boundary"], "Engram control response validation");
-    assert_eq!(cause["failureClass"], "protocol");
-    assert_eq!(cause["remoteApplication"], "unknown");
-    assert!(fixture.receiver.try_recv().is_err());
-    let inner = fixture.state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
-    assert_eq!(serde_json::to_value(&record.queued_prompts.front().unwrap().pending_prompt).unwrap(), original_head);
-}
-
-#[test]
-fn root_causal_malformed_bind_reply_keeps_exact_request() {
-    queued_binding_validation(CausalFaultMode::Malformed);
-}
-
-#[test]
-fn root_causal_missing_binding_status_keeps_exact_request() {
-    queued_binding_validation(CausalFaultMode::MissingBindingStatus);
-}
-
-#[test]
-fn root_causal_missing_begin_receipt_keeps_exact_request() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_begin", 2)));
-    *fixture.transport.mode.lock().unwrap() = CausalFaultMode::MissingBeginReceipt;
-    let (token, _, _) = fixture.start_and_queue();
-    fixture.state.finish_turn_ok_if_runtime_matches(&fixture.session, &token).unwrap();
-    let request = fixture.transport.lost_request.lock().unwrap().clone().unwrap();
-    let cards = fixture.durable_cards();
-    let cause = &cards.last().unwrap()["causalFailure"];
-    assert_eq!(cause["operation"], "turn_begin");
-    assert_eq!(cause["attemptId"], request["idempotency_key"]);
-    assert_eq!(cause["boundary"], "Engram control response validation");
-    assert_eq!(cause["remoteApplication"], "unknown");
-    assert!(fixture.receiver.try_recv().is_err());
+fn ordinary_completion_does_not_wait_for_or_execute_historical_causal_publication() {
+    let turn = OrdinaryRoot::new("ordinary-beside-historical-cause");
+    pending_historical_card(&turn);
+    let dispatch = turn.prepare("Independent ordinary prompt.");
+    let token = dispatch.runtime_token().clone();
+    deliver_turn_dispatch(&turn.state, dispatch).into_public_result().unwrap();
+    assert!(turn.prompt().prompt.contains("Independent ordinary prompt."));
+    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    assert!(public_causes(&turn).is_empty());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }

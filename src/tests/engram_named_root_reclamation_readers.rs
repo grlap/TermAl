@@ -5,7 +5,7 @@ use super::*;
 fn stale_owner_with_reader(
     label: &str,
     proof: &str,
-) -> (ClaimedRoot, EngramWorkSourceRoot, String, String) {
+) -> (EOCheckedTurn, EngramWorkSourceRoot, String, String) {
     let (claimed, entry) = settled_root(label, proof);
     let (project, reader_state, binding) = {
         let inner = claimed.state.inner.lock().unwrap();
@@ -28,25 +28,30 @@ fn stale_owner_with_reader(
             .engram.work_binding.clone().unwrap()
     };
     claimed.transport.enable_named_roots(&reader, &reader_binding);
-    let token = claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding);
         record.session.status = SessionStatus::Idle;
-        record.engram.routing_token.take().unwrap()
     });
-    {
-        let inner = claimed.state.inner.lock().unwrap();
-        let stale = AppState::engram_binding_target_for_session_shape_locked(
-            &inner, &claimed.session_id, true).unwrap().unwrap();
-        let authorized = AppState::engram_binding_target_for_session_shape_locked(
-            &inner, &reader, true).unwrap().unwrap();
-        assert!(stale.routing_token.is_none());
-        assert!(authorized.routing_token.is_some());
+    let owner_project = {
+        let mut inner = claimed.state.inner.lock().unwrap();
+        let mut disabled = inner.find_project(&project).unwrap().clone();
+        disabled.id = format!("stale-owner-project-{}", Uuid::new_v4());
+        disabled.engram.as_mut().unwrap().enabled = false;
+        let id = disabled.id.clone();
+        let index = inner.find_session_index(&claimed.session_id).unwrap();
+        inner.sessions[index].session.project_id = Some(id.clone());
+        inner.projects.push(disabled);
+        assert!(AppState::engram_source_root_target_locked(
+            &inner, &claimed.session_id).unwrap().is_none());
+        let authorized = AppState::engram_source_root_target_locked(
+            &inner, &reader).unwrap().unwrap();
         assert_eq!(authorized.settings.authority_store_key.as_ref(), Some(&entry.store));
-    }
-    (claimed, entry, reader, token)
+        id
+    };
+    (claimed, entry, reader, owner_project)
 }
 
-fn assert_peer_retirement(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot, reader: &str) {
+fn assert_peer_retirement(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot, reader: &str) {
     let plan = reclamation_plan(claimed);
     assert_eq!(plan.len(), 1, "a stale local binding cannot block an authorized peer");
     assert_eq!(plan[0].root, *entry);
@@ -82,18 +87,18 @@ fn assert_peer_retirement(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot, r
     drop(inner);
     assert_eq!(fs::read(root.join(".git")).unwrap(), git_before);
     assert_eq!(content_revision(&root).unwrap().1, revision_before);
-    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 }
 
 #[test]
-fn named_root_reclamation_tokenless_stale_owner_retires_through_peer() {
+fn named_root_reclamation_base_disabled_stale_owner_retires_through_peer() {
     let (claimed, entry, reader, _) = stale_owner_with_reader("reclaim-tokenless-owner", "completed");
     assert_peer_retirement(&claimed, &entry, &reader);
 }
 
 #[test]
 fn named_root_reclamation_wrong_store_stale_owner_retires_through_peer() {
-    let (claimed, entry, reader, token) = stale_owner_with_reader("reclaim-wrong-store-owner", "completed");
+    let (claimed, entry, reader, _) = stale_owner_with_reader("reclaim-wrong-store-owner", "completed");
     {
         let mut inner = claimed.state.inner.lock().unwrap();
         let index = inner.find_session_index(&claimed.session_id).unwrap();
@@ -103,18 +108,17 @@ fn named_root_reclamation_wrong_store_stale_owner_retires_through_peer() {
         wrong_project.engram.as_mut().unwrap().authority_store_key.as_mut().unwrap()
             .project_id.push_str("-other-store");
         inner.sessions[index].session.project_id = Some(wrong_project.id.clone());
-        inner.sessions[index].engram.routing_token = Some(token);
+        wrong_project.engram.as_mut().unwrap().enabled = true;
         inner.projects.push(wrong_project);
-        let wrong = AppState::engram_binding_target_for_session_shape_locked(
-            &inner, &claimed.session_id, true).unwrap().unwrap();
-        assert!(wrong.routing_token.is_some());
+        let wrong = AppState::engram_source_root_target_locked(
+            &inner, &claimed.session_id).unwrap().unwrap();
         assert_ne!(wrong.settings.authority_store_key.as_ref(), Some(&entry.store));
     }
     assert_peer_retirement(&claimed, &entry, &reader);
 }
 
 #[test]
-fn named_root_reclamation_tokenless_stale_owner_keeps_open_matching_bound() {
+fn named_root_reclamation_base_disabled_stale_owner_keeps_open_matching_bound() {
     // This scripted canonical carrier is active Bound. Evaluation is not a
     // field in NamedRootRead; the pinned live witness separately issues a real
     // accepted evaluation and checks the same still-active Bound carrier.
@@ -132,7 +136,7 @@ fn named_root_reclamation_tokenless_stale_owner_keeps_open_matching_bound() {
 
 #[test]
 fn named_root_reclamation_stale_owner_authority_restored_during_read_is_fenced() {
-    let (claimed, entry, reader, token) = stale_owner_with_reader("reclaim-owner-restored-race", "completed");
+    let (claimed, entry, reader, owner_project) = stale_owner_with_reader("reclaim-owner-restored-race", "completed");
     let plan = reclamation_plan(&claimed);
     assert_eq!(plan.len(), 1);
     assert_eq!(plan[0].route, EngramRootReclamationRoute::Unfocused);
@@ -142,7 +146,9 @@ fn named_root_reclamation_stale_owner_authority_restored_during_read_is_fenced()
         *hook.borrow_mut() = Some(Box::new(move || {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&owner).unwrap();
-            inner.sessions[index].engram.routing_token = Some(token);
+            assert_eq!(inner.sessions[index].session.project_id.as_ref(), Some(&owner_project));
+            inner.projects.iter_mut().find(|project| project.id == owner_project).unwrap()
+                .engram.as_mut().unwrap().enabled = true;
         }));
     });
     let before = claimed.transport.requests().len();
@@ -163,26 +169,18 @@ fn named_root_reclamation_stale_owner_authority_restored_during_read_is_fenced()
 }
 
 #[test]
-fn named_root_reclamation_rebind_first_keeps_selection_loss_without_second_retirement() {
-    // Mirror the live pass-first witness with the existing rebind owner first.
-    // Script only canonical producer replies; both owners and the planner are real.
+fn named_root_reclamation_canonical_read_first_keeps_selection_loss_without_second_retirement() {
+    // The current canonical reader applies selection loss before a stale pass.
+    // Removed control rebind/status RPC assertions are not ordinary authority.
     let (claimed, entry) = settled_root("reclamation-rebind-first", "completed");
     let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
         &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
-    let successor = claimed.record(|record| {
+    let successor = claimed.record_mut(|record| {
         let successor = record.engram.work_binding.replace(binding.clone()).unwrap();
         record.session.status = SessionStatus::Idle;
-        record.engram.rebind_required = true;
         successor
     });
     claimed.transport.enable_named_roots(&claimed.session_id, &binding);
-    {
-        let mut queued = claimed.transport.work_bindings.lock().unwrap();
-        queued.clear();
-        queued.push_back(Ok(Some(successor.clone())));
-    }
-    claimed.transport.responses.lock().unwrap()
-        .push_back(bind_reply("reclamation-rebind-first-successor"));
     let planned_before_rebind = reclamation_plan(&claimed);
     assert_eq!(planned_before_rebind.len(), 1);
     assert_eq!(planned_before_rebind[0].root, entry);
@@ -192,16 +190,25 @@ fn named_root_reclamation_rebind_first_keeps_selection_loss_without_second_retir
     let git_before = fs::read(root.join(".git")).unwrap();
     let revision_before = content_revision(&root).unwrap().1;
     let before = claimed.transport.requests().len();
-    claimed.state.ensure_engram_session_bound_off_lock(&claimed.session_id).unwrap().unwrap();
+    let (target, fence) = {
+        let inner = claimed.state.inner.lock().unwrap();
+        (AppState::engram_source_root_target_locked(&inner, &claimed.session_id).unwrap().unwrap(),
+            EngramRootReadFence::capture(&inner))
+    };
+    claimed.state.reconcile_engram_named_root_with_route_classified_until(
+        &claimed.session_id, Some(&binding), Some(EngramNamedRootState::None), &fence,
+        Some(&target.connection), claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+    ).unwrap_or_else(|failure| panic!("canonical root reconciliation failed: {}", failure.into_transport()));
     let requests = claimed.transport.requests();
-    assert_eq!(requests[before].request["operation"], "session_status");
     assert!(requests[before..].iter().any(|request|
         request.request["operation"] == "named_root_read"
             && request.request["claim_id"] == entry.claim_id));
-    assert!(requests[before..].iter().any(|request|
-        request.request["operation"] == "session_bind"
-            && request.request["work_binding"]["claim_id"] == successor.claim_id));
-    let notices = claimed.record(|record| {
+    assert_ordinary_turn_has_no_native_requests(&claimed);
+    // Explicit scripted current association after the canonical loss; this
+    // does not send or revive a historical control binding.
+    claimed.record_mut(|record| record.engram.work_binding = Some(successor.clone()));
+    claimed.transport.enable_named_roots(&claimed.session_id, &successor);
+    let notices = claimed.record_mut(|record| {
         assert_eq!(record.engram.work_binding.as_ref(), Some(&successor));
         assert_eq!(record.engram.source_root_notices.len(), 1);
         assert!(matches!(&record.engram.source_root_notices[0].kind,
@@ -222,12 +229,12 @@ fn named_root_reclamation_rebind_first_keeps_selection_loss_without_second_retir
     claimed.state.run_engram_root_reclamation_pass(planned_before_rebind);
     assert_eq!(claimed.transport.requests().len(), after_rebind,
         "neither the later planner nor a stale task may perform a second retirement read");
-    claimed.record(|record| assert_eq!(record.engram.source_root_notices, notices));
+    claimed.record_mut(|record| assert_eq!(record.engram.source_root_notices, notices));
     let inner = claimed.state.inner.lock().unwrap();
     assert!(!inner.engram_work_source_roots.contains(&entry));
     assert!(inner.engram_work_naming_history.iter().all(|history| history.retirements.is_empty()));
     drop(inner);
     assert_eq!(fs::read(root.join(".git")).unwrap(), git_before);
     assert_eq!(content_revision(&root).unwrap().1, revision_before);
-    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 }

@@ -1,489 +1,180 @@
-//! The real producers of an automatic Engram retry hold, each driven through
-//! the production dispatch path from a mailbox wake, as the stalls seen on
-//! live lanes were: a prepared begin whose acknowledgement missed its
-//! deadline (`begin_preparation_pending`), a failed preparation write settled
-//! for a fresh admission (the abort retry), and an unknown evaluate whose
-//! reply was lost (`deadline_exceeded`). While the retry is due, the wake
-//! and the session say so; when it is due, the
-//! head is delivered once with no Resume. Next to them, the holds that are not
-//! a due automatic retry: a Stop, an operator's pause, a retained hold with
-//! nothing scheduled, a cancelled head, exhaustion and changed authority keep
-//! the paused-queue disposition and no retry hold. A measured admission that
-//! consumed its whole attempt budget also keeps that explicit hold.
-//!
-//! Owns: those producer and negative cases. Does not own the shared
-//! assertions (src/tests/engram_retry_hold_projection.rs), the named-root
-//! guard producer (src/tests/engram_root_begin_unsent.rs) or the retry
-//! schedule itself (src/tests/engram_admission_retry.rs). New module, a child
-//! of src/tests/engram_begin_unknown_recovery.rs, whose fixtures it uses.
-
+//! Ordinary mailbox, pause, Stop and explicit receipt Resume controls.
 use super::*;
-use crate::tests::engram_retry_hold_projection::{
-    AUTOMATIC_RETRY_DISPOSITION, PAUSED_QUEUE_DISPOSITION, assert_automatic_retry_hold,
-    assert_no_hold, assert_plain_pause, wire_queue_holds,
-};
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 use crate::tests::mailbox_acknowledged_wake::send;
+use crate::tests::prompt_delivery::{DeliveryWriter, HeldFence};
 
-/// `state` with a coordination store, so mailbox sends wake its sessions.
 fn with_mailbox(state: AppState) -> AppState {
     let path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
-    AppState {
-        mailbox_store: Arc::new(MailboxStore::open(&path).expect("mailbox test store should open")),
-        ..state
-    }
+    AppState { mailbox_store: Arc::new(MailboxStore::open(&path).unwrap()), ..state }
 }
 
-/// The dispatch budget the slow-evaluate fixture runs under, as in the root
-/// causal-failure fixture.
-const DISPATCH_BUDGET: Duration = Duration::from_secs(20);
-
-/// The second Evaluate belongs to a wake queued behind the first turn. Its
-/// reply is either lost before the budget is spent, or returned after the
-/// whole budget on the scripted clock. The producer still owns the actual
-/// grant, so the lost reply can be recovered by the exact Evaluate replay.
-struct QueuedEvaluate {
-    producer: Arc<StatefulEngramControlTransport>,
-    clock: EngramBudgetClock,
-    evaluates: std::sync::atomic::AtomicUsize,
-    exhaust_budget: bool,
-}
-
-impl EngramControlTransport for QueuedEvaluate {
-    fn request(
-        &self,
-        connection: &EngramConnectionConfig,
-        request: &EngramControlRequest,
-        timeout: Duration,
-    ) -> std::result::Result<Value, EngramTransportError> {
-        let reply = self.producer.request(connection, request, timeout);
-        if matches!(request, EngramControlRequest::TurnEvaluate { .. })
-            && self.evaluates.fetch_add(1, Ordering::SeqCst) == 1
-        {
-            if self.exhaust_budget {
-                self.clock.advance(DISPATCH_BUDGET + Duration::from_secs(1));
-            } else {
-                return Err(EngramTransportError::deadline("queued Evaluate reply lost"));
-            }
-        }
-        reply
-    }
-
-    fn shutdown_session(&self, session_id: &str) {
-        self.producer.shutdown_session(session_id);
-    }
-}
-
-/// A root session with a mailbox whose first turn runs; a wake sent meanwhile
-/// queues behind it, and when the turn ends the wake's admission spends its
-/// budget or loses its reply. Only the latter schedules an automatic retry.
-/// Returns the state, the session, its runtime (the first turn's prompt
-/// already taken) and the sender.
-fn queued_evaluate_hold(exhaust_budget: bool) -> (
-    AppState,
-    String,
-    mpsc::Receiver<CodexRuntimeCommand>,
-    String,
-) {
-    let (state, session, receiver, _) = root_fixture([]);
-    let state = with_mailbox(state);
-    state.install_control_test_transport(Arc::new(QueuedEvaluate {
-        producer: StatefulEngramControlTransport::new(),
-        clock: state.engram_budget_clock(),
-        evaluates: std::sync::atomic::AtomicUsize::new(0),
-        exhaust_budget,
-    }));
-    // Installing a control transport sets the test dispatch budget to the
-    // deadlock guard; the slow evaluate must outlast the real-sized budget the
-    // root causal-failure fixture uses, so it is set back to that size.
-    state.inner.lock().unwrap().test_engram_dispatch_budget = Some(DISPATCH_BUDGET);
-    let sender = test_session_id(&state, Agent::Claude);
-    deliver_turn_dispatch(&state, root_dispatch(&state, &session, false)).unwrap();
-    assert_eq!(
-        abort_retry::prompts_received(&receiver),
-        1,
-        "the first turn runs"
-    );
-    let queued = send(&state, &sender, &session, "budget-queued");
-    assert_eq!(queued.notification_disposition, "queuedBehindActiveTurn");
-    let token = with_record(&state, &session, |record| {
-        record
-            .runtime
-            .runtime_token()
-            .expect("the first turn has a runtime")
+fn assert_plain_pause(turn: &OrdinaryRoot) {
+    assert_eq!(turn.state.mailbox_queued_wake_disposition(&turn.session), "heldBehindPausedQueue");
+    turn.record(|record| {
+        assert!(record.orchestrator_auto_dispatch_blocked);
+        let full = serde_json::to_value(AppState::wire_session_from_record(&turn.state.server_instance_id, record)).unwrap();
+        let summary = serde_json::to_value(AppState::wire_session_summary_from_record(&turn.state.server_instance_id, record)).unwrap();
+        assert!(full["queueHold"].is_null());
+        assert!(summary["queueHold"].is_null());
     });
-    state
-        .finish_turn_ok_if_runtime_matches(&session, &token)
-        .expect("the first turn ends");
-    assert!(
-        receiver.try_recv().is_err(),
-        "the queued wake does not reach the provider yet"
-    );
-    assert_eq!(
-        admission_retry(&state, &session)
-            .map(|retry| retry.code)
-            .as_deref(),
-        (!exhaust_budget).then_some("deadline_exceeded"),
-        "only an unknown reply within the budget schedules an automatic retry"
-    );
-    (state, session, receiver, sender)
-}
-
-/// Criterion 1, `deadline_exceeded`: while the retry is due, the
-/// session names its cause and next due time and a wake sent then is reported
-/// as waiting for it; when due, the retained wake is delivered once.
-#[test]
-fn an_unknown_evaluate_is_reported_as_an_automatic_retry_and_delivered_without_resume() {
-    let (state, session, receiver, sender) = queued_evaluate_hold(false);
-    assert_automatic_retry_hold(
-        &state,
-        &session,
-        Some("deadline_exceeded"),
-        "unknown Evaluate",
-    );
-    let held = send(&state, &sender, &session, "budget-held");
-    assert_eq!(
-        held.notification_disposition, AUTOMATIC_RETRY_DISPOSITION,
-        "a wake sent while the retry is due names it"
-    );
-
-    tick_past_due(&state, &session);
-    assert_eq!(
-        abort_retry::prompts_received(&receiver),
-        1,
-        "the retained wake reaches the provider once, without Resume"
-    );
-    assert_no_hold(&state, &session, "after the retry delivered");
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn a_spent_dispatch_budget_is_reported_as_an_explicit_hold_without_automatic_delivery() {
-    let (state, session, receiver, sender) = queued_evaluate_hold(true);
-    let before = with_record(&state, &session, Clone::clone);
-    assert_plain_pause(&state, &session, "measured admission latency hold");
-    assert!(before.session.preview.contains("admission latency hold"));
-    let held = send(&state, &sender, &session, "budget-held");
-    assert_eq!(held.notification_disposition, PAUSED_QUEUE_DISPOSITION);
-    let clock = state.engram_budget_clock();
-    for offset in [1, 5, 30] {
-        state.engram_abort_retry_tick(clock.wall_now() + chrono::Duration::seconds(offset));
+fn an_ordinary_mailbox_wake_queued_behind_a_turn_delivers_once_without_resume() {
+    let mut turn = OrdinaryRoot::new("ordinary-queued-mailbox");
+    turn.state = with_mailbox(turn.state.clone());
+    let sender = test_session_id(&turn.state, Agent::Claude);
+    let dispatch = turn.prepare("first ordinary turn");
+    let token = dispatch.runtime_token().clone();
+    deliver_turn_dispatch(&turn.state, dispatch).into_public_result().unwrap();
+    turn.prompt();
+    let queued = send(&turn.state, &sender, &turn.session, "ordinary-followup");
+    assert_eq!(queued.notification_disposition, "queuedBehindActiveTurn");
+    let expected = turn.record(|record| {
+        assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+        record.queued_prompts[0].pending_prompt.text.clone()
+    });
+    turn.assert_no_prompt();
+    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    let command = turn.prompt();
+    assert!(command.prompt.contains(&expected));
+    turn.record(|record| {
+        assert!(record.queued_prompts.is_empty());
+        assert!(!record.orchestrator_auto_dispatch_blocked);
+    });
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn an_operator_pause_keeps_mailbox_wakes_queued_without_an_automatic_retry() {
+    for code in ["deadline_exceeded", "begin_preparation_pending", "control_unavailable"] {
+        let mut turn = OrdinaryRoot::new("paused-ordinary-mailbox");
+        turn.state = with_mailbox(turn.state.clone());
+        let sender = test_session_id(&turn.state, Agent::Claude);
+        let history = json!({"code":code,"dueAt":"2026-10-20T10:00:00Z","attempts":8});
+        turn.edit(|record| {
+            record.set_auto_dispatch_blocked(true);
+            record.engram.historical_control.insert("engramAdmissionRetry".into(), history.clone());
+        });
+        let queued = send(&turn.state, &sender, &turn.session, "paused-followup");
+        assert_eq!(queued.notification_disposition, "heldBehindPausedQueue");
+        let head = turn.record(|record| serde_json::to_value(&record.queued_prompts[0]).unwrap());
+        turn.state.dispatch_orphaned_workflow_prompts();
+        turn.state.dispatch_orphaned_workflow_prompts();
+        turn.record(|record| {
+            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), head);
+            assert_eq!(record.engram.historical_control["engramAdmissionRetry"], history);
+        });
+        assert_plain_pause(&turn);
     }
-    assert!(
-        receiver.try_recv().is_err(),
-        "ticks cannot deliver the held wake"
-    );
-    let after = with_record(&state, &session, Clone::clone);
-    assert!(after.engram.admission_retry.is_none());
-    assert_eq!(
-        after.queued_prompts.front().unwrap().pending_prompt.id,
-        before.queued_prompts.front().unwrap().pending_prompt.id
-    );
-    assert_eq!(
-        after.engram.dispatch_generation,
-        before.engram.dispatch_generation
-    );
-    assert_eq!(
-        serde_json::to_value(&after.engram.begin_preparation_lineage).unwrap(),
-        serde_json::to_value(&before.engram.begin_preparation_lineage).unwrap()
-    );
-    assert_plain_pause(
-        &state,
-        &session,
-        "latency hold survives ticks and another wake",
-    );
 }
 
-/// Criterion 1, `begin_preparation_pending`: a prepared begin whose
-/// acknowledgement missed its deadline parks the head for its admission
-/// retry; the wakes and the session say so, and when due the same begin is
-/// sent once and the head delivered once.
 #[test]
-fn a_pending_begin_preparation_is_reported_as_an_automatic_retry_and_delivered_without_resume() {
-    let (state, session, receiver, transport) = lost_begin_fixture(false);
-    let mut state = with_mailbox(state);
-    let sender = test_session_id(&state, Agent::Claude);
-    let writer = AcknowledgingWriter::install(
-        &mut state,
-        transport.log.clone(),
-        Some(PersistFenceError::Deadline),
-    );
-    let first = send(&state, &sender, &session, "preparation-first");
-    assert!(
-        writer.injected(),
-        "the prepared-begin fence missed its deadline"
-    );
-    assert!(
-        begin_requests(&transport).is_empty(),
-        "the first send is withheld"
-    );
-    assert!(receiver.try_recv().is_err(), "no provider handoff yet");
-    assert_eq!(
-        admission_retry(&state, &session)
-            .map(|retry| retry.code)
-            .as_deref(),
-        Some(ENGRAM_BEGIN_PREPARATION_PENDING_CODE)
-    );
-    assert_eq!(first.notification_disposition, AUTOMATIC_RETRY_DISPOSITION);
-    assert_automatic_retry_hold(
-        &state,
-        &session,
-        Some(ENGRAM_BEGIN_PREPARATION_PENDING_CODE),
-        "pending preparation",
-    );
-    let second = send(&state, &sender, &session, "preparation-second");
-    assert_eq!(second.notification_disposition, AUTOMATIC_RETRY_DISPOSITION);
-
-    tick_past_any_due(&state, &session);
-    tick_past_any_due(&state, &session);
-    writer.finish(&state);
-    assert_eq!(
-        abort_retry::prompts_received(&receiver),
-        1,
-        "delivered once, without Resume"
-    );
-    assert_eq!(
-        begin_requests(&transport).len(),
-        1,
-        "exactly one begin is sent"
-    );
-    assert_no_hold(&state, &session, "after the retry delivered");
-}
-
-/// Criterion 1, the abort retry: a failed preparation write withdraws the
-/// begin and settles the head for a fresh automatic admission, which is due
-/// on its own schedule and reported as that retry.
-#[test]
-fn a_failed_preparation_write_settled_for_a_fresh_admission_is_reported_as_an_automatic_retry() {
-    let (state, session, receiver, transport) = lost_begin_fixture(false);
-    let mut state = with_mailbox(state);
-    let sender = test_session_id(&state, Agent::Claude);
-    let writer = AcknowledgingWriter::install(
-        &mut state,
-        transport.log.clone(),
-        Some(PersistFenceError::WriteFailed(
-            "controlled prepared-begin write failure".to_owned(),
-        )),
-    );
-    let first = send(&state, &sender, &session, "write-failure-first");
-    assert!(writer.injected());
-    assert!(receiver.try_recv().is_err(), "no provider handoff");
-    assert_eq!(
-        with_record(&state, &session, |record| record.engram.abort_retry.clone())
-            .map(|retry| retry.reason),
-        Some(EngramAbortReason::BeginPreparation)
-    );
-    assert_eq!(first.notification_disposition, AUTOMATIC_RETRY_DISPOSITION);
-    assert_automatic_retry_hold(&state, &session, None, "fresh admission settled");
-    writer.finish(&state);
-}
-
-/// Criterion 2, Stop: the user's Stop ends the automatic retry, and the queue
-/// is held as a paused queue, exactly as before.
-#[test]
-fn a_stop_during_an_automatic_retry_keeps_the_paused_queue() {
-    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
-    state
-        .request_stop_session(&session)
-        .expect("Stop is accepted");
-    assert_plain_pause(&state, &session, "stopped");
-}
-
-/// Criterion 2, an operator's pause: a retry record still present behind an
-/// operator's pause is not a due automatic retry, since nothing passes the
-/// pause.
-#[test]
-fn an_operator_pause_over_a_scheduled_retry_keeps_the_paused_queue() {
-    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].engram.operator_paused = true;
+fn a_public_stop_keeps_an_ordinary_queued_head_paused() {
+    let turn = OrdinaryRoot::new("ordinary-stop-queued-head");
+    let dispatch = turn.prepare("active ordinary turn before Stop");
+    deliver_turn_dispatch(&turn.state, dispatch).into_public_result().unwrap();
+    turn.prompt();
+    let id = turn.enqueue("ordinary queued content before Stop", QueuedPromptSource::Mailbox);
+    turn.state.request_stop_session(&turn.session).unwrap();
+    let settled = phase_sync::PollGuard::new();
+    while turn.record(|record| record.runtime_stop_in_progress) {
+        settled.wait("the real Stop owner settles");
     }
-    assert_plain_pause(&state, &session, "operator pause");
+    turn.state.dispatch_orphaned_workflow_prompts();
+    turn.record(|record| {
+        assert_eq!(record.queued_prompts[0].pending_prompt.id, id);
+        assert_eq!(record.queued_prompts[0].pending_prompt.text, "ordinary queued content before Stop");
+    });
+    assert_plain_pause(&turn);
 }
 
-/// Criterion 2, changed authority: a change of the project's Engram settings
-/// (here its store home, part of the authority an admission ran under) resets
-/// the session's Engram state, its retry records included, and keeps the
-/// retained head as an interrupted hold: a paused queue, not a due retry.
 #[test]
-fn a_retry_under_changed_authority_keeps_the_paused_queue() {
-    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
-    // A settings update validates its binary, which the fixture's sentinel
-    // is not: the project first names the real control fixture, as the bind
-    // backoff tests' settings reset does (engram_bind_backoff_retry.rs).
-    let (project, mut settings, root) = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let project = inner.sessions[index]
-            .session
-            .project_id
-            .clone()
-            .expect("the root session belongs to a project");
-        let project_record = inner
-            .projects
-            .iter_mut()
-            .find(|candidate| candidate.id == project)
-            .unwrap();
-        let root = PathBuf::from(&project_record.root_path);
-        fs::write(root.join(".engram-project"), "fixture-ok\n").unwrap();
-        let settings = project_record
-            .engram
-            .as_mut()
-            .expect("Engram is enabled for the project");
-        settings.binary_path = Some(
-            real_engram_control_fixture_path()
-                .to_string_lossy()
-                .into_owned(),
-        );
-        (project.clone(), settings.clone(), root)
+fn a_settings_authority_change_does_not_bypass_an_ordinary_pause() {
+    let turn = OrdinaryRoot::new("paused-settings-authority-change");
+    turn.edit(|record| record.set_auto_dispatch_blocked(true));
+    let id = turn.enqueue("exact paused content", QueuedPromptSource::User);
+    let mut settings = {
+        let mut inner = turn.state.inner.lock().unwrap();
+        let project = inner.projects.iter_mut().find(|entry| entry.id == turn.project).unwrap();
+        let settings = project.engram.as_mut().unwrap();
+        settings.binary_path = Some(real_engram_control_fixture_path().to_string_lossy().into_owned());
+        settings.clone()
     };
-    let home = root.join("changed-authority-home");
+    fs::write(turn.root.join(".engram-project"), "fixture-ok\n").unwrap();
+    let home = turn.root.join("changed-authority-home");
     fs::create_dir_all(&home).unwrap();
     settings.home = Some(home.to_string_lossy().into_owned());
-    state
-        .update_project_engram_settings(&project, settings)
-        .expect("the settings change is accepted");
-    assert_plain_pause(&state, &session, "changed authority");
+    turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
+    turn.state.dispatch_orphaned_workflow_prompts();
+    turn.record(|record| assert_eq!(record.queued_prompts[0].pending_prompt.id, id));
+    assert_plain_pause(&turn);
 }
 
-/// Criterion 2, Cancel: the cancelled head's retry record lingers until the
-/// next tick drops it, but it owns no head, so nothing reports it; the queue
-/// is reported exactly as the latch and status say, as before.
 #[test]
-fn a_cancelled_head_is_not_reported_as_an_automatic_retry() {
-    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
-    let head = with_record(&state, &session, |record| {
-        record
-            .queued_prompts
-            .front()
-            .expect("the head is retained")
-            .pending_prompt
-            .id
-            .clone()
+fn cancel_retires_only_the_selected_paused_mailbox_head() {
+    let mut turn = OrdinaryRoot::new("cancel-paused-mailbox");
+    turn.state = with_mailbox(turn.state.clone());
+    turn.edit(|record| record.set_auto_dispatch_blocked(true));
+    let sender = test_session_id(&turn.state, Agent::Claude);
+    send(&turn.state, &sender, &turn.session, "first-paused-wake");
+    let first = turn.record(|record| record.queued_prompts[0].pending_prompt.id.clone());
+    let successor = turn.enqueue("independent paused user content", QueuedPromptSource::User);
+    let next = turn.record(|record| {
+        let queued = record.queued_prompts.iter().find(|queued| queued.pending_prompt.id == successor).unwrap();
+        serde_json::to_value(&queued.pending_prompt).unwrap()
     });
-    state
-        .cancel_queued_prompt(&session, &head)
-        .expect("Cancel is accepted");
-    let (latched, idle) = with_record(&state, &session, |record| {
-        (
-            record.orchestrator_auto_dispatch_blocked,
-            !matches!(
-                record.session.status,
-                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-            ),
-        )
+    turn.state.cancel_queued_prompt(&turn.session, &first).unwrap();
+    turn.record(|record| {
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(serde_json::to_value(&record.queued_prompts[0].pending_prompt).unwrap(), next);
     });
-    let expected = if latched && idle {
-        PAUSED_QUEUE_DISPOSITION
-    } else {
-        "queuedBehindActiveTurn"
-    };
-    assert_eq!(state.mailbox_queued_wake_disposition(&session), expected);
-    assert_eq!(
-        wire_queue_holds(&state, &session),
-        (Value::Null, Value::Null)
-    );
+    assert_plain_pause(&turn);
 }
 
-/// Criterion 2, a retained hold with nothing scheduled: a stopped writer is
-/// not transient, so the head keeps the explicit Resume/Cancel hold with no
-/// retry, reported as a paused queue.
 #[test]
-fn a_retained_hold_with_nothing_scheduled_keeps_the_paused_queue() {
-    let (mut state, session, _receiver, transport) = lost_begin_fixture(false);
-    let writer = AcknowledgingWriter::install(
-        &mut state,
-        transport.log.clone(),
-        Some(PersistFenceError::WorkerStopped),
-    );
-    let _ = deliver_turn_dispatch(&state, root_dispatch(&state, &session, false));
-    assert!(writer.injected());
-    writer.finish(&state);
-    assert!(
-        admission_retry(&state, &session).is_none(),
-        "nothing is scheduled"
-    );
-    assert_plain_pause(&state, &session, "explicit hold");
-}
-
-/// Criterion 2, exhaustion: once the admission budget's deadline passes, the
-/// head keeps the exhausted Resume/Cancel hold, reported as a paused queue.
-#[test]
-fn an_exhausted_automatic_retry_keeps_the_paused_queue() {
-    let (mut state, session, _receiver, transport) = lost_begin_fixture(false);
-    let writer = AcknowledgingWriter::install_with(
-        &mut state,
-        transport.log.clone(),
-        Some(PreparedFence::FailTimes(PersistFenceError::Deadline, 1)),
-    );
-    let _ = deliver_turn_dispatch(&state, root_dispatch(&state, &session, false));
-    assert!(writer.injected());
-    let deadline = with_record(&state, &session, |record| {
-        record
-            .engram
-            .begin_preparation_lineage
-            .as_ref()
-            .expect("the budget window is recorded")
-            .deadline
-            .clone()
+fn a_real_receipted_head_stays_paused_until_explicit_resume_then_sends_once() {
+    let mut turn = OrdinaryRoot::new("paused-real-receipt");
+    let writer = DeliveryWriter::attach(&mut turn.state);
+    turn.edit(|record| record.set_auto_dispatch_blocked(true));
+    let id = turn.enqueue_durable("exact receipted ordinary content", true);
+    assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+    turn.assert_no_prompt();
+    writer.take(HeldFence::Durability).finish(Ok(()));
+    let acknowledged = phase_sync::PollGuard::new();
+    while !turn.record(|record| record.queued_prompt_durability_holds.get(&id).is_some_and(|hold| hold.acknowledged)) {
+        acknowledged.wait("the content fence acknowledgement settles");
+    }
+    turn.record(|record| {
+        assert_eq!(record.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Pending);
+        assert!(record.prompt_deliveries[&id].turn_generation.is_none());
     });
-    let past = chrono::DateTime::parse_from_rfc3339(&deadline)
-        .unwrap()
-        .with_timezone(&chrono::Utc)
-        + chrono::Duration::milliseconds(1);
-    state.engram_abort_retry_tick(past);
-    writer.finish(&state);
-    assert!(
-        admission_retry(&state, &session).is_none(),
-        "the retry ended"
-    );
-    assert_plain_pause(&state, &session, "exhausted");
-}
-
-/// Criterion 2, a receipted head waiting for an explicit Resume: the paused
-/// queue sends it only on a Resume, so its due retry parks and begins nothing
-/// (`receipted_head_retry_park`). That is no automatic retry: the queue is
-/// reported as paused, as before, both before and after the retry falls due.
-#[test]
-fn a_receipted_head_parked_for_resume_keeps_the_paused_queue() {
-    let (state, session, _receiver, _transport) = parked_after_deadline([]);
-    let id = receipted_admission::receipt_the_parked_head(&state, &session);
-    abort_retry::await_settlement_acknowledgement(&state, &session);
-    state.engram_abort_retry_tick(chrono::Utc::now());
-    assert_plain_pause(&state, &session, "receipted head before its retry is due");
-    let lineage = receipted_admission::retry_lineage(&state, &session);
-    tick_past_due(&state, &session);
-    receipted_admission::assert_parked_for_resume(&state, &session, &id, &lineage);
-    assert_plain_pause(&state, &session, "receipted head parked for Resume");
-}
-
-/// Criterion 2, a retained source observation met again after a restart: the
-/// latch and the hold's preview were saved, the in-memory hold was not, so
-/// until the barrier is met the due admission retry is projected as
-/// automatic. Meeting it sets the hold, and that alone must count as a change
-/// so the caller stamps and publishes the paused queue an explicit Resume
-/// lifts.
-#[test]
-fn a_source_observation_hold_met_again_after_a_restart_counts_as_a_change() {
-    let (state, session, _receiver, _sender) = queued_evaluate_hold(false);
-    let (first, restarted_hold, again, held) = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = &mut inner.sessions[index];
-        let first = hold_source_observation_admission(record);
-        // A restart keeps the latch and the preview and loses the hold.
-        record.engram.source_observation_admission_held = false;
-        let restarted_hold = engram_automatic_retry_hold(record).map(|hold| hold.kind);
-        let again = hold_source_observation_admission(record);
-        (first, restarted_hold, again, record.engram.source_observation_admission_held)
-    };
-    assert!(first, "the first hold changes the latch and the preview");
-    assert_eq!(
-        restarted_hold.as_deref(),
-        Some("automaticRetry"),
-        "before the barrier is met again the due retry is projected"
-    );
-    assert!(again, "setting only the in-memory hold counts as a change");
-    assert!(held);
-    assert_plain_pause(&state, &session, "source observation hold after a restart");
+    turn.state.dispatch_orphaned_workflow_prompts();
+    assert_plain_pause(&turn);
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    let write_ahead = writer.take(HeldFence::WriteAhead);
+    turn.record(|record| {
+        let delivery = &record.prompt_deliveries[&id];
+        assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
+        assert!(!delivery.write_ahead_acknowledged);
+        assert!(delivery.turn_generation.is_none());
+        assert!(record.orchestrator_auto_dispatch_blocked);
+    });
+    turn.assert_no_prompt();
+    write_ahead.finish(Ok(()));
+    let command = turn.prompt();
+    assert!(command.prompt.contains("exact receipted ordinary content"));
+    assert_eq!(command.delivery_receipt.as_ref().unwrap().prompt_id, id);
+    turn.record(|record| {
+        assert!(!record.orchestrator_auto_dispatch_blocked);
+        assert_eq!(record.prompt_deliveries[&id].turn_generation, Some(command.active_turn_generation));
+        assert!(record.queued_prompts.is_empty());
+    });
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    drop(writer);
 }

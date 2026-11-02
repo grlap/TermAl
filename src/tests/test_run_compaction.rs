@@ -22,6 +22,34 @@ fn fill_safe(fixture: &RunFixture, session: &str, count: usize) {
     }
 }
 
+// Native proof belongs to its original registration. Fill the same project's
+// unrelated terminal history with genuine unbound command observations under
+// a fresh owner while that project's integration is absent. Restore the
+// connection metadata afterwards; no native association or receipt is changed.
+fn fill_unbound_history(fixture: &RunFixture, count: usize) {
+    let settings = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let settings = inner.projects.iter_mut().find(|project| project.id == fixture.project_id)
+            .unwrap().engram.take();
+        fixture.state.commit_locked(&mut inner).unwrap();
+        settings
+    };
+    let session = running_owner(fixture, "compaction-unbound-history-runtime");
+    fill_safe(fixture, &session, count);
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let history = inner.test_run_observations.values().chain(
+        inner.test_run_compacted.values().filter(|row| row.compacted)
+            .flat_map(|row| row.observations.iter()))
+        .filter(|row| row.summary.owner_session_id.as_deref() == Some(session.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(history.len(), count);
+    assert!(history.iter().all(|row| test_run_final_unbound_valid(row)
+        && row.evidence.is_empty() && row.work_binding.is_none()),
+        "the filler uses actual host final-unbound proof, never native credit");
+    inner.projects.iter_mut().find(|project| project.id == fixture.project_id).unwrap().engram = settings;
+    fixture.state.commit_locked(&mut inner).unwrap();
+}
+
 fn registered_alias(fixture: &RunFixture, session: &str, key: &str) -> (String, String, PathBuf) {
     let command = "node scripts/test-launcher.mjs full";
     fixture.state.note_engram_command_started(
@@ -272,6 +300,22 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
                     "mutable stage progress does not rewrite retained identity"
                 );
             }
+            let retained_identity = if !registered {
+                let mut inner = fixture.state.inner.lock().unwrap();
+                let mut cached = inner.test_run_compacted.get_mut(run_id).unwrap();
+                assert!(!cached.compacted && cached.registration.is_none() && cached.observations.is_empty());
+                let identity = (cached.request_identity.clone(), cached.summary.detail_version.clone());
+                // A historical cached display hint is not a native receipt.
+                // Exercise the retained-artifact fallback without adding proof.
+                cached.summary.registration.restart_would_void_evidence = Some(true);
+                cached.summary.registration.restart_evidence_reason =
+                    "Cached pending-credit inference from an ordinary artifact".to_owned();
+                drop(cached);
+                fixture.state.persist_synchronous_locked(&inner).unwrap();
+                Some(identity)
+            } else {
+                None
+            };
             let mut client = fixture.summaries();
             let mut stream = fixture.state.subscribe_stream_events();
             let revision = fixture.state.full_snapshot().revision;
@@ -287,6 +331,13 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
                 let inner = fixture.state.inner.lock().unwrap();
                 assert!(inner.test_run_compacted[run_id].summary.stages.is_empty());
                 assert!(inner.test_run_compacted[run_id].summary.command.is_none());
+                let cached = &inner.test_run_compacted[run_id];
+                assert_eq!(Some((cached.request_identity.clone(), cached.summary.detail_version.clone())),
+                    retained_identity);
+                assert!(cached.registration.is_none() && cached.observations.is_empty());
+                assert!(retained.registration.verification_record_ids.is_empty());
+                assert_eq!(retained.registration.restart_evidence_reason,
+                    "Retained artifact identity does not establish verification settlement or work completion.");
             }
             if !terminal {
                 assert_eq!(retained.state, TestRunState::Unknown);
@@ -323,6 +374,19 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
                     .restart_would_void_evidence,
                 None
             );
+            if !registered {
+                let retained = fixture.summary(run_id);
+                assert_eq!(retained.registration.artifact_unavailable, Some(true));
+                assert_eq!(retained.registration.history_compacted, Some(false));
+                assert!(retained.registration.verification_record_ids.is_empty());
+                assert_eq!(retained.registration.restart_evidence_reason,
+                    "Retained artifact identity does not establish verification settlement or work completion.");
+                let inner = fixture.state.inner.lock().unwrap();
+                let cached = &inner.test_run_compacted[run_id];
+                assert_eq!(Some((cached.request_identity.clone(), cached.summary.detail_version.clone())),
+                    retained_identity);
+                assert!(!cached.compacted && cached.registration.is_none() && cached.observations.is_empty());
+            }
             if !terminal {
                 assert_eq!(fixture.summary(run_id).state, TestRunState::Unknown);
                 assert!(fixture.summary(run_id).interrupted);
@@ -408,8 +472,9 @@ fn an_unsafe_alias_preserves_the_original_registration_and_every_association() {
     let fixture = RunFixture::new("compaction-unsafe-alias");
     let session = running_owner(&fixture, "compaction-unsafe-runtime");
     let (id, alias, _) = registered_alias(&fixture, &session, "unsafe-registered");
-    let (evidence, evidence_id, _, _, _) = evidence_fixture("compaction-unsafe-source");
-    let association = evidence.state.inner.lock().unwrap().test_run_observations[&evidence_id]
+    let (evidence, _, _, _, native) = native_evidence_fixture("compaction-unsafe-source");
+    record_native_evidence(&evidence, &native);
+    let association = evidence.state.inner.lock().unwrap().test_run_observations[&native.execution_id]
         .evidence[0]
         .clone();
     {
@@ -445,25 +510,57 @@ fn an_unsafe_alias_preserves_the_original_registration_and_every_association() {
 
 #[test]
 fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
-    let (fixture, id, store, binding, report) = evidence_fixture("compaction-bound-revalidation");
-    fixture
-        .state
-        .settle_test_run_verification_receipt(&report, &exact_receipt(), &store, &binding);
-    let read = serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
+    let (fixture, id, store, binding, native) = native_evidence_fixture("compaction-bound-revalidation");
+    let execution_id = native.execution_id.clone();
+    assert_eq!(id, native.registration.run_id);
+    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, None,
+        "registration and artifact facts alone create no pending native verification");
+    record_native_evidence(&fixture, &native);
+    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(true),
+        "a real native receipt remains at risk before canonical lifecycle completion");
+    let canonical = completed_lifecycle(&fixture, &store, &binding);
+    // A native receipt is durable, but another store/claim/source generation
+    // or an unfinished lifecycle cannot make this exact work completion safe.
+    let mut wrong_store = store.clone();
+    wrong_store.database_path = fixture.root.join("other-tracker.db");
+    let mut wrong_binding = binding.clone();
+    wrong_binding.claim_id.push_str("-other");
+    for (candidate_store, candidate_binding, pointer, replacement) in [
+        (wrong_store, binding.clone(), None, Value::Null),
+        (store.clone(), wrong_binding, None, Value::Null),
+        (store.clone(), binding.clone(), Some("/project_id"), json!("other-project")),
+        (store.clone(), binding.clone(), Some("/work_id"), json!("other-work")),
+        (store.clone(), binding.clone(), Some("/latest_event/generation"), json!(2)),
+        (store.clone(), binding.clone(), Some("/run/state"), json!("open")),
+    ] {
+        let mut candidate = canonical.clone();
+        if let Some(pointer) = pointer {
+            *candidate.pointer_mut(pointer).unwrap() = replacement;
+        }
+        let read = serde_json::from_value(candidate).unwrap();
+        fixture.state.revalidate_test_run_lifecycle(&candidate_store, &candidate_binding, &read);
+        assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(true));
+    }
+    let read = serde_json::from_value(canonical).unwrap();
     fixture
         .state
         .revalidate_test_run_lifecycle(&store, &binding, &read);
-    let session = fixture.state.inner.lock().unwrap().test_run_observations[&id]
-        .summary
-        .owner_session_id
-        .clone()
-        .unwrap();
-    fill_safe(&fixture, &session, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
+    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(false));
+    fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
     {
         let inner = fixture.state.inner.lock().unwrap();
         let proof = &inner.test_run_compacted[&id].observations[0].evidence[0];
         assert_eq!(proof.binding, binding);
         assert_eq!(proof.verification_record_id, Some("e".repeat(64)));
+        let producers = engram_verification_record_producers(&id, &native.body);
+        assert_eq!(producers.len(), 1);
+        let producer = &producers[0].1;
+        assert_eq!(proof.producer_observation_id, producer.observation_id);
+        assert_eq!(proof.action_fingerprint, producer.action_fingerprint);
+        assert_eq!(proof.reported_outcome, producer.outcome);
+        assert_eq!(Some(&proof.source_basis), producer.source_basis.as_ref());
+        assert!(proof.checkpoint_id.is_none() && proof.confirmed_cursor.is_none());
+        assert_eq!(inner.test_run_compacted[&id].observations[0].execution_id, execution_id);
         assert!(inner.test_run_compacted[&id].compacted);
     }
     reload(&fixture);
@@ -492,16 +589,15 @@ fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
 /// own hold; the existing idle compaction step compacts it at the new cut.
 #[test]
 fn revalidated_eligible_run_is_compacted_by_the_idle_step_not_inline() {
-    let (fixture, id, store, binding, report) = evidence_fixture("compaction-revalidation-deferred");
-    fixture
-        .state
-        .settle_test_run_verification_receipt(&report, &exact_receipt(), &store, &binding);
-    let session = fixture.state.inner.lock().unwrap().test_run_observations[&id]
-        .summary
-        .owner_session_id
-        .clone()
-        .unwrap();
-    fill_safe(&fixture, &session, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
+    let (fixture, id, store, binding, native) = native_evidence_fixture("compaction-revalidation-deferred");
+    let execution_id = native.execution_id.clone();
+    assert_eq!(id, native.registration.run_id);
+    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, None,
+        "registration and artifact facts alone create no pending native verification");
+    record_native_evidence(&fixture, &native);
+    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(true),
+        "native recording alone does not complete the bound work");
+    fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
     let compacted = |fixture: &RunFixture| {
         fixture.state.inner.lock().unwrap().test_run_compacted.get(&id).is_some_and(|row| row.compacted)
     };
@@ -514,7 +610,7 @@ fn revalidated_eligible_run_is_compacted_by_the_idle_step_not_inline() {
         .revalidate_test_run_lifecycle(&store, &binding, &read);
     {
         let inner = fixture.state.inner.lock().unwrap();
-        assert!(inner.test_run_observations.contains_key(&id), "the revalidating hold selects nothing");
+        assert!(inner.test_run_observations.contains_key(&execution_id), "the revalidating hold selects nothing");
         assert_eq!(inner.test_runs.compaction_examined_revision, None, "the next idle step must select");
     }
     assert!(!compacted(&fixture));
@@ -524,6 +620,8 @@ fn revalidated_eligible_run_is_compacted_by_the_idle_step_not_inline() {
     let proof = &inner.test_run_compacted[&id].observations[0].evidence[0];
     assert_eq!(proof.binding, binding);
     assert_eq!(proof.verification_record_id, Some("e".repeat(64)));
+    assert!(proof.checkpoint_id.is_none() && proof.confirmed_cursor.is_none());
+    assert_eq!(inner.test_run_compacted[&id].observations[0].execution_id, execution_id);
 }
 
 #[test]
@@ -559,6 +657,7 @@ fn failed_compaction_persistence_retains_all_preexisting_detail_and_identity() {
     };
     let invalid = fixture.root.join("compaction-state-directory");
     fs::create_dir(&invalid).unwrap();
+    fixture.state.shutdown_persist_blocking();
     fixture.state.persistence_path = Arc::new(invalid);
     fixture.state.step_test_run_compaction();
     let inner = fixture.state.inner.lock().unwrap();

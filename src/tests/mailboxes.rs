@@ -1762,7 +1762,6 @@ fn rejected_delivery_persistence_failure_still_requeues_the_mailbox_wake() {
             session_id: target_id.clone(),
             through_sequence: receipt.sequence,
         }),
-        None,
         &runtime_token,
         1,
     ));

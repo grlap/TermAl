@@ -122,8 +122,9 @@ fn poll(waiter: &PersistFenceWaiter) -> Option<PersistFenceResult> {
 }
 
 // The production serializer writes the transcript separately and clears the
-// metadata's messages. Only the dormant recovery keys are future specimens.
-fn recovery_row_fixture() -> (FenceFixture, String, Value, Value, PersistDelta) {
+// metadata's messages. The recovery keys are historical control data that an
+// earlier build saved; they load as raw data and take part in no proof.
+fn historical_row_fixture() -> (FenceFixture, String, Value, Value, PersistDelta) {
     let mut fixture = FenceFixture::new();
     let id = {
         let mut inner = fixture.inner.lock().unwrap();
@@ -222,9 +223,20 @@ fn recovery_row_fixture() -> (FenceFixture, String, Value, Value, PersistDelta) 
     (fixture, id, row, messages, empty)
 }
 
+/// The ordinary own-row image of a stored session row: its queue, deliveries,
+/// holds and choices. Historical control keys in the row are not part of it.
+fn ordinary_row_image(row: &Value) -> Value {
+    let record: PersistedSessionRecord = serde_json::from_value(row.clone()).unwrap();
+    ordinary_session_row_persisted_content(&record)
+}
+
+// The begin-recovery image fence, which also proved the transcript, was
+// removed with turn gating. The own-row fence proves the session row's
+// ordinary content on the writer connection; transcript rows are not part of
+// it, so a full transcript is neither required nor able to fake its proof.
 #[test]
-fn engram_recovery_causal_ack_proves_real_transcript_outside_the_resident_tail() {
-    let (fixture, id, row, messages, _) = recovery_row_fixture();
+fn own_row_fence_proof_is_independent_of_the_transcript() {
+    let (fixture, id, row, _messages, _) = historical_row_fixture();
     let connection = fixture.cache.connection.as_ref().unwrap();
     let mut resident: PersistedSessionRecord = serde_json::from_value(row.clone()).unwrap();
     load_persisted_session_tail(
@@ -241,45 +253,56 @@ fn engram_recovery_causal_ack_proves_real_transcript_outside_the_resident_tail()
             .iter()
             .any(|message| message.id() == "cancel")
     );
-    let target = PersistFenceTarget::EngramRecovery {
+    let target = PersistFenceTarget::OrdinarySessionRow {
         session_id: id.clone(),
-        content: engram_recovery_image_from_row(&row, messages.clone()),
+        content: ordinary_row_image(&row),
     };
     assert!(
         target.is_already_durable(connection).unwrap(),
-        "full durable transcript must ACK despite an empty metadata transcript and missing resident cancellation message"
+        "the committed row ACKs despite an empty metadata transcript and a resident tail without the old message"
     );
-    // The positive witness must also reject deletion of that exact old message.
     connection
         .execute(
             "DELETE FROM messages WHERE session_id = ?1 AND message_id = 'cancel'",
             [&id],
         )
         .unwrap();
-    assert!(!target.is_already_durable(connection).unwrap());
+    assert!(
+        target.is_already_durable(connection).unwrap(),
+        "transcript rows are not part of the own-row proof"
+    );
 }
 
 #[test]
-fn engram_recovery_fence_requires_every_image_component_on_the_same_writer_connection() {
-    let (mut fixture, id, row, messages, empty) = recovery_row_fixture();
-    for pointer in [
-        "/engramBeginRecovery",
-        "/engramBeginRecoveryAudit",
-        "/queuedPrompts",
-        "/engramDispatchGeneration",
-        "/engramUncertainGrantId",
-        "/engramBeginCancelAudit",
-        "/engramBeginRecoveryFormat",
-        "/engramBeginOperationId",
-        "/engramBeginCancelCapture",
+fn own_row_fence_requires_every_ordinary_component_on_the_same_writer_connection() {
+    let (mut fixture, id, row, _messages, empty) = historical_row_fixture();
+    // Every ordinary component of the row image must match; a historical
+    // control key is raw data and cannot hold or grant the acknowledgement.
+    for (pointer, value, ordinary) in [
+        ("/queuedPrompts/0/pending_prompt/text", json!("different queued intent"), true),
+        ("/humanQueueChoices", json!({"head": {"different": true}}), true),
+        ("/engramBeginRecovery", json!({"different": true}), false),
+        ("/engramBeginRecoveryAudit", json!({"different": true}), false),
+        ("/engramDispatchGeneration", json!({"different": true}), false),
+        ("/engramUncertainGrantId", json!({"different": true}), false),
+        ("/engramBeginCancelAudit", json!({"different": true}), false),
+        ("/engramBeginRecoveryFormat", json!({"different": true}), false),
+        ("/engramBeginOperationId", json!({"different": true}), false),
+        ("/engramBeginCancelCapture", json!({"different": true}), false),
     ] {
-        let waiter = fixture.enqueue(PersistFenceTarget::EngramRecovery {
+        let waiter = fixture.enqueue(PersistFenceTarget::OrdinarySessionRow {
             session_id: id.clone(),
-            content: engram_recovery_image_from_row(&row, messages.clone()),
+            content: ordinary_row_image(&row),
         });
         fixture.receive(false);
         let mut changed = row.clone();
-        *changed.pointer_mut(pointer).unwrap() = json!({"different":true});
+        match changed.pointer_mut(pointer) {
+            Some(slot) => *slot = value,
+            None => {
+                let key = pointer.trim_start_matches('/');
+                changed.as_object_mut().unwrap().insert(key.to_owned(), value);
+            }
+        }
         fixture
             .cache
             .connection
@@ -291,8 +314,16 @@ fn engram_recovery_fence_requires_every_image_component_on_the_same_writer_conne
             )
             .unwrap();
         fixture.write(&empty).unwrap();
-        assert_eq!(poll(&waiter), None, "partial image must not ACK: {pointer}");
-        assert!(fixture.batch.has_pending());
+        if ordinary {
+            assert_eq!(poll(&waiter), None, "partial image must not ACK: {pointer}");
+            assert!(fixture.batch.has_pending());
+        } else {
+            assert_eq!(
+                poll(&waiter),
+                Some(Ok(())),
+                "historical control data does not take part in the proof: {pointer}"
+            );
+        }
         fixture
             .cache
             .connection
@@ -310,81 +341,31 @@ fn engram_recovery_fence_requires_every_image_component_on_the_same_writer_conne
             "exact image must ACK: {pointer}"
         );
     }
-    let connection = fixture.cache.connection.as_ref().unwrap();
-    let target = PersistFenceTarget::EngramRecovery {
-        session_id: id.clone(),
-        content: engram_recovery_image_from_row(&row, messages.clone()),
-    };
-    connection
-        .execute(
-            "UPDATE messages SET value_json = ?1 WHERE session_id = ?2 AND message_id = 'cancel'",
-            rusqlite::params![json!({"different":true}).to_string(), &id],
-        )
-        .unwrap();
-    assert!(
-        !target.is_already_durable(connection).unwrap(),
-        "message content mismatch cannot ACK"
-    );
-    connection
-        .execute(
-            "UPDATE messages SET value_json = ?1 WHERE session_id = ?2 AND message_id = 'cancel'",
-            rusqlite::params![messages[0].to_string(), &id],
-        )
-        .unwrap();
-    assert!(target.is_already_durable(connection).unwrap());
-    // Content order is part of the coherent image too.
-    connection
-        .execute(
-            "UPDATE messages SET position = 130 WHERE session_id = ?1 AND message_id = 'cancel'",
-            [&id],
-        )
-        .unwrap();
-    connection.execute("UPDATE messages SET position = 0 WHERE session_id = ?1 AND message_id = 'after-cancel-129'", [&id]).unwrap();
-    connection
-        .execute(
-            "UPDATE messages SET position = 129 WHERE session_id = ?1 AND message_id = 'cancel'",
-            [&id],
-        )
-        .unwrap();
-    assert!(
-        !target.is_already_durable(connection).unwrap(),
-        "reordered transcript cannot ACK"
-    );
-    connection.execute("UPDATE messages SET position = 130 WHERE session_id = ?1 AND message_id = 'after-cancel-129'", [&id]).unwrap();
-    connection
-        .execute(
-            "UPDATE messages SET position = 0 WHERE session_id = ?1 AND message_id = 'cancel'",
-            [&id],
-        )
-        .unwrap();
-    connection.execute("UPDATE messages SET position = 129 WHERE session_id = ?1 AND message_id = 'after-cancel-129'", [&id]).unwrap();
-    assert!(target.is_already_durable(connection).unwrap());
 }
 
 #[test]
-fn engram_recovery_fence_corrupt_transcript_reports_readback_failure() {
-    let (mut fixture, id, row, messages, empty) = recovery_row_fixture();
+fn own_row_fence_is_neither_blocked_nor_faked_by_a_corrupt_transcript() {
+    let (mut fixture, id, row, _messages, empty) = historical_row_fixture();
     fixture.cache.connection.as_ref().unwrap().execute(
         "UPDATE messages SET value_json = '{invalid-json' WHERE session_id = ?1 AND message_id = 'cancel'", [&id]
     ).unwrap();
-    let waiter = fixture.enqueue(PersistFenceTarget::EngramRecovery {
+    let waiter = fixture.enqueue(PersistFenceTarget::OrdinarySessionRow {
         session_id: id,
-        content: engram_recovery_image_from_row(&row, messages),
+        content: ordinary_row_image(&row),
     });
     fixture.receive(false);
     fixture.write(&empty).unwrap();
-    assert!(matches!(
-        poll(&waiter),
-        Some(Err(PersistFenceError::WriteFailed(_)))
-    ));
+    // A corrupt transcript row neither blocks nor fakes the row's own proof;
+    // a corrupt session row is a read-back failure (below).
+    assert_eq!(poll(&waiter), Some(Ok(())));
 }
 
 #[test]
-fn engram_recovery_fence_without_durable_proof_remains_unknown_until_budget_expiry() {
-    let (mut fixture, id, row, messages, empty) = recovery_row_fixture();
-    let waiter = fixture.enqueue(PersistFenceTarget::EngramRecovery {
+fn own_row_fence_without_durable_proof_remains_unknown_until_budget_expiry() {
+    let (mut fixture, id, row, _messages, empty) = historical_row_fixture();
+    let waiter = fixture.enqueue(PersistFenceTarget::OrdinarySessionRow {
         session_id: id.clone(),
-        content: engram_recovery_image_from_row(&row, messages),
+        content: ordinary_row_image(&row),
     });
     fixture.receive(false);
     fixture.batch.finish_write(&empty, &Ok(vec![]), None);
@@ -412,11 +393,11 @@ fn engram_recovery_fence_without_durable_proof_remains_unknown_until_budget_expi
 }
 
 #[test]
-fn engram_recovery_fence_reports_readback_corruption_and_actual_sql_failure() {
-    let (mut fixture, id, row, messages, empty) = recovery_row_fixture();
-    let target = PersistFenceTarget::EngramRecovery {
+fn own_row_fence_reports_readback_corruption_and_actual_sql_failure() {
+    let (mut fixture, id, row, _messages, empty) = historical_row_fixture();
+    let target = PersistFenceTarget::OrdinarySessionRow {
         session_id: id.clone(),
-        content: engram_recovery_image_from_row(&row, messages),
+        content: ordinary_row_image(&row),
     };
     let waiter = fixture.enqueue(target.clone());
     fixture.receive(false);
@@ -469,10 +450,14 @@ fn engram_recovery_fence_reports_readback_corruption_and_actual_sql_failure() {
     );
 }
 
+// The source-observation gate, its admission image and the finalization
+// mirror were removed with turn gating. What remains is the coupled proof of
+// a retained sighting history (metadata) and the session's own observation
+// content (its row), both committed on the same writer connection.
 #[test]
-fn source_observation_fence_requires_the_exact_outbox_and_admission_after_restart() {
+fn source_observation_fence_requires_the_exact_history_and_observation_after_restart() {
     let mut fixture = FenceFixture::new();
-    let (owner, session_id, admission) = {
+    let (owner, session_id, session_content) = {
         let mut inner = fixture.inner.lock().unwrap();
         let created = inner.create_session(
             Agent::Codex,
@@ -484,135 +469,66 @@ fn source_observation_fence_requires_the_exact_outbox_and_admission_after_restar
         let session_id = created.session.id.clone();
         let index = inner.find_session_index(&session_id).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.engram.dispatch_generation = 42;
-        record.engram.routing_token = Some("original-routing-token".to_owned());
-        record.engram.active_grant_id = Some("begun-grant".to_owned());
-        let basis = EngramExecutionSourceBasis {
-            workspace_id: fixture.root.path().to_string_lossy().into_owned(),
-            source_revision: "content-v1:measured".to_owned(),
-            source_root_generation: Some(1),
-            source_root_state: Some(EngramSourceRootState::Named),
-        };
-        let sighting = EngramSourceSighting {
-            basis: basis.clone(),
-            observed_at: stamp_now(),
-        };
-        let owner = EngramSourceSightingOwner {
-            scope: EngramSourceSightingScope {
-                store: EngramAuthorityStoreKey {
-                    project_id: "example/project".to_owned(),
-                    database_path: fixture.root.path().join("engram.db"),
-                },
-                project_id: "local-project".to_owned(),
-                root_execution_id: "root-execution".to_owned(),
-                work_id: "work".to_owned(),
-                run_id: "run".to_owned(),
-                claim_id: "claim".to_owned(),
-                workspace_id: basis.workspace_id.clone(),
-                source_root_generation: Some(1),
-                source_root_state: Some(EngramSourceRootState::Named),
+        record.active_turn_generation = 1;
+        record.engram.unadmitted_active_turn = Some(EngramRuntimeObservedTurn::started(
+            "held-head".to_owned(),
+            record.active_turn_generation,
+        ));
+        let session_content =
+            engram_observation_persisted_content(&PersistedSessionRecord::from_record(record));
+        // A sighting history an earlier build saved: raw data, kept exactly.
+        let owner: EngramSourceSightingOwner = serde_json::from_value(json!({
+            "scope": {
+                "workspace_id": fixture.root.path().to_string_lossy(),
+                "work_id": "work",
+                "run_id": "run",
+                "claim_id": "claim",
+                "source_root_generation": 1,
+                "source_root_state": "named",
             },
-            version: 1,
-            latest: Some(sighting.clone()),
-            pending_close: None,
-            observations: vec![EngramSourceObservationIntent {
-                id: "original-observation".to_owned(),
-                session_id: session_id.clone(),
-                prompt_id: "held-head".to_owned(),
-                dispatch_generation: 42,
-                active_turn_generation: 1,
-                grant_id: "begun-grant".to_owned(),
-                binding: EngramControlWorkBinding {
-                    root_execution_id: "root-execution".to_owned(),
-                    work_id: "work".to_owned(),
-                    run_id: "run".to_owned(),
-                    work_revision: 1,
-                    claim_id: "claim".to_owned(),
-                    claim_fence: 1,
-                },
-                connection: EngramConnectionConfig {
-                    binary_path: fixture.root.path().join("engram.exe"),
-                    project_file: fixture.root.path().join(".engram-project"),
-                    home: fixture.root.path().join("engram-home"),
-                    project_root: fixture.root.path().to_owned(),
-                    actor_id: "observer".to_owned(),
-                    actor_context: None,
-                    session_id: session_id.clone(),
-                },
-                baseline: None,
-                sighting,
-                follow_up: None,
-                root_basis: json!({"state": {"state": "none"}}),
-                routing_token: "original-routing-token".to_owned(),
-                observing_session: Some("producer-session".to_owned()),
-                call_timeout_ms: ENGRAM_DEFAULT_CALL_TIMEOUT_MS,
-                phase: EngramSourceObservationPhase::Prepared {
-                    request: json!({"operation": "execution_observe", "idempotency_key": "original-key"}),
-                },
-                continuation_released: false,
-                finalization_complete: false,
-                delivery_retired: false,
-                grant_settlement: None,
-                grant_settlement_request: None,
+            "version": 1,
+            "latest": { "basis": { "source_revision": "content-v1:measured" } },
+            "pending_close": null,
+            "observations": [{
+                "id": "original-observation",
+                "session_id": session_id,
+                "prompt_id": "held-head",
+                "phase": { "phase": "prepared", "request": {
+                    "operation": "execution_observe", "idempotency_key": "original-key",
+                } },
             }],
-        };
-        let gate = EngramSourceObservationGate {
-            scope: owner.scope.clone(),
-            observation_id: "original-observation".to_owned(),
-            owner_version: 1,
-            prompt_id: "held-head".to_owned(),
-            dispatch_generation: 42,
-            active_turn_generation: 1,
-            grant_id: "begun-grant".to_owned(),
-            attempts: 0,
-            policy_refreshed: false,
-            retry_at: stamp_now(),
-            reason: "awaiting actual receipt".to_owned(),
-            retired: false,
-        };
-        let record = &mut inner.sessions[index];
-        record.engram.source_observation_gate = Some(gate);
-        let admission = engram_admission_live_content(record);
+        }))
+        .unwrap();
         inner.engram_source_sightings.push(owner.clone());
-        (owner, session_id, admission)
+        (owner, session_id, session_content)
     };
     let target = PersistFenceTarget::EngramSourceObservation {
         owner: Box::new(owner.clone()),
         session_id: session_id.clone(),
-        admission: admission.clone(),
+        session_content: session_content.clone(),
     };
     let matching = fixture.enqueue(target.clone());
-    let mut later_owner = owner.clone();
-    later_owner.version += 1;
+    let mut later_owner = serde_json::to_value(&owner).unwrap();
+    later_owner["version"] = json!(2);
+    let later_owner: EngramSourceSightingOwner = serde_json::from_value(later_owner).unwrap();
     let different_owner = fixture.enqueue(PersistFenceTarget::EngramSourceObservation {
-        owner: Box::new(later_owner),
+        owner: Box::new(later_owner.clone()),
         session_id: session_id.clone(),
-        admission: admission.clone(),
+        session_content: session_content.clone(),
     });
-    let mut later_admission = admission.clone();
-    later_admission["generation"] = json!(43);
-    let different_admission = fixture.enqueue(PersistFenceTarget::EngramSourceObservation {
+    let mut later_content = session_content.clone();
+    later_content["activeTurn"]["generation"] = json!(2);
+    let different_content = fixture.enqueue(PersistFenceTarget::EngramSourceObservation {
         owner: Box::new(owner.clone()),
         session_id: session_id.clone(),
-        admission: later_admission,
+        session_content: later_content,
     });
-    let finalization = {
-        let inner = fixture.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-        source_observation_finalization_content(&PersistedSessionRecord::from_record(record))
-    };
-    let finalized = fixture.enqueue(PersistFenceTarget::EngramSourceFinalization {
-        owner: Box::new(owner.clone()),
-        session_id: session_id.clone(),
-        content: finalization.clone(),
-    });
-    let mut wrong_mirror = finalization;
-    wrong_mirror["uncertainGrant"] = json!("another-recovery-grant");
-    let wrong_finalization = fixture.enqueue(PersistFenceTarget::EngramSourceFinalization {
-        owner: Box::new(owner.clone()),
-        session_id,
-        content: wrong_mirror,
-    });
+    let history = fixture.enqueue(PersistFenceTarget::EngramSourceSightingHistory(Box::new(
+        owner.clone(),
+    )));
+    let wrong_history = fixture.enqueue(PersistFenceTarget::EngramSourceSightingHistory(
+        Box::new(later_owner),
+    ));
     fixture.receive(false);
     assert!(!fixture.batch.drain(&fixture.rx, false));
     assert_eq!(
@@ -629,11 +545,11 @@ fn source_observation_fence_requires_the_exact_outbox_and_admission_after_restar
     );
     fixture.write(&delta).unwrap();
     assert_eq!(poll(&matching), Some(Ok(())));
-    assert_eq!(poll(&finalized), Some(Ok(())));
+    assert_eq!(poll(&history), Some(Ok(())));
     assert_eq!(
-        poll(&wrong_finalization),
+        poll(&wrong_history),
         None,
-        "the uncertain-grant cleanup is an independent part of the coupled proof"
+        "only the exact committed history proves itself"
     );
     assert_eq!(
         poll(&different_owner),
@@ -641,36 +557,24 @@ fn source_observation_fence_requires_the_exact_outbox_and_admission_after_restar
         "an older committed owner cannot ACK a successor"
     );
     assert_eq!(
-        poll(&different_admission),
+        poll(&different_content),
         None,
-        "matching outbox alone cannot ACK another admission"
+        "matching history alone cannot ACK another session observation"
     );
     let restored = load_state(&fixture.root.path().join("termal.sqlite"))
         .unwrap()
         .unwrap();
     assert_eq!(restored.engram_source_sightings, vec![owner]);
     let restored_session = &restored.sessions[0];
-    assert_eq!(
-        restored_session
-            .engram
-            .source_observation_gate
-            .as_ref()
+    assert!(
+        restored_session.engram.unadmitted_active_turn.is_none(),
+        "persisted observation content is not a live trace after restart"
+    );
+    assert!(
+        serde_json::to_string(&restored_session.session.messages)
             .unwrap()
-            .observation_id,
-        "original-observation"
-    );
-    assert!(
-        restored_session
-            .engram
-            .source_observation_continuation
-            .is_none()
-    );
-    assert!(
-        !restored_session
-            .engram
-            .source_opening_disposition
-            .allows_delivery(),
-        "persisted receipt content is not permission to replay a provider after restart"
+            .contains("was not reported to Engram because the host restarted"),
+        "the restored trace is archived in the recovery notice, never resumed"
     );
     let persisted = PersistedState::from_inner(&restored);
     let mut old_metadata = serde_json::to_value(persisted.metadata_only()).unwrap();
@@ -686,8 +590,10 @@ fn source_observation_fence_requires_the_exact_outbox_and_admission_after_restar
     fixture.batch.fail(PersistFenceError::Shutdown);
 }
 
+// The admission fence was removed with turn gating; the ordinary own-row
+// fence keeps the same exact-content proof for the session's queue.
 #[test]
-fn engram_admission_fence_requires_exact_committed_session_content() {
+fn own_row_fence_requires_exact_committed_session_content() {
     let mut fixture = FenceFixture::new();
     let (session_id, content) = {
         let mut inner = fixture.inner.lock().expect("state mutex poisoned");
@@ -700,14 +606,26 @@ fn engram_admission_fence_requires_exact_committed_session_content() {
         );
         let index = inner.find_session_index(&created.session.id).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.engram.dispatch_generation = 42;
-        record.engram.routing_token = Some("exact-routing-token".to_owned());
+        queue_prompt_on_record(
+            record,
+            PendingPrompt {
+                id: "exact-head".to_owned(),
+                timestamp: stamp_now(),
+                text: "exact queued intent".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source: None,
+                engram_interrupted: false,
+                is_engram_retained: false,
+            },
+            Vec::new(),
+        );
         (
             record.session.id.clone(),
-            engram_admission_persisted_content(&PersistedSessionRecord::from_record(record)),
+            ordinary_session_row_persisted_content(&PersistedSessionRecord::from_record(record)),
         )
     };
-    let target = PersistFenceTarget::EngramAdmission {
+    let target = PersistFenceTarget::OrdinarySessionRow {
         session_id: session_id.clone(),
         content: content.clone(),
     };
@@ -722,8 +640,8 @@ fn engram_admission_fence_requires_exact_committed_session_content() {
     fixture.write(&delta).unwrap();
     assert_eq!(poll(&waiter), Some(Ok(())));
     let mut changed = content;
-    changed["generation"] = json!(43);
-    let mismatch = fixture.enqueue(PersistFenceTarget::EngramAdmission {
+    changed["choices"] = json!({"exact-head": {"different": true}});
+    let mismatch = fixture.enqueue(PersistFenceTarget::OrdinarySessionRow {
         session_id,
         content: changed,
     });
@@ -732,7 +650,7 @@ fn engram_admission_fence_requires_exact_committed_session_content() {
     assert_eq!(
         poll(&mismatch),
         None,
-        "row existence or another generation cannot acknowledge admission"
+        "row existence or other queue content cannot acknowledge the row"
     );
     fixture.batch.fail(PersistFenceError::Shutdown);
 }
@@ -853,7 +771,7 @@ fn predecessor_change_keeps_the_same_fences_pending_until_retry_commits() {
         "the safety refusal must still reject the stale sparse write"
     );
     assert!(fixture.cache.connection.is_none());
-    assert!(fixture.cache.transcripts.is_empty());
+    assert!(fixture.cache.transcripts.values().all(|row| !row.transcript_valid && row.identities.is_empty()));
     let stored = rusqlite::Connection::open(&path).unwrap();
     for target in &targets {
         assert!(!target.is_already_durable(&stored).unwrap());

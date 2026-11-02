@@ -13,6 +13,70 @@
 
 use super::*;
 
+#[test]
+fn plain_unpaused_resume_is_idempotent_but_a_paused_human_head_keeps_its_stop_owner() {
+    let (state, receiver) = super::delegation_support::test_app_state_with_delegation_codex_runtime(
+        "plain-resume-order",
+    );
+    let session = test_session_id(&state, Agent::Codex);
+    let generation = {
+        let mut inner = state.inner.lock().unwrap();
+        assert!(engram_project_for_session_locked(&inner, &session).is_none());
+        let record = inner.session_mut(&session).unwrap();
+        record.session.status = SessionStatus::Active;
+        record.queued_prompts.clear();
+        record.set_auto_dispatch_blocked(false);
+        record.active_turn_generation
+    };
+    for _ in 0..2 {
+        state.resume_session_queue(&session).unwrap();
+        assert!(receiver.try_recv().is_err());
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert_eq!(record.session.status, SessionStatus::Active);
+        assert_eq!(record.active_turn_generation, generation);
+        assert!(!record.orchestrator_auto_dispatch_blocked);
+        assert!(record.queued_prompts.is_empty());
+    }
+    {
+        let mut inner = state.inner.lock().unwrap();
+        queue_prompt_on_record_with_source(
+            inner.session_mut(&session).unwrap(),
+            PendingPrompt {
+                id: "paused-human-after-plain-resume".into(),
+                timestamp: stamp_now(),
+                text: "keep this prompt behind Stop".into(),
+                expanded_text: None,
+                source: None,
+                attachments: vec![],
+                engram_interrupted: false,
+                is_engram_retained: false,
+            },
+            vec![],
+            QueuedPromptSource::Human,
+        );
+    }
+    let (_, stop) = state.begin_requested_stop_session(&session, &StopSessionOptions::default()).unwrap();
+    assert!(stop.is_some(), "the production Stop owner must be claimed");
+    let (queue, stop_generation) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.orchestrator_auto_dispatch_blocked && record.runtime_stop_in_progress);
+        (serde_json::to_value(&record.queued_prompts).unwrap(), record.runtime_stop_generation)
+    };
+    let error = state.resume_session_queue(&session)
+        .err().expect("the paused Human head must preserve its Stop owner");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(receiver.try_recv().is_err());
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert_eq!(record.session.status, SessionStatus::Stopping);
+    assert_eq!(record.active_turn_generation, generation);
+    assert_eq!(record.runtime_stop_generation, stop_generation);
+    assert!(record.orchestrator_auto_dispatch_blocked && record.runtime_stop_in_progress);
+    assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), queue);
+}
+
 // pins the claude session defaults applied by
 // `StateInner::create_session`: model `"default"`, approval mode
 // `Ask`, effort `Default`, and no codex-flavoured policy fields.

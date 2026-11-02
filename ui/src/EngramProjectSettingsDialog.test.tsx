@@ -36,7 +36,7 @@ const project: Project = {
   engramDeclared: true,
   engram: {
     enabled: true,
-    turnGatedControl: false,
+    executionObservability: false,
     binaryPath: "engram",
     home: "C:\\Users\\greg\\.engram",
     deadlineMs: 2000,
@@ -49,7 +49,6 @@ const successfulVerification: EngramProjectVerification = {
   home: "C:\\Users\\greg\\.engram",
   projectId: "engram-project-1",
   database: "C:\\Users\\greg\\.engram\\engram.db",
-  requiredAssurance: "turn_gated",
   ready: true,
   fullAudit: "not_run",
   hostPathStatus: "matched",
@@ -97,7 +96,8 @@ describe("EngramProjectSettingsDialog", () => {
     }
     render(<Harness />);
     await screen.findByText("Off — completion is self-asserted.");
-    fireEvent.click(screen.getByLabelText("Turn-gated control"));
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await screen.findByText("engram-project-1");
     fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
     fireEvent.click(screen.getByLabelText("Allow Independent session"));
     fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
@@ -107,7 +107,8 @@ describe("EngramProjectSettingsDialog", () => {
     expect(saveEvaluatorDefaults).toHaveBeenCalledWith("project-1", { evaluatorAgent: "Claude" });
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByLabelText("Turn-gated control")).toBeChecked();
+    expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save & enable" })).toBeEnabled();
     expect(screen.getByLabelText("Allow Independent session")).toBeChecked();
     expect(screen.queryByLabelText("Policy change reason")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Evaluator agent")).toHaveTextContent("Claude");
@@ -128,7 +129,7 @@ describe("EngramProjectSettingsDialog", () => {
       mockVerifyProjectEngramSettings.mock.calls[0][1];
     expect(verificationPayload).toEqual({
       enabled: true,
-      turnGatedControl: false,
+      executionObservability: false,
     });
     expect(verificationPayload).not.toHaveProperty("binaryPath");
     expect(verificationPayload).not.toHaveProperty("home");
@@ -143,29 +144,29 @@ describe("EngramProjectSettingsDialog", () => {
     const savePayload = mockUpdateProjectEngramSettings.mock.calls[0][1];
     expect(savePayload).toEqual({
       enabled: true,
-      turnGatedControl: false,
+      executionObservability: false,
     });
     expect(callbacks.onSaved).toHaveBeenCalledTimes(1);
     expect(callbacks.onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps premium turn-gated control as an explicit opt-in", async () => {
-    await renderDialog();
-    fireEvent.click(screen.getByLabelText("Turn-gated control"));
+  it("does not expose or resend persisted legacy turn gating", async () => {
+    await renderDialog({ engram: { ...project.engram!, ...JSON.parse('{"turnGatedControl":true}') } });
+    expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     await screen.findByText("engram-project-1");
 
     expect(mockVerifyProjectEngramSettings).toHaveBeenCalledWith(
       "project-1",
-      expect.objectContaining({ enabled: true, turnGatedControl: true }),
+      { enabled: true, executionObservability: false },
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Save & enable" }));
     await waitFor(() =>
       expect(mockUpdateProjectEngramSettings).toHaveBeenCalledWith(
         "project-1",
-        expect.objectContaining({ enabled: true, turnGatedControl: true }),
+        { enabled: true, executionObservability: false },
       ),
     );
   });
@@ -209,7 +210,7 @@ describe("EngramProjectSettingsDialog", () => {
     );
   });
 
-  it("resets the premium draft from the persisted disable response", async () => {
+  it("disables a project that retains legacy turn-gating settings", async () => {
     mockUpdateProjectEngramSettings.mockResolvedValueOnce({
       projects: [
         {
@@ -217,7 +218,7 @@ describe("EngramProjectSettingsDialog", () => {
           engram: {
             ...project.engram!,
             enabled: false,
-            turnGatedControl: false,
+            executionObservability: false,
           },
         },
       ],
@@ -225,18 +226,19 @@ describe("EngramProjectSettingsDialog", () => {
     await renderDialog({
       engram: {
         ...project.engram!,
-        turnGatedControl: true,
+        executionObservability: true,
       },
     });
-    const premiumToggle = screen.getByLabelText("Turn-gated control");
-    expect(premiumToggle).toBeChecked();
+    expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Disable Engram" }));
 
-    await waitFor(() => expect(premiumToggle).not.toBeChecked());
+    await waitFor(() => expect(mockUpdateProjectEngramSettings).toHaveBeenCalledWith(
+      "project-1", { enabled: false },
+    ));
   });
 
-  it("resynchronizes the premium draft when persisted project state changes", async () => {
+  it("resynchronizes observability from persisted project state", async () => {
     const props = {
       onClose: vi.fn(),
       onSaved: vi.fn(),
@@ -246,20 +248,45 @@ describe("EngramProjectSettingsDialog", () => {
       <EngramProjectSettingsDialog project={project} {...props} />,
     );
     await screen.findByText("Policy unknown — Policy unavailable");
-    const premiumToggle = screen.getByLabelText("Turn-gated control");
-    expect(premiumToggle).not.toBeChecked();
+    expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
 
     view.rerender(
       <EngramProjectSettingsDialog
         project={{
           ...project,
-          engram: { ...project.engram!, turnGatedControl: true },
+          engram: { ...project.engram!, executionObservability: true },
         }}
         {...props}
       />,
     );
 
-    expect(premiumToggle).toBeChecked();
+    expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
     await screen.findByText("Policy unknown — Policy unavailable");
   });
+});
+
+
+it.each([false, true])("defaults observability ON independently of an imported old flag (%s)", async oldFlag => {
+  await renderDialog({ engram: { enabled: true, ...JSON.parse(JSON.stringify({ turnGatedControl: oldFlag })) } });
+  expect(screen.getByLabelText("Execution Observability")).toBeChecked();
+  expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+  await screen.findByText("engram-project-1");
+  expect(mockVerifyProjectEngramSettings).toHaveBeenCalledWith("project-1", {
+    enabled: true, executionObservability: true,
+  });
+  expect(screen.queryByText("Required assurance")).not.toBeInTheDocument();
+});
+
+it.each([false, true])("saves the explicit observability switch from %s without losing connection verification", async initial => {
+  await renderDialog({ engram: { ...project.engram!, executionObservability: initial } });
+  fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+  await screen.findByText("engram-project-1");
+  fireEvent.click(screen.getByLabelText("Execution Observability"));
+  expect(screen.getByRole("button", { name: "Save & enable" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Save & enable" }));
+  await waitFor(() => expect(mockUpdateProjectEngramSettings).toHaveBeenCalledWith("project-1", {
+    enabled: true, executionObservability: !initial,
+  }));
+  expect(mockVerifyProjectEngramSettings).toHaveBeenCalledTimes(1);
 });

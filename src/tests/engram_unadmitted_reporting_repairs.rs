@@ -12,8 +12,17 @@ struct InstallBarrier {
 
 impl InstallBarrier {
     fn new(state: &AppState, phase: &'static str) -> Self {
+        Self::install(state, phase, None)
+    }
+
+    fn report_candidate(state: &AppState, session: &str) -> Self {
+        Self::install(state, "capture", Some(session.to_owned()))
+    }
+
+    fn install(state: &AppState, phase: &'static str, report_owner: Option<String>) -> Self {
         let release = Arc::new((Mutex::new(false), Condvar::new()));
         let gate = release.clone();
+        let inner = Arc::downgrade(&state.inner);
         let once = std::sync::atomic::AtomicBool::new(false);
         let (entered, entered_rx) = mpsc::channel();
         let (stopping, stopping_rx) = mpsc::channel();
@@ -29,7 +38,16 @@ impl InstallBarrier {
             if event == "idle" {
                 let _ = idle.send(());
             }
-            if event == phase && !once.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            let matches_report = report_owner.as_ref().is_none_or(|session| {
+                event == "capture" && inner.upgrade().is_some_and(|inner| {
+                    let inner = inner.lock().unwrap();
+                    inner.find_session_index(session).is_some_and(|index| {
+                        inner.sessions[index].engram.unadmitted_closing_jobs.iter()
+                            .any(|job| job.policy.is_some())
+                    })
+                })
+            });
+            if event == phase && matches_report && !once.swap(true, std::sync::atomic::Ordering::AcqRel) {
                 entered.send(()).unwrap();
                 let released = gate.0.lock().unwrap();
                 let (released, timeout) = gate
@@ -72,13 +90,74 @@ fn stored_session(state: &AppState, session: &str) -> String {
     .unwrap()
 }
 
+#[test]
+fn a_retained_hazard_before_report_install_is_sticky_after_its_work_ends_and_reload() {
+    let mut fixture = ReportingTurn::new("retained-before-report-install", true, ReplyMode::Recorded, false);
+    fixture.check("completed-before-hazard", false);
+    // Join the existing writer before the interleaving. Later production
+    // persistence calls use their synchronous fallback, so reload below
+    // cannot race a queued write or add a test-side write that masks it.
+    fixture.turn.state.shutdown_persist_blocking();
+    fixture.turn.change_readme("ordinary source changed before the closing capture\n");
+    let project = fixture.turn.record(|record| record.session.project_id.clone().unwrap());
+    let other = create_test_project_session(&fixture.turn.state, Agent::Claude, &project, &fixture.turn.root);
+    let first = InstallBarrier::report_candidate(&fixture.turn.state, &fixture.turn.session_id);
+    fixture.finish();
+    first.entered.recv_timeout(DEADLOCK_GUARD).unwrap();
+    let original = fixture.turn.record(|record| record.engram.unadmitted_closing_jobs[0].clone());
+    assert!(original.policy.is_some());
+    assert!(!original.trace.source_attribution_uncertain);
+    let second = InstallBarrier::report_candidate(&fixture.turn.state, &fixture.turn.session_id);
+    {
+        let mut inner = fixture.turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&other).unwrap();
+        inner.sessions[index].claude_outstanding.register(ClaudeOutstandingEntry {
+            token: RuntimeToken::Claude("retained-install-gone".to_owned()),
+            key: "orphaned".to_owned(),
+            origin: ClaudeWorkOrigin::Unattributed,
+            background: false,
+            nested: false,
+            self_gate: false,
+            locations: vec![Some(engram_worktree_root(&fixture.turn.root))],
+            registered_at: EngramHost::interference_tick(),
+        });
+    }
+    first.release();
+    second.entered.recv_timeout(DEADLOCK_GUARD).unwrap();
+    let changed = fixture.turn.record(|record| record.engram.unadmitted_closing_jobs[0].clone());
+    assert_eq!(changed.trace.host_turn_ref, original.trace.host_turn_ref);
+    assert!(changed.trace.source_attribution_uncertain,
+        "the stale off-lock sourceful candidate must be discarded");
+    let loaded = load_state(fixture.turn.state.persistence_path.as_path()).unwrap().unwrap();
+    let index = loaded.find_session_index(&fixture.turn.session_id).unwrap();
+    assert!(loaded.sessions[index].engram.unadmitted_closing_jobs.iter().any(|job|
+        job.trace.host_turn_ref == original.trace.host_turn_ref && job.trace.source_attribution_uncertain),
+        "the sticky restriction is durable before a replacement candidate installs");
+    {
+        let mut inner = fixture.turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&other).unwrap();
+        inner.sessions[index].claude_outstanding = ClaudeOutstandingWork::default();
+    }
+    second.release();
+    let sent = fixture.observation();
+    let facts = occurrence(&sent);
+    assert_eq!(facts["host_turn_ref"], original.trace.host_turn_ref);
+    assert!(facts["source_change"].is_null(), "ending work cannot restore discarded source credit");
+    let checks = facts["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert_eq!(sent.receipt["observed_checks"][0]["credit"], "uncredited");
+    assert!(sent.durable_before_send);
+    fixture.assert_no_granted_reporting();
+}
+
 fn observed_bash(fixture: &mut ReportingTurn, key: &str, command: &str, output: &str, failed: bool) {
     observed_bash_with_effect(fixture, key, command, output, failed, |_| {});
 }
 
 fn observed_bash_with_effect(
     fixture: &mut ReportingTurn, key: &str, command: &str, output: &str, failed: bool,
-    effect: impl FnOnce(&CheckedTurn),
+    effect: impl FnOnce(&EOCheckedTurn),
 ) {
     fixture.reader.feed(json!({"type": "assistant", "message": {"content": [{
         "type": "tool_use", "id": key, "name": "Bash", "input": {"command": command}
@@ -136,28 +215,27 @@ fn unadmitted_review_denied_test_is_not_an_observed_run_but_unknown_end_is() {
     fixture.assert_no_granted_reporting();
 }
 
-// An abandoned command leaves the adopted turn's trace, which is durable
-// session state, so the production delta persist must select the session:
-// tests otherwise fall back to a full synchronous save that hides a missing stamp.
+// A full synchronous save can hide a missing session stamp. Keep a live
+// persist receiver and apply the production-selected delta to real SQLite.
 #[test]
 fn unadmitted_review_abandoned_command_drop_reaches_the_delta_persist() {
     let mut fixture = ReportingTurn::new("unadmitted-abandoned-delta", true, ReplyMode::Recorded, false);
     fixture.reader.feed(json!({"type": "assistant", "message": {"content": [{
         "type": "tool_use", "id": "abandoned-test", "name": "Bash", "input": {"command": SIZE_TEST}
     }]}}));
-    let traced = |turn: &CheckedTurn| turn.record(|record| {
+    let traced = |turn: &EOCheckedTurn| turn.record(|record| {
         record.engram.unadmitted_active_turn.as_ref().unwrap().commands.iter()
             .any(|entry| entry.tool_key == "abandoned-test")
     });
     assert!(traced(&fixture.turn), "the started command is in the adopted trace");
-    let provenance = fixture.turn.record(|record| EngramObservationProvenance::Claude(
-        ClaudeObservationProvenance {
+    let provenance = fixture.turn.record(|record| {
+        assert_eq!(record.adopted_claude_turn_generation, Some(record.active_turn_generation));
+        EngramObservationProvenance::Claude(ClaudeObservationProvenance {
             token: record.runtime.runtime_token().unwrap(),
             origin: ClaudeWorkOrigin::Adopted { turn_generation: record.active_turn_generation },
-        },
-    ));
-    // A live receiver keeps this handle's persistence on the production path,
-    // which only wakes the delta worker.
+        })
+    });
+    fixture.turn.state.shutdown_persist_blocking();
     let (tx, _rx) = mpsc::channel();
     fixture.turn.state.persist_tx = tx;
     let watermark = fixture.turn.state.inner.lock().unwrap().last_mutation_stamp;
@@ -167,16 +245,12 @@ fn unadmitted_review_abandoned_command_drop_reaches_the_delta_persist() {
 
     assert!(!traced(&fixture.turn), "the abandoned command left the trace");
     let delta = collect_persist_delta_from_shared_state(&fixture.turn.state.inner, watermark);
-    let persisted = delta
-        .changed_sessions
-        .iter()
+    let persisted = delta.changed_sessions.iter()
         .find(|record| record.session.id == fixture.turn.session_id)
         .expect("the trace change must be selected by the delta persist");
-    assert!(
-        !persisted.engram_unadmitted_active_turn.as_ref().unwrap().commands.iter()
-            .any(|entry| entry.tool_key == "abandoned-test"),
-        "the persisted trace no longer lists the abandoned command"
-    );
+    assert!(!persisted.engram_unadmitted_active_turn.as_ref().unwrap().commands.iter()
+        .any(|entry| entry.tool_key == "abandoned-test"),
+        "the persisted trace no longer lists the abandoned command");
     snapshot.assert_changes_reach_the_delta(&fixture.turn.state);
 }
 
@@ -207,13 +281,15 @@ fn active_delete_case(scope: &str) {
         if scope == "claimed" {
             let error = deletion.err().expect("claimed active custody must retain the session");
             assert_eq!(error.status, axum::http::StatusCode::CONFLICT);
-            assert!(error.message.contains("Stop"), "an active turn requires Stop, not tracking Resume: {}", error.message);
+            assert!(error.message.contains("Stop"), "an active turn requires Stop, not Resume: {}", error.message);
             assert!(!error.message.contains("Resume"));
             assert_eq!(fixture.turn.record(|record| record.engram.unadmitted_active_turn.clone()), Some(original.clone()));
             let durable: Value = serde_json::from_str(&stored_session(&fixture.turn.state, &fixture.turn.session_id)).unwrap();
             assert_eq!(durable["engramUnadmittedActiveTurn"], serde_json::to_value(&original).unwrap());
-            let resume = fixture.turn.state.resume_source_observation_delete(&fixture.turn.session_id).unwrap_err();
-            assert!(resume.message.contains("Stop"));
+            let retry = fixture.turn.state.kill_session(&fixture.turn.session_id)
+                .err().expect("a retried Delete keeps the claimed active custody");
+            assert!(retry.message.contains("Stop") && !retry.message.contains("Resume"), "{}", retry.message);
+            assert_eq!(fixture.turn.record(|record| record.engram.unadmitted_active_turn.clone()), Some(original.clone()));
             assert!(fixture.producer.requests().is_empty());
             fixture.finish();
             assert_eq!(occurrence(&fixture.observation())["host_turn_ref"], original.host_turn_ref);
@@ -227,14 +303,9 @@ fn active_delete_case(scope: &str) {
 }
 
 #[test]
-fn deletion_after_adopted_report_discharge_settles_only_the_leftover_grant() {
-    use super::super::super::claude_adopted_terminalization::{
-        assert_leftover_untouched, assert_settled_without_adopted_report, checkpoint_requests,
-        LEFTOVER,
-    };
-
-    let mut fixture = ReportingTurn::start_with_leftover(
-        "adopted-deletion", true, ReplyMode::Recorded, false, true, Some(LEFTOVER),
+fn deletion_after_adopted_report_discharge_never_replays_passive_grant_history() {
+    let mut fixture = ReportingTurn::start_with_history(
+        "adopted-deletion", true, ReplyMode::Recorded, false, true, Some("historical-open-grant"),
     );
     fixture.check("adopted-check", false);
     let (original, binding, generation) = fixture.turn.record(|record| (
@@ -242,7 +313,6 @@ fn deletion_after_adopted_report_discharge_settles_only_the_leftover_grant() {
         record.engram.work_binding.clone().unwrap(),
         record.active_turn_generation,
     ));
-    let before = checkpoint_requests(&fixture.turn).len();
     let error = fixture.turn.state.kill_session(&fixture.turn.session_id).err()
         .expect("active claimed capture must retain the session");
     assert_eq!(error.status, axum::http::StatusCode::CONFLICT);
@@ -253,21 +323,23 @@ fn deletion_after_adopted_report_discharge_settles_only_the_leftover_grant() {
         assert_eq!(record.active_turn_generation, generation);
         assert_eq!(record.engram.unadmitted_active_turn.as_ref(), Some(&original));
         assert_eq!(record.engram.work_binding.as_ref(), Some(&binding));
-        assert!(record.engram.source_observation_delete_requested);
+        assert!(record.engram.observation_delete_requested);
         assert!(record.orchestrator_auto_dispatch_blocked);
     });
     let durable: PersistedSessionRecord = serde_json::from_str(
         &stored_session(&fixture.turn.state, &fixture.turn.session_id),
     ).unwrap();
     assert_eq!(durable.engram_unadmitted_active_turn.as_ref(), Some(&original));
-    assert!(durable.engram_source_observation_delete_requested);
+    assert!(durable.engram_observation_delete_requested);
     assert!(durable.orchestrator_auto_dispatch_blocked);
-    assert_leftover_untouched(&fixture.turn, before, "active Delete retention");
+    fixture.turn.record(|record| assert_eq!(
+        record.engram.historical_control.get("engramOpenGrantId"), Some(&json!("historical-open-grant"))));
+    fixture.assert_no_granted_reporting();
     assert!(fixture.producer.requests().is_empty());
 
     let installed = InstallBarrier::new(&fixture.turn.state, "unused");
     fixture.finish();
-    assert_leftover_untouched(&fixture.turn, before, "matching adopted result");
+    fixture.assert_no_granted_reporting();
     let observed = fixture.observation();
     assert!(observed.durable_before_send);
     assert_eq!(occurrence(&observed)["kind"], "unadmitted_turn");
@@ -288,6 +360,11 @@ fn deletion_after_adopted_report_discharge_settles_only_the_leftover_grant() {
         });
         if let Some(settled) = settled { break settled; }
     };
+    // The turn's measured sighting is the report's own next envelope, sent
+    // once after the turn report.
+    let sighting = fixture.observation();
+    assert_eq!(occurrence(&sighting)["kind"], "source_sighting");
+    assert!(sighting.durable_before_send);
     assert!(runtime_observation_report_is_durable(
         &fixture.turn.state.persistence_path, &fixture.turn.session_id, &settled,
     ).unwrap());
@@ -299,22 +376,22 @@ fn deletion_after_adopted_report_discharge_settles_only_the_leftover_grant() {
     });
     // A recorded receipt alone is not the coupled local removal ACK.
     fixture.turn.state.confirm_source_observation_removal_durable(&fixture.turn.session_id).unwrap();
-    let needs_tracking_recovery = {
-        let inner = fixture.turn.state.inner.lock().unwrap();
-        source_observation_removal_blocker(&inner, &[fixture.turn.session_id.clone()]).is_some()
-    };
-    if needs_tracking_recovery {
-        assert!(fixture.turn.state.resume_source_observation_delete(&fixture.turn.session_id).unwrap());
-    }
-    assert_leftover_untouched(&fixture.turn, before, "observation discharge");
+    fixture.turn.record(|record| assert!(record.engram.observation_delete_requested,
+        "the retained Delete marker stays until the retried Delete removes the session"));
+    fixture.turn.record(|record| assert_eq!(
+        record.engram.historical_control.get("engramOpenGrantId"), Some(&json!("historical-open-grant"))));
     fixture.assert_no_granted_reporting();
     fixture.turn.record(|record| assert!(record.orchestrator_auto_dispatch_blocked));
-    assert!(matches!(fixture.turn._runtime_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(fixture.turn._runtime_rx.lock().unwrap().try_recv(), Err(mpsc::TryRecvError::Empty)));
 
     fixture.turn.state.kill_session(&fixture.turn.session_id).unwrap();
-    assert_settled_without_adopted_report(&fixture.turn, before, "session deletion");
+    fixture.assert_no_granted_reporting();
     assert!(fixture.turn.state.inner.lock().unwrap().find_session_index(&fixture.turn.session_id).is_none());
-    assert_eq!(fixture.producer.requests().len(), 1, "Delete neither resends nor omits the adopted report");
+    let kinds: Vec<Value> = fixture.producer.requests().iter()
+        .map(|request| request["occurrence"]["kind"].clone())
+        .collect();
+    assert_eq!(kinds, [json!("unadmitted_turn"), json!("source_sighting")],
+        "Delete neither resends nor omits the adopted report");
     fixture.turn.state.trigger_shutdown_signal();
     fixture.turn.state.shutdown_persist_blocking();
 }
@@ -335,12 +412,15 @@ fn unadmitted_review_delete_retains_closing_and_uncertain_delivery_custody() {
         let result = fixture.turn.state.kill_session(&fixture.turn.session_id);
         assert!(result.is_err(), "{phase}: Delete must retain unresolved observation custody");
         let retained = fixture.turn.record(PersistedSessionRecord::from_record);
-        assert!(retained.engram_source_observation_delete_requested);
+        assert!(retained.engram_observation_delete_requested);
         assert!(retained.orchestrator_auto_dispatch_blocked);
         if let Some(request) = request {
-            assert_eq!(retained.engram_unadmitted_reports[0].envelopes[0].request, request);
+            // The setup turn's own settled reports come first; the adopted
+            // turn's report follows them.
+            let setup = fixture.setup_reports.len();
+            assert_eq!(retained.engram_unadmitted_reports[setup].envelopes[0].request, request);
             let durable: Value = serde_json::from_str(&stored_session(&fixture.turn.state, &fixture.turn.session_id)).unwrap();
-            assert_eq!(durable["engramUnadmittedReports"][0]["envelopes"][0]["request"], request);
+            assert_eq!(durable["engramUnadmittedReports"][setup]["envelopes"][0]["request"], request);
         } else {
             assert_eq!(retained.engram_unadmitted_closing_jobs.len(), 1);
         }
@@ -360,7 +440,8 @@ fn unadmitted_review_delete_retains_closing_and_uncertain_delivery_custody() {
             });
             if recorded { break; }
         }
-        assert!(fixture.turn.state.resume_source_observation_delete(&fixture.turn.session_id).unwrap());
+        assert!(fixture.turn.record(|record| record.engram.observation_delete_requested),
+            "{phase}: the retained Delete marker survives until the retried Delete");
         fixture.turn.state.kill_session(&fixture.turn.session_id).unwrap();
         assert!(fixture.turn.state.inner.lock().unwrap().find_session_index(&fixture.turn.session_id).is_none());
         fixture.turn.state.trigger_shutdown_signal();
@@ -369,7 +450,7 @@ fn unadmitted_review_delete_retains_closing_and_uncertain_delivery_custody() {
 }
 
 #[test]
-fn unadmitted_review_terminal_custody_delete_resume_and_restart_stay_truthful() {
+fn unadmitted_review_terminal_custody_delete_retry_and_restart_stay_truthful() {
     for code in ["runtime_observation_retry_exhausted", "runtime_observation_invalid_retained_image"] {
         let mut fixture = ReportingTurn::new(code, true, ReplyMode::Recorded, false);
         let idle = InstallBarrier::new(&fixture.turn.state, "unused");
@@ -380,7 +461,10 @@ fn unadmitted_review_terminal_custody_delete_resume_and_restart_stay_truthful() 
         idle.idle.recv_timeout(DEADLOCK_GUARD).unwrap();
         // Begin at the persisted terminal-outbox boundary. This is not a
         // claim that this fixture ran all eight delivery attempts.
-        let expected = fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone());
+        // The setup turn's own settled reports come first; the adopted turn's
+        // report follows them.
+        let setup = fixture.setup_reports.len();
+        let expected = fixture.turn.record(|record| record.engram.unadmitted_reports[setup].clone());
         let mut failed = expected.next_version();
         failed.envelopes[1].delivery = EngramRuntimeObservationDelivery::LocalFailure {
             code: code.to_owned(), message: "private retained transport detail".to_owned(),
@@ -394,8 +478,8 @@ fn unadmitted_review_terminal_custody_delete_resume_and_restart_stay_truthful() 
                 *fixture.turn.state.inner.lock().unwrap() = load_state(&fixture.turn.state.persistence_path).unwrap().unwrap();
             }
             let error = fixture.turn.state.kill_session(&fixture.turn.session_id).err().expect("terminal custody must keep the session");
-            let resume = fixture.turn.state.resume_source_observation_delete(&fixture.turn.session_id).unwrap_err();
-            for diagnostic in [&error.message, &resume.message] {
+            let retry = fixture.turn.state.kill_session(&fixture.turn.session_id).err().expect("a retried Delete keeps terminal custody");
+            for diagnostic in [&error.message, &retry.message] {
                 assert!(diagnostic.contains(code), "{diagnostic}");
                 assert!(diagnostic.contains(&failed.host_turn_ref), "{diagnostic}");
                 assert!(diagnostic.contains("Resume cannot resolve this report"), "{diagnostic}");
@@ -410,10 +494,10 @@ fn unadmitted_review_terminal_custody_delete_resume_and_restart_stay_truthful() 
             }
             assert!(!fixture.turn.record(|record| record.engram.unadmitted_worker_running),
                 "a terminal report must not schedule a new reporting worker");
-            assert_eq!(fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone()), failed);
+            assert_eq!(fixture.turn.record(|record| record.engram.unadmitted_reports[setup].clone()), failed);
             assert!(runtime_observation_report_is_durable(&fixture.turn.state.persistence_path,
                 &fixture.turn.session_id, &failed).unwrap());
-            assert_eq!(fixture.producer.requests(), requests, "Resume/restart cannot renew a terminal send");
+            assert_eq!(fixture.producer.requests(), requests, "a retried Delete or restart cannot renew a terminal send");
         }
         fixture.turn.state.trigger_shutdown_signal();
         fixture.turn.state.shutdown_persist_blocking();
@@ -426,19 +510,26 @@ fn unadmitted_review_settlement_needs_durable_removal_ack_before_delete() {
         let mut fixture = ReportingTurn::new("unadmitted-settlement-fence", true, mode, false);
         let idle = InstallBarrier::new(&fixture.turn.state, "unused");
         fixture.finish();
-        fixture.observation();
+        let report = fixture.observation();
+        assert_eq!(occurrence(&report)["kind"], "unadmitted_turn");
+        // The turn's measured sighting is sent once after it, refused or not.
+        let sighting = fixture.observation();
+        assert_eq!(occurrence(&sighting)["kind"], "source_sighting");
         idle.idle.recv_timeout(DEADLOCK_GUARD).unwrap();
-        let settled = fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone());
+        // The setup turn's own settled reports come first; the adopted turn's
+        // report follows them.
+        let setup = fixture.setup_reports.len();
+        let settled = fixture.turn.record(|record| record.engram.unadmitted_reports[setup].clone());
         // Persist the pre-settlement image, then install only the in-memory
         // settled image. A failed coupled ACK must not erase that sole request.
         {
             let mut inner = fixture.turn.state.inner.lock().unwrap();
             let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
-            inner.sessions[index].engram.unadmitted_reports[0].envelopes[0].delivery =
+            inner.sessions[index].engram.unadmitted_reports[setup].envelopes[0].delivery =
                 EngramRuntimeObservationDelivery::Pending { last_error: Some("reply not yet durable".to_owned()) };
             inner.stamp_session_at_index(index);
             fixture.turn.state.persist_internal_locked(&inner).unwrap();
-            inner.sessions[index].engram.unadmitted_reports[0] = settled.clone();
+            inner.sessions[index].engram.unadmitted_reports[setup] = settled.clone();
             inner.stamp_session_at_index(index);
         }
         let original_writer = fixture.turn.state.persist_tx.clone();
@@ -450,7 +541,7 @@ fn unadmitted_review_settlement_needs_durable_removal_ack_before_delete() {
         let mut fence_seen = false;
         while !deletion.is_finished() {
             if let Ok(PersistRequest::Fence(fence)) = rx.recv_timeout(Duration::from_millis(20)) {
-                assert!(matches!(&fence.target, PersistFenceTarget::EngramSourceRemoval { .. }));
+                assert!(matches!(&fence.target, PersistFenceTarget::EngramObservationRemoval { .. }));
                 fence_seen = true;
                 fence.finish(Err(PersistFenceError::WriteFailed("controlled missing settlement ACK".to_owned())));
             }
@@ -459,13 +550,57 @@ fn unadmitted_review_settlement_needs_durable_removal_ack_before_delete() {
         fixture.turn.state.persist_tx = original_writer;
         assert!(fence_seen, "Delete must fence the exact settled report before removal");
         assert!(result.is_err(), "failed settlement ACK must keep the original session");
-        assert_eq!(fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone()), settled);
+        assert_eq!(fixture.turn.record(|record| record.engram.unadmitted_reports[setup].clone()), settled);
         fixture.turn.state.kill_session(&fixture.turn.session_id).unwrap();
         assert!(fixture.turn.state.inner.lock().unwrap().find_session_index(&fixture.turn.session_id).is_none());
-        assert_eq!(fixture.producer.requests().len(), 1, "durable settlement needs no resend");
+        let kinds: Vec<Value> = fixture.producer.requests().iter()
+            .map(|request| request["occurrence"]["kind"].clone())
+            .collect();
+        assert_eq!(kinds, [json!("unadmitted_turn"), json!("source_sighting")],
+            "durable settlement needs no resend");
         fixture.turn.state.trigger_shutdown_signal();
         fixture.turn.state.shutdown_persist_blocking();
     }
+}
+
+#[test]
+fn delete_without_observation_custody_needs_no_slow_writer_fence() {
+    let mut state = test_app_state();
+    let session = test_session_id(&state, Agent::Codex);
+    {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.engram.unadmitted_active_turn.is_none());
+        assert!(record.engram.unadmitted_closing_jobs.is_empty());
+        assert!(record.engram.unadmitted_reports.is_empty());
+        assert!(record.engram.source_root_bind_owner.is_none());
+    }
+    // Hold ordinary writes and reject any fence, without waiting for its
+    // production deadline. Empty custody must not request an observation ACK.
+    let original_writer = state.persist_tx.clone();
+    let (tx, rx) = mpsc::channel();
+    state.persist_tx = tx;
+    let deleting = state.clone();
+    let selected = session.clone();
+    let deletion = std::thread::spawn(move || deleting.kill_session(&selected));
+    let guard = phase_sync::PollGuard::new();
+    let mut fence_seen = false;
+    while !deletion.is_finished() {
+        if let Ok(PersistRequest::Fence(fence)) = rx.recv_timeout(Duration::from_millis(20)) {
+            fence_seen = true;
+            fence.finish(Err(PersistFenceError::WriteFailed(
+                "controlled slow writer has not acknowledged observation removal".to_owned(),
+            )));
+        }
+        guard.wait("ordinary Delete without an observation-removal ACK");
+    }
+    let result = deletion.join().unwrap();
+    state.persist_tx = original_writer;
+    assert!(!fence_seen, "empty-custody Delete must request no observation fence");
+    result.expect("ordinary deletion must complete without an observation acknowledgement");
+    assert!(state.inner.lock().unwrap().find_session_index(&session).is_none());
+    state.trigger_shutdown_signal();
+    state.shutdown_persist_blocking();
 }
 
 #[test]
@@ -486,12 +621,16 @@ fn unadmitted_review_capture_absence_retains_exact_job_without_reporting() {
         let job = fixture.turn.record(|record| record.engram.unadmitted_closing_jobs[0].clone());
         if job.attempts > 0 { break job; }
     };
-    assert_eq!(job.trace, original);
+    assert_eq!(original.observed_outcome, None, "an open trace has no outcome yet");
+    let mut closed = original.clone();
+    closed.observed_outcome = Some(EngramObservedTurnOutcome::Unknown);
+    assert_eq!(job.trace, closed, "closing records only the turn's outcome");
     assert!(job.policy.is_some());
     assert_eq!(job.attempts, 1);
     assert_eq!(job.last_error.as_deref(), Some("runtime closing source could not be measured"));
     assert!(job.terminal_failure.is_none());
-    assert!(fixture.turn.record(|record| record.engram.unadmitted_reports.is_empty()));
+    assert_eq!(fixture.turn.record(|record| record.engram.unadmitted_reports.clone()),
+        fixture.setup_reports, "the adopted turn adds no report");
     assert!(fixture.producer.requests().is_empty(), "missing source is not an empty or invented observation");
     let durable: Value = serde_json::from_str(&stored_session(&fixture.turn.state, &fixture.turn.session_id)).unwrap();
     assert_eq!(durable["engramUnadmittedClosingJobs"][0], serde_json::to_value(&job).unwrap());
@@ -573,8 +712,9 @@ fn unadmitted_review_restart_settles_active_custody_before_next_adoption() {
     assert!(history.contains(&original.host_turn_ref));
     assert!(history.contains(&original.commands[0].check.host_check_id));
     assert!(restored.engram.unadmitted_closing_jobs.is_empty());
-    assert!(restored.engram.unadmitted_reports.is_empty());
-    adopt_runtime_observation(&mut restored, "replacement-adoption-notice", 1);
+    assert_eq!(restored.engram.unadmitted_reports, fixture.setup_reports,
+        "recovery adds no report of the archived turn");
+    adopt_runtime_observation(&mut restored, "replacement-adoption-notice", 1, None);
     assert_ne!(restored.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref, original.host_turn_ref);
     let history = serde_json::to_string(&PersistedSessionRecord::from_record(&restored)).unwrap();
     assert!(history.contains(&original.host_turn_ref), "next adoption must not erase recovered facts");
@@ -595,7 +735,7 @@ fn unadmitted_review_actual_boot_archives_custody_before_new_router_adoption() {
         fixture.turn.record_mut(|record| record.session.status = status);
         let old = fixture.turn.state.clone();
         assert!(old.persist_thread_handle.lock().unwrap().is_none());
-        // CheckedTurn uses the shared synchronous-persist fixture, whose
+        // EOCheckedTurn uses the shared synchronous-persist fixture, whose
         // shutdown has no writer to drain. Materialize the test's intended
         // crash image through the existing internal persist owner first;
         // record_mut stamps but does not itself request a write.
@@ -607,7 +747,6 @@ fn unadmitted_review_actual_boot_archives_custody_before_new_router_adoption() {
             "the durable pre-boot image must include the actual completed check");
         old.trigger_shutdown_signal();
         old.shutdown_persist_blocking();
-        fixture.turn.transport.responses.lock().unwrap().push_back(bind_reply("turn-check-token"));
         let restarted = restart_reporting_state(&fixture.turn.root, &old, fixture.producer.clone());
         fixture.turn.state = restarted.clone();
         let (active, archive, closing_count, report_count) = fixture.turn.record(|record| {
@@ -617,7 +756,7 @@ fn unadmitted_review_actual_boot_archives_custody_before_new_router_adoption() {
                 _ => None,
             });
             (record.engram.unadmitted_active_turn.clone(), archive,
-             record.engram.unadmitted_closing_jobs.len(), record.engram.unadmitted_reports.len())
+             record.engram.unadmitted_closing_jobs.len(), record.engram.unadmitted_reports.clone())
         });
         // Assertions run after releasing the state mutex so a failed control
         // does not poison or strand the restarted host's real worker threads.
@@ -626,9 +765,10 @@ fn unadmitted_review_actual_boot_archives_custody_before_new_router_adoption() {
             &archive.expect("real boot must append the recovery archive"),
         ).unwrap();
         assert_eq!(recovered, original);
-        assert_eq!((closing_count, report_count), (0, 0));
+        assert_eq!((closing_count, report_count), (0, fixture.setup_reports.clone()),
+            "the archived turn leaves no closing job and no report of its own");
         let (runtime, rx) = test_codex_runtime_handle("after-unadmitted-restart");
-        fixture.turn._runtime_rx = rx;
+        fixture.turn._runtime_rx = Arc::new(Mutex::new(rx));
         fixture.turn.record_mut(|record| {
             record.runtime = SessionRuntime::Codex(runtime);
             record.session.status = SessionStatus::Idle;
@@ -769,9 +909,12 @@ fn retirement_joins_post_check_capture_and_delivery_installs_before_restore() {
                 )
                 .unwrap();
         } else {
+            // The report this delivery was installing: the adopted turn's,
+            // after the setup turn's own settled reports.
+            let setup = fixture.setup_reports.len();
             let report = fixture
                 .turn
-                .record(|record| record.engram.unadmitted_reports[0].clone());
+                .record(|record| record.engram.unadmitted_reports[setup].clone());
             state
                 .install_runtime_observation_result(
                     &fixture.turn.session_id,
@@ -782,6 +925,7 @@ fn retirement_joins_post_check_capture_and_delivery_installs_before_restore() {
                 .unwrap();
         }
         assert_eq!(stored_session(&restarted, &fixture.turn.session_id), before);
+        retire_reporting_hosts(fixture, vec![restarted, state]);
     }
 }
 
@@ -848,7 +992,8 @@ fn runtime_checkpoint_survives_storage_without_extending_mediated_continuity() {
     // implementation. Mediated continuity remains process-local.
     let decoded: PersistedSessionRecord = serde_json::from_value(wire).unwrap();
     let restored = decoded.into_record().unwrap();
-    assert!(restored.engram.continuity_anchor.is_none());
+    assert!(serde_json::to_value(&PersistedSessionRecord::from_record(&restored)).unwrap()
+        .get("engramContinuityAnchor").is_none());
     assert_eq!(restored.engram.runtime_checkpoint, Some(checkpoint));
 }
 
@@ -891,121 +1036,64 @@ fn wait_for_observation_worker_idle(state: &AppState, session: &str) {
     }
 }
 
-#[test]
-fn restored_closing_r6_preparation_resume_keeps_unread_binding_pending() {
-    let mut fixture = ReportingTurn::new(
-        "unadmitted-preparation-unread-binding", true, ReplyMode::Recorded, false,
-    );
-    fixture.turn.record_mut(|record| record.set_auto_dispatch_blocked(true));
-    queue_test_engram_prompt(&fixture.turn.state, &fixture.turn.session_id,
-        "Retain this successor's exact preparation.", QueuedPromptSource::User, None);
-    let target = AppState::engram_binding_target_for_session_shape_locked(
-        &fixture.turn.state.inner.lock().unwrap(), &fixture.turn.session_id, true,
-    ).unwrap().unwrap();
-    let evaluate = fixture.turn.transport.requests().into_iter()
-        .find(|entry| entry.request["operation"] == "turn_evaluate").unwrap().request;
-    fixture.turn.record_mut(|record| {
-        let head = record.queued_prompts.front_mut().unwrap();
-        head.engram_interrupted = true;
-        head.promotion_disposition_known = true;
-        head.engram_evaluate = Some(EngramQueuedEvaluate {
-            connection: target.connection.clone(), settings: target.settings.clone(),
-            request: serde_json::from_value(evaluate).unwrap(), operation_generation: None,
-            begun_grant_id: None, prepared_begin: None,
-        });
-    });
-    let expected = retire_with_pinned_closing_job(&mut fixture);
-    fixture.turn.transport.responses.lock().unwrap().push_back(
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport(
-            "controlled unavailable boot bind",
-        ))),
-    );
-    let old = &fixture.turn.state;
-    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
-    install_reporting_source_capture(&restarted);
-    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
-    let prepared = EngramPreparedBegin {
-        idempotency_key: "retained-preparation-after-boot".to_owned(),
-        grant_id: CHECK_GRANT.to_owned(), delivery_tokens: Vec::new(),
-        issued_no_later_than: stamp_now(), phase: EngramPreparedBeginPhase::Prepared,
-        delivered_range: None,
-    };
-    let owner = {
-        let mut inner = restarted.inner.lock().unwrap();
-        let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
-        let record = &mut inner.sessions[index];
-        assert!(!record.engram_boot_recovery_pending);
-        assert!(record.engram.rebind_required);
-        assert!(record.engram.work_binding.is_none());
-        assert_eq!(record.engram.unadmitted_closing_jobs, vec![expected.clone()]);
-        // Enter the existing local prepared-Begin acknowledgement hold after
-        // degraded boot. This fixture does not send or acknowledge that Begin.
-        let head = record.queued_prompts.front_mut().unwrap();
-        head.engram_interrupted = true;
-        head.engram_evaluate.as_mut().unwrap().prepared_begin = Some(prepared.clone());
-        EngramQueuedAdmissionOwner::capture(record).unwrap()
-    };
-    restarted.note_engram_begin_preparation_hold(
-        &fixture.turn.session_id, &owner, Some(prepared.grant_id.clone()),
-    );
-    {
-        let inner = restarted.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert!(matches!(engram_begin_preparation_resume(record),
-            EngramBeginPreparationResume::ReleasablePending));
+/// Park the actual ordinary root read before source capture, so a restored
+/// worker cannot race installation of the existing source-measurement hook.
+struct ClosingReadBarrier {
+    producer: Arc<ObservationProducer>,
+    entered: mpsc::Receiver<()>,
+    release: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl ClosingReadBarrier {
+    fn new(fixture: &ReportingTurn) -> Self {
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let gate = release.clone();
+        let (entered, received) = mpsc::channel();
+        *fixture.producer.request_hook.lock().unwrap() = Some(Arc::new(move |request| {
+            if !matches!(request, EngramControlRequest::NamedRootRead { .. }) { return; }
+            let _ = entered.send(());
+            let lock = gate.0.lock().unwrap();
+            let (lock, timeout) = gate.1.wait_timeout_while(lock, DEADLOCK_GUARD, |ready| !*ready).unwrap();
+            assert!(*lock && !timeout.timed_out(), "release the ordinary closing root read");
+        }));
+        Self { producer: fixture.producer.clone(), entered: received, release }
     }
-    restarted.release_engram_begin_preparation_hold_for_resume(
-        &fixture.turn.session_id, Some(&owner),
-    ).unwrap().expect("the existing preparation owner releases this held head");
-    let still_unread = {
-        let inner = restarted.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert!(record.engram.work_binding.is_none());
-        record.engram.rebind_required
-    };
-    assert!(still_unread, "preparation Resume is not a binding recovery read");
-    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
-    {
-        let inner = restarted.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert_eq!(record.engram.unadmitted_closing_jobs, vec![expected]);
-        assert!(record.engram.unadmitted_reports.is_empty());
-        assert_eq!(record.queued_prompts[0].engram_evaluate.as_ref().unwrap()
-            .prepared_begin.as_ref(), Some(&prepared));
-        assert!(record.orchestrator_auto_dispatch_blocked);
+
+    fn wait(&self) {
+        phase_sync::receive(&self.entered, "the restored ordinary closing root read");
     }
-    assert!(fixture.producer.requests().is_empty());
-    fixture.assert_no_granted_reporting();
-    restarted.trigger_shutdown_signal();
-    restarted.shutdown_persist_blocking();
+
+    fn release(&self) {
+        *self.release.0.lock().unwrap() = true;
+        self.release.1.notify_all();
+    }
+}
+
+impl Drop for ClosingReadBarrier {
+    fn drop(&mut self) {
+        self.release();
+        *self.producer.request_hook.lock().unwrap() = None;
+    }
 }
 
 #[test]
-fn restored_closing_r6_definitively_unbound_binding_does_not_wait_forever() {
+fn restored_closing_definitively_unclaimed_work_does_not_wait_forever() {
     let mut fixture = ReportingTurn::new(
-        "unadmitted-definitively-unbound", true, ReplyMode::Recorded, false,
+        "unadmitted-definitively-unclaimed", true, ReplyMode::Recorded, false,
     );
     let expected = retire_with_pinned_closing_job(&mut fixture);
     *fixture.producer.binding.write().unwrap() = None;
-    fixture.turn.transport.responses.lock().unwrap()
-        .push_back(bind_reply(&expected.scope.routing_token));
-    let old = &fixture.turn.state;
-    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
-    install_reporting_source_capture(&restarted);
-    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
-    restarted.ensure_engram_session_bound_off_lock(&fixture.turn.session_id).unwrap().unwrap();
+    let restarted = restart_reporting_state(&fixture.turn.root, &fixture.turn.state, fixture.producer.clone());
     wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
     {
         let inner = restarted.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert!(record.engram.routing_token.is_some());
-        assert!(record.engram.work_binding.is_none());
-        assert!(!AppState::runtime_observation_capture_waits_for_binding(record),
-            "an actual no-claim bind is definitive, not an unread recovered binding");
         let job = &record.engram.unadmitted_closing_jobs[0];
         assert_eq!(job.scope, expected.scope);
+        assert_eq!(job.trace, expected.trace);
         assert!(job.terminal_failure.as_ref().is_some_and(|cause| cause.contains("scope changed")));
-        assert!(record.engram.unadmitted_reports.is_empty());
+        assert_eq!(record.engram.unadmitted_reports, fixture.setup_reports,
+            "a definitively unclaimed closing job makes no report");
     }
     assert!(fixture.producer.requests().is_empty());
     fixture.assert_no_granted_reporting();
@@ -1015,154 +1103,79 @@ fn restored_closing_r6_definitively_unbound_binding_does_not_wait_forever() {
 }
 
 #[test]
-fn restored_closing_r5_partial_bind_error_still_wakes_capture() {
+fn restored_closing_delete_retry_preserves_the_paused_successor_without_provider_replay() {
     let mut fixture = ReportingTurn::new(
-        "unadmitted-partial-bind-wake", true, ReplyMode::Recorded, false,
+        "unadmitted-ordinary-delete-resume", true, ReplyMode::Recorded, true,
     );
-    let runtime = fixture.turn.record(|record| record.runtime.clone());
-    assert!(runtime.runtime_token().is_some());
+    fixture.turn.record_mut(|record| record.set_auto_dispatch_blocked(true));
+    queue_test_engram_prompt(&fixture.turn.state, &fixture.turn.session_id,
+        "Do not dispatch while recovering tracking.", QueuedPromptSource::User, None);
+    let successor = fixture.turn.record(|record| serde_json::to_value(&record.queued_prompts[0]).unwrap());
     let expected = retire_with_pinned_closing_job(&mut fixture);
-    fixture.turn.transport.responses.lock().unwrap()
-        .push_back(bind_reply(&expected.scope.routing_token));
-    let old = &fixture.turn.state;
-    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
+    let read = ClosingReadBarrier::new(&fixture);
+    let restarted = restart_reporting_state(&fixture.turn.root, &fixture.turn.state, fixture.producer.clone());
+    read.wait();
     install_reporting_source_capture(&restarted);
-    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
-    let barrier = InstallBarrier::new(&restarted, "capture");
-    let state = restarted.clone();
-    let session = fixture.turn.session_id.clone();
-    // The bind owns a snapshot with no runtime after restore. Change that
-    // owner at the off-lock reply boundary, without starting a provider. The
-    // bind still installs its claim, then root reconciliation rejects its
-    // obsolete runtime snapshot with LocalState.
-    *fixture.producer.request_hook.lock().unwrap() = Some(Arc::new(move |request| {
-        if matches!(request, EngramControlRequest::SessionBind { .. }) {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].runtime = runtime.clone();
-        }
-    }));
-    let bound = restarted.ensure_engram_session_bound_off_lock(&fixture.turn.session_id);
-    *fixture.producer.request_hook.lock().unwrap() = None;
-    let error = bound.err().expect("root reconciliation must reject the old runtime owner");
-    assert_eq!(error.kind, EngramTransportErrorKind::LocalState);
-    {
-        let inner = restarted.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert_eq!(record.engram.work_binding.as_ref(), Some(&expected.scope.binding));
-        assert!(!AppState::runtime_observation_capture_waits_for_binding(record),
-            "the partial bind installed the claim and cleared every capture fence");
-        assert_eq!(record.engram.unadmitted_closing_jobs, vec![expected.clone()]);
-    }
-    barrier.entered.recv_timeout(DEADLOCK_GUARD)
-        .expect("clearing the bind guard must wake eligible capture even after LocalState");
-    barrier.release();
+    read.release();
     let sent = fixture.observation();
     assert!(sent.durable_before_send);
     assert_eq!(occurrence(&sent)["host_turn_ref"], expected.trace.host_turn_ref);
-    assert_eq!(fixture.producer.requests().len(), 1);
-    fixture.assert_no_granted_reporting();
-    restarted.trigger_shutdown_signal();
-    restarted.shutdown_persist_blocking();
-}
-
-#[test]
-fn restored_closing_r5_tracking_resume_binds_without_provider_replay() {
-    let mut fixture = ReportingTurn::new(
-        "unadmitted-lazy-delete-resume", true, ReplyMode::Recorded, true,
-    );
-    let expected = retire_with_pinned_closing_job(&mut fixture);
-    fixture.turn.transport.responses.lock().unwrap()
-        .push_back(bind_reply(&expected.scope.routing_token));
-    let old = &fixture.turn.state;
-    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
-    install_reporting_source_capture(&restarted);
-    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
-    {
-        let inner = restarted.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert!(record.engram.rebind_required);
-        assert!(record.engram.work_binding.is_none());
-        assert!(!record.engram_boot_recovery_pending);
-        assert_eq!(record.engram.unadmitted_closing_jobs, vec![expected.clone()]);
-    }
     assert!(restarted.kill_session(&fixture.turn.session_id).is_err(),
-        "Delete must first retain the original closing custody");
-    // Queue a successor only after lazy boot, behind Delete's pause latch.
-    // Tracking Resume must recover the old history, never admit this prompt.
-    queue_test_engram_prompt(&restarted, &fixture.turn.session_id,
-        "Do not dispatch while recovering tracking.", QueuedPromptSource::User, None);
-    let first_resume = restarted.resume_source_observation_delete(&fixture.turn.session_id);
-    assert!(first_resume.is_err(), "the producer reply is still deliberately held");
+        "Delete retains a report whose actual producer reply is still held");
+    assert!(restarted.kill_session(&fixture.turn.session_id).is_err(),
+        "a retried Delete is still refused while the producer reply is held");
     {
         let inner = restarted.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert_eq!(record.engram.work_binding.as_ref(), Some(&expected.scope.binding),
-            "explicit tracking Resume must recover the lazy binding without a provider turn");
-        assert!(!record.engram.rebind_required);
-        assert!(record.engram.source_observation_delete_requested);
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(record.session.queue_paused);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert!(!record.queued_prompts[0].has_engram_intent());
-        assert!(record.engram.active_grant_id.is_none());
+        assert!(record.engram.observation_delete_requested);
+        assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused);
+        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), successor);
         assert!(record.runtime.runtime_token().is_none());
     }
-    let sent = fixture.observation();
-    assert!(sent.durable_before_send);
-    assert_eq!(occurrence(&sent)["host_turn_ref"], expected.trace.host_turn_ref);
-    assert!(restarted.kill_session(&fixture.turn.session_id).is_err(),
-        "an uncertain reply still keeps the exact report");
     fixture.producer.release();
     wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
-    assert!(restarted.resume_source_observation_delete(&fixture.turn.session_id).unwrap());
+    {
+        let inner = restarted.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
+        assert!(record.engram.observation_delete_requested);
+        assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused);
+        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), successor);
+    }
+    // The turn's measured sighting is the report's own next envelope, sent
+    // once after the released turn report; neither is replayed.
+    let sighting = fixture.observation();
+    assert_eq!(occurrence(&sighting)["kind"], "source_sighting");
+    assert!(sighting.durable_before_send);
+    let kinds: Vec<Value> = fixture.producer.requests().iter()
+        .map(|request| request["occurrence"]["kind"].clone())
+        .collect();
+    assert_eq!(kinds, [json!("unadmitted_turn"), json!("source_sighting")]);
+    assert!(fixture.turn._runtime_rx.lock().unwrap().try_recv().is_err(), "observation recovery sends no provider command");
     fixture.assert_no_granted_reporting();
-    assert!(fixture.turn._runtime_rx.try_recv().is_err(), "tracking recovery sends no provider command");
     restarted.kill_session(&fixture.turn.session_id).unwrap();
     assert!(restarted.inner.lock().unwrap().find_session_index(&fixture.turn.session_id).is_none());
-    assert_eq!(fixture.producer.requests().len(), 1);
     restarted.trigger_shutdown_signal();
     restarted.shutdown_persist_blocking();
 }
 
 #[test]
-fn restored_closing_capture_waits_for_lazy_binding_recovery() {
+fn restored_closing_capture_uses_its_pinned_work_without_a_control_rebind() {
     let mut fixture = ReportingTurn::new(
-        "unadmitted-lazy-closing-rebind", true, ReplyMode::Recorded, false,
+        "unadmitted-ordinary-closing-restore", true, ReplyMode::Recorded, false,
     );
-    fixture.check("before-lazy-restart", false);
+    fixture.check("before-ordinary-restart", false);
     let expected = retire_with_pinned_closing_job(&mut fixture);
-    fixture.turn.transport.responses.lock().unwrap()
-        .push_back(bind_reply(&expected.scope.routing_token));
-    let operations_before = fixture.turn.transport.requests().len();
-    let old = &fixture.turn.state;
-    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
+    let read = ClosingReadBarrier::new(&fixture);
+    let restarted = restart_reporting_state(&fixture.turn.root, &fixture.turn.state, fixture.producer.clone());
+    read.wait();
     install_reporting_source_capture(&restarted);
-    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
     {
         let inner = restarted.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert!(record.engram.rebind_required);
-        assert!(record.engram.work_binding.is_none());
-        assert!(!record.engram_boot_recovery_pending,
-            "an idle root without queued work remains lazily bound");
-        assert_eq!(record.engram.unadmitted_closing_jobs, vec![expected.clone()],
-            "unrecovered binding is not a scope change or a capture attempt");
-        assert!(record.engram.unadmitted_reports.is_empty());
+        assert!(record.engram.work_binding.is_none(), "restore does not invent a live work association");
+        assert_eq!(record.engram.unadmitted_closing_jobs, vec![expected.clone()]);
     }
-    assert_eq!(fixture.turn.transport.requests().len(), operations_before,
-        "observation custody must not make an idle root bind or dispatch at boot");
-    assert!(fixture.producer.requests().is_empty());
-    // Exercise the existing first-use binding owner, without evaluating or
-    // dispatching a provider turn. Its completion must wake the retained job.
-    restarted.ensure_engram_session_bound_off_lock(&fixture.turn.session_id)
-        .unwrap().unwrap();
-    {
-        let inner = restarted.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert_eq!(record.engram.work_binding.as_ref(), Some(&expected.scope.binding));
-        assert!(!record.engram.rebind_required);
-    }
+    read.release();
     let sent = fixture.observation();
     assert!(sent.durable_before_send);
     assert_eq!(occurrence(&sent)["host_turn_ref"], expected.trace.host_turn_ref);
@@ -1176,135 +1189,33 @@ fn restored_closing_capture_waits_for_lazy_binding_recovery() {
 
 #[test]
 fn restored_closing_capture_survives_a_source_measurement_longer_than_the_rpc_cap() {
-    // The restarted host's closing capture measures real Git and filesystem
-    // contents, which a loaded machine can make slow. That time must not
-    // spend the capture's RPC cap: the restarted state runs on the same kind
-    // of clock as the state before the restart. The hook holds every
-    // measurement for twice the whole cap, so a restart on real time fails
-    // every attempt and backs off past the wait, while the fixture's clock
-    // does not see the hold at all. It stands in for slow I/O, not for an
-    // ordering barrier.
     let mut fixture = ReportingTurn::new(
         "unadmitted-slow-closing-measurement", true, ReplyMode::Recorded, false,
     );
     fixture.check("before-slow-measurement-restart", false);
     let expected = retire_with_pinned_closing_job(&mut fixture);
-    fixture.turn.transport.responses.lock().unwrap()
-        .push_back(bind_reply(&expected.scope.routing_token));
-    let old = &fixture.turn.state;
-    let restarted = restart_reporting_state(&fixture.turn.root, old, fixture.producer.clone());
+    let read = ClosingReadBarrier::new(&fixture);
+    let restarted = restart_reporting_state(&fixture.turn.root, &fixture.turn.state, fixture.producer.clone());
+    read.wait();
     let cap = {
         let inner = restarted.inner.lock().unwrap();
         engram_project_for_session_locked(&inner, &fixture.turn.session_id)
-            .and_then(|project| project.engram.as_ref())
-            .map(|settings| settings.call_timeout())
-            .expect("the fixture's project sets its Engram RPC cap")
+            .and_then(|project| project.engram.as_ref()).unwrap().call_timeout()
     };
-    assert!(cap < Duration::from_secs(1), "the fixture's RPC cap is a scripted short cap");
+    assert!(cap < Duration::from_secs(1));
     let hold = cap * 2;
-    restarted.inner.lock().unwrap().test_engram_source_capture =
-        Some(Arc::new(move |place, _budget| {
-            std::thread::sleep(hold);
-            engram_place_source_basis(place)
-        }));
-    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
-    restarted.ensure_engram_session_bound_off_lock(&fixture.turn.session_id)
-        .unwrap().unwrap();
-    let sent = fixture.observation();
-    assert!(sent.durable_before_send);
-    assert_eq!(occurrence(&sent)["host_turn_ref"], expected.trace.host_turn_ref);
-    assert_eq!(sent.request["binding"], serde_json::to_value(&expected.scope.binding).unwrap());
-    assert_eq!(fixture.producer.requests().len(), 1);
-    fixture.assert_no_granted_reporting();
-    restarted.trigger_shutdown_signal();
-    restarted.shutdown_persist_blocking();
-}
-
-#[test]
-fn restored_closing_capture_waits_past_eager_boot_budget() {
-    let mut fixture = ReportingTurn::new(
-        "unadmitted-late-closing-rebind", true, ReplyMode::Recorded, false,
-    );
-    fixture.turn.record_mut(|record| record.set_auto_dispatch_blocked(true));
-    queue_test_engram_prompt(&fixture.turn.state, &fixture.turn.session_id,
-        "Keep successor paused during late recovery.", QueuedPromptSource::User, None);
-    let successor = fixture.turn.record(|record| record.queued_prompts[0].pending_prompt.id.clone());
-    let expected = retire_with_pinned_closing_job(&mut fixture);
-    fixture.turn.transport.responses.lock().unwrap()
-        .push_back(bind_reply(&expected.scope.routing_token));
-    let clock = EngramBudgetClock::scripted();
-    let (entered, entered_rx) = mpsc::channel();
-    let release = Arc::new((Mutex::new(false), Condvar::new()));
-    let gate = release.clone();
-    // Hold the status phase, as the existing late-recovery fixture does.
-    // The bind's own per-call deadline starts after status returns; consuming
-    // only the coordinator budget must not also expire that later operation.
-    *fixture.producer.request_hook.lock().unwrap() = Some(Arc::new(move |request| {
-        if !matches!(request, EngramControlRequest::SessionStatus { .. }) {
-            return;
-        }
-        let _ = entered.send(());
-        let lock = gate.0.lock().unwrap();
-        let (lock, timeout) = gate.1.wait_timeout_while(lock, DEADLOCK_GUARD, |ready| !*ready).unwrap();
-        assert!(*lock && !timeout.timed_out(), "release the blocked rebind");
+    // This retained delay models slow source I/O, not an ordering barrier.
+    // The actual root-read barrier above orders installation of this hook.
+    restarted.inner.lock().unwrap().test_engram_source_capture = Some(Arc::new(move |place, _budget| {
+        std::thread::sleep(hold);
+        engram_place_source_basis(place)
     }));
-    // Release the test RPC gate even when a discriminator assertion fails.
-    struct ReleaseBinding(Arc<(Mutex<bool>, Condvar)>);
-    impl Drop for ReleaseBinding {
-        fn drop(&mut self) {
-            *self.0.0.lock().unwrap() = true;
-            self.0.1.notify_all();
-        }
-    }
-    let release_on_drop = ReleaseBinding(release);
-    let old = &fixture.turn.state;
-    let root = fixture.turn.root.to_string_lossy().into_owned();
-    let path = old.persistence_path.as_ref().clone();
-    let templates = old.orchestrator_templates_path.as_ref().clone();
-    let producer = fixture.producer.clone();
-    let boot_clock = clock.clone();
-    let (boot_tx, boot_rx) = mpsc::channel();
-    let boot = std::thread::spawn(move || {
-        assert!(boot_tx.send(AppState::new_with_paths_engram_transport_and_clock_for_test(
-            root, path, templates, producer, boot_clock,
-        )).is_ok());
-    });
-    entered_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
-    clock.wait_for_scripted_waiter();
-    assert!(boot_rx.try_recv().is_err(), "boot waits before its budget expires");
-    clock.advance(Duration::from_millis(default_engram_boot_recovery_budget_ms()));
-    let restarted = boot_rx.recv_timeout(DEADLOCK_GUARD).unwrap().unwrap();
-    boot.join().unwrap();
-    install_reporting_source_capture(&restarted);
-    wait_for_observation_worker_idle(&restarted, &fixture.turn.session_id);
-    {
-        let inner = restarted.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert!(record.engram_boot_recovery_pending);
-        assert!(record.engram.work_binding.is_none());
-        assert_eq!(record.engram.unadmitted_closing_jobs, vec![expected.clone()],
-            "batch timeout cannot turn unfinished rebind into definitive scope loss");
-        assert_eq!(record.queued_prompts[0].pending_prompt.id, successor);
-        assert!(!record.queued_prompts[0].has_engram_intent());
-        assert!(record.orchestrator_auto_dispatch_blocked);
-    }
-    assert!(fixture.producer.requests().is_empty());
-    drop(release_on_drop);
+    read.release();
     let sent = fixture.observation();
     assert!(sent.durable_before_send);
     assert_eq!(occurrence(&sent)["host_turn_ref"], expected.trace.host_turn_ref);
     assert_eq!(sent.request["binding"], serde_json::to_value(&expected.scope.binding).unwrap());
-    assert_eq!(sent.request["policy_basis"], serde_json::to_value(expected.policy.as_ref().unwrap()).unwrap());
     assert_eq!(fixture.producer.requests().len(), 1);
-    {
-        let inner = restarted.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert!(!record.engram_boot_recovery_pending);
-        assert_eq!(record.queued_prompts[0].pending_prompt.id, successor);
-        assert!(!record.queued_prompts[0].has_engram_intent());
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(record.engram.active_grant_id.is_none());
-    }
     fixture.assert_no_granted_reporting();
     restarted.trigger_shutdown_signal();
     restarted.shutdown_persist_blocking();
@@ -1312,121 +1223,50 @@ fn restored_closing_capture_waits_past_eager_boot_budget() {
 
 #[tokio::test]
 async fn a_restored_closing_job_keeps_its_original_scope_and_policy() {
-    let mut fixture = ReportingTurn::new(
-        "unadmitted-closing-restart",
-        true,
-        ReplyMode::Recorded,
-        false,
-    );
-    // Settled idle roots intentionally bind lazily. A paused successor is a
-    // real eager-boot obligation, without authorizing another turn to run.
+    let mut fixture = ReportingTurn::new("unadmitted-closing-restart", true, ReplyMode::Recorded, false);
     fixture.turn.record_mut(|record| record.set_auto_dispatch_blocked(true));
-    queue_test_engram_prompt(
-        &fixture.turn.state,
-        &fixture.turn.session_id,
-        "Keep this successor paused across closing-job recovery.",
-        QueuedPromptSource::User,
-        None,
-    );
-    let successor = fixture.turn.record(|record| {
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(record.session.queue_paused);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert!(!record.queued_prompts[0].has_engram_intent());
-        record.queued_prompts[0].pending_prompt.id.clone()
-    });
-    let old = fixture.turn.state.clone();
+    queue_test_engram_prompt(&fixture.turn.state, &fixture.turn.session_id,
+        "Keep this successor paused across closing-job recovery.", QueuedPromptSource::User, None);
+    let successor = fixture.turn.record(|record| serde_json::to_value(&record.queued_prompts[0]).unwrap());
     let expected = retire_with_pinned_closing_job(&mut fixture);
-    let durable: PersistedSessionRecord =
-        serde_json::from_str(&stored_session(&old, &fixture.turn.session_id)).unwrap();
+    let old = fixture.turn.state.clone();
+    let durable: PersistedSessionRecord = serde_json::from_str(&stored_session(&old, &fixture.turn.session_id)).unwrap();
     assert!(durable.orchestrator_auto_dispatch_blocked);
-    assert_eq!(durable.queued_prompts.len(), 1);
-    assert_eq!(durable.queued_prompts[0].pending_prompt.id, successor);
-    assert!(!durable.queued_prompts[0].has_engram_intent(),
-        "the paused successor must reach boot without an admission attempt");
-    assert!(
-        expected.policy.is_some(),
-        "the guarded policy-pin commit drained before restore"
-    );
-    // The test constructor performs boot reconciliation and resumes reports
-    // before returning. Supply its replacement claim and bind reply first,
-    // so the worker observes the intended recovered scope on every ordering.
-    let replacement = test_control_work_binding("rebound-after-closing-restart", 10);
+    assert_eq!(serde_json::to_value(&durable.queued_prompts[0]).unwrap(), successor);
+    assert!(expected.policy.is_some());
+    let replacement = test_control_work_binding("different-work-after-closing-restart", 10);
     *fixture.producer.binding.write().unwrap() = Some(replacement.clone());
-    fixture
-        .turn
-        .transport
-        .responses
-        .lock()
-        .unwrap()
-        .push_back(bind_reply(&expected.scope.routing_token));
     let restarted = restart_reporting_state(&fixture.turn.root, &old, fixture.producer.clone());
-    let recovered_binding = {
-        let inner = restarted.inner.lock().unwrap();
-        let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
-        inner.sessions[index].engram.work_binding.clone()
-    };
-    assert_eq!(
-        recovered_binding.as_ref(),
-        Some(&replacement),
-        "boot must recover the replacement claim before reporting resumes"
-    );
-    // Closing-job refusal publishes a state snapshot, not a delta. Subscribe
-    // before checking the predicate so neither an early settlement nor its
-    // subsequent snapshot can leave the waiter asleep.
     let mut events = restarted.subscribe_stream_events();
     restarted.resume_runtime_observation_reports();
     tokio::time::timeout(DEADLOCK_GUARD, async {
         loop {
             let terminal = {
                 let inner = restarted.inner.lock().unwrap();
-                let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
-                inner.sessions[index].engram.unadmitted_closing_jobs[0]
-                    .terminal_failure
-                    .is_some()
+                inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()]
+                    .engram.unadmitted_closing_jobs[0].terminal_failure.is_some()
             };
-            if terminal {
-                break;
-            }
+            if terminal { break; }
             events.recv().await.unwrap();
         }
-    })
-    .await
-    .expect("the restored scope mismatch must settle visibly");
+    }).await.expect("the restored scope mismatch must settle visibly");
     let (job, notices) = {
         let inner = restarted.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(record.session.queue_paused, "boot must not resume the successor");
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(record.queued_prompts[0].pending_prompt.id, successor);
-        assert!(!record.queued_prompts[0].has_engram_intent());
-        assert!(record.engram.active_grant_id.is_none());
-        (
-            record.engram.unadmitted_closing_jobs[0].clone(),
-            system_notices(record),
-        )
+        assert!(record.orchestrator_auto_dispatch_blocked && record.session.queue_paused);
+        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), successor);
+        (record.engram.unadmitted_closing_jobs[0].clone(), system_notices(record))
     };
     restarted.shutdown_persist_blocking();
     assert_eq!(job.trace, expected.trace);
     assert_eq!(job.baseline, expected.baseline);
     assert_eq!(job.scope, expected.scope);
     assert_eq!(job.policy, expected.policy);
-    assert!(
-        job.terminal_failure
-            .as_ref()
-            .unwrap()
-            .contains("scope changed")
-    );
-    assert!(
-        notices
-            .iter()
-            .any(|notice| notice.contains(&replacement.work_id)),
-        "{:?}",
-        notices
-    );
+    assert!(job.terminal_failure.as_ref().unwrap().contains("scope changed"));
+    assert!(notices.iter().any(|notice| notice.contains(&replacement.work_id)), "{notices:?}");
     assert!(fixture.producer.requests().is_empty());
     fixture.assert_no_granted_reporting();
+    restarted.trigger_shutdown_signal();
 }
 
 #[test]
@@ -1506,18 +1346,11 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>, migrate_outbox
         drop(connection);
         let (mut persisted, baseline_has_no_other_owner) = {
             let inner = fixture.turn.state.inner.lock().unwrap();
-            let settled = inner.engram_session_obligations.checkpoint_operations.iter().all(|operation| {
-                inner.engram_confirmed_containment_ids.contains(&operation.original.id)
-            }) && inner.engram_pending_checkpoint_receipts.entries.is_empty()
+            let isolated = inner.engram_session_obligations.entries.is_empty()
+                && inner.engram_session_obligations.checkpoint_operations.is_empty()
                 && inner.quarantined_persisted_session_ids.is_empty()
-                && inner.sessions.iter().all(|record| {
-                    !record.engram.checkpoint_in_progress
-                        && record.engram.checkpoint_status_owner.is_none()
-                        && record.engram.active_grant_id.is_none()
-                        && record.engram.uncertain_grant_id.is_none()
-                })
-                && engram_admission_obligation_locked(&inner, &fixture.turn.session_id).is_none();
-            (PersistedState::from_inner(&inner), settled)
+                && inner.sessions.iter().all(|record| record.engram.historical_control.is_empty());
+            (PersistedState::from_inner(&inner), isolated)
         };
         let source_image = serde_json::to_value(&persisted).unwrap();
         persisted.metadata_capture = PersistMetadataCapture::new(
@@ -1526,44 +1359,18 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>, migrate_outbox
         assert_eq!(serde_json::to_value(&persisted).unwrap(), source_image,
             "copy setup must not alter serialized custody or authority");
         if migrate_outbox {
-            // The landed producer had neither the new ledger nor its mirror.
-            // Project only this fixture's fully ACKed baseline on the disposable
-            // copy; keep its complete current image and every older-format field.
+            // This ordinary fixture has no control checkpoint to project out.
+            // Keep the complete real custody image; only the metadata marker
+            // below is converted to exercise the predecessor-reader floor.
             fs::write(data.join("current-format-snapshot.json"),
                 serde_json::to_vec(&persisted).unwrap()).unwrap();
             assert!(baseline_has_no_other_owner,
-                "predecessor projection must not omit live or unresolved checkpoint custody");
+                "the disposable predecessor fixture has no unrelated historical custody");
             let ledger = &persisted.engram_session_obligations;
             ledger.validate().unwrap();
             assert!(ledger.entries.is_empty(), "no linked independent obligation may be omitted");
-            assert_eq!(ledger.checkpoint_operations.len(), 1, "only the known baseline is projected");
-            let operation = &ledger.checkpoint_operations[0];
-            operation.validate().unwrap();
-            assert_eq!(operation.protection.local_session_id, fixture.turn.session_id);
-            assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
-            assert!(operation.protection.authority_confirmed);
-            assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
-            assert_eq!(operation.attempts.len(), 1);
-            assert!(matches!(operation.attempts[0].result, Some(EngramCheckpointAttemptResult::Accepted)));
-            let baseline_requests: Vec<_> = fixture.turn.transport.requests().into_iter()
-                .filter(|request| request.request["operation"] == "turn_checkpoint").collect();
-            assert_eq!(baseline_requests.len(), 1);
-            assert_eq!(baseline_requests[0].request["grant_id"], CHECK_GRANT);
-            assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), baseline_requests[0].request);
-            for record in &mut persisted.sessions {
-                if let Some(mirror) = &record.engram_checkpoint_operation {
-                    assert_eq!(record.session.id, fixture.turn.session_id);
-                    assert_eq!(serde_json::to_value(mirror).unwrap(), serde_json::to_value(operation).unwrap());
-                }
-                record.engram_checkpoint_operation = None;
-            }
-            persisted.engram_session_obligations = EngramSessionObligationLedger::empty();
-            let mut expected = source_image.clone();
-            expected["engramSessionObligations"] = serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
-            for record in expected["sessions"].as_array_mut().unwrap() {
-                record.as_object_mut().unwrap().remove("engramCheckpointOperation");
-            }
-            assert_eq!(serde_json::to_value(&persisted).unwrap(), expected,
+            assert!(ledger.checkpoint_operations.is_empty());
+            assert_eq!(serde_json::to_value(&persisted).unwrap(), source_image,
                 "predecessor projection preserves all runtime checkpoint and observation custody");
         }
         persist_state_from_persisted(&path, &persisted).unwrap();
@@ -1585,7 +1392,11 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>, migrate_outbox
     assert!(observation.durable_before_send);
     let pending = snapshot(&fixture, "pending", "engramUnadmittedReports");
     let retained: Value = serde_json::from_str(&pending.2).unwrap();
-    assert_eq!(retained["engramUnadmittedReports"][0]["envelopes"][0]["request"],
+    let setup = fixture.setup_reports.len();
+    assert_eq!(retained["engramUnadmittedReports"].as_array().unwrap()[..setup].to_vec(),
+        fixture.setup_reports.iter().map(|report| serde_json::to_value(report).unwrap()).collect::<Vec<_>>(),
+        "the setup turn's settled report is retained unchanged");
+    assert_eq!(retained["engramUnadmittedReports"][setup]["envelopes"][0]["request"],
         observation.request, "the probe retains the actual immutable producer request");
     fixture.producer.release();
     fixture.turn.state.trigger_shutdown_signal();
@@ -1669,12 +1480,18 @@ fn a_malformed_retained_envelope_does_not_starve_a_later_valid_report() {
     let mut fixture = ReportingTurn::new("unadmitted-poison", true, ReplyMode::Recorded, false);
     let settled = InstallBarrier::new(&fixture.turn.state, "unused");
     fixture.finish();
-    fixture.observation();
+    let original = fixture.observation();
+    assert_eq!(occurrence(&original)["kind"], "unadmitted_turn");
+    // The turn's measured sighting follows its report.
+    assert_eq!(occurrence(&fixture.observation())["kind"], "source_sighting");
     settled.idle.recv_timeout(DEADLOCK_GUARD).unwrap();
     {
         let mut inner = fixture.turn.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
-        let mut good = inner.sessions[index].engram.unadmitted_reports[0].next_version();
+        // The adopted turn's report, after the setup turn's own settled
+        // reports, is the valid report retried behind the malformed one.
+        let setup = fixture.setup_reports.len();
+        let mut good = inner.sessions[index].engram.unadmitted_reports[setup].next_version();
         good.envelopes[0].delivery = EngramRuntimeObservationDelivery::Pending { last_error: None };
         let mut bad = good.clone();
         bad.host_turn_ref = "corrupt-retained-envelope".to_owned();
@@ -1687,7 +1504,8 @@ fn a_malformed_retained_envelope_does_not_starve_a_later_valid_report() {
         .turn
         .state
         .start_runtime_observation_worker(&fixture.turn.session_id);
-    fixture.observation();
+    // Only the valid report's pending turn request is sent again, identically.
+    assert_eq!(fixture.observation().request, original.request);
     settled.idle.recv_timeout(DEADLOCK_GUARD).unwrap();
     fixture.turn.record(|record| {
         assert!(

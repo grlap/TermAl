@@ -701,7 +701,6 @@ fn resume_persist_failure_rolls_back_the_promotion_and_keeps_the_queue_paused() 
         assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(record.queued_prompts[0].pending_prompt.id, queued_id);
         assert_eq!(record.session.pending_prompts.len(), 1);
-        assert!(record.engram.pending_dispatch.is_none());
     }
 
     // Persistence works again: the same head promotes and reaches the runtime.
@@ -774,7 +773,6 @@ fn rejected_turn_delivery_is_one_atomic_terminal_transition() {
         &session_id,
         "runtime command channel rejected the queued prompt",
         None,
-        None,
         &runtime_token,
         1,
     ));
@@ -841,7 +839,6 @@ fn stale_rejected_turn_delivery_does_not_touch_a_successor_runtime() {
         &state,
         &session_id,
         "stale runtime command rejection",
-        None,
         None,
         &stale_token,
         1,

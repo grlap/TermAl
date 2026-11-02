@@ -2032,7 +2032,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
         review_documents_lock: Arc::new(Mutex::new(())),
         engram_carried_poll_lock: Arc::new(Mutex::new(())),
-        engram_retry_slots: EngramRetrySlots::default(),
+        runtime_retry_slots: RuntimeRetrySlots::default(),
         state_broadcast_senders: StateBroadcastSenders {
             stream_events: broadcast::channel(16).0,
             legacy_state_subscribers: Arc::default(),

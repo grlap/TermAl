@@ -10,7 +10,7 @@
 // session's read-only command counts nowhere. Does not own following a
 // shell or crediting a test
 // (src/tests/engram_turn_checks.rs and its one-call child). New module, a
-// child of src/tests/engram_turn_checks.rs, whose `CheckedTurn` fixture it
+// child of src/tests/engram_turn_checks.rs, whose `EOCheckedTurn` fixture it
 // uses.
 use super::*;
 
@@ -39,7 +39,7 @@ fn sorted(mut places: Vec<String>) -> Vec<String> {
 /// A session of `turn`'s project working in `workdir`, and a recorder for
 /// it. The recorder's `command_started` reports no directory, which is the
 /// shape of a Claude command whatever the session's agent.
-fn writer_in(turn: &CheckedTurn, workdir: &FsPath) -> (String, SessionRecorder) {
+fn writer_in(turn: &EOCheckedTurn, workdir: &FsPath) -> (String, SessionRecorder) {
     let project_id = turn.record(|record| {
         record
             .session
@@ -81,7 +81,7 @@ fn run_command(recorder: &mut SessionRecorder, key: &str, command: &str) {
 }
 
 /// Where TermAl presumes the shell of `session` to be.
-fn shell_of(turn: &CheckedTurn, session: &str) -> EngramShellDirectory {
+fn shell_of(turn: &EOCheckedTurn, session: &str) -> EngramShellDirectory {
     let inner = turn.state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(session).expect("the writer");
     inner.sessions[index]
@@ -93,7 +93,7 @@ fn shell_of(turn: &CheckedTurn, session: &str) -> EngramShellDirectory {
 
 /// Where a next command, `key`, of `session` may write
 /// (`engram_command_write_places`).
-fn write_places_of(turn: &CheckedTurn, session: &str, key: &str) -> (Vec<Option<String>>, bool) {
+fn write_places_of(turn: &EOCheckedTurn, session: &str, key: &str) -> (Vec<Option<String>>, bool) {
     let inner = turn.state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(session).expect("the writer");
     let places = engram_command_write_places(&inner.sessions[index], key, None);
@@ -102,7 +102,7 @@ fn write_places_of(turn: &CheckedTurn, session: &str, key: &str) -> (Vec<Option<
 
 /// The places the running command `key` of `session` may write in, as
 /// recorded when it started or was last described.
-fn running_worktrees(turn: &CheckedTurn, session: &str, key: &str) -> Vec<Option<String>> {
+fn running_worktrees(turn: &EOCheckedTurn, session: &str, key: &str) -> Vec<Option<String>> {
     let inner = turn.state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(session).expect("the writer");
     inner.sessions[index]
@@ -117,15 +117,16 @@ fn running_worktrees(turn: &CheckedTurn, session: &str, key: &str) -> Vec<Option
 /// Gives `turn` one check, finished but with its closing snapshot still
 /// pending, so it stays open to writes, credited to `turn`'s worktree;
 /// returns the pending capture, to finish at the end.
-fn open_check(turn: &CheckedTurn) -> Arc<EngramBasisCapture> {
+fn open_check(turn: &EOCheckedTurn) -> Arc<EngramBasisCapture> {
     let pending = Arc::new(EngramBasisCapture::default());
+    let check = turn.finished_check(0, pending.clone());
     turn.record_mut(|record| {
-        record.engram.active_turn_checks = vec![turn.finished_check(0, pending.clone())];
+        record.engram.active_turn_checks = vec![check];
     });
     pending
 }
 
-fn overlapped(turn: &CheckedTurn) -> bool {
+fn overlapped(turn: &EOCheckedTurn) -> bool {
     turn.record(|record| record.engram.active_turn_checks[0].overlapped)
 }
 
@@ -363,7 +364,7 @@ fn a_lost_line_is_bounded_only_by_absolute_literal_targets() {
 
 #[test]
 fn a_move_resolves_absolute_targets_once_and_relative_ones_from_every_start() {
-    let turn = CheckedTurn::start("lost-move-resolution", true);
+    let turn = EOCheckedTurn::start("lost-move-resolution", true);
     for directory in ["sub", "inner", "sub/inner"] {
         fs::create_dir_all(turn.root.join(directory)).expect("fixture directories");
     }
@@ -425,7 +426,7 @@ fn a_move_resolves_absolute_targets_once_and_relative_ones_from_every_start() {
 
 #[test]
 fn a_lost_shell_is_kept_among_the_places_its_changes_named_until_it_is_followed_again() {
-    let turn = CheckedTurn::start("lost-among", true);
+    let turn = EOCheckedTurn::start("lost-among", true);
     fs::create_dir_all(turn.root.join("sub")).expect("a subdirectory");
     let workdir = turn.root.to_string_lossy().into_owned();
     let root = resolved(&turn.root);
@@ -525,7 +526,7 @@ fn a_lost_shell_among_too_many_places_or_none_may_be_anywhere() {
 
     // A lost shell that names no place at all, which no loss leaves, writes
     // anywhere rather than only in the workdir.
-    let turn = CheckedTurn::start("lost-nowhere", true);
+    let turn = EOCheckedTurn::start("lost-nowhere", true);
     let (session, _) = writer_in(&turn, &turn.root);
     {
         let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
@@ -547,7 +548,7 @@ fn a_move_left_pending_by_another_command_bounds_the_shell_to_both_places() {
     // A command whose end is never reported leaves its move pending: later
     // commands may run where the shell was or where that move leads, never
     // anywhere.
-    let turn = CheckedTurn::start("pending-bound", true);
+    let turn = EOCheckedTurn::start("pending-bound", true);
     fs::create_dir_all(turn.root.join("sub")).expect("a subdirectory");
     let workdir = turn.root.to_string_lossy().into_owned();
     let sub = resolved(&turn.root.join("sub"));
@@ -564,7 +565,7 @@ fn a_move_left_pending_by_another_command_bounds_the_shell_to_both_places() {
     );
 
     // A pending move TermAl could not resolve may lead anywhere.
-    let unresolved = CheckedTurn::start("pending-unresolved", true);
+    let unresolved = EOCheckedTurn::start("pending-unresolved", true);
     let unresolved_workdir = unresolved.root.to_string_lossy().into_owned();
     let (session, mut recorder) = writer_in(&unresolved, &unresolved.root);
     recorder
@@ -602,7 +603,7 @@ fn a_move_left_pending_by_another_command_bounds_the_shell_to_both_places() {
 
     // A line TermAl cannot follow, while that move is still pending, may
     // leave the shell where the move led: anywhere.
-    let absorbed = CheckedTurn::start("pending-absorbed", true);
+    let absorbed = EOCheckedTurn::start("pending-absorbed", true);
     let (session, mut recorder) = writer_in(&absorbed, &absorbed.root);
     recorder
         .command_started(
@@ -632,7 +633,7 @@ fn a_move_read_from_a_place_the_shell_left_is_placed_only_when_absolute() {
     // another command's move became pending (or TermAl lost the shell), may
     // start from any place the shell may now be in: an absolute target still
     // names one place, a relative one may lead anywhere.
-    let turn = CheckedTurn::start("second-move", true);
+    let turn = EOCheckedTurn::start("second-move", true);
     fs::create_dir_all(turn.root.join("a")).expect("a directory");
     fs::create_dir_all(turn.root.join("b")).expect("another directory");
     let workdir = turn.root.to_string_lossy().into_owned();
@@ -698,7 +699,7 @@ fn a_move_read_from_a_place_the_shell_left_is_placed_only_when_absolute() {
 fn a_later_command_of_a_lost_shell_writes_wherever_its_earlier_lines_led() {
     // Two lost lines, then a plain command: it may write where the first
     // line led, though the second led elsewhere.
-    let turn = CheckedTurn::start("lost-accumulates", true);
+    let turn = EOCheckedTurn::start("lost-accumulates", true);
     let other = sibling_worktree(&turn, "lost-accumulates-other");
     fs::create_dir_all(other.join("crates")).expect("a directory in the other repository");
     let (_, mut recorder) = writer_in(&turn, &other);
@@ -723,7 +724,7 @@ fn a_later_command_of_a_lost_shell_writes_wherever_its_earlier_lines_led() {
 
 #[test]
 fn a_lost_shell_elsewhere_leaves_an_open_check_alone_until_its_changes_may_reach_it() {
-    let turn = CheckedTurn::start("lost-elsewhere", true);
+    let turn = EOCheckedTurn::start("lost-elsewhere", true);
     let other = sibling_worktree(&turn, "lost-elsewhere-other");
     fs::create_dir_all(other.join("crates")).expect("a directory in the other repository");
     let pending = open_check(&turn);
@@ -775,7 +776,7 @@ fn a_change_termal_cannot_place_exactly_counts_where_its_session_works() {
     // command, and the lost shell's later commands, count where their session
     // works: they mark an open check in that worktree and leave one in
     // another worktree alone, rather than marking every check on the host.
-    let turn = CheckedTurn::start("lost-anywhere", true);
+    let turn = EOCheckedTurn::start("lost-anywhere", true);
     let other = sibling_worktree(&turn, "lost-anywhere-other");
     fs::create_dir_all(other.join("sub")).expect("a directory in the other repository");
     fs::create_dir_all(turn.root.join("sub")).expect("a directory in the checked repository");
@@ -859,7 +860,7 @@ fn a_command_reported_more_than_once_writes_where_it_first_did() {
     // A runtime reports one command more than once (pending, running, a
     // description, its end), and another command's reports may come in
     // between: each report of the first resolves its line the same way.
-    let turn = CheckedTurn::start("lost-repeated", true);
+    let turn = EOCheckedTurn::start("lost-repeated", true);
     let other = sibling_worktree(&turn, "lost-repeated-other");
     fs::create_dir_all(other.join("sub")).expect("a directory in the other repository");
     let pending = open_check(&turn);
@@ -911,7 +912,7 @@ fn a_relative_change_of_a_lost_shell_counts_where_its_session_works_as_it_starts
     // the command, so it counts where its session works as it starts, not
     // only the shell after it: in its workdir's worktree, and in the named
     // source root its turn works in.
-    let turn = CheckedTurn::start("lost-relative-now", true);
+    let turn = EOCheckedTurn::start("lost-relative-now", true);
     let other = sibling_worktree(&turn, "lost-relative-now-other");
     fs::create_dir_all(other.join("crates")).expect("a directory in the other repository");
     let (session, mut recorder) = writer_in(&turn, &other);
@@ -966,7 +967,7 @@ fn a_relative_change_of_a_lost_shell_counts_where_its_session_works_as_it_starts
 fn a_lone_absolute_change_of_a_lost_shell_writes_where_it_leads_as_it_starts() {
     // TermAl cannot name where the lost shell is, but an absolute target
     // needs no start: the command counts where it leads, not anywhere.
-    let turn = CheckedTurn::start("lost-absolute-now", true);
+    let turn = EOCheckedTurn::start("lost-absolute-now", true);
     let other = sibling_worktree(&turn, "lost-absolute-now-other");
     fs::create_dir_all(other.join("crates")).expect("a directory in the other repository");
     let (session, mut recorder) = writer_in(&turn, &other);
@@ -998,7 +999,7 @@ fn a_line_resolved_for_the_shell_it_loses_is_not_resolved_again() {
     // A report resolves a line TermAl cannot follow once: the worktrees its
     // command may write in take the changes as resolved for the shell it
     // loses (`engram_line_lost_move`).
-    let turn = CheckedTurn::start("lost-resolved-once", true);
+    let turn = EOCheckedTurn::start("lost-resolved-once", true);
     let other = sibling_worktree(&turn, "lost-resolved-once-other");
     let workdir = other.to_string_lossy().into_owned();
     let in_workdir = EngramCommandPlaces::at(vec![None]);
@@ -1036,7 +1037,7 @@ fn a_relative_change_resolves_from_each_start_only_while_the_shell_is_followed()
     // A relative `cd` of a command whose shell TermAl follows resolves from
     // each place the command may start in; of a lost shell's command, whose
     // places TermAl knows only resolved, it may lead anywhere.
-    let turn = CheckedTurn::start("places-shell-lost", true);
+    let turn = EOCheckedTurn::start("places-shell-lost", true);
     fs::create_dir_all(turn.root.join("sub")).expect("a subdirectory");
     let workdir = turn.root.to_string_lossy().into_owned();
     let root = Some(engram_worktree_root(&turn.root));
@@ -1063,7 +1064,7 @@ fn a_claude_sessions_read_only_command_in_the_checked_worktree_leaves_the_check_
     // A command that only reads writes nowhere. Only a Claude session's line
     // is read as Bash; the same line from another runtime may run under a
     // shell that reads it otherwise, so it still counts where it runs.
-    let turn = CheckedTurn::start("read-only-here", true);
+    let turn = EOCheckedTurn::start("read-only-here", true);
     let other = sibling_worktree(&turn, "read-only-here-other");
     let project_id = turn.record(|record| {
         record

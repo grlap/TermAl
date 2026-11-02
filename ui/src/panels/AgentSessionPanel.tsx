@@ -23,7 +23,6 @@ import {
   PendingPromptCard,
   QueuePausedIndicator,
 } from "./session-activity-cards";
-import { resolveQueuePauseCause, retainedPromptHoldText } from "./queue-pause-cause";
 import { SourceTrackingRecoveryIndicator } from "./source-tracking-recovery-card";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { type RenderMessageCard } from "./virtualized-conversation-types";
@@ -1221,140 +1220,58 @@ const SessionConversationPage = memo(
         forceVirtualized={hasOlderHistory || hasNewerHistory}
       />
     );
-    // A retained authorization owns its recovery UI whether its transcript
-    // message is visible, evicted, or not promoted yet. Keep one recovery card
-    // instead of also rendering the entry as an ordinary queued prompt.
-    const retainedPrompts = !isTurnActive && !hasNewerHistory
-      ? pendingPrompts.filter((prompt) => prompt.isEngramRetained === true)
-      : EMPTY_PENDING_PROMPTS;
-    const ordinaryPendingPrompts = !isTurnActive
-      ? visiblePendingPrompts.filter((prompt) => prompt.isEngramRetained !== true)
-      : visiblePendingPrompts;
-    const actionableQueuedCount = ordinaryPendingPrompts.length + retainedPrompts.length;
-    const hasInterruptedRetainedPrompt = pendingPrompts.some(
-      (prompt) =>
-        prompt.isEngramRetained === true && prompt.engramInterrupted === true,
-    );
-    const queuePaused =
-      !session.sourceTrackingRecovery &&
-      !isTurnActive &&
-      Boolean(session.queuePaused) &&
-      !hasInterruptedRetainedPrompt &&
-      actionableQueuedCount > 0;
+    // Queue state is ordinary backend state. Historical Engram flags do not
+    // choose recovery controls or override canonical delivery receipts.
+    const deliveries = new Map((session.promptDeliveries ?? []).map(delivery => [delivery.promptId, delivery]));
+    const deliveryIsHistorical = (promptId: string) => {
+      const disposition = deliveries.get(promptId)?.disposition;
+      return disposition === "ambiguous" || disposition === "accepted" || disposition === "handingOff";
+    };
+    const actionableQueuedCount = hasNewerHistory ? 0 : pendingPrompts.filter(prompt => !deliveryIsHistorical(prompt.id)).length;
+    const queuePaused = !session.sourceTrackingRecovery && !isTurnActive
+      && Boolean(session.queuePaused) && actionableQueuedCount > 0;
     const pausedQueueCard = queuePaused ? (
-      <QueuePausedIndicator
-        agent={session.agent}
-        preview={session.preview}
-        queueHold={session.queueHold}
-        queuedCount={actionableQueuedCount}
-        onResume={() => onResumeSessionQueue?.(session.id)}
-      />
+      <QueuePausedIndicator agent={session.agent} preview={session.preview}
+        queuedCount={actionableQueuedCount} onResume={() => onResumeSessionQueue?.(session.id)} />
     ) : null;
     const sourceTrackingRecoveryCard = session.sourceTrackingRecovery ? (
-      <SourceTrackingRecoveryIndicator
-        explanation={session.preview}
-        onRecover={() => onResumeSessionQueue?.(session.id)}
-      />
+      <SourceTrackingRecoveryIndicator explanation={session.preview}
+        onRecover={() => onResumeSessionQueue?.(session.id)} />
     ) : null;
-    const ordinaryPendingPromptIds = new Set(
-      ordinaryPendingPrompts.map((prompt) => prompt.id),
-    );
-    const retainedPromptIds = new Set(retainedPrompts.map((prompt) => prompt.id));
+    const visiblePendingIds = new Set(visiblePendingPrompts.map(prompt => prompt.id));
     const pendingPromptCards = pendingPrompts
-      .filter(
-        (prompt) =>
-          ordinaryPendingPromptIds.has(prompt.id) || retainedPromptIds.has(prompt.id),
-      )
-      .map((prompt) =>
-        retainedPromptIds.has(prompt.id) ? (() => {
-          const retainedBodyIsVisible = visibleMessageIds.has(prompt.id);
-          const retainedCard = (
-            <article className="activity-card">
-              <div className="activity-card-copy">
-                <div className="card-label">Prompt retained</div>
-                <p>{session.sourceTrackingRecovery
-                  ? "Prompt retained during source tracking recovery. Recovery does not send this prompt."
-                  : prompt.engramInterrupted && !session.queueHold
-                  ? "Delivery is interrupted or unknown. Cancel this retained prompt or reconcile it before continuing."
-                  : retainedPromptHoldText(
-                      resolveQueuePauseCause(session.preview, session.queueHold),
-                    )}</p>
-                {!retainedBodyIsVisible ? (
-                  <PendingPromptCard
-                    prompt={prompt}
-                    sessionId={session.id}
-                    onOpenMailbox={onOpenMailbox}
-                    searchQuery={
-                      conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-                        ? conversationSearchQuery
-                        : ""
-                    }
-                    searchHighlightTone={
-                      conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-                        ? "active"
-                        : "match"
-                    }
-                  />
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="queue-resume-button"
-                aria-label="Cancel retained prompt"
-                onClick={() => onCancelQueuedPrompt(session.id, prompt.id)}
-              >
-                Cancel
-              </button>
-            </article>
-          );
-          return retainedBodyIsVisible ? (
-            <Fragment key={prompt.id}>{retainedCard}</Fragment>
-          ) : (
-            <MessageSlot
-              key={prompt.id}
-              itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
-              isSearchMatch={conversationSearchMatchedItemKeys.has(
-                `pendingPrompt:${prompt.id}`,
-              )}
-              isSearchActive={
-                conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-              }
-              onSearchItemMount={onConversationSearchItemMount}
-            >
-              {retainedCard}
-            </MessageSlot>
-          );
-        })() : (
-          <MessageSlot
-            key={prompt.id}
-            itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
-            isSearchMatch={conversationSearchMatchedItemKeys.has(
-              `pendingPrompt:${prompt.id}`,
-            )}
-            isSearchActive={
-              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-            }
-            onSearchItemMount={onConversationSearchItemMount}
-          >
-            <PendingPromptCard
-              prompt={prompt}
-              sessionId={session.id}
-              onOpenMailbox={onOpenMailbox}
-              onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
-              searchQuery={
-                conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-                  ? conversationSearchQuery
-                  : ""
-              }
-              searchHighlightTone={
-                conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-                  ? "active"
-                  : "match"
-              }
-            />
-          </MessageSlot>
-        ),
-      );
+      .filter(prompt => visiblePendingIds.has(prompt.id)
+        || (!hasNewerHistory && deliveryIsHistorical(prompt.id)))
+      .map(prompt => {
+        const delivery = deliveries.get(prompt.id);
+        const historical = deliveryIsHistorical(prompt.id);
+        const bodyVisible = visibleMessageIds.has(prompt.id);
+        const deliveryLabel = delivery?.disposition === "ambiguous"
+          ? "Delivery outcome unknown"
+          : delivery?.disposition === "accepted" ? "Prompt accepted by provider" : "Prompt handoff in progress";
+        const card = historical ? (
+          <article className="activity-card" aria-label="Prompt delivery status">
+            <div className="activity-card-copy">
+              <div className="card-label">{deliveryLabel}</div>
+              <p>{delivery?.reason ?? "This delivery record does not authorize sending the prompt again."}</p>
+              {!bodyVisible ? <PendingPromptCard prompt={prompt} sessionId={session.id}
+                onOpenMailbox={onOpenMailbox} searchQuery={conversationSearchQuery}
+                searchHighlightTone={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"} /> : null}
+            </div>
+          </article>
+        ) : (
+          <PendingPromptCard prompt={prompt} sessionId={session.id}
+            onOpenMailbox={onOpenMailbox} onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
+            searchQuery={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? conversationSearchQuery : ""}
+            searchHighlightTone={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"} />
+        );
+        return bodyVisible ? <Fragment key={prompt.id}>{card}</Fragment> : (
+          <MessageSlot key={prompt.id} itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
+            isSearchMatch={conversationSearchMatchedItemKeys.has(`pendingPrompt:${prompt.id}`)}
+            isSearchActive={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`}
+            onSearchItemMount={onConversationSearchItemMount}>{card}</MessageSlot>
+        );
+      });
     const pendingPromptQueue =
       pendingPromptCards.length > 0 ? (
         <div className="conversation-pending-prompts">

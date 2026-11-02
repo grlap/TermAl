@@ -23,33 +23,39 @@ const TOLD: &str = "was closed with outcome Unknown; it is not recorded";
 /// Starts a recognised check under `key` whose end is never reported, and
 /// closes the turn, which closes it with outcome Unknown. Clears the holder
 /// line afterwards so what follows reads alone.
-fn close_a_check_with_no_end(turn: &CheckedTurn, recorder: &mut SessionRecorder, key: &str) {
-    close_a_command_with_no_end(turn, recorder, key, SIZE_TEST);
+fn close_a_check_with_no_end(turn: &EOCheckedTurn, recorder: &mut SessionRecorder, key: &str) -> Value {
+    close_a_command_with_no_end(turn, recorder, key, SIZE_TEST)
 }
 
 /// `close_a_check_with_no_end` for the check `command` starts.
 fn close_a_command_with_no_end(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     recorder: &mut SessionRecorder,
     key: &str,
     command: &str,
-) {
+) -> Value {
     recorder
         .command_started(key, command)
         .expect("the start records");
     turn.wait_for_snapshots();
-    turn.finish();
+    let request = turn.finish();
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "{request:#}");
+    assert_eq!(checks[0]["observed_result"], "indeterminate");
+    assert!(checks[0].get("finished_at").is_none());
+    assert_ordinary_observation_has_no_native_credit(turn, &request);
     let closed = turn.record(|record| record.engram.pending_source_root_line.clone());
     assert!(
         closed.is_some_and(|line| line.contains("no end was reported")),
         "the check was closed with outcome Unknown"
     );
     turn.record_mut(|record| record.engram.pending_source_root_line = None);
+    request
 }
 
 /// The holder line pending now, cleared, so the next read sees only what
 /// follows.
-fn take_line(turn: &CheckedTurn) -> String {
+fn take_line(turn: &EOCheckedTurn) -> String {
     let line = turn.record(|record| record.engram.pending_source_root_line.clone());
     turn.record_mut(|record| record.engram.pending_source_root_line = None);
     line.unwrap_or_default()
@@ -103,7 +109,7 @@ fn told_line(ended: &str, code: i64) -> String {
 /// fingerprint and never by its text. An end reported again is not told.
 #[test]
 fn a_plain_command_reusing_the_key_is_told_once_as_an_observation() {
-    let turn = CheckedTurn::start("late-end-reused-plain", true);
+    let turn = EOCheckedTurn::start("late-end-reused-plain", true);
     let mut recorder = turn.recorder();
     close_a_check_with_no_end(&turn, &mut recorder, "reused");
     recorder
@@ -127,7 +133,7 @@ fn a_plain_command_reusing_the_key_is_told_once_as_an_observation() {
 /// command under the key is not told again.
 #[test]
 fn an_end_reported_without_its_start_is_told_once() {
-    let turn = CheckedTurn::start("late-end-no-start", true);
+    let turn = EOCheckedTurn::start("late-end-no-start", true);
     let mut recorder = turn.recorder();
     close_a_check_with_no_end(&turn, &mut recorder, "lost-end");
     end(&mut recorder, "lost-end", "git status", 0);
@@ -151,22 +157,10 @@ fn an_end_reported_without_its_start_is_told_once() {
 /// once, named as the recognised check it is.
 #[test]
 fn a_rerun_that_capacity_refuses_is_told_once() {
-    const NEXT_GRANT: &str = "late-end-capacity-next-grant";
-    let turn = CheckedTurn::start_with_turns(
-        "late-end-capacity-rerun",
-        true,
-        None,
-        vec![
-            checkpoint_reply(CHECK_GRANT),
-            grant_reply(NEXT_GRANT),
-            begin_reply(NEXT_GRANT),
-            checkpoint_reply(NEXT_GRANT),
-        ],
-        2,
-    );
+    let turn = EOCheckedTurn::start("late-end-capacity-rerun", true);
     let mut recorder = turn.recorder();
     close_a_check_with_no_end(&turn, &mut recorder, "rerun");
-    begin_check_outcome_turn(&turn);
+    turn.begin("Run the successor ordinary check.");
     let workers = turn.record(|record| record.engram.capture_workers.clone());
     let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
     let pending = (0..ENGRAM_CAPTURE_WORKER_LIMIT)
@@ -206,7 +200,11 @@ fn a_rerun_that_capacity_refuses_is_told_once() {
     let line = take_line(&turn);
     assert!(line.contains(&told_line(&size_test_label(), 0)), "{line}");
     assert_eq!(line.matches(TOLD).count(), 1, "{line}");
-    finish_check_outcome_turn(&turn);
+    let request = turn.finish();
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "diagnostic capacity cannot lose ordinary facts: {request:#}");
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
 /// An ACP runtime may report a frame with no command line (its start names
@@ -216,7 +214,7 @@ fn a_rerun_that_capacity_refuses_is_told_once() {
 #[test]
 fn an_acp_title_only_end_is_told_once() {
     const TITLE: &str = "Run the size test";
-    let turn = CheckedTurn::start("late-end-acp-title", true);
+    let turn = EOCheckedTurn::start("late-end-acp-title", true);
     let mut recorder = turn.recorder();
     close_a_check_with_no_end(&turn, &mut recorder, "acp-call");
     recorder
@@ -239,7 +237,7 @@ fn an_acp_title_only_end_is_told_once() {
 /// built-in check.
 #[test]
 fn a_declared_checks_late_end_is_told_once() {
-    let turn = CheckedTurn::start("late-end-declared", true);
+    let turn = EOCheckedTurn::start("late-end-declared", true);
     super::declared_checks::declare(
         &turn,
         super::declared_checks::DECLARED_TEST,
@@ -281,22 +279,10 @@ fn a_declared_checks_late_end_is_told_once() {
 /// itself.
 #[test]
 fn a_rerun_that_starts_a_check_retires_the_closure() {
-    const NEXT_GRANT: &str = "late-end-rerun-check-next-grant";
-    let turn = CheckedTurn::start_with_turns(
-        "late-end-rerun-check",
-        true,
-        None,
-        vec![
-            checkpoint_reply(CHECK_GRANT),
-            grant_reply(NEXT_GRANT),
-            begin_reply(NEXT_GRANT),
-            checkpoint_reply(NEXT_GRANT),
-        ],
-        2,
-    );
+    let turn = EOCheckedTurn::start("late-end-rerun-check", true);
     let mut recorder = turn.recorder();
-    close_a_check_with_no_end(&turn, &mut recorder, "reused");
-    begin_check_outcome_turn(&turn);
+    let first = close_a_check_with_no_end(&turn, &mut recorder, "reused");
+    turn.begin("Run the successor ordinary check.");
     turn.run("reused", SIZE_TEST, EngramCommandExit::Code(0), || {});
     assert!(
         !take_line(&turn).contains(TOLD),
@@ -307,11 +293,55 @@ fn a_rerun_that_starts_a_check_retires_the_closure() {
         !take_line(&turn).contains(TOLD),
         "nor is its end reported again"
     );
-    let checkpoint = finish_check_outcome_turn(&turn);
-    assert_eq!(checkpoint["grant_id"], NEXT_GRANT);
+    let request = turn.finish();
+    assert_ne!(request["occurrence"]["host_turn_ref"], first["occurrence"]["host_turn_ref"]);
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "only the successor's own check: {request:#}");
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert_ne!(checks[0]["host_check_id"], first["occurrence"]["observed_checks"][0]["host_check_id"]);
+    assert_ordinary_observation_has_no_native_credit(&turn, &request);
+}
+
+/// The test-run rows the session of `turn` owns: each one's execution id and
+/// whether it has ended.
+fn session_test_runs(turn: &EOCheckedTurn) -> Vec<(String, bool)> {
+    let inner = turn.state.inner.lock().unwrap();
+    inner
+        .test_run_observations
+        .values()
+        .filter(|row| row.summary.owner_session_id.as_deref() == Some(turn.session_id.as_str()))
+        .map(|row| (row.execution_id.clone(), row.summary.ended_at.is_some()))
+        .collect()
+}
+
+/// A start repeated in its own turn, as ACP repeats one (pending, then in
+/// progress), is the same execution: it matches that start's test-run row,
+/// adds no row and starts no second check, and the one end ends that row and
+/// that check. Only an earlier turn's unended start is not this turn's.
+#[test]
+fn a_start_repeated_in_its_own_turn_matches_its_original_row() {
+    let turn = EOCheckedTurn::start("repeated-start-same-turn", true);
+    let mut recorder = turn.recorder();
+    recorder.command_started("repeated", SIZE_TEST).expect("the start records");
+    let original = session_test_runs(&turn);
+    assert_eq!(original.len(), 1, "the start is one execution: {original:?}");
+    assert!(!original[0].1, "the original start has not ended");
+    for _ in 0..2 {
+        recorder.command_started("repeated", SIZE_TEST).expect("the repeated start records");
+        assert_eq!(session_test_runs(&turn), original, "a repeated start adds no row");
+    }
+    turn.wait_for_snapshots();
+    end(&mut recorder, "repeated", SIZE_TEST, 0);
+    turn.wait_for_snapshots();
+    assert!(!take_line(&turn).contains(TOLD), "its end is no late end");
     assert_eq!(
-        checkpoint["verification_evidence"].as_array().map(Vec::len),
-        Some(1),
-        "the rerun check is recorded as itself: {checkpoint:#}"
+        session_test_runs(&turn),
+        vec![(original[0].0.clone(), true)],
+        "the one end ends the original row"
     );
+    let request = turn.finish();
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "one check: {request:#}");
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }

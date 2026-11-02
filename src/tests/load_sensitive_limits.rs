@@ -17,9 +17,8 @@ fn load_sensitive_limits_are_doubled_and_keep_their_relations() {
     );
     assert_eq!(ENGRAM_CONTROL_SETTLE_TIMEOUT, Duration::from_secs(21));
     assert_eq!(ENGRAM_SOURCE_ROOT_NAMING_BUDGET, Duration::from_secs(102));
-    // Lifecycle arbitration outlasts the longest call and a whole admission.
+    // Ordinary connection teardown outlasts the longest transport call.
     assert!(ENGRAM_CONTROL_SETTLE_TIMEOUT > Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS));
-    assert!(ENGRAM_CONTROL_SETTLE_TIMEOUT > Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS));
     // A naming call holds two full captures and the commit's reserve; what
     // its reads take comes out of the second capture.
     assert!(
@@ -146,23 +145,18 @@ fn the_long_calls_wait_out_the_server_work_they_cover() {
         "http://127.0.0.1:1".to_owned(),
     )
     .unwrap();
-    let dispatch = Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS);
     let wait = |call| bridge.allowance(call);
     // A mailbox send that wakes a session holding a claim delivers its turn
-    // before it answers: a gated admission and the turn's begin-time capture.
-    assert!(wait(DelegationLongCall::MailboxSend) > dispatch + REVIEW_FREEZE_TIMEOUT);
+    // before it answers. Ordinary delivery retains the review-freeze budget.
+    assert!(wait(DelegationLongCall::MailboxSend) > REVIEW_FREEZE_TIMEOUT);
     // A follow-up delivers the re-armed child turn after its recovery.
     assert!(
         wait(DelegationLongCall::Followup)
-            > termal_delegation_followup_recovery_allowance() + dispatch + REVIEW_FREEZE_TIMEOUT
+            > termal_delegation_followup_recovery_allowance() + REVIEW_FREEZE_TIMEOUT
     );
-    // A spawn binds the parent, which may recover a binding, and the new
-    // child off the admission path, then delivers the child's first turn;
-    // an evaluation request spawns its evaluator after its tracker reads.
-    let spawn = engram_unqueued_bind_worst_case(true)
-        + engram_unqueued_bind_worst_case(false)
-        + dispatch
-        + REVIEW_FREEZE_TIMEOUT;
+    // A spawn delivers the child's first ordinary turn; an evaluation
+    // request additionally reads the tracker before spawning its evaluator.
+    let spawn = REVIEW_FREEZE_TIMEOUT;
     assert!(wait(DelegationLongCall::Spawn) > spawn);
     assert!(
         wait(DelegationLongCall::EvaluationRequest)

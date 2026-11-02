@@ -1,10 +1,9 @@
-// Owns Claude persisted-output credit diagnostics through the real parser,
-// session recorder and checkpoint. Does not read spill files or change check
-// verdicts. New module using the fixture from engram_turn_checks.rs.
+// Owns Claude persisted-output safety through the real parser and ordinary EO.
+// Keeps diagnostic result facts and raw transcript output without opening spill
+// paths or granting native verification. Uses the shared ordinary-turn fixture.
 use super::*;
 
 const SPILL_PATH: &str = "C:\\not-read\\tool-results\\private-output.txt";
-const CUT_REASON: &str = "the runtime cut the output before any passing summary was available";
 
 fn prefix() -> String {
     "running tests\n".to_owned() + &"x".repeat(30_000 - "running tests\n".len())
@@ -16,7 +15,7 @@ fn persisted(stdout: &str) -> Value {
         "persistedOutputPath": SPILL_PATH, "persistedOutputSize": 173853})
 }
 
-fn start(turn: &CheckedTurn, background: bool) -> (ClaudeTurnState, SessionRecorder) {
+fn start(turn: &EOCheckedTurn, background: bool) -> (ClaudeTurnState, SessionRecorder) {
     let mut parser = ClaudeTurnState::default();
     let mut recorder = turn.recorder();
     let mut external = None;
@@ -34,7 +33,7 @@ fn start(turn: &CheckedTurn, background: bool) -> (ClaudeTurnState, SessionRecor
 }
 
 fn complete(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     parser: &mut ClaudeTurnState,
     recorder: &mut SessionRecorder,
     result: Value,
@@ -55,22 +54,31 @@ fn complete(
     turn.wait_for_snapshots();
 }
 
-fn pending(turn: &CheckedTurn) -> String {
-    turn.record(|record| record.engram.pending_source_root_line.clone()).unwrap_or_default()
+fn diagnostic(turn: &EOCheckedTurn) -> EngramTurnCheck {
+    turn.record(|record| record.engram.active_turn_checks.iter()
+        .find(|check| check.key == "large-check").unwrap().clone())
+}
+
+fn finish_observed(turn: &EOCheckedTurn, expected: &str) {
+    let request = turn.finish();
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0]["observed_result"], expected);
+    assert!(!request.to_string().contains(SPILL_PATH), "spill paths are not observation evidence");
+    assert_ordinary_observation_has_no_native_credit(turn, &request);
 }
 
 #[test]
-fn claude_persisted_output_without_summary_names_the_cut_and_quiet_remedy() {
-    let turn = CheckedTurn::start("claude-cut", true);
+fn claude_persisted_output_without_summary_keeps_the_cut_and_raw_output() {
+    let turn = EOCheckedTurn::start("claude-cut", true);
     let (mut parser, mut recorder) = start(&turn, false);
     let stdout = prefix();
     complete(&turn, &mut parser, &mut recorder, persisted(&stdout), false);
-    let checkpoint = turn.finish();
-    assert_withheld_and_told(&turn, &checkpoint, CUT_REASON);
-    let line = pending(&turn);
-    assert!(line.contains("cargo test -q"), "{line}");
-    assert!(!line.contains(SPILL_PATH) && !line.contains(&stdout), "{line}");
-    assert!(!checkpoint.to_string().contains(SPILL_PATH));
+    let check = diagnostic(&turn);
+    assert!(check.runtime_output_cut);
+    assert!(!check.end.as_ref().unwrap().showed_passing_tests);
+    assert!(!check.end.as_ref().unwrap().result_lines.join("\n").contains(SPILL_PATH));
+    finish_observed(&turn, "indeterminate");
     turn.record(|record| {
         assert!(record.session.messages.iter().any(|message| matches!(
             message, Message::Command { output, .. } if output == &stdout
@@ -79,30 +87,32 @@ fn claude_persisted_output_without_summary_names_the_cut_and_quiet_remedy() {
 }
 
 #[test]
-fn claude_large_inline_output_still_credits_the_supplied_passing_tail() {
-    // Metadata with a supplied passing summary keeps the existing verdict too:
-    // this fix explains missing evidence, it never manufactures or removes it.
+fn claude_large_inline_output_keeps_its_supplied_passing_tail_without_native_credit() {
     for has_metadata in [false, true] {
-        let turn = CheckedTurn::start(&format!("claude-inline-{has_metadata}"), true);
+        let turn = EOCheckedTurn::start(&format!("claude-inline-{has_metadata}"), true);
         let (mut parser, mut recorder) = start(&turn, false);
         let stdout = prefix() + "\ntest result: ok. 1 passed; 0 failed\n";
         let result = if has_metadata { persisted(&stdout) } else {
             json!({"stdout": stdout, "stderr": "", "interrupted": false})
         };
         complete(&turn, &mut parser, &mut recorder, result, false);
-        let checkpoint = turn.finish();
-        assert_eq!(checkpoint["verification_evidence"][0]["check_kind"], "test");
-        assert_eq!(observations(&checkpoint)[0]["outcome"], "succeeded");
-        assert!(!pending(&turn).contains(CUT_REASON));
+        let check = diagnostic(&turn);
+        assert_eq!(check.runtime_output_cut, has_metadata);
+        assert!(check.end.as_ref().unwrap().showed_passing_tests,
+            "actual supplied tail remains diagnostic evidence even with spill metadata");
+        assert!(check.end.as_ref().unwrap().result_lines.iter()
+            .any(|line| line.contains("test result: ok. 1 passed")));
+        // A cut ordinary observation stays conservative; it never becomes a
+        // native verification or opens the spill file to manufacture a verdict.
+        finish_observed(&turn, if has_metadata { "indeterminate" } else { "passed" });
     }
 }
 
 #[test]
-fn claude_malformed_persisted_metadata_keeps_the_generic_no_summary_refusal() {
+fn claude_malformed_persisted_metadata_does_not_claim_an_output_cut() {
     let stdout = prefix();
     for (index, metadata) in [
-        json!({}),
-        json!({"persistedOutputPath": SPILL_PATH}),
+        json!({}), json!({"persistedOutputPath": SPILL_PATH}),
         json!({"persistedOutputSize": 173853}),
         json!({"persistedOutputPath": null, "persistedOutputSize": 173853}),
         json!({"persistedOutputPath": true, "persistedOutputSize": 173853}),
@@ -113,45 +123,48 @@ fn claude_malformed_persisted_metadata_keeps_the_generic_no_summary_refusal() {
         json!({"persistedOutputPath": SPILL_PATH, "persistedOutputSize": 0}),
         json!({"persistedOutputPath": SPILL_PATH, "persistedOutputSize": 30000}),
     ].into_iter().enumerate() {
-        let turn = CheckedTurn::start(&format!("claude-cut-malformed-{index}"), true);
+        let turn = EOCheckedTurn::start(&format!("claude-cut-malformed-{index}"), true);
         let (mut parser, mut recorder) = start(&turn, false);
         let mut result = json!({"stdout": stdout, "stderr": "", "interrupted": false});
         result.as_object_mut().unwrap().extend(metadata.as_object().unwrap().clone());
         complete(&turn, &mut parser, &mut recorder, result, false);
-        let checkpoint = turn.finish();
-        assert_withheld_and_told(&turn, &checkpoint, "its output shows no passing test");
-        assert!(!pending(&turn).contains("cargo test -q"));
+        let check = diagnostic(&turn);
+        assert!(!check.runtime_output_cut);
+        assert!(!check.end.as_ref().unwrap().showed_passing_tests);
+        // This is the observed successful shell result, not proof that a test passed.
+        finish_observed(&turn, "passed");
     }
 }
 
 #[test]
 fn claude_persisted_metadata_never_promotes_failure_interruption_or_background() {
     for cause in ["failed", "interrupted", "background", "auto-background"] {
-        let turn = CheckedTurn::start(&format!("claude-cut-{cause}"), true);
+        let turn = EOCheckedTurn::start(&format!("claude-cut-{cause}"), true);
         let (mut parser, mut recorder) = start(&turn, cause == "background");
         let mut result = persisted("test result: FAILED. 0 passed; 1 failed");
         if cause == "interrupted" { result["interrupted"] = json!(true); }
         if cause == "auto-background" { result["backgroundTaskId"] = json!("task-running"); }
         complete(&turn, &mut parser, &mut recorder, result, cause == "failed");
-        let checkpoint = turn.finish();
+        let check = diagnostic(&turn);
+        let end = check.end.as_ref().unwrap();
+        assert!(!end.showed_passing_tests);
         match cause {
-            "failed" | "interrupted" => {
-                assert_eq!(checkpoint["verification_evidence"][0]["check_kind"], "test");
-                assert_eq!(observations(&checkpoint)[0]["outcome"], if cause == "failed" { "failed" } else { "unknown" });
-            }
-            _ => assert!(checkpoint.get("verification_evidence").is_none(), "{checkpoint:#}"),
+            "failed" => assert_eq!(end.exit, EngramCommandExit::Code(1)),
+            "interrupted" => assert_eq!(end.exit, EngramCommandExit::Unknown),
+            _ => assert_eq!(end.exit, EngramCommandExit::NotFinished),
         }
-        assert!(!pending(&turn).contains(CUT_REASON));
+        finish_observed(&turn, "indeterminate");
     }
 }
 
 #[test]
-fn claude_persisted_output_keeps_overlap_refusal_precedence() {
-    let turn = CheckedTurn::start("claude-cut-overlap", true);
+fn claude_persisted_output_keeps_overlap_and_cut_diagnostics_without_native_credit() {
+    let turn = EOCheckedTurn::start("claude-cut-overlap", true);
     let (mut parser, mut recorder) = start(&turn, false);
     run_beside(&turn);
     complete(&turn, &mut parser, &mut recorder, persisted(&prefix()), false);
-    let checkpoint = turn.finish();
-    assert_withheld_and_told(&turn, &checkpoint, "reached its worktree while it ran");
-    assert!(!pending(&turn).contains(CUT_REASON));
+    let check = diagnostic(&turn);
+    assert!(check.overlapped && check.runtime_output_cut);
+    assert!(!check.end.as_ref().unwrap().showed_passing_tests);
+    finish_observed(&turn, "indeterminate");
 }

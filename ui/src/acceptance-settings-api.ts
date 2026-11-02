@@ -15,7 +15,6 @@ export type AcceptancePolicySnapshot = {
   readerKey: string;
   policy?: string;
   epoch?: number;
-  requiredAssurance?: string;
   acceptanceEvaluation?: StoreAcceptancePolicy;
 };
 export type PolicyChange = StoreAcceptancePolicy & {

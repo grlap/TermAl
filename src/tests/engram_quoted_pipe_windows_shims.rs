@@ -75,7 +75,7 @@ fn medium_repair_script_runners_do_not_infer_their_configured_shell() {
 #[test]
 fn medium_repair_batch_success_report_cannot_forge_passing_credit() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start("quoted-batch-shim-forgery", true);
+    let turn = EOCheckedTurn::start("quoted-batch-shim-forgery", true);
     let provenance = turn.record(|record| {
         EngramObservationProvenance::Claude(ClaudeObservationProvenance {
             token: record.runtime.runtime_token().unwrap(),
@@ -106,32 +106,16 @@ fn medium_repair_batch_success_report_cannot_forge_passing_credit() {
         )
         .unwrap();
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
-    one_node_test(&checkpoint, "unknown");
-    for row in checkpoint["verification_evidence"].as_array().unwrap() {
-        assert!(row["refs"]
-            .as_array()
-            .unwrap()
-            .contains(&json!(format!("command:{command}"))));
-        let id = &row["producer_observation"]["observation_id"];
-        let producers = observations(&checkpoint)
-            .into_iter()
-            .filter(|producer| &producer["observation_id"] == id)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            producers.len(),
-            1,
-            "the evidence must name its exact producer"
-        );
-        assert_eq!(
-            producers[0]["outcome"], "unknown",
-            "no passing shim credit: {checkpoint:#}"
-        );
-        assert!(row["summary"]
-            .as_str()
-            .unwrap()
-            .contains("pipe containment validation rejected"));
-    }
+    let observation = turn.finish();
+    one_node_test(&observation, "indeterminate");
+    assert_ordinary_observation_has_no_native_credit(&turn, &observation);
+    assert!(node_refs(&turn).contains(&format!("command:{command}")));
+    assert!(node_summary(&turn).contains("pipe containment validation rejected"));
+    let check = node_diagnostic(&turn);
+    let facts = observation["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(facts[0]["host_check_id"], unadmitted_host_check_id(
+        observation["occurrence"]["host_turn_ref"].as_str().unwrap(), &check.key),
+        "the ordinary fact must name its exact recorded check");
 }
 
 #[test]

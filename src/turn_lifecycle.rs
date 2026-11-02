@@ -58,10 +58,10 @@ struct EngramMcpRuntimeRevocationBatch {
     newly_pending_session_ids: Vec<String>,
 }
 
+#[cfg(test)]
 #[derive(Default)]
 struct EngramMcpRuntimeRevocationRelease {
     deferred_callbacks: Vec<(String, RuntimeToken, Vec<DeferredStopCallback>)>,
-    project_fence_release_failed: bool,
 }
 
 #[derive(Debug, Default)]
@@ -116,20 +116,6 @@ enum AtomicTurnFailureMode<'a> {
         owner_generation: u64,
         retain_runtime: bool,
     },
-}
-
-#[derive(Clone, Debug)]
-struct RejectedEngramDeliveryOwner {
-    dispatch_generation: u64,
-    grant_id: String,
-    prompt_id: String,
-    intent_fingerprint: String,
-}
-
-struct RejectedEngramCheckpointOwner {
-    delivery: RejectedEngramDeliveryOwner,
-    active_turn_generation: u64,
-    stop: RuntimeStopOwner,
 }
 
 impl<'a> AtomicTurnFailureMode<'a> {
@@ -294,6 +280,7 @@ fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
 /// StateInner lock. Project settings transactions use this primitive while
 /// releasing their project-generation fence in the same critical section, so
 /// a newer mutation cannot install pending teardown state between the two.
+#[cfg(test)]
 fn release_engram_mcp_runtime_revocations_without_teardown_locked(
     inner: &mut StateInner,
     batch: EngramMcpRuntimeRevocationBatch,
@@ -343,6 +330,7 @@ impl AppState {
     /// authority is unusable. The runtime stays alive until its normal reset
     /// boundary, while terminal callbacks captured during the bounded revoke
     /// window are returned for replay after the project fence is released.
+    #[cfg(test)]
     fn release_engram_mcp_runtime_revocations_without_teardown(
         &self,
         batch: EngramMcpRuntimeRevocationBatch,
@@ -369,14 +357,14 @@ impl AppState {
         // the stop fence has been released. Prepared handoff comes last, so a
         // deferred terminal outcome wins before we consider delivering a prompt.
         deferred_callbacks.sort_by_key(|deferred| match deferred {
-            DeferredStopCallback::EngramHandoff { .. } => 2,
+            DeferredStopCallback::TurnHandoff { .. } => 2,
             DeferredStopCallback::RuntimeExited { .. } => 1,
             _ => 0,
         });
         for deferred in deferred_callbacks {
             let active_turn_generation = deferred.active_turn_generation();
             let replay_result = match deferred {
-                DeferredStopCallback::EngramHandoff { dispatch, .. } => {
+                DeferredStopCallback::TurnHandoff { dispatch, .. } => {
                     let prepared = dispatch
                         .0
                         .lock()
@@ -593,9 +581,6 @@ impl AppState {
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
             );
-            let preserve_delegation_for_rebind = inner.sessions[index].engram.rebind_required
-                && inner.sessions[index].engram.active_grant_id.is_some()
-                && engram_project_for_session_locked(&inner, session_id).is_some();
             let should_write_message = was_busy || shutdown_error.is_some();
             let message_id = should_write_message.then(|| inner.next_message_id());
             let file_change_message_id =
@@ -616,7 +601,6 @@ impl AppState {
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
                 let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
-                abandon_ending_turn_engram_dispatch(record);
                 // The stopped runtime's turn, captured before it is retired.
                 let ending_turn = record.active_turn_generation;
                 if retain_runtime_for_retry {
@@ -780,7 +764,7 @@ impl AppState {
                         && !suppress_automatic_resume
                         && dispatch_queued_prompts,
                     failed_mailbox_notification,
-                    should_write_message && !preserve_delegation_for_rebind,
+                    should_write_message,
                     stopped_wait_refresh,
                     None,
                     shutdown_error.map(str::to_owned),
@@ -812,7 +796,7 @@ impl AppState {
                         false,
                         false,
                         failed_mailbox_notification,
-                        should_write_message && !preserve_delegation_for_rebind,
+                        should_write_message,
                         DelegationWaitRefresh::default(),
                         Some(detail),
                         shutdown_error.map(str::to_owned),
@@ -899,15 +883,7 @@ impl AppState {
         expected_active_turn_generation: Option<u64>,
         error_message: &str,
     ) -> Result<bool> {
-        self.checkpoint_engram_turn_off_lock(
-            session_id,
-            EngramCheckpointPurpose::TurnTerminal,
-            Some(token),
-            expected_active_turn_generation,
-            EngramNextIntent::Wait,
-            Some(EngramExecutionOutcome::Failed),
-            None,
-        );
+
         let cleaned = error_message.trim();
         let (should_dispatch_next, failed_mailbox_notification) = {
             let Some(_observation_install) =
@@ -944,7 +920,7 @@ impl AppState {
                 return Ok(false);
             }
             let _ = record;
-            self.queue_runtime_observation_close_locked(&mut inner, index);
+            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Failed);
             let record = &mut inner.sessions[index];
             // A turn that failed before its runtime acknowledged a receipted
             // prompt leaves that delivery unknown. Settled here, under the
@@ -958,7 +934,6 @@ impl AppState {
                     "the turn failed before the runtime acknowledged the prompt: {cleaned}"
                 )),
             );
-            abandon_ending_turn_engram_dispatch(record);
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
                 // Restore the durable wake below, but do not immediately run
@@ -1041,16 +1016,15 @@ impl AppState {
         session_id: &str,
         token: &RuntimeToken,
         active_turn_generation: u64,
-        engram_dispatch_generation: Option<u64>,
         error_message: &str,
     ) -> Result<bool> {
         self.fail_rejected_turn_delivery_with_federation(session_id, token, active_turn_generation,
-            engram_dispatch_generation, error_message, None)
+            error_message, None)
     }
 
     fn fail_rejected_turn_delivery_with_federation(
         &self, session_id: &str, token: &RuntimeToken, active_turn_generation: u64,
-        engram_dispatch_generation: Option<u64>, error_message: &str,
+        error_message: &str,
         federation_identity: Option<&FederationExecutorHandoffIdentity>,
     ) -> Result<bool> {
         let Some(owner_generation) = self.claim_turn_terminalization_if_runtime_matches_with_federation(
@@ -1062,39 +1036,6 @@ impl AppState {
         else {
             return Ok(false);
         };
-        let rejected_engram_owner = engram_dispatch_generation.and_then(|dispatch_generation| {
-            self.capture_rejected_engram_delivery_owner(
-                session_id,
-                token,
-                active_turn_generation,
-                owner_generation,
-                dispatch_generation,
-            )
-        });
-        let rejected_engram_owner_durably_interrupted = rejected_engram_owner
-            .as_ref()
-            .is_some_and(|owner| {
-                match self.persist_rejected_engram_delivery_interruption(
-                    session_id,
-                    token,
-                    active_turn_generation,
-                    owner_generation,
-                    owner,
-                ) {
-                    Ok(interrupted) => interrupted,
-                    Err(error) => {
-                        // Do not checkpoint a remote grant unless the queued
-                        // owner is already durably non-replayable. The atomic
-                        // terminal transition below gets one more chance to
-                        // persist the interruption while leaving the grant
-                        // open on failure.
-                        eprintln!(
-                            "state warning> failed to persist rejected Engram delivery interruption for `{session_id}`: {error:#}"
-                        );
-                        false
-                    }
-                }
-            });
         self.fail_turn_and_clear_runtime_atomically(
             session_id,
             error_message,
@@ -1103,111 +1044,7 @@ impl AppState {
                 active_turn_generation,
                 owner_generation,
             },
-            rejected_engram_owner,
-            rejected_engram_owner_durably_interrupted,
         )
-    }
-
-    fn capture_rejected_engram_delivery_owner(
-        &self,
-        session_id: &str,
-        token: &RuntimeToken,
-        active_turn_generation: u64,
-        owner_generation: u64,
-        dispatch_generation: u64,
-    ) -> Option<RejectedEngramDeliveryOwner> {
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(session_id)?;
-        let record = &inner.sessions[index];
-        if record.engram.dispatch_generation != dispatch_generation
-            || record.active_turn_generation != active_turn_generation
-            || !record.runtime.matches_runtime_token(token)
-            || !record.runtime_stop_is_owned_by(
-                RuntimeStopOwnerKind::LostRuntimeTerminalization,
-                token,
-                owner_generation,
-            )
-        {
-            return None;
-        }
-        let grant_id = record.engram.active_grant_id.clone()?;
-        let queued = record.queued_prompts.front()?;
-        if queued.promoted_message_index.is_none()
-            || queued
-                .engram_evaluate
-                .as_ref()
-                .and_then(|prepared| prepared.begun_grant_id.as_deref())
-                != Some(grant_id.as_str())
-        {
-            return None;
-        }
-        Some(RejectedEngramDeliveryOwner {
-            dispatch_generation,
-            grant_id,
-            prompt_id: queued.pending_prompt.id.clone(),
-            intent_fingerprint: engram_turn_intent_fingerprint(
-                &queued.pending_prompt.text,
-                queued.pending_prompt.expanded_text.as_deref(),
-                &queued.attachments,
-                queued.pending_prompt.source.as_ref(),
-                queued.source,
-            ),
-        })
-    }
-
-    fn persist_rejected_engram_delivery_interruption(
-        &self,
-        session_id: &str,
-        token: &RuntimeToken,
-        active_turn_generation: u64,
-        owner_generation: u64,
-        owner: &RejectedEngramDeliveryOwner,
-    ) -> Result<bool> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else {
-            return Ok(false);
-        };
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        let owner_is_current = record.engram.dispatch_generation == owner.dispatch_generation
-            && record.active_turn_generation == active_turn_generation
-            && record.runtime.matches_runtime_token(token)
-            && record.runtime_stop_is_owned_by(
-                RuntimeStopOwnerKind::LostRuntimeTerminalization,
-                token,
-                owner_generation,
-            )
-            && record.engram.active_grant_id.as_deref() == Some(owner.grant_id.as_str())
-            && record.queued_prompts.front().is_some_and(|queued| {
-                queued.pending_prompt.id == owner.prompt_id
-                    && queued.promoted_message_index.is_some()
-                    && queued
-                        .engram_evaluate
-                        .as_ref()
-                        .and_then(|prepared| prepared.begun_grant_id.as_deref())
-                        == Some(owner.grant_id.as_str())
-                    && engram_turn_intent_fingerprint(
-                        &queued.pending_prompt.text,
-                        queued.pending_prompt.expanded_text.as_deref(),
-                        &queued.attachments,
-                        queued.pending_prompt.source.as_ref(),
-                        queued.source,
-                    ) == owner.intent_fingerprint
-            });
-        if !owner_is_current {
-            return Ok(false);
-        }
-        let queued = record
-            .queued_prompts
-            .front_mut()
-            .expect("captured rejected Engram owner should remain queued");
-        queued.engram_interrupted = true;
-        queued.engram_waiting = false;
-        record.set_auto_dispatch_blocked(true);
-        sync_pending_prompts(record);
-        self.commit_locked(&mut inner)?;
-        Ok(true)
     }
 
     /// Terminalizes an Active/Approval turn only when its runtime has already
@@ -1246,8 +1083,6 @@ impl AppState {
                 active_turn_generation,
                 owner_generation,
             },
-            None,
-            false,
         )
     }
 
@@ -1344,8 +1179,6 @@ impl AppState {
                 owner_generation,
                 retain_runtime: false,
             },
-            None,
-            false,
         )
     }
 
@@ -1366,8 +1199,6 @@ impl AppState {
                 owner_generation,
                 retain_runtime: true,
             },
-            None,
-            false,
         )
     }
 
@@ -1376,59 +1207,7 @@ impl AppState {
         session_id: &str,
         error_message: &str,
         mode: AtomicTurnFailureMode<'_>,
-        rejected_engram_owner: Option<RejectedEngramDeliveryOwner>,
-        rejected_engram_owner_durably_interrupted: bool,
     ) -> Result<bool> {
-        // Deliberately omit the runtime token: MatchingRuntime already owns
-        // the exact stop fence, while rejected delivery and missing-runtime
-        // recovery have no live handle to match. Passing a token would make
-        // the checkpoint helper refuse the owned stop-in-progress case.
-        let checkpoint_token = None;
-        let rejected_checkpoint_owner = match mode {
-            AtomicTurnFailureMode::RejectedDelivery { token, active_turn_generation, owner_generation }
-                if rejected_engram_owner.is_some() && rejected_engram_owner_durably_interrupted =>
-            {
-                Some(RejectedEngramCheckpointOwner {
-                    delivery: rejected_engram_owner.as_ref().expect("rejected owner").clone(),
-                    active_turn_generation,
-                    stop: RuntimeStopOwner {
-                        kind: RuntimeStopOwnerKind::LostRuntimeTerminalization,
-                        token: Some(token.clone()),
-                        generation: owner_generation,
-                    },
-                })
-            }
-            _ => None,
-        };
-        let checkpoint_outcome =
-            if rejected_engram_owner.is_some() && !rejected_engram_owner_durably_interrupted {
-                EngramCheckpointOutcome::Skipped
-            } else {
-                // A matching runtime reported a confirmed failure; a missing
-                // runtime or a rejected delivery leaves the ending unknown.
-                self.checkpoint_engram_turn_with_retry_owner_off_lock(
-                    session_id,
-                    EngramCheckpointPurpose::TurnTerminal,
-                    checkpoint_token,
-                    None,
-                    EngramNextIntent::Wait,
-                    Some(
-                        if matches!(mode, AtomicTurnFailureMode::MatchingRuntime { .. }) {
-                            EngramExecutionOutcome::Failed
-                        } else {
-                            EngramExecutionOutcome::Unknown
-                        },
-                    ),
-                    None,
-                    None,
-                    false,
-                    None,
-                    None,
-                    None,
-                    rejected_checkpoint_owner.as_ref(),
-                    None,
-                )
-            };
         let cleaned = error_message.trim();
         let preserve_accepted_turn_state = mode.preserves_accepted_turn_state();
         let (
@@ -1545,7 +1324,7 @@ impl AppState {
                 }
                 return Ok(false);
             }
-            self.queue_runtime_observation_close_locked(&mut inner, index);
+            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Failed);
             let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
             let file_change_message_id = (preserve_accepted_turn_state
                 && !inner.sessions[index].active_turn_file_changes.is_empty())
@@ -1577,44 +1356,6 @@ impl AppState {
                     (!matches!(mode, AtomicTurnFailureMode::RejectedDelivery { .. }))
                         .then_some(active_mailbox_notification)
                         .flatten();
-                if let Some(owner) = rejected_engram_owner.as_ref() {
-                    let owner_is_current = record.engram.dispatch_generation
-                        == owner.dispatch_generation
-                        && record.queued_prompts.front().is_some_and(|queued| {
-                            queued.pending_prompt.id == owner.prompt_id
-                                && queued.promoted_message_index.is_some()
-                                && queued
-                                    .engram_evaluate
-                                    .as_ref()
-                                    .and_then(|prepared| prepared.begun_grant_id.as_deref())
-                                    == Some(owner.grant_id.as_str())
-                                && engram_turn_intent_fingerprint(
-                                    &queued.pending_prompt.text,
-                                    queued.pending_prompt.expanded_text.as_deref(),
-                                    &queued.attachments,
-                                    queued.pending_prompt.source.as_ref(),
-                                    queued.source,
-                                ) == owner.intent_fingerprint
-                        });
-                    if owner_is_current {
-                        if matches!(checkpoint_outcome, EngramCheckpointOutcome::Succeeded) {
-                            record.queued_prompts.pop_front();
-                            record.engram.dispatch_generation =
-                                record.engram.dispatch_generation.saturating_add(1);
-                        } else {
-                            let queued = record
-                                .queued_prompts
-                                .front_mut()
-                                .expect("captured rejected Engram owner should remain queued");
-                            queued.engram_interrupted = true;
-                            queued.engram_waiting = false;
-                            record.set_auto_dispatch_blocked(true);
-                        }
-                        sync_pending_prompts(record);
-                    }
-                } else {
-                    abandon_ending_turn_engram_dispatch(record);
-                }
                 let deferred_stop_callbacks = if mode.retained_runtime_token().is_some() {
                     record.clear_runtime_stop();
                     std::mem::take(&mut record.deferred_stop_callbacks)
@@ -1946,15 +1687,7 @@ impl AppState {
         expected_active_turn_generation: Option<u64>,
         error_message: &str,
     ) -> Result<()> {
-        self.checkpoint_engram_turn_off_lock(
-            session_id,
-            EngramCheckpointPurpose::TurnTerminal,
-            Some(token),
-            expected_active_turn_generation,
-            EngramNextIntent::Wait,
-            Some(EngramExecutionOutcome::Failed),
-            None,
-        );
+
         let cleaned = error_message.trim();
         let (commit_result, should_dispatch_next, failed_mailbox_notification) = {
             let Some(_observation_install) =
@@ -1990,9 +1723,8 @@ impl AppState {
                 return Ok(());
             }
             let _ = record;
-            self.queue_runtime_observation_close_locked(&mut inner, index);
+            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Failed);
             let record = &mut inner.sessions[index];
-            abandon_ending_turn_engram_dispatch(record);
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
                 record.set_auto_dispatch_blocked(true);
@@ -2106,11 +1838,14 @@ impl AppState {
                 let _ = tree.terminate_attempt(label, |_| Ok(()), false);
             }
         }
-        self.checkpoint_successful_engram_turn_off_lock(
+
+        // Coverage belongs to this active turn, before its terminal transition.
+        if let Err(error) = self.settle_covered_mailbox_continuations(
             session_id,
-            token,
-            expected_active_turn_generation,
-        );
+            Some((token, expected_active_turn_generation)),
+        ) {
+            eprintln!("mailbox coverage> deferred before turn completion: {error:#}");
+        }
         let stopping_orchestrator_session_ids = self.stopping_orchestrator_session_ids_snapshot();
         let (should_dispatch_next, _orchestrator_delta) = {
             let Some(_observation_install) =
@@ -2176,9 +1911,8 @@ impl AppState {
                 return Ok(());
             }
             let _ = record;
-            self.queue_runtime_observation_close_locked(&mut inner, index);
+            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Succeeded);
             let record = &mut inner.sessions[index];
-            abandon_ending_turn_engram_dispatch(record);
 
             if record.session.status == SessionStatus::Active {
                 record.session.status = SessionStatus::Idle;
@@ -2288,6 +2022,43 @@ impl AppState {
         )
     }
 
+    // The first dedicated provider callback owns the factual terminal outcome.
+    // Queue it before cleanup wakes the root waiter or drains pending calls.
+    #[cfg(windows)]
+    fn close_runtime_observation_before_dedicated_cleanup(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        expected_active_turn_generation: Option<u64>,
+        outcome: EngramObservedTurnOutcome,
+    ) -> Result<()> {
+        let Some(_install) = self.runtime_observation_lifetime.enter("terminal") else {
+            return Ok(());
+        };
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return Ok(());
+        };
+        let record = &inner.sessions[index];
+        if !record.runtime.matches_runtime_token(token)
+            || expected_active_turn_generation.is_some_and(|generation| record.active_turn_generation != generation)
+            || record.runtime_stop_in_progress
+            || record.engram.unadmitted_active_turn.as_ref()
+                .is_none_or(|trace| trace.generation != record.active_turn_generation)
+        {
+            return Ok(());
+        }
+        let messages_before = session_message_count(record);
+        self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, outcome);
+        inner.stamp_session_at_index(index);
+        if session_message_count(&inner.sessions[index]) != messages_before {
+            self.commit_session_locked(&mut inner, session_id)?;
+        } else {
+            self.persist_session_internal_locked(&inner, session_id)?;
+        }
+        Ok(())
+    }
+
     fn handle_runtime_exit_if_matches_guarded(
         &self,
         session_id: &str,
@@ -2306,29 +2077,24 @@ impl AppState {
                     .then(|| record.runtime.dedicated_tree_owner()).flatten()
             })
         };
-        let checkpoint_outcome = Some(if error_message.is_some() {
-            EngramExecutionOutcome::Failed
-        } else { EngramExecutionOutcome::Unknown });
-        let is_quarantined_exit = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            inner
-                .find_session_index(session_id)
-                .and_then(|index| inner.sessions.get(index))
-                .is_some_and(|record| {
-                    record.runtime.matches_runtime_token(token)
-                        && expected_active_turn_generation
-                            .is_none_or(|generation| record.active_turn_generation == generation)
-                        && record.engram_mcp_runtime_quarantined
-                })
+        // A provider error is a known failure; an otherwise silent exit says
+        // nothing about success. Cleanup diagnostics cannot change that fact.
+        let observed_outcome = if error_message.is_some() {
+            EngramObservedTurnOutcome::Failed
+        } else {
+            EngramObservedTurnOutcome::Unknown
         };
         #[cfg(windows)]
         if let Some((tree, process, label)) = &dedicated_owner {
             let mut claimed_callback = false;
             let _ = tree.terminate_attempt_after_claim(label, |_| kill_child_process(process, label), false, || {
                 claimed_callback = true;
-                if !root_exit && !is_quarantined_exit {
-                    self.checkpoint_engram_turn_off_lock(session_id, EngramCheckpointPurpose::TurnTerminal,
-                        Some(token), expected_active_turn_generation, EngramNextIntent::Wait, checkpoint_outcome, None);
+                if !root_exit {
+                    if let Err(error) = self.close_runtime_observation_before_dedicated_cleanup(
+                        session_id, token, expected_active_turn_generation, observed_outcome,
+                    ) {
+                        eprintln!("engram> failed to queue provider-exit observation before cleanup: {error:#}");
+                    }
                 }
             });
             // Drained communication callbacks join the exact attempt; they
@@ -2336,23 +2102,8 @@ impl AppState {
             if !root_exit && !claimed_callback && tree.is_confirmed() { return Ok(()); }
             if tree.is_in_progress() { return Ok(()); }
         }
-        #[cfg(windows)]
-        let cleanup_only = dedicated_owner.is_some() && !root_exit;
         #[cfg(not(windows))]
-        let cleanup_only = { let _ = root_exit; false };
-        if !cleanup_only && !is_quarantined_exit && let Some(checkpoint_outcome) = checkpoint_outcome {
-            // An exit that reports an error failed the turn; a silent exit
-            // leaves its outcome unknown.
-            self.checkpoint_engram_turn_off_lock(
-                session_id,
-                EngramCheckpointPurpose::TurnTerminal,
-                Some(token),
-                expected_active_turn_generation,
-                EngramNextIntent::Wait,
-                Some(checkpoint_outcome),
-                None,
-            );
-        }
+        let _ = root_exit;
         let cleaned = error_message.map(str::trim).unwrap_or("");
         let (
             should_dispatch_next,
@@ -2409,7 +2160,7 @@ impl AppState {
                 && inner.sessions[index].session.preview == make_preview(cleaned) {
                 return Ok(());
             }
-            self.queue_runtime_observation_close_locked(&mut inner, index);
+            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, observed_outcome);
             let was_busy = matches!(
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
@@ -2421,9 +2172,7 @@ impl AppState {
             let preserve_dedicated_reset = preserve_dedicated_hold && inner.sessions[index].runtime_reset_required;
             let preserve_automatic_resume_block = inner.sessions[index]
                 .engram_mcp_runtime_quarantined
-                && inner.sessions[index].orchestrator_auto_dispatch_blocked
-                || preserve_dedicated_hold;
-            let operator_paused = inner.sessions[index].engram.operator_paused;
+                && inner.sessions[index].orchestrator_auto_dispatch_blocked || preserve_dedicated_hold;
             let quarantined_exit = inner.sessions[index].engram_mcp_runtime_quarantined;
             let message_id = ((!quarantined_exit || retain_cleanup_owner) && (was_busy || !cleaned.is_empty()))
                 .then(|| inner.next_message_id());
@@ -2463,22 +2212,15 @@ impl AppState {
                 let exited_mailbox_notification = was_busy
                     .then(|| record.active_turn_mailbox_notification.take())
                     .flatten();
-                abandon_ending_turn_engram_dispatch(record);
                 if !retain_cleanup_owner {
                     record.clear_runtime();
                     if !preserve_dedicated_reset { record.clear_runtime_reset(); }
                 }
+                let operator_paused = record.engram.operator_paused;
                 record.set_auto_dispatch_blocked(
-                    retain_cleanup_owner || preserve_automatic_resume_block || exited_mailbox_notification.is_some(),
+                    retain_cleanup_owner || preserve_automatic_resume_block || exited_mailbox_notification.is_some() || operator_paused,
                 );
-                if operator_paused {
-                    // Keep the operator latch after applying the normal exit
-                    // policy, including its source-observation hold cleanup.
-                    if !record.orchestrator_auto_dispatch_blocked {
-                        record.set_auto_dispatch_blocked(true);
-                    }
-                    record.engram.operator_paused = true;
-                }
+                record.engram.operator_paused = operator_paused;
                 record.clear_runtime_stop();
                 // Unsent deferred hand-offs first; then the runtime went away
                 // before it acknowledged a receipted prompt, so whether it

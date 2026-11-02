@@ -43,10 +43,53 @@ mod capacity {
     include!("engram_named_root_capacity.rs");
 }
 
-fn settled_root(label: &str, proof_kind: &str) -> (ClaimedRoot, EngramWorkSourceRoot) {
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let tree = add_claimed_root_worktree(&claimed.root);
-    name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
+
+// Compose the existing EO state/work-service owner with a real Git worktree.
+pub(super) fn root_fixture(label: &str) -> (EOCheckedTurn, PathBuf) {
+    let turn = EOCheckedTurn::idle(label, true);
+    let path = turn.root.join(".worktrees").join("retained-root");
+    run_git_test_command(&turn.root, &[
+        "worktree", "add", "--quiet", "-b", "retained-root", path.to_str().unwrap(),
+    ]);
+    (turn, path)
+}
+
+pub(super) fn request_fixture_name(turn: &EOCheckedTurn, path: Option<&FsPath>)
+    -> Result<EngramSourceRootResponse, ApiError>
+{
+    let work = turn.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
+    assert_ordinary_turn_has_no_native_requests(turn);
+    let result = turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
+        work, path: path.map(|path| Some(path.to_string_lossy().into_owned())),
+    });
+    assert_ordinary_turn_has_no_native_requests(turn);
+    result
+}
+
+fn retained_root_proof(journal: &EngramNamedRootJournal, released: bool) -> Value {
+    let binding = journal.read_binding.as_ref().unwrap();
+    let (event, receipt) = journal.confirmed.as_ref().unwrap();
+    let position = json!({"feed": {"kind": "run_execution", "id": binding.run_id},
+        "position": receipt.position.position});
+    json!({
+        "project_id": journal.store.project_id, "work_id": binding.work_id,
+        "root_execution_id": binding.root_execution_id, "run_id": binding.run_id,
+        "claim_id": binding.claim_id, "run": {"state": if released {"open"} else {"completed"}, "generation":1},
+        "named_root": if released {
+            json!({"state": "unbound_by_release", "last_generation": receipt.generation,
+                "released_at_position": receipt.position.position + 1})
+        } else { json!({"state": "none"}) },
+        "latest_event": {"event": receipt.event, "position": position,
+            "generation": receipt.generation, "kind": receipt.kind,
+            "workspace_id": receipt.workspace_id, "named_at": event.root.named_at},
+        "read_cut": {"feed": {"kind": "run_execution", "id": binding.run_id},
+            "position": receipt.position.position + 1}
+    })
+}
+
+fn settled_root(label: &str, proof_kind: &str) -> (EOCheckedTurn, EngramWorkSourceRoot) {
+    let (claimed, tree) = root_fixture(label);
+    request_fixture_name(&claimed, Some(&tree)).unwrap();
     let (entry, journal) = {
         let inner = claimed.state.inner.lock().unwrap();
         let entry = inner.engram_work_source_roots[0].clone();
@@ -58,7 +101,7 @@ fn settled_root(label: &str, proof_kind: &str) -> (ClaimedRoot, EngramWorkSource
         assert!(journal.read_binding.is_some());
         (entry, journal)
     };
-    let mut proof = covering_removed_root_read(&journal, proof_kind == "released");
+    let mut proof = retained_root_proof(&journal, proof_kind == "released");
     match proof_kind {
         "completed" | "released" => {}
         "cancelled" => proof["run"]["state"] = json!("cancelled"),
@@ -87,12 +130,12 @@ fn settled_root(label: &str, proof_kind: &str) -> (ClaimedRoot, EngramWorkSource
     successor.claim_id.push_str("-next");
     successor.run_id.push_str("-next");
     successor.root_execution_id.push_str("-next");
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.engram.work_binding = Some(successor.clone());
         record.engram.named_root = Some(EngramNamedRootState::None);
     });
     claimed.transport.enable_named_roots(&claimed.session_id, &successor);
-    claimed.transport.replace_held_claims([Ok(no_held_claims())]);
+    claimed.transport.replace_held_claims([Ok(EngramHeldClaims { items: Vec::new(), omitted: 0 })]);
     (claimed, entry)
 }
 
@@ -176,7 +219,7 @@ fn named_root_reclamation_live_old_binding_is_retained() { recovery_retains_unce
 #[test]
 fn named_root_reclamation_unknown_old_binding_is_retained() { recovery_retains_uncertainty("unknown"); }
 
-fn reclamation_plan(claimed: &ClaimedRoot) -> Vec<EngramRootReclamationTask> {
+fn reclamation_plan(claimed: &EOCheckedTurn) -> Vec<EngramRootReclamationTask> {
     let now = claimed.state.engram_budget_clock().now();
     let (snapshot, expected, disposition) = {
         let inner = claimed.state.inner.lock().unwrap();
@@ -193,7 +236,7 @@ fn reclamation_plan(claimed: &ClaimedRoot) -> Vec<EngramRootReclamationTask> {
     plan
 }
 
-fn assert_root_retained(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot) {
+fn assert_root_retained(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) {
     assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(entry));
 }
 
@@ -211,7 +254,7 @@ fn named_root_reclamation_bounded_pass_retires_unfocused_without_provider_dispat
     assert_eq!(notices.len(), 1);
     assert!(notices[0].published);
     assert!(!notices[0].delivered);
-    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 }
 
 #[test]
@@ -219,7 +262,7 @@ fn named_root_reclamation_idle_current_binding_uses_existing_recovery_owner() {
     let (claimed, entry) = settled_root("reclamation-idle-current", "completed");
     let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
         &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding.clone());
         record.session.status = SessionStatus::Idle;
     });
@@ -229,7 +272,7 @@ fn named_root_reclamation_idle_current_binding_uses_existing_recovery_owner() {
     assert_eq!(plan[0].route, EngramRootReclamationRoute::Current(claimed.session_id.clone()));
     claimed.state.run_engram_root_reclamation_pass(plan);
     assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry));
-    assert!(matches!(claimed.runtime_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
 }
 
 #[test]
@@ -237,12 +280,12 @@ fn named_root_reclamation_active_current_and_pending_intent_are_not_candidates()
     let (claimed, entry) = settled_root("reclamation-excluded-owners", "completed");
     let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
         &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding);
         record.session.status = SessionStatus::Active;
     });
     assert!(reclamation_plan(&claimed).is_empty());
-    claimed.record(|record| record.session.status = SessionStatus::Idle);
+    claimed.record_mut(|record| record.session.status = SessionStatus::Idle);
     {
         let mut inner = claimed.state.inner.lock().unwrap();
         let journal = &mut inner.engram_named_root_journal[0];

@@ -12,6 +12,20 @@ enum EngramRuntimeObservationWork {
 // Exhaustion retains the immutable wire as a visible local failure.
 const ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS: u32 = 8;
 
+// Bounded observation delivery backoff, independent of any turn or queue.
+fn runtime_observation_retry_delay(session_id: &str, attempts: u32) -> chrono::Duration {
+    const DELAYS_SECONDS: [u64; 6] = [2, 5, 10, 20, 30, 60];
+    let index = usize::try_from(attempts.saturating_sub(1)).unwrap_or(usize::MAX)
+        .min(DELAYS_SECONDS.len() - 1);
+    let digest = sha256_hex(format!("{session_id}:{attempts}").as_bytes());
+    let spread = u64::from_str_radix(&digest[..8], 16).unwrap_or(0) % 21;
+    chrono::Duration::milliseconds((DELAYS_SECONDS[index] * 1000 * (100 + spread) / 100) as i64)
+}
+
+fn runtime_observation_retry_due(due: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+    chrono::DateTime::parse_from_rfc3339(due).map_or(true, |at| at <= now)
+}
+
 // Process-local retirement barrier. A worker registers before checking the
 // stop flag and holds its guard through CAS and persistence, including the
 // synchronous fallback. Restore may start only after this registry and the
@@ -104,9 +118,7 @@ impl AppState {
     // not persist the work binding, so its absence before rebind is not proof
     // that the immutable closing scope changed. Delivery needs no current bind.
     fn runtime_observation_capture_waits_for_binding(record: &SessionRecord) -> bool {
-        record.engram_boot_recovery_pending
-            || record.engram.rebind_required
-            || record.engram.bind_in_progress
+        record.engram.source_root_bind_owner.is_some()
     }
 
     // Called after closing capture and by post-listen boot for restored
@@ -199,7 +211,7 @@ impl AppState {
                 (adapter, work)
             };
             let (adapter, work) = candidate;
-            if !engram_retry_due_passed(work.due(), chrono::Utc::now()) {
+            if !runtime_observation_retry_due(work.due(), chrono::Utc::now()) {
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -217,7 +229,7 @@ impl AppState {
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
-                let Some(_slot) = self.engram_retry_slots.try_acquire_opportunistic() else {
+                let Some(_slot) = self.runtime_retry_slots.try_acquire() else {
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
                 };
@@ -243,7 +255,7 @@ impl AppState {
                     continue;
                 }
             }
-            let Some(_slot) = self.engram_retry_slots.try_acquire_opportunistic() else {
+            let Some(_slot) = self.runtime_retry_slots.try_acquire() else {
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             };
@@ -295,7 +307,7 @@ impl AppState {
                     next.attempts = 0;
                 }
                 next.retry_at = (chrono::Utc::now()
-                    + engram_abort_retry_delay(session_id, next.attempts))
+                    + runtime_observation_retry_delay(session_id, next.attempts))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             } else {
                 next.attempts = 0;
@@ -335,6 +347,33 @@ impl AppState {
         if Self::runtime_observation_capture_waits_for_binding(&inner.sessions[index]) {
             return Ok(());
         }
+        if matches!(&result, Ok(EngramRuntimeClosingOutcome::Unclaimed)) {
+            expected.scope.require_current(&inner, session_id)
+                .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+        }
+        if let Ok(EngramRuntimeClosingOutcome::Binding(scope)) = &result {
+            expected.scope.require_current(&inner, session_id)
+                .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+            let mut current = EngramRuntimeClosingScope::capture_with_binding(
+                &inner, session_id, scope.binding.as_ref(),
+            ).map_err(anyhow::Error::msg)?;
+            current.historical_fields = scope.historical_fields.clone();
+            if &current != scope {
+                return Ok(());
+            }
+        }
+        if matches!(&result, Ok(EngramRuntimeClosingOutcome::Report(_)))
+            && inner.sessions[index].engram.unadmitted_closing_jobs.iter().any(|job| job == expected)
+        {
+            // Off-lock measurement produced a candidate, not an immutable
+            // report. A newly discovered retained hazard invalidates that
+            // candidate before any request can be persisted or sent.
+            engram_reconcile_claude_consumer(&mut inner, index);
+            if !inner.sessions[index].engram.unadmitted_closing_jobs.iter().any(|job| job == expected) {
+                self.persist_session_internal_locked(&inner, session_id)?;
+                return Ok(());
+            }
+        }
         let state = &mut inner.sessions[index].engram;
         let Some(position) = state
             .unadmitted_closing_jobs
@@ -346,6 +385,16 @@ impl AppState {
         let mut diagnostic = None;
         match result {
             Ok(EngramRuntimeClosingOutcome::BindingRecoveryPending) => return Ok(()),
+            Ok(EngramRuntimeClosingOutcome::Unclaimed) => {
+                state.unadmitted_closing_jobs.remove(position);
+            }
+            Ok(EngramRuntimeClosingOutcome::Binding(scope)) => {
+                let job = &mut state.unadmitted_closing_jobs[position];
+                job.scope = scope;
+                job.attempts = 0;
+                job.retry_at = unadmitted_observation_timestamp();
+                job.last_error = None;
+            }
             Ok(EngramRuntimeClosingOutcome::Policy(policy)) => {
                 let job = &mut state.unadmitted_closing_jobs[position];
                 job.policy = Some(policy);

@@ -1,6 +1,5 @@
-import { memo, useEffect, useId, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
-import { isRoutineEngramControl } from "./engram-control-routine";
 import {
   CheckIcon,
   CollapseIcon,
@@ -401,7 +400,7 @@ export const MessageCard = memo(
           />
         );
       case "engramControl":
-        return <EngramControlCard message={message} searchQuery={searchQuery} />;
+        return <EngramControlCard message={message} />;
       case "subagentResult":
         return (
           <SubagentResultCard
@@ -544,24 +543,8 @@ function engramLatencyDetail(latency: EngramControlMessage["latencyMs"]) {
     : `Latency: ${latency.total} ms`;
 }
 
-function EngramControlCard({
-  message,
-  searchQuery = "",
-}: {
-  message: EngramControlMessage;
-  searchQuery?: string;
-}) {
-  // Routine cards start collapsed; any other card is expanded on every render,
-  // so a card that later turns actionable can never stay hidden. A manual
-  // expansion belongs to this card identity and survives ordinary rerenders.
-  // An active transcript search opens every card, because search indexes the
-  // details, as the other collapsible cards do.
-  const routine = isRoutineEngramControl(message);
-  const isSearchExpanded = searchQuery.trim().length > 0;
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const detailsId = useId();
-  const detailsExpanded =
-    !routine || isSearchExpanded || expandedId === message.id;
+// Stored control cards are historical data, never live recovery controls.
+function EngramControlCard({ message }: { message: EngramControlMessage }) {
   // An own-property lookup: the code comes from the wire, and a name such as
   // `constructor` must not resolve to an inherited member.
   const codeBoundary =
@@ -601,59 +584,15 @@ function EngramControlCard({
     engramSourceRootDetail(message.sourceRoot),
     engramLatencyDetail(message.latencyMs),
   ].filter((value): value is string => Boolean(value));
-  const detailsToggle =
-    routine && !isSearchExpanded ? (
-      <button
-        className="command-icon-button engram-control-details-toggle"
-        type="button"
-        onClick={() => setExpandedId(detailsExpanded ? null : message.id)}
-        aria-label={detailsExpanded ? "Hide Engram details" : "Show Engram details"}
-        aria-expanded={detailsExpanded}
-        aria-controls={detailsId}
-        title={detailsExpanded ? "Hide Engram details" : "Show Engram details"}
-      >
-        {detailsExpanded ? <CollapseIcon /> : <ExpandIcon />}
-      </button>
-    ) : undefined;
-
-  // A collapsed routine card is one row: its meta row, which keeps the marker
-  // menu and the drag to a board, carrying the stage and title beside the
-  // toggle. Expanding it shows the full card. The toggle keeps its place in
-  // both, so it keeps keyboard focus across the switch.
   return (
-    <article
-      className={`message-card reasoning-card engram-control-card${
-        detailsExpanded ? "" : " engram-control-compact"
-      }`}
-    >
-      <MessageMeta
-        author={message.author}
-        timestamp={message.timestamp}
-        trailing={
-          <>
-            {detailsExpanded ? null : (
-              <>
-                <span className="engram-control-compact-summary">
-                  <span className="engram-control-compact-label">Engram · {message.stage}</span>
-                  <span className="engram-control-compact-title">{title}</span>
-                </span>
-                {message.stage === "restart" ? (
-                  <span className="message-meta-tag engram-control-status">Restart</span>
-                ) : null}
-                {message.nextIntent === "wait" ? (
-                  <span className="message-meta-tag engram-control-status">Waiting</span>
-                ) : null}
-              </>
-            )}
-            {detailsToggle}
-          </>
-        }
-      />
-      {detailsExpanded ? (
-        <>
-          <div className="card-label">Engram · {message.stage}</div>
-          <h3>{title}</h3>
-          <div className="engram-control-details" id={detailsId}>
+    <article className="message-card reasoning-card engram-control-card">
+      <div className="message-meta">
+        <span className="message-meta-author">{message.author === "you" ? "You" : "Agent"}</span>
+        <span className="message-meta-end">{message.timestamp}</span>
+      </div>
+      <div className="card-label">Historical Engram · {message.stage}</div>
+      <h3>{title}</h3>
+      <div className="engram-control-details">
             <p className="support-copy">{details.join(" · ")}</p>
             {message.causalFailure ? (
               <div className="engram-causal-failure">
@@ -682,9 +621,7 @@ function EngramControlCard({
                 {directive.kind} · {directive.audience} · {directive.satisfaction}
               </p>
             ))}
-          </div>
-        </>
-      ) : null}
+      </div>
     </article>
   );
 }

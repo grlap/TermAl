@@ -1,6 +1,6 @@
 // A changed description or repeated start can retire a launch check before
 // its completion. Actual ACP updates and synthetic run records exercise
-// later correlation and settlement without executing a launcher or shell.
+// later ordinary correlation without executing a launcher or shell.
 use super::*;
 
 struct StartClock(Option<(String, Option<String>)>);
@@ -19,7 +19,7 @@ impl Drop for StartClock {
     }
 }
 
-fn take_retirement_notices(turn: &CheckedTurn) -> Vec<String> {
+fn take_retirement_notices(turn: &EOCheckedTurn) -> Vec<String> {
     let pending = turn.record(|record| {
         record.engram.pending_source_root_line.clone().unwrap_or_default()
     });
@@ -28,7 +28,7 @@ fn take_retirement_notices(turn: &CheckedTurn) -> Vec<String> {
         .map(str::to_owned).collect()
 }
 
-fn assert_retirement_notice(turn: &CheckedTurn, fingerprint: &str, original: &str, later: &str) {
+fn assert_retirement_notice(turn: &EOCheckedTurn, fingerprint: &str, original: &str, later: &str) {
     let notices = take_retirement_notices(turn);
     assert_eq!(notices.len(), 1, "the retired launch needs one notice: {notices:?}");
     let line = &notices[0];
@@ -40,7 +40,7 @@ fn assert_retirement_notice(turn: &CheckedTurn, fingerprint: &str, original: &st
 }
 
 fn acp_update(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     recorder: &mut SessionRecorder,
     state: &mut AcpTurnState,
     key: &str,
@@ -77,9 +77,11 @@ fn running_run(runs: &FsPath, root: &FsPath, started: &str) -> PathBuf {
 
 fn retired_launch_cannot_lend_run(repeated_start: bool, changed_place: bool) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn(&format!("retired-description-{repeated_start}-{changed_place}"));
+    let (turn, worktree) = ordinary_carried_turn(&format!("retired-description-{repeated_start}-{changed_place}"));
     // Create the alternate location before any check's source interval opens.
-    let elsewhere = sibling_worktree(&turn, "elsewhere");
+    let elsewhere = turn.root.join(".worktrees").join("elsewhere");
+    run_git_test_command(&turn.root, &["worktree", "add", "--quiet", "-b", "elsewhere",
+        elsewhere.to_str().unwrap()]);
     let cwd = fs::canonicalize(&worktree).unwrap();
     let other_cwd = fs::canonicalize(&elsewhere).unwrap();
     let command = format!("{DETACHED_GATE} --notify session-original");
@@ -163,10 +165,10 @@ fn retired_launch_cannot_lend_run(repeated_start: bool, changed_place: bool) {
         }
     });
     write_run(&runs, "test-retired-launch", &cwd, &earlier_at, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert!(checkpoint.get("verification_evidence").is_none(),
-        "a later launch borrowed the retired check's run: {checkpoint:#}");
-    assert_refused(&turn, &checkpoint, "another background gate launched");
+    assert_carried_ambiguity(&turn);
+    let observation = turn.finish();
+    assert_ordinary_observation_has_no_native_credit(&turn, &observation);
+    assert_carried_ambiguity(&turn);
     assert!(retained, "retirement must keep the original root/start, not the replacement's");
 }
 
@@ -190,9 +192,9 @@ fn repeated_start_changed_place_cannot_lend_a_late_published_run() {
     retired_launch_cannot_lend_run(true, true);
 }
 
-fn unchanged_launch_still_credits(repeated_start: bool) {
+fn unchanged_launch_keeps_artifact(repeated_start: bool) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn(&format!("matched-description-{repeated_start}"));
+    let (turn, worktree) = ordinary_carried_turn(&format!("matched-description-{repeated_start}"));
     let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
     let mut recorder = turn.recorder();
     let mut acp = AcpTurnState::default();
@@ -216,18 +218,17 @@ fn unchanged_launch_still_credits(repeated_start: bool) {
         assert!(!carried.ambiguous);
     });
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]
-fn acp_matching_terminal_description_keeps_its_own_run_credit() {
-    unchanged_launch_still_credits(false);
+fn acp_matching_terminal_description_keeps_its_own_run_artifact() {
+    unchanged_launch_keeps_artifact(false);
 }
 
 #[test]
-fn matching_repeated_start_keeps_the_original_start_and_credit() {
-    unchanged_launch_still_credits(true);
+fn matching_repeated_start_keeps_the_original_start_and_artifact() {
+    unchanged_launch_keeps_artifact(true);
 }
 
 #[test]
@@ -242,7 +243,7 @@ fn repeating_an_ordinary_test_with_a_changed_command_creates_no_full_launch_noti
 
 fn ordinary_retirement_stays_silent(repeated_start: bool) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn(&format!("retired-ordinary-test-{repeated_start}"));
+    let (turn, worktree) = ordinary_carried_turn(&format!("retired-ordinary-test-{repeated_start}"));
     let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
     let mut recorder = turn.recorder();
     recorder.command_started_in("ordinary", "cargo test", Some("cargo test"), Some(&cwd)).unwrap();
@@ -263,5 +264,5 @@ fn ordinary_retirement_stays_silent(repeated_start: bool) {
         assert!(record.engram.carried_unmatched_launches.is_empty());
     });
     assert!(take_retirement_notices(&turn).is_empty());
-    assert!(turn.finish().get("verification_evidence").is_none());
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }

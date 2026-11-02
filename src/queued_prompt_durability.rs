@@ -392,7 +392,7 @@ impl AppState {
     fn finish_resume_drain(
         &self,
         session_id: &str,
-        owner: Option<EngramQueuedAdmissionOwner>,
+        owner: Option<QueuedTurnOwner>,
         checked_head: Option<&str>,
         drained: Option<StartedQueuedTurn>,
     ) -> std::result::Result<Option<StartedQueuedTurn>, ApiError> {
@@ -411,7 +411,11 @@ impl AppState {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let refusal = inner
             .find_visible_session_index(session_id)
-            .and_then(|index| queued_head_durability_resume_refusal(&inner.sessions[index]))
+            .and_then(|index| {
+                let record = &inner.sessions[index];
+                ordinary_queue_position(record).and_then(|position|
+                    queued_prompt_durability_resume_refusal(record, &record.queued_prompts[position]))
+            })
             .unwrap_or_else(|| RESUME_QUEUE_CHANGED_REFUSAL.to_owned());
         Err(ApiError::conflict(refusal))
     }
@@ -419,7 +423,7 @@ impl AppState {
     fn unstarted_resume_step(
         &self,
         session_id: &str,
-        owner: Option<&EngramQueuedAdmissionOwner>,
+        owner: Option<&QueuedTurnOwner>,
         checked_head: Option<&str>,
     ) -> UnstartedResumeStep {
         let inner = self.inner.lock().expect("state mutex poisoned");
@@ -434,25 +438,11 @@ impl AppState {
         {
             return UnstartedResumeStep::Keep;
         }
-        if let Some(refusal) = queued_head_durability_resume_refusal(record) {
+        if let Some(refusal) = ordinary_queue_position(record).and_then(|position|
+            queued_prompt_durability_resume_refusal(record, &record.queued_prompts[position])) {
             return UnstartedResumeStep::Refuse(refusal);
         }
-        // Cold recovery can discover a previously begun turn after Resume's
-        // initial check. Report the retained hold instead of a silent success.
-        if checked_head.is_some_and(|id| {
-            record
-                .queued_prompts
-                .front()
-                .is_some_and(|head| head.pending_prompt.id == id)
-        }) && engram_queue_head_refused_as_interrupted(record)
-            && !engram_retry_attempt_in_flight(record)
-        {
-            return UnstartedResumeStep::Refuse(format!(
-                "Engram recovery retained this prompt: {} Reconcile its prior turn or cancel the retained prompt before continuing.",
-                record.session.preview,
-            ));
-        }
-        let changed_to_saved_entry = record.queued_prompts.front().is_some_and(|head| {
+        let changed_to_saved_entry = ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position)).is_some_and(|head| {
             checked_head != Some(head.pending_prompt.id.as_str())
                 && queued_prompt_kept_standalone(record, head)
         });

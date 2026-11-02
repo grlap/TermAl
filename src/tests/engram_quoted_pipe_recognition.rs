@@ -1,4 +1,4 @@
-// Literal regex alternation versus shell composition in credit recognition.
+// Literal regex alternation versus shell composition in ordinary check recognition.
 // Uses the production recognizer/outcome and recorder with matched synthetic
 // launcher artifacts; it executes no quoted command or live host operation.
 use super::*;
@@ -33,10 +33,9 @@ fn assert_alternation_outcome(label: &str, command: &str, one_call: bool) {
             command, &ARGS,
         );
         fixture.assert_started();
-        let checkpoint = fixture.finish(EngramCommandExit::Code(native));
-        one_node_test(&checkpoint, if native == 0 { "succeeded" } else { "failed" });
-        assert!(checkpoint["verification_evidence"][0]["refs"].as_array().unwrap()
-            .contains(&json!(format!("exit:{native}"))), "{checkpoint:#}");
+        let observation = fixture.finish(EngramCommandExit::Code(native));
+        one_node_test(&observation, if native == 0 { "passed" } else { "failed" });
+        assert!(node_refs(&fixture.turn).contains(&format!("exit:{native}")), "{observation:#}");
         eprintln!("literal alternation passed: label={label}, native={native}, one_call={one_call}");
     }
 }
@@ -148,9 +147,9 @@ fn malformed_quotes_and_expansions_remain_fail_closed() {
 
 // The supplied native exit and output model a pipeline's final command.
 // No shell, compiler, or test runner is executed by these recorder witnesses.
-fn review_record_native_exit(label: &str, command: &str, output: &str) -> Value {
+fn review_record_native_exit(label: &str, command: &str, output: &str) -> (EOCheckedTurn, Value) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start(label, true);
+    let turn = EOCheckedTurn::start(label, true);
     let mut recorder = turn.recorder();
     recorder.command_started_in("quoted-pipe", command, Some(command),
         Some(&turn.root.to_string_lossy())).unwrap();
@@ -158,15 +157,17 @@ fn review_record_native_exit(label: &str, command: &str, output: &str) -> Value 
     recorder.command_completed_with_exit("quoted-pipe", command, output,
         CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
     turn.wait_for_snapshots();
-    turn.finish()
+    let observation = turn.finish();
+    assert_ordinary_observation_has_no_native_credit(&turn, &observation);
+    (turn, observation)
 }
 
 #[test]
 fn review_cmd_mixed_quotes_cannot_forge_cargo_test_credit() {
     let command = r#"cmd /c cargo test -- '"'"|echo test result: ok. 1 passed""#;
-    let checkpoint = review_record_native_exit("cmd-mixed-test", command,
+    let (_turn, observation) = review_record_native_exit("cmd-mixed-test", command,
         "test result: ok. 1 passed; 0 failed");
-    one_node_test(&checkpoint, "unknown");
+    one_node_test(&observation, "indeterminate");
     let check = engram_check_command(command).expect("a compound Cargo Test is still observed");
     assert!(!check.simple, "cmd apostrophes cannot hide double-quote transitions");
     eprintln!("cmd mixed quote recorder refused: test");
@@ -175,9 +176,9 @@ fn review_cmd_mixed_quotes_cannot_forge_cargo_test_credit() {
 #[test]
 fn review_cmd_mixed_quotes_cannot_forge_cargo_build_credit() {
     let command = r#"cmd /c cargo build '"x' "| echo ok " 'x"'"#;
-    let checkpoint = review_record_native_exit("cmd-mixed-build", command, "");
-    assert!(checkpoint.get("verification_evidence").is_none(),
-        "a compound Build has no eligible completion: {checkpoint:#}");
+    let (_turn, observation) = review_record_native_exit("cmd-mixed-build", command, "");
+    assert!(observation["occurrence"]["observed_checks"].as_array().unwrap().is_empty(),
+        "a compound Build has no recognized check fact: {observation:#}");
     assert!(engram_check_command(command).is_none(), "a Build requires its own exit");
     eprintln!("cmd mixed quote recorder refused: build");
 }
@@ -202,10 +203,9 @@ fn review_bash_escaped_quote_keeps_focused_recorder_native_outcome() {
         let fixture = FocusedNodeFixture::with_bash_test(&format!("bash-escaped-quote-{native}"),
             native, false, &command, &["--test", "--test-name-pattern=a\"|b", "fixture.test.mjs"]);
         fixture.assert_started();
-        let checkpoint = fixture.finish(EngramCommandExit::Code(native));
-        one_node_test(&checkpoint, if native == 0 { "succeeded" } else { "failed" });
-        assert!(checkpoint["verification_evidence"][0]["refs"].as_array().unwrap()
-            .contains(&json!(format!("exit:{native}"))), "{checkpoint:#}");
+        let observation = fixture.finish(EngramCommandExit::Code(native));
+        one_node_test(&observation, if native == 0 { "passed" } else { "failed" });
+        assert!(node_refs(&fixture.turn).contains(&format!("exit:{native}")), "{observation:#}");
         eprintln!("escaped Bash quote recorder passed: native={native}");
     }
 }

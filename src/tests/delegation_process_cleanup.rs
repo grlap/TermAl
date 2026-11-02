@@ -9,9 +9,10 @@ fn process_cleanup_launch_directory_preserves_immutable_engram_authority() {
         fn request(
             &self,
             connection: &EngramConnectionConfig,
-            _request: &EngramControlRequest,
+            request: &EngramControlRequest,
             _timeout: Duration,
         ) -> Result<Value, EngramTransportError> {
+            assert!(matches!(request, EngramControlRequest::WorkSessionRead {}));
             Ok(serde_json::to_value(connection).unwrap())
         }
         fn shutdown_session(&self, _session_id: &str) {}
@@ -34,9 +35,7 @@ fn process_cleanup_launch_directory_preserves_immutable_engram_authority() {
     let launch_record = adapter
         .request(
             &connection,
-            &EngramControlRequest::SessionStatus {
-                routing_token: "fixture-token".to_owned(),
-            },
+            &EngramControlRequest::WorkSessionRead {},
             phase_sync::DEADLOCK_GUARD,
         )
         .unwrap();
@@ -87,7 +86,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::Out.WriteLine('delegation-process-control-ready')
 [Console]::Out.Flush()
 while ($null -ne ($line = [Console]::In.ReadLine())) {
-  [Console]::Out.WriteLine((@{status='ok';result=@{routing_token='fixture-token';fixture_cwd=[Environment]::CurrentDirectory;fixture_project_file=$args[1];fixture_home=$args[3];fixture_actor=$args[6];fixture_session=$args[8];fixture_env_home=$env:ENGRAM_HOME;fixture_env_session=$env:ENGRAM_SESSION_ID}} | ConvertTo-Json -Compress))
+  [Console]::Out.WriteLine((@{status='ok';result=@{binding=$null;fixture_cwd=[Environment]::CurrentDirectory;fixture_project_file=$args[([Array]::IndexOf($args, '--project-file') + 1)];fixture_home=$args[([Array]::IndexOf($args, '--home') + 1)];fixture_actor=$args[([Array]::IndexOf($args, '--actor-id') + 1)];fixture_session=$args[([Array]::IndexOf($args, '--session-id') + 1)];fixture_env_home=$env:ENGRAM_HOME;fixture_env_session=$env:ENGRAM_SESSION_ID}} | ConvertTo-Json -Compress))
   [Console]::Out.Flush()
 }
 "#,
@@ -98,7 +97,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         r#"#!/bin/sh
 printf '%s\n' 'delegation-process-control-ready'
 while IFS= read -r line; do
-  printf '{"status":"ok","result":{"routing_token":"fixture-token","fixture_cwd":"%s"}}\n' "$PWD"
+  printf '{"status":"ok","result":{"binding":null,"fixture_cwd":"%s"}}\n' "$PWD"
 done
 "#,
     );
@@ -152,15 +151,7 @@ done
     let reply = adapter
         .request(
             &replay,
-            &EngramControlRequest::SessionBind {
-                external_ref: "fixture".to_owned(),
-                title: "Fixture".to_owned(),
-                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-                mediated_effects: vec![EngramEffect::Observe],
-                capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-                work_binding: None,
-                idempotency_key: "fixture-bind".to_owned(),
-            },
+            &EngramControlRequest::WorkSessionRead {},
             phase_sync::DEADLOCK_GUARD,
         )
         .unwrap();
@@ -431,9 +422,7 @@ fn delegation_process_cleanup_missing_host_cwd_fails_before_control_spawn() {
     let error = EngramHostAdapter::default()
         .request(
             &connection,
-            &EngramControlRequest::SessionStatus {
-                routing_token: "fixture-token".to_owned(),
-            },
+            &EngramControlRequest::WorkSessionRead {},
             phase_sync::DEADLOCK_GUARD,
         )
         .unwrap_err();
@@ -467,7 +456,7 @@ fn delegation_process_cleanup_resolution_control_is_never_started() {
     let error = EngramHostAdapter::new(temp.path().to_path_buf())
         .request(
             &connection,
-            &EngramControlRequest::SessionStatus { routing_token: "fixture-token".to_owned() },
+            &EngramControlRequest::WorkSessionRead {},
             phase_sync::DEADLOCK_GUARD,
         )
         .unwrap_err();
@@ -507,7 +496,7 @@ fn delegation_process_cleanup_resolution_post_spawn_transport_stays_unknown() {
     let error = EngramHostAdapter::new(temp.path().to_path_buf())
         .request(
             &connection,
-            &EngramControlRequest::SessionStatus { routing_token: "fixture-token".to_owned() },
+            &EngramControlRequest::WorkSessionRead {},
             phase_sync::DEADLOCK_GUARD,
         )
         .unwrap_err();
@@ -552,25 +541,41 @@ fn delegation_process_cleanup_native_search_exe_precedes_batch_shadow() {
 }
 
 #[test]
-fn delegation_process_cleanup_native_search_preserves_absence_shim_guard() {
-    if !resolver_search_child("guard", "tests::delegation_process_cleanup::delegation_process_cleanup_native_search_preserves_absence_shim_guard") {
+fn delegation_process_cleanup_native_search_preserves_work_shim_guard() {
+    if !resolver_search_child("guard", "tests::delegation_process_cleanup::delegation_process_cleanup_native_search_preserves_work_shim_guard") {
         return;
     }
     let root = PathBuf::from(std::env::var_os("TERMAL_RESOLUTION_ROOT").unwrap());
     let binary = FsPath::new("cmd");
-    validate_engram_absence_executable(binary).unwrap();
-    assert!(validate_engram_absence_executable(&root.join("cmd.cmd")).is_err(),
-        "an explicit batch shim stays forbidden for absence selectors");
+    validate_work_read_program(binary, false).unwrap();
+    assert!(validate_work_read_program(&root.join("cmd.cmd"), false).is_err(),
+        "an explicit batch shim stays forbidden for Work arguments");
     let project_file = root.join(".engram-project");
     fs::write(&project_file, "fixture\n").unwrap();
-    let _ = run_engram_diagnostic_args_until(
-        binary, &project_file, &root, &root, "control-session-inspect",
-        &["--session-id", "fixture-session"],
-        std::time::Instant::now() + phase_sync::DEADLOCK_GUARD,
-        phase_sync::DEADLOCK_GUARD, &root,
+    let connection = EngramConnectionConfig {
+        binary_path: binary.to_path_buf(),
+        project_file,
+        home: root.clone(),
+        project_root: root.clone(),
+        actor_id: "fixture-actor".into(),
+        actor_context: None,
+        session_id: "fixture-session".into(),
+    };
+    let command = work_read_launch_command(&connection, &root).unwrap();
+    let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
+    assert_eq!(
+        fs::canonicalize(command.get_program()).unwrap(),
+        fs::canonicalize(expected).unwrap()
     );
-    assert!(!root.join("shim-started").exists(),
-        "a validated bare absence command must never deliver selectors to a PATH batch shim");
+    let _ = run_work_read_command(
+        &connection,
+        &["show".to_owned(), "fixture-session".to_owned(), "--json".to_owned()],
+        &root,
+    );
+    assert!(
+        !root.join("shim-started").exists(),
+        "a validated bare Work command must never deliver arguments to a PATH batch shim"
+    );
 }
 
 #[test]
@@ -635,18 +640,19 @@ fn resolved_alias_connection(temp: &TestTempRoot, extension: &str) -> EngramConn
 }
 
 #[test]
-fn delegation_process_cleanup_resolved_alias_batch_absence_is_rejected() {
-    let temp = TestTempRoot::create("resolved-alias-batch-absence");
+fn delegation_process_cleanup_resolved_alias_batch_work_is_rejected() {
+    let temp = TestTempRoot::create("resolved-alias-batch-work");
     let connection = resolved_alias_connection(&temp, "cmd");
-    validate_engram_absence_executable(&connection.binary_path).unwrap();
-    let result = run_engram_diagnostic_args_until(
-        &connection.binary_path, &connection.project_file, &connection.home,
-        &connection.project_root, "control-session-inspect", &["--target-session-id=fixture"],
-        std::time::Instant::now() + phase_sync::DEADLOCK_GUARD,
-        phase_sync::DEADLOCK_GUARD, temp.path(),
+    validate_work_read_binary(&connection).unwrap();
+    let result = run_work_read_command(
+        &connection,
+        &["show".to_owned(), "fixture-session".to_owned(), "--json".to_owned()],
+        temp.path(),
     );
-    assert!(!temp.path().join("alias-started").exists(),
-        "raw .exe absence guard passed, but its resolved batch target must never receive selectors");
+    assert!(
+        !temp.path().join("alias-started").exists(),
+        "raw .exe Work validation passed, but its resolved batch target must never receive arguments"
+    );
     assert!(result.is_err(), "resolved batch alias must be refused before launch");
 }
 
@@ -662,29 +668,49 @@ fn delegation_process_cleanup_resolved_alias_powershell_work_is_rejected() {
 }
 
 #[test]
-fn delegation_process_cleanup_resolved_alias_powershell_absence_keeps_exact_selectors() {
-    let temp = TestTempRoot::create("resolved-alias-powershell-absence");
+fn delegation_process_cleanup_resolved_alias_powershell_work_keeps_exact_arguments() {
+    let temp = TestTempRoot::create("resolved-alias-powershell-work-arguments");
     let mut connection = resolved_alias_connection(&temp, "ps1");
     let script = fs::canonicalize(&connection.binary_path).unwrap();
     connection.binary_path = temp.path().join("alias.ps1");
     std::os::windows::fs::symlink_file(&script, &connection.binary_path)
         .expect("same-kind PowerShell alias witness must be available, never skipped");
     fs::write(script, "[Console]::Out.WriteLine((ConvertTo-Json -InputObject @($args) -Compress))").unwrap();
-    let selectors = ["--target-session-id=fixture trailing  ", "--retained-grant-id=quote\";& value  "];
-    for binary in [&connection.binary_path, &temp.path().join("target.ps1")] {
-        validate_engram_absence_executable(binary).unwrap();
-        let output = run_engram_diagnostic_args_until(
-            binary, &connection.project_file, &connection.home, &connection.project_root,
-            "control-session-inspect", &selectors,
-            std::time::Instant::now() + phase_sync::DEADLOCK_GUARD,
-            phase_sync::DEADLOCK_GUARD, temp.path(),
+    let selectors = ["fixture trailing  ", "quote\";& value  "];
+    let expected = vec![
+        "--home".to_owned(),
+        connection.home.to_string_lossy().into_owned(),
+        "--project-file".to_owned(),
+        connection.project_file.to_string_lossy().into_owned(),
+        "work".to_owned(),
+        "--actor-id".to_owned(),
+        connection.actor_id.clone(),
+        "--session-id".to_owned(),
+        connection.session_id.clone(),
+        "show".to_owned(),
+        selectors[0].to_owned(),
+        "--note".to_owned(),
+        selectors[1].to_owned(),
+        "--json".to_owned(),
+    ];
+    // Both explicit PowerShell paths are genuine test-fixture exemptions;
+    // the sibling native-spelled alias witness above remains forbidden.
+    for binary in [temp.path().join("alias.ps1"), temp.path().join("target.ps1")] {
+        connection.binary_path = binary;
+        validate_work_read_binary(&connection).unwrap();
+        let output = run_work_read_command(
+            &connection,
+            &[
+                "show".to_owned(),
+                selectors[0].to_owned(),
+                "--note".to_owned(),
+                selectors[1].to_owned(),
+                "--json".to_owned(),
+            ],
+            temp.path(),
         ).unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let actual: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
-        let expected = vec!["--project-file".to_owned(), connection.project_file.to_string_lossy().into_owned(),
-            "--home".to_owned(), connection.home.to_string_lossy().into_owned(),
-            "control-session-inspect".to_owned(), selectors[0].to_owned(), selectors[1].to_owned(), "--json".to_owned()];
-        assert_eq!(actual, expected, "resolved PS and explicit PS must preserve selectors as data");
+        let actual: Vec<String> = serde_json::from_value(output).unwrap();
+        assert_eq!(actual, expected, "resolved PS and explicit PS must preserve arguments as data");
     }
 }
 
@@ -712,7 +738,7 @@ fn resolved_alias_write_is_never_started(extension: &str) {
     assert!(!temp.path().join("alias-started").exists(),
         "an alias that changes native to {extension} must not execute even on an unrestricted host write");
     let control_error = EngramHostAdapter::new(temp.path().to_path_buf())
-        .request(&connection, &EngramControlRequest::SessionStatus { routing_token: "fixture-token".to_owned() },
+        .request(&connection, &EngramControlRequest::WorkSessionRead {},
             phase_sync::DEADLOCK_GUARD).unwrap_err();
     assert!(control_error.process_never_started, "control launch uses the same definite refusal: {control_error}");
     match classify_acceptance_evaluation_run(result) {
@@ -1783,8 +1809,11 @@ fn production_stale_owner_case(acp: bool) {
     // isolation. The public route refuses this unconfirmed predecessor.
     let replacement = ProductionWorkerTree::spawn(&state, &session_id, replacement_temp.path(), acp);
     let before = {
-        let inner = state.inner.lock().unwrap();
-        inner.sessions[inner.find_session_index(&session_id).unwrap()].clone()
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(&session_id).unwrap();
+        record.engram.historical_control.insert("cleanupWitness".to_owned(),
+            json!({"successor":"exact ordinary history","unknown":[null,{"kept":true}]}));
+        record.clone()
     };
     assert_eq!(before.retained_dedicated_owners.len(), 2, "Live registration predates the first worker claim");
     assert!(before.dedicated_predecessor_pending());
@@ -1798,7 +1827,7 @@ fn production_stale_owner_case(acp: bool) {
     };
     assert_eq!(after_failure.runtime.runtime_token(), before.runtime.runtime_token());
     assert_eq!(after_failure.session.status, before.session.status);
-    assert_eq!(after_failure.engram.active_grant_id, before.engram.active_grant_id);
+    assert_eq!(after_failure.engram.historical_control, before.engram.historical_control);
     assert_eq!(after_failure.active_turn_generation, before.active_turn_generation);
     assert_eq!(after_failure.retained_dedicated_owners.len(), 2);
     state.retry_retained_dedicated_cleanup(&session_id).unwrap();
@@ -1810,7 +1839,8 @@ fn production_stale_owner_case(acp: bool) {
     };
     assert_eq!(after_retry.runtime.runtime_token(), before.runtime.runtime_token());
     assert_eq!(after_retry.session.status, before.session.status);
-    assert_eq!(after_retry.engram.active_grant_id, before.engram.active_grant_id);
+    assert_eq!(after_retry.active_turn_generation, before.active_turn_generation);
+    assert_eq!(after_retry.engram.historical_control, before.engram.historical_control);
     assert_eq!(after_retry.retained_dedicated_owners.len(), 1);
     assert!(!after_retry.dedicated_predecessor_pending());
     replacement.exit_root();
@@ -1894,7 +1924,7 @@ fn production_revocation_failure_case(acp: bool, confirm_before_finalization: bo
             matches!(callback, DeferredStopCallback::RuntimeExited { .. })));
         assert!(record.runtime.dedicated_cleanup_failure().is_some());
     }
-    let shutdown = state.shutdown_revoked_engram_mcp_runtimes(batch, "owned revocation witness", None);
+    let shutdown = state.shutdown_revoked_engram_mcp_runtimes(batch, "owned revocation witness");
     assert!(shutdown.shutdowns[0].retain_runtime_for_retry);
     assert!(shutdown.shutdowns[0].shutdown_error.is_some());
     assert!(!owner.tree.has_exited().unwrap(), "both descendants still own pipes before finalization");
@@ -1965,7 +1995,7 @@ fn production_post_revocation_exit_case(acp: bool, fail_waiter_retry: bool) {
     // descendants are live. Only the negative case also fails the later waiter.
     owner.tree.termination_failures.store(if fail_waiter_retry { 3 } else { 2 },
         std::sync::atomic::Ordering::SeqCst);
-    let shutdown = state.shutdown_revoked_engram_mcp_runtimes(batch, "post-finalization exit witness", None);
+    let shutdown = state.shutdown_revoked_engram_mcp_runtimes(batch, "post-finalization exit witness");
     assert!(shutdown.shutdowns[0].retain_runtime_for_retry);
     let outcome = state.finalize_revoked_engram_mcp_runtimes(shutdown);
     assert!(!outcome.failures.is_empty());

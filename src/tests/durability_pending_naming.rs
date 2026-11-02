@@ -1,18 +1,52 @@
 // Naming's durable intent and generation belong to the unchanged retry.
 use super::*;
 
+// Compose the shared idle owner with real Git and public naming operations;
+// this creates no second state/runtime owner or control credential.
+fn pending_naming_worktree(root: &FsPath) -> PathBuf {
+    prepare_naming_worktree_container(root);
+    let path = root.join(".worktrees").join("durability-naming");
+    run_git_test_command(root, &[
+        "worktree", "add", "--quiet", "-b", "durability-naming", path.to_str().unwrap(),
+    ]);
+    path
+}
+
+fn pending_naming_request(
+    turn: &EOCheckedTurn, path: Option<&FsPath>,
+) -> Result<EngramSourceRootResponse, ApiError> {
+    let association = turn.record(|record| record.engram.work_binding.clone())
+        .unwrap_or_else(|| {
+            // Reload deliberately clears the local association. Retain only
+            // the fixture's one scripted remote association as request input;
+            // the public API must still validate it through work services.
+            let model = turn.transport.named_roots.lock().unwrap();
+            let bindings = &model.as_ref().unwrap().read_bindings;
+            assert_eq!(bindings.len(), 1);
+            bindings.values().next().unwrap().clone()
+        });
+    let work = association.work_id;
+    assert_ordinary_turn_has_no_native_requests(turn);
+    let result = turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
+        work, path: path.map(|path| Some(path.to_string_lossy().into_owned())),
+    });
+    assert_ordinary_turn_has_no_native_requests(turn);
+    result
+}
+
+
 #[test]
 fn durability_pending_orphaned_withholding_reguard_preserves_classification() {
     withholding_reguard(true, false);
 }
 
 #[test]
-fn durability_pending_orphaned_withholding_legacy_adapter_keeps_transport_class() {
+fn durability_pending_orphaned_withholding_transport_projection_keeps_its_class() {
     withholding_reguard(false, false);
 }
 
 #[test]
-fn durability_pending_orphaned_withholding_rechecks_admission_after_ack() {
+fn durability_pending_orphaned_withholding_rechecks_work_owner_after_ack() {
     withholding_reguard(true, true);
 }
 
@@ -20,52 +54,33 @@ fn durability_pending_orphaned_withholding_rechecks_admission_after_ack() {
 // re-guard. It does not claim a second reachable naming endpoint interleaving.
 fn withholding_reguard(classified: bool, replace_binding: bool) {
     let _scope = TestTempRootDirectoryScope::repository_local();
-    let claimed = ClaimedRoot::new_scripted("withholding-reguard", Vec::new());
-    prepare_claimed_root_naming(&claimed, "withholding-reguard");
-    claimed_root_store(&claimed);
-    claimed.record(|record| record.engram.named_root = Some(EngramNamedRootState::None));
+    let claimed = EOCheckedTurn::idle("withholding-reguard", true);
+
+    claimed.record_mut(|record| record.engram.named_root = Some(EngramNamedRootState::None));
     let mut state = claimed.state.clone();
     let (tx, rx) = mpsc::channel();
     state.persist_tx = tx;
-    let target = claimed_root_target(&claimed);
+    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id).unwrap().unwrap();
     let worker_state = state.clone();
     let worker_target = target.clone();
     let worker = std::thread::spawn(move || {
         let deadline = worker_state.engram_budget_clock().now() + Duration::from_secs(2);
-        let token = worker_target.routing_token.as_deref().unwrap();
-        if classified {
-            worker_state.apply_engram_root_withholding_classified_until(
-                &worker_target,
-                token,
-                worker_target.work_binding.as_ref(),
-                None,
-                None,
-                deadline,
-            )
-        } else {
-            worker_state
-                .apply_engram_root_withholding_until(
-                    &worker_target,
-                    token,
-                    worker_target.work_binding.as_ref(),
-                    None,
-                    None,
-                    deadline,
-                )
-                .map_err(EngramRootReconcileFailure::AdmissionInvalid)
-        }
+        worker_state.apply_engram_root_withholding_until(
+            &worker_target, worker_target.work_binding.as_ref(), None, deadline)
     });
     let mut batch = PersistFenceBatch::default();
     receive_naming_authority_fence(&rx, &mut batch, &worker);
     assert_eq!(
-        claimed.record(|record| record.engram.named_root.clone()),
+        claimed.record_mut(|record| record.engram.named_root.clone()),
         Some(EngramNamedRootState::None),
         "Unknown cannot be installed before a real re-guard ACK"
     );
     let late = collect_persist_delta_from_shared_state(&state.inner, 0);
     let mut cache = SqlitePersistConnectionCache::new();
     if replace_binding {
-        claimed.record(|record| record.engram.routing_token = Some("successor-token".to_owned()));
+        claimed.record_mut(|record| {
+            record.engram.work_binding.as_mut().unwrap().claim_id.push_str("-successor");
+        });
         persist_delta_with_fences(
             &mut cache,
             state.persistence_path.as_path(),
@@ -87,7 +102,7 @@ fn withholding_reguard(classified: bool, replace_binding: bool) {
         Ok(()) => panic!("unacknowledged or superseded admission cannot install Unknown"),
     };
     assert_eq!(
-        claimed.record(|record| record.engram.named_root.clone()),
+        claimed.record_mut(|record| record.engram.named_root.clone()),
         Some(EngramNamedRootState::None)
     );
     if replace_binding {
@@ -135,9 +150,9 @@ fn withholding_reguard(classified: bool, replace_binding: bool) {
 }
 
 #[test]
-fn durability_pending_orphaned_legacy_reconcile_keeps_origin_categories() {
-    // Real accepted fences through the old wrapper: publication must remain
-    // protocol, not become transport merely because it carries an ApiError.
+fn durability_pending_orphaned_classified_reconcile_keeps_origin_categories() {
+    // Real accepted fences through the current tokenless owner: explicit
+    // transport projection preserves publication and infrastructure origins.
     for publication in [false, true] {
         for failure in [
             PersistFenceError::Deadline,
@@ -146,25 +161,20 @@ fn durability_pending_orphaned_legacy_reconcile_keeps_origin_categories() {
             PersistFenceError::Superseded,
         ] {
             let _scope = TestTempRootDirectoryScope::repository_local();
-            let claimed = ClaimedRoot::new_scripted("legacy-reconcile", Vec::new());
-            prepare_claimed_root_naming(&claimed, "legacy-reconcile");
-            claimed_root_store(&claimed);
-            let target = claimed_root_target(&claimed);
+            let claimed = EOCheckedTurn::idle("legacy-reconcile", true);
+
+            let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id).unwrap().unwrap();
             let mut state = claimed.state.clone();
             let (tx, rx) = mpsc::channel();
             state.persist_tx = tx;
             let fence = EngramRootReadFence::capture(&state.inner.lock().unwrap());
             let worker_state = state.clone();
             let worker = std::thread::spawn(move || {
-                worker_state.reconcile_engram_named_root_with_fence_until(
-                    &target.connection.session_id,
-                    target.routing_token.as_deref().unwrap(),
-                    target.work_binding.as_ref(),
-                    Some(EngramNamedRootState::None),
-                    &fence,
-                    Some(&target.connection),
+                worker_state.reconcile_engram_named_root_with_route_classified_until(
+                    &target.connection.session_id, target.work_binding.as_ref(),
+                    Some(EngramNamedRootState::None), &fence, Some(&target.connection),
                     worker_state.engram_budget_clock().now() + Duration::from_secs(2),
-                )
+                ).map_err(EngramRootReconcileFailure::into_transport)
             });
             let mut batch = PersistFenceBatch::default();
             let mut cache = SqlitePersistConnectionCache::new();
@@ -264,16 +274,11 @@ async fn durability_pending_orphaned_naming_writer_failures_stay_untyped() {
 async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<PersistFenceError>) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let label = "pending-orphaned-naming";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = pending_naming_worktree(&claimed.root);
+
     if clear {
-        name_root(
-            &claimed,
-            label,
-            Some(&worktree),
-            vec![claimed_root_held(label)],
-        )
+        pending_naming_request(&claimed, Some(&worktree))
         .unwrap();
     }
     claimed
@@ -284,12 +289,7 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    name_root(
-        &claimed,
-        label,
-        if clear { None } else { Some(&worktree) },
-        vec![claimed_root_held(label)],
-    )
+    pending_naming_request(&claimed, if clear { None } else { Some(&worktree) })
     .unwrap_err();
     let original = claimed
         .state
@@ -301,16 +301,20 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
         .clone()
         .unwrap();
     let reporter = claimed.session_id.clone();
-    let project = claimed.record(|record| record.session.project_id.clone().unwrap());
+    let project = claimed.record_mut(|record| record.session.project_id.clone().unwrap());
+    let association = claimed.record(|record| record.engram.work_binding.clone());
     claimed.session_id =
         create_test_project_session(&claimed.state, Agent::Codex, &project, &claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
-    let status_before = claimed
-        .transport
-        .requests()
-        .iter()
-        .filter(|request| request.request["operation"] == "session_status")
-        .count();
+    // Explicit fixture association for the successor; no credential or grant.
+    claimed.record_mut(|record| record.engram.work_binding = association);
+    // The successor's ordinary child must answer for its own session. The
+    // predecessor's explicit identity reply is not valid for this connection.
+    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .work_session_read_reply = Some(Ok(json!({
+            "project_id": "github.com/example/source-root", "session_id": claimed.session_id,
+            "work_session": true, "capabilities": ["host_work_v1"],
+        })));
+
     let binds_before = claimed
         .transport
         .requests()
@@ -325,25 +329,29 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
     let worker_tree = worktree.clone();
     let orphaned = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let orphaned_in_worker = orphaned.clone();
+    let reads_at_orphaning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let reads_at_orphaning_in_worker = reads_at_orphaning.clone();
     let worker = std::thread::spawn(move || {
         let state = claimed.state.clone();
+        let transport = claimed.transport.clone();
         // A real reporter can disappear while held-claims is off lock. Keep
         // it available during preparatory maintenance, then exercise the
         // endpoint's orphan branch rather than a maintenance-only recovery.
         TEST_ENGRAM_AFTER_SOURCE_ROOT_HELD_READ.with(|hook| {
             *hook.borrow_mut() = Some(Box::new(move || {
+                // Earlier maintenance reads are not proof that this orphan
+                // has been read. Fence injection starts after this boundary.
+                let reads = transport.requests().iter()
+                    .filter(|request| request.request["operation"] == "named_root_read")
+                    .count();
                 let mut inner = state.inner.lock().unwrap();
                 let index = inner.find_session_index(&reporter).unwrap();
                 inner.remove_session_at(index);
+                reads_at_orphaning_in_worker.store(reads, std::sync::atomic::Ordering::SeqCst);
                 orphaned_in_worker.store(true, std::sync::atomic::Ordering::SeqCst);
             }));
         });
-        let result = name_root(
-            &claimed,
-            label,
-            if clear { None } else { Some(&worker_tree) },
-            vec![claimed_root_held(label)],
-        );
+        let result = pending_naming_request(&claimed, if clear { None } else { Some(&worker_tree) });
         (claimed, result)
     });
     let mut batch = PersistFenceBatch::default();
@@ -351,18 +359,18 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
     let mut observed = None;
     for _ in 0..32 {
         receive_naming_authority_fence(&rx, &mut batch, &worker);
-        let after_status = orphaned.load(std::sync::atomic::Ordering::SeqCst)
+        let after_canonical_read = orphaned.load(std::sync::atomic::Ordering::SeqCst)
             && transport
                 .requests()
                 .iter()
-                .filter(|request| request.request["operation"] == "session_status")
+                .filter(|request| request.request["operation"] == "named_root_read")
                 .count()
-                > status_before;
+                > reads_at_orphaning.load(std::sync::atomic::Ordering::SeqCst);
         let image = match &batch.pending[0].target {
             PersistFenceTarget::EngramWorkAuthority(image) => Some(image.as_ref()),
             _ => None,
         };
-        let target = after_status
+        let target = after_canonical_read
             && image.is_some_and(|image| {
                 image.history.transition.as_ref().is_some_and(|owner| {
                     owner.phase
@@ -386,6 +394,11 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
         let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
         if target {
             let image = image.unwrap().clone();
+            assert!(orphaned.load(std::sync::atomic::Ordering::SeqCst));
+            assert!(transport.requests().iter()
+                .filter(|request| request.request["operation"] == "named_root_read")
+                .count() > reads_at_orphaning.load(std::sync::atomic::Ordering::SeqCst),
+                "the selected orphan owner follows a read made after reporter removal");
             if let Some(failure) = failure.clone() {
                 batch.fail(failure);
             } else {
@@ -417,7 +430,7 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
     }
     let (mut claimed, result) = worker.join().unwrap();
     let (image, late) =
-        observed.expect("the orphan branch reaches its own guarded phase AFTER SessionStatus");
+        observed.expect("the orphan branch reaches its own guarded phase AFTER canonical NamedRootRead");
     let response = match result {
         Err(error) => error.into_response(),
         Ok(_) => panic!("an unacknowledged orphan phase is not successful naming"),
@@ -484,12 +497,7 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
         assert_eq!(journal.pending.as_ref(), Some(&original));
     }
     reload_pending_naming(&mut claimed, loaded);
-    let retried = name_root(
-        &claimed,
-        label,
-        if clear { None } else { Some(&worktree) },
-        vec![claimed_root_held(label)],
-    );
+    let retried = pending_naming_request(&claimed, if clear { None } else { Some(&worktree) });
     match retried {
         Err(error) => assert_eq!(error.status, StatusCode::CONFLICT, "{}", error.message),
         Ok(current) if clear => assert!(current.root.is_none()),
@@ -526,7 +534,7 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
     assert_eq!(body["retry"]["mode"], "same_request");
 }
 
-fn reload_pending_naming(claimed: &mut ClaimedRoot, loaded: StateInner) {
+fn reload_pending_naming(claimed: &mut EOCheckedTurn, loaded: StateInner) {
     let mut restarted = test_app_state();
     restarted.persistence_path = claimed.state.persistence_path.clone();
     restarted.inner = Arc::new(StateMutex::new(loaded));
@@ -540,15 +548,15 @@ fn reload_pending_naming(claimed: &mut ClaimedRoot, loaded: StateInner) {
 async fn durability_pending_naming_first_guard_has_no_invented_generation_after_reload() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let label = "pending-first-guard";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = pending_naming_worktree(&claimed.root);
+
     let (tx, rx) = mpsc::channel();
     claimed.state.persist_tx = tx;
     let state = claimed.state.clone();
     let tree = worktree.clone();
     let worker = std::thread::spawn(move || {
-        let result = name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]);
+        let result = pending_naming_request(&claimed, Some(&tree));
         (claimed, result)
     });
     let mut batch = PersistFenceBatch::default();
@@ -613,12 +621,7 @@ async fn durability_pending_naming_first_guard_has_no_invented_generation_after_
     reload_pending_naming(&mut claimed, loaded);
     // This is a fresh application under the fixture's current held claim,
     // not acknowledgement of a generation the old guard never allocated.
-    let named = name_root(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![claimed_root_held(label)],
-    )
+    let named = pending_naming_request(&claimed, Some(&worktree))
     .unwrap();
     assert!(named.generation > 0);
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
@@ -642,9 +645,9 @@ async fn durability_pending_review_naming_clock_expiry_preserves_pending_contrac
 async fn naming_late_intent_commit(advance_clock: bool) {
     let _temp_scope = TestTempRootDirectoryScope::repository_local();
     let label = "durability-pending-naming";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = pending_naming_worktree(&claimed.root);
+
     let (tx, rx) = mpsc::channel();
     claimed.state.persist_tx = tx;
     let state = claimed.state.clone();
@@ -652,12 +655,7 @@ async fn naming_late_intent_commit(advance_clock: bool) {
     let transport = claimed.transport.clone();
     let worker_tree = worktree.clone();
     let worker = std::thread::spawn(move || {
-        let result = name_root(
-            &claimed,
-            label,
-            Some(&worker_tree),
-            vec![claimed_root_held(label)],
-        );
+        let result = pending_naming_request(&claimed, Some(&worker_tree));
         (claimed, result)
     });
     let mut batch = PersistFenceBatch::default();
@@ -672,7 +670,7 @@ async fn naming_late_intent_commit(advance_clock: bool) {
         &mut batch,
     )
     .unwrap();
-    receive_naming_authority_fence(&rx, &mut batch, &worker);
+    receive_prepared_naming_intent(&state, &rx, &mut batch, &mut cache, &worker);
     let intent = state.inner.lock().unwrap().engram_named_root_journal[0]
         .pending
         .clone()
@@ -772,12 +770,7 @@ async fn naming_late_intent_commit(advance_clock: bool) {
     // The same request is explicitly resent. Step only real fences from the
     // production route, including recovery fences, until its result arrives.
     let worker = std::thread::spawn(move || {
-        let result = name_root(
-            &claimed,
-            label,
-            Some(&worktree),
-            vec![claimed_root_held(label)],
-        );
+        let result = pending_naming_request(&claimed, Some(&worktree));
         (claimed, result)
     });
     let started = std::time::Instant::now();
@@ -847,21 +840,16 @@ async fn naming_late_intent_commit(advance_clock: bool) {
 async fn durability_pending_review_clear_publication_keeps_original_generation() {
     let _temp_scope = TestTempRootDirectoryScope::repository_local();
     let label = "durability-pending-clear-publication";
-    let mut claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    name_root(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![claimed_root_held(label)],
-    )
+    let mut claimed = EOCheckedTurn::idle(label, true);
+    let worktree = pending_naming_worktree(&claimed.root);
+    pending_naming_request(&claimed, Some(&worktree))
     .unwrap();
     let original = claimed.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
     let (tx, rx) = mpsc::channel();
     claimed.state.persist_tx = tx;
     let state = claimed.state.clone();
     let worker = std::thread::spawn(move || {
-        let result = name_root(&claimed, label, None, vec![claimed_root_held(label)]);
+        let result = pending_naming_request(&claimed, None);
         (claimed, result)
     });
     let mut batch = PersistFenceBatch::default();
@@ -948,7 +936,7 @@ async fn durability_pending_review_clear_publication_keeps_original_generation()
         .count();
     assert_eq!(end_count, 1);
     reload_pending_naming(&mut claimed, disk);
-    let cleared = name_root(&claimed, label, None, vec![claimed_root_held(label)]).unwrap();
+    let cleared = pending_naming_request(&claimed, None).unwrap();
     assert!(cleared.root.is_none());
     assert_eq!(cleared.generation, 0);
     assert_eq!(

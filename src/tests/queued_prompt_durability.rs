@@ -1120,7 +1120,7 @@ fn a_bound_resume_whose_head_is_gone_is_not_refused_for_a_held_successor() {
         let index = inner.find_session_index(&fixture.session).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
         record.set_auto_dispatch_blocked(true);
-        let owner = EngramQueuedAdmissionOwner::capture(record).expect("a head");
+        let owner = QueuedTurnOwner::capture(record).expect("a head");
         clear_queued_prompts_by_source(record, QueuedPromptSource::User);
         fixture.state.commit_locked(&mut inner).unwrap();
         owner

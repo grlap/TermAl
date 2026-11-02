@@ -318,11 +318,9 @@ impl ProcessEngramControlTransport {
 }
 
 impl EngramControlTransport for ProcessEngramControlTransport {
-    fn connection_generation(&self, session_id: &str) -> Option<u64> {
-        // Only a live, published child is a connection; a reserved start, a
-        // finished or retiring child, or none at all reads as none.
-        let live = self
-            .processes
+    fn has_live_child(&self, session_id: &str) -> bool {
+        // A reserved start or a finished or retiring child is not live.
+        self.processes
             .lock()
             .expect("Engram process registry mutex poisoned")
             .get(session_id)
@@ -330,8 +328,11 @@ impl EngramControlTransport for ProcessEngramControlTransport {
             .is_some_and(|process| {
                 !process.worker_finished.load(Ordering::Acquire)
                     && !process.retiring.load(Ordering::Acquire)
-            });
-        if !live {
+            })
+    }
+
+    fn connection_generation(&self, session_id: &str) -> Option<u64> {
+        if !self.has_live_child(session_id) {
             return None;
         }
         self.generations
@@ -448,26 +449,17 @@ impl EngramControlTransport for ProcessEngramControlTransport {
             connection,
             preference,
             timeout,
-            false,
             &self.host_workdir,
         )
     }
 
-    fn read_work_binding_for_boot(
-        &self,
-        connection: &EngramConnectionConfig,
-        preference: EngramBindingPreference<'_>,
-        timeout: Duration,
-    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        read_engram_work_binding_from_cli(connection, preference, timeout, true, &self.host_workdir)
-    }
 
     fn read_held_claims(
         &self,
         connection: &EngramConnectionConfig,
         timeout: Duration,
     ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
-        read_engram_held_claims_from_cli(connection, timeout, false, &self.host_workdir)
+        read_engram_held_claims_from_cli(connection, timeout, &self.host_workdir)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -558,6 +550,7 @@ fn spawn_engram_control_process(
         .arg("--home")
         .arg(&connection.home)
         .arg("control")
+        .arg("--work-session")
         .arg("--actor-id")
         .arg(&connection.actor_id);
     if let Some(actor_context) = connection.actor_context.as_deref() {

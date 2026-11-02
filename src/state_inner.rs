@@ -122,7 +122,6 @@ impl StateInner {
             .then(|| session_model.clone());
 
         let record = SessionRecord {
-            unmediated_turn_generation: None,
             federation_mailbox_binding: None,
             federation_automatic_mailbox_binding: None,
             federation_retired_automatic_mailbox_bindings: Vec::new(),
@@ -178,16 +177,11 @@ impl StateInner {
             codex_terminal_identity_unresolved: false,
             runtime_stop_in_progress: false,
             runtime_stop_owner: None,
-            engram_containment_stop: None,
             runtime_stop_generation: 0,
             auto_dispatch_pause_epoch: 0,
             engram_mcp_revocation_pending: false,
             deferred_stop_callbacks: Vec::new(),
             engram: EngramSessionState::default(),
-            engram_boot_recovery_pending: false,
-            engram_boot_recovery_dispatch_pending: false,
-            engram_boot_recovery_retry_in_progress: false,
-            engram_queue_schedule: EngramQueueSchedule::default(),
             hidden: false,
             // Freshly created records start unstamped; the call path
             // immediately inserts this record and then the caller routes
@@ -195,6 +189,7 @@ impl StateInner {
             // stamp as soon as a mutation happens.
             body_sequence: SessionBodySequence::default(),
             mutation_stamp: 0,
+            persist_incarnation: Arc::new(()),
             prompt_history_mutation_stamp: 0,
             session: Session {
                 body_seq: None,
@@ -253,8 +248,6 @@ impl StateInner {
                 agent_commands_revision: 0,
                 codex_thread_state: None,
                 live_activity: None,
-                engram_boot_recovery_pending: false,
-                engram_control_off: None,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
                 messages: MessageSequence::default(),
@@ -266,10 +259,8 @@ impl StateInner {
                 pending_prompts: Vec::new(),
                 prompt_deliveries: Vec::new(),
                 provider_handoffs: Vec::new(),
-                prompt_admission_budgets: BTreeMap::new(),
                 provider_handoff_history: None,
                 queue_paused: false,
-                queue_hold: None,
                 provider_capacity_waiting: false,
                 source_tracking_recovery: false,
                 queue_projection_hash: None,
@@ -445,8 +436,7 @@ impl StateInner {
     /// WITHOUT using the resulting `&mut SessionRecord`. Production
     /// callers: `import_discovered_codex_threads` in `state_boot.rs`,
     /// which swaps an owned record into the slot via `*slot = record`,
-    /// and the stale-begin settlement in `engram_host_adapter.rs`, which
-    /// edits the slot in place; both then re-stamp the slot so the SQLite
+    /// then re-stamps the slot so the SQLite
     /// delta persist picks up the row. Returns the assigned stamp,
     /// or `None` if the index is out of bounds.
     fn stamp_session_at_index(&mut self, index: usize) -> Option<u64> {
@@ -567,7 +557,6 @@ impl StateInner {
                 named_by != session_id
             });
             self.removed_session_ids.push(session_id);
-            self.compact_removed_checkpoint_history();
         }
     }
 

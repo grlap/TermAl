@@ -189,10 +189,6 @@ export function normalizeEngramHostSettings(
     developerName: settings?.developerName?.trim().toLowerCase() || "dev",
     binaryPath: settings?.binaryPath?.trim() || "engram",
     home: settings?.home?.trim() || defaultHome,
-    bootRecoveryBudgetMs:
-      typeof settings?.bootRecoveryBudgetMs === "number"
-        ? settings.bootRecoveryBudgetMs
-        : 5_000,
   };
 }
 

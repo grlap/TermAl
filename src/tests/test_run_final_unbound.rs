@@ -98,7 +98,7 @@ fn final_no_binding_proof_survives_boot_and_historical_monitoring_gaps() {
 
 #[test]
 fn a_start_snapshot_cannot_finalize_after_binding_or_reporting_changes() {
-    for change in ["binding", "grant", "report", "generation"] {
+    for change in ["binding", "observation", "unmatched-launch", "generation"] {
         let fixture = RunFixture::new(&format!("final-unbound-{change}"));
         let session = running_owner(&fixture, "final-unbound-context-runtime");
         let id = start(&fixture, &session, "cargo test");
@@ -117,10 +117,14 @@ fn a_start_snapshot_cannot_finalize_after_binding_or_reporting_changes() {
                         claim_fence: 1,
                     })
                 }
-                "grant" => record.engram.active_grant_id = Some("pending-grant".to_owned()),
-                "report" => {
-                    record.engram.active_turn_report =
-                        Some(("pending-grant".to_owned(), EngramTurnReport::default()))
+                "observation" => {
+                    let generation = record.active_turn_generation;
+                    adopt_runtime_observation(
+                        record, "pending-observation", generation, None,
+                    );
+                }
+                "unmatched-launch" => {
+                    engram_note_unmatched_launch(record, &fixture.root, &test_run_timestamp());
                 }
                 "generation" => record.active_turn_generation += 1,
                 _ => unreachable!(),

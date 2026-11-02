@@ -20,7 +20,7 @@ impl Drop for PlanningProbe {
     }
 }
 
-fn scaled_scheduler_state(label: &str) -> ClaimedRoot {
+fn scaled_scheduler_state(label: &str) -> EOCheckedTurn {
     let (claimed, entry) = settled_root(label, "unknown");
     {
         let mut inner = claimed.state.inner.lock().unwrap();

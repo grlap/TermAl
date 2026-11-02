@@ -3,9 +3,6 @@
 //! Uses the production host transport and a pinned Engram disposable store.
 use super::*;
 
-#[path = "engram_checkpoint_result_recovery_live.rs"]
-mod checkpoint_result_recovery_live;
-
 #[path = "engram_legacy_root_recovery_live.rs"]
 mod legacy_recovery;
 
@@ -27,15 +24,15 @@ mod source_observation;
 #[path = "engram_build_checks_live.rs"]
 mod build_checks;
 
-struct CompletionFixture {
-    live: LiveRootFixture,
-    root: PathBuf,
-    home: PathBuf,
-    project_id: String,
+pub(super) struct CompletionFixture {
+    pub(super) live: LiveRootFixture,
+    pub(super) root: PathBuf,
+    pub(super) home: PathBuf,
+    pub(super) project_id: String,
 }
 
 impl CompletionFixture {
-    fn command(&self, session_id: &str, args: &[&str], work: bool) -> Value {
+    pub(super) fn command(&self, session_id: &str, args: &[&str], work: bool) -> Value {
         let (actor_id, actor_context) = {
             let inner = self.live.state.inner.lock().expect("state mutex poisoned");
             engram_runtime_actor_identity(
@@ -72,7 +69,7 @@ impl CompletionFixture {
         })
     }
 
-    fn work(&self, session_id: &str, args: &[&str]) -> Value {
+    pub(super) fn work(&self, session_id: &str, args: &[&str]) -> Value {
         self.command(session_id, args, true)
     }
 
@@ -85,38 +82,31 @@ impl CompletionFixture {
         )
     }
 
-    fn canonical_read(
-        &self,
-        session: &str,
-        binding: &EngramControlWorkBinding,
-    ) -> EngramNamedRootReadResponse {
-        let target = AppState::engram_binding_target_for_session_shape_locked(
-            &self.live.state.inner.lock().unwrap(),
-            session,
-            true,
-        )
-        .unwrap()
-        .unwrap();
-        let read: EngramNamedRootReadResponse = parse_engram_result(
-            self.live
-                .transport
-                .request(
-                    &target.connection,
-                    &EngramControlRequest::NamedRootRead {
-                        routing_token: target.routing_token.clone().unwrap(),
-                        run_id: binding.run_id.clone(),
-                        claim_id: binding.claim_id.clone(),
-                    },
-                    target.settings.call_timeout(),
-                )
-                .expect("real canonical run is readable"),
-        )
-        .unwrap();
-        read.validate_authority(
-            target.settings.authority_store_key.as_ref().unwrap(),
-            binding,
-        )
-        .unwrap();
+    pub(super) fn store(&self) -> EngramAuthorityStoreKey {
+        self.live.state.inner.lock().unwrap().find_project(&self.project_id)
+            .unwrap().engram.as_ref().unwrap().authority_store_key.clone().unwrap()
+    }
+
+    pub(super) fn target(&self, session: &str) -> EngramBindingTarget {
+        AppState::engram_source_root_target_locked(&self.live.state.inner.lock().unwrap(), session)
+            .unwrap().expect("the ordinary work service is configured")
+    }
+
+    pub(super) fn claim_binding(&self, session: &str) -> EngramControlWorkBinding {
+        let target = self.target(session);
+        target.adapter.read_work_session(&target.connection, &self.store(), target.settings.call_timeout())
+            .expect("the actual ordinary producer identifies this session");
+        target.adapter.read_work_binding(&target.connection, EngramBindingPreference { current: None },
+            target.settings.call_timeout()).unwrap().expect("the real session holds a claim")
+    }
+
+    fn canonical_read(&self, session: &str, binding: &EngramControlWorkBinding) -> EngramNamedRootReadResponse {
+        let target = self.target(session);
+        let read: EngramNamedRootReadResponse = parse_engram_result(target.adapter.request(
+            &target.connection, &EngramControlRequest::NamedRootRead {
+                run_id: binding.run_id.clone(), claim_id: binding.claim_id.clone(),
+            }, target.settings.call_timeout()).expect("real canonical run is readable")).unwrap();
+        read.validate_authority(&self.store(), binding).unwrap();
         read
     }
 
@@ -144,9 +134,7 @@ impl CompletionFixture {
             _ => panic!("expected a provider prompt"),
         }
         assert!(self.live.receiver.try_recv().is_err());
-        assert!(self.record(session_id, |record| {
-            record.engram.active_turn_start_basis.is_some()
-        }));
+        assert!(self.record(session_id, |record| record.engram.unadmitted_active_turn.is_some()));
     }
 
     fn wait_for_check_capture(&self, session_id: &str) {
@@ -164,6 +152,132 @@ impl CompletionFixture {
         assert!(!captures.is_empty(), "the real check is recognized");
         for capture in captures {
             capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+        }
+    }
+
+    fn registered_check(&self, session: &str, root: &FsPath, command: &str)
+        -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
+    {
+        let argv = engram_shell_words(command).unwrap();
+        assert_eq!(argv.first().map(String::as_str), Some("cargo"));
+        let clean_before = run_git_test_command_output(root, &["status", "--porcelain"]).is_empty();
+        assert!(clean_before, "registered native checks start on a clean commit");
+        let commit = run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim().to_owned();
+        let run_id = format!("test-live-{}", Uuid::new_v4().simple());
+        let runs = PathBuf::from(run_git_test_command_output(root,
+            &["rev-parse", "--path-format=absolute", "--git-path", "review-runs"]).trim());
+        let directory = runs.join(&run_id);
+        fs::create_dir_all(&directory).unwrap();
+        let started = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let request = json!({
+            "runId": run_id, "root": fs::canonicalize(root).unwrap().to_string_lossy(),
+            "owner": session, "creatorPid": std::process::id(), "detached": false,
+            "input": "commit", "full": false, "started": started,
+            "command": argv, "stages": [{ "name": "focused", "command": argv[0], "args": &argv[1..] }],
+        });
+        fs::write(directory.join("request.json"), serde_json::to_vec(&request).unwrap()).unwrap();
+        self.live.state.register_test_run(session, RegisterTestRunRequest {
+            run_id: run_id.clone(), run_directory: directory.to_string_lossy().into_owned(),
+        }).unwrap();
+        let registration = self.live.state.inner.lock().unwrap().test_run_registrations[&run_id].clone();
+        assert_eq!(registration.work_binding.as_ref(), Some(&self.claim_binding(session)));
+        assert_eq!(registration.authority_store.as_ref(), Some(&self.store()));
+        assert!(registration.named_root.is_some(), "the actual naming owner pins the registered root");
+        let mut recorder = SessionRecorder::new(self.live.state.clone(), session.to_owned());
+        recorder.command_started_in(&run_id, command, Some(command), Some(&root.to_string_lossy())).unwrap();
+        self.wait_for_check_capture(session);
+        let stage_started = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let output = Command::new(&argv[0]).args(&argv[1..]).current_dir(root)
+            .env("CARGO_TARGET_DIR", root.join("target")).output().expect("actual native Cargo launches");
+        let text = format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        fs::write(directory.join("focused.log"), &text).unwrap();
+        let code = output.status.code().expect("native command exit");
+        if command.contains(" test") {
+            assert!(code == 0 && text.contains("1 passed"), "the real embedded checked_content test passed: {text}");
+        }
+        let ended = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let after_commit = run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim().to_owned();
+        let dirty = run_git_test_command_output(root, &["status", "--porcelain"]);
+        assert_eq!(after_commit, commit);
+        assert!(dirty.is_empty(), "the real native check leaves source unchanged: {dirty}");
+        let results = json!({
+            "runId": run_id, "state": if code == 0 { "passed" } else { "failed" },
+            "exitCode": code, "started": started, "ended": ended,
+            "stages": [{ "name": "focused", "state": if code == 0 { "passed" } else { "failed" },
+                "code": code, "command": argv, "started": stage_started, "ended": ended }],
+            "input": { "kind": "commit", "commit": commit, "cleanBefore": clean_before,
+                "after": { "commit": after_commit, "clean": true, "paths": [] },
+                "outcome": "clean", "eligible": true },
+        });
+        fs::write(directory.join("results.json"), serde_json::to_vec(&results).unwrap()).unwrap();
+        recorder.command_completed_with_exit(&run_id, command, &text,
+            if code == 0 { CommandStatus::Success } else { CommandStatus::Error },
+            EngramCommandExit::Code(i64::from(code))).unwrap();
+        self.wait_for_check_capture(session);
+        let EngramVerificationRecordPrepared::Ready(frozen) = engram_verification_record_prepare(&registration)
+            else { panic!("the real registered artifact must produce a native verification body"); };
+        let route = self.live.state.engram_verification_record_route(&registration).unwrap();
+        let sent = engram_verification_record_send(frozen.clone(), Ok(route.link()));
+        let EngramVerificationRecordStep::Received { body, receipt } = &sent
+            else { panic!("actual producer must answer the registered native check: {sent:?}"); };
+        self.live.state.note_engram_verification_record_step(&registration, &sent);
+        let loaded = load_state(self.live.state.persistence_path.as_path()).unwrap().unwrap();
+        assert!(matches!(&loaded.test_run_registrations[&run_id].verification_record,
+            Some(TestRunVerificationAck::Received { receipt: saved, .. }) if saved == receipt),
+            "the actual receipt is durably retained on the registered run");
+        let duplicate = engram_verification_record_send(frozen, Ok(route.link()));
+        let EngramVerificationRecordStep::Received { body: again, receipt: replay } = duplicate
+            else { panic!("exact native record replay returns its original receipt"); };
+        assert_eq!(&again, body);
+        assert_eq!(serde_json::to_value(&replay).unwrap(), serde_json::to_value(receipt).unwrap());
+        assert_eq!(receipt.verifications.len(), 1);
+        let positive = self.object(&receipt.verifications[0].record_id);
+        for mismatch in ["dirty-input", "claim-fence", "same-key-different-body"] {
+            let mut refused = body.clone();
+            if mismatch != "same-key-different-body" {
+                refused.registration.host_run_id = format!("{}-{mismatch}", body.registration.host_run_id);
+            }
+            match mismatch {
+                "dirty-input" => refused.post_run.clean_before = false,
+                "claim-fence" => refused.registration.binding.claim_fence += 1,
+                _ => refused.run.command.push_str(" --changed-body"),
+            }
+            let request = EngramControlRequest::VerificationRecord {
+                operation_key: engram_verification_record_key(&refused.registration.host_run_id),
+                record: serde_json::to_value(&refused).unwrap(),
+            };
+            let target = self.target(session);
+            let error = target.adapter.request(&target.connection, &request, target.settings.call_timeout())
+                .expect_err("the real producer rejects invalid input, claim scope or an idempotency collision");
+            assert_eq!(error.kind, EngramTransportErrorKind::Remote, "{mismatch}: {error:?}");
+            assert_eq!(self.object(&receipt.verifications[0].record_id), positive);
+        }
+
+        assert_no_live_turn_gate(&self.live.transport);
+        (body.clone(), receipt.clone())
+    }
+
+    fn wait_for_reports(&self, session: &str) {
+        self.live.state.start_runtime_observation_worker(session);
+        let guard = phase_sync::PollGuard::new();
+        loop {
+            let done = self.record(session, |record| {
+                record.engram.unadmitted_closing_jobs.is_empty()
+                    && record.engram.unadmitted_reports.iter().all(|report| report.is_settled())
+                    && !record.engram.unadmitted_worker_running
+            });
+            if done {
+                self.record(session, |record| {
+                    for report in &record.engram.unadmitted_reports {
+                        for envelope in &report.envelopes {
+                            assert!(matches!(envelope.delivery, EngramRuntimeObservationDelivery::Recorded { .. }),
+                                "a real positive witness requires an acknowledged producer receipt: {:?}", envelope.delivery);
+                        }
+                    }
+                });
+                break;
+            }
+            guard.wait("actual ordinary observation worker completes the persisted report");
         }
     }
 
@@ -200,7 +314,7 @@ impl CompletionFixture {
     }
 }
 
-fn completion_fixture() -> CompletionFixture {
+pub(super) fn completion_fixture() -> CompletionFixture {
     let suffix = "recovered-named-completion";
     let live = live_root_fixture(suffix, []);
     let base = live.state.test_temp_root.as_ref().unwrap().path();
@@ -256,7 +370,7 @@ fn completion_fixture() -> CompletionFixture {
             &project_id,
             UpdateProjectEngramSettingsRequest {
                 enabled: true,
-                turn_gated_control: true,
+                execution_observability: Some(true),
                 acceptance_evaluation: None,
                 binary_path: Some(live_engram_binary().to_string_lossy().into_owned()),
                 home: Some(home.to_string_lossy().into_owned()),
@@ -309,440 +423,127 @@ fn objects_with_key<'a>(value: &'a Value, key: &str, found: &mut Vec<&'a Value>)
     }
 }
 
+
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     let fixture = completion_fixture();
-    let first_session = &fixture.live.session_id;
-    let added = fixture.work(
-        first_session,
-        &[
-            "add",
-            "Check the recovered named worktree",
-            "--accept",
-            "A test passes in the named root",
-            "--bind",
-            "1=test",
-            "--json",
-        ],
-    );
-    let work_ref = added["work"]["short_ref"]
-        .as_str()
-        .or_else(|| added["short_ref"].as_str())
-        .expect("work ref")
-        .to_owned();
-    fixture.work(first_session, &["claim", &work_ref, "--json"]);
-    fixture.begin(first_session, "Make the earlier source change.");
-    for state in ["claimed"] {
-        assert!(
-            fixture
-                .live
-                .transport
-                .root_reads
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|read| {
-                    read.run.state == state
-                        && read.named_root == EngramNamedRootState::None
-                        && read.latest_event.is_none()
-                }),
-            "the real producer proves first-contact absence while {state}"
-        );
-    }
-    let initial_binding = fixture.record(first_session, |record| {
-        record.engram.work_binding.clone().unwrap()
-    });
+    let first = &fixture.live.session_id;
+    let added = fixture.work(first, &["add", "Check the recovered named worktree",
+        "--accept", "A test passes in the named root", "--bind", "1=test", "--json"]);
+    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    fixture.work(first, &["claim", work, "--json"]);
+    let original = fixture.claim_binding(first);
+    let unnamed = fixture.canonical_read(first, &original);
+    assert_eq!(unnamed.named_root, EngramNamedRootState::None);
+    assert!(unnamed.latest_event.is_none());
+    fixture.begin(first, "Make the earlier source change.");
     fs::write(fixture.root.join("README.md"), "earlier changed content\n").unwrap();
-    finish_live_root(&fixture.live.state, first_session);
-    // A work checkpoint activates the canonical run. A control-turn checkpoint
-    // closes the grant and stores observations, but does not activate that run.
-    fixture.work(
-        first_session,
-        &[
-            "note",
-            &work_ref,
-            "Earlier source change recorded before releasing this run",
-            "--status",
-            "--json",
-        ],
-    );
-    let active = fixture.canonical_read(first_session, &initial_binding);
-    assert_eq!(active.run.state, "active");
-    assert_eq!(active.named_root, EngramNamedRootState::None);
-    assert!(active.latest_event.is_none());
-    let checkpoints = fixture.live.transport.requests_for("turn_checkpoint");
-    let old = checkpoints.last().expect("old turn checkpoint");
-    let old_observation = old["observations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|observation| observation["source_changed"] == true)
-        .unwrap_or_else(|| panic!("the run retains a real earlier mutation: {old:#}"));
-    let old_basis = old_observation["source_basis"].clone();
-    assert!(
-        old_basis["source_root_generation"].is_null(),
-        "{old_basis:#}"
-    );
-    fixture.work(
-        first_session,
-        &[
-            "update",
-            &work_ref,
-            "--release",
-            "--reason",
-            "Continue in a recovered session",
-            "--json",
-        ],
-    );
-
-    // New content is committed before the recovered session names its root.
-    fs::write(
-        fixture.root.join("README.md"),
-        "newer content before naming\n",
-    )
-    .unwrap();
+    finish_live_root(&fixture.live.state, first);
+    fixture.wait_for_reports(first);
+    let reports = fixture.live.transport.requests_for("execution_observe");
+    assert!(!reports.is_empty(), "the real producer receives the earlier ordinary mutation");
+    let earlier = reports.clone();
+    fixture.work(first, &["note", work, "Earlier source change retained before release", "--status", "--json"]);
+    fixture.work(first, &["update", work, "--release", "--reason", "Continue in a recovered session", "--json"]);
+    fs::write(fixture.root.join("README.md"), "newer content before naming\n").unwrap();
     run_git_test_command(&fixture.root, &["add", "README.md"]);
-    run_git_test_command(
-        &fixture.root,
-        &["commit", "--quiet", "-m", "newer fixture content"],
-    );
-    let worktree = fixture.root.join(".worktrees").join("new-root");
-    run_git_test_command(
-        &fixture.root,
-        &[
-            "worktree",
-            "add",
-            "--quiet",
-            "-b",
-            "new-root",
-            worktree.to_str().unwrap(),
-        ],
-    );
-    let second_session = create_test_project_session(
-        &fixture.live.state,
-        Agent::Codex,
-        &fixture.project_id,
-        &fixture.root,
-    );
-    let _cleanup = LiveRootCleanup {
-        transport: fixture.live.transport.clone(),
-        session_id: second_session.clone(),
-    };
-    fixture.work(
-        &second_session,
-        &[
-            "claim",
-            &work_ref,
-            "--recover",
-            "Recover the released run at newer content",
-            "--json",
-        ],
-    );
-    fixture
-        .live
-        .state
-        .ensure_engram_session_bound_off_lock(&second_session)
-        .expect("recovered session binds")
-        .expect("binding is enabled");
-    let recovered = fixture.record(&second_session, |record| {
-        record.engram.work_binding.clone().unwrap()
-    });
-    assert_eq!(
-        recovered.run_id, initial_binding.run_id,
-        "recovery preserves the old mutation's run"
-    );
-    assert_eq!(recovered.claim_id, initial_binding.claim_id);
-    assert!(recovered.claim_fence > initial_binding.claim_fence);
-    let named = fixture
-        .live
-        .state
-        .name_engram_source_root(
-            &second_session,
-            EngramSourceRootRequest {
-                work: work_ref.clone(),
-                path: Some(Some(worktree.to_string_lossy().into_owned())),
-            },
-        )
-        .expect("the production host names the real canonical run");
-    assert!(named.generation > 0);
-    // Release reopens the run and recovery claims it again. Checkpoint the
-    // recovered holder before exercising its active named-root admission.
-    fixture.work(
-        &second_session,
-        &[
-            "note",
-            &work_ref,
-            "Recovered holder will check the named root without an edit",
-            "--status",
-            "--json",
-        ],
-    );
-    let revision = named.source_revision.expect("named content measured");
-    assert_ne!(old_basis["source_revision"], revision);
-    let before = content_revision(&worktree)
-        .expect("new worktree measures")
-        .1;
-    assert_eq!(before, revision);
-    fixture.begin(&second_session, "Run the check without changing source.");
-    assert!(fixture.live.transport.root_reads.lock().unwrap().iter().any(|read| {
-        read.run.state == "active" && matches!(&read.named_root,
-            EngramNamedRootState::Bound { generation, .. } if *generation == named.generation as i64)
-            && read.latest_event.as_ref().is_some_and(|event| event.kind == EngramNamedRootKind::Bound)
-    }), "the real active run confirms the named generation and Bound event");
-    let target = AppState::engram_binding_target_for_session_shape_locked(
-        &fixture.live.state.inner.lock().unwrap(),
-        &second_session,
-        true,
-    )
-    .unwrap()
-    .unwrap();
-    let cwd = fs::canonicalize(&worktree)
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
-    let mut recorder = SessionRecorder::new(fixture.live.state.clone(), second_session.clone());
-    recorder
-        .command_started_in(
-            "named-test",
-            "cargo test --offline",
-            Some("cargo test --offline"),
-            Some(&cwd),
-        )
-        .unwrap();
-    fixture.wait_for_check_capture(&second_session);
-    let output = Command::new("cargo")
-        .args(["test", "--offline"])
-        .current_dir(&worktree)
-        .output()
-        .expect("real test launches");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let text = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(text.contains("1 passed"), "{text}");
-    recorder
-        .command_completed_with_exit(
-            "named-test",
-            "cargo test --offline",
-            &text,
-            CommandStatus::Success,
-            EngramCommandExit::Code(0),
-        )
-        .unwrap();
-    fixture.wait_for_check_capture(&second_session);
-    finish_live_root(&fixture.live.state, &second_session);
-    assert_eq!(
-        content_revision(&worktree).unwrap().1,
-        before,
-        "the check did not edit source"
-    );
-    let checkpoints = fixture.live.transport.requests_for("turn_checkpoint");
-    let checked = checkpoints.last().expect("new root checkpoint");
-    assert_eq!(
-        checked["verification_evidence"].as_array().map(Vec::len),
-        Some(1),
-        "{checked:#}"
-    );
-    let observations = checked["observations"].as_array().unwrap();
-    assert!(
-        observations
-            .iter()
-            .all(|observation| observation["source_changed"] == false),
-        "no synthetic edit: {checked:#}"
-    );
-    let producer = observations
-        .iter()
-        .find(|observation| {
-            observation["outcome"] == "succeeded"
-                && observation["source_basis"]["source_revision"] == revision
-        })
-        .expect("check producer has the new basis");
-    let basis = &producer["source_basis"];
-    assert_eq!(basis["source_root_generation"], named.generation);
-    assert_eq!(basis["source_root_state"], "named");
-    assert_ne!(basis["workspace_id"], old_basis["workspace_id"]);
-    let shown = fixture.work(&second_session, &["show", &work_ref, "--notes", "--json"]);
-    let mut rows = Vec::new();
-    objects_with_key(&shown, "verification", &mut rows);
-    assert_eq!(rows.len(), 1, "one store-minted check: {shown:#}");
-    assert_eq!(rows[0]["verification"]["result"], "passed");
-    assert_eq!(rows[0]["verification"]["source_revision"], revision);
-    let verification_id = rows[0]["locator"].as_str().unwrap();
-    let stored = fixture.object(verification_id);
-    eprintln!("real named-root verification: {stored:#}");
-    assert_eq!(
-        stored["source_basis"], *basis,
-        "Engram retained the host's named basis"
-    );
-    let shown = fixture.work(&second_session, &["show", &work_ref, "--json"]);
-    let acceptance = shown["acceptance_basis"]
-        .as_i64()
-        .expect("acceptance basis")
-        .to_string();
-    let evidence = shown["evidence_basis"]
-        .as_i64()
-        .expect("evidence cut")
-        .to_string();
-    fixture.work(
-        &second_session,
-        &[
-            "evaluate",
-            &work_ref,
-            "--mode",
-            "same-session",
-            "--acceptance-basis",
-            &acceptance,
-            "--evidence-basis",
-            &evidence,
-            "--verdict",
-            "1=pass:observed",
-            "--rationale",
-            "1=Real cargo test in the recovered named root passed without an edit",
-            "--evidence",
-            &format!("1={verification_id}"),
-            "--source-fingerprint",
-            &revision,
-            "--attempt",
-            "named-completion",
-            "--json",
-        ],
-    );
-    // An accepted evaluation is not lifecycle end. The real producer still
-    // reports this active Bound run, and a reclamation read must retain it.
-    let evaluated_read = fixture.canonical_read(&second_session, &recovered);
-    assert_eq!(evaluated_read.run.state, "active");
-    assert!(matches!(evaluated_read.named_root, EngramNamedRootState::Bound { .. }));
-    let retained = fixture.live.state.inner.lock().unwrap().engram_work_source_roots
-        .iter().find(|root| root.claim_id == recovered.claim_id).unwrap().clone();
+    run_git_test_command(&fixture.root, &["commit", "--quiet", "-m", "newer fixture content"]);
+    let worktree = fixture.root.join(".worktrees/new-root");
+    run_git_test_command(&fixture.root, &["worktree", "add", "--quiet", "-b", "new-root", worktree.to_str().unwrap()]);
+    let second = create_test_project_session(&fixture.live.state, Agent::Codex, &fixture.project_id, &fixture.root);
+    let _cleanup = LiveRootCleanup { transport: fixture.live.transport.clone(), session_id: second.clone() };
+    fixture.work(&second, &["claim", work, "--recover", "Recover the released run at newer content", "--json"]);
+    let recovered = fixture.claim_binding(&second);
+    assert_eq!(recovered.run_id, original.run_id);
+    assert_eq!(recovered.claim_id, original.claim_id);
+    assert!(recovered.claim_fence > original.claim_fence);
+    let named = fixture.live.state.name_engram_source_root(&second, EngramSourceRootRequest {
+        work: work.to_owned(), path: Some(Some(worktree.to_string_lossy().into_owned())),
+    }).unwrap();
+    let bound = fixture.canonical_read(&second, &recovered);
+    assert!(matches!(bound.named_root, EngramNamedRootState::Bound { generation, .. }
+        if generation == named.generation as i64));
+    fixture.work(&second, &["note", work, "Recovered holder checks the named root without an edit", "--status", "--json"]);
+    let before = content_revision(&worktree).unwrap().1;
+    fixture.begin(&second, "Run the real check without changing source.");
+    let (body, receipt) = fixture.registered_check(&second, &worktree, "cargo test --offline");
+    assert_eq!(body.registration.binding, recovered);
+    assert_eq!(body.registration.root.generation, named.generation as i64);
+    let stored = fixture.object(&receipt.verifications[0].record_id);
+    assert_eq!(stored["source_basis"], serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap());
+    assert_eq!(stored["check_kind"], "test");
+    assert_eq!(content_revision(&worktree).unwrap().1, before);
+    assert!(worktree.join(".git").is_file(), "naming never removes the worktree");
+    for prior in earlier { assert!(fixture.live.transport.requests_for("execution_observe").contains(&prior)); }
+    finish_live_root(&fixture.live.state, &second);
+    fixture.wait_for_reports(&second);
+    let shown = fixture.work(&second, &["show", work, "--json"]);
+    let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
+    let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
+    let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("the registered native witness requires committed input"); };
+    let verification = &receipt.verifications[0].record_id;
+    fixture.work(&second, &[
+        "evaluate", work, "--mode", "same-session", "--acceptance-basis", &acceptance,
+        "--evidence-basis", &evidence, "--verdict", "1=pass:observed", "--rationale",
+        "1=Real registered cargo test in the recovered named root passed without an edit",
+        "--evidence", &format!("1={verification}"), "--source-fingerprint", commit,
+        "--attempt", "named-completion", "--json",
+    ]);
+    let evaluated = fixture.canonical_read(&second, &recovered);
+    assert_eq!(evaluated.run.state, "active", "evaluation alone does not complete the run");
+    assert!(matches!(evaluated.named_root, EngramNamedRootState::Bound { .. }));
+    let retained = fixture.live.state.inner.lock().unwrap().engram_work_source_roots.iter()
+        .find(|entry| entry.claim_id == recovered.claim_id).unwrap().clone();
     let plan = {
-        let now = fixture.live.state.engram_budget_clock().now();
+        let now = fixture.live.state.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_COOLDOWN;
         engram_root_reclamation_plan_locked(&fixture.live.state.inner.lock().unwrap(), now)
     };
-    assert!(plan.iter().any(|task| task.root == retained));
-    let reads_before = fixture.live.transport.root_reads.lock().unwrap().len();
     fixture.live.state.run_engram_root_reclamation_pass(plan);
-    assert!(fixture.live.transport.root_reads.lock().unwrap().len() > reads_before);
     assert!(fixture.live.state.inner.lock().unwrap().engram_work_source_roots.contains(&retained));
-    assert_eq!(content_revision(&worktree).unwrap().1, before);
-    let done = fixture.work(
-        &second_session,
-        &[
-            "done",
-            &work_ref,
-            "Named-root check passed without an edit",
-            "--source-fingerprint",
-            &revision,
-            "--json",
-        ],
-    );
-    eprintln!("real recovered named-root completion: {done:#}");
-    let final_show = fixture.work(&second_session, &["show", &work_ref, "--json"]);
-    assert_eq!(
-        final_show["status"]["work"]["lifecycle"], "completed",
-        "{final_show:#}"
-    );
-    assert_eq!(content_revision(&worktree).unwrap().1, before);
-    let terminal: EngramNamedRootReadResponse = parse_engram_result(
-        fixture
-            .live
-            .transport
-            .request(
-                &target.connection,
-                &EngramControlRequest::NamedRootRead {
-                    routing_token: target.routing_token.clone().unwrap(),
-                    run_id: recovered.run_id.clone(),
-                    claim_id: recovered.claim_id.clone(),
-                },
-                target.settings.call_timeout(),
-            )
-            .expect("completed canonical run is readable"),
-    )
-    .unwrap();
+    fixture.work(&second, &["done", work, "Named-root registered check passed without an edit",
+        "--source-fingerprint", commit, "--json"]);
+    let final_show = fixture.work(&second, &["show", work, "--json"]);
+    assert_eq!(final_show["status"]["work"]["lifecycle"], "completed", "{final_show:#}");
+    let terminal = fixture.canonical_read(&second, &recovered);
     assert_eq!(terminal.run.state, "completed");
     assert_eq!(terminal.named_root, EngramNamedRootState::None);
-    assert!(
-        terminal.latest_event.is_some(),
-        "completion retains naming history"
-    );
-    terminal
-        .validate_authority(
-            target.settings.authority_store_key.as_ref().unwrap(),
-            &recovered,
-        )
-        .unwrap();
-
-    // Move focus through a real work claim before rebinding. The rebind's
-    // existing current-selection cleanup would otherwise consume this entry
-    // before the background reclamation path can observe it.
-    // The old run's retained journal, not focus or a directory deletion,
-    // supplies the canonical identity to the background reclamation path.
-    let later = fixture.work(&second_session, &["add", "Continue after named completion", "--json"]);
-    let later_ref = later["work"]["short_ref"].as_str()
-        .or_else(|| later["short_ref"].as_str()).unwrap();
-    fixture.work(&second_session, &["claim", later_ref, "--json"]);
-    // Only skip the cooldown's wall-clock wait: the real planner must choose
-    // the reconciliation route. The former holder still has a local view of
-    // this recovered run, so moving the naming session on does not imply that
-    // the entry is Unfocused. No clock, deadline or durable state is changed.
+    assert!(terminal.latest_event.is_some(), "completion retains canonical naming history");
     let plan = {
-        let now = fixture.live.state.engram_budget_clock().now();
-        let inner = fixture.live.state.inner.lock().unwrap();
-        eprintln!("historical retirement table before pass: {:#?}", inner.engram_work_source_roots);
-        assert!(inner.engram_work_source_roots.contains(&retained));
-        engram_root_reclamation_plan_locked(&inner, now + ENGRAM_ROOT_RECLAMATION_COOLDOWN)
+        let now = fixture.live.state.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_COOLDOWN;
+        engram_root_reclamation_plan_locked(&fixture.live.state.inner.lock().unwrap(), now)
     };
-    eprintln!("historical retirement actual plan: {plan:#?}");
-    assert!(plan.iter().any(|task| task.root == retained
-        && task.route == EngramRootReclamationRoute::Current(first_session.clone())),
-        "the existing former holder is the planner's reconciliation owner");
+    assert!(plan.iter().any(|task| task.root == retained), "the real planner chooses canonical reconciliation");
     let reads_before = fixture.live.transport.root_reads.lock().unwrap().len();
     fixture.live.state.run_engram_root_reclamation_pass(plan);
-    let reads = fixture.live.transport.root_reads.lock().unwrap();
-    eprintln!("historical retirement reads during pass: {:#?}", &reads[reads_before..]);
-    assert!(reads[reads_before..].iter().any(|read|
-        read.run_id == recovered.run_id && read.run.state == "completed"));
-    drop(reads);
+    assert!(fixture.live.transport.root_reads.lock().unwrap()[reads_before..].iter()
+        .any(|read| read.run_id == recovered.run_id && read.run.state == "completed"));
+    let notice_id = {
+        let inner = fixture.live.state.inner.lock().unwrap();
+        assert!(!inner.engram_work_source_roots.contains(&retained));
+        let notices = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+            .filter(|notice| notice.selection == retained).collect::<Vec<_>>();
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].published);
+        assert_eq!(notices[0].binding, recovered);
+        assert_eq!(notices[0].read.run.state, "completed");
+        assert!(notices[0].line.contains("its run completed"));
+        notices[0].id.clone()
+    };
+    let later = fixture.work(&second, &["add", "Continue after named completion", "--json"]);
+    let later_work = later["work"]["short_ref"].as_str().or_else(|| later["short_ref"].as_str()).unwrap();
+    fixture.work(&second, &["claim", later_work, "--json"]);
+    fixture.live.state.name_engram_source_root(&second, EngramSourceRootRequest {
+        work: later_work.to_owned(), path: Some(Some(worktree.to_string_lossy().into_owned())),
+    }).unwrap();
     let inner = fixture.live.state.inner.lock().unwrap();
-    eprintln!("historical retirement table after pass: {:#?}", inner.engram_work_source_roots);
-    assert!(!inner.engram_work_source_roots.contains(&retained));
-    let notice = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-        .find(|notice| notice.selection == retained).expect("real canonical proof published a retirement");
-    assert!(notice.published);
-    assert_eq!(notice.binding, recovered);
-    assert_eq!(notice.read.run.state, "completed");
-    assert!(notice.line.contains("its run completed"));
-    let notice_id = notice.id.clone();
-    assert_eq!(inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-        .filter(|notice| notice.selection == retained).count(), 1);
-    drop(inner);
-    assert!(worktree.join(".git").is_file(), "host retirement never deletes the worktree");
-    assert_eq!(content_revision(&worktree).unwrap().1, before);
-
-    // The real rebind now follows acknowledged reclamation. It must neither
-    // remove a second selection nor create a duplicate retirement notice.
-    {
-        let mut inner = fixture.live.state.inner.lock().unwrap();
-        let index = inner.find_session_index(&second_session).unwrap();
-        inner.sessions[index].engram.rebind_required = true;
-    }
-    fixture.live.state.ensure_engram_session_bound_off_lock(&second_session).unwrap().unwrap();
-    assert_ne!(fixture.record(&second_session, |record| record.engram.work_binding.clone().unwrap()).claim_id,
-        recovered.claim_id);
-    let inner = fixture.live.state.inner.lock().unwrap();
-    assert!(!inner.engram_work_source_roots.contains(&retained));
     let notices = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
         .filter(|notice| notice.selection == retained).collect::<Vec<_>>();
-    assert_eq!(notices.len(), 1);
+    assert_eq!(notices.len(), 1, "ordinary naming does not retire the completed selection twice");
     assert_eq!(notices[0].id, notice_id);
     assert!(notices[0].published);
     drop(inner);
     assert!(worktree.join(".git").is_file());
     assert_eq!(content_revision(&worktree).unwrap().1, before);
+    assert_no_live_turn_gate(&fixture.live.transport);
 }

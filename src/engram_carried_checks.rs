@@ -1,25 +1,7 @@
-// Background and detached test-launcher gates, carried past their turn.
-//
-// Owns: telling a launcher full gate whose command result marks only its
-// launch (a runtime's background mode, or `--detach`) from one that ended;
-// keeping it on its session as a carried check past the turn that launched
-// it; fencing it against every write the host observes in its worktree until
-// it settles, with what wrote; finding the run's directory and keeping the
-// digest of its terminal record from the first read that found it terminal;
-// and, at the holder's next checkpoint on the same claim and root
-// generation, crediting it as a resolved check for the report or refusing it
-// with the reason told to the holder, and merging the credited ones into that
-// checkpoint's checks (`engram_credit_carried_checks`). Also the marker that
-// survives a host restart, so the holder learns that the run lost its credit,
-// and the merging of the lines about checks' credit that wait for a prompt
-// (`engram_merge_credit_lines`).
-//
-// Does not own: the in-turn check lifecycle and its overlap rules
-// (engram_turn_checks.rs), the report's layout (`engram_turn_report`), the
-// launcher (scripts/test-launcher.mjs), or the run index and its cards
-// (test_runs.rs), whose tick only calls `poll_engram_carried_runs`.
-//
-// New file: nothing was moved into it.
+// Local custody of running command facts and launcher artifacts. A late end
+// stays with its original owner and never creates checkpoint verification or
+// transfers credit into a successor trace. Registered native verification has
+// its own exact registration, producer receipt and source checks.
 
 /// At most this many carried checks per session; a new launch past it drops
 /// the oldest, whose holder is told.
@@ -85,12 +67,16 @@ struct EngramCarriedCheck {
     /// the runtime that launched it.
     runtime: Option<RuntimeToken>,
     /// The claimed work the launching turn was bound to.
+    #[cfg(test)]
     work_id: String,
+    #[cfg(test)]
     claim_id: String,
     /// Authority at launch. Live renewal keeps this fence; recovery after a
     /// lapse advances it even if the claim id and root naming survive.
+    #[cfg(test)]
     claim_fence: i64,
     /// The generation of the named source root the check ran in.
+    #[cfg(test)]
     root_generation: u64,
     /// The run's directory, once found (`engram_find_carried_run`).
     run_directory: Option<PathBuf>,
@@ -140,32 +126,6 @@ struct EngramCarriedCheck {
     /// for a single-item gate and for a carried Codex test.
     /// Each with the fence its claim had at the gate's launch, read then.
     bind_targets: Vec<EngramBindTarget>,
-}
-
-/// When a settlement candidate's evidence interval closed, on the
-/// interference clock: the latest of its run's first terminal read, its
-/// launch snapshot's completion and THIS candidate's own settlement snapshot's
-/// completion. Another candidate's snapshot never moves it. `None` when any of
-/// them is unknown.
-fn engram_carried_candidate_closure(
-    carried: &EngramCarriedCheck,
-    candidate: &EngramResolvedCheck,
-) -> Option<u64> {
-    if !carried.ended() {
-        return None;
-    }
-    // A carried Codex test's interval closes as a check's in its turn does:
-    // at the latest of its end, its snapshots and a declared check's artifact
-    // read (`EngramTurnCheck::interference_end`).
-    if carried.ends_by_report {
-        return carried.check.interference_end();
-    }
-    Some(
-        carried
-            .terminal_at?
-            .max(carried.check.start_basis.ready_tick()?)
-            .max(candidate.end.end_basis.ready_tick()?),
-    )
 }
 
 /// What survives a host restart of a carried check: enough to tell its
@@ -251,6 +211,32 @@ impl EngramCarriedCheck {
             engram_check_fingerprint(&self.check.command),
         )
     }
+
+    /// The line its holder gets when a project settings change ends its
+    /// session's claim association and the carried check with it. Names the
+    /// gate by fingerprint and root, never by its command line.
+    fn association_reset_line(&self, why: &str) -> String {
+        let what = if self.ends_by_report { "Codex test" } else { "background full gate" };
+        format!(
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the {what} launched at {} in {} (check {}) is no \
+             longer followed: {why}. What was already observed stays as reported; run it again \
+             once the new settings apply.",
+            self.check.started_at,
+            engram_source_root_display(&self.check.target.root.to_string_lossy()),
+            engram_check_fingerprint(&self.check.command),
+        )
+    }
+}
+
+/// The lines the holders of `record`'s carried checks get when a project
+/// settings change ends the session's claim association.
+fn engram_carried_checks_association_reset_lines(record: &SessionRecord, why: &str) -> Vec<String> {
+    record
+        .engram
+        .carried_checks
+        .iter()
+        .map(|carried| carried.association_reset_line(why))
+        .collect()
 }
 
 /// The line the holder of a check the host carried when it restarted gets.
@@ -327,13 +313,6 @@ fn engram_dropped_launch_may_have_run(why: &str) -> bool {
     matches!(why, ENGRAM_LAUNCH_DROP_COMPOUND | ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE
         | ENGRAM_LAUNCH_DROP_ASSOCIATION)
 }
-
-/// Why an ambiguous carried check is refused (`EngramCarriedCheck::ambiguous`).
-const ENGRAM_CARRIED_AMBIGUOUS: &str = concat!(
-    "another background gate launched in the same worktree within two minutes of it ",
-    "has unresolved run ownership, so the host cannot tell their runs apart; launch the gate ",
-    "again two minutes or more after the last launch there"
-);
 
 /// How long after a launch with no run matched to it a later launch in the
 /// same worktree is refused as ambiguous. Run matching takes only runs that
@@ -880,13 +859,8 @@ fn engram_carried_run_progress_with(
     (None, false)
 }
 
-/// Why a check whose run two terminal reads saw differently is refused.
-const ENGRAM_CARRIED_TERMINAL_CONFLICT: &str = concat!(
-    "two reads that found its run terminal saw different records, so the host ",
-    "cannot tell which it read first"
-);
-
 /// Why a run that ended neither passed nor failed is refused.
+#[cfg(test)]
 const ENGRAM_CARRIED_RUN_NEITHER: &str = concat!(
     "its run ended neither passed nor failed (it was stopped or interrupted), ",
     "so it is neither credited nor recorded"
@@ -895,6 +869,7 @@ const ENGRAM_CARRIED_RUN_NEITHER: &str = concat!(
 /// Why a failed run that ran no stage is refused
 /// (`engram_launcher_record_ran_no_stage`): refused before its first stage,
 /// it tested nothing, so its failure is no test's.
+#[cfg(test)]
 const ENGRAM_CARRIED_RUN_NO_STAGE_RAN: &str = concat!(
     "its run failed before its first stage (its terminal record has every stage unrun), ",
     "so it tested nothing and is neither credited nor recorded"
@@ -902,12 +877,14 @@ const ENGRAM_CARRIED_RUN_NO_STAGE_RAN: &str = concat!(
 
 /// Why a passed run with no test stage is refused
 /// (`engram_launcher_test_stages`).
+#[cfg(test)]
 const ENGRAM_CARRIED_RUN_NO_TEST_STAGE: &str = concat!(
     "its run requested no test stage: its request record marks no stage `kind` `test`, ",
     "or, giving no kinds, names neither `rust-tests` nor `vitest`"
 );
 
 /// What a settled run says, when the host may credit it.
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 struct EngramCarriedRunVerdict {
     passed: bool,
@@ -932,6 +909,7 @@ struct EngramCarriedRunVerdict {
 /// stage at all (`ENGRAM_CARRIED_RUN_NO_STAGE_RAN`). Either way the
 /// expected, before and after input fingerprints must agree, and so must the
 /// request's.
+#[cfg(test)]
 fn engram_read_carried_run(
     directory: &FsPath,
     digest: &str,
@@ -1053,479 +1031,6 @@ fn engram_read_carried_run(
     })
 }
 
-/// The result lines a settled run's verification carries: the verdict, each
-/// stage's line, the run directory and the input fingerprint.
-fn engram_carried_result_lines(
-    verdict: &EngramCarriedRunVerdict,
-    directory: &FsPath,
-) -> Vec<String> {
-    std::iter::once(format!(
-        "full gate {} {}: {} stage{} ({})",
-        verdict.run_id,
-        if verdict.passed { "passed" } else { "failed" },
-        verdict.stages.len(),
-        if verdict.stages.len() == 1 { "" } else { "s" },
-        verdict.stages.join(", ")
-    ))
-    .chain(verdict.stage_lines.iter().cloned())
-    .chain([
-        format!("run directory {}", directory.display()),
-        format!("input fingerprint {}", verdict.fingerprint),
-    ])
-    .collect()
-}
-
-/// Settles `carried`, whose run the host has read as terminal: the record
-/// must still be the one first read, it must say what the host may credit,
-/// and a fresh source basis must equal the launch's. Waits for the snapshots
-/// until `deadline`. Returns the resolved check for the report, `None` when
-/// a snapshot was not ready in time (the check stays carried, fenced and
-/// pinned, for the next checkpoint), or why it is refused.
-fn engram_settle_carried_check(
-    carried: &EngramCarriedCheck,
-    workers: &Arc<std::sync::atomic::AtomicUsize>,
-    deadline: std::time::Instant,
-) -> Result<Option<EngramResolvedCheck>, String> {
-    // A carried Codex test is settled from its own reported end, as a check
-    // in its turn would be (`engram_reported_ends.rs`).
-    if carried.ends_by_report {
-        // Only a launcher gate has the terminal run that judges Cargo's
-        // candidates. A missing launcher completion can instead carry by
-        // its reported end; its inherited candidate must still refuse it.
-        if let Some(candidate) = carried.check.watcher_cargo_candidates.first() {
-            return Err(format!("a file in its worktree changed: {}", candidate.path));
-        }
-        // A watcher change exempted while it launched holds only against a
-        // run's registration, which a test settled by its reported end has
-        // none of: it refuses the test, as an inherited candidate does.
-        if let Some((exempted, _)) = &carried.check.watcher_exempted {
-            return Err(format!(
-                "{exempted} (notified before the launch was stamped, but a test settled by \
-                 its reported end has no run registration to show the change preceded it)"
-            ));
-        }
-        return engram_settle_reported_end(carried, deadline);
-    }
-    if carried.ambiguous {
-        return Err(ENGRAM_CARRIED_AMBIGUOUS.to_owned());
-    }
-    if carried.terminal_conflict {
-        return Err(ENGRAM_CARRIED_TERMINAL_CONFLICT.to_owned());
-    }
-    if carried.terminal_digest.is_none() && carried.run_directory.is_none() && carried.run_missing {
-        return Err(
-            "no run of it appeared within ten minutes of its launch, so it started none".to_owned(),
-        );
-    }
-    if carried.terminal_digest.is_none() && carried.launcher_gone {
-        return Err(concat!(
-            "its launcher ended without recording a terminal result; settle the run with ",
-            "the launcher's `recover` and run the gate again"
-        )
-        .to_owned());
-    }
-    let (Some(directory), Some(digest)) = (&carried.run_directory, &carried.terminal_digest) else {
-        return Err("its run was not found".to_owned());
-    };
-    let verdict = engram_read_carried_run(directory, digest).map_err(str::to_owned)?;
-    // A watcher change whose notification arrived before the launch stamp did
-    // not fence the gate. The stamp can lag the launcher's own start, so that
-    // holds only when the run registered with this host after the latest
-    // such arrival, in the watcher order: the launcher registers before it
-    // fingerprints its input or runs any stage, so the run never read the
-    // tree before the change. No wall clock decides this; a run this process
-    // never saw register, as before a restart, takes no exemption.
-    if let Some((exempted, latest)) = &carried.check.watcher_exempted {
-        let registered = engram_run_registration_order(directory);
-        if !registered.is_some_and(|registered| *latest < registered) {
-            return Err(format!(
-                "{exempted} (notified before the launch was stamped, but not before its run \
-                 registered with this host, so the change may have reached it)"
-            ));
-        }
-    }
-    // A test may hold this settlement's snapshot and decide its deadline
-    // (`install_test_engram_settlement_hold`).
-    #[cfg(test)]
-    let hold = test_engram_take_settlement_hold(&carried.check.target.root);
-    // Tells the test this settlement returned, whichever way it does.
-    #[cfg(test)]
-    let _settling = hold.as_ref().map(TestEngramSettlementHold::settling);
-    #[cfg(test)]
-    let deadline = match &hold {
-        Some(hold) if hold.deadline_now => std::time::Instant::now(),
-        _ => deadline,
-    };
-    // A snapshot that finished without a basis failed, and never will give
-    // one; only one not ready in time is tried again at the next checkpoint.
-    let start = match carried.check.start_basis.wait_until(deadline) {
-        Some(Some(start)) => start,
-        Some(None) => {
-            return Err("the host could not take its source snapshot at the launch".to_owned());
-        }
-        None => return Ok(None),
-    };
-    // Settlement keeps the launch's root identity. The caller separately
-    // rejects a carried check if the live claim no longer names this generation.
-    let provenance = match (start.source_root_generation, start.source_root_state) {
-        (Some(generation), Some(state)) => EngramRootCapture::Recorded {
-            generation, state, workspace_id: start.workspace_id.clone(),
-        },
-        (None, None) => EngramRootCapture::Unnamed,
-        _ => EngramRootCapture::Unconfirmed,
-    };
-    #[cfg(test)]
-    let end_basis = match hold {
-        Some(hold) => {
-            let place = carried.check.target.basis_place();
-            let shared = hold.shared.clone();
-            let capture = EngramCapture::spawn(workers, move || {
-                hold.wait_released();
-                provenance.stamp(engram_place_source_basis(&place))
-            });
-            TestEngramSettlementHold::record_capture(&shared, &capture);
-            capture
-        }
-        None => engram_spawn_basis_capture(carried.check.target.basis_place(), workers, provenance),
-    };
-    #[cfg(not(test))]
-    let end_basis = engram_spawn_basis_capture(carried.check.target.basis_place(), workers, provenance);
-    let finish = match end_basis.wait_until(deadline) {
-        Some(Some(finish)) => finish,
-        Some(None) => {
-            return Err("the host could not take its source snapshot at settlement".to_owned());
-        }
-        None => return Ok(None),
-    };
-    if start != finish {
-        return Err(
-            "the host's source basis at settlement differs from its basis at the launch".to_owned(),
-        );
-    }
-    // Judge Cargo's temporary names only now, after its run is terminal and
-    // the settlement snapshot has closed. The Create event may have arrived
-    // before Cargo renamed its sibling to target/.
-    for candidate in &carried.check.watcher_cargo_candidates {
-        if !FsPath::new(&candidate.root).join("target").is_dir() {
-            return Err(format!(
-                "a file in its worktree changed: {} (pending Cargo sibling; target/ is not a \
-                 directory at terminal settlement)",
-                candidate.path
-            ));
-        }
-    }
-    let basis = start;
-    let mut check = carried.check.clone();
-    let end = EngramTurnCheckEnd {
-        completed_at: verdict.ended.clone(),
-        exit: EngramCommandExit::Code(verdict.exit_code),
-        build_diagnostic: None,
-        result_lines: engram_carried_result_lines(&verdict, directory),
-        showed_passing_tests: verdict.passed,
-        // A carried run is a full gate, never a focused run.
-        focused_stage_line_missing: false,
-        // A carried run that ran no stage is refused before this
-        // (`engram_read_carried_run`).
-        launcher_ran_no_stage: false,
-        end_basis,
-        declared: None,
-    };
-    check.end = Some(end.clone());
-    Ok(Some(EngramResolvedCheck {
-        toolchain: check.toolchain.wait_until(deadline).flatten(),
-        check,
-        end,
-        outcome: if verdict.passed {
-            EngramExecutionOutcome::Succeeded
-        } else {
-            EngramExecutionOutcome::Failed
-        },
-        basis,
-        ran_successfully: verdict.passed,
-    }))
-}
-
-/// A test's hold on the next settlement of the carried run in one worktree:
-/// its end snapshot is taken only once the test releases it, and with
-/// `deadline_now` the settlement waits for its snapshots no longer than the
-/// present instant, so a held snapshot misses the deadline deterministically.
-#[cfg(test)]
-struct TestEngramSettlementHold {
-    /// Tells this hold from every other, including one for the same root.
-    id: u64,
-    root: PathBuf,
-    deadline_now: bool,
-    shared: TestEngramSettlementHoldShared,
-}
-
-/// What a hold's settlement and its test share.
-#[cfg(test)]
-#[derive(Default)]
-struct TestEngramSettlementHoldState {
-    /// A settlement took the hold.
-    taken: bool,
-    /// The test let the held snapshot be taken.
-    released: bool,
-    /// The settlement that took the hold returned.
-    settled: bool,
-    /// The end snapshot the settlement started, held until the release; its
-    /// worker's last effect is publishing it.
-    capture: Option<Arc<EngramBasisCapture>>,
-}
-
-#[cfg(test)]
-type TestEngramSettlementHoldShared = Arc<(Mutex<TestEngramSettlementHoldState>, std::sync::Condvar)>;
-
-/// Locks a hold's shared state, also after a panic poisoned it, so cleanup
-/// on unwind never panics again.
-#[cfg(test)]
-fn test_engram_settlement_hold_state(
-    shared: &TestEngramSettlementHoldShared,
-) -> std::sync::MutexGuard<'_, TestEngramSettlementHoldState> {
-    shared.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Marks a hold's settlement returned when dropped.
-#[cfg(test)]
-struct TestEngramSettlementSettling(TestEngramSettlementHoldShared);
-
-#[cfg(test)]
-impl Drop for TestEngramSettlementSettling {
-    fn drop(&mut self) {
-        test_engram_settlement_hold_state(&self.0).settled = true;
-        self.0.1.notify_all();
-    }
-}
-
-#[cfg(test)]
-impl TestEngramSettlementHold {
-    fn settling(&self) -> TestEngramSettlementSettling {
-        TestEngramSettlementSettling(self.shared.clone())
-    }
-
-    fn wait_released(&self) {
-        let mut state = test_engram_settlement_hold_state(&self.shared);
-        while !state.released {
-            state = self
-                .shared
-                .1
-                .wait(state)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-        }
-    }
-
-    fn record_capture(shared: &TestEngramSettlementHoldShared, capture: &Arc<EngramBasisCapture>) {
-        test_engram_settlement_hold_state(shared).capture = Some(capture.clone());
-        shared.1.notify_all();
-    }
-}
-
-/// The holds tests have installed, taken in order by the settlements of the
-/// carried runs in their worktrees.
-#[cfg(test)]
-static TEST_ENGRAM_SETTLEMENT_HOLDS: std::sync::LazyLock<Mutex<Vec<TestEngramSettlementHold>>> =
-    std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
-
-#[cfg(test)]
-static TEST_ENGRAM_SETTLEMENT_HOLD_IDS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// The test's handle on one installed hold. Dropped, also on unwind, it
-/// removes its hold if no settlement took it; otherwise it releases the held
-/// snapshot and waits, bounded, for the settlement and its snapshot to
-/// finish, so neither outlives the test's fixture unnoticed.
-#[cfg(test)]
-struct TestEngramSettlementControl {
-    id: u64,
-    shared: TestEngramSettlementHoldShared,
-}
-
-#[cfg(test)]
-impl TestEngramSettlementControl {
-    /// Waits until a settlement took this hold, panicking past `deadline`.
-    fn wait_taken(&self, deadline: std::time::Instant) {
-        let mut state = test_engram_settlement_hold_state(&self.shared);
-        while !state.taken {
-            let remaining = deadline
-                .checked_duration_since(std::time::Instant::now())
-                .expect("no settlement took the hold in time");
-            state = self
-                .shared
-                .1
-                .wait_timeout(state, remaining)
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
-        }
-    }
-
-    /// Whether a settlement took this hold.
-    fn was_taken(&self) -> bool {
-        test_engram_settlement_hold_state(&self.shared).taken
-    }
-
-    /// Lets the held snapshot be taken.
-    fn release(&self) {
-        test_engram_settlement_hold_state(&self.shared).released = true;
-        self.shared.1.notify_all();
-    }
-
-    /// Whether, by `deadline`, the settlement that took this hold returned
-    /// and the end snapshot it started was published: the last effect of its
-    /// worker. The snapshot finishes only after `release`.
-    fn completed_by(&self, deadline: std::time::Instant) -> bool {
-        let mut state = test_engram_settlement_hold_state(&self.shared);
-        while !state.settled {
-            let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
-                return false;
-            };
-            state = self
-                .shared
-                .1
-                .wait_timeout(state, remaining)
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
-        }
-        let capture = state.capture.clone();
-        drop(state);
-        capture.is_none_or(|capture| capture.wait_until(deadline).is_some())
-    }
-
-    /// The basis of the end snapshot the settlement that took this hold
-    /// started, once by `deadline` the settlement returned and that snapshot
-    /// was published with a basis: what a witness of a late snapshot needs.
-    /// Unlike cleanup (`completed_by`), a settlement that returned without
-    /// starting an end snapshot does not complete it, and is told at once.
-    fn try_completed(
-        &self,
-        deadline: std::time::Instant,
-    ) -> Result<EngramExecutionSourceBasis, TestEngramSettlementIncomplete> {
-        let mut state = test_engram_settlement_hold_state(&self.shared);
-        while !state.settled {
-            let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
-                return Err(TestEngramSettlementIncomplete::NotSettled);
-            };
-            state = self
-                .shared
-                .1
-                .wait_timeout(state, remaining)
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
-        }
-        let Some(capture) = state.capture.clone() else {
-            return Err(TestEngramSettlementIncomplete::NoEndSnapshot);
-        };
-        drop(state);
-        match capture.wait_until(deadline) {
-            None => Err(TestEngramSettlementIncomplete::EndSnapshotUnfinished),
-            Some(None) => Err(TestEngramSettlementIncomplete::EndSnapshotWithoutBasis),
-            Some(Some(basis)) => Ok(basis),
-        }
-    }
-
-    /// As `try_completed`, panicking unless the settlement completed.
-    fn wait_completed(&self, deadline: std::time::Instant) -> EngramExecutionSourceBasis {
-        self.try_completed(deadline).unwrap_or_else(|why| {
-            panic!("the held settlement did not complete with its end snapshot: {why:?}")
-        })
-    }
-}
-
-#[cfg(test)]
-impl Drop for TestEngramSettlementControl {
-    fn drop(&mut self) {
-        let untaken = {
-            let mut holds = TEST_ENGRAM_SETTLEMENT_HOLDS
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            holds
-                .iter()
-                .position(|hold| hold.id == self.id)
-                .map(|position| holds.remove(position))
-                .is_some()
-        };
-        if untaken {
-            return;
-        }
-        self.release();
-        // A bound is only a diagnostic here: it never shows the worker ended.
-        if !self.completed_by(std::time::Instant::now() + TEST_PHASE_DEADLOCK_GUARD) {
-            eprintln!("a held carried settlement had not finished when its test let go of it");
-        }
-    }
-}
-
-/// Why a held settlement did not complete with its end snapshot's basis
-/// (`TestEngramSettlementControl::try_completed`).
-#[cfg(test)]
-#[derive(Debug, PartialEq)]
-enum TestEngramSettlementIncomplete {
-    /// The settlement had not returned by the deadline.
-    NotSettled,
-    /// It returned without starting an end snapshot.
-    NoEndSnapshot,
-    /// Its end snapshot was not published by the deadline.
-    EndSnapshotUnfinished,
-    /// Its end snapshot was published without a basis.
-    EndSnapshotWithoutBasis,
-}
-
-/// Holds the next settlement of the carried run in the worktree `root`.
-#[cfg(test)]
-fn install_test_engram_settlement_hold(
-    root: &FsPath,
-    deadline_now: bool,
-) -> TestEngramSettlementControl {
-    let id = TEST_ENGRAM_SETTLEMENT_HOLD_IDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let shared = TestEngramSettlementHoldShared::default();
-    TEST_ENGRAM_SETTLEMENT_HOLDS
-        .lock()
-        .expect("test settlement holds poisoned")
-        .push(TestEngramSettlementHold {
-            id,
-            root: root.to_path_buf(),
-            deadline_now,
-            shared: shared.clone(),
-        });
-    TestEngramSettlementControl { id, shared }
-}
-
-/// The first hold installed for the worktree `root`, marked taken.
-#[cfg(test)]
-fn test_engram_take_settlement_hold(root: &FsPath) -> Option<TestEngramSettlementHold> {
-    let hold = {
-        let mut holds = TEST_ENGRAM_SETTLEMENT_HOLDS
-            .lock()
-            .expect("test settlement holds poisoned");
-        let position = holds.iter().position(|hold| hold.root == root)?;
-        holds.remove(position)
-    };
-    test_engram_settlement_hold_state(&hold.shared).taken = true;
-    hold.shared.1.notify_all();
-    Some(hold)
-}
-
-/// A carried check's outcome at a checkpoint, by the grant and sequence that
-/// name it (`engram_settle_carried_check`).
-type EngramCarriedSettlement = (String, usize, Result<Option<EngramResolvedCheck>, String>);
-
-/// Settles each of `carried` off the lock, within `deadline`.
-fn engram_settle_carried_checks(
-    carried: &[EngramCarriedCheck],
-    workers: &Arc<std::sync::atomic::AtomicUsize>,
-    deadline: std::time::Instant,
-) -> Vec<EngramCarriedSettlement> {
-    carried
-        .iter()
-        .map(|carried| {
-            (
-                carried.check.grant_id.clone(),
-                carried.check.sequence,
-                engram_settle_carried_check(carried, workers, deadline),
-            )
-        })
-        .collect()
-}
-
 /// Why `launched`, whose command only launched its run, cannot be carried in
 /// the session of `record`, as the line its holder gets: the session is a
 /// delegated one, its turn is not measured in a named source root, it ran
@@ -1548,8 +1053,7 @@ fn engram_carry_refusal(record: &SessionRecord, launched: &EngramTurnCheck) -> O
         ));
     }
     let Some(turn_root) = engram
-        .active_turn_source_root
-        .as_ref()
+        .observed_source_root()
         .filter(|_| engram.work_binding.is_some())
     else {
         return Some(format!(
@@ -1603,10 +1107,16 @@ fn engram_carry_check(
         return Some(line);
     }
     let engram = &mut record.engram;
-    let (Some(binding), Some(turn_root)) = (&engram.work_binding, &engram.active_turn_source_root)
-    else {
+    if engram.work_binding.is_none() || engram.observed_source_root().is_none() {
         return None;
-    };
+    }
+    #[cfg(test)]
+    let binding = engram.work_binding.as_ref().expect("carried launch has its original binding");
+    #[cfg(test)]
+    let root_generation = engram
+        .observed_source_root()
+        .expect("carried launch has its original root")
+        .generation;
     let root_key = engram_path_key(&launched.target.root);
     let recent = |at: &str| engram_launch_window_is_recent(at, &launched.started_at);
     // A carried Codex test has no run, so it can be confused with none.
@@ -1618,11 +1128,7 @@ fn engram_carry_check(
     }) || engram
         .carried_unmatched_launches
         .iter()
-        .any(|(root, at)| *root == root_key && recent(at))
-        || engram.pending_launch_diagnostics.iter().any(|mark| {
-            mark.root.as_ref().is_some_and(|root| engram_path_key(root) == root_key)
-                && recent(&mark.started_at)
-        });
+        .any(|(root, at)| *root == root_key && recent(at));
     // A change the watcher saw while the gate was being launched fences it.
     let fence = launched
         .watcher_fence
@@ -1633,7 +1139,14 @@ fn engram_carry_check(
         fence,
         // A batch gate's members, with their fences at this launch.
         bind_targets,
-        ..engram_new_carried_check(binding, turn_root.generation, launched, None)
+        ..engram_new_carried_check(
+            #[cfg(test)]
+            binding,
+            #[cfg(test)]
+            root_generation,
+            launched,
+            None,
+        )
     };
     engram_push_carried_check(record, carried)
 }
@@ -1643,7 +1156,9 @@ fn engram_carry_check(
 /// yet. With `reported_by`, the runtime it ran under, it ends by the end that
 /// runtime reports for it; without, it is a launcher gate's launch.
 fn engram_new_carried_check(
+    #[cfg(test)]
     binding: &EngramControlWorkBinding,
+    #[cfg(test)]
     root_generation: u64,
     check: EngramTurnCheck,
     reported_by: Option<RuntimeToken>,
@@ -1651,9 +1166,13 @@ fn engram_new_carried_check(
     EngramCarriedCheck {
         ends_by_report: reported_by.is_some(),
         runtime: reported_by,
+        #[cfg(test)]
         work_id: binding.work_id.clone(),
+        #[cfg(test)]
         claim_id: binding.claim_id.clone(),
+        #[cfg(test)]
         claim_fence: binding.claim_fence,
+        #[cfg(test)]
         root_generation,
         check,
         run_directory: None,
@@ -1720,13 +1239,24 @@ fn engram_note_consumed_runs(record: &mut SessionRecord, used: Vec<PathBuf>) {
     consumed.drain(..excess);
 }
 
+// Repeated provider frames keep one original location/time exclusion. They
+// neither refresh its start nor add entries to the existing bounded window.
+fn engram_note_observed_launch_location(record: &mut SessionRecord, root: &FsPath, started_at: &str) {
+    let root_key = engram_path_key(root);
+    if !record.engram.carried_unmatched_launches.iter().any(|(known, at)| {
+        *known == root_key && at == started_at
+    }) {
+        engram_note_unmatched_launch(record, root, started_at);
+    }
+}
+
 /// Keeps a background full-gate launch of `record` in the worktree at `root`,
 /// launched at `launched_at`, that left without a run found for it, so a
 /// later launch there within the run search time is refused as ambiguous
 /// rather than taking that run (`engram_carry_check`).
 fn engram_note_unmatched_launch(record: &mut SessionRecord, root: &FsPath, launched_at: &str) {
     let root_key = engram_path_key(root);
-    // Diagnostic retirement can arrive after another carry was constructed,
+    // A location observation or retirement can arrive after another carry was constructed,
     // or even after it matched this run. Revoke eligibility before any later
     // poll/checkpoint can settle it; a saved run identity is not authority.
     for carried in &mut record.engram.carried_checks {
@@ -1806,43 +1336,6 @@ fn engram_check_is_launcher_full(command: &EngramCheckCommand) -> bool {
             mode.split([';', '&', '|', '<', '>', '(', ')']).next() == Some("full")
         })
     })
-}
-
-/// The lines telling the holder in `record` that each of its carried checks
-/// earned no credit because `why`, for a reset of its Engram state that
-/// drops them (a project's Engram settings changed, or the project was
-/// removed). The caller logs them and sets them again after the reset. A
-/// batch gate's members, of a gate still carried, pending its checkpoint's
-/// answer or owed a bind, are dropped by the same reset, and each gets its
-/// line too.
-fn engram_carried_checks_reset_lines(record: &SessionRecord, why: &str) -> Vec<String> {
-    let engram = &record.engram;
-    let unbound = engram
-        .carried_checks
-        .iter()
-        .flat_map(|carried| carried.bind_targets.iter())
-        .chain(engram.pending_batches.iter().flat_map(|batch| batch.targets.iter()))
-        .chain(
-            engram
-                .owed_binds
-                .iter()
-                .filter(|owed| !engram_owed_bind_may_be_bound(owed))
-                .map(|owed| &owed.target),
-        )
-        .map(|target| engram_batch_not_recorded_line(&target.short_ref, why));
-    // One that may have been sent may be bound already: its state is unknown.
-    let unknown = engram
-        .owed_binds
-        .iter()
-        .filter(|owed| engram_owed_bind_may_be_bound(owed))
-        .map(|owed| engram_batch_unconfirmed_line(&owed.target.short_ref, why));
-    engram
-        .carried_checks
-        .iter()
-        .map(|carried| carried.refusal_line(why))
-        .chain(unbound)
-        .chain(unknown)
-        .collect()
 }
 
 /// Fences every carried check of `record` whose worktree `worktrees` may
@@ -1955,444 +1448,13 @@ fn engram_display_reported_target(target: &str) -> String {
 
 /// Whether `carried` is past `ENGRAM_CARRIED_CHECK_TTL_SECONDS` at `now`
 /// (or its launch time cannot be read).
+#[cfg(test)]
 fn engram_carried_check_expired(
     carried: &EngramCarriedCheck,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
     engram_parse_time(&carried.check.started_at)
         .is_none_or(|launched| (now - launched).num_seconds() > ENGRAM_CARRIED_CHECK_TTL_SECONDS)
-}
-
-/// The carried checks of `record` to settle at the checkpoint of its current
-/// turn: bound to the same claim, measured in the same named-root
-/// generation, read as terminal and not fenced. They are settled off the
-/// lock (`engram_settle_carried_check`).
-/// Another held claim's gate waits for its launch claim's own grant. Engram's
-/// `renew_holder_claim`, `rebase_planning_claim` and live `claim_work_on`
-/// branch keep the fence; release and lapsed recovery advance it. A retained
-/// claim id or root therefore does not prove continuous launch authority.
-fn engram_carried_checks_to_settle(record: &SessionRecord) -> Vec<EngramCarriedCheck> {
-    let engram = &record.engram;
-    let (Some(binding), Some(turn_root)) = (&engram.work_binding, &engram.active_turn_source_root)
-    else {
-        return Vec::new();
-    };
-    let now = chrono::Utc::now();
-    engram
-        .carried_checks
-        .iter()
-        .filter(|carried| {
-            !engram_carried_check_expired(carried, now)
-                && carried.claim_id == binding.claim_id
-                && carried.work_id == binding.work_id
-                && carried.claim_fence == binding.claim_fence
-                && carried.root_generation == turn_root.generation
-                && (carried.ended()
-                    || carried.launcher_gone
-                    || carried.run_missing
-                    || carried.ambiguous)
-                && carried.fence.is_none()
-        })
-        .cloned()
-        .collect()
-}
-
-/// Under the lock at the checkpoint of `record`'s turn: takes the outcomes
-/// of the carried checks settled off the lock (`settled`, by grant and
-/// sequence), keeping a credit only while the live record is still carried
-/// and unfenced, and keeping carried one whose snapshots were not ready in
-/// time; and drops every carried check that can no longer be
-/// credited: fenced, older than `ENGRAM_CARRIED_CHECK_TTL_SECONDS` at `now`,
-/// or whose claim no longer names the same root generation (`generations`,
-/// aligned with the carried checks: the generation the host now records for
-/// each one's claim, `None` when it records none). Returns the credited
-/// checks for the report, in the order they launched, and the lines for the
-/// holder.
-/// `held_claims` confirms that a finished check on another focused claim can
-/// wait for its launch claim's grant. An incomplete or unavailable read only
-/// retains it within the existing refusal and expiry bounds, never credits.
-fn engram_take_settled_carried_checks(
-    record: &mut SessionRecord,
-    mut settled: Vec<EngramCarriedSettlement>,
-    generations: &[Option<u64>],
-    held_claims: Option<&EngramHeldClaims>,
-    now: chrono::DateTime<chrono::Utc>,
-) -> (Vec<EngramResolvedCheck>, Vec<String>) {
-    let mut credited = Vec::new();
-    let mut lines = Vec::new();
-    // The runtime a carried Codex test still waiting for its end must run
-    // under for that end to reach the host (`engram_reported_ends.rs`).
-    let current_runtime = record.runtime.runtime_token();
-    let carried_checks = std::mem::take(&mut record.engram.carried_checks);
-    let mut left = Vec::new();
-    let mut unmatched = Vec::new();
-    for (position, carried) in carried_checks.into_iter().enumerate() {
-        // Every gate that leaves below leaves its run used, or, with none
-        // found, its launch unmatched. A carried Codex test has no run.
-        left.extend(carried.run_directory.clone());
-        if carried.run_directory.is_none() && !carried.ends_by_report {
-            unmatched.push((
-                carried.check.target.root.clone(),
-                carried.check.started_at.clone(),
-            ));
-        }
-        let outcome = settled
-            .iter()
-            .position(|(grant_id, sequence, _)| {
-                *grant_id == carried.check.grant_id && *sequence == carried.check.sequence
-            })
-            .map(|found| settled.swap_remove(found).2);
-        if engram_reported_end_stranded(&carried, current_runtime.as_ref()) {
-            lines.push(engram_stranded_reported_end_line(
-                &carried.check.command,
-                current_runtime.as_ref(),
-            ));
-            continue;
-        }
-        if let Some(cause) = &carried.fence {
-            lines.push(carried.refusal_line(&format!(
-                "the host saw something that may have written in its worktree before it \
-                 settled: {cause}"
-            )));
-            continue;
-        }
-        if generations.get(position).copied().flatten() != Some(carried.root_generation) {
-            lines.push(carried.refusal_line(
-                "its claim was released, or its source root renamed or cleared, before it settled",
-            ));
-            continue;
-        }
-        // Only the launch claim's grant can publish its evidence. Recheck
-        // that exact authority under the final lock before accepting it.
-        let same_claim = record.engram.work_binding.as_ref().map(|binding| {
-            binding.claim_id == carried.claim_id
-                && binding.work_id == carried.work_id
-                && binding.claim_fence == carried.claim_fence
-        });
-        // A poll that read off the lock may have found the conflict after
-        // this checkpoint copied the check to settle it.
-        if carried.terminal_conflict {
-            lines.push(carried.refusal_line(ENGRAM_CARRIED_TERMINAL_CONFLICT));
-            continue;
-        }
-        // Retirement may revoke this live carry after the off-lock copy
-        // was settled. Reject before either focus deferral or publication.
-        if !carried.ends_by_report && carried.ambiguous {
-            lines.push(carried.refusal_line(ENGRAM_CARRIED_AMBIGUOUS));
-            continue;
-        }
-        // Six hours after its launch a gate is refused, whatever a
-        // settlement made of it.
-        if engram_carried_check_expired(&carried, now) {
-            let came = if carried.ends_by_report {
-                carried.end_reported()
-            } else {
-                carried.ended()
-            };
-            lines.push(carried.refusal_line(match (came, carried.ends_by_report) {
-                (true, false) => concat!(
-                    "it was not settled within six hours of its launch (a background gate is ",
-                    "settled only at a checkpoint on the same claim and source root)"
-                ),
-                (true, true) => concat!(
-                    "it was not settled within six hours of its launch (a carried test is ",
-                    "settled only at a checkpoint on the same claim and source root)"
-                ),
-                (false, false) => "its run did not end within six hours of its launch",
-                (false, true) => "no end of it was reported within six hours of its launch",
-            }));
-            continue;
-        }
-        if same_claim == Some(false)
-            && (carried.ended()
-                || carried.launcher_gone
-                || carried.run_missing
-                || carried.ambiguous)
-        {
-            let launch_claim = held_claims.and_then(|held| {
-                held.items
-                    .iter()
-                    .find(|claim| claim.work_id == carried.work_id)
-            });
-            let held = match (launch_claim, held_claims) {
-                (Some(claim), _) => Some(
-                    claim.claim_id == carried.claim_id && claim.claim_fence == carried.claim_fence,
-                ),
-                (None, Some(claims)) if claims.omitted == 0 => Some(false),
-                _ => None,
-            };
-            if held == Some(false) {
-                lines.push(
-                    carried.refusal_line("its claim is no longer the one this session holds"),
-                );
-                continue;
-            }
-            // A settlement error discovered before focus moved still refuses
-            // the gate below; do not also promise a future settlement.
-            if let Some(Err(why)) = &outcome {
-                lines.push(carried.refusal_line(why));
-                continue;
-            }
-            let item = launch_claim
-                .map(|claim| claim.short_ref.as_str())
-                .filter(|name| !name.is_empty())
-                .unwrap_or(&carried.work_id);
-            let state = if carried.ended() {
-                "finished"
-            } else {
-                "awaits settlement"
-            };
-            let confirmation = if held.is_none() {
-                " once its held claim is confirmed"
-            } else {
-                ""
-            };
-            lines.push(format!(
-                "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} check {} {state}; settles at your next \
-                 checkpoint focused on {}{confirmation}.",
-                engram_check_fingerprint(&carried.check.command),
-                engram_display_reported_target(item),
-            ));
-            // An unavailable or bounded held read is not proof of release.
-            // Unknown status can wait only within the existing bounds: fence,
-            // root loss, terminal conflict and six-hour expiry were checked
-            // above, on every checkpoint, before this deferral.
-        }
-        // Settlement ran off-lock. A watcher change exempted since was not
-        // judged against the run's registration by that copy, so the check stays
-        // carried: the next checkpoint settles it with the exemption visible.
-        // Only notifications that arrived before the launch are exempted, so
-        // this defers a bounded number of times.
-        let exempted_since = matches!(
-            &outcome,
-            Some(Ok(Some(resolved)))
-                if carried.check.watcher_exempted.is_some()
-                    && carried.check.watcher_exempted != resolved.check.watcher_exempted
-        );
-        // Likewise a Cargo sibling candidate that arrived since, when every
-        // such candidate was notified before the launch: the next checkpoint
-        // judges it by `target/`. Any other new candidate refuses below.
-        let candidates_since = matches!(
-            &outcome,
-            Some(Ok(Some(resolved)))
-                if carried.check.watcher_cargo_candidates
-                    != resolved.check.watcher_cargo_candidates
-                    && carried
-                        .check
-                        .watcher_cargo_candidates
-                        .iter()
-                        .filter(|candidate| {
-                            !resolved.check.watcher_cargo_candidates.contains(candidate)
-                        })
-                        .all(|candidate| candidate.before_launch)
-        );
-        let outcome = if exempted_since || candidates_since {
-            None
-        } else {
-            outcome
-        };
-        match outcome {
-            Some(Ok(Some(resolved))) if same_claim == Some(true) => {
-                // Settlement ran off-lock. A newly arrived candidate was not
-                // judged by that copy, so never consume it as passing evidence.
-                if carried.check.watcher_cargo_candidates != resolved.check.watcher_cargo_candidates
-                {
-                    let path = carried
-                        .check
-                        .watcher_cargo_candidates
-                        .iter()
-                        .find(|candidate| {
-                            !resolved.check.watcher_cargo_candidates.contains(candidate)
-                                && !candidate.before_launch
-                        })
-                        .map(|candidate| candidate.path.as_str())
-                        .unwrap_or("an unknown path");
-                    lines.push(carried.refusal_line(&format!(
-                        "a pending Cargo sibling event arrived during settlement: {path}"
-                    )));
-                    continue;
-                }
-                // This candidate is judged by its own closure: Claude work
-                // registered no later than it may be in what it recorded,
-                // and work registered only after it is not.
-                let closure = engram_carried_candidate_closure(&carried, &resolved);
-                match (&carried.potential, closure) {
-                    (Some((registered_at, cause)), Some(closure)) if *registered_at <= closure => {
-                        lines.push(carried.refusal_line(&format!(
-                            "the host saw something that may have written in its worktree \
-                             before it settled: {}",
-                            cause.describe()
-                        )));
-                    }
-                    (_, None) => lines.push(carried.refusal_line(
-                        "the host could not tell when its settlement snapshot was taken",
-                    )),
-                    _ => credited.push(resolved),
-                }
-                continue;
-            }
-            Some(Err(why)) => {
-                lines.push(carried.refusal_line(&why));
-                continue;
-            }
-            Some(Ok(_)) | None => {}
-        }
-        if let Some(directory) = &carried.run_directory {
-            left.retain(|used| used != directory);
-        } else {
-            unmatched.retain(|(root, at)| {
-                *root != carried.check.target.root || *at != carried.check.started_at
-            });
-        }
-        record.engram.carried_checks.push(carried);
-    }
-    engram_note_consumed_runs(record, left);
-    for (root, at) in unmatched {
-        engram_note_unmatched_launch(record, &root, &at);
-    }
-    credited.sort_by(|left, right| left.check.started_at.cmp(&right.check.started_at));
-    (credited, lines)
-}
-
-/// Under the lock at the checkpoint of the session at `index` (`session_id`):
-/// takes its settled carried checks (`engram_take_settled_carried_checks`),
-/// with the generation the host now records for each one's claim; tells the
-/// holder, and logs, why any was refused or dropped; and puts the credited
-/// ones first in `resolved`, since they launched before this turn's checks.
-/// Returns how many it put there, for `engram_trim_turn_checks`.
-fn engram_credit_carried_checks(
-    inner: &mut StateInner,
-    index: usize,
-    session_id: &str,
-    checkpoint_grant_id: &str,
-    settled: Vec<EngramCarriedSettlement>,
-    held_claims: Option<&EngramHeldClaims>,
-    resolved: &mut Vec<EngramResolvedCheck>,
-) -> usize {
-    // The members of each batch gate, by the grant and sequence it launched
-    // under, read before the settled gates leave the carried list.
-    let batch_members: Vec<_> = inner.sessions[index]
-        .engram
-        .carried_checks
-        .iter()
-        .filter(|carried| !carried.bind_targets.is_empty())
-        .map(|carried| {
-            (
-                carried.check.grant_id.clone(),
-                carried.check.sequence,
-                carried.bind_targets.clone(),
-            )
-        })
-        .collect();
-    let store = engram_project_for_session_locked(inner, session_id)
-        .and_then(|project| project.engram.as_ref())
-        .and_then(|settings| settings.authority_store_key.clone());
-    let generations = inner.sessions[index]
-        .engram
-        .carried_checks
-        .iter()
-        .map(|carried| {
-            store.as_ref().and_then(|store| {
-                engram_work_source_root_for_claim(
-                    &inner.engram_work_source_roots,
-                    store,
-                    &carried.work_id,
-                    &carried.claim_id,
-                )
-                .map(|entry| entry.generation)
-            })
-        })
-        .collect::<Vec<_>>();
-    let artifact_candidates: BTreeMap<_, _> = inner.sessions[index].engram.carried_checks.iter()
-        .filter_map(|carried| Some(((carried.check.grant_id.clone(), carried.check.sequence),
-            TestRunObservedArtifact {
-                run_id: carried.run_directory.as_ref()?.file_name()?.to_str()?.to_owned(),
-                run_directory: test_run_display_path(carried.run_directory.as_ref()?),
-                request_identity: None,
-                terminal_digest: Some(carried.terminal_digest.clone()?),
-            })))
-        .collect();
-    let record = inner
-        .session_mut_by_index(index)
-        .expect("session index should be valid");
-    let (credited, lines) = engram_take_settled_carried_checks(
-        record,
-        settled,
-        &generations,
-        held_claims,
-        chrono::Utc::now(),
-    );
-    for line in lines {
-        eprintln!("engram> session={session_id} {line}");
-        record.engram.set_pending_source_root_line(line);
-    }
-    // A batch gate credited as passed leaves its members pending until this
-    // checkpoint's answer names its own record (`engram_batch_binds.rs`). A
-    // failed gate binds nothing: its own line already tells its holder.
-    for check in credited
-        .iter()
-        .filter(|check| check.outcome == EngramExecutionOutcome::Succeeded)
-    {
-        let Some((_, _, targets)) = batch_members.iter().find(|(grant_id, sequence, _)| {
-            *grant_id == check.check.grant_id && *sequence == check.check.sequence
-        }) else {
-            continue;
-        };
-        record.engram.pending_batches.push(EngramPendingBatch {
-            checkpoint_grant_id: checkpoint_grant_id.to_owned(),
-            producer_observation_id: engram_batch_producer_observation_id(
-                session_id,
-                &check.check.grant_id,
-                check.check.sequence,
-                &check.check.key,
-            ),
-            measurement: EngramBindMeasurement {
-                workspace_id: check.basis.workspace_id.clone(),
-                source_revision: check.basis.source_revision.clone(),
-                measured_at: check.end.completed_at.clone(),
-            },
-            targets: targets.clone(),
-            pended_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        });
-    }
-    let carried_count = credited.len();
-    for check in &credited {
-        let Some(artifact) = artifact_candidates.get(&(check.check.grant_id.clone(), check.check.sequence)) else { continue; };
-        let grant_identity = sha256_hex(check.check.grant_id.as_bytes());
-        let tool_identity = sha256_hex(check.check.key.as_bytes());
-        // The owner/grant/tool bucket narrows candidates; every original
-        // predicate still decides, over the whole bucket, in key order.
-        let bucket = (Some(session_id.to_owned()), Some(grant_identity.clone()), tool_identity.clone());
-        let candidates: Vec<_> = inner.test_run_observations.index().check(&bucket)
-            .filter_map(|key| inner.test_run_observations.get(key))
-            .filter(|row| {
-                row.summary.owner_session_id.as_deref() == Some(session_id)
-                    && row.grant_identity.as_deref() == Some(grant_identity.as_str())
-                    && row.tool_identity == tool_identity && row.summary.started_at.as_deref() == Some(check.check.started_at.as_str())
-            }).map(|row| row.execution_id.clone()).collect();
-        if candidates.len() == 1
-            && inner.test_run_observations.update(&candidates[0], |row| row.artifact = Some(artifact.clone())).is_some()
-        {
-            inner.test_runs.observations_durable.remove(&candidates[0]);
-        }
-    }
-    resolved.splice(0..0, credited);
-    carried_count
-}
-
-/// Trims this turn's checks in `resolved`, after its first `carried_count`
-/// credited carried ones, so the report stays within
-/// `ENGRAM_TURN_CHECK_LIMIT` where it can. The turn's own checks are already
-/// held to that limit as they start (`note_engram_command_started`), so this
-/// trims only for credited carried gates; it runs after the checks the host
-/// cannot judge were withheld, so a withheld check makes room for one.
-fn engram_trim_turn_checks(resolved: &mut Vec<EngramResolvedCheck>, carried_count: usize) {
-    let carried_count = carried_count.min(resolved.len());
-    let excess = resolved
-        .len()
-        .saturating_sub(ENGRAM_TURN_CHECK_LIMIT)
-        .min(resolved.len() - carried_count);
-    resolved.drain(carried_count..carried_count + excess);
 }
 
 /// `later`, a line about a check's credit, merged into `earlier`, one still
@@ -2592,11 +1654,11 @@ fn engram_scratch_fence_detail(
 // no additional event history, durable state, or filesystem access here.
 fn engram_watcher_fence_diagnostic(cause: &str, facts: &str, check: &EngramTurnCheck) -> String {
     format!(
-        "watcher provenance: {} cause_sha256={} check_key_sha256={} grant_sha256={} check_sequence={} check_started={} fenced={}",
+        "watcher provenance: {} cause_sha256={} check_key_sha256={} host_turn_ref_sha256={} check_sequence={} check_started={} fenced={}",
         engram_truncate_utf8(facts, 900),
         sha256_hex(cause.as_bytes()),
         sha256_hex(check.key.as_bytes()),
-        sha256_hex(check.grant_id.as_bytes()),
+        sha256_hex(check.host_turn_ref.as_bytes()),
         check.sequence,
         engram_truncate_utf8(&check.started_at, 40),
         engram_interference_tick(),
@@ -2956,7 +2018,7 @@ impl AppState {
         let _polling = self.lock_engram_carried_poll();
         struct Pending {
             session_id: String,
-            grant_id: String,
+            host_turn_ref: String,
             sequence: usize,
             root: PathBuf,
             launched_at: String,
@@ -2988,7 +2050,7 @@ impl AppState {
                         .filter(move |carried| engram_carried_check_polls(carried, now))
                         .map(move |carried| Pending {
                             session_id: record.session.id.clone(),
-                            grant_id: carried.check.grant_id.clone(),
+                            host_turn_ref: carried.check.host_turn_ref.clone(),
                             sequence: carried.check.sequence,
                             root: carried.check.target.root.clone(),
                             launched_at: carried.check.started_at.clone(),
@@ -3031,27 +2093,13 @@ impl AppState {
             // so taking them does not mark the session for persistence.
             let record = &mut inner.sessions[index];
             let Some(carried) = record.engram.carried_checks.iter_mut().find(|carried| {
-                carried.check.grant_id == pending.grant_id
+                carried.check.host_turn_ref == pending.host_turn_ref
                     && carried.check.sequence == pending.sequence
             }) else {
                 continue;
             };
             engram_note_carried_run_read(carried, found, digest, launcher_gone, missing, ruled_out);
         }
-    }
-
-    /// Whether `session_id` carries a check a poll still reads
-    /// (`engram_carried_check_polls`).
-    fn engram_session_has_pollable_carried_checks(&self, session_id: &str) -> bool {
-        let now = chrono::Utc::now();
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        inner.find_session_index(session_id).is_some_and(|index| {
-            inner.sessions[index]
-                .engram
-                .carried_checks
-                .iter()
-                .any(|carried| engram_carried_check_polls(carried, now))
-        })
     }
 
     /// Takes the lock that serializes carried-run polls

@@ -70,13 +70,13 @@ fn unmediated_claude_turn_is_current(record: &SessionRecord) -> bool {
     record.adopted_claude_turn_generation == Some(record.active_turn_generation)
 }
 
-fn unmediated_claude_turn_notice(cause: ClaudeUnownedCause, adopted: bool, bound: bool) -> String {
-    let unrecorded = if adopted && bound {
-        "TermAl did not mediate it. When it ends, the host attempts to report its observations to Engram \
-         as unadmitted history with unknown causality. Its test runs remain uncredited."
+fn unmediated_claude_turn_notice(cause: ClaudeUnownedCause, adopted: bool, reporting: bool) -> String {
+    let unrecorded = if adopted && reporting {
+        "TermAl did not prompt it. When it ends, the host attempts to report its observations to Engram \
+         with unknown causality. These observations do not earn verification credit."
     } else {
-        "TermAl did not mediate it: Engram has no record of it, and its edits \
-         and test runs are kept unassigned, not reported or credited."
+        "TermAl did not prompt it. This turn has no automatic observation report; its edits \
+         and checks are kept unassigned. This notice supplies no verification credit."
     };
     match cause {
         ClaudeUnownedCause::Unassigned => format!(
@@ -263,6 +263,8 @@ impl AppState {
         if !inner.sessions[index].runtime.matches_runtime_token(token) {
             return Ok(None);
         }
+        let observations_enabled = ordinary_runtime_observation_enabled(&inner, session_id);
+        let opening_root = observations_enabled.then(|| runtime_observation_opening_root(&inner, session_id)).flatten();
         let message_id = inner.next_message_id();
         let (
             adopted_generation,
@@ -307,7 +309,9 @@ impl AppState {
             });
             if let Some(generation) = adopted_generation {
                 record.adopted_claude_turn_generation = Some(generation);
-                adopt_runtime_observation(record, &message_id, generation);
+                if observations_enabled {
+                    adopt_runtime_observation(record, &message_id, generation, opening_root);
+                }
             }
             record.unmediated_claude_turn = Some(UnmediatedClaudeTurn {
                 adopted_generation,
@@ -318,7 +322,9 @@ impl AppState {
                 id: message_id,
                 timestamp: stamp_now(),
                 author: Author::System,
-                text: unmediated_claude_turn_notice(cause, adopted_generation.is_some(), record.engram.work_binding.is_some()),
+                text: unmediated_claude_turn_notice(cause, adopted_generation.is_some(),
+                    adopted_generation.is_some_and(|generation| record.engram.unadmitted_active_turn
+                        .as_ref().is_some_and(|trace| trace.generation == generation))),
                 expanded_text: None,
                 source: None,
             };
@@ -401,47 +407,16 @@ impl AppState {
         }
     }
 
-    /// A turn no prompt owned ran beside the session's open grant: its
-    /// interval overlapped the grant's measurement interval, between the
-    /// grant's begin basis and its close. Nothing proves where one ended and
-    /// the grant's own turn began (the runtime may start the waiting prompt
-    /// before this reader processes the unowned result), so the grant's
-    /// measured begin, and the watcher's hints, are kept as they are. The
-    /// grant is marked as having mixed attribution instead, and its own
-    /// source report is withheld as uncertain (the turn report in
-    /// `engram_turn_checks.rs`); checks keep their own proof. The overlap is
-    /// kept as unassigned.
-    /// Only for the runtime `token` names: a replaced runtime's late frames
-    /// mark no grant of its successor.
+    /// An unowned turn may overlap the current ordinary turn. Only activity
+    /// from its exact current runtime may make source attribution uncertain.
     fn mark_engram_turn_attribution_mixed(&self, session_id: &str, token: &RuntimeToken) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else {
-            return;
-        };
+        let Some(index) = inner.find_session_index(session_id) else { return; };
         let record = &mut inner.sessions[index];
         if !record.runtime.matches_runtime_token(token) {
             return;
         }
-        let Some(grant_id) = record.engram.active_grant_id.clone() else {
-            return;
-        };
-        if record.engram.active_turn_mixed_attribution.as_deref() == Some(grant_id.as_str()) {
-            return;
-        }
-        record.engram.active_turn_mixed_attribution = Some(grant_id.clone());
-        // Outstanding Claude work is part of what the session says about the
-        // restriction (`claude_outstanding_work.rs`).
-        if record.claude_outstanding.any() {
-            record.claude_outstanding.notice_due = true;
-        }
-        push_unassigned_claude_observation(
-            record,
-            format!(
-                "a turn no prompt owned overlapped grant {grant_id}'s measurement interval; \
-                 what changed in it may be that turn's or the grant's, so the grant's own \
-                 source report is withheld as uncertain"
-            ),
-        );
+        claude_mark_observation_mixed(record);
     }
 
     /// An error `result` the router tied to the host's prompt proves Claude

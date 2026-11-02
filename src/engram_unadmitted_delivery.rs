@@ -53,7 +53,6 @@ impl EngramRuntimeObservationReport {
         capture: EngramRuntimeClosingCapture,
         connection: EngramConnectionConfig,
         store: EngramAuthorityStoreKey,
-        routing_token: &str,
         observing_session: String,
         call_timeout: Duration,
     ) -> Result<Self, EngramTransportError> {
@@ -63,7 +62,7 @@ impl EngramRuntimeObservationReport {
             ));
         }
         let envelopes =
-            prepare_runtime_observations(trace, capture, routing_token, chrono::Utc::now())?
+            prepare_runtime_observations(trace, capture, chrono::Utc::now())?
                 .into_iter()
                 .map(|request| EngramRuntimeObservationEnvelope {
                     request,
@@ -229,6 +228,11 @@ fn deliver_runtime_observation_envelope(
         serde_json::from_value(envelope.request.clone()).map_err(|error| {
             EngramTransportError::protocol(format!("invalid retained observation: {error}"))
         })?;
+    if serde_json::to_value(&request).ok().as_ref() != Some(&envelope.request) {
+        return Err(EngramTransportError::protocol(
+            "retained observation contains unsupported fields; its original bytes remain retained",
+        ));
+    }
     let EngramControlRequest::ExecutionObserve { observation, .. } = &request else {
         return Err(EngramTransportError::protocol(
             "retained runtime report may send only execution_observe",
@@ -238,6 +242,7 @@ fn deliver_runtime_observation_envelope(
         observation.occurrence,
         EngramInterTurnOccurrence::UnadmittedTurn { .. }
             | EngramInterTurnOccurrence::ObservedCheck { .. }
+            | EngramInterTurnOccurrence::SourceSighting { .. }
     ) {
         return Err(EngramTransportError::protocol(
             "retained runtime report has another occurrence kind",
@@ -268,11 +273,11 @@ fn deliver_runtime_observation_envelope(
         return Ok(next);
     }
     next.envelopes[index].delivery = match adapter.request(&report.connection, &request, timeout) {
-        Ok(value) => match EngramSourceObservationReceipt::from_unadmitted_result(
-            value.clone(),
-            observation,
-            &report.observing_session,
-        ) {
+        Ok(value) => match if matches!(&observation.occurrence, EngramInterTurnOccurrence::SourceSighting { .. }) {
+            EngramSourceObservationReceipt::from_recorded_result(value.clone(), observation, &report.observing_session)
+        } else {
+            EngramSourceObservationReceipt::from_unadmitted_result(value.clone(), observation, &report.observing_session)
+        } {
             Ok(_) => EngramRuntimeObservationDelivery::Recorded { receipt: value },
             // Invalid receipt bytes cannot prove acceptance or refusal. Keep
             // the exact request for bounded retry and a visible diagnostic.

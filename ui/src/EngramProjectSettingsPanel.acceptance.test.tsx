@@ -13,7 +13,7 @@ vi.mock("./api", async importOriginal => ({ ...await importOriginal<typeof impor
 vi.mock("./acceptance-settings-api", () => ({ getAcceptancePolicy: vi.fn(), changeAcceptancePolicy: vi.fn(), saveEvaluatorDefaults: vi.fn() }));
 
 const project: Project = { id: "one", name: "One", rootPath: "/one", remoteId: "local", engramDeclared: true,
-  engram: { enabled: true, turnGatedControl: false } };
+  engram: { enabled: true, executionObservability: false } };
 const other: Project = { ...project, id: "two", name: "Two", rootPath: "/two" };
 const policy: AcceptancePolicySnapshot = { available: true, readerKey: "reader", policy: "a".repeat(32),
   acceptanceEvaluation: { modes: [], mechanicalBasis: "asserted", requireSourceFreshness: false } };
@@ -25,13 +25,13 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function setup() {
+function setup(initial: Project = project) {
   const busy = vi.fn();
   function Harness() {
-    const [current, setCurrent] = useState(project);
+    const [current, setCurrent] = useState(initial);
     return <>
       <button onClick={() => setCurrent(other)}>Switch project</button>
-      <button onClick={() => setCurrent(value => ({ ...value, engram: { ...value.engram!, turnGatedControl: true } }))}>Persist turn gating</button>
+      <button onClick={() => setCurrent(value => ({ ...value, engram: { ...value.engram!, enabled: false } }))}>Persist disabled connection</button>
       <EngramProjectSettingsPanel project={current} idPrefix="test" onBusyChange={busy}
         onVerified={vi.fn()} onSaved={result => setCurrent(result.projects[0])}
         onDefaultsSaved={result => setCurrent(result.projects[0])} />
@@ -47,26 +47,38 @@ beforeEach(() => {
   vi.mocked(getAcceptancePolicy).mockResolvedValue(policy);
   vi.mocked(verifyProjectEngramSettings).mockResolvedValue({ verified: true, projectId: "engram-one", ready: true,
     fullAudit: "not_run", hostPathStatus: "matched", elapsedMs: 12,
-    binaryPath: "/bin/engram", home: "/one/.engram", database: "/one/.engram/store.db", requiredAssurance: "asserted" });
+    binaryPath: "/bin/engram", home: "/one/.engram", database: "/one/.engram/store.db" });
   vi.mocked(saveEvaluatorDefaults).mockImplementation(async (_, defaults) => state({ ...project, engram: { ...project.engram!, acceptanceEvaluation: defaults } }));
   vi.mocked(updateProjectEngramSettings).mockResolvedValue(state(project));
 });
 
-it("keeps turn-gating edits and verification when evaluator defaults are edited and saved", async () => {
+it("keeps connection verification when evaluator defaults are edited and saved", async () => {
   setup();
   await screen.findByText("Off — completion is self-asserted.");
-  fireEvent.click(screen.getByLabelText("Turn-gated control"));
   fireEvent.click(screen.getByRole("button", { name: "Verify" }));
   await screen.findByText("engram-one");
   fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
   fireEvent.click(screen.getByRole("option", { name: "Claude" }));
   expect(screen.getByRole("button", { name: "Save & enable" })).toBeEnabled();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" })); });
-  expect(screen.getByLabelText("Turn-gated control")).toBeChecked();
+  expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Evaluator agent")).toHaveTextContent("Claude");
   expect(screen.getByRole("button", { name: "Save & enable" })).toBeEnabled();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save & enable" })); });
-  expect(updateProjectEngramSettings).toHaveBeenCalledWith("one", { enabled: true, turnGatedControl: true });
+  expect(updateProjectEngramSettings).toHaveBeenCalledWith("one", { enabled: true, executionObservability: false });
+  expect(verifyProjectEngramSettings).toHaveBeenCalledTimes(1);
+});
+
+it("keeps successful verification when Save & enable changes the enabled state", async () => {
+  setup({ ...project, engram: { ...project.engram!, enabled: false } });
+  fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+  await screen.findByText("engram-one");
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Save & enable" }));
+  });
+  expect(updateProjectEngramSettings).toHaveBeenCalledWith("one", { enabled: true, executionObservability: false });
+  expect(screen.getByText("engram-one")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save & enable" })).toBeEnabled();
   expect(verifyProjectEngramSettings).toHaveBeenCalledTimes(1);
 });
 
@@ -75,13 +87,13 @@ it("keeps an unsaved evaluator draft through connection updates, resetting it on
   await screen.findByText("Off — completion is self-asserted.");
   fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
   fireEvent.click(screen.getByRole("option", { name: "Claude" }));
-  fireEvent.click(screen.getByRole("button", { name: "Persist turn gating" }));
-  expect(screen.getByLabelText("Turn-gated control")).toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Persist disabled connection" }));
+  expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Evaluator agent")).toHaveTextContent("Claude");
   fireEvent.click(screen.getByRole("button", { name: "Switch project" }));
   await screen.findByText("Off — completion is self-asserted.");
   expect(screen.getByLabelText("Evaluator agent")).toHaveTextContent("Auto — other vendor when ready");
-  expect(screen.getByLabelText("Turn-gated control")).not.toBeChecked();
+  expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
 });
 
 it.each(["defaults", "policy"] as const)("releases %s busy ownership on a project switch without letting the old reply unlock a new save", async kind => {

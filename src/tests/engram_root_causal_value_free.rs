@@ -1,281 +1,91 @@
-//! Received values never reach the committed causal record or the wire.
-//! Owns the envelope, bind-phase, recovery-receipt and cold-restore vectors,
-//! not recovery decisions. Split beside engram_root_causal_rebind.rs and
-//! registered by engram_root_causal_failure.rs, whose fixture it uses.
-
+//! Remaining decoder diagnostics and historical original facts, without gate recovery.
 use super::*;
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
+use crate::tests::engram_host_adapter::turn_checks::checkpoint_result_recovery::{
+    passive_checkpoint, install_historical_checkpoint, append_historical_result,
+};
 
-struct Committed {
-    cards: Vec<Value>,
-    projections: [String; 2],
-    head: Option<Value>,
+#[test]
+fn ordinary_envelope_decode_keeps_received_values_out_of_causal_metadata() {
+    let sentinel = "opaque-envelope-sentinel-5d21";
+    let error = exchange_engram_control_frame(&mut Vec::new(),
+        &mut std::io::Cursor::new(format!("{{\"status\":\"{sentinel}\"}}\n").into_bytes()), b"{}").unwrap_err();
+    let cause = EngramCausalFailure::request(&error, &EngramControlRequest::WorkSessionRead {});
+    let wire = serde_json::to_value(&cause).unwrap();
+    assert!(!wire.to_string().contains(sentinel));
+    assert_eq!(wire["operation"], "work_session_read");
+    assert_eq!(wire["failureClass"], "protocol");
+    assert_eq!(wire["remoteApplication"], "unknown");
+    assert!(wire["attemptId"].is_null());
+    let message = wire["message"].as_str().unwrap();
+    assert!(message.starts_with("invalid Engram response: kind="));
+    assert!(message.ends_with("(names withheld)"));
 }
 
-// Nothing may panic while StateInner is held: a RED would poison the lock and
-// abort again during fixture cleanup. These read or change the session under
-// the guard and leave every unwrap and assertion to the caller, after release.
-fn read_record<T>(fixture: &CausalRoot, read: impl FnOnce(&SessionRecord) -> T) -> T {
-    let value = {
-        let inner = fixture.state.inner.lock().unwrap();
-        inner
-            .find_session_index(&fixture.session)
-            .map(|index| read(&inner.sessions[index]))
-    };
-    value.expect("the fixture session exists")
+#[test]
+fn ordinary_work_result_schema_never_echoes_a_returned_capability() {
+    let capability = "opaque-phase-sentinel-91e4";
+    let error = parse_engram_result::<EngramHeldClaims>(json!({"items":[{
+        "work_id":capability, "claim_fence":capability
+    }]})).unwrap_err();
+    let cause = EngramCausalFailure::request(&error, &EngramControlRequest::WorkSessionRead {});
+    assert!(!serde_json::to_string(&cause).unwrap().contains(capability));
+    assert!(!error.message.contains(capability));
+    assert_eq!(cause.failure_class, EngramCausalFailureClass::Protocol);
+    assert_eq!(cause.remote_application, EngramRemoteApplication::Unknown);
 }
 
-fn write_record(fixture: &CausalRoot, write: impl FnOnce(&mut SessionRecord)) {
-    let found = {
-        let mut inner = fixture.state.inner.lock().unwrap();
-        let index = inner.find_session_index(&fixture.session);
-        index.and_then(|index| inner.session_mut_by_index(index)).map(write)
-    };
-    found.expect("the fixture session exists");
-}
-
-fn committed(fixture: &CausalRoot) -> Committed {
-    let cards = fixture.durable_cards();
-    let count = read_record(fixture, |record| record.session.messages.len());
-    let persisted = serde_json::to_value(
-        load_persisted_message_range(&fixture.state.persistence_path, &fixture.session, 0, count)
-            .unwrap(),
-    )
-    .unwrap()
-    .to_string();
-    let (wire, head) = read_record(fixture, |record| {
-        (
-            serde_json::to_value(AppState::wire_session_from_record(
-                &fixture.state.server_instance_id,
-                record,
-            )),
-            record
-                .queued_prompts
-                .front()
-                .map(|queued| serde_json::to_value(&queued.pending_prompt)),
-        )
+#[test]
+fn historical_checkpoint_original_and_earlier_unknown_survive_a_later_refusal() {
+    let turn = OrdinaryRoot::new("historical-receipt-refusal-data");
+    let mut operation = passive_checkpoint(&turn.root, &turn.session);
+    let original = serde_json::to_value(&operation.original).unwrap();
+    let first = serde_json::to_value(&operation.attempts[0]).unwrap();
+    append_historical_result(&mut operation, EngramCheckpointAttemptResult::Refused {
+        response: json!({"decision":"refuse","code":"lifecycle_hold"}),
     });
-    let wire = wire.unwrap().to_string();
-    let head = head.transpose().unwrap();
-    Committed { cards, projections: [persisted, wire], head }
-}
-
-fn assert_absent(committed: &Committed, values: &[&str]) {
-    for projection in &committed.projections {
-        for value in values {
-            assert!(
-                !projection.contains(value),
-                "a received value leaked into the persisted/public record"
-            );
-        }
+    operation.validate().unwrap();
+    {
+        let mut inner = turn.state.inner.lock().unwrap();
+        install_historical_checkpoint(&mut inner, &turn.session, &operation);
+        turn.state.commit_locked(&mut inner).unwrap();
     }
-}
-
-fn lost_request(fixture: &CausalRoot) -> Value {
-    fixture
-        .transport
-        .lost_request
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("the selected malformed response must be reached")
-}
-
-fn last_cause(committed: &Committed) -> Value {
-    committed.cards.last().expect("a committed card")["causalFailure"].clone()
-}
-
-#[test]
-fn root_causal_envelope_decode_keeps_received_values_out_of_the_record() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_evaluate", 2)));
-    *fixture.transport.mode.lock().unwrap() = CausalFaultMode::MalformedEnvelopeSecret;
-    let (token, original_head, _) = fixture.start_and_queue();
-    let _completion = fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-    let request = lost_request(&fixture);
-    let committed = committed(&fixture);
-    assert_eq!(
-        committed.head.as_ref(),
-        Some(&original_head),
-        "existing decision: the unresolved request retains its exact prompt"
-    );
-    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
-    assert_absent(
-        &committed,
-        &[
-            "opaque-envelope-sentinel-5d21",
-            request["routing_token"].as_str().unwrap(),
-        ],
-    );
-    let cause = last_cause(&committed);
-    assert_eq!(cause["operation"], "turn_evaluate");
-    assert_eq!(cause["attemptId"], request["idempotency_key"]);
-    assert_eq!(cause["failureClass"], "protocol");
-    assert_eq!(cause["boundary"], "Engram control response validation");
-    assert_eq!(cause["remoteApplication"], "unknown");
-    let message = cause["message"].as_str().unwrap();
-    assert!(message.starts_with("invalid Engram response: kind="), "{message}");
-    assert!(message.ends_with("(names withheld)"), "{message}");
+    deliver_turn_dispatch(&turn.state, turn.prepare("Independent ordinary input.")).into_public_result().unwrap();
+    turn.prompt();
+    turn.state.shutdown_persist_blocking();
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    let kept = &loaded.engram_session_obligations.checkpoint_operations[0];
+    assert_eq!(serde_json::to_value(&kept.original).unwrap(), original);
+    assert_eq!(serde_json::to_value(&kept.attempts[0]).unwrap(), first);
+    let raw = serde_json::to_value(kept).unwrap();
+    assert_eq!(raw["attempts"][1]["result"]["response"]["code"], "lifecycle_hold");
+    assert_ne!(kept.protection.phase, EngramSessionObligationPhase::Confirmed);
+    assert!(kept.protection.settlement_evidence.is_null());
+    assert!(loaded.test_run_observations.is_empty());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn root_causal_rebind_phase_keeps_returned_capability_out_of_the_record() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("session_bind", 2)));
-    *fixture.transport.mode.lock().unwrap() = CausalFaultMode::RebindPhaseSecret;
-    let (token, _, _) = fixture.start_and_queue();
-    write_record(&fixture, |record| record.engram.rebind_required = true);
-    let _completion = fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-    let request = lost_request(&fixture);
-    let echoed = fixture
-        .transport
-        .echoed
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("the producer returned a capability");
-    let committed = committed(&fixture);
-    assert_eq!(request["operation"], "session_bind");
-    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
-    assert_absent(&committed, &["opaque-phase-sentinel-91e4", &echoed]);
-    let cause = last_cause(&committed);
-    assert_eq!(cause["operation"], "session_bind");
-    assert_eq!(cause["attemptId"], request["idempotency_key"]);
-    assert_eq!(cause["failureClass"], "protocol");
-    assert_eq!(cause["boundary"], "Engram control response validation");
-    assert_eq!(
-        cause["message"],
-        "Engram rebind returned a phase instead of `ready` or `sync_required`: \
-         field path=$.status.phase (value withheld)"
-    );
-}
-
-#[test]
-fn root_causal_recovery_receipt_keeps_received_grant_out_of_the_record() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_checkpoint", 2)));
-    *fixture.transport.mode.lock().unwrap() = CausalFaultMode::RecoveryReceiptSecret;
-    let (token, _, _) = fixture.start_and_queue();
-    write_record(&fixture, |record| record.engram.rebind_required = true);
-    let _completion = fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-    let request = lost_request(&fixture);
-    let committed = committed(&fixture);
-    assert_eq!(request["operation"], "turn_checkpoint");
-    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
-    assert_absent(
-        &committed,
-        &[
-            "opaque-receipt-sentinel-6b0d",
-            request["routing_token"].as_str().unwrap(),
-        ],
-    );
-    let cause = last_cause(&committed);
-    assert_eq!(cause["operation"], "turn_checkpoint");
-    assert_eq!(cause["attemptId"], request["idempotency_key"]);
-    assert_eq!(cause["failureClass"], "remote");
-    assert_eq!(cause["originalCode"], "restart_checkpoint_receipt_mismatch");
-    assert_eq!(cause["remoteApplication"], "unknown");
-}
-
-#[test]
-fn root_causal_recovery_refusal_keeps_the_producer_code() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_checkpoint", 2)));
-    *fixture.transport.mode.lock().unwrap() = CausalFaultMode::RecoveryRefusal;
-    let (token, _, _) = fixture.start_and_queue();
-    write_record(&fixture, |record| record.engram.rebind_required = true);
-    let _completion = fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-    let request = lost_request(&fixture);
-    let committed = committed(&fixture);
-    assert_eq!(request["operation"], "turn_checkpoint");
-    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
-    let cause = last_cause(&committed);
-    assert_eq!(cause["operation"], "turn_checkpoint");
-    assert_eq!(cause["attemptId"], request["idempotency_key"]);
-    assert_eq!(cause["originalCode"], "lifecycle_hold", "the producer's own code");
-    assert_eq!(cause["failureClass"], "producer_refusal");
-    assert_eq!(cause["remoteApplication"], "refused");
-}
-
-// A lost evaluate reply leaves its prepared evaluate on the exact head; the
-// saved record then replaces the live one, as the loader does after a restart.
-// Then selects the restore's own malformed reply. Returns the original head.
-fn cold_restored(
-    fixture: &CausalRoot,
-    operation: &'static str,
-    ordinal: usize,
-    mode: CausalFaultMode,
-) -> Value {
-    let (token, original_head, _) = fixture.start_and_queue();
-    let _completion = fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-    // Nothing here may panic while StateInner is held; results are checked
-    // after the guard is released.
-    let snapshot = {
-        let mut inner = fixture.state.inner.lock().unwrap();
-        let index = inner.find_session_index(&fixture.session);
-        index.and_then(|index| inner.session_mut_by_index(index)).map(|record| {
-            let retained = record.queued_prompts.front().map(|queued| {
-                (queued.pending_prompt.id.clone(), queued.engram_evaluate.is_some())
-            });
-            let recovered = match PersistedSessionRecord::from_record(record).into_record() {
-                Ok(restored) => {
-                    *record = restored;
-                    Ok(record.engram.recovered_admission)
-                }
-                Err(error) => Err(format!("{error:#}")),
-            };
-            (retained, recovered)
-        })
-    };
-    let (retained, recovered) = snapshot.expect("the fixture session exists");
-    let recovered = recovered.expect("the saved record loads");
-    assert_eq!(
-        retained,
-        Some((original_head["id"].as_str().unwrap().to_owned(), true)),
-        "the exact head keeps its prepared evaluate"
-    );
-    assert!(recovered, "the loader marks a retained admission as recovered");
-    *fixture.transport.lost_request.lock().unwrap() = None;
-    *fixture.transport.fault.lock().unwrap() = Some((operation, ordinal));
-    *fixture.transport.mode.lock().unwrap() = mode;
-    original_head
-}
-
-#[test]
-fn root_causal_cold_restore_status_validation_keeps_its_request() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_evaluate", 2)));
-    let operation = "session_status";
-    cold_restored(&fixture, operation, 1, CausalFaultMode::MalformedRequestSecret);
-    // Through the queue's own admission, its fallback and the committed card.
-    let _resume = fixture.state.resume_session_queue(&fixture.session);
-    let request = lost_request(&fixture);
-    let committed = committed(&fixture);
-    assert_eq!(request["operation"], operation);
-    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
-    assert_absent(
-        &committed,
-        &[
-            "opaque-response-sentinel-73f9",
-            request["routing_token"].as_str().unwrap(),
-        ],
-    );
-    let cause = last_cause(&committed);
-    assert_eq!(cause["operation"], operation);
-    assert_eq!(cause["attemptId"], request["idempotency_key"]);
-    assert_eq!(cause["failureClass"], "protocol");
-    assert_eq!(cause["boundary"], "Engram control response validation");
-    assert_eq!(cause["remoteApplication"], "unknown");
-    assert!(cause["message"].as_str().unwrap().contains("kind=Data; field path=$"));
+fn loading_unknown_original_keeps_exact_content_without_requesting_a_status_or_checkpoint() {
+    let turn = OrdinaryRoot::new("historical-cold-original");
+    let id = turn.enqueue("Original unknown input 🦀", QueuedPromptSource::User);
+    let before = turn.edit(|record| {
+        let head = &mut record.queued_prompts[0];
+        head.engram_evaluate = Some(json!({"request":{"operation":"turn_evaluate",
+            "idempotency_key":"original-unknown-key"},"prepared_begin":{"grant_id":"old-grant"}}));
+        head.engram_ordinary_handoff = true;
+        sync_pending_prompts(record);
+        serde_json::to_value(&record.queued_prompts[0]).unwrap()
+    });
+    let loaded = turn.record(|record| PersistedSessionRecord::from_record(record).into_record().unwrap());
+    assert_eq!(loaded.queued_prompts[0].pending_prompt.id, id);
+    assert_eq!(serde_json::to_value(&loaded.queued_prompts[0]).unwrap(), before);
+    assert!(ordinary_queue_position(&loaded).is_none());
+    assert!(loaded.prompt_deliveries.is_empty());
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
@@ -311,62 +121,4 @@ fn root_causal_decoders_keep_received_text_out_of_messages() {
         json!({"a": 1}),
         "accepted input and trailing whitespace are unchanged"
     );
-}
-
-// The closing branch interrupts the head before its checkpoint, and the
-// existing interrupted-head hold writes no card for this admission. The
-// attribution is pinned on the restore's error and the admission fallback.
-#[test]
-fn root_causal_cold_restore_checkpoint_validation_keeps_its_request() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_evaluate", 2)));
-    let original_head = cold_restored(
-        &fixture,
-        "turn_checkpoint",
-        2,
-        CausalFaultMode::RecoveryMalformedRequestSecret,
-    );
-    let (target, owner) = {
-        let inner = fixture.state.inner.lock().unwrap();
-        (
-            AppState::engram_binding_target_for_session_shape_locked(&inner, &fixture.session, true),
-            inner
-                .find_session_index(&fixture.session)
-                .and_then(|index| EngramQueuedAdmissionOwner::capture(&inner.sessions[index])),
-        )
-    };
-    let mut target = target.unwrap().expect("the session has a binding target");
-    let owner = owner.expect("the retained head has an owner");
-    target.admission_started_at = Some(fixture.state.engram_budget_clock().now());
-    let error = fixture
-        .state
-        .restore_queued_engram_target(&mut target, &owner)
-        .unwrap_err();
-    let request = lost_request(&fixture);
-    let (head, interrupted) = read_record(&fixture, |record| {
-        let head = record.queued_prompts.front();
-        (
-            head.map(|queued| serde_json::to_value(&queued.pending_prompt)),
-            head.is_some_and(|queued| queued.engram_interrupted),
-        )
-    });
-    let head = head.transpose().unwrap();
-    assert_eq!(request["operation"], "turn_checkpoint");
-    assert_eq!(head.as_ref(), Some(&original_head), "existing decision: exact head retained");
-    assert!(interrupted, "existing decision: interrupted before the checkpoint");
-    assert!(fixture.receiver.try_recv().is_err(), "no provider handoff");
-    let cause = error.causal_failure.clone().expect("the exact request is attached");
-    let fallback = EngramCausalFailure::error(&error, "admission_binding", None, &[]);
-    assert_eq!(fallback, cause, "the admission fallback keeps the attributed cause");
-    let cause = serde_json::to_value(cause).unwrap();
-    let text = format!("{cause} {}", error.message);
-    for value in ["opaque-response-sentinel-73f9", request["routing_token"].as_str().unwrap()] {
-        assert!(!text.contains(value), "a received value reached the diagnostic");
-    }
-    assert_eq!(cause["operation"], "turn_checkpoint");
-    assert_eq!(cause["attemptId"], request["idempotency_key"]);
-    assert_eq!(cause["failureClass"], "protocol");
-    assert_eq!(cause["boundary"], "Engram control response validation");
-    assert_eq!(cause["remoteApplication"], "unknown");
-    assert!(cause["message"].as_str().unwrap().contains("kind=Data; field path=$"));
 }

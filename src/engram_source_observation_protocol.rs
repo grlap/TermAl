@@ -40,7 +40,7 @@ impl EngramDoctorControl {
             .ok_or_else(invalid)?;
         let rules = self.obligation_rules.as_ref().filter(|id| engram_observation_object_id(id))
             .ok_or_else(invalid)?;
-        if self.schema_version != Some(1) || self.required_assurance != "turn_gated" {
+        if self.schema_version != Some(1) {
             return Err(invalid());
         }
         Ok(EngramObservationPolicyBasis::AccountIfEligible {
@@ -69,14 +69,16 @@ fn read_engram_observation_policy(
         host_workdir,
     ).map_err(|error| EngramTransportError::transport(error.message))?;
     let store = validate_engram_readiness(
-        &receipt, &connection.project_file, &connection.home, true,
+        &receipt, &connection.project_file, &connection.home,
     ).map_err(|error| EngramTransportError::protocol(error.message))?;
     if &store != expected_store {
         return Err(EngramTransportError::local_state(
             "source observation readiness belongs to another store or project",
         ));
     }
-    receipt.control.observation_policy()
+    receipt.observation_policy.as_ref().ok_or_else(|| {
+        EngramTransportError::protocol("Engram readiness supplied no observation policy tuple")
+    })?.observation_policy()
 }
 
 // This boundary uses only the producer's explicitly admitted root states;
@@ -130,10 +132,20 @@ enum EngramObservedSourceChange {
     AssumedMissingBaseline { workspace_id: String, sighting: EngramMeasuredSighting },
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EngramObservedTurnOutcome {
+    Succeeded,
+    Failed,
+    Cancelled,
+    Unknown,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum EngramInterTurnOccurrence {
     InterTurnChange { source_change: EngramObservedSourceChange },
+    SourceSighting { source_basis: EngramExecutionSourceBasis, observed_at: String },
     // Grant-free occurrences of a turn the host observed only after it began
     // (`engram_unadmitted_observation.rs`). A null source change reports no
     // change; it never asserts the source was unchanged. Only that module's
@@ -143,6 +155,8 @@ enum EngramInterTurnOccurrence {
         host_turn_ref: String,
         source_change: Option<EngramObservedSourceChange>,
         observed_checks: Vec<EngramObservedCheck>,
+        #[serde(default, rename = "outcome", skip_serializing_if = "Option::is_none")]
+        observed_outcome: Option<EngramObservedTurnOutcome>,
     },
     #[cfg_attr(not(test), allow(dead_code))]
     ObservedCheck { host_turn_ref: String, check: EngramObservedCheck },
@@ -166,81 +180,140 @@ struct EngramInterTurnObservation {
     policy_basis: EngramObservationPolicyBasis,
 }
 
+// Measured input only: no provider continuation, session token, grant,
+// retry phase or settlement can be reconstructed from these facts.
+#[cfg(test)]
+#[derive(Clone, Debug)]
+struct EngramMeasuredSourceFacts {
+    id: String,
+    binding: EngramControlWorkBinding,
+    baseline: Option<EngramMeasuredSighting>,
+    sighting: EngramMeasuredSighting,
+    root_basis: Value,
+}
+
+#[cfg(test)]
+fn validate_engram_measured_source(
+    facts: &EngramMeasuredSourceFacts,
+    policy_basis: &EngramObservationPolicyBasis,
+) -> Result<EngramObservationRootBasis, EngramTransportError> {
+    let invalid = |message| EngramTransportError::protocol(message);
+    let EngramObservationPolicyBasis::AccountIfEligible {
+        project_policy_epoch, policy, obligation_rule_set,
+    } = policy_basis;
+    if *project_policy_epoch <= 0 || !engram_observation_object_id(policy)
+        || !engram_observation_object_id(obligation_rule_set)
+        || facts.id.is_empty() || facts.id.len() + "termal-observe:".len() > 128
+    {
+        return Err(invalid("source observation policy or request identity is invalid"));
+    }
+    let root_basis: EngramObservationRootBasis = serde_json::from_value(facts.root_basis.clone())
+        .map_err(|_| invalid("source observation capture has no admitted canonical root basis"))?;
+    validate_engram_measured_source_sighting(&root_basis, &facts.sighting)?;
+    Ok(root_basis)
+}
+
+fn validate_engram_measured_source_sighting(
+    root_basis: &EngramObservationRootBasis,
+    sighting: &EngramMeasuredSighting,
+) -> Result<(), EngramTransportError> {
+    let invalid = |message| EngramTransportError::protocol(message);
+    let measured = chrono::DateTime::parse_from_rfc3339(&sighting.observed_at)
+        .map_err(|_| invalid("source sighting has no measured timestamp"))?;
+    if measured.offset().local_minus_utc() != 0 {
+        return Err(invalid("source sighting timestamp is not UTC"));
+    }
+    let basis = &sighting.source_basis;
+    let root_matches = match (&root_basis.state, basis.source_root_generation, basis.source_root_state) {
+        (EngramObservationRootState::Bound { workspace_id, generation, named_at },
+            Some(measured), Some(EngramSourceRootState::Named)) =>
+            measured > 0 && measured == *generation && workspace_id == &basis.workspace_id
+                && root_basis.latest_event.is_some()
+                && chrono::DateTime::parse_from_rfc3339(named_at).is_ok(),
+        (EngramObservationRootState::None {}, None, None) => true,
+        (EngramObservationRootState::None {}, Some(generation), Some(EngramSourceRootState::Ended)) =>
+            generation > 0 && root_basis.latest_event.is_some(),
+        (EngramObservationRootState::UnboundByRelease { last_generation, released_at_position }, None, None) =>
+            *last_generation > 0 && *released_at_position > 0,
+        _ => false,
+    };
+    if root_basis.capture_run_cut <= 0
+        || root_basis.latest_event.as_ref().is_some_and(|id| !engram_observation_object_id(id))
+        || !root_matches || basis.source_revision.trim().is_empty()
+        || basis.source_revision.len() > 512
+        || basis.workspace_id.is_empty() || basis.workspace_id.len() > 512
+    {
+        return Err(invalid("source observation measurements do not match the canonical opening"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 impl EngramInterTurnObservation {
-    fn from_intent(
-        intent: &EngramSourceObservationIntent,
+    fn from_source_change(
+        facts: &EngramMeasuredSourceFacts,
         policy_basis: EngramObservationPolicyBasis,
     ) -> Result<Self, EngramTransportError> {
-        let invalid = |message| EngramTransportError::protocol(message);
-        let EngramObservationPolicyBasis::AccountIfEligible {
-            project_policy_epoch, policy, obligation_rule_set,
-        } = &policy_basis;
-        if *project_policy_epoch <= 0 || !engram_observation_object_id(policy)
-            || !engram_observation_object_id(obligation_rule_set)
-            || intent.id.is_empty() || intent.id.len() + "termal-observe:".len() > 128
-        {
-            return Err(invalid("source observation policy or request identity is invalid"));
-        }
-        let root_basis: EngramObservationRootBasis = serde_json::from_value(intent.root_basis.clone())
-            .map_err(|_| invalid("source observation capture has no admitted canonical root basis"))?;
-        let sighting = &intent.sighting;
+        let root_basis = validate_engram_measured_source(facts, &policy_basis)?;
+        let sighting = &facts.sighting;
+        let basis = &sighting.source_basis;
         let through = chrono::DateTime::parse_from_rfc3339(&sighting.observed_at)
-            .map_err(|_| invalid("source sighting has no measured timestamp"))?.with_timezone(&chrono::Utc);
-        let workspace_id = &sighting.basis.workspace_id;
-        let root_matches = match (&root_basis.state, sighting.basis.source_root_generation, sighting.basis.source_root_state) {
-            (EngramObservationRootState::Bound { workspace_id: named_workspace, generation, named_at }, Some(measured), Some(EngramSourceRootState::Named)) =>
-                measured > 0 && measured == *generation && named_workspace == workspace_id
-                    && root_basis.latest_event.is_some()
-                    && chrono::DateTime::parse_from_rfc3339(named_at).is_ok(),
-            // A normal clear retains its Ended event in the canonical proof.
-            // An unnamed workdir measurement has no named generation/state.
-            (EngramObservationRootState::None {}, None, None) => true,
-            (EngramObservationRootState::None {}, Some(generation), Some(EngramSourceRootState::Ended)) =>
-                generation > 0 && root_basis.latest_event.is_some(),
-            (EngramObservationRootState::UnboundByRelease { last_generation, released_at_position }, None, None) =>
-                *last_generation > 0 && *released_at_position > 0,
-            _ => false,
-        };
-        if root_basis.capture_run_cut <= 0
-            || root_basis.latest_event.as_ref().is_some_and(|id| !engram_observation_object_id(id))
-            || !root_matches
-            || sighting.basis.source_revision.trim().is_empty()
-            || sighting.basis.source_revision.len() > 512
-            || workspace_id.is_empty() || workspace_id.len() > 512
-        {
-            return Err(invalid("source observation measurements do not match the canonical opening"));
-        }
-        let (from, source_change) = if let Some(baseline) = &intent.baseline {
+            .map_err(|_| EngramTransportError::protocol("source sighting has no measured timestamp"))?;
+        let (from, source_change) = if let Some(baseline) = &facts.baseline {
             let from = chrono::DateTime::parse_from_rfc3339(&baseline.observed_at)
-                .map_err(|_| invalid("source baseline has no measured timestamp"))?.with_timezone(&chrono::Utc);
-            if baseline.basis.workspace_id != sighting.basis.workspace_id
-                || baseline.basis.source_root_generation != sighting.basis.source_root_generation
-                || baseline.basis.source_root_state != sighting.basis.source_root_state
-                || baseline.basis.source_revision == sighting.basis.source_revision
-                || baseline.basis.source_revision.trim().is_empty()
-                || baseline.basis.source_revision.len() > 512 || from > through
+                .map_err(|_| EngramTransportError::protocol("source baseline has no measured timestamp"))?;
+            if baseline.source_basis.workspace_id != basis.workspace_id
+                || baseline.source_basis.source_root_generation != basis.source_root_generation
+                || baseline.source_basis.source_root_state != basis.source_root_state
+                || baseline.source_basis.source_revision == basis.source_revision
+                || baseline.source_basis.source_revision.trim().is_empty()
+                || baseline.source_basis.source_revision.len() > 512 || from > through
             {
-                return Err(invalid("source observation has no compatible differing measured baseline"));
+                return Err(EngramTransportError::protocol(
+                    "source observation has no compatible differing measured baseline"));
             }
             (baseline.observed_at.clone(), EngramObservedSourceChange::ContentComparison {
-                workspace_id: workspace_id.clone(),
+                workspace_id: basis.workspace_id.clone(),
                 baseline: EngramMeasuredBaseline {
-                    workspace_id: baseline.basis.workspace_id.clone(),
-                    source_revision: baseline.basis.source_revision.clone(), observed_at: baseline.observed_at.clone(),
+                    workspace_id: baseline.source_basis.workspace_id.clone(),
+                    source_revision: baseline.source_basis.source_revision.clone(),
+                    observed_at: baseline.observed_at.clone(),
                 },
-                sighting: EngramMeasuredSighting { source_basis: sighting.basis.clone(), observed_at: sighting.observed_at.clone() },
+                sighting: sighting.clone(),
             })
         } else {
             (sighting.observed_at.clone(), EngramObservedSourceChange::AssumedMissingBaseline {
-                workspace_id: workspace_id.clone(),
-                sighting: EngramMeasuredSighting { source_basis: sighting.basis.clone(), observed_at: sighting.observed_at.clone() },
+                workspace_id: basis.workspace_id.clone(), sighting: sighting.clone(),
             })
         };
         Ok(Self {
-            idempotency_key: format!("termal-observe:{}", intent.id),
-            binding: intent.binding.clone(), root_basis,
+            idempotency_key: format!("termal-observe:{}", facts.id),
+            binding: facts.binding.clone(), root_basis,
             observed_interval: EngramObservationInterval { from, through: sighting.observed_at.clone() },
             occurrence: EngramInterTurnOccurrence::InterTurnChange { source_change },
+            causality: EngramObservationCausality::Unknown {}, policy_basis,
+        })
+    }
+
+    fn from_source_sighting(
+        facts: &EngramMeasuredSourceFacts,
+        policy_basis: EngramObservationPolicyBasis,
+    ) -> Result<Self, EngramTransportError> {
+        let root_basis = validate_engram_measured_source(facts, &policy_basis)?;
+        if facts.baseline.is_some() {
+            return Err(EngramTransportError::protocol("a source sighting has no comparison baseline"));
+        }
+        Ok(Self {
+            idempotency_key: format!("termal-observe:{}", facts.id),
+            binding: facts.binding.clone(), root_basis,
+            observed_interval: EngramObservationInterval {
+                from: facts.sighting.observed_at.clone(),
+                through: facts.sighting.observed_at.clone(),
+            },
+            occurrence: EngramInterTurnOccurrence::SourceSighting {
+                source_basis: facts.sighting.source_basis.clone(),
+                observed_at: facts.sighting.observed_at.clone(),
+            },
             causality: EngramObservationCausality::Unknown {}, policy_basis,
         })
     }
@@ -249,6 +322,7 @@ impl EngramInterTurnObservation {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum EngramObservationAccounting {
+    Sighting {},
     SourceChange { source_change: Option<String> },
     Repeat { source_change: String },
     NoSourceChange {},
@@ -274,6 +348,23 @@ struct EngramSourceObservationReceipt {
 }
 
 impl EngramSourceObservationReceipt {
+    fn is_sighting(&self) -> bool {
+        matches!(&self.accounting, EngramObservationAccounting::Sighting {})
+    }
+
+    #[cfg(test)]
+    fn from_sighting_result(
+        value: Value, request: &EngramInterTurnObservation, observing_session: &str,
+    ) -> Result<Self, EngramTransportError> {
+        let receipt = Self::from_recorded_result(value, request, observing_session)?;
+        if !matches!(&request.occurrence, EngramInterTurnOccurrence::SourceSighting { .. })
+            || !receipt.is_sighting()
+        {
+            return Err(EngramTransportError::protocol("historical audit does not confirm a source sighting"));
+        }
+        Ok(receipt)
+    }
+
     fn is_accounted(&self) -> bool {
         match &self.accounting {
             EngramObservationAccounting::SourceChange { source_change } =>
@@ -281,11 +372,6 @@ impl EngramSourceObservationReceipt {
             EngramObservationAccounting::Repeat { source_change } => engram_observation_object_id(source_change),
             _ => false,
         }
-    }
-
-    fn is_root_move(&self) -> bool {
-        matches!(&self.accounting, EngramObservationAccounting::AuditOnly { reason }
-            if reason == "root_basis_moved")
     }
 
     fn from_recorded_result(
@@ -349,8 +435,26 @@ impl EngramSourceObservationReceipt {
         request: &EngramInterTurnObservation,
         observing_session: &str,
     ) -> Result<(), EngramTransportError> {
+        if let EngramInterTurnOccurrence::SourceSighting { source_basis, observed_at } = &request.occurrence {
+            validate_engram_measured_source_sighting(&request.root_basis, &EngramMeasuredSighting {
+                source_basis: source_basis.clone(), observed_at: observed_at.clone(),
+            })?;
+            let parse = |value: &str| chrono::DateTime::parse_from_rfc3339(value)
+                .map_err(|_| EngramTransportError::protocol("source sighting interval has an invalid timestamp"));
+            let from = parse(&request.observed_interval.from)?;
+            let through = parse(&request.observed_interval.through)?;
+            let measured = parse(observed_at)?;
+            if from > measured || measured > through {
+                return Err(EngramTransportError::protocol("source sighting lies outside its measured interval"));
+            }
+        }
+        let accounted = match &request.occurrence {
+            EngramInterTurnOccurrence::SourceSighting { .. } =>
+                self.is_sighting() && self.opened_obligations.is_empty(),
+            _ => self.is_accounted(),
+        };
         if !self.recorded_scope_matches(request, observing_session)?
-            || !self.observed_checks.is_empty() || !(self.is_accounted() || self.is_historical())
+            || !self.observed_checks.is_empty() || !(accounted || self.is_historical())
         {
             return Err(EngramTransportError::protocol(
                 "source observation receipt does not account for the captured scope and policy",
@@ -361,6 +465,7 @@ impl EngramSourceObservationReceipt {
 }
 
 impl EngramTransportError {
+    #[cfg(test)]
     fn is_definitive_observation_policy_refusal(&self) -> bool {
         self.kind == EngramTransportErrorKind::Remote
             && self.code.as_deref() == Some("execution_observation_policy_basis_mismatch")
@@ -378,39 +483,26 @@ mod source_sighting_protocol_tests {
         })).unwrap()
     }
 
-    fn intent() -> EngramSourceObservationIntent {
+    fn source_facts() -> EngramMeasuredSourceFacts {
         let basis = EngramExecutionSourceBasis {
             workspace_id: "workspace-protocol".into(), source_revision: "content-v1:new".into(),
             source_root_generation: Some(1), source_root_state: Some(EngramSourceRootState::Named),
         };
-        EngramSourceObservationIntent {
-            id: "original-observation".into(), session_id: "host-session".into(),
-            prompt_id: "original-prompt".into(), dispatch_generation: 42,
-            active_turn_generation: 7, grant_id: "original-grant".into(),
+        EngramMeasuredSourceFacts {
+            id: "original-observation".into(),
             binding: EngramControlWorkBinding {
                 root_execution_id: "root-protocol".into(), work_id: "work-protocol".into(),
                 run_id: "run-protocol".into(), claim_id: "claim-protocol".into(),
                 work_revision: 2, claim_fence: 8,
             },
-            connection: EngramConnectionConfig {
-                binary_path: PathBuf::from("protocol/engram"), project_file: PathBuf::from("protocol/.engram-project"),
-                home: PathBuf::from("protocol/home"), project_root: PathBuf::from("protocol"),
-                actor_id: "protocol-actor".into(), actor_context: None, session_id: "host-session".into(),
-            },
-            routing_token: "original-routing".into(), observing_session: Some("producer-session".into()),
-            call_timeout_ms: ENGRAM_DEFAULT_CALL_TIMEOUT_MS,
-            follow_up: None,
-            baseline: Some(EngramSourceSighting {
-                basis: EngramExecutionSourceBasis { source_revision: "content-v1:old".into(), ..basis.clone() },
+            baseline: Some(EngramMeasuredSighting {
+                source_basis: EngramExecutionSourceBasis { source_revision: "content-v1:old".into(), ..basis.clone() },
                 observed_at: "2026-10-03T00:00:00Z".into(),
             }),
-            sighting: EngramSourceSighting { basis, observed_at: "2026-10-03T00:01:00Z".into() },
+            sighting: EngramMeasuredSighting { source_basis: basis, observed_at: "2026-10-03T00:01:00Z".into() },
             root_basis: json!({ "capture_run_cut": 9, "latest_event": "c".repeat(32),
                 "state": { "state": "bound", "workspace_id": "workspace-protocol",
                     "generation": 1, "named_at": "2026-10-02T23:00:00Z" } }),
-            phase: EngramSourceObservationPhase::Captured, continuation_released: false,
-            finalization_complete: false,
-            delivery_retired: false, grant_settlement: None, grant_settlement_request: None,
         }
     }
 
@@ -429,38 +521,38 @@ mod source_sighting_protocol_tests {
 
     #[test]
     fn source_observation_protocol_preserves_measured_facts_and_missing_baseline() {
-        let mut captured = intent();
-        let request = EngramInterTurnObservation::from_intent(&captured, policy()).unwrap();
+        let mut captured = source_facts();
+        let request = EngramInterTurnObservation::from_source_change(&captured, policy()).unwrap();
         let wire = serde_json::to_value(EngramControlRequest::ExecutionObserve {
-            routing_token: "original-routing".into(), observation: request.clone(),
+            observation: request.clone(),
         }).unwrap();
         assert_eq!(wire["operation"], "execution_observe");
         assert_eq!(wire["causality"], json!({ "kind": "unknown" }));
         assert_eq!(wire["occurrence"]["source_change"]["detection"], "content_comparison");
         assert_eq!(wire["occurrence"]["source_change"]["baseline"]["observed_at"], "2026-10-03T00:00:00Z");
-        assert_eq!(wire["occurrence"]["source_change"]["sighting"]["source_basis"], serde_json::to_value(&captured.sighting.basis).unwrap());
+        assert_eq!(wire["occurrence"]["source_change"]["sighting"]["source_basis"], serde_json::to_value(&captured.sighting.source_basis).unwrap());
         assert_eq!(wire["observed_interval"], json!({ "from": "2026-10-03T00:00:00Z", "through": "2026-10-03T00:01:00Z" }));
         let replay: EngramControlRequest = serde_json::from_value(wire.clone()).unwrap();
-        assert_eq!(serde_json::to_value(replay).unwrap(), wire, "persisted request replays identical facts and identity");
+        assert_eq!(serde_json::to_value(replay).unwrap(), wire, "stored request retains identical facts and identity");
         captured.baseline = None;
-        let missing = serde_json::to_value(EngramInterTurnObservation::from_intent(&captured, policy()).unwrap()).unwrap();
+        let missing = serde_json::to_value(EngramInterTurnObservation::from_source_change(&captured, policy()).unwrap()).unwrap();
         assert_eq!(missing["occurrence"]["source_change"]["detection"], "assumed_missing_baseline");
         assert_eq!(missing["observed_interval"]["from"], missing["observed_interval"]["through"]);
         assert!(missing["occurrence"]["source_change"].get("baseline").is_none());
 
         captured.baseline = Some(captured.sighting.clone());
-        assert!(EngramInterTurnObservation::from_intent(&captured, policy()).is_err(), "equal measurements do not invent a change");
-        captured.baseline.as_mut().unwrap().basis.source_revision = "content-v1:old".into();
-        captured.baseline.as_mut().unwrap().basis.workspace_id = "unrelated-workspace".into();
-        assert!(EngramInterTurnObservation::from_intent(&captured, policy()).is_err());
+        assert!(EngramInterTurnObservation::from_source_change(&captured, policy()).is_err(), "equal measurements do not invent a change");
+        captured.baseline.as_mut().unwrap().source_basis.source_revision = "content-v1:old".into();
+        captured.baseline.as_mut().unwrap().source_basis.workspace_id = "unrelated-workspace".into();
+        assert!(EngramInterTurnObservation::from_source_change(&captured, policy()).is_err());
         captured.baseline = None;
         captured.root_basis["state"]["extra"] = json!(true);
-        assert!(EngramInterTurnObservation::from_intent(&captured, policy()).is_err());
+        assert!(EngramInterTurnObservation::from_source_change(&captured, policy()).is_err());
     }
 
     #[test]
     fn source_observation_protocol_requires_accounted_exact_scope_and_policy() {
-        let request = EngramInterTurnObservation::from_intent(&intent(), policy()).unwrap();
+        let request = EngramInterTurnObservation::from_source_change(&source_facts(), policy()).unwrap();
         let valid = receipt(&request);
         assert!(EngramSourceObservationReceipt::from_accounted_result(valid.clone(), &request, "producer-session").is_ok());
         let mut repeat = valid.clone();
@@ -489,11 +581,156 @@ mod source_sighting_protocol_tests {
     }
 
     #[test]
+    fn source_observation_protocol_quiet_sighting_has_no_turn_or_grant_identity() {
+        let mut facts = source_facts();
+        facts.baseline = None;
+        let request = EngramInterTurnObservation::from_source_sighting(&facts, policy()).unwrap();
+        let wire = serde_json::to_value(EngramControlRequest::ExecutionObserve {
+            observation: request.clone(),
+        }).unwrap();
+        assert_eq!(wire["occurrence"], json!({
+            "kind": "source_sighting", "source_basis": facts.sighting.source_basis,
+            "observed_at": facts.sighting.observed_at,
+        }));
+        assert_eq!(wire["occurrence"]["source_basis"]["source_revision"], "content-v1:new");
+        assert!(wire.get("routing_token").is_none());
+        assert!(wire["occurrence"].get("host_turn_ref").is_none());
+        assert_eq!(request.observed_interval.from, request.observed_interval.through);
+        let decoded: EngramControlRequest = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+
+        let mut valid = receipt(&request);
+        valid["accounting"] = json!({ "kind": "sighting" });
+        valid["opened_obligations"] = json!([]);
+        let recorded = EngramSourceObservationReceipt::from_sighting_result(
+            valid.clone(), &request, "producer-session",
+        ).unwrap();
+        assert!(recorded.is_sighting());
+        assert!(!recorded.is_accounted(), "a quiet sighting invents no source change");
+        let mut wrong_time = request.clone();
+        if let EngramInterTurnOccurrence::SourceSighting { observed_at, .. } = &mut wrong_time.occurrence {
+            *observed_at = "2026-10-03T00:01:02Z".into();
+        }
+        assert!(EngramSourceObservationReceipt::from_sighting_result(
+            valid.clone(), &wrong_time, "producer-session",
+        ).is_err(), "a receipt cannot freshen a sighting outside its measured interval");
+        let mut wrong_root = request.clone();
+        if let EngramObservationRootState::Bound { generation, .. } = &mut wrong_root.root_basis.state {
+            *generation += 1;
+        }
+        assert!(EngramSourceObservationReceipt::from_sighting_result(
+            valid.clone(), &wrong_root, "producer-session",
+        ).is_err(), "receipt echo does not repair an inconsistent root capture");
+        for reason in ["root_basis_moved", "historical_binding", "finished_run"] {
+            let mut audit = valid.clone();
+            audit["accounting"] = json!({ "kind": "audit_only", "reason": reason });
+            let historical = EngramSourceObservationReceipt::from_recorded_result(
+                audit.clone(), &request, "producer-session",
+            ).unwrap();
+            assert!(!historical.is_sighting());
+            assert!(!historical.is_accounted());
+            assert!(EngramSourceObservationReceipt::from_sighting_result(
+                audit, &request, "producer-session",
+            ).is_err(), "historical audit never proves freshness");
+        }
+        let changed = EngramInterTurnObservation::from_source_change(&source_facts(), policy()).unwrap();
+        assert!(EngramSourceObservationReceipt::from_recorded_result(
+            valid.clone(), &changed, "producer-session",
+        ).is_err(), "a sighting cannot account a source-change request");
+        for (pointer, wrong) in [
+            ("/binding/claim_fence", json!(9)),
+            ("/position/feed/id", json!("another-run")),
+            ("/observing_session", json!("another-observer")),
+            ("/policy_basis/project_policy_epoch", json!(4)),
+            ("/policy_basis/policy", json!("f".repeat(32))),
+            ("/policy_basis/obligation_rule_set", json!("f".repeat(32))),
+            ("/recorded_at", json!("2026-10-03T00:00:59Z")),
+            ("/recorded_at", json!("invalid-time")),
+            ("/accounting", json!({ "kind": "source_change", "source_change": "d".repeat(32) })),
+            ("/accounting", json!({ "kind": "sighting", "source_change": "d".repeat(32) })),
+            ("/opened_obligations", json!(["e".repeat(32)])),
+            ("/observed_checks", json!([{ "host_check_id": "unexpected" }])),
+        ] {
+            let mut wrong_receipt = valid.clone();
+            *wrong_receipt.pointer_mut(pointer).unwrap() = wrong;
+            assert!(EngramSourceObservationReceipt::from_sighting_result(
+                wrong_receipt, &request, "producer-session",
+            ).is_err(), "accepted mismatched sighting receipt {pointer}");
+        }
+    }
+
+    #[test]
+    fn source_observation_protocol_quiet_sighting_requires_measured_root_policy_and_time() {
+        let mut facts = source_facts();
+        assert!(EngramInterTurnObservation::from_source_sighting(&facts, policy()).is_err(),
+            "quiet reporting cannot silently discard a comparison baseline");
+        facts.baseline = None;
+        for (pointer, wrong) in [
+            ("/capture_run_cut", json!(0)),
+            ("/latest_event", json!("invalid-id")),
+            ("/state/generation", json!(2)),
+            ("/state/workspace_id", json!("another-workspace")),
+            ("/state/named_at", json!("invalid-time")),
+        ] {
+            let mut bad = facts.clone();
+            *bad.root_basis.pointer_mut(pointer).unwrap() = wrong;
+            assert!(EngramInterTurnObservation::from_source_sighting(&bad, policy()).is_err(),
+                "accepted mismatched root field {pointer}");
+        }
+        for observed_at in ["invalid-time", "2026-10-03T01:01:00+01:00"] {
+            let mut bad = facts.clone();
+            bad.sighting.observed_at = observed_at.into();
+            assert!(EngramInterTurnObservation::from_source_sighting(&bad, policy()).is_err());
+        }
+        let mut bad = facts.clone();
+        bad.sighting.source_basis.source_revision.clear();
+        assert!(EngramInterTurnObservation::from_source_sighting(&bad, policy()).is_err());
+        let invalid_policy = EngramObservationPolicyBasis::AccountIfEligible {
+            project_policy_epoch: 0, policy: "a".repeat(32), obligation_rule_set: "b".repeat(64),
+        };
+        assert!(EngramInterTurnObservation::from_source_sighting(&facts, invalid_policy).is_err());
+        facts.sighting.source_basis.source_root_generation = None;
+        facts.sighting.source_basis.source_root_state = None;
+        facts.root_basis = json!({ "capture_run_cut": 9, "latest_event": null,
+            "state": { "state": "none" } });
+        assert!(EngramInterTurnObservation::from_source_sighting(&facts, policy()).is_ok());
+    }
+
+    #[test]
+    fn source_observation_protocol_work_session_restriction_needs_explicit_current_support() {
+        let connection = EngramConnectionConfig {
+            binary_path: "fixture-engram".into(), project_file: "fixture/.engram-project".into(),
+            home: "fixture/home".into(), project_root: "fixture".into(), actor_id: "host".into(),
+            actor_context: None, session_id: "host-session".into(),
+        };
+        let cache = EngramConnectionCapabilities::default();
+        for flag in [None, Some(Value::Null), Some(json!(false)), Some(json!("true")), Some(json!(true))] {
+            let mut reply = json!({"session_id":"host-session", "work_session":true,
+                "capabilities":["host_work_v1", "verification_record_v1"]});
+            if let Some(flag) = &flag {
+                reply["verification_evidence_git_tree_applicability_v1"] = flag.clone();
+            }
+            cache.note_reply(&connection, Some(1), &EngramControlRequest::WorkSessionRead {}, &Ok(reply));
+            assert_eq!(cache.work_session_git_tree_applicability(&connection, Some(1)),
+                flag.as_ref().and_then(Value::as_bool) == Some(true));
+            assert!(!cache.work_session_git_tree_applicability(&connection, Some(2)),
+                "a replacement child does not inherit the restricted-evidence flag");
+            assert_eq!(cache.work_session_verification_record(&connection, Some(1)),
+                EngramVerificationRecordSupport::Supported,
+                "missing restricted-evidence support does not change unrestricted record support");
+        }
+        cache.note_reply(&connection, Some(1), &EngramControlRequest::WorkSessionRead {},
+            &Err(EngramTransportError::deadline("lost capability reply")));
+        assert!(!cache.work_session_git_tree_applicability(&connection, Some(1)));
+    }
+
+    #[test]
     fn source_observation_protocol_requires_one_readiness_tuple_and_definitive_refusal() {
-        let control = json!({ "schema_version": 1, "required_assurance": "turn_gated",
+        let control = json!({ "schema_version": 1,
             "epoch": 3, "policy": "a".repeat(32), "obligation_rules": "b".repeat(64) });
         let decoded: EngramDoctorControl = serde_json::from_value(control.clone()).unwrap();
-        assert_eq!(decoded.observation_policy().unwrap(), policy());
+        assert_eq!(decoded.observation_policy().unwrap(), policy(),
+            "ordinary accounting uses the coherent tuple without requiring turn admission");
         for field in ["schema_version", "epoch", "policy", "obligation_rules"] {
             let mut incomplete = control.clone();
             incomplete.as_object_mut().unwrap().remove(field);
@@ -513,21 +750,21 @@ mod source_sighting_protocol_tests {
 
     #[test]
     fn source_observation_protocol_uses_the_same_carrier_without_an_active_named_root() {
-        let mut captured = intent();
+        let mut captured = source_facts();
         captured.baseline = None;
-        captured.sighting.basis.source_root_generation = None;
-        captured.sighting.basis.source_root_state = None;
+        captured.sighting.source_basis.source_root_generation = None;
+        captured.sighting.source_basis.source_root_state = None;
         captured.root_basis = json!({ "capture_run_cut": 9, "latest_event": null, "state": { "state": "none" } });
-        let request = EngramInterTurnObservation::from_intent(&captured, policy()).unwrap();
+        let request = EngramInterTurnObservation::from_source_change(&captured, policy()).unwrap();
         assert_eq!(serde_json::to_value(&request).unwrap()["root_basis"]["state"], json!({ "state": "none" }));
         captured.root_basis["latest_event"] = json!("c".repeat(32));
-        let after_clear = EngramInterTurnObservation::from_intent(&captured, policy()).unwrap();
+        let after_clear = EngramInterTurnObservation::from_source_change(&captured, policy()).unwrap();
         assert_eq!(after_clear.root_basis.latest_event, Some("c".repeat(32)),
             "unnamed measurements preserve the ended canonical history");
-        captured.sighting.basis.source_root_generation = Some(1);
-        captured.sighting.basis.source_root_state = Some(EngramSourceRootState::Ended);
-        assert!(EngramInterTurnObservation::from_intent(&captured, policy()).is_ok());
-        captured.sighting.basis.source_root_state = Some(EngramSourceRootState::Named);
-        assert!(EngramInterTurnObservation::from_intent(&captured, policy()).is_err(), "a no-root cut cannot claim a live named root");
+        captured.sighting.source_basis.source_root_generation = Some(1);
+        captured.sighting.source_basis.source_root_state = Some(EngramSourceRootState::Ended);
+        assert!(EngramInterTurnObservation::from_source_change(&captured, policy()).is_ok());
+        captured.sighting.source_basis.source_root_state = Some(EngramSourceRootState::Named);
+        assert!(EngramInterTurnObservation::from_source_change(&captured, policy()).is_err(), "a no-root cut cannot claim a live named root");
     }
 }

@@ -1,620 +1,313 @@
-// Owns the tests of source-root naming re-establishing a turn-gated-control
-// OFF session's Base binding after a host reload flagged its restored token
-// for rebinding: the naming bind it sends and the key it sends it under, what
-// it adopts, the fences that refuse it, the rollback of a failed save, a
-// concurrent replacement, and a token another binder replaced meanwhile. Also
-// owns the flag a named-root refusal for an inactive control session sets,
-// and the remedy each such refusal names.
-// Does not own fresh tokenless naming (engram_source_root_naming.rs, whose
-// fixture helpers this child module uses) or the verification-record sender.
-// New module.
+// Ordinary naming recovery replaces the retired control-rebind oracles.
+// Each case preserves the old safety purpose (reload, exact claim, failed
+// save, competing owner, immutable retry, refusal custody) while proving
+// that no control token, bind key or old grant becomes ordinary authority.
 use super::*;
 
-/// The session's binding fields that naming owns.
-fn binding_state(
-    claimed: &ClaimedRoot,
-) -> (Option<String>, bool, Option<EngramControlWorkBinding>) {
-    claimed.record(|record| {
-        (
-            record.engram.routing_token.clone(),
-            record.engram.rebind_required,
-            record.engram.work_binding.clone(),
-        )
+fn binding_state(turn: &EOCheckedTurn)
+    -> (Option<String>, bool, Option<EngramControlWorkBinding>)
+{
+    turn.record(|record| (
+        record.engram.historical_control.get("engramRoutingToken").and_then(Value::as_str).map(str::to_owned),
+        record.engram.historical_control.get("engramRebindRequired").and_then(Value::as_bool).unwrap_or(false),
+        record.engram.work_binding.clone(),
+    ))
+}
+
+fn ordinary_root(label: &str) -> (EOCheckedTurn, PathBuf) {
+    let claimed = EOCheckedTurn::idle(label, true);
+    let worktree = claimed.root.join(".worktrees").join("ordinary-naming");
+    run_git_test_command(&claimed.root, &[
+        "worktree", "add", "--quiet", "-b", "ordinary-naming", worktree.to_str().unwrap(),
+    ]);
+    claimed.record_mut(|record| record.engram.work_binding = None);
+    (claimed, worktree)
+}
+
+fn reload_naming_session(claimed: &EOCheckedTurn) {
+    claimed.record_mut(|record| {
+        let saved = serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap();
+        let loaded: PersistedSessionRecord = serde_json::from_value(saved).unwrap();
+        *record = loaded.into_record().unwrap();
+    });
+}
+
+fn history(claimed: &EOCheckedTurn, token: &str, flagged: bool) {
+    claimed.record_mut(|record| {
+        record.engram.historical_control.insert("engramRoutingToken".into(), json!(token));
+        record.engram.historical_control.insert("engramRebindRequired".into(), json!(flagged));
+    });
+}
+
+fn ordinary_naming_request(turn: &EOCheckedTurn, path: Option<&FsPath>)
+    -> Result<EngramSourceRootResponse, ApiError>
+{
+    // The association comes from the explicit shared fixture, never old credentials.
+    let work = {
+        let roots = turn.transport.named_roots.lock().unwrap();
+        let bindings = &roots.as_ref().unwrap().read_bindings;
+        assert_eq!(bindings.len(), 1);
+        bindings.values().next().unwrap().work_id.clone()
+    };
+    turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
+        work, path: path.map(|path| Some(path.to_string_lossy().into_owned())),
     })
 }
 
-fn sent_binds(claimed: &ClaimedRoot) -> Vec<RecordedEngramControlRequest> {
-    claimed
-        .transport
-        .requests()
-        .into_iter()
-        .filter(|request| request.request["operation"] == "session_bind")
-        .collect()
+fn reload_legacy_control_setting(turn: &EOCheckedTurn) {
+    let mut inner = turn.state.inner.lock().unwrap();
+    let project = inner.sessions[inner.find_session_index(&turn.session_id).unwrap()]
+        .session.project_id.clone().unwrap();
+    let settings = inner.projects.iter_mut().find(|item| item.id == project).unwrap()
+        .engram.as_mut().unwrap();
+    let enabled = settings.execution_observability;
+    let mut saved = serde_json::to_value(&*settings).unwrap();
+    saved["turnGatedControl"] = json!(true);
+    *settings = serde_json::from_value(saved).unwrap();
+    assert_eq!(settings.execution_observability, enabled);
+    assert!(serde_json::to_value(&*settings).unwrap().get("turnGatedControl").is_none(),
+        "the retired setting is ignored, never an executable authority field");
 }
 
-/// A host reload of the naming session: its record goes through the
-/// persisted form and back, as a restart restores it.
-fn reload_naming_session(claimed: &ClaimedRoot) {
-    claimed.record(|record| {
-        let saved = serde_json::to_value(PersistedSessionRecord::from_record(record))
-            .expect("the record serializes");
-        let loaded: PersistedSessionRecord =
-            serde_json::from_value(saved).expect("the record loads");
-        *record = loaded.into_record().expect("the record reloads");
-    });
+fn roots<T>(claimed: &EOCheckedTurn, change: impl FnOnce(&mut TestEngramNamedRoots) -> T) -> T {
+    change(claimed.transport.named_roots.lock().unwrap().as_mut().unwrap())
 }
 
-/// An OFF session that named `worktree` with a fresh naming bind, then went
-/// through a reload. Engram answers each naming bind with `replies`.
-fn named_then_reloaded(
-    label: &str,
-    replies: Vec<ScriptedEngramControlResponse>,
-) -> (ClaimedRoot, PathBuf, EngramSourceRootResponse) {
-    let claimed = ClaimedRoot::new_scripted(label, replies);
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_tokenless_base_naming(&claimed, label);
-    let named = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect("a fresh OFF session names its root with a naming bind");
-    reload_naming_session(&claimed);
-    (claimed, worktree, named)
+fn operations(claimed: &EOCheckedTurn, operation: &str) -> Vec<Value> {
+    claimed.transport.requests().into_iter()
+        .filter(|request| request.request["operation"] == operation)
+        .map(|request| request.request).collect()
 }
 
-fn claim_binding(label: &str) -> EngramControlWorkBinding {
-    claimed_root_held(label).items[0]
-        .control_binding
-        .clone()
-        .expect("the held claim carries its binding")
-}
-
-fn bind_key(bind: &RecordedEngramControlRequest) -> String {
-    bind.request["idempotency_key"]
-        .as_str()
-        .expect("a session_bind carries its idempotency key")
-        .to_owned()
-}
-
-/// A session_bind request without its idempotency key: what it asks for.
-fn bind_intent(bind: &RecordedEngramControlRequest) -> Value {
-    let mut request = bind.request.clone();
-    request
-        .as_object_mut()
-        .expect("a session_bind is an object")
-        .remove("idempotency_key");
-    request
-}
-
-/// Puts `token`, flagged for rebinding, in place of the session's own: what
-/// another binder's bind followed by a refusal or a reload leaves behind.
-fn replace_flagged_token(claimed: &ClaimedRoot, token: &str) {
-    claimed.record(|record| {
-        record.engram.routing_token = Some(token.to_owned());
-        record.engram.rebind_required = true;
-    });
-}
-
-#[test]
-fn a_reload_flags_the_naming_token_and_naming_again_rebinds_it_with_the_same_intent() {
-    let label = "off-rebind-renamed";
-    // The re-bind asks under its own key, so Engram answers it with a fresh
-    // binding rather than replaying its answer to the first naming.
-    let (claimed, worktree, first) = named_then_reloaded(
-        label,
-        vec![bind_reply("naming-token"), bind_reply("rebound-token")],
-    );
-    // The persisted form keeps the token, flagged, but not the work binding.
-    assert_eq!(
-        binding_state(&claimed),
-        (Some("naming-token".to_owned()), true, None),
-        "a reload restores the naming token flagged for rebinding"
-    );
-
-    let again = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect("the same root is named again under the same live claim");
-    assert_eq!(again.root, first.root);
-    assert_eq!(
-        again.generation, first.generation,
-        "the same name keeps its generation"
-    );
-
-    let binds = sent_binds(&claimed);
-    assert_eq!(
-        binds.len(),
-        2,
-        "naming again sends exactly one more session_bind"
-    );
-    assert_eq!(
-        bind_intent(&binds[1]),
-        bind_intent(&binds[0]),
-        "the same naming intent"
-    );
-    assert_ne!(
-        bind_key(&binds[1]),
-        bind_key(&binds[0]),
-        "under a key of its own, which Engram cannot answer with the first naming's token"
-    );
-    assert_eq!(binds[1].connection, binds[0].connection);
-    assert_eq!(
-        binding_state(&claimed),
-        (
-            Some("rebound-token".to_owned()),
-            false,
-            Some(claim_binding(label))
-        ),
-        "the answer is adopted and the flag cleared"
-    );
-    // What was saved is what a later reload restores.
-    reload_naming_session(&claimed);
-    assert_eq!(binding_state(&claimed).0.as_deref(), Some("rebound-token"));
+fn assert_no_control_wire(claimed: &EOCheckedTurn) {
     assert!(claimed.transport.requests().iter().all(|request| !matches!(
         request.request["operation"].as_str(),
-        Some("turn_evaluate" | "turn_begin" | "turn_checkpoint")
+        Some("session_bind" | "session_status" | "turn_evaluate" |
+            "turn_begin" | "turn_grant_read" | "turn_checkpoint")
     )));
+    assert!(operations(claimed, "named_root_bind").iter()
+        .all(|request| request.get("routing_token").is_none()));
 }
 
 #[test]
-fn a_valid_unflagged_naming_token_is_used_without_another_bind() {
-    let label = "off-rebind-unflagged";
-    let claimed = ClaimedRoot::new_scripted(label, vec![bind_reply("naming-token")]);
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_tokenless_base_naming(&claimed, label);
-    name_tokenless_base_root(&claimed, label, Some(&worktree)).expect("the first name binds");
-    let before = binding_state(&claimed);
-    assert!(!before.1);
+fn reload_preserves_historical_token_while_naming_relearns_the_exact_claim() {
+    let label = "ordinary-reload-history";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "historical-token", false);
+    let first = ordinary_naming_request(&claimed, Some(&worktree)).unwrap();
+    reload_naming_session(&claimed);
+    assert_eq!(binding_state(&claimed), (Some("historical-token".into()), false, None));
+    let again = ordinary_naming_request(&claimed, Some(&worktree)).unwrap();
+    assert_eq!(again.root, first.root);
+    assert_eq!(again.generation, first.generation);
+    assert_eq!(binding_state(&claimed), (Some("historical-token".into()), false,
+        roots(&claimed, |model| model.read_bindings.values().next().cloned())));
+    reload_naming_session(&claimed);
+    assert_eq!(binding_state(&claimed), (Some("historical-token".into()), false, None));
+    assert_no_control_wire(&claimed);
+}
 
-    name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect("naming again with a valid token");
-    assert_eq!(sent_binds(&claimed).len(), 1, "no second session_bind");
+#[test]
+fn unflagged_historical_token_is_not_used_as_an_ordinary_naming_credential() {
+    let label = "ordinary-unflagged-history";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "historical-token", false);
+    let first = ordinary_naming_request(&claimed, Some(&worktree)).unwrap();
+    let before = binding_state(&claimed);
+    let again = ordinary_naming_request(&claimed, Some(&worktree)).unwrap();
+    assert_eq!(again.generation, first.generation);
     assert_eq!(binding_state(&claimed), before);
+    assert_no_control_wire(&claimed);
 }
 
 #[test]
-fn a_control_on_session_is_never_rebound_by_naming() {
-    let label = "off-rebind-control-on";
-    let (claimed, worktree, _) = named_then_reloaded(label, vec![bind_reply("naming-token")]);
-    change_engram_settings(&claimed.state, |engram| engram.turn_gated_control = true);
-    let before = binding_state(&claimed);
-    assert!(before.1);
-
-    // Whatever naming answers under control ON, it sends no naming bind.
-    let _ = name_tokenless_base_root(&claimed, label, Some(&worktree));
-    assert_eq!(
-        sent_binds(&claimed).len(),
-        1,
-        "no naming bind under control ON"
-    );
-    assert_eq!(
-        binding_state(&claimed),
-        before,
-        "the flag and token are its binders'"
-    );
+fn saved_legacy_setting_true_cannot_restore_control_naming_or_token_authority() {
+    let label = "ordinary-legacy-setting";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "flagged-history", true);
+    reload_legacy_control_setting(&claimed);
+    let named = ordinary_naming_request(&claimed, Some(&worktree)).unwrap();
+    assert!(named.root.is_some());
+    assert_eq!(binding_state(&claimed).0.as_deref(), Some("flagged-history"));
+    assert!(binding_state(&claimed).1);
+    assert_no_control_wire(&claimed);
 }
 
 #[test]
-fn naming_does_not_rebind_a_flagged_session_over_unresolved_state() {
-    for case in [
-        "active",
-        "uncertain",
-        "legacy",
-        "checkpoint",
-        "binding",
-        "retained-bind",
-    ] {
-        let label = format!("off-rebind-fence-{case}");
-        let (claimed, worktree, _) = named_then_reloaded(&label, vec![bind_reply("naming-token")]);
-        let retained = {
-            let inner = claimed.state.inner.lock().unwrap();
-            AppState::engram_source_root_target_locked(&inner, &claimed.session_id)
-                .unwrap()
-                .map(|target| {
-                    EngramRetainedBind::new(
-                        &target,
-                        &EngramControlRequest::SessionStatus {
-                            routing_token: "naming-token".to_owned(),
-                        },
-                    )
-                })
-                .expect("the session has a Base target")
-        };
-        claimed.record(|record| match case {
-            "active" => record.engram.active_grant_id = Some("keep-active".to_owned()),
-            "uncertain" => record.engram.uncertain_grant_id = Some("keep-uncertain".to_owned()),
-            "legacy" => record.engram.begins_recorded = false,
-            "checkpoint" => record.engram.checkpoint_in_progress = true,
-            "binding" => record.engram.bind_in_progress = true,
-            "retained-bind" => record.engram.retained_bind = Some(retained),
+fn ordinary_naming_preserves_unresolved_control_history_without_settling_it() {
+    for case in ["active", "uncertain", "legacy", "checkpoint", "binding", "retained-bind"] {
+        let label = format!("ordinary-history-{case}");
+        let (claimed, worktree) = ordinary_root(&label);
+        history(&claimed, "flagged-history", true);
+        let key = match case {
+            "active" => "engramActiveGrantId",
+            "uncertain" => "engramUncertainGrantId",
+            "legacy" => "engramBeginsRecorded",
+            "checkpoint" => "engramCheckpointInProgress",
+            "binding" => "engramBindInProgress",
+            "retained-bind" => "engramRetainedBind",
             _ => unreachable!(),
+        };
+        let raw = match case {
+            "active" => json!("keep-active"),
+            "uncertain" => json!("keep-uncertain"),
+            "legacy" => json!(false),
+            "checkpoint" | "binding" => json!(true),
+            "retained-bind" => json!({
+                "request": {"operation":"session_status", "routing_token":"flagged-history"},
+                "unknown":{"future":[null, true, "whole żółw 🐢 payload"]},
+            }),
+            _ => unreachable!(),
+        };
+        claimed.record_mut(|record| {
+            record.engram.historical_control.insert(key.to_owned(), raw.clone());
         });
-        let before = binding_state(&claimed);
-        assert!(before.1, "{case}: flagged by the reload");
-
-        let error = name_tokenless_base_root(&claimed, &label, Some(&worktree))
-            .expect_err("naming refuses to rebind over unresolved state");
-        assert_eq!(error.status, StatusCode::CONFLICT, "{case}: {error:?}");
-        assert!(
-            error.message.contains("unresolved Engram")
-                || error.message.contains("earlier Engram bind"),
-            "{case}: the existing conflict: {error:?}"
-        );
-        assert_eq!(
-            sent_binds(&claimed).len(),
-            1,
-            "{case}: no second session_bind"
-        );
-        assert_eq!(
-            binding_state(&claimed),
-            before,
-            "{case}: flag and token kept"
-        );
+        let evidence = || claimed.record(|record| record.engram.historical_control.clone());
+        let before = evidence();
+        assert!(ordinary_naming_request(&claimed, Some(&worktree)).unwrap().root.is_some());
+        assert_eq!(evidence(), before, "{case}: ordinary naming cannot settle control history");
+        assert_eq!(binding_state(&claimed).0.as_deref(), Some("flagged-history"));
+        assert!(binding_state(&claimed).1);
+        assert_no_control_wire(&claimed);
     }
 }
 
 #[test]
-fn a_failed_save_of_the_rebind_restores_the_flagged_token() {
-    let label = "off-rebind-save-fails";
-    let (claimed, worktree, _) = named_then_reloaded(
-        label,
-        vec![bind_reply("naming-token"), bind_reply("naming-token")],
-    );
+fn failed_claim_association_save_restores_history_and_releases_the_naming_owner() {
+    let label = "ordinary-association-save-fails";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "flagged-history", true);
     let before = binding_state(&claimed);
-    assert!(before.1);
-
     TEST_ENGRAM_NAMING_BIND_SAVE_FAILS.with(|fails| fails.set(true));
-    let error = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect_err("a failed save refuses the name");
+    let result = ordinary_naming_request(&claimed, Some(&worktree));
     TEST_ENGRAM_NAMING_BIND_SAVE_FAILS.with(|fails| fails.set(false));
-    assert!(
-        error.message.contains("persisting naming binding"),
-        "{error:?}"
-    );
-    assert_eq!(sent_binds(&claimed).len(), 2, "the bind itself was sent");
-    assert_eq!(
-        binding_state(&claimed),
-        before,
-        "the flagged token, prior work binding and flag are restored"
-    );
-    claimed.record(|record| {
-        assert!(!record.engram.bind_in_progress);
-        assert!(record.engram.source_root_bind_owner.is_none());
-    });
-}
-
-#[test]
-fn a_concurrent_replacement_of_the_binding_is_not_overwritten() {
-    let label = "off-rebind-replaced";
-    let (claimed, worktree, _) = named_then_reloaded(
-        label,
-        vec![bind_reply("naming-token"), bind_reply("naming-token")],
-    );
-    let state = claimed.state.clone();
-    let session = claimed.session_id.clone();
-    TEST_ENGRAM_AFTER_NAMING_BIND_REPLY.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            // Another owner of the session's binding answers first.
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            let engram = &mut inner.sessions[index].engram;
-            engram.routing_token = Some("other-owner-token".to_owned());
-            engram.rebind_required = false;
-        }));
-    });
-
-    let error = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect_err("the naming bind no longer owns the binding");
-    TEST_ENGRAM_AFTER_NAMING_BIND_REPLY.with(|hook| hook.borrow_mut().take());
-    assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
-    assert_eq!(sent_binds(&claimed).len(), 2);
-    let (token, flagged, _) = binding_state(&claimed);
-    assert_eq!(
-        token.as_deref(),
-        Some("other-owner-token"),
-        "the replacement stands"
-    );
-    assert!(!flagged);
-}
-
-#[test]
-fn a_rebind_after_another_binder_replaced_the_naming_token_never_reuses_the_first_naming_key() {
-    let label = "off-rebind-superseded";
-    let (claimed, worktree, first) = named_then_reloaded(
-        label,
-        vec![
-            bind_reply("naming-token"),
-            bind_reply("fresh-token"),
-            bind_reply("fresh-token"),
-        ],
-    );
-    // Engram answers a key it has seen with the answer it recorded, so the
-    // first naming's key would bring back "naming-token". Since then another
-    // binder replaced it, and that binder's token is now flagged.
-    replace_flagged_token(&claimed, "owed-bind-token");
-    let before = binding_state(&claimed);
-
-    // The re-bind's reply is lost to a failed save: the flagged state is
-    // restored, as a lost reply leaves it.
-    TEST_ENGRAM_NAMING_BIND_SAVE_FAILS.with(|fails| fails.set(true));
-    let error = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect_err("a failed save refuses the name");
-    TEST_ENGRAM_NAMING_BIND_SAVE_FAILS.with(|fails| fails.set(false));
-    assert!(
-        error.message.contains("persisting naming binding"),
-        "{error:?}"
-    );
+    let error = result.expect_err("a failed association save must refuse naming");
+    assert!(error.message.contains("persisting naming binding"), "{error:?}");
     assert_eq!(binding_state(&claimed), before);
-
-    let again = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect("naming again re-binds the flagged session");
-    assert_eq!(again.generation, first.generation);
-
-    let binds = sent_binds(&claimed);
-    assert_eq!(binds.len(), 3);
-    assert_eq!(bind_intent(&binds[1]), bind_intent(&binds[0]));
-    assert_ne!(
-        bind_key(&binds[1]),
-        bind_key(&binds[0]),
-        "the re-bind never asks under the key whose recorded answer is the superseded token"
-    );
-    assert_eq!(
-        bind_key(&binds[2]),
-        bind_key(&binds[1]),
-        "while the flagged token is the same, a retried re-bind replays under the same key"
-    );
-    assert_eq!(
-        binding_state(&claimed),
-        (
-            Some("fresh-token".to_owned()),
-            false,
-            Some(claim_binding(label))
-        ),
-        "the fresh binding is adopted and the flag cleared"
-    );
+    assert!(operations(&claimed, "named_root_bind").is_empty(), "no write before durable association");
+    claimed.record(|record| assert!(record.engram.source_root_bind_owner.is_none()));
+    assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.is_empty());
+    assert_no_control_wire(&claimed);
 }
 
-fn with_named_roots<T>(
-    claimed: &ClaimedRoot,
-    change: impl FnOnce(&mut TestEngramNamedRoots) -> T,
-) -> T {
-    change(
-        claimed
-            .transport
-            .named_roots
-            .lock()
-            .unwrap()
-            .as_mut()
-            .expect("the named-roots model"),
-    )
-}
-
-fn sent_named_root_binds(claimed: &ClaimedRoot) -> usize {
-    claimed
-        .transport
-        .requests()
-        .iter()
-        .filter(|request| request.request["operation"] == "named_root_bind")
-        .count()
-}
-
-fn nothing_named_yet(claimed: &ClaimedRoot) -> bool {
-    claimed
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .engram_work_source_roots
-        .is_empty()
-}
-
-/// Makes Engram's control session for the claimed session inactive right
-/// after its next naming bind is answered, as an exited control session is.
-fn control_session_goes_inactive_after_the_bind(claimed: &ClaimedRoot) {
-    let transport = claimed.transport.clone();
+#[test]
+fn a_competing_work_association_is_not_overwritten_by_naming() {
+    let label = "ordinary-competing-association";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "flagged-history", true);
+    let replacement = test_control_work_binding("competing-association", 1);
+    let expected = replacement.clone();
+    let state = claimed.state.clone();
     let session = claimed.session_id.clone();
     TEST_ENGRAM_AFTER_NAMING_BIND_REPLY.with(|hook| {
         *hook.borrow_mut() = Some(Box::new(move || {
-            transport
-                .named_roots
-                .lock()
-                .unwrap()
-                .as_mut()
-                .expect("the named-roots model")
-                .inactive_sessions
-                .insert(session);
-        }));
-    });
-}
-
-#[test]
-fn an_off_named_root_refusal_flags_the_held_token_and_naming_again_binds_the_root() {
-    let label = "off-refused-rebind";
-    let claimed = ClaimedRoot::new_scripted(
-        label,
-        vec![bind_reply("naming-token"), bind_reply("rebound-token")],
-    );
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_tokenless_base_naming(&claimed, label);
-    control_session_goes_inactive_after_the_bind(&claimed);
-
-    let error = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect_err("Engram refuses the named-root bind of an inactive control session");
-    TEST_ENGRAM_AFTER_NAMING_BIND_REPLY.with(|hook| hook.borrow_mut().take());
-    assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
-    assert!(
-        error.message.contains("named_root_binding_refused")
-            && error.message.contains("requires an active host session"),
-        "{error:?}"
-    );
-    assert!(
-        error.message.contains("marked for renewal")
-            && error.message.contains("name the root again"),
-        "the refusal names its remedy: {error:?}"
-    );
-    let (token, flagged, _) = binding_state(&claimed);
-    assert_eq!(token.as_deref(), Some("naming-token"), "the token is kept");
-    assert!(flagged, "the refused token is flagged for rebinding");
-    assert!(nothing_named_yet(&claimed));
-
-    // Naming the same root again re-binds the session, which is what makes
-    // Engram's control session active again, and binds the root.
-    let named = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect("naming again re-binds the session and binds the root");
-    let binds = sent_binds(&claimed);
-    assert_eq!(binds.len(), 2, "exactly one re-bind");
-    assert_eq!(bind_intent(&binds[1]), bind_intent(&binds[0]));
-    assert_ne!(
-        bind_key(&binds[1]),
-        bind_key(&binds[0]),
-        "under a key Engram has not seen, so it does not replay the inactive binding"
-    );
-    assert!(
-        with_named_roots(&claimed, |roots| roots.inactive_sessions.is_empty()),
-        "the re-bind made Engram's control session active"
-    );
-    assert_eq!(
-        binding_state(&claimed),
-        (
-            Some("rebound-token".to_owned()),
-            false,
-            Some(claim_binding(label))
-        ),
-        "the new token is adopted and the flag cleared"
-    );
-    assert_eq!(sent_named_root_binds(&claimed), 2);
-    assert!(!nothing_named_yet(&claimed), "the root is bound: {named:?}");
-    assert!(claimed.transport.requests().iter().all(|request| !matches!(
-        request.request["operation"].as_str(),
-        Some("turn_evaluate" | "turn_begin" | "turn_checkpoint")
-    )));
-}
-
-#[test]
-fn an_off_named_root_refusal_for_another_cause_flags_nothing() {
-    let label = "off-refused-other-cause";
-    let claimed = ClaimedRoot::new_scripted(label, vec![bind_reply("naming-token")]);
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_tokenless_base_naming(&claimed, label);
-    // A refusal Engram makes for another reason than an inactive session.
-    with_named_roots(&claimed, |roots| roots.refuse_next = true);
-
-    let error = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect_err("Engram refuses the named-root bind");
-    assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
-    assert!(
-        error.message.contains("named_root_binding_refused")
-            && error.message.contains("does not cure this refusal"),
-        "the refusal keeps Engram's reason and claims no inactive session: {error:?}"
-    );
-    assert!(!error.message.contains("no longer active"), "{error:?}");
-    assert_eq!(
-        binding_state(&claimed).0.as_deref(),
-        Some("naming-token")
-    );
-    assert!(!binding_state(&claimed).1, "nothing is flagged");
-    assert_eq!(sent_binds(&claimed).len(), 1, "no re-bind is owed");
-}
-
-#[test]
-fn an_off_named_root_refusal_after_the_token_changed_flags_nothing() {
-    let label = "off-refused-token-changed";
-    let claimed = ClaimedRoot::new_scripted(label, vec![bind_reply("naming-token")]);
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_tokenless_base_naming(&claimed, label);
-    control_session_goes_inactive_after_the_bind(&claimed);
-    // Another binder replaces the session's token while the named-root bind
-    // under the old one is in flight.
-    let state = claimed.state.clone();
-    let session = claimed.session_id.clone();
-    with_named_roots(&claimed, |roots| {
-        roots.on_inactive_refusal = Some(Box::new(move || {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].engram.routing_token = Some("other-owner-token".to_owned());
+            inner.sessions[index].engram.work_binding = Some(replacement);
         }));
     });
-
-    let error = name_tokenless_base_root(&claimed, label, Some(&worktree))
-        .expect_err("Engram refuses the named-root bind");
+    let result = ordinary_naming_request(&claimed, Some(&worktree));
     TEST_ENGRAM_AFTER_NAMING_BIND_REPLY.with(|hook| hook.borrow_mut().take());
-    // The refusal's authority read re-checks the session's current token
-    // first and refuses a read for a token that is no longer the session's;
-    // the refusal then names that precondition and its remedy, and flags
-    // nothing.
-    assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
-    assert!(
-        error.message.contains("named_root_binding_refused")
-            && error
-                .message
-                .contains("replaced while this naming's bind was in flight")
-            && error.message.contains("name the root again"),
-        "the refusal names the failed precondition and its remedy: {error:?}"
-    );
-    assert!(
-        error.message.contains("earlier authority connection"),
-        "the authority read's own refusal is kept: {error:?}"
-    );
-    // The fence before the read refused it: no read was sent for the stale
-    // token after the refused bind.
-    let operations: Vec<String> = claimed
-        .transport
-        .requests()
-        .iter()
-        .map(|request| request.request["operation"].as_str().unwrap_or("").to_owned())
-        .collect();
-    let refused_bind = operations
-        .iter()
-        .rposition(|operation| operation == "named_root_bind")
-        .expect("the refused named-root bind");
-    assert!(
-        !operations[refused_bind + 1..]
-            .iter()
-            .any(|operation| operation == "named_root_read"),
-        "no authority read follows the refused bind: {operations:?}"
-    );
-    let (token, flagged, _) = binding_state(&claimed);
-    assert_eq!(token.as_deref(), Some("other-owner-token"), "the replacement stands");
-    assert!(!flagged, "a token that is not the refused one is not flagged");
-    assert!(
-        claimed
-            .state
-            .inner
-            .lock()
-            .unwrap()
-            .engram_named_root_journal
-            .iter()
-            .any(|journal| journal.pending.is_some()),
-        "the refused transition is neither learned nor cleared"
-    );
+    assert_eq!(result.unwrap_err().status, StatusCode::CONFLICT);
+    assert_eq!(binding_state(&claimed), (Some("flagged-history".into()), true, Some(expected)));
+    assert!(operations(&claimed, "named_root_bind").is_empty());
+    claimed.record(|record| assert!(record.engram.source_root_bind_owner.is_none()));
+    assert_no_control_wire(&claimed);
 }
 
 #[test]
-fn a_named_root_refusal_under_turn_gated_control_keeps_the_binding_and_names_its_remedy() {
-    let label = "on-refused-remedy";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let worktree = add_claimed_root_worktree(&claimed.root);
-    prepare_claimed_root_naming(&claimed, label);
-    claimed.record(|record| record.engram.rebind_required = false);
+fn retry_after_failed_association_save_does_not_replay_or_mint_a_control_binding() {
+    let label = "ordinary-association-retry";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "another-owners-history", true);
     let before = binding_state(&claimed);
-    assert!(!before.1, "an unflagged binding to start from");
-    with_named_roots(&claimed, |roots| {
-        roots.inactive_sessions.insert(claimed.session_id.clone());
-    });
+    TEST_ENGRAM_NAMING_BIND_SAVE_FAILS.with(|fails| fails.set(true));
+    let failed = ordinary_naming_request(&claimed, Some(&worktree));
+    TEST_ENGRAM_NAMING_BIND_SAVE_FAILS.with(|fails| fails.set(false));
+    assert!(failed.is_err());
+    assert_eq!(binding_state(&claimed), before);
+    let named = ordinary_naming_request(&claimed, Some(&worktree)).unwrap();
+    assert!(named.root.is_some());
+    assert_eq!(operations(&claimed, "named_root_bind").len(), 1);
+    assert_eq!(roots(&claimed, |model| model.seen.len()), 1);
+    assert_eq!(binding_state(&claimed).0, before.0);
+    assert!(binding_state(&claimed).1);
+    assert_no_control_wire(&claimed);
+}
 
-    let error = name_root(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![claimed_root_held(label)],
-    )
-    .expect_err("Engram refuses the named-root bind");
-    assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
-    assert!(
-        error.message.contains("named_root_binding_refused")
-            && error.message.contains("Under turn-gated control")
-            && error.message.contains("name the root again"),
-        "the refusal names the failed precondition and its remedy: {error:?}"
-    );
-    assert_eq!(
-        binding_state(&claimed),
-        before,
-        "the session's binder owns its binding; nothing is flagged"
-    );
-    assert!(sent_binds(&claimed).is_empty(), "naming binds nothing");
+#[test]
+fn a_passive_inactive_control_marker_does_not_disable_the_ordinary_work_child() {
+    let label = "ordinary-inactive-history";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "inactive-token-history", true);
+    claimed.record_mut(|record| {
+        record.engram.historical_control.insert("engramSessionStatus".into(),
+            json!({"phase":"exited", "routing_token":"inactive-token-history", "future":[null,true]}));
+    });
+    let historical = claimed.record(|record| record.engram.historical_control.clone());
+    assert!(ordinary_naming_request(&claimed, Some(&worktree)).unwrap().root.is_some());
+    claimed.record(|record| assert_eq!(record.engram.historical_control, historical,
+        "naming neither interprets nor settles a passive inactive control marker"));
+    assert_eq!(binding_state(&claimed).0.as_deref(), Some("inactive-token-history"));
+    assert!(binding_state(&claimed).1);
+    assert_no_control_wire(&claimed);
+}
+
+#[test]
+fn canonical_named_root_refusal_keeps_its_reason_and_pending_intent_without_rebinding() {
+    let label = "ordinary-root-refusal";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "history", false);
+    roots(&claimed, |model| model.refuse_next = true);
+    let error = ordinary_naming_request(&claimed, Some(&worktree)).unwrap_err();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("named_root_binding_refused"), "{error:?}");
+    assert_eq!(binding_state(&claimed).0.as_deref(), Some("history"));
+    assert!(!binding_state(&claimed).1);
+    assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.is_empty());
+    assert!(claimed.state.inner.lock().unwrap().engram_named_root_journal.iter()
+        .any(|entry| entry.pending.is_some()), "the refused intent remains unconfirmed");
+    assert_no_control_wire(&claimed);
+}
+
+#[test]
+fn a_concurrent_historical_token_change_is_preserved_without_changing_work_authority() {
+    let label = "ordinary-token-changed";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "old-history", true);
+    let state = claimed.state.clone();
+    let session = claimed.session_id.clone();
+    TEST_ENGRAM_AFTER_NAMING_BIND_REPLY.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].engram.historical_control.insert("engramRoutingToken".into(), json!("other-owner-history"));
+        }));
+    });
+    let result = ordinary_naming_request(&claimed, Some(&worktree));
+    TEST_ENGRAM_AFTER_NAMING_BIND_REPLY.with(|hook| hook.borrow_mut().take());
+    assert!(result.unwrap().root.is_some());
+    assert_eq!(binding_state(&claimed).0.as_deref(), Some("other-owner-history"));
+    assert!(binding_state(&claimed).1);
+    assert_no_control_wire(&claimed);
+}
+
+#[test]
+fn refusal_with_legacy_true_preserves_control_evidence_and_retries_the_exact_root_intent() {
+    let label = "ordinary-legacy-refusal";
+    let (claimed, worktree) = ordinary_root(label);
+    history(&claimed, "keep-history", true);
+    reload_legacy_control_setting(&claimed);
+    roots(&claimed, |model| model.refuse_next = true);
+    let failed = ordinary_naming_request(&claimed, Some(&worktree)).unwrap_err();
+    assert!(failed.message.contains("named_root_binding_refused"), "{failed:?}");
+    assert_eq!(binding_state(&claimed).0.as_deref(), Some("keep-history"));
+    assert!(binding_state(&claimed).1);
+    let named = ordinary_naming_request(&claimed, Some(&worktree)).unwrap();
+    assert!(named.root.is_some());
+    let writes = operations(&claimed, "named_root_bind");
+    assert_eq!(writes.len(), 2);
+    assert_eq!(writes[0], writes[1], "same immutable root request and idempotency key");
+    assert_eq!(roots(&claimed, |model| model.seen.len()), 1);
+    assert_no_control_wire(&claimed);
 }

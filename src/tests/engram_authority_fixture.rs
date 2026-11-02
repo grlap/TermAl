@@ -5,48 +5,6 @@
 
 use super::*;
 
-/// Re-exec the test binary through the normal Engram command/process-tree path.
-/// Only this child gets the marker; the parent test environment is untouched.
-pub(super) fn binary_path(root: &FsPath) -> PathBuf {
-    let executable = std::env::current_exe().expect("current test executable");
-    let filter = format!("{}::authority_command", module_path!());
-    // module_path includes the crate name; libtest lists names relative to it.
-    let filter = filter.split_once("::").unwrap().1;
-    let output = root.join("native-authority-output");
-    let log = root.join("native-authority-test.log");
-    // Keep libtest's progress/summary out of the doctor's JSON protocol, while
-    // retaining its diagnostics and exit status when a fixture assertion fails.
-    // Each test owns one root; command kinds use separate output slots so an
-    // advisory work-context read cannot overwrite the revocation response.
-    #[cfg(windows)]
-    let (path, script) = (
-        root.join("native-authority.cmd"),
-        format!(
-            "@echo off\r\nset \"TERMAL_TEST_AUTHORITY_FIXTURE={}-%~5\"\r\ntype nul > \"{}-%~5\"\r\n\"{}\" --exact {filter} --nocapture -- %* > \"{}-%~5\"\r\nif errorlevel 1 (type \"{}-%~5\" 1>&2 & exit /b 1)\r\ntype \"{}-%~5\"\r\n",
-            output.display(),
-            output.display(),
-            executable.display(),
-            log.display(),
-            log.display(),
-            output.display()
-        ),
-    );
-    #[cfg(not(windows))]
-    let (path, script) = (
-        root.join("native-authority.sh"),
-        format!(
-            "#!/bin/sh\nexport TERMAL_TEST_AUTHORITY_FIXTURE='{}'-\"$5\"\n: > '{}'-\"$5\"\nif '{}' --exact {filter} --nocapture -- \"$@\" > '{}'-\"$5\"; then\n  cat '{}'-\"$5\"\nelse\n  cat '{}'-\"$5\" >&2\n  exit 1\nfi\n",
-            output.to_string_lossy().replace('\'', "'\\''"),
-            output.to_string_lossy().replace('\'', "'\\''"),
-            executable.to_string_lossy().replace('\'', "'\\''"),
-            log.to_string_lossy().replace('\'', "'\\''"),
-            output.to_string_lossy().replace('\'', "'\\''"),
-            log.to_string_lossy().replace('\'', "'\\''")
-        ),
-    );
-    fs::write(&path, script).expect("write native authority launcher");
-    path
-}
 
 #[test]
 fn authority_command() {

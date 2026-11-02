@@ -3,6 +3,75 @@ use std::io::Read;
 use std::time::Instant;
 
 const GUARD: Duration = Duration::from_secs(30);
+
+#[test]
+fn native_windows_bounded_read_reports_inheritance_lock_budget() {
+    // Deliberate contention belongs in its own process: holding this suite's
+    // launch lock would make unrelated bounded-reader tests time out too.
+    let mut command = LaunchSpec::new(std::env::current_exe().unwrap());
+    command.args([
+        "--exact", "windows_launch::tests::native_windows_lock_budget_child",
+        "--nocapture", "--test-threads=1",
+    ]).env("TERMAL_TEST_LOCK_BUDGET_CHILD", "1").current_dir(root());
+    let output = crate::run_bounded_read_command(
+        &mut command, Instant::now() + GUARD, 64 * 1024, true,
+    ).unwrap();
+    assert!(output.status.success(), "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("lock-budget-observed"));
+}
+
+#[test]
+fn native_windows_lock_budget_child() {
+    if std::env::var_os("TERMAL_TEST_LOCK_BUDGET_CHILD").is_none() { return; }
+    let directory = scratch();
+    let marker = directory.join("parked.json");
+    let (start_tx, start_rx) = std::sync::mpsc::channel();
+    let (waiting_tx, waiting_rx) = std::sync::mpsc::channel();
+    let process = Arc::new(Mutex::new(None));
+    let worker_process = process.clone();
+    let worker = std::thread::spawn(move || {
+        start_rx.recv_timeout(GUARD).unwrap();
+        let budget = Duration::from_secs(2);
+        let deadline = Instant::now() + budget;
+        TEST_BEFORE_INHERITANCE_LOCK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || waiting_tx.send(()).unwrap()));
+        });
+        let mut command = node_spec("hold");
+        command.arg(marker);
+        let error = crate::run_bounded_read_windows_with_setup(
+            &mut command, deadline, 4096, |child| {
+                *worker_process.lock().unwrap() = Some(child.clone());
+                Ok(())
+            },
+        ).unwrap_err();
+        (error, budget)
+    });
+    let blocker = prepare_with_hook(&node_spec("parity"), false, false, |_| {
+        start_tx.send(()).unwrap();
+        waiting_rx.recv_timeout(GUARD).unwrap();
+        let release = Instant::now() + Duration::from_secs(2);
+        // Expiry is the injected failure, not a throughput/success oracle.
+        // The worker has passed its pre-launch deadline check and is now
+        // about to wait on this exact inherited-handle creation window.
+        while let Some(remaining) = release.checked_duration_since(Instant::now()) {
+            std::thread::sleep(remaining);
+        }
+    }).unwrap();
+    let (error, budget) = worker.join().unwrap();
+    drop(blocker);
+    let detail = error.downcast_ref::<crate::BoundedReadFailure>().unwrap();
+    assert_eq!(detail.stage, "wait", "{error:#}");
+    assert_eq!(detail.kind, "TimedOut", "{error:#}");
+    assert!(detail.launch_lock_wait.is_some_and(|wait| wait >= budget), "{error:#}");
+    assert!(detail.elapsed >= budget, "{error:#}");
+    assert!(error.chain().any(|cause| cause.downcast_ref::<io::Error>()
+        .is_some_and(|error| error.kind() == io::ErrorKind::TimedOut)), "{error:#}");
+    let child = process.lock().unwrap().take().expect("the parked child was resumed");
+    assert!(child.try_wait().unwrap().is_some(), "failed read must reap its exact child");
+    println!("lock-budget-observed: {error:#}");
+}
+
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }

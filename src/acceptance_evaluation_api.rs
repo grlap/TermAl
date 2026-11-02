@@ -1165,6 +1165,11 @@ impl AppState {
         let mut notes_cursors = BTreeSet::new();
         // Ordinary legacy paging can shorten the brief. Once canonical
         // identity is acquired, contradictory carriers and page failures abort.
+        // The full binding list is read after paging. Reserve its ordinary
+        // session identity read whenever canonical binding discovery can run,
+        // even if the later full contract turns out to have no bindings.
+        let binding_session_read = discovery.target.is_some()
+            && discovery.identity.as_ref().is_some_and(|identity| identity.active_run_id.is_some());
         let mandatory_reads_after_paging = acceptance_mandatory_reads_after_paging(
             &request.criterion_evidence,
             automatic
@@ -1174,7 +1179,7 @@ impl AppState {
                 .map(|target| target.selected_evidence.as_slice())
                 .unwrap_or_default(),
             acceptance_windowed_criteria_count(&show),
-        );
+        ) + u32::from(binding_session_read);
 
         let mut older_pages = Vec::new();
         let mut collected = acceptance_evidence_page_len(&show);

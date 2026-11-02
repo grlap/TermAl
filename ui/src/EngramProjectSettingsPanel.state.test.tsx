@@ -37,13 +37,13 @@ const turnedOffProject: Project = {
   remoteId: "local",
   engramDeclared: true,
   engramOperatorDisabled: true,
-  engram: { enabled: false, turnGatedControl: false },
+  engram: { enabled: false, executionObservability: false },
 };
 
 const enabledProject: Project = {
   ...turnedOffProject,
   engramOperatorDisabled: false,
-  engram: { enabled: true, turnGatedControl: false },
+  engram: { enabled: true, executionObservability: false },
 };
 
 const policy: AcceptancePolicySnapshot = {
@@ -67,7 +67,7 @@ const successfulVerification: EngramProjectVerification = {
   binaryPath: "/bin/engram",
   home: "/one/.engram",
   database: "/one/.engram/store.db",
-  requiredAssurance: "asserted",
+
 };
 
 function deferred<T>() {

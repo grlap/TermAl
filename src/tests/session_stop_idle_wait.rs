@@ -411,7 +411,7 @@ fn stop_on_an_idle_waiting_session_drops_continuations_and_keeps_other_prompts_p
 }
 
 #[test]
-fn one_stop_of_a_parked_admission_also_consumes_the_sessions_other_waits() {
+fn one_stop_of_an_idle_waiting_session_consumes_all_of_its_waits() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     {
@@ -420,12 +420,11 @@ fn one_stop_of_a_parked_admission_also_consumes_the_sessions_other_waits() {
         *inner.test_run_waits = vec![test_run_wait_record("run-wait-still-pending", &session_id)];
         let index = inner.find_session_index(&session_id).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        // One wait's continuation is parked in Engram admission at the head;
-        // a second continuation queued behind it.
-        queue_seeded_prompt(record, "parked-head", QueuedPromptSource::Orchestrator);
+        // Two workflow continuations already queued by settled waits, and a
+        // human prompt that Stop keeps behind the latch.
+        queue_seeded_prompt(record, "first-workflow", QueuedPromptSource::Orchestrator);
         queue_seeded_prompt(record, "later-workflow", QueuedPromptSource::Orchestrator);
-        record.engram.admission_in_progress =
-            Some(Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        queue_seeded_prompt(record, "from-user", QueuedPromptSource::User);
         state.commit_locked(&mut inner).unwrap();
     }
     let messages_before = session_record(&state, &session_id).session.messages.len();
@@ -433,7 +432,7 @@ fn one_stop_of_a_parked_admission_also_consumes_the_sessions_other_waits() {
 
     state
         .request_stop_session(&session_id)
-        .expect("Stop of a parked admission should succeed");
+        .expect("Stop of an idle waiting session should succeed");
 
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -452,22 +451,14 @@ fn one_stop_of_a_parked_admission_also_consumes_the_sessions_other_waits() {
             .iter()
             .map(|queued| queued.pending_prompt.id.as_str())
             .collect::<Vec<_>>(),
-        vec!["parked-head"],
-        "the held admission head stays for its explicit cancel; later continuations go"
+        vec!["from-user"],
+        "every workflow continuation goes; the human prompt stays paused"
     );
-    assert!(record.queued_prompts[0].engram_interrupted);
-    assert!(
-        record
-            .session
-            .preview
-            .starts_with("Engram authorization canceled"),
-        "the admission Stop's preview stands: {}",
-        record.session.preview
-    );
+    assert_eq!(record.session.preview, SESSION_STOPPED_BY_USER_MESSAGE);
     assert_eq!(
         record.session.messages.len(),
-        messages_before,
-        "no second stopped message"
+        messages_before + 1,
+        "one Stop records exactly one stopped message"
     );
     let mut consumed_reasons = Vec::new();
     while let Ok(payload) = delta_events.try_recv() {

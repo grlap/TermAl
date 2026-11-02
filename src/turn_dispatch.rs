@@ -74,13 +74,15 @@ struct StartedQueuedTurn {
     queued: QueuedPromptRecord,
 }
 
-struct PreparedEngramQueuedTurn {
-    prompt_id: String,
-    dispatch_generation: u64,
-    pending_engram: Option<EngramPendingDispatch>,
+fn ordinary_queue_dispatch_is_held(
+    inner: &StateInner, record: &SessionRecord, allow_blocked_dispatch: bool,
+) -> bool {
+    session_resource_reset_in_progress(inner, record)
+        || record.engram.observation_delete_requested
+        || record.runtime_stop_in_progress
+        || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+        || (record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch)
 }
-
-const ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE: &str = "session is restoring its Engram authority after restart; retry when engramBootRecoveryPending is false";
 
 /// Adds transport context that a receiving agent cannot infer from its own
 /// repository instructions. Peer sessions may live in entirely different
@@ -176,53 +178,6 @@ impl AppState {
         resolved.map(CodexServiceTierPreparation::Ready)
     }
 
-    fn prepare_next_queued_turn_engram_off_lock(
-        &self,
-        session_id: &str,
-    ) -> Option<PreparedEngramQueuedTurn> {
-        let (queued, dispatch_generation) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner.find_session_index(session_id)?;
-            let queued = inner.sessions[index].queued_prompts.front()?;
-            if queued.source == QueuedPromptSource::Human {
-                return None;
-            }
-            if engram_queue_head_refused_as_interrupted(&inner.sessions[index])
-                && !containment_retained_reconciliation_allowed(&inner, session_id) {
-                return None;
-            }
-            let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
-            if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
-                return Some(PreparedEngramQueuedTurn {
-                    prompt_id: queued.pending_prompt.id.clone(),
-                    dispatch_generation,
-                    pending_engram: None,
-                });
-            }
-            (queued.clone(), dispatch_generation)
-        };
-        let intent = EngramTurnIntentSnapshot {
-            session_id: session_id.to_owned(),
-            dispatch_generation: self.queued_engram_generation(
-                session_id,
-                &queued.pending_prompt.id,
-                dispatch_generation,
-            ),
-            intent_fingerprint: engram_turn_intent_fingerprint(
-                &queued.pending_prompt.text,
-                queued.pending_prompt.expanded_text.as_deref(),
-                &queued.attachments,
-                queued.pending_prompt.source.as_ref(),
-                queued.source,
-            ),
-        };
-        Some(PreparedEngramQueuedTurn {
-            prompt_id: queued.pending_prompt.id,
-            dispatch_generation,
-            pending_engram: self.evaluate_engram_turn_off_lock(&intent),
-        })
-    }
-
     #[cfg(test)]
     fn install_test_acp_runtime_override(&self, agent: AcpAgent, runtime: AcpRuntimeHandle) {
         self.test_acp_runtime_overrides
@@ -306,189 +261,53 @@ impl AppState {
         inner: &mut StateInner,
         index: usize,
         allow_blocked_dispatch: bool,
-        pending_engram: Option<EngramPendingDispatch>,
     ) -> Result<Option<StartedTurn>> {
-        if pending_engram.is_some()
-            && ordinary_off_execution_applies(inner, &inner.sessions[index].session.id)
+        let record = &inner.sessions[index];
+        if session_resource_reset_in_progress(inner, record)
+            || record.engram.observation_delete_requested
+            || record.runtime_stop_in_progress
+            || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+            || (record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch)
         {
             return Ok(None);
         }
-        if ordinary_admission_is_excluded(inner, &inner.sessions[index].session.id) {
-            return Ok(None);
-        }
-        // None may mean evaluation was withheld by an obligation that has
-        // since settled off-lock. It is never an ungated result under ON.
-        if pending_engram.is_none()
-            && Self::engram_session_requires_dispatch_card_locked(
-                inner, &inner.sessions[index].session.id,
-            )
+        let Some(position) = ordinary_queue_position(record) else { return Ok(None); };
+        let queued = record.queued_prompts[position].clone();
+        // Human sends retain their off-lock reset and exact selected owner.
+        if queued.source == QueuedPromptSource::Human
+            || queued_prompt_held_for_durability(record, &queued)
+            || !self.prompt_delivery_gate_locked(inner, index, &queued.pending_prompt.id, true)
         {
             return Ok(None);
         }
-        // An obsolete admission cannot promote or abandon its successor.
-        if let Some(EngramPendingDispatch {
-            evaluated: EngramDispatchEvaluation::RetainedBindFailure { proof, .. },
-            ..
-        }) = pending_engram.as_ref()
-            && (inner.sessions[index].engram.dispatch_generation != proof.generation_before_promotion
-                || inner.sessions[index].active_turn_generation.wrapping_add(1).max(1)
-                    != proof.promoted_turn_generation
-                || !inner.sessions[index]
-                    .queued_prompts
-                    .front()
-                    .is_some_and(|head| engram_bind_retry_prompt_matches(head, proof)))
-        {
-            return Ok(None);
-        }
-        if inner.sessions[index].runtime_stop_in_progress {
-            abandon_engram_pending_dispatch(
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-                pending_engram,
-            );
-            return Ok(None);
-        }
-        if inner.sessions[index].orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
-            abandon_engram_pending_dispatch(
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-                pending_engram,
-            );
-            return Ok(None);
-        }
-
-        let queue_position = dispatch_queue_position(inner, index);
-        let Some(queued) = queue_position.and_then(|position| inner.sessions[index].queued_prompts.get(position)).cloned() else {
-            abandon_engram_pending_dispatch(
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-                pending_engram,
-            );
-            return Ok(None);
-        };
-
-        // Human envelopes are promoted only by their off-lock Human owner,
-        // including with control OFF. A legacy locked Send drain has neither
-        // that owner nor authority to release its explicit pause.
-        if queued.source == QueuedPromptSource::Human {
-            // An abandon moves the durable dispatch generation: stamp it.
-            if abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram) {
-                inner.stamp_session_at_index(index);
-            }
-            return Ok(None);
-        }
-
-        // A head held for its durability acknowledgement is promoted by no
-        // entry point, and the FIFO queue behind it waits with it. Its
-        // acknowledgement dispatches it (queued_prompt_durability.rs).
-        if queued_prompt_held_for_durability(&inner.sessions[index], &queued) {
-            abandon_engram_pending_dispatch(
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-                pending_engram,
-            );
-            return Ok(None);
-        }
-
-        // Every nongated entry point must respect durable authorization, not
-        // only the off-lock Resume wrapper. Settings reset is not non-delivery.
-        // Checked before the receipt gate, so a refused head consumes no
-        // Resume.
-        if !ordinary_off_execution_applies(inner, &inner.sessions[index].session.id)
-            && pending_engram.is_none() && queued.is_engram_retained() {
-            return Ok(None);
-        }
-
-        // A receipted head is promoted only once its write-ahead hand-off
-        // record is durable, and the queue waits for it, as for a held head.
-        // This is the promotion's own gate: past a pause it consumes the
-        // explicit Resume that carries the attempt, in this critical section,
-        // and it begins no write-ahead inside its caller's transaction; the
-        // ordinary drain does (prompt_delivery.rs).
-        if !self.prompt_delivery_gate_locked(inner, index, &queued.pending_prompt.id, true) {
-            abandon_engram_pending_dispatch(
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-                pending_engram,
-            );
-            return Ok(None);
-        }
-
-        let pending_engram_for_abandon = pending_engram.clone();
-        let retain_for_admission = pending_engram.is_some();
         let session_id = inner.sessions[index].session.id.clone();
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(inner, &session_id);
-        let host_mcp_servers_only =
-            session_is_acceptance_evaluator_child_locked(inner, &session_id);
-        // Serialize the actual promotion against publication of host shutdown.
-        // The M4 supervisor's own stop does not stop ordinary local queues.
+        let host_mcp_servers_only = session_is_acceptance_evaluator_child_locked(inner, &session_id);
         let host_shutdown = self.shutdown_signal_tx.borrow();
-        if *host_shutdown {
-            // An abandon moves the durable dispatch generation: stamp it.
-            if abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram) {
-                inner.stamp_session_at_index(index);
-            }
-            return Ok(None);
-        }
-        let standard_dispatch = !ordinary_off_execution_applies(inner, &session_id);
-        let mut started = match self.start_turn_on_record_with_control_mode(
-            inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid"),
-            queued.pending_prompt.id.clone(),
-            queued.pending_prompt.text.clone(),
-            queued.attachments.clone(),
-            queued.pending_prompt.expanded_text.clone(),
-            queued.pending_prompt.source.clone(),
-            pending_engram,
-            engram_mcp,
-            host_mcp_servers_only,
-            standard_dispatch,
-        ) {
-            Ok(started) => started,
-            Err(error) => {
-                abandon_engram_pending_dispatch(
-                    inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid"),
-                    pending_engram_for_abandon,
-                );
-                return Err(annotate_queued_followup_start_failure(
-                    inner,
-                    index,
-                    anyhow!("failed to dispatch queued prompt: {}", error.message),
-                ));
-            }
-        };
+        if *host_shutdown { return Ok(None); }
+        let mut started = self.start_turn_on_record(
+            &mut inner.sessions[index],
+            queued.pending_prompt.id.clone(), queued.pending_prompt.text.clone(),
+            queued.attachments.clone(), queued.pending_prompt.expanded_text.clone(),
+            queued.pending_prompt.source.clone(), engram_mcp, host_mcp_servers_only,
+        ).map_err(|error| annotate_queued_followup_start_failure(
+            inner, index, anyhow!("failed to dispatch queued prompt: {}", error.message),
+        ))?;
         drop(host_shutdown);
-        // The session may now write under a check another session of its
-        // worktree has open.
         EngramHost::turn_started(inner, index);
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        mark_prompt_delivery_promoted(
-            record,
-            &queued,
-            &mut started.dispatch,
-            &started.message_delta.message_id,
-            &self.server_instance_id,
-        );
-        // Authorization intent survives until the provider handoff is known.
-        if !standard_dispatch && queued.is_engram_retained() {
-            // The original control request remains evidence even though its
-            // positively never-promoted prompt ran as ordinary work. Record
-            // this new handoff so no later selector can replay the envelope.
-            let entry = &mut record.queued_prompts[queue_position.expect("selected queue position")];
+        let record = &mut inner.sessions[index];
+        mark_prompt_delivery_promoted(record, &queued, &mut started.dispatch,
+            &started.message_delta.message_id, &self.server_instance_id);
+        if queued.engram_bind.is_some() || queued.engram_evaluate.is_some()
+            || queued.engram_interrupted || queued.engram_waiting
+        {
+            // Keep the original stored record as history after its own newly
+            // proven-unsent content runs once. It cannot be selected again.
+            let entry = &mut record.queued_prompts[position];
             entry.engram_ordinary_handoff = true;
             entry.promoted_message_index = Some(started.message_delta.message_index);
-        } else if !retain_for_admission {
-            record.queued_prompts.remove(queue_position.expect("selected queue position"));
+        } else {
+            record.queued_prompts.remove(position);
         }
         sync_pending_prompts(record);
         started.message_delta.session_mutation_stamp = record.mutation_stamp;
@@ -533,26 +352,8 @@ impl AppState {
         attachments: Vec<PromptImageAttachment>,
         expanded_prompt: Option<String>,
         source: Option<MessageSource>,
-        pending_engram: Option<EngramPendingDispatch>,
         engram_mcp: Option<EngramMcpRuntimeConfig>,
         host_mcp_servers_only: bool,
-    ) -> std::result::Result<StartedTurn, ApiError> {
-        self.start_turn_on_record_with_control_mode(record, message_id, prompt, attachments,
-            expanded_prompt, source, pending_engram, engram_mcp, host_mcp_servers_only, true)
-    }
-
-    fn start_turn_on_record_with_control_mode(
-        &self,
-        record: &mut SessionRecord,
-        message_id: String,
-        prompt: String,
-        attachments: Vec<PromptImageAttachment>,
-        expanded_prompt: Option<String>,
-        source: Option<MessageSource>,
-        mut pending_engram: Option<EngramPendingDispatch>,
-        engram_mcp: Option<EngramMcpRuntimeConfig>,
-        host_mcp_servers_only: bool,
-        standard_dispatch: bool,
     ) -> std::result::Result<StartedTurn, ApiError> {
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
@@ -564,17 +365,6 @@ impl AppState {
         }
         if let Some(detail) = record.runtime.dedicated_cleanup_failure() {
             return Err(ApiError::conflict(format!("{detail}; Stop or Delete must finish cleanup before a new turn")));
-        }
-        if let Some(EngramPendingDispatch {
-            evaluated: EngramDispatchEvaluation::RetainedBindFailure { proof, .. },
-            ..
-        }) = pending_engram.as_mut()
-            && record.runtime.runtime_token() != proof.runtime_before_promotion
-        {
-            // The queue/promotion lock still owns this exact attempt. Losing
-            // optional non-delivery proof cannot terminalize its delegation;
-            // carry a typed non-retry hold to delivery, never infer from a card.
-            proof.retry_eligible = false;
         }
         match record.remote_proxy_identity() {
             Ok(None) => {}
@@ -596,9 +386,7 @@ impl AppState {
             .collect::<Vec<_>>();
         record.active_turn_generation = record.active_turn_generation.wrapping_add(1).max(1);
         let active_turn_generation = record.active_turn_generation;
-        record.unmediated_turn_generation = (!standard_dispatch).then_some(active_turn_generation);
         // A successor never inherits the previous opening's presentation.
-        record.engram.opening_diagnostic = None;
         record.active_turn_start_message_count = Some(record.session.messages.len());
         let expanded_prompt = expanded_prompt
             .as_deref()
@@ -662,10 +450,6 @@ impl AppState {
                 through_sequence: mailbox.sequence,
             });
         record.active_turn_mailbox_notification = mailbox_notification.clone();
-        let engram_dispatch_generation = pending_engram
-            .as_ref()
-            .map(|pending| pending.dispatch_generation);
-
         let dispatch = match record.session.agent {
             Agent::Claude => {
                 if record.runtime_reset_required {
@@ -747,7 +531,6 @@ impl AppState {
                         text: runtime_prompt.clone(),
                         turn_generation: active_turn_generation,
                     },
-                    engram_dispatch_generation,
                     mailbox_notification: mailbox_notification.clone(),
                     runtime_token: record
                         .runtime
@@ -834,7 +617,6 @@ impl AppState {
                         // A receipted promotion sets it (prompt_delivery.rs).
                         delivery_receipt: None,
                     },
-                    engram_dispatch_generation,
                     mailbox_notification: mailbox_notification.clone(),
                     runtime_token: record
                         .runtime
@@ -930,7 +712,6 @@ impl AppState {
                         prompt: runtime_prompt.to_owned(),
                         resume_session_id: record.external_session_id.clone(),
                     },
-                    engram_dispatch_generation,
                     mailbox_notification,
                     runtime_token: record
                         .runtime
@@ -943,13 +724,7 @@ impl AppState {
             }
         };
 
-        if standard_dispatch {
-            record.set_auto_dispatch_blocked(false);
-        } else {
-            record.orchestrator_auto_dispatch_blocked = false;
-            record.session.queue_paused = false;
-            record.engram.operator_paused = false;
-        }
+        record.set_auto_dispatch_blocked(false);
         record.active_turn_file_changes.clear();
         record.active_turn_file_change_grace_deadline = None;
         let observation_source = record.queued_prompts.iter()
@@ -991,12 +766,6 @@ impl AppState {
             queued.promoted_message_index = Some(message_index);
             queued.promotion_disposition_known = true;
         }
-        if let Some(EngramPendingDispatch {
-            evaluated: EngramDispatchEvaluation::RetainedBindFailure { proof, .. },
-            ..
-        }) = pending_engram.as_mut() {
-            proof.promotion_index = Some(message_index);
-        }
         record.session.live_activity = Some(SessionLiveActivity {
             prompt: prompt.clone(),
             command: None,
@@ -1004,14 +773,6 @@ impl AppState {
         });
         record.session.status = SessionStatus::Active;
         record.session.preview = prompt_preview_text(&prompt, &message_attachments);
-        if standard_dispatch {
-            record.engram.dispatch_generation = engram_dispatch_generation
-                .unwrap_or_else(|| record.engram.dispatch_generation.saturating_add(1));
-            if let Some(pending) = pending_engram.as_mut() {
-                pending.dispatch_generation = record.engram.dispatch_generation;
-            }
-            record.engram.pending_dispatch = pending_engram;
-        }
         record.provider_handoff_observations.prepared = Some(ProviderHandoffPrompt {
             prompt_id: message_id.clone(),
             source: observation_source,
@@ -1062,7 +823,7 @@ impl AppState {
                             record.session.status,
                             SessionStatus::Idle | SessionStatus::Error
                         )
-                        && queue_has_orphaned_workflow(&inner, record)
+                        && queue_has_orphaned_workflow(record)
                         && !record.orchestrator_auto_dispatch_blocked
                         && matches!(record.runtime, SessionRuntime::None)
                 })
@@ -1284,57 +1045,11 @@ impl AppState {
     }
 
     fn dispatch_next_queued_turn_for_activation(&self, session_id: &str,
-        owner: EngramQueuedAdmissionOwner) -> Result<Option<TurnDispatch>> {
+        owner: QueuedTurnOwner) -> Result<Option<TurnDispatch>> {
         self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
         Ok(self.start_next_queued_turn_off_lock_for_owner(
             session_id, false, false, Some(QueuedDrainOwner::Activation(owner)),
         )?.map(|started| started.dispatch))
-    }
-
-    /// The retried admission of a prompt whose delivery was withheld before
-    /// handoff (`engram_abort_retry.rs`): it bypasses the paused queue only
-    /// for `owner`, the exact head the retry was due for, and only while its
-    /// acknowledged abort record and authority still release that head,
-    /// checked under the promotion lock. A Cancel, takeover, Stop or changed
-    /// authority since the tick starts nothing.
-    fn dispatch_next_queued_turn_for_abort_retry(
-        &self,
-        session_id: &str,
-        owner: EngramQueuedAdmissionOwner,
-    ) -> Result<Option<TurnDispatch>> {
-        if let Err(err) = self.reconcile_never_woken_mailbox_notifications_for_session(session_id) {
-            eprintln!(
-                "mailbox> failed reconciling notifications before the retried admission for \
-                 `{session_id}`: {err:#}"
-            );
-        }
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
-        Ok(self
-            .start_next_queued_turn_off_lock_for_owner(
-                session_id,
-                true,
-                false,
-                Some(QueuedDrainOwner::AbortRetry(owner)),
-            )?
-            .map(|started| started.dispatch))
-    }
-
-    /// Retry the exact acknowledged retained bind through the ordinary
-    /// admission owner. It cannot release a successor or bypass root repair.
-    fn dispatch_next_queued_turn_for_bind_retry(
-        &self,
-        session_id: &str,
-        owner: EngramQueuedAdmissionOwner,
-    ) -> Result<Option<TurnDispatch>> {
-        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
-        Ok(self
-            .start_next_queued_turn_off_lock_for_owner(
-                session_id,
-                true,
-                false,
-                Some(QueuedDrainOwner::BindRetry(owner)),
-            )?
-            .map(|started| started.dispatch))
     }
 
     /// An explicit Resume bound to the queue head its caller checked (a held
@@ -1344,7 +1059,7 @@ impl AppState {
     fn dispatch_next_queued_turn_for_resume(
         &self,
         session_id: &str,
-        owner: EngramQueuedAdmissionOwner,
+        owner: QueuedTurnOwner,
     ) -> Result<Option<TurnDispatch>> {
         Ok(self
             .dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner)?
@@ -1354,7 +1069,7 @@ impl AppState {
     fn dispatch_next_queued_turn_for_resume_with_prompt(
         &self,
         session_id: &str,
-        owner: EngramQueuedAdmissionOwner,
+        owner: QueuedTurnOwner,
     ) -> Result<Option<StartedQueuedTurn>> {
         if let Err(err) = self.reconcile_never_woken_mailbox_notifications_for_session(session_id) {
             eprintln!(
@@ -1389,41 +1104,19 @@ impl AppState {
     }
 
     /// `start_next_queued_turn_off_lock`; with an `owner`, the paused-queue
-    /// bypass is that owner's alone, and an abort-retry owner also requires
-    /// its abort record to release the head
-    /// (`dispatch_next_queued_turn_for_abort_retry`).
+    /// bypass is that owner's alone.
     fn start_next_queued_turn_off_lock_for_owner(
         &self,
         session_id: &str,
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
-        mut owner: Option<QueuedDrainOwner>,
+        owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
-        {
+        if let Some(QueuedDrainOwner::Resume(expected) | QueuedDrainOwner::Activation(expected)) = &owner {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if ordinary_off_execution_applies(&inner, session_id) {
-                if let Some(QueuedDrainOwner::Activation(previous)) = &owner {
-                    let Some(index) = inner.find_session_index(session_id) else { return Ok(None); };
-                    if inner.sessions[index].active_turn_generation != previous.active_turn_generation {
-                        return Ok(None);
-                    }
-                    owner = EngramQueuedAdmissionOwner::capture_ordinary(&inner.sessions[index])
-                        .map(QueuedDrainOwner::Activation);
-                }
-                match owner.as_ref() {
-                    // A historical control retry is not an activation event
-                    // for unrelated ordinary work at OFF.
-                    Some(QueuedDrainOwner::AbortRetry(_) | QueuedDrainOwner::BindRetry(_)
-                        | QueuedDrainOwner::AdmissionRetry(_)) => return Ok(None),
-                    Some(QueuedDrainOwner::Resume(owner)) => {
-                        if inner.find_session_index(session_id).is_none_or(|index|
-                            !owner.matches(&inner.sessions[index])
-                                || dispatch_queue_position(&inner, index).is_none_or(|position|
-                                    inner.sessions[index].queued_prompts[position].pending_prompt.id != owner.prompt_id))
-                        { return Ok(None); }
-                    }
-                    _ => {}
-                }
+            if inner.find_session_index(session_id)
+                .is_none_or(|index| !expected.matches(&inner.sessions[index])) {
+                return Ok(None);
             }
         }
         let mut selected_human = None;
@@ -1435,8 +1128,7 @@ impl AppState {
                     let record = &inner.sessions[index];
                     let eligible = owner.matches(record) && dispatch_queue_position(&inner, index)
                         .and_then(|position| record.queued_prompts.get(position)).is_some_and(|head|
-                        (head.source == QueuedPromptSource::Human && !head.has_engram_intent())
-                            || human_choice_matches(record, head, &self.server_instance_id));
+                        head.source == QueuedPromptSource::Human);
                     if eligible { selected_human = HumanResumeOwner::capture(record, owner.clone()); }
                     selected_human.is_some()
                 })
@@ -1469,28 +1161,16 @@ impl AppState {
                 let record = &inner.sessions[index];
                 !owner.matches(record) || record.orchestrator_auto_dispatch_blocked
                     || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
-                    || record.engram.project_reset_in_progress || record.runtime_stop_in_progress
-                    || (!ordinary_off_execution_applies(&inner, session_id) && record.engram_boot_recovery_pending)
-                    || ordinary_admission_is_excluded(&inner, session_id)
-                    || engram_project_for_session_locked(&inner, session_id)
-                        .is_some_and(|project| inner.engram_project_resets.contains(&project.id))
+                    || record.runtime_stop_in_progress
+                    || session_resource_reset_in_progress(&inner, record)
             }) { return Ok(None) }
         }
         // Where the session writes, for the overlap marks its turn start
         // makes under the lock.
         self.engram_host().turn_starting(session_id);
-        let capacity_resume_owner = match owner.as_ref() {
-            Some(QueuedDrainOwner::Resume(owner)) if owner.capacity_nonce.is_some() => Some(owner),
-            _ => None,
-        };
-        let result = self.with_queued_engram_admission_for_capacity_resume(session_id, capacity_resume_owner, || {
-            self.start_next_queued_turn_inner_off_lock(
-                session_id,
-                allow_blocked_dispatch,
-                orphaned_workflow_only,
-                owner.clone(),
-            )
-        });
+        let result = self.start_next_queued_turn_inner_off_lock(
+            session_id, allow_blocked_dispatch, orphaned_workflow_only, owner,
+        );
         let result = self.settle_unstarted_queued_turn(consume_mailbox_relay_hold(result));
         // A promotion that started nothing may have left a delegation child
         // held (a failed promotion, a parked queued admission); a started turn
@@ -1506,15 +1186,6 @@ impl AppState {
         result: Result<Option<StartedQueuedTurn>>,
     ) -> Result<Option<StartedQueuedTurn>> {
         if let Err(error) = &result {
-            // Prepared bind/evaluate evidence survived the failed promotion.
-            // It is held for explicit retry and must bypass terminal follow-up
-            // settlement in this already-committed queue path.
-            if error
-                .downcast_ref::<RetainedQueuedPromotionPersistenceUnknown>()
-                .is_some()
-            {
-                return result;
-            }
             if let Some(failure) = error.downcast_ref::<QueuedFollowupStartFailure>() {
                 if let Err(cleanup) =
                     self.settle_queued_followup_start_failure(failure, &format!("{error:#}"))
@@ -1526,120 +1197,6 @@ impl AppState {
             }
         }
         result
-    }
-
-    #[cfg(test)]
-    fn with_queued_engram_admission(
-        &self,
-        session_id: &str,
-        drain: impl FnMut() -> Result<Option<StartedQueuedTurn>>,
-    ) -> Result<Option<StartedQueuedTurn>> {
-        self.with_queued_engram_admission_for_capacity_resume(session_id, None, drain)
-    }
-
-    fn with_queued_engram_admission_for_capacity_resume(
-        &self,
-        session_id: &str,
-        capacity_resume_owner: Option<&EngramQueuedAdmissionOwner>,
-        mut drain: impl FnMut() -> Result<Option<StartedQueuedTurn>>,
-    ) -> Result<Option<StartedQueuedTurn>> {
-        loop {
-            let guard = {
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
-                let Some(index) = inner.find_session_index(session_id) else {
-                    return Ok(None);
-                };
-                if ordinary_off_execution_applies(&inner, session_id) {
-                    drop(inner);
-                    return drain();
-                }
-                // A retained Human handoff has no ordinary admission owner,
-                // even before reload marks its unknown outcome interrupted.
-                if inner.sessions[index].queued_prompts.front()
-                    .is_some_and(|head| head.source == QueuedPromptSource::Human) {
-                    return Ok(None);
-                }
-                if engram_source_observation_holds_admission(&inner, index) {
-                    if hold_source_observation_admission(&mut inner.sessions[index]) {
-                        inner.stamp_session_at_index(index);
-                        self.commit_locked(&mut inner)?;
-                    }
-                    return Ok(None);
-                }
-                let gated = Self::engram_session_requires_dispatch_card_locked(&inner, session_id);
-                let retained_without_gate = !gated
-                    && (inner.sessions[index].engram.recovered_admission
-                        || inner.sessions[index]
-                            .queued_prompts
-                            .front()
-                            .is_some_and(QueuedPromptRecord::is_engram_retained));
-                if retained_without_gate {
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    hold_engram_queued_authorization_when_control_off(record);
-                    self.commit_locked(&mut inner)?;
-                    return Ok(None);
-                }
-                let contained_reconciliation = containment_retained_reconciliation_allowed(&inner, session_id);
-                let record = &mut inner.sessions[index];
-                if engram_queue_head_refused_as_interrupted(record)
-                    && !record.engram.recovered_admission
-                    && !contained_reconciliation
-                {
-                    return Ok(None);
-                }
-                if !gated {
-                    None
-                } else {
-                    if let Some(wake) = &record.engram.admission_in_progress {
-                        wake.store(true, std::sync::atomic::Ordering::Relaxed);
-                        return Ok(None);
-                    }
-                    let wake = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                    let owner = capacity_resume_owner.filter(|owner| owner.matches(record))
-                        .cloned().or_else(|| EngramQueuedAdmissionOwner::capture(record));
-                    record.engram.admission_in_progress = Some(wake.clone());
-                    // Bind the ACK's exact capacity continuation as its guard
-                    // is acquired, before evaluation can leave this lock. The
-                    // after-drain attachment is too late for the retry tick.
-                    if let Some(owner) = owner.as_ref().filter(|owner| owner.capacity_nonce.is_some())
-                        && prompt_delivery_resume_holds(record, &owner.prompt_id)
-                        && let Some(delivery) = record.prompt_deliveries.get(&owner.prompt_id)
-                        && delivery.write_ahead_acknowledged
-                    {
-                        record.engram.admission_attempt = Some(EngramAdmissionAttempt {
-                            token: wake.clone(), prompt_id: owner.prompt_id.clone(),
-                            write_ahead: delivery.write_ahead.clone(),
-                        });
-                    }
-                    // The head this admission evaluates, so a receipted
-                    // attempt is left only to the admission of its own prompt.
-                    record.engram.admission_prompt_id =
-                        owner.as_ref().map(|owner| owner.prompt_id.clone());
-                    Some(EngramAdmissionGuard {
-                        state: self,
-                        session_id,
-                        wake,
-                        owner,
-                    })
-                }
-            };
-            if guard.is_some() {
-                // A held delegation child being resumed or retried is now
-                // admitting: report that before the admission runs, so no
-                // wait reads the earlier hold as needing attention meanwhile.
-                // It touches only the delegation and its waits, never this
-                // session's record.
-                self.sync_delegation_attempt_for_child_session(session_id);
-            }
-            let result = drain();
-            let retry = guard.as_ref().is_some_and(EngramAdmissionGuard::release);
-            if retry && matches!(result, Ok(None)) {
-                continue;
-            }
-            return result;
-        }
     }
 
     // Direct dispatch already committed the enqueue before promoting its head.
@@ -1658,17 +1215,15 @@ impl AppState {
         if queued_head_held_for_durability(&inner.sessions[index]) {
             return Ok(None);
         }
-        let queued = inner.sessions[index]
-            .queued_prompts
-            .front()
-            .cloned()
-            .ok_or_else(|| anyhow!("queued prompt disappeared before dispatch"))?;
+        let Some(position) = ordinary_queue_position(&inner.sessions[index]) else { return Ok(None); };
+        let queued = inner.sessions[index].queued_prompts[position].clone();
+        if queued.source == QueuedPromptSource::Human { return Ok(None); }
         let snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
         let receipted_head = inner.sessions[index]
             .prompt_deliveries
             .contains_key(&queued.pending_prompt.id);
         let Some(started) = self
-            .start_next_queued_turn_locked(inner, index, true, None)
+            .start_next_queued_turn_locked(inner, index, true)
             .context("failed to start queued turn")?
         else {
             // A receipted head waits for its write-ahead hand-off record, and
@@ -1729,49 +1284,27 @@ impl AppState {
         orphaned_workflow_only: bool,
         mut owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
-        // Only an unrestricted ordinary drain can leave ordinary activation.
-        // Specialized owners retain their own restrictions and retry custody.
-        let ordinary_readiness_wake = owner.is_none()
-            && !allow_blocked_dispatch && !orphaned_workflow_only;
+        // Only an automatic, non-bypassing drain treats an existing hold as
+        // a successful no-op. Explicit owners keep their original errors.
+        let automatic_queue = (owner.is_none() && !allow_blocked_dispatch).then_some(false);
+        let mut automatic_owner = automatic_queue.and_then(|_| {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id)
+                .and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
+        });
+        let ordinary_owner = match owner.as_mut() {
+            Some(QueuedDrainOwner::Resume(owner) | QueuedDrainOwner::Activation(owner)) => Some(owner),
+            _ => automatic_owner.as_mut(),
+        };
+        if matches!(self.prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(
+            session_id, ordinary_owner, automatic_queue,
+        )?, RuntimeResetPreparation::Held) {
+            return Ok(None);
+        }
         let activation_owner = match &owner {
             Some(QueuedDrainOwner::Activation(owner)) => Some(owner.clone()),
             _ => None,
         };
-        if let Some(owner) = &activation_owner {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.find_session_index(session_id).is_none_or(|index| !owner.matches(&inner.sessions[index])) {
-                return Ok(None);
-            }
-        }
-        let _checkpoint_budget = self.begin_checkpoint_preflight_budget(session_id);
-        if let Some(
-            QueuedDrainOwner::Resume(retry_owner)
-            | QueuedDrainOwner::AdmissionRetry(retry_owner),
-        ) = &owner {
-            self.settle_certified_checkpoint_before_admission(session_id, Some(retry_owner))
-                .map_err(|error| anyhow!(error.message))?;
-        }
-        {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            if ordinary_admission_is_excluded(&inner, session_id) {
-                return Ok(None);
-            }
-        }
-        let ordinary_owner = match owner.as_mut() {
-            Some(QueuedDrainOwner::Resume(owner) | QueuedDrainOwner::Activation(owner))
-                if owner.ordinary.is_some() => Some(owner),
-            _ => None,
-        };
-        self.prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(session_id, ordinary_owner)?;
-        // An explicit Send/Resume bypass is permission for the queue head
-        // that existed when this drain began, not for a successor exposed by
-        // cancellation while its authorization was off-lock. A retried
-        // admission's bypass is the owner it was due for, and a bound Resume's
-        // the head its caller checked; never a fresh one.
-        let releases_abort_retry = matches!(owner, Some(QueuedDrainOwner::AbortRetry(_)));
-        let releases_bind_retry = matches!(owner, Some(QueuedDrainOwner::BindRetry(_)));
-        let releases_admission_retry =
-            matches!(owner, Some(QueuedDrainOwner::AdmissionRetry(_)));
         let live_owner = match &owner {
             Some(QueuedDrainOwner::FederationWake(owner)) => Some(owner.clone()),
             _ => None,
@@ -1781,22 +1314,13 @@ impl AppState {
             _ => None,
         };
         let bypass_owner = match owner {
-            Some(
-                QueuedDrainOwner::AbortRetry(owner)
-                | QueuedDrainOwner::Resume(owner)
-                | QueuedDrainOwner::BindRetry(owner)
-                | QueuedDrainOwner::AdmissionRetry(owner),
-            ) => Some(owner),
-            Some(QueuedDrainOwner::Activation(_)) => None,
-            Some(QueuedDrainOwner::FederationWake(_) | QueuedDrainOwner::MailboxRelay(_)) => None,
-            None => allow_blocked_dispatch
-                .then(|| {
-                    let inner = self.inner.lock().expect("state mutex poisoned");
-                    inner.find_session_index(session_id).and_then(|index| {
-                        EngramQueuedAdmissionOwner::capture(&inner.sessions[index])
-                    })
-                })
-                .flatten(),
+            Some(QueuedDrainOwner::Resume(owner)) => Some(owner),
+            Some(_) => None,
+            None => allow_blocked_dispatch.then(|| {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner.find_session_index(session_id)
+                    .and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
+            }).flatten(),
         };
         let mut context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
         // Base-tier context refresh is the sole external operation before this
@@ -1842,6 +1366,9 @@ impl AppState {
             if activation_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
                 return Ok(None);
             }
+            if automatic_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+                return Ok(None);
+            }
             if allow_blocked_dispatch
                 && !bypass_owner
                     .as_ref()
@@ -1849,524 +1376,83 @@ impl AppState {
             {
                 return Ok(None);
             }
-            if !ordinary_off_execution_applies(&inner, session_id) && inner.sessions[index].engram_boot_recovery_pending {
-                let should_retry = if orphaned_workflow_only {
-                    inner.sessions[index]
-                        .queued_prompts
-                        .iter()
-                        .find(|queued| queued.source != QueuedPromptSource::Mailbox)
-                        .is_some_and(|queued| queued.source == QueuedPromptSource::Orchestrator)
-                } else {
-                    !inner.sessions[index].queued_prompts.is_empty()
-                };
-                if should_retry {
-                    if ordinary_readiness_wake {
-                        let record = &mut inner.sessions[index];
-                        if let Some(owner) = EngramQueuedAdmissionOwner::capture(record) {
-                            record.engram_queue_schedule.register_activation(owner,
-                                &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
-                        }
-                    }
-                    inner.sessions[index].engram_boot_recovery_dispatch_pending = true;
-                }
-                drop(inner);
-                if should_retry {
-                    self.request_engram_boot_recovery_retry(session_id);
-                }
+            let record = &inner.sessions[index];
+            if ordinary_queue_dispatch_is_held(&inner, record, allow_blocked_dispatch) {
                 return Ok(None);
             }
-            if self.engram_project_reset_holds_drain_locked(&mut inner, index, session_id) {
-                // A settings transaction has not yet committed the authority
-                // that should govern this prompt. Keep the queue head durable
-                // until the exact project-reset owner releases its fence; an
-                // idle session says why it waits (`engram_project_reset_wait.rs`).
+            if orphaned_workflow_only
+                && !(record.is_local_session()
+                    && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error)
+                    && matches!(record.runtime, SessionRuntime::None)
+                    && queue_has_orphaned_workflow(record))
+            {
                 return Ok(None);
             }
-            if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
-                let record = &inner.sessions[index];
-                if record.runtime_stop_in_progress {
-                    return Ok(None);
-                }
-                // As in the Engram branch below: a drain never starts a second
-                // turn on a busy session. The turn's own completion drains the
-                // queue; a durability acknowledgement that arrives mid-turn
-                // relies on that.
-                if matches!(
-                    record.session.status,
-                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-                ) {
-                    return Ok(None);
-                }
-                if record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
-                    return Ok(None);
-                }
-                if orphaned_workflow_only {
-                    let eligible = record.is_local_session()
-                        && matches!(
-                            record.session.status,
-                            SessionStatus::Idle | SessionStatus::Error
-                        )
-                        && matches!(record.runtime, SessionRuntime::None)
-                        && queue_has_orphaned_workflow(&inner, record);
-                    if !eligible {
-                        return Ok(None);
-                    }
-                }
-                let Some(queued) = dispatch_queue_position(&inner, index)
-                    .and_then(|position| record.queued_prompts.get(position)).cloned() else {
-                    return Ok(None);
-                };
-                // As in the Engram branch below, this drain, not the
-                // promotion, begins a receipted head's write-ahead or awaits
-                // the one in flight; a held head writes no hand-off record.
-                if !queued_prompt_held_for_durability(record, &queued)
-                    && !self.prompt_delivery_gate_locked(
-                        &mut inner,
-                        index,
-                        &queued.pending_prompt.id,
-                        false,
-                    )
-                {
-                    return Ok(None);
-                }
-                let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
-                let Some(started) = self.start_next_queued_turn_locked(
-                    &mut inner,
-                    index,
-                    allow_blocked_dispatch,
-                    None,
-                )?
-                else {
-                    return Ok(None);
-                };
-                let revision = match self.commit_persisted_session_delta_locked(&mut inner, session_id) {
-                    Ok(revision) => revision,
-                    Err(err) => {
-                        // The promotion is only real once it is durable. Put
-                        // the record back so the head, the latch, and the
-                        // transcript match what the runtime actually saw:
-                        // nothing.
-                        inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid")
-                            .restore_queue_promotion(
-                                promotion_snapshot,
-                                queued,
-                                &started.message_delta.message_id,
-                            );
-                        let restore_error = self.persist_internal_locked(&inner).err();
-                        self.publish_state_locked(&inner);
-                        let err = match restore_error {
-                            Some(restore_error) => anyhow!(
-                                "{err:#}; failed to persist restored queued promotion: {restore_error:#}"
-                            ),
-                            None => err,
-                        };
-                        return Err(annotate_queued_followup_start_failure(
-                            &inner,
-                            index,
-                            err.context("failed to persist the promoted queue head"),
-                        ));
-                    }
-                };
-                let StartedTurn {
-                    dispatch,
-                    message_delta,
-                } = started;
-                self.publish_started_turn_message_delta(&inner, revision, message_delta);
-                drop(inner);
-                return Ok(Some(StartedQueuedTurn { dispatch, queued }));
-            }
-        }
-
-        for _attempt in 0..3 {
-            let snapshot = {
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
-                let Some(index) = inner.find_session_index(session_id) else {
-                    return Ok(None);
-                };
-                if live_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
-                    return Ok(None);
-                }
-                if relay_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
-                    return Ok(None);
-                }
-                if allow_blocked_dispatch
-                    && !bypass_owner
-                        .as_ref()
-                        .is_some_and(|owner| owner.matches(&inner.sessions[index]))
-                {
-                    return Ok(None);
-                }
-                if releases_abort_retry {
-                    let authority = Self::engram_binding_target_for_session_shape_locked(
-                        &inner, session_id, true,
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|target| engram_abort_authority(&target));
-                    if !engram_abort_retry_releases(&inner.sessions[index], authority.as_deref()) {
-                        return Ok(None);
-                    }
-                }
-                if releases_bind_retry {
-                    let authority = Self::engram_binding_target_for_session_shape_locked(
-                        &inner, session_id, true,
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|target| engram_abort_authority(&target));
-                    // The budget clock is read only where a bind retry is
-                    // actually due-checked, so a drain that never reaches this
-                    // check takes no clock.
-                    if !engram_bind_retry_releases(&inner.sessions[index], authority.as_deref())
-                        || inner.sessions[index]
-                            .engram
-                            .next_bind_retry_at
-                            .is_some_and(|at| at > inner.engram_budget_clock_snapshot().now())
-                    {
-                        return Ok(None);
-                    }
-                }
-                if releases_admission_retry {
-                    let authority = Self::engram_binding_target_for_session_shape_locked(
-                        &inner, session_id, true,
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|target| engram_abort_authority(&target));
-                    if !engram_admission_retry_releases(
-                        &inner.sessions[index],
-                        authority.as_deref(),
-                    ) || inner.sessions[index]
-                        .engram
-                        .next_bind_retry_at
-                        .is_some_and(|at| at > inner.engram_budget_clock_snapshot().now())
-                    {
-                        return Ok(None);
-                    }
-                }
-                if inner.sessions[index].engram_boot_recovery_pending {
-                    let should_retry = if orphaned_workflow_only {
-                        inner.sessions[index]
-                            .queued_prompts
-                            .iter()
-                            .find(|queued| queued.source != QueuedPromptSource::Mailbox)
-                            .is_some_and(|queued| queued.source == QueuedPromptSource::Orchestrator)
-                    } else {
-                        !inner.sessions[index].queued_prompts.is_empty()
-                    };
-                    if should_retry {
-                        if ordinary_readiness_wake {
-                            let record = &mut inner.sessions[index];
-                            if let Some(owner) = EngramQueuedAdmissionOwner::capture(record) {
-                                record.engram_queue_schedule.register_activation(owner,
-                                    &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
-                            }
-                        }
-                        inner.sessions[index].engram_boot_recovery_dispatch_pending = true;
-                    }
-                    drop(inner);
-                    if should_retry {
-                        self.request_engram_boot_recovery_retry(session_id);
-                    }
-                    return Ok(None);
-                }
-                if self.engram_project_reset_holds_drain_locked(&mut inner, index, session_id) {
-                    return Ok(None);
-                }
-                let record = &inner.sessions[index];
-                if record.runtime_stop_in_progress {
-                    return Ok(None);
-                }
-                if record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
-                    return Ok(None);
-                }
-                if orphaned_workflow_only {
-                    let eligible = record.is_local_session()
-                        && matches!(
-                            record.session.status,
-                            SessionStatus::Idle | SessionStatus::Error
-                        )
-                        && matches!(record.runtime, SessionRuntime::None)
-                        && record
-                            .queued_prompts
-                            .iter()
-                            .find(|queued| queued.source != QueuedPromptSource::Mailbox)
-                            .is_some_and(|queued| {
-                                queued.source == QueuedPromptSource::Orchestrator
-                            });
-                    if !eligible {
-                        return Ok(None);
-                    }
-                }
-                let Some(queued) = record.queued_prompts.front().cloned() else {
-                    return Ok(None);
-                };
-                // A held head asks Engram for nothing: it cannot be promoted.
-                // Recheck source here after off-lock preparation: only the
-                // Human path may act on a Human head, including unknown sends.
-                if queued.source == QueuedPromptSource::Human {
-                    return Ok(None);
-                }
-                if queued_prompt_held_for_durability(record, &queued) {
-                    return Ok(None);
-                }
-                // Nor does a receipted head before its write-ahead hand-off
-                // record is durable; the gate starts or awaits that record,
-                // and only when a turn could start now (the busy check below
-                // runs too late for that).
-                if record.prompt_deliveries.contains_key(&queued.pending_prompt.id)
-                    && matches!(
-                        record.session.status,
-                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-                    )
-                {
-                    return Ok(None);
-                }
-                if engram_queue_head_refused_as_interrupted(record)
-                    && !record.engram.recovered_admission
-                    && !containment_retained_reconciliation_allowed(&inner, session_id)
-                {
-                    return Ok(None);
-                }
-                // Last of the head checks, so a head refused above writes no
-                // hand-off record. Only checked here: the promotion's own gate,
-                // after the evaluation, consumes a Resume it relies on.
-                if !self.prompt_delivery_gate_locked(
-                    &mut inner,
-                    index,
-                    &queued.pending_prompt.id,
-                    false,
-                ) {
-                    return Ok(None);
-                }
-                let record = &inner.sessions[index];
-                (
-                    queued,
-                    record.engram.dispatch_generation,
-                    record.session.status,
-                )
-            };
-            if matches!(
-                snapshot.2,
-                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-            ) {
-                return Ok(None);
-            }
-            let intent = EngramTurnIntentSnapshot {
-                session_id: session_id.to_owned(),
-                dispatch_generation: self.queued_engram_generation(
-                    session_id,
-                    &snapshot.0.pending_prompt.id,
-                    snapshot.1,
-                ),
-                intent_fingerprint: engram_turn_intent_fingerprint(
-                    &snapshot.0.pending_prompt.text,
-                    snapshot.0.pending_prompt.expanded_text.as_deref(),
-                    &snapshot.0.attachments,
-                    snapshot.0.pending_prompt.source.as_ref(),
-                    snapshot.0.source,
-                ),
-            };
-            let relay_authority = self.prepare_front_mailbox_relay_authority(session_id)
-                .map_err(|error| mailbox_relay_admission_held(error.message))?;
-            let pending_engram = self.evaluate_engram_turn_off_lock(&intent);
-            #[cfg(test)]
-            if let Some(hook) = TEST_MAILBOX_RELAY_AFTER_EVALUATE.with(|hook| hook.borrow_mut().take()) { hook(); }
-
-            let relay_link = relay_authority.as_ref().map(|(_, authority)| authority.lock_link()).transpose();
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else {
-                return Ok(None);
-            };
-            if ordinary_off_execution_applies(&inner, session_id) {
-                // The settings transition owns the next ordinary activation.
-                // This old evaluation owns neither a successor nor its pause.
-                return Ok(None);
-            }
-            let unchanged = inner.sessions[index].engram.dispatch_generation == snapshot.1
-                && activation_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
-                && live_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
-                && relay_owner.as_ref().is_none_or(|owner| owner.matches(&inner.sessions[index]))
-                && (!allow_blocked_dispatch
-                    || bypass_owner.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index])))
-                && inner.sessions[index]
-                    .queued_prompts
-                    .front()
-                    .is_some_and(|queued| {
-                        queued.pending_prompt.id == snapshot.0.pending_prompt.id
-                            // Mailbox coalescing retains the ID and generation
-                            // while replacing the admitted sequence in place.
-                            && engram_turn_intent_fingerprint(
-                                &queued.pending_prompt.text,
-                                queued.pending_prompt.expanded_text.as_deref(),
-                                &queued.attachments,
-                                queued.pending_prompt.source.as_ref(),
-                                queued.source,
-                            ) == intent.intent_fingerprint
-                    })
-                && !matches!(
-                    inner.sessions[index].session.status,
-                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-                )
-                && !inner.sessions[index].runtime_stop_in_progress
-                && !inner.sessions[index].engram_boot_recovery_pending;
-            if !unchanged {
-                let bypass_was_superseded = activation_owner.as_ref()
-                    .is_some_and(|owner| !owner.matches(&inner.sessions[index])) || allow_blocked_dispatch
-                    && !bypass_owner
-                        .as_ref()
-                        .is_some_and(|owner| owner.matches(&inner.sessions[index]));
-                let record = inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid");
-                if record.engram.dispatch_generation == snapshot.1 {
-                    abandon_engram_pending_dispatch(record, pending_engram);
-                } else if pending_engram.as_ref().is_some_and(|pending| {
-                    matches!(&pending.evaluated, EngramDispatchEvaluation::Grant { .. })
-                }) {
-                    // A newer dispatch already owns the generation counter.
-                    // Preserve its identity while still repairing the older
-                    // evaluated grant that lost the queue-head race.
-                    record.engram.rebind_required = true;
-                }
-                if bypass_was_superseded {
-                    return Ok(None);
-                }
-                continue;
-            }
-            let relay_refusal = relay_link.as_ref().err().map(|error| anyhow!("{error:#}"))
-                .or_else(|| self.validate_front_mailbox_relay_authority_locked(
-                    &inner, session_id, relay_authority.as_ref(),
-                ).err().map(|error| anyhow!(error.message)));
-            if let Some(error) = relay_refusal {
-                // Preserve the exact preparation using the existing abandon /
-                // rebind protocol; a late authority loss is not a new turn.
-                // The abandon moves the durable dispatch generation and may
-                // clear the head's intent: stamp it so this commit carries it.
-                if abandon_engram_pending_dispatch(&mut inner.sessions[index], pending_engram) {
-                    inner.stamp_session_at_index(index);
-                }
-                self.commit_locked(&mut inner)?;
-                return Err(mailbox_relay_admission_held(error.context("relay authority lost before queue promotion")));
-            }
-            let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
-            let queued_after_evaluation = inner.sessions[index]
-                .queued_prompts
-                .front()
-                .cloned()
-                .expect("validated Engram queue head should remain current");
-            let queued_prompt_id = queued_after_evaluation.pending_prompt.id.clone();
-            if engram_queue_head_refused_as_interrupted(&inner.sessions[index])
-                && !containment_retained_reconciliation_allowed(&inner, session_id) {
-                return Ok(None);
-            }
-            let activation_owned_before_promotion = activation_owner
-                .as_ref()
-                .is_some_and(|owner| owner.matches(&inner.sessions[index]));
-            let Some(started) = self.start_next_queued_turn_locked(
+        let Some(queued) = dispatch_queue_position(&inner, index)
+            .and_then(|position| record.queued_prompts.get(position)).cloned() else {
+            return Ok(None);
+        };
+        // Write-ahead acknowledgement belongs to this exact prompt;
+        // a held entry never writes or consumes a handoff.
+        if !queued_prompt_held_for_durability(record, &queued)
+            && !self.prompt_delivery_gate_locked(
                 &mut inner,
                 index,
-                allow_blocked_dispatch,
-                pending_engram,
-            )?
-            else {
-                if activation_owned_before_promotion {
-                    let owner = activation_owner.as_ref().expect("checked activation owner");
-                    let activation_due_at = inner
-                        .engram_budget_clock_snapshot()
-                        .wall_now()
-                        .to_rfc3339();
-                    let record = &mut inner.sessions[index];
-                    // Abandoning this evaluation advances its wire generation.
-                    // Carry service only across that owned, locked transition;
-                    // a successor or a reset that raced evaluation never gets here.
-                    if record.engram.dispatch_generation == owner.generation.saturating_add(1)
-                        && record.active_turn_generation == owner.active_turn_generation
-                        && record.queued_prompts.front()
-                            .is_some_and(|head| head.pending_prompt.id == owner.prompt_id)
-                        && record.engram_queue_schedule.activation.is_none()
-                    {
-                        let next_owner = EngramQueuedAdmissionOwner::capture(record)
-                            .expect("checked unchanged head");
-                        record.engram_queue_schedule.activation = Some((
-                            next_owner,
-                            activation_due_at,
-                        ));
-                    }
-                }
-                return Ok(None);
-            };
-            let revision = match self.commit_persisted_session_delta_locked(&mut inner, session_id) {
-                Ok(revision) => revision,
-                Err(err) => {
-                    // Same rollback as the zero-transport path: an undurable
-                    // promotion must not strand the head or drop the latch.
-                    inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid")
-                        .restore_queue_promotion(
-                            promotion_snapshot,
-                            queued_after_evaluation,
-                            &started.message_delta.message_id,
-                        );
-                    // The exact prepared operation remains the durable replay
-                    // anchor. Persist the restored paused record without a new
-                    // client revision, surface it at the consumed revision,
-                    // and preserve this classification for both live and
-                    // delayed delegation settlement paths.
-                    let restore_error = self.persist_internal_locked(&inner).err();
-                    self.publish_state_locked(&inner);
-                    let err = match restore_error {
-                        Some(restore_error) => anyhow!(
-                            "{err:#}; failed to persist restored retained promotion: {restore_error:#}"
-                        ),
-                        None => err,
-                    };
-                    let err = err.context("failed to persist the promoted queue head");
-                    let retained =
-                        inner.sessions[index]
-                            .queued_prompts
-                            .front()
-                            .is_some_and(|queued| {
-                                queued.pending_prompt.id == queued_prompt_id
-                                    && queued.is_engram_retained()
-                            });
-                    return if retained {
-                        Err(err.context(RetainedQueuedPromotionPersistenceUnknown {
-                            prompt_id: queued_prompt_id,
-                        }))
-                    } else {
-                        Err(annotate_queued_followup_start_failure(&inner, index, err))
-                    };
-                }
-            };
-            let StartedTurn {
-                dispatch,
-                message_delta,
-            } = started;
-            self.publish_started_turn_message_delta(&inner, revision, message_delta);
-            drop(inner);
-            return Ok(Some(StartedQueuedTurn {
-                dispatch,
-                queued: snapshot.0,
-            }));
+                &queued.pending_prompt.id,
+                false,
+            )
+        {
+            return Ok(None);
         }
-        Ok(None)
+        let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
+        let Some(started) = self.start_next_queued_turn_locked(
+            &mut inner,
+            index,
+            allow_blocked_dispatch,
+        )?
+        else {
+            return Ok(None);
+        };
+        let revision = match self.commit_persisted_session_delta_locked(&mut inner, session_id) {
+            Ok(revision) => revision,
+            Err(err) => {
+                // The promotion is only real once it is durable. Put
+                // the record back so the head, the latch, and the
+                // transcript match what the runtime actually saw:
+                // nothing.
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid")
+                    .restore_queue_promotion(
+                        promotion_snapshot,
+                        queued,
+                        &started.message_delta.message_id,
+                    );
+                let restore_error = self.persist_internal_locked(&inner).err();
+                self.publish_state_locked(&inner);
+                let err = match restore_error {
+                    Some(restore_error) => anyhow!(
+                        "{err:#}; failed to persist restored queued promotion: {restore_error:#}"
+                    ),
+                    None => err,
+                };
+                return Err(annotate_queued_followup_start_failure(
+                    &inner,
+                    index,
+                    err.context("failed to persist the promoted queue head"),
+                ));
+            }
+        };
+        let StartedTurn {
+            dispatch,
+            message_delta,
+        } = started;
+        self.publish_started_turn_message_delta(&inner, revision, message_delta);
+        drop(inner);
+        return Ok(Some(StartedQueuedTurn { dispatch, queued }));
+        }
     }
 
-    /// The inner dispatch that actually hands a ready turn to the agent
-    /// driver.
-    ///
-    /// Locates the session in `AppState.inner`, builds the prompt
-    /// payload, calls [`Self::start_turn_on_record`] to get a
-    /// [`TurnDispatch`], installs the `RuntimeToken` on the record so
-    /// later `_if_runtime_matches` guards can tell live from stale
-    /// events, and finally forwards the prompt to the runtime's writer
-    /// channel. If any step fails we mark the turn as errored via the
-    /// lifecycle path rather than surfacing a bare `ApiError` to the
-    /// caller — the turn is already underway by the time we're in here.
     fn dispatch_turn(
         &self,
         session_id: &str,
@@ -2382,20 +1468,7 @@ impl AppState {
         request: SendMessageRequest,
         followup: Option<&DelegationRecord>,
     ) -> std::result::Result<DispatchTurnResult, ApiError> {
-        let result = self.dispatch_or_queue_turn_with_followup(session_id, request, followup);
-        if matches!(result, Ok(DispatchTurnResult::Queued)) {
-            // A prompt a project settings change holds is queued here, not
-            // drained: an idle session says why it waits
-            // (`engram_project_reset_wait.rs`).
-            // A remote proxy shows its host's preview; it is not fenced here.
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            if let Some(index) = inner.find_session_index(session_id)
-                && inner.sessions[index].remote_id.is_none()
-            {
-                self.engram_project_reset_holds_drain_locked(&mut inner, index, session_id);
-            }
-        }
-        result
+        self.dispatch_or_queue_turn_with_followup(session_id, request, followup)
     }
 
     fn dispatch_or_queue_turn_with_followup(
@@ -2404,50 +1477,6 @@ impl AppState {
         request: SendMessageRequest,
         followup: Option<&DelegationRecord>,
     ) -> std::result::Result<DispatchTurnResult, ApiError> {
-        if !self.ordinary_off_execution_applies(session_id)
-            && self.queue_user_behind_contained_head(session_id, &request, followup)? {
-            return Ok(DispatchTurnResult::Queued);
-        }
-        if self.queue_ordinary_behind_checkpoint(session_id, &request, followup)? {
-            return Ok(DispatchTurnResult::Queued);
-        }
-        let _checkpoint_budget = self.begin_checkpoint_preflight_budget(session_id);
-        let checkpoint_preflight = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            !ordinary_off_execution_applies(&inner, session_id)
-                && certified_checkpoint_replay_target_locked(&inner, session_id, None).is_some()
-        };
-        if checkpoint_preflight {
-            if request.text.trim().is_empty() && request.attachments.is_empty() {
-                return Err(ApiError::bad_request("prompt cannot be empty"));
-            }
-            parse_prompt_image_attachments(&request.attachments)?;
-            // Settle the old operation before this Send creates or admits a
-            // prompt. Success confers no exception to the ordinary checks.
-            if let Err(error) = self.settle_certified_checkpoint_before_admission(session_id, None) {
-                // A failed exact retry may become Unknown. Keep the new
-                // envelope queued without treating that duty as settled.
-                if self.queue_ordinary_behind_checkpoint(session_id, &request, followup)? {
-                    return Ok(DispatchTurnResult::Queued);
-                }
-                return Err(error);
-            }
-        }
-        {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            require_no_engram_local_dispatch_obligation(&inner, session_id)?;
-        }
-        let recovery_pending = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            inner
-                .find_visible_session_index(session_id)
-                .is_some_and(|index| !ordinary_off_execution_applies(&inner, session_id)
-                    && inner.sessions[index].engram_boot_recovery_pending)
-        };
-        if recovery_pending {
-            self.request_engram_boot_recovery_retry(session_id);
-            return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
-        }
         // Where the session writes, for the overlap marks its turn start
         // makes under the lock.
         self.engram_host().turn_starting(session_id);
@@ -2509,7 +1538,7 @@ impl AppState {
                 record.queued_prompts.front().and_then(|head| head.pending_prompt.source.as_ref())
                     .and_then(|source| source.mailbox.as_ref())
                     .filter(|source| source.mailbox_id.starts_with("relay-mailbox-"))
-                    .and_then(|_| EngramQueuedAdmissionOwner::capture(record))
+                    .and_then(|_| QueuedTurnOwner::capture(record))
             })
         };
         let mut refused_relay_head = match self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id) {
@@ -2566,13 +1595,8 @@ impl AppState {
                 .and_then(|queued|queued.pending_prompt.source.as_ref())
                 .and_then(|source|source.mailbox.as_ref())
                 .is_some_and(|source|source.mailbox_id.starts_with("relay-mailbox-")) {
-                refused_relay_head = EngramQueuedAdmissionOwner::capture(&inner.sessions[index]);
+                refused_relay_head = QueuedTurnOwner::capture(&inner.sessions[index]);
             }
-        }
-        if !ordinary_off_execution_applies(&inner, session_id) && inner.sessions[index].engram_boot_recovery_pending {
-            drop(inner);
-            self.request_engram_boot_recovery_retry(session_id);
-            return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
         }
         if delegated_child_dispatch_is_blocked_locked(&inner, index)
             && !reserved_followup_is_admissible_locked(&inner, session_id, followup)
@@ -2665,25 +1689,24 @@ impl AppState {
                 prompt = rendered_prompt;
             }
         }
-        require_no_engram_local_dispatch_obligation(&inner, session_id)?;
-        let project_reset_fenced = inner.sessions[index].engram.project_reset_in_progress
-            || engram_project_for_session_locked(&inner, session_id)
-                .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
         let session_is_busy = matches!(
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
         ) || inner.sessions[index].runtime_stop_in_progress
-            || project_reset_fenced;
+            || inner.sessions[index].engram.observation_delete_requested
+            || session_resource_reset_in_progress(&inner, &inner.sessions[index]);
         let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
         let blocked_queue_contains_user_prompt = inner.sessions[index]
             .queued_prompts
             .iter()
-            .any(|queued| matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human));
+            .any(|queued| ordinary_queue_entry_is_runnable(&inner.sessions[index], queued)
+                && matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human));
         let orchestrator_auto_dispatch_blocked =
             inner.sessions[index].orchestrator_auto_dispatch_blocked;
         let paused_human_queue = orchestrator_auto_dispatch_blocked
             && inner.sessions[index].queued_prompts.iter()
-                .any(|queued| queued.source == QueuedPromptSource::Human);
+                .any(|queued| ordinary_queue_entry_is_runnable(&inner.sessions[index], queued)
+                    && queued.source == QueuedPromptSource::Human);
         let queued_prompt_source = if source
             .as_ref()
             .is_some_and(|message_source| message_source.is_mailbox())
@@ -2694,56 +1717,6 @@ impl AppState {
         };
         let capacity_automatic_prompt = inner.sessions[index].provider_capacity_retry.is_some()
             && (source.is_some() || request.source_mailbox.is_some());
-        if ordinary_off_execution_applies(&inner, session_id)
-            && inner.sessions[index].queued_prompts.iter().any(|queued|
-                queued.is_engram_retained()
-                    || !ordinary_queue_entry_is_runnable(&inner.sessions[index], queued))
-        {
-            let message_id = inner.next_message_id();
-            // Historical rows remain at their original positions. Neither
-            // coalescing nor explicit-user prioritization rewrites them.
-            let before = inner.sessions[index].clone();
-            queue_prompt_on_record_with_source(inner.session_mut_by_index(index).expect("validated session"), PendingPrompt {
-                engram_interrupted: false, is_engram_retained: false,
-                attachments: attachments.iter().map(|attachment| attachment.metadata.clone()).collect(),
-                id: message_id.clone(), timestamp: stamp_now(), text: prompt,
-                expanded_text: expanded_prompt, source,
-            }, attachments, queued_prompt_source);
-            if let Err(error) = self.commit_followup_prompt_locked_for_session(
-                &mut inner, followup, &message_id, true, Some(session_id),
-            ) {
-                if followup.is_none() { inner.sessions[index] = before; }
-                return Err(ApiError::internal(format!("failed persisting prompt: {error:#}")));
-            }
-            if session_is_busy || orchestrator_auto_dispatch_blocked {
-                return Ok(DispatchTurnResult::Queued);
-            }
-            let owner = EngramQueuedAdmissionOwner::capture_ordinary(&inner.sessions[index]);
-            drop(inner);
-            return match owner.map(|owner| self.dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner)).transpose() {
-                Ok(Some(Some(started))) => Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch)),
-                Ok(_) => Ok(DispatchTurnResult::Queued),
-                Err(error) => {
-                    eprintln!("queued prompt start remains pending: {error:#}");
-                    Ok(DispatchTurnResult::Queued)
-                }
-            };
-        }
-        let explicit_reset_resume = project_reset_fenced
-            && orchestrator_auto_dispatch_blocked
-            && !paused_human_queue
-            && !capacity_automatic_prompt
-            && queued_prompt_source == QueuedPromptSource::User;
-        if explicit_reset_resume {
-            // A user prompt accepted while a project-settings fence is active
-            // is still an explicit resume. Keep it durable until the fence is
-            // released, but clear Stop's automatic-dispatch latch now so the
-            // committed settings can drain that prompt without another click.
-            inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid")
-                .set_auto_dispatch_blocked(false);
-        }
         // Stop leaves a persisted explicit-resume latch. Routine mailbox
         // notifications must join the durable queue even when it was empty at
         // the moment of Stop; only a later user prompt may lift the latch.
@@ -2751,7 +1724,6 @@ impl AppState {
             && (queued_prompt_source == QueuedPromptSource::Mailbox
                 || capacity_automatic_prompt || paused_human_queue);
 
-        require_no_engram_local_dispatch_obligation(&inner, session_id)?;
         let mut message_id = inner.next_message_id();
         let still_refused = refused_relay_head.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]));
         let record = &inner.sessions[index];
@@ -2759,11 +1731,8 @@ impl AppState {
             && !capacity_automatic_prompt && record.provider_capacity_retry.is_none()
             && queued_prompt_source == QueuedPromptSource::User
             && !queued_head_held_for_durability(record)
-            && record.engram.pending_dispatch.is_none() && record.engram.admission_in_progress.is_none()
-            && record.engram.source_observation_preparations == 0
-            && record.engram.active_grant_id.is_none() && record.engram.uncertain_grant_id.is_none()
             && record.queued_prompts.front().is_some_and(|head|
-                !head.is_engram_retained() && head.promoted_message_index.is_none());
+                ordinary_queue_entry_is_runnable(record, head));
         // Scheduling isolation only: use the existing explicit-user priority
         // paths without changing the persisted Stop/pause latch. The exact
         // refused carrier remains queued; ordinary-user FIFO is preserved.
@@ -2772,14 +1741,12 @@ impl AppState {
             && !blocked_queue_contains_user_prompt && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User
             && !queued_head_held_for_durability(&inner.sessions[index])
-            && !inner.sessions[index].queued_prompts.front().is_some_and(QueuedPromptRecord::is_engram_retained));
+            && !inner.sessions[index].queued_prompts.front().is_some_and(|head|
+                !ordinary_queue_entry_is_runnable(&inner.sessions[index], head)));
         if still_refused && !manual_can_overtake {
             // Admission of ordinary work is separate from authority to promote
             // the retained relay carrier. Keep FIFO/durability and resume gates;
             // the relay worker will re-drive the carrier when authority returns.
-            // The queued prompt is durable: queue it through the stamping
-            // accessor so the commit below carries it, as the branch after
-            // this one does.
             queue_prompt_on_record_with_source(
                 inner.session_mut_by_index(index).expect("session index should be valid"),
                 PendingPrompt {
@@ -2792,342 +1759,6 @@ impl AppState {
                 .map_err(|error|ApiError::internal(format!("failed to persist ordinary prompt behind retained relay: {error:#}")))?;
             return Ok(DispatchTurnResult::Queued);
         }
-        // S0 ("off means off") keeps the pre-adapter dispatch algorithm
-        // intact. In particular, an unconfigured project must not pay the
-        // extra queue commit needed to release the state mutex around Engram
-        // evaluation. This local check resolves the session's project (including
-        // inherited child scope); it performs no Engram I/O. The branches below
-        // retain the non-control dispatch transitions.
-        if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
-            if !ordinary_off_execution_applies(&inner, session_id) && inner.sessions[index]
-                .queued_prompts
-                .front()
-                .is_some_and(QueuedPromptRecord::is_engram_retained)
-            {
-                let record = inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid");
-                record
-                    .queued_prompts
-                    .front_mut()
-                    .expect("retained head exists")
-                    .engram_interrupted = true;
-                record.set_auto_dispatch_blocked(true);
-                record.session.preview = "Engram control is off; authorization retained. Cancel the queued prompt before continuing.".to_owned();
-                queue_prompt_on_record_with_source(
-                    record,
-                    PendingPrompt {
-                        engram_interrupted: false,
-                        is_engram_retained: false,
-                        attachments: attachments
-                            .iter()
-                            .map(|attachment| attachment.metadata.clone())
-                            .collect(),
-                        id: message_id.clone(),
-                        timestamp: stamp_now(),
-                        text: prompt,
-                        expanded_text: expanded_prompt,
-                        source,
-                    },
-                    attachments,
-                    queued_prompt_source,
-                );
-                self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
-                    .map_err(|error| {
-                        ApiError::internal(format!(
-                            "failed to persist prompt behind held authorization: {error:#}"
-                        ))
-                    })?;
-                return Ok(DispatchTurnResult::Queued);
-            }
-            if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
-                if let Some(mailbox_id) = source
-                    .as_ref()
-                    .and_then(|source| source.mailbox.as_ref())
-                    .map(|mailbox| mailbox.mailbox_id.clone())
-                {
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    // An entry enqueued with a durability prerequisite keeps
-                    // its proven content; a wake never rewrites it.
-                    let durability_holds = &record.queued_prompt_durability_holds;
-                    if let Some(existing) = record.queued_prompts.iter_mut().find(|queued| {
-                        !durability_holds.contains_key(&queued.pending_prompt.id)
-                            && queued
-                                .pending_prompt
-                                .source
-                                .as_ref()
-                                .and_then(|source| source.mailbox.as_ref())
-                                .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
-                    }) {
-                        let existing_sequence = existing
-                            .pending_prompt
-                            .source
-                            .as_ref()
-                            .and_then(|source| source.mailbox.as_ref())
-                            .map(|mailbox| mailbox.sequence)
-                            .unwrap_or_default();
-                        let incoming_sequence = source
-                            .as_ref()
-                            .and_then(|source| source.mailbox.as_ref())
-                            .map(|mailbox| mailbox.sequence)
-                            .unwrap_or_default();
-                        if existing_sequence <= incoming_sequence {
-                            existing.pending_prompt.timestamp = stamp_now();
-                            existing.pending_prompt.text = prompt;
-                            existing.pending_prompt.expanded_text = expanded_prompt;
-                            existing.pending_prompt.source = source;
-                            existing.source = QueuedPromptSource::Mailbox;
-                        }
-                        message_id = existing.pending_prompt.id.clone();
-                        note_mailbox_continuation_boundary(record, &message_id);
-                        sync_pending_prompts(record);
-                        self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
-                            .map_err(|err| {
-                                ApiError::internal(format!(
-                                    "failed to persist mailbox notification: {err:#}"
-                                ))
-                            })?;
-                        if session_is_busy || orchestrator_auto_dispatch_blocked {
-                            return Ok(DispatchTurnResult::Queued);
-                        }
-                        if blocked_queue_contains_user_prompt {
-                            prioritize_user_queued_prompts(
-                                inner
-                                    .session_mut_by_index(index)
-                                    .expect("session index should be valid"),
-                            );
-                        }
-                        let (revision, started) = match self
-                            .start_and_commit_queued_dispatch_locked(
-                                &mut inner,
-                                index,
-                                followup,
-                                &message_id,
-                            ) {
-                            Ok(Some(started)) => started,
-                            Ok(None) => {
-                                return Ok(
-                                    self.queued_after_direct_enqueue(inner, index, session_id)
-                                );
-                            }
-                            Err(error) => {
-                                drop(inner);
-                                return Err(self.finish_queued_followup_start_error(
-                                    error.context("failed to dispatch coalesced mailbox queue"),
-                                ));
-                            }
-                        };
-                        let started_current_mailbox = matches!(
-                            &started.message_delta.message,
-                            Message::Text {
-                                source: Some(source),
-                                ..
-                            } if source
-                                .mailbox
-                                .as_ref()
-                                .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
-                        );
-                        self.publish_started_turn_message_delta(
-                            &inner,
-                            revision,
-                            started.message_delta,
-                        );
-                        drop(inner);
-                        return Ok(if started_current_mailbox {
-                            DispatchTurnResult::Dispatched(started.dispatch)
-                        } else {
-                            DispatchTurnResult::DispatchedAfterQueue(started.dispatch)
-                        });
-                    }
-                }
-            }
-            let recover_blocked_queue_with_existing_user_prompt = !session_is_busy
-                && !paused_human_queue
-                && has_queued_prompts
-                && orchestrator_auto_dispatch_blocked
-                && blocked_queue_contains_user_prompt
-                && !capacity_automatic_prompt
-                && queued_prompt_source == QueuedPromptSource::User;
-            // A head held for its durability acknowledgement is never
-            // overtaken: the manual send queues behind it instead.
-            let prioritize_manual_dispatch_over_blocked_queue = !session_is_busy
-                && has_queued_prompts
-                && orchestrator_auto_dispatch_blocked
-                && !blocked_queue_contains_user_prompt
-                && !capacity_automatic_prompt
-                && queued_prompt_source == QueuedPromptSource::User
-                && !queued_head_held_for_durability(&inner.sessions[index]);
-
-            if recover_blocked_queue_with_existing_user_prompt {
-                queue_prompt_on_record_with_source(
-                    inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid"),
-                    PendingPrompt {
-                        engram_interrupted: false,
-                        is_engram_retained: false,
-                        attachments: attachments
-                            .iter()
-                            .map(|attachment| attachment.metadata.clone())
-                            .collect(),
-                        id: message_id.clone(),
-                        timestamp: stamp_now(),
-                        text: prompt,
-                        expanded_text: expanded_prompt.clone(),
-                        source: source.clone(),
-                    },
-                    attachments,
-                    queued_prompt_source,
-                );
-                prioritize_user_queued_prompts(
-                    inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid"),
-                );
-                self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
-                    .map_err(|err| {
-                        ApiError::internal(format!("failed to persist session state: {err:#}"))
-                    })?;
-                let (revision, started) = match self.start_and_commit_queued_dispatch_locked(
-                    &mut inner,
-                    index,
-                    followup,
-                    &message_id,
-                ) {
-                    Ok(Some(started)) => started,
-                    Ok(None) => {
-                        return Ok(self.queued_after_direct_enqueue(inner, index, session_id));
-                    }
-                    Err(error) => {
-                        drop(inner);
-                        return Err(self.finish_queued_followup_start_error(error));
-                    }
-                };
-                self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
-                drop(inner);
-                return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
-            }
-
-            if prioritize_manual_dispatch_over_blocked_queue {
-                let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
-                let host_mcp_servers_only =
-                    session_is_acceptance_evaluator_child_locked(&inner, session_id);
-                let standard_dispatch = !ordinary_off_execution_applies(&inner, session_id);
-                let started = self.start_turn_on_record_with_control_mode(
-                    inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid"),
-                    message_id.clone(),
-                    prompt,
-                    attachments,
-                    expanded_prompt,
-                    source,
-                    None,
-                    engram_mcp,
-                    host_mcp_servers_only,
-                    standard_dispatch,
-                )?;
-                EngramHost::turn_started(&mut inner, index);
-                let revision = self
-                    .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
-                    .map_err(|err| {
-                        ApiError::internal(format!("failed to persist session state: {err:#}"))
-                    })?;
-                self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
-                drop(inner);
-                return Ok(DispatchTurnResult::Dispatched(started.dispatch));
-            }
-
-            if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
-                queue_prompt_on_record_with_source(
-                    inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid"),
-                    PendingPrompt {
-                        engram_interrupted: false,
-                        is_engram_retained: false,
-                        attachments: attachments
-                            .iter()
-                            .map(|attachment| attachment.metadata.clone())
-                            .collect(),
-                        id: message_id.clone(),
-                        timestamp: stamp_now(),
-                        text: prompt,
-                        expanded_text: expanded_prompt,
-                        source,
-                    },
-                    attachments,
-                    queued_prompt_source,
-                );
-                if explicit_reset_resume {
-                    prioritize_user_queued_prompts(
-                        inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid"),
-                    );
-                }
-                self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
-                    .map_err(|err| {
-                        ApiError::internal(format!("failed to persist session state: {err:#}"))
-                    })?;
-                if session_is_busy || blocked_automatic_prompt {
-                    return Ok(DispatchTurnResult::Queued);
-                }
-                let (revision, started) = match self.start_and_commit_queued_dispatch_locked(
-                    &mut inner,
-                    index,
-                    followup,
-                    &message_id,
-                ) {
-                    Ok(Some(started)) => started,
-                    Ok(None) => {
-                        return Ok(self.queued_after_direct_enqueue(inner, index, session_id));
-                    }
-                    Err(error) => {
-                        drop(inner);
-                        return Err(self.finish_queued_followup_start_error(error));
-                    }
-                };
-                self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
-                drop(inner);
-                return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
-            }
-
-            let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
-            let host_mcp_servers_only =
-                session_is_acceptance_evaluator_child_locked(&inner, session_id);
-            let standard_dispatch = !ordinary_off_execution_applies(&inner, session_id);
-            let started = self.start_turn_on_record_with_control_mode(
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-                message_id.clone(),
-                prompt,
-                attachments,
-                expanded_prompt,
-                source,
-                None,
-                engram_mcp,
-                host_mcp_servers_only,
-                standard_dispatch,
-            )?;
-            EngramHost::turn_started(&mut inner, index);
-            let revision = self
-                .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
-                .map_err(|err| {
-                    ApiError::internal(format!("failed to persist session state: {err:#}"))
-                })?;
-            self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
-            drop(inner);
-            return Ok(DispatchTurnResult::Dispatched(started.dispatch));
-        }
-
-        // The gated path below drops StateInner for preparation and uses its
-        // own exact late authority guard. Never retain this link across it.
-        drop(relay_link);
-
         if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
             if let Some(mailbox_id) = source
                 .as_ref()
@@ -3137,10 +1768,12 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
+                // An entry enqueued with a durability prerequisite keeps
+                // its proven content; a wake never rewrites it.
                 let durability_holds = &record.queued_prompt_durability_holds;
                 if let Some(existing) = record.queued_prompts.iter_mut().find(|queued| {
-                    !queued.is_engram_retained()
-                        && !durability_holds.contains_key(&queued.pending_prompt.id)
+                    !durability_holds.contains_key(&queued.pending_prompt.id)
+                        && !queued.has_stored_history()
                         && queued
                             .pending_prompt
                             .source
@@ -3148,13 +1781,6 @@ impl AppState {
                             .and_then(|source| source.mailbox.as_ref())
                             .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
                 }) {
-                    // The durable mailbox is the queue. Whether the receiver
-                    // is busy or idle with queued work, retain one compact
-                    // wake-up prompt per mailbox. Concurrent appends allocate
-                    // sequence numbers before taking the state lock, so an
-                    // older sender can arrive here last; never let it replace
-                    // metadata for a newer retained wake. Message bodies
-                    // remain only in SQLite.
                     let existing_sequence = existing
                         .pending_prompt
                         .source
@@ -3175,6 +1801,7 @@ impl AppState {
                         existing.source = QueuedPromptSource::Mailbox;
                     }
                     message_id = existing.pending_prompt.id.clone();
+                    note_mailbox_continuation_boundary(record, &message_id);
                     sync_pending_prompts(record);
                     self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
                         .map_err(|err| {
@@ -3192,24 +1819,42 @@ impl AppState {
                                 .expect("session index should be valid"),
                         );
                     }
-                    drop(inner);
-                    let started = self
-                        .start_next_queued_turn_off_lock(session_id, true, false)
-                        .map_err(|err| {
-                            self.queued_start_api_error(
-                                err.context("failed to dispatch coalesced mailbox queue"),
-                            )
-                        })?;
-                    let Some(started) = started else {
-                        return Ok(DispatchTurnResult::Queued);
+                    let (revision, started) = match self
+                        .start_and_commit_queued_dispatch_locked(
+                            &mut inner,
+                            index,
+                            followup,
+                            &message_id,
+                        ) {
+                        Ok(Some(started)) => started,
+                        Ok(None) => {
+                            return Ok(
+                                self.queued_after_direct_enqueue(inner, index, session_id)
+                            );
+                        }
+                        Err(error) => {
+                            drop(inner);
+                            return Err(self.finish_queued_followup_start_error(
+                                error.context("failed to dispatch coalesced mailbox queue"),
+                            ));
+                        }
                     };
-                    let started_current_mailbox = started
-                        .queued
-                        .pending_prompt
-                        .source
-                        .as_ref()
-                        .and_then(|source| source.mailbox.as_ref())
-                        .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id);
+                    let started_current_mailbox = matches!(
+                        &started.message_delta.message,
+                        Message::Text {
+                            source: Some(source),
+                            ..
+                        } if source
+                            .mailbox
+                            .as_ref()
+                            .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
+                    );
+                    self.publish_started_turn_message_delta(
+                        &inner,
+                        revision,
+                        started.message_delta,
+                    );
+                    drop(inner);
                     return Ok(if started_current_mailbox {
                         DispatchTurnResult::Dispatched(started.dispatch)
                     } else {
@@ -3225,73 +1870,169 @@ impl AppState {
             && blocked_queue_contains_user_prompt
             && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User;
+        // A head held for its durability acknowledgement is never
+        // overtaken: the manual send queues behind it instead.
         let prioritize_manual_dispatch_over_blocked_queue = !session_is_busy
             && has_queued_prompts
             && orchestrator_auto_dispatch_blocked
             && !blocked_queue_contains_user_prompt
             && !capacity_automatic_prompt
             && queued_prompt_source == QueuedPromptSource::User
-            && !queued_head_held_for_durability(&inner.sessions[index]);
+            && !queued_head_held_for_durability(&inner.sessions[index])
+            && !inner.sessions[index].queued_prompts.front().is_some_and(|head|
+                !ordinary_queue_entry_is_runnable(&inner.sessions[index], head));
 
-        queue_prompt_on_record_with_source(
-            inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid"),
-            PendingPrompt {
-                engram_interrupted: false,
-                is_engram_retained: false,
-                attachments: attachments
-                    .iter()
-                    .map(|attachment| attachment.metadata.clone())
-                    .collect(),
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                text: prompt,
-                expanded_text: expanded_prompt,
-                source,
-            },
-            attachments,
-            queued_prompt_source,
-        );
-        if recover_blocked_queue_with_existing_user_prompt
-            || prioritize_manual_dispatch_over_blocked_queue
-            || explicit_reset_resume
-        {
+        if recover_blocked_queue_with_existing_user_prompt {
+            queue_prompt_on_record_with_source(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
+                    attachments: attachments
+                        .iter()
+                        .map(|attachment| attachment.metadata.clone())
+                        .collect(),
+                    id: message_id.clone(),
+                    timestamp: stamp_now(),
+                    text: prompt,
+                    expanded_text: expanded_prompt.clone(),
+                    source: source.clone(),
+                },
+                attachments,
+                queued_prompt_source,
+            );
             prioritize_user_queued_prompts(
                 inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid"),
             );
+            self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist session state: {err:#}"))
+                })?;
+            let (revision, started) = match self.start_and_commit_queued_dispatch_locked(
+                &mut inner,
+                index,
+                followup,
+                &message_id,
+            ) {
+                Ok(Some(started)) => started,
+                Ok(None) => {
+                    return Ok(self.queued_after_direct_enqueue(inner, index, session_id));
+                }
+                Err(error) => {
+                    drop(inner);
+                    return Err(self.finish_queued_followup_start_error(error));
+                }
+            };
+            self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
+            drop(inner);
+            return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
         }
-        self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
+
+        if prioritize_manual_dispatch_over_blocked_queue {
+            let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
+            let host_mcp_servers_only =
+                session_is_acceptance_evaluator_child_locked(&inner, session_id);
+            let started = self.start_turn_on_record(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                message_id.clone(),
+                prompt,
+                attachments,
+                expanded_prompt,
+                source,
+                engram_mcp,
+                host_mcp_servers_only,
+            )?;
+            EngramHost::turn_started(&mut inner, index);
+            let revision = self
+                .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist session state: {err:#}"))
+                })?;
+            self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
+            drop(inner);
+            return Ok(DispatchTurnResult::Dispatched(started.dispatch));
+        }
+
+        if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
+            queue_prompt_on_record_with_source(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
+                    attachments: attachments
+                        .iter()
+                        .map(|attachment| attachment.metadata.clone())
+                        .collect(),
+                    id: message_id.clone(),
+                    timestamp: stamp_now(),
+                    text: prompt,
+                    expanded_text: expanded_prompt,
+                    source,
+                },
+                attachments,
+                queued_prompt_source,
+            );
+            self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist session state: {err:#}"))
+                })?;
+            // Only the explicit priority branches above may release a pause.
+            // Appending new input cannot resume an unknown provider handoff.
+            if session_is_busy || blocked_automatic_prompt || orchestrator_auto_dispatch_blocked {
+                return Ok(DispatchTurnResult::Queued);
+            }
+            let (revision, started) = match self.start_and_commit_queued_dispatch_locked(
+                &mut inner,
+                index,
+                followup,
+                &message_id,
+            ) {
+                Ok(Some(started)) => started,
+                Ok(None) => {
+                    return Ok(self.queued_after_direct_enqueue(inner, index, session_id));
+                }
+                Err(error) => {
+                    drop(inner);
+                    return Err(self.finish_queued_followup_start_error(error));
+                }
+            };
+            self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
+            drop(inner);
+            return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
+        }
+
+        let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
+        let host_mcp_servers_only =
+            session_is_acceptance_evaluator_child_locked(&inner, session_id);
+        let started = self.start_turn_on_record(
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
+            message_id.clone(),
+            prompt,
+            attachments,
+            expanded_prompt,
+            source,
+            engram_mcp,
+            host_mcp_servers_only,
+        )?;
+        EngramHost::turn_started(&mut inner, index);
+        let revision = self
+            .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
             .map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
-        // A head held for its durability acknowledgement keeps this prompt
-        // queued behind it. A drain now could start nothing, or, should the
-        // acknowledgement land while the lock is released, start that head
-        // past a pause without a Resume. The acknowledgement (on an unpaused
-        // queue) or a later Resume drains the queue.
-        if session_is_busy
-            || blocked_automatic_prompt
-            || queued_head_held_for_durability(&inner.sessions[index])
-        {
-            return Ok(DispatchTurnResult::Queued);
-        }
+        self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
         drop(inner);
-        let started = self
-            .start_next_queued_turn_off_lock(session_id, true, false)
-            .map_err(|err| {
-                self.queued_start_api_error(err.context("failed to dispatch queued turn"))
-            })?;
-        let Some(started) = started else {
-            return Ok(DispatchTurnResult::Queued);
-        };
-        if started.queued.pending_prompt.id == message_id {
-            Ok(DispatchTurnResult::Dispatched(started.dispatch))
-        } else {
-            Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch))
-        }
+        return Ok(DispatchTurnResult::Dispatched(started.dispatch));
     }
 }
 
@@ -3300,19 +2041,11 @@ impl AppState {
 #[derive(Clone)]
 enum QueuedDrainOwner {
     /// Ordinary service of an exact head; never permission to bypass a pause.
-    Activation(EngramQueuedAdmissionOwner),
+    Activation(QueuedTurnOwner),
     /// A metadata wake can re-drive only its captured boundary, never a successor.
     MailboxRelay(MailboxRelayDrainOwner),
     /// Same-process activation of one durable remote wake; never a pause bypass.
     FederationWake(FederationExecutorLiveOwner),
     /// An explicit Resume of the head its caller checked.
-    Resume(EngramQueuedAdmissionOwner),
-    /// A retried admission due for this head; its acknowledged abort record
-    /// must still release it.
-    AbortRetry(EngramQueuedAdmissionOwner),
-    /// An acknowledged bind-only journal with host-local phase proof.
-    BindRetry(EngramQueuedAdmissionOwner),
-    /// A parked head's automatic replay of its retained intent; its
-    /// acknowledged parked-admission retry must still release it.
-    AdmissionRetry(EngramQueuedAdmissionOwner),
+    Resume(QueuedTurnOwner),
 }

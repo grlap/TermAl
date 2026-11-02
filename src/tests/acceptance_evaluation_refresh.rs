@@ -84,12 +84,8 @@ fn selected_refresh_fixture_for(criteria: &[usize]) -> (AppState, String, String
     };
     assert_eq!(reads.load(Ordering::SeqCst),1);
     assert!(delegation.delegation.prompt.contains("Older selected proof read anew at cut 42."));
-    {
-        let mut inner = state.inner.lock().unwrap();
-        // Park bind/abort retries so this fixture measures acceptance refresh
-        // alone; these controls do not model an Engram-bound evaluator child.
-        inner.session_mut(&delegation.delegation.child_session_id).unwrap().engram.project_reset_in_progress = true;
-    }
+    // The evaluator is already active. Ordinary observation schedules no
+    // bind/abort retry, so acceptance refresh needs no dispatch-reset flag.
     (state,parent,delegation.delegation.id,delegation.delegation.child_session_id)
 }
 
@@ -217,6 +213,16 @@ fn acceptance_refresh_definitive_non_holder_drop_does_not_resurrect_next_attempt
 #[test]
 fn acceptance_refresh_binding_change_preserves_the_discovery_hint() {
     let (state,_,id,child) = selected_refresh_fixture();
+    let (_, _, mut binding_page) = evidence_selection::canonical_binding_receipts();
+    binding_page["basis"]["work_revision"] = json!(8);
+    binding_page["basis"]["run_cut"] = json!(43);
+    binding_page["rows"] = json!([
+        {"criterion":1,"binding":{"requirement":{"check_kind":"test"},"obligation":null}},
+        {"criterion":2,"binding":null}
+    ]);
+    // The new criterion binding has no recorded closure. Discovery must
+    // preserve the requester's hint without manufacturing verification proof.
+    evidence_selection::install_binding_evidence_transport(&state, &child, vec![binding_page]);
     let (_,run) = scripted_runner(vec![Ok(resubmit_refusal())]);
     let reads = Arc::new(AtomicUsize::new(0));
     state.submit_acceptance_evaluation_with_io(&child,keyed_submission(&id,1),run,
@@ -864,12 +870,8 @@ fn acceptance_refresh_sub_agent_pin_selects_fresh_attested_child() {
     assert!(target.attempt_history.is_none());
     assert!(!record.prompt.contains("Host-authored acceptance attempt"));
     assert_eq!(current_target(&state, &old_id).attempt_history.unwrap().ordinal, 1);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        // Exclude bind retries while exercising the acceptance submission.
-        inner.session_mut(&record.child_session_id).unwrap()
-            .engram.project_reset_in_progress = true;
-    }
+    // Submission uses the retained evaluator identity; ordinary observation
+    // has no bind retry to park before this injected write.
     let mut receipt: Value = serde_json::from_str(&evaluate_receipt(false)).unwrap();
     receipt["evaluation"]["mode"] = json!("sub_agent");
     state.submit_acceptance_evaluation_with_runner(

@@ -87,8 +87,8 @@
 
 /// In-process classifier metadata for `ApiError`.
 ///
-/// Most kinds stay local. Federation settings and the project-reset boundary
-/// expose their own stable typed refusal codes beside `error`. Remote proxy
+/// Most kinds stay local. Typed boundaries, such as federation settings,
+/// expose stable refusal codes beside `error`. Remote proxy
 /// decoding reconstructs an `ApiError` from status plus `{ error }` (any such
 /// code is lost), so any caller that needs typed recovery must attach the kind
 /// locally.
@@ -109,13 +109,6 @@ enum ApiErrorKind {
     LocalSessionMissing,
     /// A known launch lacks durable identity needed to admit a run wait.
     TestRunWaitRegistrationUnavailable,
-    /// A queued Engram operation is still durably anchored, but the host
-    /// could not establish whether its transcript promotion was persisted.
-    /// Callers must report the error without terminalizing delegated work.
-    RetainedQueuedPromotionPersistenceUnknown,
-    EngramProjectResetRuntimeHeld,
-    EngramProjectResetDeadline,
-    EngramProjectResetRefused,
     RemoteConnectionUnavailable,
     /// An owned federation SSH child could not be proven reaped. Never start
     /// another process for that pair until explicit operator reconciliation.
@@ -186,7 +179,6 @@ struct ApiError {
     // `kind: None`; callers that need typed recovery must tag errors locally.
     kind: Option<ApiErrorKind>,
     durability_deadline: Option<EnqueuedDurabilityDeadline>,
-    project_reset: Option<EngramProjectResetProgress>,
 }
 
 impl ApiError {
@@ -198,7 +190,6 @@ impl ApiError {
             status: StatusCode::BAD_REQUEST,
             kind: None,
             durability_deadline: None,
-            project_reset: None,
         }
     }
 
@@ -208,7 +199,6 @@ impl ApiError {
             status: StatusCode::CONFLICT,
             kind: None,
             durability_deadline: None,
-            project_reset: None,
         }
     }
 
@@ -218,7 +208,6 @@ impl ApiError {
             status: StatusCode::NOT_FOUND,
             kind: None,
             durability_deadline: None,
-            project_reset: None,
         }
     }
 
@@ -232,7 +221,6 @@ impl ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             kind: None,
             durability_deadline: None,
-            project_reset: None,
         }
     }
 
@@ -242,7 +230,6 @@ impl ApiError {
             status: StatusCode::BAD_GATEWAY,
             kind: None,
             durability_deadline: None,
-            project_reset: None,
         }
     }
 
@@ -253,7 +240,6 @@ impl ApiError {
             status,
             kind: None,
             durability_deadline: None,
-            project_reset: None,
         }
     }
 
@@ -295,37 +281,6 @@ impl ApiError {
 impl IntoResponse for ApiError {
     /// Converts the value into response.
     fn into_response(self) -> Response {
-        if self.kind == Some(ApiErrorKind::EngramProjectResetRefused) {
-            return (self.status, Json(json!({
-                "error": self.message,
-                "code": "engram_project_reset_refused",
-                "outcome": "settings_not_applied",
-                "reset": self.project_reset,
-            }))).into_response();
-        }
-        if self.kind == Some(ApiErrorKind::EngramProjectResetDeadline) {
-            return (self.status, Json(json!({
-                "error": self.message,
-                "code": "engram_project_reset_deadline",
-                "outcome": "settings_not_applied",
-                "reset": self.project_reset,
-            }))).into_response();
-        }
-        if self.kind == Some(ApiErrorKind::EngramProjectResetRuntimeHeld) {
-            return (self.status, Json(json!({
-                "error": self.message,
-                "code": "engram_project_reset_runtime_held",
-                "outcome": "settings_not_applied",
-                "existingSettingsRemainCurrent": true,
-            }))).into_response();
-        }
-        if let Some(progress) = self.project_reset {
-            return (self.status, Json(json!({
-                "error": self.message,
-                "code": "engram_project_reset_in_progress",
-                "reset": progress,
-            }))).into_response();
-        }
         if let Some(deadline) = self.durability_deadline
             && let Some(operation) = deadline.operation
         {
@@ -829,14 +784,6 @@ struct Session {
     /// bounded transcript page happens to be resident.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     live_activity: Option<SessionLiveActivity>,
-    /// True while the host is restoring this session's Engram routing
-    /// authority after process start. This readiness marker is projected from
-    /// process-local state and is never persisted as session authority.
-    #[serde(default, skip_serializing_if = "is_false")]
-    engram_boot_recovery_pending: bool,
-    /// Executing host's ordinary OFF queue policy. Absent on older remote hosts.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_control_off: Option<bool>,
     status: SessionStatus,
     preview: String,
     messages: MessageSequence,
@@ -865,9 +812,6 @@ struct Session {
     /// (`prompt_delivery.rs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     prompt_deliveries: Vec<PromptDeliveryView>,
-    /// Derived timing of retained admission heads, keyed by prompt id.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    prompt_admission_budgets: BTreeMap<String, PromptAdmissionBudgetView>,
     /// Actual provider-channel enqueues observed by this host process.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     provider_handoffs: Vec<ProviderHandoffView>,
@@ -880,14 +824,9 @@ struct Session {
     /// distinguish "paused, waiting for the user" from "about to start".
     #[serde(default)]
     queue_paused: bool,
-    /// Why the paused queue is held and when it moves on by itself, while a
-    /// due automatic Engram retry owns its head (`engram_retry_hold.rs`).
-    /// Absent for every other hold, which `queue_paused` alone reports.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    queue_hold: Option<SessionQueueHold>,
     #[serde(default)]
     provider_capacity_waiting: bool,
-    /// Derived from the original session's retained Delete recovery mode.
+    /// True while an actual pending deletion retains observation records.
     #[serde(default, skip_serializing_if = "is_false")]
     source_tracking_recovery: bool,
     /// Opaque identity/disposition fingerprint for the authoritative queued
@@ -940,8 +879,6 @@ impl Session {
             agent_commands_revision: self.agent_commands_revision.clone(),
             codex_thread_state: self.codex_thread_state.clone(),
             live_activity: self.live_activity.clone(),
-            engram_boot_recovery_pending: self.engram_boot_recovery_pending.clone(),
-            engram_control_off: self.engram_control_off,
             status: self.status.clone(),
             preview: self.preview.clone(),
             messages: MessageSequence::default(),
@@ -952,11 +889,9 @@ impl Session {
             markers: self.markers.clone(),
             pending_prompts: self.pending_prompts.clone(),
             prompt_deliveries: self.prompt_deliveries.clone(),
-            prompt_admission_budgets: self.prompt_admission_budgets.clone(),
             provider_handoffs: self.provider_handoffs.clone(),
             provider_handoff_history: self.provider_handoff_history.clone(),
             queue_paused: self.queue_paused.clone(),
-            queue_hold: self.queue_hold.clone(),
             provider_capacity_waiting: self.provider_capacity_waiting.clone(),
             source_tracking_recovery: self.source_tracking_recovery.clone(),
             queue_projection_hash: self.queue_projection_hash.clone(),
@@ -1040,10 +975,6 @@ struct StateSessionSummary {
     codex_thread_state: Option<CodexThreadState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     live_activity: Option<SessionLiveActivity>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    engram_boot_recovery_pending: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_control_off: Option<bool>,
     status: SessionStatus,
     preview: String,
     #[serde(rename = "messageCount")]
@@ -1051,8 +982,6 @@ struct StateSessionSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     markers: Vec<ConversationMarker>,
     queue_paused: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    queue_hold: Option<SessionQueueHold>,
     #[serde(default)]
     provider_capacity_waiting: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -2444,8 +2373,10 @@ struct UpdateProjectEngramSettingsRequest {
     acceptance_evaluation: Option<AcceptanceEvaluatorDefaults>,
     #[serde(default)]
     enabled: bool,
+    /// Absent keeps the project's stored choice: an update that does not name
+    /// it, such as Disable, never turns observations back on.
     #[serde(default)]
-    turn_gated_control: bool,
+    execution_observability: Option<bool>,
     #[serde(default)]
     binary_path: Option<String>,
     #[serde(default)]
@@ -2464,7 +2395,6 @@ struct VerifyProjectEngramSettingsResponse {
     home: String,
     project_id: String,
     database: String,
-    required_assurance: String,
     ready: bool,
     full_audit: &'static str,
     host_path_status: String,
@@ -2482,19 +2412,27 @@ struct UpdateEngramHostSettingsRequest {
     developer_name: String,
     binary_path: String,
     home: String,
-    #[serde(default = "default_engram_boot_recovery_budget_ms")]
-    boot_recovery_budget_ms: u64,
 }
 
 impl UpdateProjectEngramSettingsRequest {
+    /// Whether the request leaves Execution Observability as the project has
+    /// it stored.
+    fn keeps_stored_observability(&self) -> bool {
+        self.execution_observability.is_none()
+    }
+
+    /// The settings the request names. An absent Execution Observability
+    /// takes the stored record's default here; an update replaces it with the
+    /// project's stored choice (`keeps_stored_observability`).
     fn into_settings(self) -> EngramProjectSettings {
         EngramProjectSettings {
             acceptance_evaluation: self.acceptance_evaluation,
             enabled: self.enabled,
-            turn_gated_control: self.turn_gated_control,
+            execution_observability: self
+                .execution_observability
+                .unwrap_or_else(default_engram_execution_observability),
             binary_path: self.binary_path,
             home: self.home,
-            work_authority_grant: None,
             authority_store_key: None,
             deadline_ms: self.deadline_ms,
         }
@@ -3067,10 +3005,6 @@ struct AgentReadiness {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
-    /// Unresolved session settlement is separate from the applied project
-    /// settings. This projection contains no private recovery wire values.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_control_recovery: Vec<EngramControlRecoverySummary>,
     revision: u64,
     /// UUID generated at `AppState::new_with_paths` boot; see
     /// `HealthResponse::server_instance_id` for semantics. Carried on
@@ -3581,21 +3515,7 @@ struct SessionQueueDelta {
     pending_prompts: Vec<PendingPrompt>,
     queue_paused: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    queue_hold: Option<SessionQueueHold>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     queue_projection_hash: Option<String>,
-}
-
-/// Why a session's paused queue is held and when it moves on by itself,
-/// while a due automatic Engram retry owns its head: `kind` is
-/// `automaticRetry`, `cause` the retry's code and `retryAt` its next due time
-/// (RFC 3339). Built only by `engram_automatic_retry_hold`.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionQueueHold {
-    kind: String,
-    cause: String,
-    retry_at: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

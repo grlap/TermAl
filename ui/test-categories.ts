@@ -35,7 +35,6 @@ export type HeavyTestFile = {
 };
 
 export const APP_TEST_FILES: readonly string[] = [
-  "src/App.engram-control-recovery.test.tsx",
   "src/App.test-runs-badge.test.tsx",
   "src/App.control-panel-dnd.test.tsx",
   "src/App.control-panel.board.test.tsx",

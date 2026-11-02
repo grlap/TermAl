@@ -38,7 +38,6 @@ describe("EngramPreferencesPanel", () => {
           developerName: "dev",
           binaryPath: "engram",
           home: "C:\\Engram",
-          bootRecoveryBudgetMs: 5_000,
         }}
         projects={[
           declaredProject,
@@ -67,7 +66,7 @@ describe("EngramPreferencesPanel", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Second repo" })).toBeInTheDocument();
     expect(
-      screen.getByText(/Base MCP and work context are enabled/),
+      screen.getByRole("checkbox", { name: "Execution Observability" }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/write-only grant/)).not.toBeInTheDocument();
 
@@ -80,9 +79,6 @@ describe("EngramPreferencesPanel", () => {
     fireEvent.change(screen.getByLabelText("Engram host home"), {
       target: { value: "C:\\EngramHome" },
     });
-    fireEvent.change(screen.getByLabelText("Engram boot recovery budget"), {
-      target: { value: "7500" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Save host settings" }));
 
     await waitFor(() =>
@@ -90,7 +86,6 @@ describe("EngramPreferencesPanel", () => {
         developerName: "greg",
         binaryPath: "C:\\tools\\engram.exe",
         home: "C:\\EngramHome",
-        bootRecoveryBudgetMs: 7_500,
       }),
     );
     expect(onStateUpdated).toHaveBeenCalledTimes(1);
@@ -103,7 +98,6 @@ describe("EngramPreferencesPanel", () => {
           developerName: "dev",
           binaryPath: "engram",
           home: "C:\\Engram",
-          bootRecoveryBudgetMs: 5_000,
         }}
         projects={[{ ...declaredProject, engramDeclared: false }]}
         onStateUpdated={vi.fn()}

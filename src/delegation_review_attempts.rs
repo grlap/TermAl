@@ -207,7 +207,7 @@ fn review_requester_project_locked(inner: &StateInner, requester: &str) -> Resul
         .ok_or_else(|| ApiError::not_found("review result is unavailable"))?;
     let root = &inner.sessions[index];
     if root.hidden || !root.is_local_session()
-        || root.engram.source_observation_delete_requested
+        || root.engram.observation_delete_requested
         || root.session.parent_delegation_id.is_some()
         || inner.find_delegation_index_by_child_session_id(requester).is_some()
     {

@@ -1,8 +1,11 @@
-//! Session-local transcript rejection must not fail a sibling admission fence.
+//! Session-local transcript rejection must not fail a sibling own-row fence.
 use super::*;
 
 #[path = "persist_queue_promotion_conflict.rs"]
 mod queue_promotion;
+
+#[path = "human_prompt_row_fence.rs"]
+mod human_prompt_row_fence;
 
 fn message(id: &str) -> Message {
     Message::Text {
@@ -30,7 +33,30 @@ fn other_message(id: &str) -> Message {
     }
 }
 
-fn conflict_does_not_fail_sibling_admission(sparse: bool) {
+/// Queues one ordinary prompt: the per-session change an own-row fence
+/// (`ordinary_session_row_persisted_content`) must prove for that row alone.
+fn queue_ordinary_prompt(record: &mut SessionRecord, id: &str) {
+    let pending = PendingPrompt {
+        id: id.to_owned(),
+        timestamp: stamp_now(),
+        text: "keep the original queued intent".into(),
+        expanded_text: None,
+        source: None,
+        attachments: Vec::new(),
+        engram_interrupted: false,
+        is_engram_retained: false,
+    };
+    queue_prompt_on_record(record, pending, Vec::new());
+}
+
+fn ordinary_row_target(record: &SessionRecord) -> PersistFenceTarget {
+    PersistFenceTarget::OrdinarySessionRow {
+        session_id: record.session.id.clone(),
+        content: ordinary_session_row_persisted_content(&PersistedSessionRecord::from_record(record)),
+    }
+}
+
+fn conflict_does_not_fail_sibling_own_row_fence(sparse: bool) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let mut fixture = FenceFixture::new();
     let (bad, good) = {
@@ -70,8 +96,7 @@ fn conflict_does_not_fail_sibling_admission(sparse: bool) {
         let mut inner = fixture.inner.lock().unwrap();
         let index = inner.find_session_index(&bad).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.engram.dispatch_generation = 2;
-        record.engram.routing_token = Some("rejected-new-owner".into());
+        queue_ordinary_prompt(record, "rejected-new-owner");
         record.session.prompt_history.push("unsaved history".into());
         record.prompt_history_mutation_stamp = record.mutation_stamp;
         if sparse {
@@ -84,25 +109,18 @@ fn conflict_does_not_fail_sibling_admission(sparse: bool) {
             push_message_on_record(record, message("body-0"));
         }
         record.message_positions = build_message_positions(&record.session.messages);
-        let bad_target = PersistFenceTarget::EngramAdmission {
-            session_id: bad.clone(),
-            content: engram_admission_persisted_content(&PersistedSessionRecord::from_record(record)),
-        };
+        let bad_target = ordinary_row_target(record);
         let index = inner.find_session_index(&good).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.engram.dispatch_generation = 42;
-        record.engram.routing_token = Some("healthy-new-owner".into());
-        let good_target = PersistFenceTarget::EngramAdmission {
-            session_id: good.clone(),
-            content: engram_admission_persisted_content(&PersistedSessionRecord::from_record(record)),
-        };
+        queue_ordinary_prompt(record, "healthy-new-owner");
+        let good_target = ordinary_row_target(record);
         (bad_target, good_target)
     };
     let bad_waiter = fixture.enqueue(bad_target.clone());
     let good_waiter = fixture.enqueue(good_target.clone());
     fixture.receive(false);
     fixture.batch.drain(&fixture.rx, false);
-    assert_eq!(fixture.batch.pending.len(), 2, "both admissions must share the failing write");
+    assert_eq!(fixture.batch.pending.len(), 2, "both own-row fences must share the failing write");
     assert_eq!(poll(&bad_waiter), None);
     assert_eq!(poll(&good_waiter), None);
     let delta = fixture.collect();
@@ -121,11 +139,11 @@ fn conflict_does_not_fail_sibling_admission(sparse: bool) {
         assert!(rejected.error.contains("duplicate transcript identity"));
     }
     assert_eq!(poll(&good_waiter), Some(Ok(())),
-        "a conflicting sibling transcript must not make unrelated admission durability unknown: {result:?}");
+        "a conflicting sibling transcript must not make an unrelated row's durability unknown: {result:?}");
     let persisted = result.expect("healthy sibling must commit despite transcript rejection");
     assert!(persisted.contains(&good));
     assert!(!persisted.contains(&bad), "rejected session cannot be reported durable");
-    assert_ne!(poll(&bad_waiter), Some(Ok(())), "rejected admission must not receive a false ACK");
+    assert_ne!(poll(&bad_waiter), Some(Ok(())), "the rejected row must not receive a false ACK");
     let connection = fixture.cache.connection.as_ref().unwrap();
     assert!(good_target.is_already_durable(connection).unwrap());
     assert!(!bad_target.is_already_durable(connection).unwrap());
@@ -142,7 +160,7 @@ fn conflict_does_not_fail_sibling_admission(sparse: bool) {
     assert_eq!(retry.changed_sessions[0].session.id, bad);
     assert!(retry.changed_sessions[0].persist_prompt_history, "rejected prompt history must also remain dirty");
     // A later legitimate producer correction, not a database repair, can
-    // discharge the original exact admission fence without another request.
+    // discharge the original exact own-row fence without another request.
     {
         let mut inner = fixture.inner.lock().unwrap();
         let record = inner.session_mut(&bad).unwrap();
@@ -160,13 +178,13 @@ fn conflict_does_not_fail_sibling_admission(sparse: bool) {
 }
 
 #[test]
-fn duplicate_incoming_id_does_not_poison_sibling_admission_fence() {
-    conflict_does_not_fail_sibling_admission(false);
+fn duplicate_incoming_id_does_not_poison_sibling_own_row_fence() {
+    conflict_does_not_fail_sibling_own_row_fence(false);
 }
 
 #[test]
-fn sparse_id_collision_does_not_poison_sibling_admission_fence() {
-    conflict_does_not_fail_sibling_admission(true);
+fn sparse_id_collision_does_not_poison_sibling_own_row_fence() {
+    conflict_does_not_fail_sibling_own_row_fence(true);
 }
 
 fn unrelated_constraint_is_fatal(trigger_body: &str) {
@@ -184,13 +202,9 @@ fn unrelated_constraint_is_fatal(trigger_body: &str) {
     let target = {
         let mut inner = fixture.inner.lock().unwrap();
         let record = inner.session_mut(&id).unwrap();
-        record.engram.dispatch_generation = 42;
-        record.engram.routing_token = Some("must-not-ack".into());
+        queue_ordinary_prompt(record, "must-not-ack");
         push_message_on_record(record, message("trigger-message"));
-        PersistFenceTarget::EngramAdmission {
-            session_id: id,
-            content: engram_admission_persisted_content(&PersistedSessionRecord::from_record(record)),
-        }
+        ordinary_row_target(record)
     };
     let waiter = fixture.enqueue(target.clone());
     fixture.receive(false);
@@ -395,46 +409,39 @@ fn rejection_diagnostic_is_bounded_and_survives_a_healthy_tick() {
     assert_eq!(json["lastSessionRejection"]["error"].as_str().unwrap().chars().count(), 1024);
 }
 
-fn queue_admission_owner(record: &mut SessionRecord) -> EngramQueuedAdmissionOwner {
-    let pending = PendingPrompt {
-        id: format!("ack-head-{}", record.session.id),
-        timestamp: stamp_now(),
-        text: "keep the original queued intent".into(),
-        expanded_text: None,
-        source: None,
-        attachments: Vec::new(),
-        engram_interrupted: false,
-        is_engram_retained: false,
-    };
-    queue_prompt_on_record(record, pending, Vec::new());
-    EngramQueuedAdmissionOwner::capture(record).unwrap()
-}
-
 #[test]
-fn synchronous_admission_ack_is_scoped_to_the_saved_session() {
+fn synchronous_own_row_ack_is_scoped_to_the_saved_session() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let (_fixture, state, bad, good) = partial_synchronous_fixture(false);
-    let (bad_owner, good_owner) = {
+    let project = create_test_project(&state, state.test_temp_root.as_ref().unwrap().path(), "Human row ACK");
+    {
         let mut inner = state.inner.lock().unwrap();
-        let bad_owner = queue_admission_owner(inner.session_mut(&bad).unwrap());
-        let good_owner = queue_admission_owner(inner.session_mut(&good).unwrap());
-        (bad_owner, good_owner)
+        inner.projects.iter_mut().find(|entry| entry.id == project).unwrap().engram =
+            Some(EngramProjectSettings::default());
+        for id in [&bad, &good] {
+            let record = inner.session_mut(id).unwrap();
+            record.session.project_id = Some(project.clone());
+            queue_ordinary_prompt(record, &format!("ack-head-{id}"));
+        }
+    }
+    // The ordinary own-row acknowledgement: with no persist writer, the
+    // synchronous commit proves only the exact row it saved.
+    let image = |id: &str| {
+        let inner = state.inner.lock().unwrap();
+        Some(human_prompt_persistence_fence(&inner, id).unwrap()
+            .expect("the configured Engram project exercises the synchronous fence"))
     };
-    let deadline = || state.engram_budget_clock().now() + phase_sync::DEADLOCK_GUARD;
-    let (error, fault) = state.confirm_engram_admission_durable_classified(
-        &bad, deadline(), &bad_owner,
-    ).unwrap_err();
+    let error = state.confirm_human_prompt_persistence(image(&bad)).unwrap_err();
     assert!(error.message.contains(&bad));
     assert!(error.message.contains("UNIQUE constraint failed"));
-    assert!(matches!(fault, EngramAdmissionDurabilityFault::Local));
-    state.confirm_engram_admission_durable_classified(&good, deadline(), &good_owner).unwrap();
+    state.confirm_human_prompt_persistence(image(&good)).unwrap();
     {
         let mut inner = state.inner.lock().unwrap();
         let record = inner.session_mut(&bad).unwrap();
         record.session.messages[0] = message("body-2");
         record.message_positions = build_message_positions(&record.session.messages);
     }
-    state.confirm_engram_admission_durable_classified(&bad, deadline(), &bad_owner).unwrap();
+    state.confirm_human_prompt_persistence(image(&bad)).unwrap();
     let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
     for id in [&bad, &good] {
         assert_eq!(loaded.sessions[loaded.find_session_index(id).unwrap()]
@@ -442,38 +449,39 @@ fn synchronous_admission_ack_is_scoped_to_the_saved_session() {
     }
 }
 
+// The abort-retry owner and its acknowledgement were removed with turn
+// gating. A retry record an earlier build saved is raw historical data on its
+// own row: a rejected row does not save it, the saved row keeps it exactly,
+// and nothing schedules, retries or acknowledges it.
 #[test]
-fn synchronous_retry_ack_does_not_mark_a_rejected_session_saved() {
+fn historical_retry_record_stays_raw_data_on_its_saved_row() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let (_fixture, state, bad, good) = partial_synchronous_fixture(false);
+    let historical = |id: &str| json!({
+        "promptId": format!("ack-head-{id}"),
+        "reason": "begin_preparation",
+        "attempts": 1,
+        "authority": "same-retry-authority",
+        "acknowledged": false,
+    });
     let mut inner = state.inner.lock().unwrap();
     for id in [&bad, &good] {
         let record = inner.session_mut(id).unwrap();
-        let owner = queue_admission_owner(record);
-        record.engram.abort_retry = Some(EngramAbortRetry {
-            prompt_id: owner.prompt_id,
-            reason: EngramAbortReason::BeginPreparation,
-            settled_grant_id: None,
-            attempts: 1,
-            held_since: stamp_now(),
-            due_at: stamp_now(),
-            authority: "same-retry-authority".into(),
-            acknowledged: false,
-            generation: record.engram.dispatch_generation,
-        });
+        record.engram.historical_control.insert("engramAbortRetry".into(), historical(id));
     }
-    for id in [&bad, &good] {
-        let index = inner.find_session_index(id).unwrap();
-        state.request_engram_abort_acknowledgement_locked(&mut inner, index);
-    }
-    assert!(!inner.sessions[inner.find_session_index(&bad).unwrap()].engram.abort_retry_saved);
-    assert!(inner.sessions[inner.find_session_index(&good).unwrap()].engram.abort_retry_saved);
-    let record = inner.session_mut(&bad).unwrap();
-    record.session.messages[0] = message("body-2");
-    record.message_positions = build_message_positions(&record.session.messages);
-    let index = inner.find_session_index(&bad).unwrap();
-    state.request_engram_abort_acknowledgement_locked(&mut inner, index);
-    assert!(inner.sessions[index].engram.abort_retry_saved);
+    let error = state.commit_session_locked(&mut inner, &bad).unwrap_err();
+    assert!(format!("{error:#}").contains(&bad));
+    assert!(format!("{error:#}").contains("UNIQUE constraint failed"));
+    state.commit_session_locked(&mut inner, &good).unwrap();
+    drop(inner);
+    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let bad_record = &loaded.sessions[loaded.find_session_index(&bad).unwrap()];
+    assert!(!bad_record.engram.historical_control.contains_key("engramAbortRetry"),
+        "a rejected row cannot report its retry record saved");
+    let good_record = &loaded.sessions[loaded.find_session_index(&good).unwrap()];
+    assert_eq!(good_record.engram.historical_control.get("engramAbortRetry"), Some(&historical(&good)),
+        "the saved row keeps the exact historical record as raw data");
+    assert!(good_record.provider_capacity_retry.is_none(), "no retry owner is restored from it");
 }
 
 #[test]
@@ -490,7 +498,6 @@ fn synchronous_capacity_ack_does_not_mark_a_rejected_session_saved() {
             generation: record.active_turn_generation,
             stop_generation: record.runtime_stop_generation,
             pause_epoch: record.auto_dispatch_pause_epoch,
-            dispatch_generation: record.engram.dispatch_generation,
             settings: provider_capacity_settings(record),
             attempts: 0,
             due_at: None,
@@ -522,8 +529,8 @@ fn row_bound_commits_refuse_only_their_rejected_session() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let (_fixture, state, bad, good) = partial_synchronous_fixture(false);
     let mut inner = state.inner.lock().unwrap();
-    inner.session_mut(&bad).unwrap().engram.routing_token = Some("unsaved-bad-token".into());
-    inner.session_mut(&good).unwrap().engram.routing_token = Some("saved-good-token".into());
+    queue_ordinary_prompt(inner.session_mut(&bad).unwrap(), "unsaved-bad-prompt");
+    queue_ordinary_prompt(inner.session_mut(&good).unwrap(), "saved-good-prompt");
     let error = state.commit_session_locked(&mut inner, &bad).unwrap_err();
     assert!(format!("{error:#}").contains(&bad));
     assert!(format!("{error:#}").contains("UNIQUE constraint failed"));
@@ -532,8 +539,11 @@ fn row_bound_commits_refuse_only_their_rejected_session() {
     assert!(!inner.remote_settings_persist_dirty);
     drop(inner);
     let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
-    assert!(loaded.sessions[loaded.find_session_index(&bad).unwrap()].engram.routing_token.is_none());
-    assert_eq!(loaded.sessions[loaded.find_session_index(&good).unwrap()].engram.routing_token.as_deref(),
-        Some("saved-good-token"));
+    let queued = |id: &str| -> Vec<String> {
+        loaded.sessions[loaded.find_session_index(id).unwrap()].queued_prompts.iter()
+            .map(|queued| queued.pending_prompt.id.clone()).collect()
+    };
+    assert!(queued(&bad).is_empty(), "the rejected row's own change is not saved");
+    assert_eq!(queued(&good), ["saved-good-prompt"]);
     assert_eq!(loaded.preferences.default_codex_model, "saved-sibling-preference");
 }

@@ -52,7 +52,7 @@ form needs its local request, input and results artifacts to match the
 observed owner, root, argv, interval and terminal native stage. Stale,
 foreign, interrupted, unrun or inconsistent artifacts cannot supply a pass
 or a native-exit reference. Detached focused builds are not supported.
-Source, grant, overlap and outstanding-work fences apply to Build as to Test;
+Source, overlap and outstanding-work fences apply to Build as to Test;
 this distinction does not change the maintained full gate's Test stages.
 
 ## Review Gate
@@ -884,132 +884,41 @@ failure. The report logic is in `scripts/test-durations.mjs`.
 
 A full gate takes longer than a Claude tool call may run (10 minutes), so a
 session that needs the gate as evidence for an Engram item it holds launches
-it in the background, in the item's named source root:
+it in the background, in the item's named source root, with committed input:
 
 ```bash
-pushd "C:\path\to\worktree" && node scripts/test-launcher.mjs full
+pushd "C:\path\to\worktree" && node scripts/test-launcher.mjs full --input commit
 ```
 
 with the Bash tool's background mode, then ends the turn. A runtime that can
-notify a coordinator may launch it with `--detach` instead. Only a root
-session whose turn is measured in the item's named source root gets credit
-this way; a delegated session is told its gate is not carried. The gate goes
-alone on its line: a launch joined to another command, or a `--detach`
-launch that failed, earns no credit and TermAl says so; relaunch two minutes
-or more later, since a launch that follows an unmatched one sooner is
-refused as ambiguous. TermAl carries the
-launch past the turn and credits the run as a passed test check on the
-holder's next checkpoint for the same claim, when every stage the run
-requested passed, among them a test stage ([Which stages count as
-tests](#which-stages-count-as-tests)), its input
-fingerprints before and after are present and agree, its terminal record is
-the one TermAl first read as terminal, the worktree's source is unchanged,
-and no write TermAl can observe reached the worktree before the run ended.
-A terminal carried run at a checkpoint whose binding names a different
-claim is refused immediately (`its claim is no longer the one this session
-holds`), even if its old root entry remains. An existing fence or changed
-root generation takes precedence. With no binding, or while the run is
-nonterminal, no claim mismatch is invented; existing fence, generation,
-conflict and six-hour expiry rules still apply. Credit requires the exact
-same claim.
-A full-gate check retired because a later description or repeated start
-changes its command or place keeps its original root/start ambiguity window.
-A check-credit notice names the original fingerprint and start, explains the
-command-or-place change and that a run may already have started, and advises
-waiting two minutes or more after the last launch in that worktree.
-A later gate there cannot borrow the retired launch's run. A matching
-description or repeated start keeps the original check; retiring an ordinary
-test adds no full-run window.
-An enabled Current full-gate start without a binding or active grant retains
-only bounded diagnostic correlation. A matching detached/background result
-reports `it began without a binding to claimed work, so it was not carried`
-or `the turn has no active grant at its start, so it was not carried`, never
-verification. A known, unambiguous Git-worktree location and original start
-time protect a subsequent gate from borrowing that run; unknown locations
-produce only the line. Correlation uses the key, runtime and turn, so fresh
-identities can start independently. Diagnostic loss is reported once with
-the original fingerprint/time: `the pending-command tracking limit dropped
-that command's diagnostic tracking`, `its runtime or turn ended before its
-launch result; diagnostic tracking dropped`, or `its command at completion
-did not match its start`. Each such retirement keeps a known root and its
-original start in the bounded unmatched-launch window; an enabled own
-abandonment keeps that window silently. This prevents a later gate from
-borrowing a run whose diagnostic was lost. Unknown roots add no window.
-Retirement also rechecks existing carried gates, including saved run matches,
-and the final checkpoint lock rechecks that eligibility after off-lock
-settlement. Retroactive revocation applies only to starts within two minutes
-in either direction. A run already read as terminal before the other start
-keeps its eligibility, allowing the existing ten-second launch-stamp slack.
-Missing timestamps remain ambiguous. An ambiguous saved match cannot supply
-passing evidence or batch-member bindings.
-These lines claim no launch outcome; disabled or
-non-Current observations gain no loss-reporting or cleanup authority.
-A failed run with a complete record is recorded as failed; a run that was
-stopped or interrupted, or whose launcher died without a result, is
-neither, and TermAl records nothing for it. While it runs, a command the
-holding session runs in that worktree refuses the credit unless the session
-is a Claude session and the command only reads (such as `git status`,
-`git diff`, or `node scripts/test-launcher.mjs summary RUN_DIRECTORY` from
-the repository root). A Claude session's background launch leaves its shell
-where it was, because the Bash tool runs a background call in a shell of its
-own: a later command with no `pushd` of its own runs where the session's
-shell already was, not in the gate's worktree. The credit is also refused
-by a command another writable session runs in that worktree, unless that
-session is a Claude session and the command only reads (a command TermAl
-cannot place counts where its session works: its workdir's worktree and its
-claim's named source root, not every worktree on the host); by a file edit
-reported by another session that works there; by any
-file edit the holding session reports; and by any file change TermAl's
-workspace watcher sees there, except under the worktree's own `.tmp/`
-scratch directory and except a change whose notification reached TermAl
-before both the gate's launch and its run's registration with TermAl (which
-the launcher makes before it fingerprints its input or runs any stage): the
-run then never read the tree before the change, however long the
-notification waited to be handled. The changed file's own modification time
-is not trusted for this, since tools and renames can give it an old one, nor
-is the wall clock, which can step backward: TermAl orders notifications,
-launches and registrations on its own counter, held in memory only, so a
-run registered before a TermAl restart takes no such exemption. A gate
-settled by its reported end, such as a Codex test still running when its
-turn closed, takes none either. A refusal for a watcher change outside
-Cargo's temporary target siblings names the file's modification time, or
-says it is unknown, and when the notification reached TermAl. Once the gate
-is carried, another session being in a turn
-refuses nothing by itself. At the launch it does: a gate launched while
-another writable session is in a turn in that worktree, or while another
-command of the holder is running, is not carried at all. TermAl says which
-and why before the next prompt. The launcher makes Cargo's `target`
-directory itself before the first stage, when Git ignores it and no
-`CARGO_TARGET_DIR` points elsewhere: Cargo would otherwise make it through
-a temporary sibling (`target` plus random characters) that the watcher does
-not ignore, and the first build in a fresh worktree would refuse its own
-gate. A command run through Claude's PowerShell tool is not reported
-to TermAl, so only the watcher can see what it writes. While a carried
-gate can still be credited and has not settled, TermAl denies any Claude
-session's Write, Edit, MultiEdit or NotebookEdit request whose target lies
-in the gate's worktree, including the holder's own and a subagent's, before
-it is allowed: the target is resolved against the session's directory and
-through links, an approval given later is checked again, and the denial says
-which gate it protects. A run read as ended stays protected until it
-settles, since the watcher reports late, and only a checkpoint of its holder
-on the claim that launched it settles it. While its holder is focused on
-another claim it settles only after the holder makes that claim its focus
-again, so it can stay protected until it expires six hours after its launch;
-the denial names the holder and when the protection ends. A gate already
-fenced, refused or expired is not protected. A target is judged as
-the watcher judges a change there: a worktree nested inside the gate's is
-its own, and the watcher's ignored directories and the `.tmp/` at the
-worktree's root are not protected. A denied request writes nothing, so the
-gate keeps its credit. Bash commands, Codex patches, other processes and
-anything that bypasses Claude's permission request are not covered; their
-writes still refuse the gate as above. Once the run has
-ended, a write no longer refuses it, except a change the watcher reports
-late, which may have landed while it ran; a source change still there at the
-checkpoint does. A host restart during the run loses the credit, and TermAl
-says so after it. An acceptance evaluation requested before the record lands
-is judged without it, and Engram marks it stale when the record lands (a
-check recorded after an evaluation's evidence basis makes it stale), so
-request it after the checkpoint that records the gate. The full rules are in
+notify a coordinator may launch it with `--detach` instead.
+
+Credit comes only from registered verification. A run registered with
+`--input commit` ([committed-input runs](#ordinary-committed-input-runs---input-commit))
+in the claim's named source root, on the exact store, that ends with terminal
+results and an eligible committed-input record (`input: commit <sha> clean;
+eligible`), is sent to Engram with `verification_record` over the session's
+work session, and Engram decides credit from that record. A run without that
+registration, or whose record is not eligible, earns no credit, whatever its
+stages say. Only a root session holding the claim can name its root; a
+delegated session is measured in its workdir and has no named root.
+
+TermAl still carries such a launch past the turn as local custody, and says
+before the next prompt when a launch is not carried or a carried one is
+dropped: a launch joined to another command, a `--detach` launch that failed,
+a launch less than two minutes after an unmatched one in the same worktree, a
+launch with no named root or in another worktree, a write TermAl can observe
+reaching the worktree while the run is going, a released claim or a renamed
+or cleared root, or six hours without an ended run. That custody is not
+verification: it adds no credit and settles nothing at a later turn. While the
+run is going, a command the holding session runs in that worktree counts as a
+write unless the session is a Claude session and the command only reads (such
+as `git status`, `git diff`, or `node scripts/test-launcher.mjs summary
+RUN_DIRECTORY` from the repository root). A host restart during the run loses
+the carry, and TermAl says so after it. An acceptance evaluation requested
+before the run's record is sent is judged without it, and Engram marks it
+stale when the record lands, so request it after the record is sent. The full
+rules are in
 [the Engram host adapter's carried background gates](features/engram-host-adapter.md#carried-background-gates).
 
 The watcher omits `Modify(Any)` and metadata-only notifications whose path
@@ -1020,12 +929,9 @@ creation, deletion, rename, unknown events and unreadable or linked paths
 remain observable. A file write followed by a restore still fences the run;
 equal final hashes or old mtimes do not cancel an observed file event.
 
-One carried gate can also be recorded for every item of a commit that lands
-several items: hold each item's claim, name each item's source root to the
-gate's worktree, and give each item a granted turn on its own claim on the
-frozen tree before launching the gate. TermAl then binds the gate's passed
-record to each other item, on that item's own run, and says for each whether
-it was recorded. See [batch full gates](features/batch-full-gates.md).
+One gate is no longer recorded for the other items of a commit that lands
+several items: TermAl sends no `verification_bind` for them, so each item
+needs its own registered run. See [batch full gates](features/batch-full-gates.md).
 
 ### Which stages count as tests
 
@@ -1067,7 +973,7 @@ stage after its summary was printed, such as by the disk-capacity floor above,
 prints `FAIL RUN exit=1`, but its own `results.json` records it failed with
 every stage unrun. In the foreground, when the summary's first verdict names
 the run whose `results.json` its `results:` line names, its check ends
-Unknown. A carried run like that is refused, neither credited nor recorded. A
+Unknown. A carried run like that is dropped, never recorded. A
 run that failed at any stage, its first included, is still recorded failed.
 
 A focused run, `node scripts/test-launcher.mjs focused -- COMMAND ARG...`,
@@ -1079,7 +985,9 @@ coherent native Node TAP/spec totals block, records them
 on the focused stage of `results.json` as `tests` (`passed`, `failed`,
 `ignored`), and prints them in its summary as `tests: passed=N failed=M
 ignored=K` beside `input fingerprint: …`. A runner it does not recognise gets
-no counts. The host credits a passing focused run only from that run's own
+no counts. A focused run earns credit only as registered verification, run
+with `--input commit` as a full gate above; otherwise the host reports it as
+an uncredited check, and reports it passed only from that run's own
 `results.json`, found through the summary's `results:` line under the same
 checks as a full gate's request record: the summary's own verdict, its first
 `PASS RUN exit=0` line, names that same run; the run and its focused stage
@@ -1088,8 +996,8 @@ failed. Counts printed in the summary but missing from the record earn
 nothing, and a `results:` line printed later in a stage's diagnostics cannot
 lend another run's counts. A failing focused run is recorded as failed, as
 before. A focused run started with `--detach` is no test check at all: only a
-full gate is carried. A credited focused run
-is recorded like the plain test command it wraps, never as a full gate. The
+full gate is carried. A passing focused run
+is reported like the plain test command it wraps, never as a full gate. The
 host side takes effect once a host built with it is running, that is after
 the next TermAl restart. Native Node recognition and unsupported-form feedback
 also require that updated running host; declarations alone cannot add them.
@@ -1097,9 +1005,9 @@ also require that updated running host; declarations alone cannot add them.
 Native Node focused checks additionally match owner, repository root, exact
 inner argv, execution interval, native terminal exit and unchanged input
 fingerprints through the same local artifact validator as focused Build.
-Missing, partial, duplicate or inconsistent totals do not earn passing credit;
+Missing, partial, duplicate or inconsistent totals are not reported as passed;
 skipped/TODO tests are ignored rather than executed passes, and cancellation
-counts as failure. Valid matching failing evidence records a failed Test;
+counts as failure. Valid matching failing evidence reports a failed test;
 missing or mismatched evidence remains unknown, never a summary-text rescue.
 The bounded Node grammar supports TAP/spec reporters, name/skip patterns,
 positive concurrency/timeout values and test files; watch, help, eval and

@@ -21,7 +21,7 @@ it("runs only after explicit action and retains an audit across Verify", async (
   vi.mocked(request).mockResolvedValue(audit);
   vi.mocked(verifyProjectEngramSettings).mockResolvedValue({ verified: true, ready: true, fullAudit: "not_run",
     hostPathStatus: "matched", elapsedMs: 10, binaryPath: "/engram", home: "/home", projectId: "store-one",
-    database: "/home/one.db", requiredAssurance: "turn_gated" });
+    database: "/home/one.db" });
   const project: Project = { id: "project/one", name: "One", rootPath: "/one", remoteId: "local", engramDeclared: true };
   render(<EngramProjectSettingsPanel project={project} idPrefix="test" onSaved={vi.fn()} onDefaultsSaved={vi.fn()} onVerified={vi.fn()} />);
   expect(request).not.toHaveBeenCalled();
@@ -33,7 +33,8 @@ it("runs only after explicit action and retains an audit across Verify", async (
   expect(await screen.findByText("Not run by Verify")).toBeInTheDocument();
   expect(screen.getByLabelText("Last Full Audit result")).toHaveTextContent("Audit healthy");
   expect(screen.getByText(audit.warnings)).toBeInTheDocument();
-  expect(screen.getByText(/Base · advisory \/ unmediated/)).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "Execution Observability" })).toBeChecked();
+  expect(screen.queryByText("Required assurance")).not.toBeInTheDocument();
   expect(request).toHaveBeenCalledTimes(1);
 });
 

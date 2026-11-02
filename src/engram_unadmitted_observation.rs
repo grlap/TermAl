@@ -64,7 +64,6 @@ struct EngramUnadmittedObservationBasis {
 /// The execution_observe request for an unadmitted turn, validated as built
 /// at `built_at`.
 fn engram_unadmitted_turn_request(
-    routing_token: &str,
     basis: EngramUnadmittedObservationBasis,
     host_turn_ref: String,
     source_change: Option<EngramObservedSourceChange>,
@@ -72,9 +71,8 @@ fn engram_unadmitted_turn_request(
     built_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<EngramControlRequest, EngramTransportError> {
     engram_unadmitted_request(
-        routing_token,
         basis,
-        EngramInterTurnOccurrence::UnadmittedTurn { host_turn_ref, source_change, observed_checks },
+        EngramInterTurnOccurrence::UnadmittedTurn { host_turn_ref, source_change, observed_checks, observed_outcome: None },
         built_at,
     )
 }
@@ -82,22 +80,32 @@ fn engram_unadmitted_turn_request(
 /// The execution_observe request for one check of an unadmitted turn,
 /// reported on its own, validated as built at `built_at`.
 fn engram_observed_check_request(
-    routing_token: &str,
     basis: EngramUnadmittedObservationBasis,
     host_turn_ref: String,
     check: EngramObservedCheck,
     built_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<EngramControlRequest, EngramTransportError> {
     engram_unadmitted_request(
-        routing_token,
         basis,
         EngramInterTurnOccurrence::ObservedCheck { host_turn_ref, check },
         built_at,
     )
 }
 
+// A real point-in-time source measurement, independent of whether a change
+// or a check was observed. It supplies no mutation or verification credit.
+fn engram_source_sighting_request(
+    basis: EngramUnadmittedObservationBasis,
+    sighting: EngramMeasuredSighting,
+    built_at: chrono::DateTime<chrono::Utc>,
+) -> Result<EngramControlRequest, EngramTransportError> {
+    engram_unadmitted_request(basis, EngramInterTurnOccurrence::SourceSighting {
+        source_basis: sighting.source_basis,
+        observed_at: sighting.observed_at,
+    }, built_at)
+}
+
 fn engram_unadmitted_request(
-    routing_token: &str,
     basis: EngramUnadmittedObservationBasis,
     occurrence: EngramInterTurnOccurrence,
     built_at: chrono::DateTime<chrono::Utc>,
@@ -114,7 +122,6 @@ fn engram_unadmitted_request(
     engram_validate_unadmitted_observation(&observation, built_at)
         .map_err(|reason| EngramTransportError::protocol(format!("unadmitted observation refused: {reason}")))?;
     let request = EngramControlRequest::ExecutionObserve {
-        routing_token: routing_token.to_owned(),
         observation,
     };
     let bytes = serde_json::to_vec(&request).map_err(|_| {
@@ -199,12 +206,20 @@ fn engram_validate_unadmitted_observation(
     if through > built_at {
         return Err("observed_interval.through is after the request was built".into());
     }
+    if let EngramInterTurnOccurrence::SourceSighting { source_basis, observed_at } = &observation.occurrence {
+        engram_observation_source_basis(source_basis, "source_sighting.source_basis")?;
+        engram_observation_within(observed_at, from, through, "source_sighting.observed_at")?;
+        validate_engram_measured_source_sighting(&observation.root_basis, &EngramMeasuredSighting {
+            source_basis: source_basis.clone(), observed_at: observed_at.clone(),
+        }).map_err(|error| error.message)?;
+        return Ok(());
+    }
     let (host_turn_ref, source_change, checks) = match &observation.occurrence {
-        EngramInterTurnOccurrence::UnadmittedTurn { host_turn_ref, source_change, observed_checks } =>
+        EngramInterTurnOccurrence::UnadmittedTurn { host_turn_ref, source_change, observed_checks, .. } =>
             (host_turn_ref, source_change.as_ref(), observed_checks.as_slice()),
         EngramInterTurnOccurrence::ObservedCheck { host_turn_ref, check } =>
             (host_turn_ref, None, std::slice::from_ref(check)),
-        EngramInterTurnOccurrence::InterTurnChange { .. } =>
+        EngramInterTurnOccurrence::InterTurnChange { .. } | EngramInterTurnOccurrence::SourceSighting { .. } =>
             return Err("an inter-turn change is not an unadmitted occurrence".into()),
     };
     engram_observation_text(host_turn_ref, ENGRAM_OBSERVATION_MAX_LABEL_BYTES, "host_turn_ref")?;
@@ -334,7 +349,7 @@ impl EngramSourceObservationReceipt {
                 observed_checks.iter().map(|check| check.host_check_id.as_str()).collect(),
             ),
             EngramInterTurnOccurrence::ObservedCheck { check, .. } => (false, vec![check.host_check_id.as_str()]),
-            EngramInterTurnOccurrence::InterTurnChange { .. } => {
+            EngramInterTurnOccurrence::InterTurnChange { .. } | EngramInterTurnOccurrence::SourceSighting { .. } => {
                 return Err(EngramTransportError::protocol(
                     "an inter-turn change receipt is not an unadmitted observation receipt",
                 ));
@@ -436,7 +451,7 @@ mod unadmitted_observation_tests {
         source_change: Option<EngramObservedSourceChange>,
         checks: Vec<EngramObservedCheck>,
     ) -> Result<EngramControlRequest, EngramTransportError> {
-        engram_unadmitted_turn_request("routing-unadmitted", basis(), "turn-1".into(), source_change, checks, built_at())
+        engram_unadmitted_turn_request(basis(), "turn-1".into(), source_change, checks, built_at())
     }
 
     fn observation(request: &EngramControlRequest) -> &EngramInterTurnObservation {
@@ -466,7 +481,7 @@ mod unadmitted_observation_tests {
         let request = turn(Some(change()), vec![check("check-1"), check("check-2")]).unwrap();
         let wire = serde_json::to_value(&request).unwrap();
         assert_eq!(wire["operation"], "execution_observe");
-        assert_eq!(wire["routing_token"], "routing-unadmitted");
+        assert!(wire.get("routing_token").is_none(), "ordinary requests carry no admission credential");
         assert_eq!(wire["causality"], json!({ "kind": "unknown" }));
         assert_eq!(wire["observed_interval"], json!({ "from": at(10), "through": at(50) }));
         let occurrence = &wire["occurrence"];
@@ -500,7 +515,7 @@ mod unadmitted_observation_tests {
         unfinished.finished_at = None;
         unfinished.source_basis = None;
         unfinished.host_evidence_ref = None;
-        let request = engram_observed_check_request("routing-unadmitted", basis(), "turn-1".into(), unfinished, built_at()).unwrap();
+        let request = engram_observed_check_request(basis(), "turn-1".into(), unfinished, built_at()).unwrap();
         let wire = serde_json::to_value(&request).unwrap();
         assert_eq!(wire["occurrence"], json!({
             "kind": "observed_check", "host_turn_ref": "turn-1",
@@ -514,7 +529,7 @@ mod unadmitted_observation_tests {
     fn with_basis(change: impl FnOnce(&mut EngramUnadmittedObservationBasis)) -> Result<EngramControlRequest, EngramTransportError> {
         let mut changed = basis();
         change(&mut changed);
-        engram_unadmitted_turn_request("routing-unadmitted", changed, "turn-1".into(), None, Vec::new(), built_at())
+        engram_unadmitted_turn_request(changed, "turn-1".into(), None, Vec::new(), built_at())
     }
 
     fn with_change(change: impl FnOnce(&mut EngramMeasuredBaseline, &mut EngramMeasuredSighting)) -> Result<EngramControlRequest, EngramTransportError> {
@@ -565,7 +580,7 @@ mod unadmitted_observation_tests {
         refused(turn(None, vec![half_root]), "root generation and state only together");
 
         refused(
-            engram_unadmitted_turn_request("routing-unadmitted", basis(), "t".repeat(129), None, Vec::new(), built_at()),
+            engram_unadmitted_turn_request(basis(), "t".repeat(129), None, Vec::new(), built_at()),
             "host_turn_ref must be trimmed",
         );
         refused(with_basis(|basis| basis.idempotency_key = "k".repeat(129)), "idempotency_key must be trimmed");
@@ -602,10 +617,14 @@ mod unadmitted_observation_tests {
             }), Vec::new()),
             "source_revision must be trimmed",
         );
-        refused(
-            engram_unadmitted_turn_request(&"r".repeat(65 * 1_024), basis(), "turn-1".into(), None, Vec::new(), built_at()),
-            "byte bound",
-        );
+        // Individually valid fields can exceed the serialized whole-request
+        // bound after JSON escaping. No retired credential is needed.
+        let large_checks = (0..16).map(|index| {
+            let mut item = check(&format!("large-{index}"));
+            item.host_evidence_ref = Some("\\".repeat(ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES));
+            item
+        }).collect();
+        refused(turn(None, large_checks), "byte bound");
     }
 
     #[test]
@@ -629,7 +648,7 @@ mod unadmitted_observation_tests {
         assert!(decode(&unreported, receipt(&unreported,
             json!({ "kind": "audit_only", "reason": "historical_binding" }), both.clone())).is_ok(),
             "a terminal historical audit also settles no reported change");
-        let standalone = engram_observed_check_request("routing-unadmitted", basis(), "turn-1".into(), check("check-3"), built_at()).unwrap();
+        let standalone = engram_observed_check_request(basis(), "turn-1".into(), check("check-3"), built_at()).unwrap();
         assert!(decode(&standalone, receipt(&standalone, no_change.clone(),
             json!([{ "host_check_id": "check-3", "credit": "uncredited" }]))).is_ok());
 

@@ -1,6 +1,79 @@
 // Shared finite read-command transport, introduced for host freeze and Work
 // reads. Owns child/group and bounded pipe observation, not caller authority,
 // command construction or response parsing. Extracted from review_freeze_process.rs.
+#[derive(Debug)]
+struct BoundedReadFailure {
+    stage: &'static str,
+    kind: String,
+    elapsed: Duration,
+    launch_lock_wait: Option<Duration>,
+    #[cfg(all(windows, test))]
+    launch_lock_holders: String,
+    detail: String,
+}
+
+impl std::fmt::Display for BoundedReadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let lock_wait = self.launch_lock_wait.map_or_else(
+            || "unobserved".to_owned(), |wait| wait.as_millis().to_string(),
+        );
+        #[cfg(all(windows, test))]
+        {
+            write!(f, "bounded read stage={} kind={} elapsed_ms={} lock_wait_ms={}: {}",
+                self.stage, self.kind, self.elapsed.as_millis(),
+                lock_wait, self.detail)?;
+            write!(f, "; {}", self.launch_lock_holders)
+        }
+        #[cfg(not(all(windows, test)))]
+        {
+            write!(f, "bounded read stage={} kind={} elapsed_ms={} lock_wait_ms={}: {}",
+                self.stage, self.kind, self.elapsed.as_millis(),
+                lock_wait, self.detail)
+        }
+    }
+}
+
+impl std::error::Error for BoundedReadFailure {}
+
+struct BoundedReadObservation {
+    started: std::time::Instant,
+    stage: &'static str,
+    launch_lock_wait: Option<Duration>,
+    #[cfg(all(windows, test))]
+    lock_observation: host_command::telemetry::Observation,
+}
+
+impl BoundedReadObservation {
+    fn new() -> Self {
+        Self {
+            started: std::time::Instant::now(), stage: "spawn",
+            // The legacy Windows Command path does not expose its lock wait.
+            launch_lock_wait: if cfg!(windows) { None } else { Some(Duration::ZERO) },
+            #[cfg(all(windows, test))]
+            lock_observation: host_command::telemetry::Observation::new(),
+        }
+    }
+
+    fn failure(&self, error: anyhow::Error) -> anyhow::Error {
+        let kind = error.chain().find_map(|cause| {
+            if let Some(error) = cause.downcast_ref::<io::Error>() {
+                return Some(format!("{:?}", error.kind()));
+            }
+            cause.downcast_ref::<mpsc::RecvTimeoutError>().map(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => "TimedOut".to_owned(),
+                mpsc::RecvTimeoutError::Disconnected => "Disconnected".to_owned(),
+            })
+        }).unwrap_or_else(|| "Other".to_owned());
+        let detail = error.to_string();
+        error.context(BoundedReadFailure {
+            stage: self.stage, kind, elapsed: self.started.elapsed(),
+            launch_lock_wait: self.launch_lock_wait, detail,
+            #[cfg(all(windows, test))]
+            launch_lock_holders: self.lock_observation.summary(),
+        })
+    }
+}
+
 #[cfg(windows)]
 type BoundedReadCommand = windows_launch::LaunchSpec;
 #[cfg(not(windows))]
@@ -75,13 +148,31 @@ fn run_bounded_read_windows_with_setup(
     output_limit: usize,
     before_observe: impl FnOnce(&Arc<windows_launch::WindowsChild>) -> Result<()>,
 ) -> Result<std::process::Output> {
+    let mut observed = BoundedReadObservation::new();
+    run_bounded_read_windows_observed(command, deadline, output_limit, before_observe, &mut observed)
+        .map_err(|error| observed.failure(error))
+}
+
+#[cfg(windows)]
+fn run_bounded_read_windows_observed(
+    command: &mut BoundedReadCommand,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    before_observe: impl FnOnce(&Arc<windows_launch::WindowsChild>) -> Result<()>,
+    observed: &mut BoundedReadObservation,
+) -> Result<std::process::Output> {
     command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     if deadline <= std::time::Instant::now() {
-        bail!("bounded read deadline exceeded before launch");
+        return Err(io::Error::new(io::ErrorKind::TimedOut,
+            "bounded read deadline exceeded before launch").into());
     }
-    let launch = windows_launch::prepare(command)?;
+    let mut lock_wait = Duration::ZERO;
+    let launch = windows_launch::prepare_with_lock_timing(command, &mut lock_wait);
+    observed.launch_lock_wait = Some(lock_wait);
+    let launch = launch?;
     let process = launch.process();
     let result = (|| {
+        observed.stage = "read";
         let stdout = process
             .take_stdout()
             .context("bounded read process stdout missing")?;
@@ -90,17 +181,23 @@ fn run_bounded_read_windows_with_setup(
             .context("bounded read process stderr missing")?;
         let out = bounded_read_pipe(stdout, output_limit, false);
         let err = bounded_read_pipe(stderr, 64 * 1024, true);
+        observed.stage = "spawn";
         launch.resume_after_attach(&process)?;
         before_observe(&process)?;
+        observed.stage = "wait";
         let status = process
             .wait_timeout(deadline.saturating_duration_since(std::time::Instant::now()))?
-            .context("bounded read deadline exceeded")?;
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "bounded read deadline exceeded"))?;
         launch.cleanup_after_shell_exit(&process, "bounded read")?;
         let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
-        let stdout =
-            out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))??;
-        let stderr =
-            err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))??;
+        observed.stage = "pipe";
+        let stdout = out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        observed.stage = "read";
+        let stdout = stdout?;
+        observed.stage = "pipe";
+        let stderr = err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        observed.stage = "read";
+        let stderr = stderr?;
         Ok(std::process::Output {
             status,
             stdout,
@@ -186,6 +283,22 @@ fn run_bounded_read_process_input(
     before_observe: impl FnOnce(&Arc<SharedChild>) -> Result<()>,
     input: Option<Vec<u8>>,
 ) -> Result<std::process::Output> {
+    let mut observed = BoundedReadObservation::new();
+    run_bounded_read_process_input_observed(
+        command, deadline, output_limit, own_tree, before_observe, input, &mut observed,
+    ).map_err(|error| observed.failure(error))
+}
+
+#[cfg(any(not(windows), test))]
+fn run_bounded_read_process_input_observed(
+    command: &mut Command,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    own_tree: bool,
+    before_observe: impl FnOnce(&Arc<SharedChild>) -> Result<()>,
+    input: Option<Vec<u8>>,
+    observed: &mut BoundedReadObservation,
+) -> Result<std::process::Output> {
     #[cfg(windows)]
     eprintln!(
         "windows launch> unavailable: legacy Command has opaque launch settings; using legacy job ownership"
@@ -229,6 +342,7 @@ fn run_bounded_read_process_input(
     #[cfg(unix)]
     let mut group_cleanup_started = false;
     let result = (|| {
+        observed.stage = "read";
         let stdout = process
             .take_stdout()
             .context("bounded read process stdout missing")?;
@@ -237,6 +351,7 @@ fn run_bounded_read_process_input(
             .context("bounded read process stderr missing")?;
         let out = bounded_read_pipe(stdout, output_limit, false);
         let err = bounded_read_pipe(stderr, 64 * 1024, true);
+        observed.stage = "spawn";
         if let Some(tree) = &tree {
             tree.resume_after_attach(&process)?;
         }
@@ -250,12 +365,13 @@ fn run_bounded_read_process_input(
                 })
                 .context("batch input thread unavailable")?;
         }
+        observed.stage = "wait";
         loop {
             if read_child_has_exited(&process)? {
                 break;
             }
             if std::time::Instant::now() >= deadline {
-                bail!("bounded read deadline exceeded");
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "bounded read deadline exceeded").into());
             }
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -276,10 +392,14 @@ fn run_bounded_read_process_input(
         // both reader threads one shared, bounded EOF/drain grace, not a zero
         // timeout racing their sends and not an unbounded receive.
         let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
-        let stdout =
-            out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))??;
-        let stderr =
-            err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))??;
+        observed.stage = "pipe";
+        let stdout = out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        observed.stage = "read";
+        let stdout = stdout?;
+        observed.stage = "pipe";
+        let stderr = err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        observed.stage = "read";
+        let stderr = stderr?;
         Ok(std::process::Output {
             status,
             stdout,

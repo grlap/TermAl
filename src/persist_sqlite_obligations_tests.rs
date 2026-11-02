@@ -73,7 +73,8 @@ mod session_obligation_storage_tests {
 
     #[test]
     fn project_containment_storage_refuses_unknown_identity_confirmations_without_a_local_row() {
-        for grant in ["", ENGRAM_UNCERTAIN_GRANT_UNKNOWN] {
+        // Original stored sentinel, not a live grant/recovery API.
+        for grant in ["", "unknown"] {
             for load in [false, true] {
                 let connection = connection();
                 let root = std::env::current_dir().unwrap();

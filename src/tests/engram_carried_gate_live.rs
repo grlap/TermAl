@@ -1,9 +1,8 @@
 // Owns the operator-run checks of carried background gates
 // (src/engram_carried_checks.rs) against a real Engram binary and a
 // disposable store: a background full gate launched in one turn and
-// credited as a passed test verification on the holder's next checkpoint,
-// which the real store accepts and reads back; and a gate the holder's own
-// write refused, which leaves no verification in the store. Does not own the
+// retained as exact launch/artifact custody without automatic verification;
+// a holder's write preserves its refusal cause and likewise earns no credit. Does not own the
 // scripted checks of the same behaviour (src/tests/engram_carried_checks.rs)
 // or the root recovery checks of its parent module, whose fixture it uses, or
 // the batch gate's live check (its child module, engram_batch_gate_live.rs).
@@ -134,7 +133,7 @@ fn live_carried_gate(suffix: &str) -> LiveCarriedGate {
             &project_id,
             UpdateProjectEngramSettingsRequest {
                 enabled: true,
-                turn_gated_control: true,
+                execution_observability: Some(true),
                 acceptance_evaluation: None,
                 binary_path: None,
                 home: None,
@@ -153,13 +152,8 @@ fn live_carried_gate(suffix: &str) -> LiveCarriedGate {
     gate
 }
 
-/// Names the real claim before opening the grant that launches its gate.
+/// Names the actual held claim through the ordinary work-session service.
 fn name_live_root(gate: &LiveCarriedGate) {
-    gate.fixture
-        .state
-        .ensure_engram_session_bound_off_lock(&gate.fixture.session_id)
-        .expect("real claim binds")
-        .expect("control is enabled");
     gate.fixture
         .state
         .name_engram_source_root(
@@ -329,89 +323,73 @@ fn live_verifications(gate: &LiveCarriedGate) -> Vec<Value> {
     found
 }
 
-#[test]
-#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_carried_background_gate_is_credited_by_the_real_store_on_the_next_checkpoint() {
-    let gate = live_carried_gate("carried-credited");
-    name_live_root(&gate);
-    begin_live_turn(&gate, "Launch the gate.");
-    launch_live_gate(&gate);
-    finish_live_root(&gate.fixture.state, &gate.fixture.session_id);
-    assert!(
-        live_verifications(&gate).is_empty(),
-        "nothing is credited while the run has not ended"
-    );
 
-    finish_live_run(&gate);
-    begin_live_turn(&gate, "Read the gate's summary.");
+fn finish_carried_turn(gate: &LiveCarriedGate) {
     finish_live_root(&gate.fixture.state, &gate.fixture.session_id);
-
-    let checkpoints = gate.fixture.transport.requests_for("turn_checkpoint");
-    let settling = checkpoints.last().expect("the second turn is checkpointed");
-    assert_eq!(
-        settling["verification_evidence"][0]["check_kind"], "test",
-        "{settling:#}"
-    );
-    assert!(
-        settling["verification_evidence"][0]["refs"]
-            .as_array()
-            .is_some_and(|refs| refs.iter().any(|reference| reference
-                .as_str()
-                .is_some_and(|reference| reference.starts_with("launched-under-grant:")))),
-        "{settling:#}"
-    );
-    let verifications = live_verifications(&gate);
-    eprintln!("live carried gate: the real store's verifications: {verifications:#?}");
-    assert!(
-        verifications
-            .iter()
-            .any(|verification| verification["check_kind"] == "test"
-                && verification["result"] == "passed"
-                && verification["producer_outcome"] == "succeeded"),
-        "the real store holds a passed test verification: {verifications:#?}"
-    );
-    assert!(live_record(&gate, |record| record
-        .engram
-        .carried_checks
-        .is_empty()));
+    gate.fixture.state.start_runtime_observation_worker(&gate.fixture.session_id);
+    let guard = phase_sync::PollGuard::new();
+    loop {
+        let done = live_record(gate, |record| {
+            record.engram.unadmitted_closing_jobs.is_empty()
+                && !record.engram.unadmitted_worker_running
+                && record.engram.unadmitted_reports.iter().all(|report| {
+                    report.envelopes.iter().all(|envelope|
+                        matches!(envelope.delivery, EngramRuntimeObservationDelivery::Recorded { .. }))
+                })
+        });
+        if done { break; }
+        guard.wait("real carried-launch ordinary report and worker finish before process cleanup");
+    }
 }
 
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
-fn live_carried_gate_refused_by_a_write_leaves_no_verification_in_the_real_store() {
+fn live_carried_background_gate_keeps_artifact_custody_without_automatic_native_credit() {
+    let gate = live_carried_gate("carried-custody");
+    name_live_root(&gate);
+    begin_live_turn(&gate, "Launch the gate.");
+    launch_live_gate(&gate);
+    finish_carried_turn(&gate);
+    assert!(live_verifications(&gate).is_empty());
+    finish_live_run(&gate);
+    gate.fixture.state.poll_engram_carried_runs();
+    let (run, digest) = live_record(&gate, |record| {
+        let carried = &record.engram.carried_checks[0];
+        (carried.run_directory.clone().unwrap(), carried.terminal_digest.clone().unwrap())
+    });
+    assert!(engram_read_carried_run(&run, &digest).unwrap().passed, "actual artifact reader");
+    begin_live_turn(&gate, "Read the gate's summary.");
+    finish_carried_turn(&gate);
+    gate.fixture.state.poll_engram_carried_runs();
+    assert!(live_verifications(&gate).is_empty(), "a launch artifact is not registered native verification");
+    live_record(&gate, |record| {
+        assert_eq!(record.engram.carried_checks.len(), 1);
+        assert_eq!(record.engram.carried_checks[0].terminal_digest.as_deref(), Some(digest.as_str()));
+        assert!(record.engram.carried_consumed_runs.is_empty());
+    });
+    assert_no_live_turn_gate(&gate.fixture.transport);
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn live_carried_gate_fenced_by_a_write_keeps_its_cause_and_no_native_verification() {
     let gate = live_carried_gate("carried-refused");
     name_live_root(&gate);
     begin_live_turn(&gate, "Launch the gate.");
     launch_live_gate(&gate);
-    let cwd = fs::canonicalize(&gate.worktree)
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
+    let cwd = fs::canonicalize(&gate.worktree).unwrap().to_string_lossy().into_owned();
     SessionRecorder::new(gate.fixture.state.clone(), gate.fixture.session_id.clone())
-        .command_started_in("build", "cargo build", Some("cargo build"), Some(&cwd))
-        .expect("the start should record");
+        .command_started_in("build", "cargo build", Some("cargo build"), Some(&cwd)).unwrap();
     finish_live_run(&gate);
-    finish_live_root(&gate.fixture.state, &gate.fixture.session_id);
-
-    assert!(
-        live_verifications(&gate).is_empty(),
-        "a refused gate leaves no verification in the real store"
-    );
-    assert!(live_record(&gate, |record| record
-        .engram
-        .carried_checks
-        .is_empty()));
-    let line = live_record(&gate, |record| {
-        record.engram.pending_source_root_line.clone()
-    })
-    .unwrap_or_default();
-    assert!(
-        line.contains("earned no credit") && line.contains("ran a `cargo` command there"),
-        "{line}"
-    );
+    gate.fixture.state.poll_engram_carried_runs();
+    let cause = live_record(&gate, |record| record.engram.carried_checks[0].fence.clone().unwrap());
+    assert!(cause.contains("cargo"), "{cause}");
+    finish_carried_turn(&gate);
+    assert!(live_verifications(&gate).is_empty());
+    live_record(&gate, |record| {
+        assert_eq!(record.engram.carried_checks.len(), 1);
+        assert_eq!(record.engram.carried_checks[0].fence.as_deref(), Some(cause.as_str()));
+        assert!(record.engram.carried_consumed_runs.is_empty());
+    });
+    assert_no_live_turn_gate(&gate.fixture.transport);
 }
-
-// A batch full gate bound to a second held item against the real store, a
-// child module so the launcher's `live` mode runs it.
-#[path = "engram_batch_gate_live.rs"]
-mod batch_gate_live;

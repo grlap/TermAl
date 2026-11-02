@@ -78,7 +78,7 @@ fn seed_projection_metadata(state: &AppState, session_id: &str) -> Value {
     record.session = serde_json::from_value(value).expect("metadata fixture is valid");
     // These two wire fields derive from record authority, not the embedded Session.
     record.orchestrator_auto_dispatch_blocked = true;
-    record.engram.source_observation_delete_requested = true;
+    record.engram.observation_delete_requested = true;
     inner.stamp_session_at_index(index);
     metadata
 }
@@ -101,12 +101,12 @@ async fn serialized_session_projection_preserves_metadata_and_redacts_private_bo
         let index = inner
             .find_session_index(&session_id)
             .expect("session exists");
-        AppState::wire_session_for_inner(&inner, &state.server_instance_id, &inner.sessions[index])
+        AppState::wire_session_from_record(&state.server_instance_id, &inner.sessions[index])
     };
     let full = serde_json::to_value(full).expect("full projection serializes");
     let full_object = full.as_object().unwrap();
-    assert_eq!(full["engramControlOff"], false,
-        "a plain local session is outside the positive Base/OFF lane");
+    assert!(full.get("engramControlOff").is_none(),
+        "the current ordinary projection has no retired control-mode selector");
     let app = app_router(state.clone());
 
     // No handoffFrom/handoffTo query is used here: those optional bounds

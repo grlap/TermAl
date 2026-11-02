@@ -1,565 +1,8 @@
-//! Causal evidence at actual root completion and queued-head admission.
-//! Owns disposable control/writer fixtures, not recovery policy or live stores.
-//! Registered by engram_root_dispatch.rs; no provider process is launched.
-
+//! Historical causal diagnostics beside ordinary root queue ownership.
+//! Cards below are synthetic passive specimens, not new control applications.
+//! Real SQLite cases prove local committed bytes; no publication executor is recreated.
 use super::*;
-
-#[derive(Clone, Copy)]
-enum CausalFaultMode {
-    LostReply,
-    DeadlineAfterApply,
-    NeverStarted,
-    Refuse,
-    SecretReply,
-    Malformed,
-    MissingBindingStatus,
-    MissingBeginReceipt,
-    MismatchedBegin,
-    HealMalformed,
-    HealRefused,
-    BudgetAfterGrant,
-    MalformedRequestSecret,
-    RecoveryMalformedRequestSecret,
-    MalformedEnvelopeSecret,
-    RebindPhaseSecret,
-    RecoveryReceiptSecret,
-    RecoveryRefusal,
-}
-
-struct CausalTransport {
-    producer: Arc<StatefulEngramControlTransport>,
-    // Settable so a later phase (a cold restore) can select its own fault.
-    fault: Mutex<Option<(&'static str, usize)>>,
-    attempts: Mutex<HashMap<String, usize>>,
-    applications: Mutex<HashSet<(String, String)>>,
-    lost_request: Mutex<Option<Value>>,
-    // A capability the producer returned, for absence checks.
-    echoed: Mutex<Option<String>>,
-    mode: Mutex<CausalFaultMode>,
-    clock: Mutex<Option<EngramBudgetClock>>,
-    after_fault: Mutex<Option<Box<dyn FnOnce() + Send>>>,
-    // Every requested operation, in order, for ordering witnesses.
-    order: Mutex<Vec<String>>,
-}
-
-impl CausalTransport {
-    fn new(fault: Option<(&'static str, usize)>) -> Arc<Self> {
-        Arc::new(Self {
-            producer: StatefulEngramControlTransport::new(),
-            fault: Mutex::new(fault),
-            attempts: Mutex::new(HashMap::new()),
-            applications: Mutex::new(HashSet::new()),
-            lost_request: Mutex::new(None),
-            echoed: Mutex::new(None),
-            mode: Mutex::new(CausalFaultMode::LostReply),
-            clock: Mutex::new(None),
-            after_fault: Mutex::new(None),
-            order: Mutex::new(Vec::new()),
-        })
-    }
-
-    fn application_count(&self, operation: &str) -> usize {
-        self.applications
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(applied, _)| applied == operation)
-            .count()
-    }
-}
-
-impl EngramControlTransport for CausalTransport {
-    fn request(
-        &self,
-        connection: &EngramConnectionConfig,
-        request: &EngramControlRequest,
-        timeout: Duration,
-    ) -> std::result::Result<Value, EngramTransportError> {
-        let wire = serde_json::to_value(request).unwrap();
-        let operation = wire["operation"].as_str().unwrap().to_owned();
-        self.order.lock().unwrap().push(operation.clone());
-        let ordinal = {
-            let mut attempts = self.attempts.lock().unwrap();
-            let count = attempts.entry(operation.clone()).or_default();
-            *count += 1;
-            *count
-        };
-        let fault = *self.fault.lock().unwrap() == Some((operation.as_str(), ordinal));
-        let mode = *self.mode.lock().unwrap();
-        if fault && matches!(mode, CausalFaultMode::MalformedEnvelopeSecret) {
-            // The real framed decoder, fed an envelope whose tag echoes a
-            // capability and an opaque value; never a producer application.
-            *self.lost_request.lock().unwrap() = Some(wire.clone());
-            let tag = format!(
-                "opaque-envelope-sentinel-5d21 {}",
-                wire["routing_token"].as_str().unwrap()
-            );
-            let frame = format!("{}\n", json!({"status": tag}));
-            return exchange_engram_control_frame(
-                &mut Vec::new(),
-                &mut std::io::Cursor::new(frame.into_bytes()),
-                b"{}",
-            );
-        }
-        if fault && matches!(mode, CausalFaultMode::RecoveryReceiptSecret) {
-            // A typed-valid receipt naming another grant; never applied.
-            *self.lost_request.lock().unwrap() = Some(wire.clone());
-            return Ok(json!({"decision": "checkpointed", "receipt": {
-                "grant_id": "opaque-receipt-sentinel-6b0d", "cursor": 1, "confirmed_cursor": 1
-            }}));
-        }
-        if fault && matches!(mode, CausalFaultMode::RecoveryRefusal) {
-            // An explicit producer refusal of the recovery checkpoint.
-            *self.lost_request.lock().unwrap() = Some(wire.clone());
-            return Ok(json!({"decision": "refuse", "code": "lifecycle_hold"}));
-        }
-        if fault && matches!(mode, CausalFaultMode::MalformedRequestSecret | CausalFaultMode::RecoveryMalformedRequestSecret) {
-            // Deliberately invalid protocol vectors, never a producer application.
-            // Include both a known capability and an unrelated opaque value.
-            *self.lost_request.lock().unwrap() = Some(wire.clone());
-            let value = format!("opaque-response-sentinel-73f9 {}", wire["routing_token"].as_str().unwrap());
-            return Ok(if operation == "session_status" {
-                json!(value)
-            } else {
-                json!({"decision": value})
-            });
-        }
-        if matches!(
-            mode,
-            CausalFaultMode::HealMalformed | CausalFaultMode::HealRefused
-        ) {
-            // Synthetic protocol vectors, not a claim that the stateful
-            // producer expired this grant. Exercise the existing heal branch.
-            if operation == "turn_begin" && ordinal == 2 {
-                return Ok(json!({"decision":"refuse", "code":"grant_expired"}));
-            }
-            if operation == "turn_evaluate" && ordinal == 3 {
-                *self.lost_request.lock().unwrap() = Some(wire.clone());
-                return Ok(if matches!(mode, CausalFaultMode::HealMalformed) {
-                    json!({"decision":"malformed"})
-                } else {
-                    json!({"decision":"refuse", "directive": {
-                        "directive_id":"fixture-refusal", "code":"lifecycle_hold",
-                        "target":"agent", "satisfaction":"unavailable"
-                    }})
-                });
-            }
-        }
-        if fault
-            && matches!(
-                mode,
-                CausalFaultMode::NeverStarted | CausalFaultMode::Refuse
-            )
-        {
-            *self.lost_request.lock().unwrap() = Some(wire.clone());
-            return match mode {
-                CausalFaultMode::NeverStarted => Err(EngramTransportError::spawn_failed(
-                    "control worker executable missing; request never started",
-                )),
-                // An explicit response for this request, not a proof about
-                // prior same-key applications or permission to retry.
-                CausalFaultMode::Refuse => {
-                    Ok(json!({"decision":"refuse", "code":"lifecycle_hold"}))
-                }
-                _ => unreachable!(),
-            };
-        }
-        // The stateful producer applies its real fixture contract first.
-        // A lost reply is not evidence that this application never occurred.
-        let mut reply = self.producer.request(connection, request, timeout)?;
-        if operation == "session_status"
-            && matches!(
-                mode,
-                CausalFaultMode::RecoveryMalformedRequestSecret
-                    | CausalFaultMode::RecoveryReceiptSecret
-                    | CausalFaultMode::RecoveryRefusal
-            )
-        {
-            // Synthetic open-grant status to reach the existing recovery branch;
-            // not a claim that the stateful producer kept this completed turn open.
-            // "begun" selects the cold restore's closing branch; warm ignores it.
-            reply["phase"] = json!("turn_open");
-            reply["open_grant_id"] = json!("fixture-open-recovery-grant");
-            reply["open_grant_state"] = json!("begun");
-        }
-        if operation == "turn_evaluate"
-            && reply["decision"] == "grant"
-            && matches!(mode, CausalFaultMode::SecretReply)
-        {
-            // The lifecycle producer models grant/key ownership, not delivery
-            // cursors. Supply its optional wire page so the real host builds
-            // a nonempty Begin capability list, rather than a helper-only test.
-            reply["grant"]["delivery"] = json!({"page": {
-                "from_cursor": 0, "to_cursor": 1, "head_cursor": 1,
-                "delivery_token": "opaque-capability-7eb9f4d2"
-            }});
-        }
-        if matches!(
-            reply["decision"].as_str(),
-            Some("grant" | "begin" | "checkpointed")
-        ) {
-            self.applications.lock().unwrap().insert((
-                operation.clone(),
-                wire["idempotency_key"].as_str().unwrap().to_owned(),
-            ));
-        }
-        if fault {
-            *self.lost_request.lock().unwrap() = Some(wire.clone());
-            if let Some(after) = self.after_fault.lock().unwrap().take() {
-                after();
-            }
-            match mode {
-                CausalFaultMode::DeadlineAfterApply => {
-                    self.clock
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .expect("deadline fault has a scripted clock")
-                        .advance(timeout);
-                    return Err(EngramTransportError::deadline(format!(
-                        "control reply deadline after applying {operation}"
-                    )));
-                }
-                CausalFaultMode::Malformed => return Ok(json!({"decision":"malformed"})),
-                CausalFaultMode::MissingBindingStatus => {
-                    reply.as_object_mut().unwrap().remove("status");
-                    return Ok(reply);
-                }
-                CausalFaultMode::MissingBeginReceipt => {
-                    reply.as_object_mut().unwrap().remove("receipt");
-                    return Ok(reply);
-                }
-                CausalFaultMode::MismatchedBegin => {
-                    reply["receipt"]["grant_id"] = json!("different-grant");
-                    return Ok(reply);
-                }
-                CausalFaultMode::RebindPhaseSecret => {
-                    // A typed-valid bind whose phase echoes the returned
-                    // capability; the producer did apply this bind.
-                    let returned = reply["routing_token"].as_str().unwrap().to_owned();
-                    reply["status"]["phase"] =
-                        json!(format!("opaque-phase-sentinel-91e4 {returned}"));
-                    *self.echoed.lock().unwrap() = Some(returned);
-                    return Ok(reply);
-                }
-                CausalFaultMode::BudgetAfterGrant => {
-                    self.clock
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .unwrap()
-                        .advance(Duration::from_secs(21));
-                    return Ok(reply);
-                }
-                _ => {}
-            }
-            let secret_detail = if matches!(mode, CausalFaultMode::SecretReply) {
-                format!(
-                    "; {} {} password = \"secret with spaces\"",
-                    wire["routing_token"].as_str().unwrap(),
-                    wire["delivery_tokens"]
-                        .as_array()
-                        .map(|tokens| tokens
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .collect::<Vec<_>>()
-                            .join(" "))
-                        .unwrap_or_default()
-                )
-            } else {
-                String::new()
-            };
-            return Err(EngramTransportError::transport(format!(
-                "control worker reached EOF after applying {operation}; response frame missing{secret_detail}"
-            )));
-        }
-        Ok(reply)
-    }
-
-    fn read_observation_policy(
-        &self,
-        _connection: &EngramConnectionConfig,
-        _store: &EngramAuthorityStoreKey,
-        _timeout: Duration,
-        _host_workdir: &FsPath,
-    ) -> std::result::Result<EngramObservationPolicyBasis, EngramTransportError> {
-        // This unclaimed lifecycle fixture deliberately has no source policy.
-        // Never fall through to a CLI or a live project/store read.
-        Err(EngramTransportError::protocol(
-            "unclaimed causal fixture has no observation policy",
-        ))
-    }
-
-    fn shutdown_session(&self, session_id: &str) {
-        self.producer.shutdown_session(session_id);
-    }
-}
-
-/// Prefixes a refused tick the writer classified, by type and before
-/// formatting, as the relational checkpoint race
-/// (`PersistCheckpointMirrorLedgerMismatch`), which keeps its fences for the
-/// retry tick. It is the only refusal a publication join may pass; text alone,
-/// without the type, never earns it.
-const TYPED_CHECKPOINT_RACE: &str = "typed checkpoint mirror race: ";
-
-struct CausalRoot {
-    state: AppState,
-    session: String,
-    receiver: mpsc::Receiver<CodexRuntimeCommand>,
-    transport: Arc<CausalTransport>,
-    committed: mpsc::Receiver<std::result::Result<u64, String>>,
-    writer_gate: Arc<Mutex<Option<CausalWriterGate>>>,
-    fail_writes: Arc<std::sync::atomic::AtomicBool>,
-    // Once set, the next tick that carries a causal card and has already
-    // accepted that card's fence leaves the card's session out, as the bounded
-    // collector does when the session changes between plan and snapshot in
-    // both of its passes.
-    defer_cause_once: Arc<std::sync::atomic::AtomicBool>,
-    // Ticks refused as the typed race that still held a causal card's fence.
-    typed_refusals_retaining_cause: Arc<std::sync::atomic::AtomicUsize>,
-}
-
-struct CausalWriterGate {
-    arrived: mpsc::Sender<()>,
-    release: mpsc::Receiver<()>,
-    // Hold the writer at its next tick whatever it carries, not only at its
-    // first causal record.
-    any_tick: bool,
-}
-
-impl CausalRoot {
-    fn new(fault: Option<(&'static str, usize)>) -> Self {
-        let (mut state, session, receiver, _) = root_fixture([]);
-        let transport = CausalTransport::new(fault);
-        state.install_control_test_transport(transport.clone());
-        state.inner.lock().unwrap().test_engram_dispatch_budget = Some(Duration::from_secs(20));
-        let (persist_tx, persist_rx) = mpsc::channel();
-        let (committed_tx, committed) = mpsc::channel();
-        state.persist_tx = persist_tx;
-        state
-            .persist_worker_alive
-            .store(true, std::sync::atomic::Ordering::Release);
-        let inner = Arc::clone(&state.inner);
-        let path = Arc::clone(&state.persistence_path);
-        let writer_gate = Arc::new(Mutex::new(None::<CausalWriterGate>));
-        let worker_gate = Arc::clone(&writer_gate);
-        let fail_writes = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let worker_fail = Arc::clone(&fail_writes);
-        let defer_cause_once = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let worker_defer = Arc::clone(&defer_cause_once);
-        let typed_refusals_retaining_cause = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let worker_typed_refusals = Arc::clone(&typed_refusals_retaining_cause);
-        let holds_cause_fence = |fences: &PersistFenceBatch| {
-            fences.pending.iter().any(|fence| {
-                matches!(fence.target, PersistFenceTarget::EngramCausalCard { .. })
-            })
-        };
-        let worker = std::thread::spawn(move || {
-            let mut cache = SqlitePersistConnectionCache::new();
-            let mut fences = PersistFenceBatch::default();
-            // Event-driven writer with the production worker's wait: no
-            // polling, fake ACK or sleep, but while a fence stays pending
-            // after a successful tick (its content was deferred), the next
-            // tick comes on the fence-retry delay, as in app_boot.rs.
-            let mut retry = PersistWorkerRetryState::default();
-            loop {
-                let outcome = retry.wait_for_next_tick(&persist_rx, &mut fences);
-                if outcome == PersistWorkerWaitOutcome::Exit {
-                    break;
-                }
-                let mut shutdown =
-                    fences.drain(&persist_rx, outcome == PersistWorkerWaitOutcome::Shutdown);
-                let mut delta = collect_persist_delta_from_shared_state(&inner, 0);
-                let carries_cause = |record: &PersistedSessionRecord| {
-                    record.session.messages.iter().any(|message| {
-                        matches!(message, Message::EngramControl { card, .. }
-                            if card.causal_failure.is_some())
-                    })
-                };
-                let has_cause = delta.changed_sessions.iter().any(carries_cause);
-                // The card's fence is sent right after its commit, under the
-                // same state lock. Take it into this tick before deferring, so
-                // the first tick carrying the card is the refused one and that
-                // fence is the one it must keep.
-                if has_cause && worker_defer.swap(false, std::sync::atomic::Ordering::AcqRel) {
-                    while !holds_cause_fence(&fences) {
-                        let request = persist_rx
-                            .recv_timeout(DEADLOCK_GUARD)
-                            .expect("the causal card's fence follows its commit");
-                        shutdown |= matches!(
-                            fences.accept(request),
-                            PersistWorkerWaitOutcome::Shutdown
-                        );
-                    }
-                    let deferred: Vec<String> = delta
-                        .changed_sessions
-                        .iter()
-                        .filter(|record| carries_cause(record))
-                        .map(|record| record.session.id.clone())
-                        .collect();
-                    delta
-                        .changed_sessions
-                        .retain(|record| !deferred.contains(&record.session.id));
-                    delta.deferred_session_ids.extend(deferred);
-                }
-                let gate = {
-                    let mut gate = worker_gate.lock().unwrap();
-                    if gate.as_ref().is_some_and(|gate| has_cause || gate.any_tick) {
-                        gate.take()
-                    } else {
-                        None
-                    }
-                };
-                if let Some(gate) = gate {
-                    gate.arrived.send(()).unwrap();
-                    gate.release.recv_timeout(DEADLOCK_GUARD).unwrap();
-                }
-                if worker_fail.load(std::sync::atomic::Ordering::Acquire) {
-                    // Real SQLite write rejection on the writer's connection.
-                    // Reapply after cache invalidation; never synthesize an ACK.
-                    cache.connection_for(&path).unwrap()
-                        .execute_batch("PRAGMA query_only = ON").unwrap();
-                }
-                let result = persist_delta_with_fences(&mut cache, &path, &delta, &mut fences)
-                    .map(|_| delta.watermark);
-                // Classified by type before the error becomes text.
-                let typed_race = result
-                    .as_ref()
-                    .err()
-                    .is_some_and(|error| error.is::<PersistCheckpointMirrorLedgerMismatch>());
-                if typed_race && holds_cause_fence(&fences) {
-                    worker_typed_refusals.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-                }
-                // The production contract: a failed write and a still-pending
-                // fence each bring a later tick. Shutdown below still exits,
-                // so a test's teardown never waits on a failing writer.
-                retry.finish_fenced_tick(
-                    &result.as_ref().map(|_| ()).map_err(|error| anyhow!("{error:#}")),
-                    false,
-                    &mut fences,
-                );
-                let result = result.map_err(|error| {
-                    if typed_race {
-                        format!("{TYPED_CHECKPOINT_RACE}{error:#}")
-                    } else {
-                        format!("{error:#}")
-                    }
-                });
-                let _ = committed_tx.send(result);
-                if shutdown {
-                    fences.fail(PersistFenceError::WorkerStopped);
-                    break;
-                }
-            }
-        });
-        *state.persist_thread_handle.lock().unwrap() = Some(worker);
-        Self {
-            state,
-            session,
-            receiver,
-            transport,
-            committed,
-            writer_gate,
-            fail_writes,
-            defer_cause_once,
-            typed_refusals_retaining_cause,
-        }
-    }
-
-    fn start_and_queue(&self) -> (RuntimeToken, Value, u64) {
-        deliver_turn_dispatch(
-            &self.state,
-            root_dispatch(&self.state, &self.session, false),
-        )
-        .unwrap();
-        assert!(matches!(
-            self.receiver.try_recv().unwrap(),
-            CodexRuntimeCommand::Prompt { .. }
-        ));
-        assert!(self.receiver.try_recv().is_err());
-        let queued = self
-            .state
-            .dispatch_turn(
-                &self.session,
-                SendMessageRequest {
-                    text: "Exact retained continuation".to_owned(),
-                    expanded_text: None,
-                    attachments: Vec::new(),
-                    source_session_id: None,
-                    source_mailbox: None,
-                },
-            )
-            .unwrap();
-        assert!(matches!(queued, DispatchTurnResult::Queued));
-        let inner = self.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&self.session).unwrap()];
-        (
-            record.runtime.runtime_token().unwrap(),
-            serde_json::to_value(&record.queued_prompts.front().unwrap().pending_prompt).unwrap(),
-            record.engram.dispatch_generation,
-        )
-    }
-
-    /// Deterministic join on causal publication, without sleeps. Each pending
-    /// cause's fence was sent with its commit, and this writer publishes it
-    /// inside the tick that resolves the fence, before reporting that tick.
-    /// The only refused tick allowed on the way is one the writer classified
-    /// by type as the relational checkpoint race (`TYPED_CHECKPOINT_RACE`),
-    /// which keeps its fences for the retry tick. Use only when every other
-    /// write succeeds; a failed ACK stays pending.
-    fn await_causal_publication(&self) {
-        loop {
-            let pending = {
-                let inner = self.state.inner.lock().unwrap();
-                inner.find_session_index(&self.session).is_some_and(|index| {
-                    inner.sessions[index].session.messages.iter().any(|message| {
-                        matches!(message, Message::EngramControl { card, .. }
-                            if card.causal_failure.as_ref()
-                                .is_some_and(|cause| cause.publication_pending))
-                    })
-                })
-            };
-            if !pending {
-                return;
-            }
-            let tick = self.committed.recv_timeout(DEADLOCK_GUARD);
-            assert!(
-                matches!(&tick, Ok(Ok(_)))
-                    || matches!(&tick, Ok(Err(error)) if error.starts_with(TYPED_CHECKPOINT_RACE)),
-                "the writer must report the tick that publishes a pending cause: {tick:?}"
-            );
-        }
-    }
-
-    fn durable_cards(&self) -> Vec<Value> {
-        let (watermark, end_index) = {
-            let inner = self.state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&self.session).unwrap()];
-            (inner.last_mutation_stamp, record.session.messages.len())
-        };
-        // Wait for the connected writer's real COMMIT, before Drop's final
-        // synchronous snapshot. This is not serializer-only/fallback proof.
-        self.state.persist_tx.send(PersistRequest::Delta).unwrap();
-        loop {
-            let written = self
-                .committed
-                .recv_timeout(DEADLOCK_GUARD)
-                .unwrap()
-                .unwrap();
-            if written >= watermark {
-                break;
-            }
-        }
-        load_persisted_message_range(&self.state.persistence_path, &self.session, 0, end_index)
-            .unwrap()
-            .into_iter()
-            .filter_map(|(_, message)| match message {
-                Message::EngramControl { card, .. } => Some(serde_json::to_value(card).unwrap()),
-                _ => None,
-            })
-            .collect()
-    }
-}
+use super::super::uncertain_begin::OrdinaryRoot;
 
 #[path = "engram_root_causal_publication.rs"]
 mod causal_publication;
@@ -573,428 +16,197 @@ mod causal_rebind;
 #[path = "engram_root_causal_value_free.rs"]
 mod causal_value_free;
 
-#[path = "engram_closing_checkpoint_retry.rs"]
-mod closing_checkpoint_retry;
 
-impl Drop for CausalRoot {
-    fn drop(&mut self) {
-        // Join before AppState's declared-last temp owner removes this store.
-        // Also runs during an assertion unwind, with no detached writer.
-        self.state.shutdown_persist_blocking();
+
+fn historical_card(cause: Option<EngramCausalFailure>) -> EngramControlCard {
+    EngramControlCard {
+        causal_failure: cause, schema_version: 1, stage: EngramControlStage::Checkpoint,
+        assurance: "turn_gated".into(), decision: EngramControlCardDecision::Degraded,
+        dispatch: EngramControlCardDispatch::Withheld, refusal_code: None,
+        defer_code: None, grant_id: Some("historical-grant".into()), directives: Vec::new(),
+        delivered_range: None, latency_ms: EngramControlLatencyCard::default(),
+        fail_mode: EngramControlFailMode::Enforced, repair_armed: false,
+        next_intent: None, source_root: None,
     }
 }
 
-fn assert_root_causal_failure(operation: &'static str, ordinal: usize) {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some((operation, ordinal)));
-    let (token, original_head, generation) = fixture.start_and_queue();
-    let completion = fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-    fixture.await_causal_publication();
-    let handoffs = fixture
-        .receiver
-        .try_iter()
-        .filter(|command| matches!(command, CodexRuntimeCommand::Prompt { .. }))
-        .count();
-    let (head, cards, preview, current_generation) = {
-        let inner = fixture.state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
-        (
-            record
-                .queued_prompts
-                .front()
-                .map(|queued| serde_json::to_value(&queued.pending_prompt).unwrap()),
-            record
-                .session
-                .messages
-                .iter()
-                .filter_map(|message| match message {
-                    Message::EngramControl { card, .. } => {
-                        Some(serde_json::to_value(card).unwrap())
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            record.session.preview.clone(),
-            record.engram.dispatch_generation,
-        )
-    };
-    let durable = fixture.durable_cards();
-    let lost = fixture
-        .transport
-        .lost_request
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("selected fault reached from actual root completion");
-    eprintln!(
-        "causal witness operation={operation} key={} grant={} native_completion={completion:?} handoffs={handoffs} generation={generation}->{current_generation} exact_head={} preview={preview:?} applications=evaluate:{}/begin:{}/checkpoint:{} cards={} durable={}",
-        lost["idempotency_key"],
-        lost["grant_id"],
-        head.as_ref() == Some(&original_head),
-        fixture.transport.application_count("turn_evaluate"),
-        fixture.transport.application_count("turn_begin"),
-        fixture.transport.application_count("turn_checkpoint"),
-        serde_json::to_string(&cards).unwrap(),
-        serde_json::to_string(&durable).unwrap()
-    );
-    assert_eq!(cards, durable, "actual writer persisted the normal cards");
-    let failed = cards
-        .iter()
-        .rev()
-        .find(|card| card["decision"] == "degraded")
-        .expect("normal failure card");
-    assert_eq!(
-        failed["causalFailure"]["operation"], operation,
-        "normal card must identify the original failure boundary"
-    );
-    assert_eq!(
-        failed["causalFailure"]["originalCode"],
-        "control_unavailable"
-    );
-    assert_eq!(failed["causalFailure"]["failureClass"], "transport");
-    if operation == "turn_checkpoint" {
-        let origin = cards
-            .iter()
-            .find(|card| card["stage"] == "checkpoint" && card["decision"] == "degraded")
-            .unwrap();
-        assert_eq!(
-            origin["causalFailure"]["attemptId"],
-            failed["causalFailure"]["attemptId"]
-        );
-        assert_eq!(
-            origin["causalFailure"]["message"],
-            failed["causalFailure"]["message"]
-        );
-        assert_eq!(
-            origin["causalFailure"]["continuationId"],
-            original_head["id"]
-        );
-        assert_eq!(
-            failed["causalFailure"]["continuationReason"],
-            "Closing checkpoint not settled; continuation cannot assume the prior grant closed."
-        );
-        let (checkpoint, canonical, excluded, grant) = {
-            let inner = fixture.state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
-            let checkpoint = record.engram.checkpoint_operation.clone();
-            let canonical = checkpoint.as_ref().and_then(|operation| {
-                selected_checkpoint_operation(&inner.engram_session_obligations, operation).cloned()
-            });
-            (
-                checkpoint,
-                canonical,
-                engram_admission_obligation_locked(&inner, &fixture.session).is_some(),
-                record.engram.active_grant_id.clone(),
-            )
-        };
-        let checkpoint = checkpoint.expect("the original lost report remains owed");
-        checkpoint.validate().unwrap();
-        assert_eq!(
-            serde_json::to_value(canonical.expect("canonical debt equals its session mirror")).unwrap(),
-            serde_json::to_value(&checkpoint).unwrap()
-        );
-        assert_eq!(serde_json::to_value(&checkpoint.original.request).unwrap(), lost);
-        assert_eq!(grant.as_deref(), lost["grant_id"].as_str());
-        assert!(excluded, "the retained original report withholds new admission");
-        assert_eq!(
-            fixture.transport.attempts.lock().unwrap()["turn_evaluate"],
-            1
-        );
-    }
-    assert!(failed["causalFailure"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("response frame missing"));
-    assert_eq!(failed["causalFailure"]["remoteApplication"], "unknown");
-    assert_eq!(
-        failed["causalFailure"]["attemptId"],
-        lost["idempotency_key"]
-    );
-    assert!(failed["causalFailure"]["continuationReason"]
-        .as_str()
-        .is_some_and(|reason| !reason.is_empty()));
-    assert_eq!(
-        head.as_ref(),
-        Some(&original_head),
-        "exact queued prompt remains owned"
-    );
-    assert_eq!(handoffs, 0, "unsettled continuation never reaches provider");
+fn save_card(turn: &OrdinaryRoot, card: EngramControlCard) -> String {
+    let mut inner = turn.state.inner.lock().unwrap();
+    let id = inner.next_message_id();
+    inner.session_mut(&turn.session).unwrap().session.messages.push(Message::EngramControl {
+        id: id.clone(), timestamp: stamp_now(), author: Author::Assistant, card,
+    });
+    turn.state.commit_locked(&mut inner).unwrap();
+    persist_locked_state_to_sqlite(&turn.state.persistence_path, &inner).unwrap();
+    id
+}
+
+fn durable_card(turn: &OrdinaryRoot, id: &str) -> Value {
+    let count = turn.record(|record| record.session.messages.len());
+    load_persisted_message_range(&turn.state.persistence_path, &turn.session, 0, count).unwrap()
+        .into_iter().find_map(|(_, message)| match message {
+            Message::EngramControl { id: actual, card, .. } if actual == id =>
+                Some(serde_json::to_value(card).unwrap()),
+            _ => None,
+        }).expect("the actual SQLite transcript retained its original card")
 }
 
 #[test]
-fn root_causal_evaluate_reply_loss_survives_card_and_writer() {
-    assert_root_causal_failure("turn_evaluate", 2);
-}
-
-#[test]
-fn root_causal_begin_reply_loss_survives_card_and_writer() {
-    assert_root_causal_failure("turn_begin", 2);
-}
-
-#[test]
-fn root_causal_closing_reply_loss_survives_card_and_writer() {
-    assert_root_causal_failure("turn_checkpoint", 1);
-}
-
-#[test]
-fn root_causal_publication_survives_an_incoherent_cut_from_a_deferred_snapshot() {
-    // Simulates the bounded collector's double-Changed outcome: when the
-    // session changes between plan and snapshot in both of its passes, the
-    // tick that carries the pending cause leaves that session out
-    // ("persist snapshot still deferred after bounded retry"). Its closing
-    // checkpoint's ledger entry is still in that delta, so the write refuses
-    // the incoherent cut. That refusal must keep the cause's fence for the
-    // retry tick, whose coherent cut publishes the cause; no later persist
-    // request is sent.
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_checkpoint", 1)));
-    fixture
-        .defer_cause_once
-        .store(true, std::sync::atomic::Ordering::Release);
-    let (token, _, _) = fixture.start_and_queue();
-    fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-    fixture.await_causal_publication();
-    assert!(
-        !fixture
-            .defer_cause_once
-            .load(std::sync::atomic::Ordering::Acquire),
-        "the tick holding the cause's fence was deferred"
-    );
-    assert!(
-        fixture
-            .typed_refusals_retaining_cause
-            .load(std::sync::atomic::Ordering::Acquire)
-            >= 1,
-        "that tick was refused as the typed race and kept the cause's fence for the retry"
-    );
-}
-
-#[test]
-fn root_causal_healthy_completion_hands_off_once_with_actual_applications() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(None);
-    let (token, _, _) = fixture.start_and_queue();
-    fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token)
-        .unwrap();
-    assert!(matches!(
-        fixture.receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(fixture.receiver.try_recv().is_err());
-    assert_eq!(fixture.transport.application_count("turn_evaluate"), 2);
-    assert_eq!(fixture.transport.application_count("turn_begin"), 2);
-    assert_eq!(fixture.transport.application_count("turn_checkpoint"), 1);
-    let durable = fixture.durable_cards();
-    assert_eq!(durable.len(), 3);
-    assert!(durable.iter().all(|card| card["decision"] != "degraded"));
-}
-
-#[test]
-fn root_causal_never_started_and_explicit_refusal_keep_distinct_knowledge() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    for (mode, expected_class, expected_application) in [
-        (CausalFaultMode::NeverStarted, "transport", "not_started"),
-        (CausalFaultMode::Refuse, "producer_refusal", "refused"),
-    ] {
-        let fixture = CausalRoot::new(Some(("turn_begin", 2)));
-        *fixture.transport.mode.lock().unwrap() = mode;
-        let (token, _, _) = fixture.start_and_queue();
-        let completion = fixture
-            .state
-            .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-        if matches!(mode, CausalFaultMode::Refuse) {
-            assert_eq!(
-                completion.unwrap_err().to_string(),
-                "failed to deliver queued turn dispatch: Engram did not authorize this turn for runtime delivery"
-            );
-        } else {
-            completion.unwrap();
+fn ordinary_completion_drains_fifo_without_replaying_or_overwriting_historical_causes() {
+    for operation in ["turn_evaluate", "turn_begin", "turn_checkpoint"] {
+        let turn = OrdinaryRoot::new("ordinary-historical-cause");
+        let error = EngramTransportError::transport("historical response frame missing");
+        let cause = EngramCausalFailure::error(&error, operation, Some("original-request"), &[]);
+        let id = save_card(&turn, historical_card(Some(cause)));
+        let original = durable_card(&turn, &id);
+        deliver_turn_dispatch(&turn.state, turn.prepare("first ordinary input")).unwrap();
+        turn.prompt();
+        for text in ["FIFO second", "FIFO third"] {
+            assert!(matches!(turn.state.dispatch_turn(&turn.session, SendMessageRequest {
+                text: text.into(), expanded_text: None, attachments: Vec::new(),
+                source_session_id: None, source_mailbox: None,
+            }).unwrap(), DispatchTurnResult::Queued));
         }
-        let cards = fixture.durable_cards();
-        let cause = &cards.last().unwrap()["causalFailure"];
-        assert_eq!(cause["operation"], "turn_begin");
-        assert_eq!(cause["failureClass"], expected_class);
-        assert_eq!(cause["remoteApplication"], expected_application);
-        if matches!(mode, CausalFaultMode::Refuse) {
-            assert_eq!(cause["originalCode"], "lifecycle_hold");
-            assert!(cause["message"]
-                .as_str()
-                .unwrap()
-                .contains("prior application is not determined"));
+        let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+        for expected in ["FIFO second", "FIFO third"] {
+            turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+            assert!(turn.prompt().prompt.contains(expected));
+            turn.assert_no_prompt();
         }
-        assert_eq!(fixture.transport.application_count("turn_begin"), 1);
-        assert!(fixture.receiver.try_recv().is_err());
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        {
+            let inner = turn.state.inner.lock().unwrap();
+            persist_locked_state_to_sqlite(&turn.state.persistence_path, &inner).unwrap();
+        }
+        assert_eq!(durable_card(&turn, &id), original);
+        turn.record(|record| assert!(record.queued_prompts.is_empty()));
+        turn.assert_no_prompt();
+        turn.assert_no_control();
     }
 }
 
 #[test]
-fn root_causal_request_secrets_never_reach_committed_cards() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_begin", 2)));
-    *fixture.transport.mode.lock().unwrap() = CausalFaultMode::SecretReply;
-    let (token, _, _) = fixture.start_and_queue();
-    fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token)
-        .unwrap();
-    let cards = fixture.durable_cards();
-    let lost = fixture
-        .transport
-        .lost_request
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap();
-    let serialized = serde_json::to_string(&cards).unwrap();
-    assert!(!serialized.contains(lost["routing_token"].as_str().unwrap()));
-    let tokens = lost["delivery_tokens"].as_array().unwrap();
-    assert_eq!(tokens, &[json!("opaque-capability-7eb9f4d2")]);
-    for token in tokens {
-        assert!(!serialized.contains(token.as_str().unwrap()));
-    }
-    assert!(!serialized.contains("secret with spaces"));
-    assert!(serialized.contains("response frame missing"));
-    assert!(serialized.contains("redacted"));
-}
-
-#[test]
-fn root_causal_public_stop_preserves_cause_and_distinct_operator_hold() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_evaluate", 2)));
-    let (token, original_head, _) = fixture.start_and_queue();
-    fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token)
-        .unwrap();
-    let before = fixture.durable_cards();
-    fixture
-        .state
-        .request_stop_session(&fixture.session)
-        .unwrap();
+fn ordinary_row_fence_reads_its_exact_queue_image_from_real_wal_snapshots() {
+    let turn = OrdinaryRoot::new("ordinary-row-wal");
+    turn.enqueue("exact own-row prompt", QueuedPromptSource::User);
+    let target = turn.record(|record| PersistFenceTarget::OrdinarySessionRow {
+        session_id: turn.session.clone(),
+        content: ordinary_session_row_persisted_content(&PersistedSessionRecord::from_record(record)),
+    });
     {
-        // Assert on an owned snapshot: a failed assertion must not poison the
-        // writer's state lock and trigger another panic from fixture teardown.
-        let record = {
-            let inner = fixture.state.inner.lock().unwrap();
-            inner.sessions[inner.find_session_index(&fixture.session).unwrap()].clone()
-        };
-        assert!(record.engram.operator_paused);
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(record.engram.admission_retry.is_none());
-        assert!(record.session.preview.contains("authorization canceled"));
-        assert_eq!(
-            serde_json::to_value(&record.queued_prompts.front().unwrap().pending_prompt).unwrap(),
-            original_head
-        );
+        let inner = turn.state.inner.lock().unwrap();
+        persist_locked_state_to_sqlite(&turn.state.persistence_path, &inner).unwrap();
     }
-    assert_eq!(
-        fixture.durable_cards(),
-        before,
-        "Stop keeps historical cause, not a new failure"
-    );
-    assert!(fixture.receiver.try_recv().is_err());
-    assert_eq!(
-        fixture.transport.attempts.lock().unwrap()["turn_evaluate"],
-        2
-    );
+    let writer = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    writer.execute_batch("PRAGMA journal_mode=WAL").unwrap();
+    let reader = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+    assert!(target.is_already_durable(&reader).unwrap());
+    let original: String = writer.query_row("SELECT value_json FROM sessions WHERE id=?1",
+        [&turn.session], |row| row.get(0)).unwrap();
+    let mut changed: Value = serde_json::from_str(&original).unwrap();
+    changed["queuedPrompts"][0]["pending_prompt"]["text"] = json!("different own-row bytes");
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    writer.execute("UPDATE sessions SET value_json=?1 WHERE id=?2",
+        rusqlite::params![changed.to_string(), turn.session]).unwrap();
+    assert!(!target.is_already_durable(&writer).unwrap(), "a different own-row cannot satisfy its fence");
+    assert!(target.is_already_durable(&reader).unwrap(), "uncommitted sibling image is not published");
+    writer.execute_batch("ROLLBACK").unwrap();
+    assert!(target.is_already_durable(&reader).unwrap());
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    writer.execute("UPDATE sessions SET value_json=?1 WHERE id=?2",
+        rusqlite::params![changed.to_string(), turn.session]).unwrap();
+    writer.execute_batch("COMMIT").unwrap();
+    assert!(!target.is_already_durable(&reader).unwrap());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn root_causal_legacy_card_loads_without_inventing_failure_details() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(None);
-    fixture.start_and_queue();
-    let mut wire = fixture.durable_cards().into_iter().next().unwrap();
-    wire.as_object_mut().unwrap().remove("causalFailure");
+fn ordinary_work_service_diagnostics_keep_not_started_distinct_from_unknown_application() {
+    for (error, expected) in [
+        (EngramTransportError::spawn_failed("fixture worker absent"), EngramRemoteApplication::NotStarted),
+        (EngramTransportError::transport("fixture response lost"), EngramRemoteApplication::Unknown),
+        (EngramTransportError::remote(EngramControlErrorBody {
+            code: "access_denied".into(), message: "fixture refusal".into(),
+        }), EngramRemoteApplication::Unknown),
+    ] {
+        let cause = EngramCausalFailure::error(&error, "execution_observe", Some("original-request"), &[]);
+        assert_eq!(cause.remote_application, expected);
+        assert_eq!(cause.attempt_id.as_deref(), Some("original-request"));
+        assert_eq!(cause.operation, "execution_observe");
+    }
+}
+
+#[test]
+fn ordinary_historical_request_secrets_are_redacted_before_real_sqlite_storage() {
+    let turn = OrdinaryRoot::new("ordinary-cause-redaction");
+    let error = EngramTransportError::transport(
+        "response frame missing capability-sentinel password = 'secret with spaces'");
+    let cause = EngramCausalFailure::error(&error, "historical_request", Some("original-attempt"),
+        &["capability-sentinel"]);
+    let id = save_card(&turn, historical_card(Some(cause)));
+    let serialized = serde_json::to_string(&durable_card(&turn, &id)).unwrap();
+    assert!(serialized.contains("response frame missing") && serialized.contains("redacted"));
+    assert!(!serialized.contains("capability-sentinel") && !serialized.contains("secret with spaces"));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn ordinary_public_stop_keeps_historical_cause_and_owns_the_unsent_queue() {
+    let turn = OrdinaryRoot::new("ordinary-cause-stop");
+    let id = save_card(&turn, historical_card(Some(EngramCausalFailure::error(
+        &EngramTransportError::transport("historical lost report"), "turn_checkpoint", Some("old-key"), &[]))));
+    let original = durable_card(&turn, &id);
+    turn.enqueue("unsent original", QueuedPromptSource::User);
+    // No external provider is running. Exercise the actual public Stop claim
+    // and its synchronous completion, without spawning a background interrupt.
+    turn.edit(|record| {
+        record.session.status = SessionStatus::Active;
+        record.runtime = SessionRuntime::None;
+    });
+    let options = StopSessionOptions::default();
+    let (_, claim) = turn.state.begin_requested_stop_session(&turn.session, &options).unwrap();
+    assert!(claim.is_some());
+    turn.state.stop_local_session_with_options(&turn.session, options, claim).unwrap();
+    turn.record(|record| {
+        assert!(record.orchestrator_auto_dispatch_blocked);
+        assert!(record.engram.operator_paused);
+        assert_eq!(record.queued_prompts.front().unwrap().pending_prompt.text, "unsent original");
+    });
+    assert_eq!(durable_card(&turn, &id), original);
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn historical_card_without_cause_loads_without_inventing_failure_details() {
+    let wire = serde_json::to_value(historical_card(None)).unwrap();
+    assert!(wire.get("causalFailure").is_none());
     let loaded: EngramControlCard = serde_json::from_value(wire).unwrap();
     assert!(loaded.causal_failure.is_none());
-    assert!(serde_json::to_value(loaded)
-        .unwrap()
-        .get("causalFailure")
-        .is_none());
+    assert!(serde_json::to_value(loaded).unwrap().get("causalFailure").is_none());
 }
 
 #[test]
-fn root_causal_checkpoint_link_rejects_stale_unrelated_reset_and_settled_causes() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_checkpoint", 1)));
-    let (token, _, _) = fixture.start_and_queue();
-    let target = {
-        let inner = fixture.state.inner.lock().unwrap();
-        AppState::engram_binding_target_for_session_shape_locked(&inner, &fixture.session, true)
+fn ordinary_stale_completion_or_dispatch_cannot_decorate_or_consume_a_replacement() {
+    for paused in [false, true] {
+        let turn = OrdinaryRoot::new("ordinary-stale-cause");
+        let dispatch = turn.prepare("superseded input");
+        let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+        turn.edit(|record| {
+            record.runtime = SessionRuntime::None;
+            record.session.status = SessionStatus::Idle;
+            if paused { record.set_auto_dispatch_blocked(true); }
+        });
+        turn.enqueue("independent replacement", QueuedPromptSource::User);
+        let before = turn.saved();
+        assert!(matches!(deliver_turn_dispatch(&turn.state, dispatch), TurnDispatchDeliveryOutcome::Superseded));
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        assert_eq!(turn.saved(), before);
+        turn.assert_no_prompt();
+        turn.assert_no_control();
     }
-    .unwrap()
-    .expect("capture the original authority before checkpoint debt excludes admission");
-    // Exercise the actual checkpoint before admission's legitimate promotion.
-    fixture.state.checkpoint_engram_turn_off_lock(
-        &fixture.session,
-        EngramCheckpointPurpose::TurnTerminal,
-        Some(&token),
-        None,
-        EngramNextIntent::Continue,
-        Some(EngramExecutionOutcome::Succeeded),
-        None,
-    );
-    let (current_target, record) = {
-        let inner = fixture.state.inner.lock().unwrap();
-        (
-            AppState::engram_binding_target_for_session_shape_locked(&inner, &fixture.session, true),
-            inner
-                .find_session_index(&fixture.session)
-                .map(|index| inner.sessions[index].clone()),
-        )
-    };
-    assert!(
-        current_target.unwrap().is_none(),
-        "original checkpoint debt excludes generic admission"
-    );
-    let mut record = record.expect("the original session remains present");
-    let owner = EngramQueuedAdmissionOwner::capture(&record).unwrap();
-    assert!(engram_checkpoint_cause_for_owner(&record, &target, &owner).is_some());
-    let mut stale = owner.clone();
-    stale.prompt_id = "unrelated-head".to_owned();
-    assert!(engram_checkpoint_cause_for_owner(&record, &target, &stale).is_none());
-    stale = owner.clone();
-    stale.active_turn_generation += 1;
-    assert!(engram_checkpoint_cause_for_owner(&record, &target, &stale).is_none());
-    record.engram.project_reset_in_progress = true;
-    assert!(engram_checkpoint_cause_for_owner(&record, &target, &owner).is_none());
-    record.engram.project_reset_in_progress = false;
-    record.runtime_stop_in_progress = true;
-    assert!(engram_checkpoint_cause_for_owner(&record, &target, &owner).is_none());
-    record.runtime_stop_in_progress = false;
-    let mut other_target = target.clone();
-    other_target.connection.actor_id.push_str("-replacement");
-    assert!(engram_checkpoint_cause_for_owner(&record, &other_target, &owner).is_none());
-    // A later successful card for the same grant masks its old failure even
-    // before the normal settlement clears the local grant.
-    let mut success = record
-        .session
-        .messages
-        .iter()
-        .rev()
-        .find_map(|message| match message {
-            Message::EngramControl { card, .. } if card.stage == EngramControlStage::Checkpoint => {
-                Some(card.clone())
-            }
-            _ => None,
-        })
-        .unwrap();
-    success.decision = EngramControlCardDecision::Grant;
-    success.causal_failure = None;
-    record.session.messages.push(Message::EngramControl {
-        id: "later-success".to_owned(),
-        timestamp: stamp_now(),
-        author: Author::Assistant,
-        card: success,
-    });
-    assert!(engram_checkpoint_cause_for_owner(&record, &target, &owner).is_none());
 }
 
 #[test]
@@ -1029,114 +241,6 @@ fn root_causal_redaction_is_bounded_and_never_upgrades_remote_errors() {
 }
 
 #[test]
-fn root_causal_parse_mismatch_and_healing_refusal_keep_actual_request_identity() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    for (mode, operation, expected_class, application) in [
-        (
-            CausalFaultMode::Malformed,
-            "turn_evaluate",
-            "protocol",
-            "unknown",
-        ),
-        (
-            CausalFaultMode::MismatchedBegin,
-            "turn_begin",
-            "protocol",
-            "unknown",
-        ),
-        (
-            CausalFaultMode::HealMalformed,
-            "turn_evaluate",
-            "protocol",
-            "unknown",
-        ),
-        (
-            CausalFaultMode::HealRefused,
-            "turn_evaluate",
-            "producer_refusal",
-            "refused",
-        ),
-    ] {
-        let fault_op = if matches!(
-            mode,
-            CausalFaultMode::HealMalformed | CausalFaultMode::HealRefused
-        ) {
-            "turn_begin"
-        } else {
-            operation
-        };
-        let fixture = CausalRoot::new(Some((fault_op, 2)));
-        *fixture.transport.mode.lock().unwrap() = mode;
-        let (token, original_head, _) = fixture.start_and_queue();
-        let _completion = fixture
-            .state
-            .finish_turn_ok_if_runtime_matches(&fixture.session, &token);
-        let cards = fixture.durable_cards();
-        let cause = &cards.last().unwrap()["causalFailure"];
-        let request = fixture
-            .transport
-            .lost_request
-            .lock()
-            .unwrap()
-            .clone()
-            .unwrap();
-        assert_eq!(cause["operation"], operation);
-        assert_eq!(cause["attemptId"], request["idempotency_key"]);
-        assert_eq!(cause["failureClass"], expected_class);
-        assert_eq!(cause["remoteApplication"], application);
-        if matches!(
-            mode,
-            CausalFaultMode::HealMalformed | CausalFaultMode::HealRefused
-        ) {
-            assert!(cause["continuationReason"]
-                .as_str()
-                .unwrap()
-                .contains("grant_expired"));
-        }
-        let head = {
-            let inner = fixture.state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
-            record
-                .queued_prompts
-                .front()
-                .map(|queued| serde_json::to_value(&queued.pending_prompt).unwrap())
-        };
-        if matches!(mode, CausalFaultMode::HealRefused) {
-            assert_eq!(head, None, "explicit refusal retires the promoted prompt");
-        } else {
-            assert_eq!(
-                head.as_ref(),
-                Some(&original_head),
-                "unresolved request retains its exact prompt"
-            );
-        }
-        assert!(fixture.receiver.try_recv().is_err());
-    }
-}
-
-#[test]
-fn root_causal_expired_pre_begin_budget_is_current_request_not_started() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let fixture = CausalRoot::new(Some(("turn_evaluate", 2)));
-    *fixture.transport.mode.lock().unwrap() = CausalFaultMode::BudgetAfterGrant;
-    *fixture.transport.clock.lock().unwrap() =
-        Some(fixture.state.select_test_scripted_engram_budget_clock());
-    let (token, _, _) = fixture.start_and_queue();
-    fixture
-        .state
-        .finish_turn_ok_if_runtime_matches(&fixture.session, &token)
-        .unwrap();
-    let cards = fixture.durable_cards();
-    let cause = &cards.last().unwrap()["causalFailure"];
-    assert_eq!(cause["operation"], "turn_begin");
-    assert_eq!(cause["originalCode"], "dispatch_budget_exhausted");
-    assert_eq!(cause["failureClass"], "deadline");
-    assert_eq!(cause["remoteApplication"], "not_started");
-    assert_eq!(fixture.transport.attempts.lock().unwrap()["turn_begin"], 1);
-    assert!(fixture.receiver.try_recv().is_err());
-}
-
-#[test]
 fn root_causal_local_preparation_preserves_error_but_not_prior_application_certainty() {
     let error =
         EngramTransportError::local_state("Failed to persist prepared evaluate: writer stopped");
@@ -1158,77 +262,4 @@ fn root_causal_local_preparation_preserves_error_but_not_prior_application_certa
         EngramCausalFailure::local(&earlier, "turn_evaluate", "Evaluate durable preparation");
     assert_eq!(carried.operation, "turn_checkpoint");
     assert_eq!(carried.remote_application, EngramRemoteApplication::Unknown);
-}
-
-#[test]
-fn root_causal_superseded_response_never_decorates_replacement_prompt() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    for held in [false, true] {
-        let fixture = CausalRoot::new(Some(("turn_evaluate", 2)));
-        let (token, mut replacement, _) = fixture.start_and_queue();
-        replacement["id"] = json!("replacement-prompt");
-        let shared = Arc::clone(&fixture.state.inner);
-        let session = fixture.session.clone();
-        *fixture.transport.after_fault.lock().unwrap() = Some(Box::new(move || {
-            let mut inner = shared.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            let record = &mut inner.sessions[index];
-            record.queued_prompts.front_mut().unwrap().pending_prompt.id =
-                "replacement-prompt".to_owned();
-            record.engram.dispatch_generation += 1;
-            // Separate intentional hold: the runnable companion must still
-            // demonstrate that a stale response does not block its successor.
-            if held {
-                record.set_auto_dispatch_blocked(true);
-            }
-        }));
-        fixture
-            .state
-            .finish_turn_ok_if_runtime_matches(&fixture.session, &token)
-            .unwrap();
-        let cards = fixture.durable_cards();
-        let lost = fixture
-            .transport
-            .lost_request
-            .lock()
-            .unwrap()
-            .clone()
-            .unwrap();
-        assert!(cards
-            .iter()
-            .all(|card| card["causalFailure"]["attemptId"] != lost["idempotency_key"]));
-        let (head, blocked, active_generation) = {
-            let inner = fixture.state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
-            (
-                record
-                    .queued_prompts
-                    .front()
-                    .map(|queued| serde_json::to_value(&queued.pending_prompt).unwrap()),
-                record.orchestrator_auto_dispatch_blocked,
-                record.active_turn_generation,
-            )
-        };
-        if held {
-            assert_eq!(head.as_ref(), Some(&replacement));
-            assert!(blocked, "stale response must preserve the independent hold");
-            assert_eq!(fixture.transport.application_count("turn_begin"), 1);
-        } else {
-            assert_eq!(head, None, "runnable replacement was legitimately promoted");
-            assert!(!blocked);
-            match fixture.receiver.try_recv().unwrap() {
-                CodexRuntimeCommand::Prompt {
-                    session_id,
-                    command,
-                } => {
-                    assert_eq!(session_id, fixture.session);
-                    assert_eq!(command.active_turn_generation, active_generation);
-                    assert!(command.prompt.contains("Exact retained continuation"));
-                }
-                _ => panic!("replacement must reach its provider as a prompt"),
-            }
-            assert_eq!(fixture.transport.application_count("turn_begin"), 2);
-        }
-        assert!(fixture.receiver.try_recv().is_err(), "no duplicate handoff");
-    }
 }

@@ -53,7 +53,7 @@ fn engram_focused_interval_late_observation_records_passed_build() {
     one_build(
         &f.finish(EngramCommandExit::Code(0)),
         &revision,
-        "succeeded",
+        "passed",
     );
 }
 
@@ -68,7 +68,7 @@ fn engram_focused_interval_exact_slack_boundary_records_passed_build() {
     one_build(
         &f.finish(EngramCommandExit::Code(0)),
         &revision,
-        "succeeded",
+        "passed",
     );
 }
 
@@ -160,10 +160,9 @@ fn engram_focused_interval_negative_controls_name_the_failed_comparison() {
         interval_records(&mut f, REQUEST);
         mutate(&mut f);
         let revision = f.turn.revision();
-        let checkpoint = f.finish(EngramCommandExit::Code(0));
-        one_build(&checkpoint, &revision, "unknown");
-        let row = &checkpoint["verification_evidence"][0];
-        let text = row["summary"].as_str().unwrap();
+        let request = f.finish(EngramCommandExit::Code(0));
+        one_build(&request, &revision, "indeterminate");
+        let text = diagnostic_summary(&f.turn);
         assert!(text.contains("observed native exit 0"), "{case}: {text}");
         assert!(
             text.contains("interval validation rejected"),
@@ -176,8 +175,7 @@ fn engram_focused_interval_negative_controls_name_the_failed_comparison() {
         assert!(!text.contains("PRIVATE_INVALID_TIME"), "{text}");
         assert!(text.len() <= ENGRAM_CHECK_SUMMARY_MAX_BYTES);
         assert!(
-            row.get("refs")
-                .is_none_or(|refs| !refs.as_array().unwrap().contains(&json!("exit:0")))
+            !diagnostic_refs(&f.turn).contains(&"exit:0".to_owned())
         );
     }
 }

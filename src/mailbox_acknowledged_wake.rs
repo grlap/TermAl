@@ -137,7 +137,7 @@ impl AppState {
     /// text so it no longer claims unread mail.
     ///
     /// Acknowledgement advances the data cursor only; it never cancels an
-    /// accepted wake. Retained heads are replay input and stay untouched. A
+    /// accepted wake. Stored prompt history stays immutable. A
     /// wake whose boundary row is invisible or already delivered is left for
     /// dispatch-time revalidation, which drops it.
     fn refresh_acknowledged_mailbox_wakeups(
@@ -159,7 +159,7 @@ impl AppState {
                 .queued_prompts
                 .iter()
                 .filter(|queued| {
-                    !queued.is_engram_retained() && !queued_prompt_kept_standalone(record, queued)
+                    !queued.has_stored_history() && !queued_prompt_kept_standalone(record, queued)
                 })
                 .filter_map(|queued| {
                     let mailbox = queued.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
@@ -197,7 +197,7 @@ impl AppState {
             let durability_holds = &record.queued_prompt_durability_holds;
             let Some(queued) = record.queued_prompts.iter_mut().find(|queued| {
                 queued.pending_prompt.id == prompt_id
-                    && !queued.is_engram_retained()
+                    && !queued.has_stored_history()
                     && !durability_holds.contains_key(&queued.pending_prompt.id)
                     && queued
                         .pending_prompt

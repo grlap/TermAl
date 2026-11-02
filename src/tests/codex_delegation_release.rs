@@ -37,7 +37,7 @@ fn codex_rpc_timeout_and_transport_are_host_errors_but_rejection_is_bad_request(
 
 #[test]
 fn rejected_followup_admission_does_not_unarchive_terminal_child() {
-    for rejection in ["recovery", "stopping", "canceled"] {
+    for rejection in ["observation-delete", "stopping", "canceled"] {
         let (state, child, delegation, release, input_rx) =
             terminal_child_with_pending_durability();
         release.retry_durability(&state).unwrap();
@@ -77,8 +77,8 @@ fn rejected_followup_admission_does_not_unarchive_terminal_child() {
                                 let mut inner = worker_state.inner.lock().unwrap();
                                 let index = inner.find_session_index(&worker_child).unwrap();
                                 match rejection {
-                                    "recovery" => {
-                                        inner.sessions[index].engram_boot_recovery_pending = true
+                                    "observation-delete" => {
+                                        inner.sessions[index].engram.observation_delete_requested = true
                                     }
                                     "stopping" => {
                                         inner.sessions[index].session.status =
@@ -149,7 +149,7 @@ fn rejected_followup_admission_does_not_unarchive_terminal_child() {
 
 #[test]
 fn rejected_followup_after_restore_rearchives_without_admitting_a_prompt() {
-    for rejection in ["recovery", "stopping", "canceled", "compensation"] {
+    for rejection in ["observation-delete", "stopping", "canceled", "compensation"] {
         let (state, child, delegation, release, input_rx) =
             terminal_child_with_pending_durability();
         release.retry_durability(&state).unwrap();
@@ -188,7 +188,7 @@ fn rejected_followup_after_restore_rearchives_without_admitting_a_prompt() {
                 let mut inner = worker_state.inner.lock().unwrap();
                 let index = inner.find_session_index(&worker_child).unwrap();
                 match rejection {
-                    "recovery" => inner.sessions[index].engram_boot_recovery_pending = true,
+                    "observation-delete" => inner.sessions[index].engram.observation_delete_requested = true,
                     "stopping" | "compensation" => {
                         inner.sessions[index].session.status = SessionStatus::Stopping
                     }

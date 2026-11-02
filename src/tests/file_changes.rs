@@ -127,23 +127,37 @@ fn file_change_capture_fixture() -> (Arc<AppState>, String, String) {
             "Original prompt",
             "fixture".to_owned(),
         );
-        record.engram.active_turn_source_root = Some(EngramTurnSourceRoot {
-            root: root.join("sibling-root").to_string_lossy().into_owned(),
-            common_dir_key: "original-store".to_owned(),
-            short_ref: "original-work".to_owned(),
-            claim_id: "original-claim".to_owned(),
-            generation: 1,
-            sealed_revision: None,
-        });
-        record.engram.active_grant_id = Some("private-grant".to_owned());
-        record.engram.routing_token = Some("private-routing-token".to_owned());
-        record.engram.active_turn_naming_identity = Some((
-            EngramAuthorityStoreKey {
+        // The ordinary observed trace carries the captured naming scope and
+        // source root (`observed_naming_identity`, `observed_source_root`).
+        // Its claim and run ids are private and never reach the evidence note.
+        let mut trace = EngramRuntimeObservedTurn::started(
+            "original-prompt".to_owned(),
+            record.active_turn_generation,
+        );
+        trace.opening_root = Some(EngramRuntimeOpeningRoot {
+            store: EngramAuthorityStoreKey {
                 database_path: root.join("store"),
                 project_id: "original-project".to_owned(),
             },
-            "original-work".to_owned(),
-        ));
+            binding: EngramControlWorkBinding {
+                root_execution_id: "private-root-execution".to_owned(),
+                work_id: "original-work".to_owned(),
+                run_id: "private-run".to_owned(),
+                work_revision: 1,
+                claim_id: "private-claim".to_owned(),
+                claim_fence: 1,
+            },
+            provenance: EngramRootCapture::Unconfirmed,
+            source_root: Some(EngramTurnSourceRoot {
+                root: root.join("sibling-root").to_string_lossy().into_owned(),
+                common_dir_key: "original-store".to_owned(),
+                short_ref: "original-work".to_owned(),
+                claim_id: "original-claim".to_owned(),
+                generation: 1,
+                sealed_revision: None,
+            }),
+        });
+        record.engram.unadmitted_active_turn = Some(trace);
         created.session.id
     };
     let path = root.join("deleted.rs").to_string_lossy().into_owned();
@@ -175,10 +189,8 @@ fn file_change_capture_retains_original_evidence_across_owner_changes() {
         "root-store",
         "root-seal",
         "naming",
-        "routing",
-        "grant",
-        "intent",
-        "dispatch",
+        "binding",
+        "delete-requested",
         "runtime",
         "missing-anchor",
     ] {
@@ -230,43 +242,46 @@ fn file_change_capture_retains_original_evidence_across_owner_changes() {
                 "root-claim" => {
                     record
                         .engram
-                        .active_turn_source_root
-                        .as_mut()
+                        .observed_source_root_mut()
                         .unwrap()
                         .claim_id = "replacement-claim".to_owned()
                 }
                 "root-store" => {
                     record
                         .engram
-                        .active_turn_source_root
-                        .as_mut()
+                        .observed_source_root_mut()
                         .unwrap()
                         .common_dir_key = "replacement-store".to_owned()
                 }
                 "root-seal" => {
                     record
                         .engram
-                        .active_turn_source_root
-                        .as_mut()
+                        .observed_source_root_mut()
                         .unwrap()
                         .sealed_revision = Some("sealed".to_owned())
                 }
+                // The captured naming scope: the trace's store and its work.
                 "naming" => {
                     record
                         .engram
-                        .active_turn_naming_identity
+                        .unadmitted_active_turn
                         .as_mut()
+                        .and_then(|trace| trace.opening_root.as_mut())
                         .unwrap()
-                        .0
+                        .store
                         .project_id = "replacement-project".to_owned()
                 }
-                "routing" => record.engram.routing_token = Some("replacement-routing".to_owned()),
-                "grant" => record.engram.active_grant_id = Some("replacement-grant".to_owned()),
-                "intent" => {
-                    record.engram.active_turn_intent_fingerprint =
-                        Some("replacement-intent".to_owned())
+                "binding" => {
+                    record
+                        .engram
+                        .unadmitted_active_turn
+                        .as_mut()
+                        .and_then(|trace| trace.opening_root.as_mut())
+                        .unwrap()
+                        .binding
+                        .work_id = "replacement-work".to_owned()
                 }
-                "dispatch" => record.engram.dispatch_generation += 1,
+                "delete-requested" => record.engram.observation_delete_requested = true,
                 "runtime" => {
                     let (handle, _receiver) = test_codex_runtime_handle("replacement-runtime");
                     record.runtime = SessionRuntime::Codex(handle);
@@ -312,8 +327,9 @@ fn file_change_capture_retains_original_evidence_across_owner_changes() {
         assert!(evidence.get("trackingIncarnation").is_none());
         assert_eq!(record.session.preview, original_preview, "{change}");
         assert_eq!(evidence["files"][&path], "deleted", "{change}");
-        assert!(!notes[0].contains("private-routing-token"));
-        assert!(!notes[0].contains("private-grant"));
+        assert!(!notes[0].contains("private-claim"));
+        assert!(!notes[0].contains("private-run"));
+        assert!(!notes[0].contains("private-root-execution"));
         assert!(!notes[0].contains("successor-prompt"));
         assert!(
             !record

@@ -24,15 +24,13 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         .or_else(|| added["short_ref"].as_str())
         .unwrap();
     fixture.work(session, &["claim", work, "--json"]);
-    fixture
-        .live
-        .state
-        .ensure_engram_session_bound_off_lock(session)
-        .unwrap()
-        .unwrap();
-    let binding = fixture.record(session, |record| {
-        record.engram.work_binding.clone().unwrap()
-    });
+    let binding = fixture.claim_binding(session);
+    let association = EngramRootIntentAssociation::validate(
+        &fixture.store(), &binding.work_id, &binding.claim_id, Some(binding.claim_fence), Some(&binding),
+    ).unwrap();
+    let target = fixture.target(session);
+    let deadline = fixture.live.state.engram_budget_clock().now() + target.settings.call_timeout();
+    fixture.live.state.bind_fresh_engram_source_root_until(target, &association, deadline).unwrap();
     let before = fixture.canonical_read(session, &binding);
     assert_eq!(before.named_root, EngramNamedRootState::None);
     assert!(
@@ -99,39 +97,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         let index = inner.find_session_index(session).unwrap();
         inner.sessions[index].runtime = runtime;
     }
-    let dispatch = dispatch_live_root(
-        &fixture.live.state,
-        session,
-        "Inspect the legacy opening.",
-        None,
-    );
-    deliver_turn_dispatch(&fixture.live.state, dispatch).unwrap();
-    let CodexRuntimeCommand::Prompt { command, .. } = fixture.live.receiver.try_recv().unwrap()
-    else {
-        panic!("provider prompt");
-    };
-    assert!(
-        command.prompt.contains("canonical naming history"),
-        "{}",
-        command.prompt
-    );
-    assert!(fixture.record(session, |record| {
-        record.engram.active_turn_start_basis.is_none()
-    }));
-    assert_eq!(
-        fixture.record(session, |record| record
-            .engram
-            .active_turn_root_capture
-            .clone()),
-        Some(EngramRootCapture::Unconfirmed)
-    );
-    fixture
-        .live
-        .state
-        .recover_engram_authority_runs(session, Duration::from_secs(2));
-    assert!(fixture.record(session, |record| {
-        !record.engram.source_root_notices.is_empty()
-    }));
+    assert_eq!(fixture.live.state.engram_turn_root_capture(session), EngramRootCapture::Unconfirmed);
     let named = fixture
         .live
         .state
@@ -144,172 +110,38 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         )
         .expect("ordinary forward naming recovers without historical repair");
     assert!(named.generation > 7);
-    assert_eq!(
-        fixture.live.state.engram_turn_root_capture(session),
-        EngramRootCapture::Unconfirmed
-    );
     let bound = fixture.canonical_read(session, &binding);
-    assert!(
-        matches!(bound.named_root, EngramNamedRootState::Bound { generation, .. } if generation == named.generation as i64)
-    );
+    assert!(matches!(bound.named_root, EngramNamedRootState::Bound { generation, .. }
+        if generation == named.generation as i64));
     assert_eq!(bound.latest_event.unwrap().kind, EngramNamedRootKind::Bound);
+    fixture.begin(session, "Check the prospectively named generation without an edit.");
+    fixture.record(session, |record| {
+        let opening = record.engram.unadmitted_active_turn.as_ref().unwrap().opening_root.as_ref().unwrap();
+        assert_eq!(opening.binding, binding);
+        assert!(matches!(opening.provenance, EngramRootCapture::Recorded { generation, .. }
+            if generation == named.generation as i64));
+    });
+    let before = content_revision(&fixture.root).unwrap().1;
+    let (body, receipt) = fixture.registered_check(session, &fixture.root, "cargo test --offline");
+    assert_eq!(body.registration.binding, binding);
+    assert_eq!(body.registration.root.generation, named.generation as i64);
+    let stored = fixture.object(&receipt.verifications[0].record_id);
+    assert_eq!(stored["source_basis"], serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap());
+    assert_eq!(stored["check_kind"], "test");
     finish_live_root(&fixture.live.state, session);
-    let old_checkpoints = fixture.live.transport.requests_for("turn_checkpoint");
-    let old = old_checkpoints.last().unwrap();
-    assert!(
-        old["observations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|observation| observation.get("source_basis").is_none_or(Value::is_null)),
-        "{old:#}"
-    );
-    let dispatch = dispatch_live_root(
-        &fixture.live.state,
-        session,
-        "Check the new generation without an edit.",
-        None,
-    );
-    deliver_turn_dispatch(&fixture.live.state, dispatch).unwrap();
-    let CodexRuntimeCommand::Prompt { command, .. } = fixture.live.receiver.try_recv().unwrap()
-    else {
-        panic!("fresh provider prompt");
-    };
-    assert!(
-        !command
-            .prompt
-            .contains("Source-root authority recovery remains incomplete"),
-        "{}",
-        command.prompt
-    );
-    assert!(
-        !command
-            .prompt
-            .contains("This turn's source-root binding is unconfirmed"),
-        "{}",
-        command.prompt
-    );
-    assert!(
-        matches!(fixture.record(session, |record| record.engram.active_turn_root_capture.clone()), Some(EngramRootCapture::Recorded { generation, state: EngramSourceRootState::Named, .. }) if generation == named.generation as i64)
-    );
-    assert_eq!(
-        fixture.record(session, |record| record
-            .engram
-            .active_turn_start_basis
-            .as_ref()
-            .unwrap()
-            .source_root_generation),
-        Some(named.generation as i64)
-    );
-    let revision = named.source_revision.unwrap();
-    let mut recorder = SessionRecorder::new(fixture.live.state.clone(), session.clone());
-    let cwd = fs::canonicalize(&fixture.root)
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
-    recorder
-        .command_started_in(
-            "legacy-test",
-            "cargo test --offline",
-            Some("cargo test --offline"),
-            Some(&cwd),
-        )
-        .unwrap();
-    fixture.wait_for_check_capture(session);
-    let output = Command::new("cargo")
-        .args(["test", "--offline"])
-        .current_dir(&fixture.root)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let output = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(output.contains("1 passed"), "{output}");
-    recorder
-        .command_completed_with_exit(
-            "legacy-test",
-            "cargo test --offline",
-            &output,
-            CommandStatus::Success,
-            EngramCommandExit::Code(0),
-        )
-        .unwrap();
-    fixture.wait_for_check_capture(session);
-    finish_live_root(&fixture.live.state, session);
-    let checkpoints = fixture.live.transport.requests_for("turn_checkpoint");
-    let checked = checkpoints.last().unwrap();
-    assert_eq!(
-        checked["verification_evidence"].as_array().map(Vec::len),
-        Some(1),
-        "{checked:#}"
-    );
-    let basis = checked["observations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|observation| observation["source_basis"]["source_revision"] == revision)
-        .unwrap()["source_basis"]
-        .clone();
-    assert_eq!(basis["source_root_generation"], named.generation);
-    assert_eq!(
-        content_revision(&fixture.root).unwrap().1,
-        revision,
-        "no invented edit"
-    );
-    let shown = fixture.work(session, &["show", work, "--notes", "--json"]);
-    let mut rows = Vec::new();
-    objects_with_key(&shown, "verification", &mut rows);
-    assert_eq!(rows.len(), 1, "{shown:#}");
-    let verification = rows[0]["locator"].as_str().unwrap();
-    assert_eq!(fixture.object(verification)["source_basis"], basis);
+    fixture.wait_for_reports(session);
+    assert_eq!(content_revision(&fixture.root).unwrap().1, before, "no invented source edit");
     let shown = fixture.work(session, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
-    fixture.work(
-        session,
-        &[
-            "evaluate",
-            work,
-            "--mode",
-            "same-session",
-            "--acceptance-basis",
-            &acceptance,
-            "--evidence-basis",
-            &evidence,
-            "--verdict",
-            "1=pass:observed",
-            "--rationale",
-            "1=Actual check in a prospectively confirmed legacy root passed",
-            "--evidence",
-            &format!("1={verification}"),
-            "--source-fingerprint",
-            &revision,
-            "--attempt",
-            "legacy-forward-completion",
-            "--json",
-        ],
-    );
-    fixture.work(
-        session,
-        &[
-            "done",
-            work,
-            "Prospective root check passed",
-            "--source-fingerprint",
-            &revision,
-            "--json",
-        ],
-    );
-    let shown = fixture.work(session, &["show", work, "--json"]);
-    assert_eq!(
-        shown["status"]["work"]["lifecycle"], "completed",
-        "{shown:#}"
-    );
+    let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("the registered native witness requires committed input"); };
+    fixture.work(session, &["evaluate", work, "--mode", "same-session", "--acceptance-basis",
+        &acceptance, "--evidence-basis", &evidence, "--verdict", "1=pass:observed", "--rationale",
+        "1=Real registered check in a prospectively confirmed legacy root passed", "--evidence",
+        &format!("1={}", receipt.verifications[0].record_id), "--source-fingerprint", commit,
+        "--attempt", "legacy-forward-completion", "--json"]);
+    fixture.work(session, &["done", work, "Prospective root check passed", "--source-fingerprint", commit, "--json"]);
+    let completed = fixture.work(session, &["show", work, "--json"]);
+    assert_eq!(completed["status"]["work"]["lifecycle"], "completed", "{completed:#}");
+    assert_no_live_turn_gate(&fixture.live.transport);
 }

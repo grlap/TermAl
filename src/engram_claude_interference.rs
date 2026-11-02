@@ -98,6 +98,7 @@ fn engram_hazards_of_work(
     work: &ClaudeOutstandingWork,
     current: Option<&RuntimeToken>,
     turn_generation: u64,
+    adopted_generation: Option<u64>,
     owner_writes: bool,
     keys: Option<&[String]>,
 ) -> Vec<EngramClaudeHazard> {
@@ -105,7 +106,7 @@ fn engram_hazards_of_work(
         .entries
         .iter()
         .filter(|entry| keys.is_none_or(|keys| keys.contains(&entry.key)))
-        .filter(|entry| entry.is_hazard(current, turn_generation))
+        .filter(|entry| entry.is_hazard(current, turn_generation, adopted_generation))
         .map(|entry| EngramClaudeHazard {
             owner: owner.clone(),
             key: Some(entry.key.clone()),
@@ -150,6 +151,7 @@ fn engram_session_hazards(
         &record.claude_outstanding,
         record.runtime.runtime_token().as_ref(),
         record.active_turn_generation,
+        record.adopted_claude_turn_generation,
         engram_session_may_write(inner, index),
         keys,
     )
@@ -168,7 +170,7 @@ fn engram_orphaned_hazards(inner: &StateInner, session_id: Option<&str>) -> Vec<
                 },
             };
             // Nothing of a deleted session is its current turn's own.
-            engram_hazards_of_work(&owner, &orphan.work, None, 0, true, None)
+            engram_hazards_of_work(&owner, &orphan.work, None, 0, None, true, None)
         })
         .collect()
 }
@@ -226,6 +228,27 @@ fn engram_claude_interference_cause(
         .find_map(|hazard| engram_claude_interference(hazard, subject))
 }
 
+// Source attribution has no self-launch exception. An unresolved measured
+// worktree cannot prove that retained writing work was somewhere else.
+fn engram_observation_interference_cause(
+    hazards: &[EngramClaudeHazard],
+    session: usize,
+    root: Option<&str>,
+) -> Option<ClaudeHazardCause> {
+    if let Some(root) = root {
+        return engram_claude_interference_cause(hazards, &EngramInterferenceSubject {
+            session, key: "", root: root.to_owned(), ended_at: None, simple_full_gate: false,
+        });
+    }
+    hazards.iter().find_map(|hazard| match &hazard.owner {
+        EngramHazardOwner::Session { index, .. } if *index == session =>
+            Some(ClaudeHazardCause::OwnSession),
+        EngramHazardOwner::Session { cause, .. } if hazard.owner_writes => Some(cause.clone()),
+        EngramHazardOwner::Deleted { cause } => Some(cause.clone()),
+        _ => None,
+    })
+}
+
 /// Applies `hazards` to the unpublished records and the live grant of the
 /// session at `consumer`, or of every session. Each open or closed turn check
 /// they may overlap is fenced with the first cause. Each carried run is fenced
@@ -243,6 +266,7 @@ fn engram_apply_claude_hazards(
     if hazards.is_empty() {
         return;
     }
+    let mut changed_sources = Vec::new();
     for (index, record) in inner.sessions.iter_mut().enumerate() {
         if consumer.is_some_and(|consumer| consumer != index) {
             continue;
@@ -301,12 +325,37 @@ fn engram_apply_claude_hazards(
                 }
             }
         }
-        let mixes_grant = hazards.iter().any(|hazard| {
-            matches!(hazard.owner, EngramHazardOwner::Session { index: owner, .. } if owner == index)
-        });
-        if mixes_grant {
-            claude_mark_grant_mixed(record);
+        let worktree = engram_session_worktree(record);
+        let mixes_source = record.engram.unadmitted_active_turn.as_ref()
+            .filter(|trace| trace.generation == record.active_turn_generation
+                && !trace.source_attribution_uncertain)
+            .is_some_and(|trace| {
+                let root = trace.opening_root.as_ref().and_then(|opening| opening.source_root.as_ref())
+                    .map(|named| engram_path_key(FsPath::new(&named.root)))
+                    .or_else(|| worktree.clone());
+                engram_observation_interference_cause(hazards, index, root.as_deref()).is_some()
+            });
+        if mixes_source {
+            claude_mark_observation_mixed(record);
         }
+        let mut changed = mixes_source;
+        for job in &mut record.engram.unadmitted_closing_jobs {
+            if job.trace.source_attribution_uncertain { continue; }
+            let root = match &job.scope.root {
+                EngramNamedRootState::Bound { workspace_id, .. } =>
+                    Some(engram_path_key(FsPath::new(workspace_id))),
+                _ if job.scope.workdir == record.session.workdir => worktree.clone(),
+                _ => None,
+            };
+            if engram_observation_interference_cause(hazards, index, root.as_deref()).is_some() {
+                job.trace.source_attribution_uncertain = true;
+                changed = true;
+            }
+        }
+        if changed { changed_sources.push(index); }
+    }
+    for index in changed_sources {
+        inner.stamp_session_at_index(index);
     }
 }
 

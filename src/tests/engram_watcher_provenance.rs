@@ -32,10 +32,10 @@ fn source_refusal_path_forms(path: &FsPath) -> [String; 2] {
 #[test]
 fn watcher_provenance_source_refusal_retains_available_and_unknown_facts() {
     take_workspace_watch_diagnostics();
-    let (turn, worktree) = named_turn("watcher-source-provenance");
+    let (turn, worktree) = ordinary_carried_turn("watcher-source-provenance");
     let path = fs::canonicalize(&worktree).unwrap().join("README.md");
     let before = fs::read(&path).unwrap();
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
 
     // This ingress has no raw Notify event. Its absence must be stated,
     // rather than inventing a notification subtype, timing or writer PID.
@@ -62,8 +62,7 @@ fn watcher_provenance_source_refusal_retains_available_and_unknown_facts() {
         .expect("the first refusal retains separate diagnostic facts");
     assert_eq!(take_workspace_watch_diagnostics(), vec![diagnostic.clone()]);
     finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+    assert_carried_fence_custody(&turn, "a file in its worktree changed");
     let fence = diagnostic;
     assert!(fence.contains("watcher provenance:"), "{fence}");
     for fact in [
@@ -79,11 +78,11 @@ fn watcher_provenance_source_refusal_retains_available_and_unknown_facts() {
 }
 
 #[test]
-fn watcher_provenance_late_write_then_restore_still_refuses_credit() {
-    let (turn, worktree) = named_turn("watcher-source-restored");
+fn watcher_provenance_late_write_then_restore_still_fences_custody() {
+    let (turn, worktree) = ordinary_carried_turn("watcher-source-restored");
     let path = fs::canonicalize(&worktree).unwrap().join("README.md");
     let before = fs::read(&path).unwrap();
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
     fs::write(&path, b"transient source edit").unwrap();
     fs::write(&path, &before).unwrap();
     assert_eq!(fs::read(&path).unwrap(), before);
@@ -94,15 +93,14 @@ fn watcher_provenance_late_write_then_restore_still_refuses_credit() {
     // Matching snapshots and an already-terminal run must not waive it.
     turn.state
         .note_engram_workspace_file_changes(&[source_change(&path)]);
-    let checkpoint = turn.finish();
-    assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+    assert_carried_fence_custody(&turn, "a file in its worktree changed");
 }
 
 #[test]
-fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement() {
+fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_custody() {
     use notify::event::{MetadataKind, ModifyKind};
     take_workspace_watch_diagnostics();
-    let (turn, worktree) = named_turn("watcher-source-raw");
+    let (turn, worktree) = ordinary_carried_turn("watcher-source-raw");
     let root = fs::canonicalize(&worktree).unwrap();
     let path = root.join("README.md");
     let before = fs::read(&path).unwrap();
@@ -116,11 +114,12 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement()
     event.attrs.set_info(&private_info);
     // Receipt can precede check registration while handling is delayed.
     // The observation's receipt clock is diagnostic ordering only, not a
-    // credit exemption. The Engram arrival given here follows the launch, so
+    // custody exemption. The Engram arrival given here follows the launch, so
     // the change fences; an arrival before a launch is judged by its own
     // order (src/tests/engram_watcher_change_time.rs).
     let observation = WorkspaceWatchObservation::capture(&event);
-    launch_gate(&turn, &worktree, false);
+    ordinary_launch_gate(&turn, &worktree, false);
+    let host_turn_ref = turn.record(|record| record.engram.carried_checks[0].check.host_turn_ref.clone());
     let changes = turn.state.process_workspace_watch_event(
         &event,
         &observation,
@@ -163,7 +162,7 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement()
             sha256_hex(engram_path_key(&root).as_bytes())
         ),
         format!("check_key_sha256={}", sha256_hex(b"gate")),
-        format!("grant_sha256={}", sha256_hex(CHECK_GRANT.as_bytes())),
+        format!("host_turn_ref_sha256={}", sha256_hex(host_turn_ref.as_bytes())),
     ] {
         assert!(fence.contains(&fact), "missing {fact}: {fence}");
     }
@@ -184,7 +183,7 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement()
     assert!(clock("delivered=") < clock("fenced="));
     assert!(!fence.contains("private backend detail"));
     assert!(fence.len() < 900);
-    assert!(!fence.contains(CHECK_GRANT));
+    assert!(!fence.contains(&host_turn_ref));
 
     // A second notification cannot replace the first refusal or grow its
     // history, even when the later notification carries other attributes.
@@ -214,8 +213,7 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_settlement()
     assert!(!bounded.contains("private"));
     assert!(bounded.contains(&format!("check_key_sha256={}", sha256_hex(b"gate"))));
     finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+    assert_carried_fence_custody(&turn, "a file in its worktree changed");
 }
 
 #[test]
@@ -235,10 +233,10 @@ fn watcher_provenance_real_source_edits_replacements_and_renames_remain_fenced()
             notify::EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
         ),
     ] {
-        let (turn, worktree) = named_turn(&format!("watcher-source-{label}"));
+        let (turn, worktree) = ordinary_carried_turn(&format!("watcher-source-{label}"));
         let path = fs::canonicalize(&worktree).unwrap().join("README.md");
         let bytes = fs::read(&path).unwrap();
-        launch_gate(&turn, &worktree, false);
+        ordinary_launch_gate(&turn, &worktree, false);
         let mut event = notify::Event::new(kind).add_path(path.clone());
         if label == "replace" {
             fs::remove_file(&path).unwrap();
@@ -259,15 +257,14 @@ fn watcher_provenance_real_source_edits_replacements_and_renames_remain_fenced()
             &[],
         );
         finish_run(&worktree, "passed", &"f".repeat(64));
-        let checkpoint = turn.finish();
-        assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+        assert_carried_fence_custody(&turn, "a file in its worktree changed");
     }
 }
 
 #[test]
 fn watcher_provenance_other_worktree_and_access_events_do_not_gain_a_fence() {
-    let (turn, worktree) = named_turn("watcher-source-routing");
-    launch_gate(&turn, &worktree, false);
+    let (turn, worktree) = ordinary_carried_turn("watcher-source-routing");
+    ordinary_launch_gate(&turn, &worktree, false);
     let elsewhere = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
         .add_path(turn.root.join("README.md"));
     turn.state.process_workspace_watch_event(
@@ -290,8 +287,7 @@ fn watcher_provenance_other_worktree_and_access_events_do_not_gain_a_fence() {
     );
     assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_none()));
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_carried_artifact_custody(&turn, &run, true);
 }
 
 #[test]

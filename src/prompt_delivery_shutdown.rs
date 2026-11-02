@@ -100,11 +100,6 @@ impl AppState {
                 acknowledged: false,
             });
             record.queued_prompts.push_front(entry.clone());
-            if entry.has_engram_intent() {
-                detach_engram_pending_dispatch_keeping_uncertain_begin(record);
-            } else {
-                take_and_abandon_engram_pending_dispatch(record);
-            }
         }
         if record.session.status == SessionStatus::Active { record.session.status = SessionStatus::Idle; }
         record.file_change_tracking = None;

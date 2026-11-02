@@ -109,12 +109,6 @@ fn engram_session_authority_in_project<'a>(
     require_runtime_enabled: bool,
     project_reset_owner_generation: Option<u64>,
 ) -> std::result::Result<Option<EngramSessionAuthority<'a>>, String> {
-    // Recovery uses its frozen original connection explicitly. Generic target
-    // construction must not bootstrap, probe or replace an excluded session,
-    // including when current project gating is disabled or boot is retrying.
-    if engram_admission_obligation_locked(inner, connection_session_id).is_some() {
-        return Ok(None);
-    }
     let Some(settings) = project.engram.as_ref() else {
         return Ok(None);
     };
@@ -126,8 +120,7 @@ fn engram_session_authority_in_project<'a>(
     };
     if !reset_access_allowed
         || project.remote_id != LOCAL_REMOTE_ID
-        || (require_runtime_enabled && record.engram.disabled_reason.is_some())
-        || (require_runtime_enabled && !settings.is_control_enabled())
+        || (require_runtime_enabled && !settings.is_base_enabled())
     {
         return Ok(None);
     }
@@ -176,8 +169,7 @@ fn engram_session_authority_locked<'a>(
     }
 }
 
-// Naming and its canonical readers use Base MCP without authorizing a turn.
-// Keep the session/store safety checks even though turn gating is optional.
+// Naming and its canonical readers preserve exact session/store authority.
 fn engram_source_root_base_is_enabled_locked(inner: &StateInner, session_id: &str) -> bool {
     let Some(record) = inner
         .find_session_index(session_id)
@@ -189,7 +181,6 @@ fn engram_source_root_base_is_enabled_locked(inner: &StateInner, session_id: &st
         return false;
     };
     record.is_local_session()
-        && record.engram.disabled_reason.is_none()
         && !inner.engram_project_resets.contains(&project.id)
         && project.remote_id == LOCAL_REMOTE_ID
         && project.engram.as_ref().is_some_and(EngramProjectSettings::is_base_enabled)
@@ -203,8 +194,8 @@ impl AppState {
         if !engram_source_root_base_is_enabled_locked(inner, session_id) {
             return Ok(None);
         }
-        // `false` alone also skips Base enablement and disabled_reason. The
-        // explicit guard above preserves both; the builder preserves the
+        // `false` alone also skips Base enablement. The explicit guard above
+        // preserves it; the builder preserves the
         // root/child shape, project, reset and connection validation.
         Self::engram_binding_target_for_session_shape_locked(inner, session_id, false)
     }
@@ -213,7 +204,6 @@ impl AppState {
 /// The narrow view of the Base-service naming target, or None when it would
 /// build none or fail. Nothing is cloned and no turn grant is created.
 struct EngramSessionReaderView<'a> {
-    routing_token: Option<&'a str>,
     store: Option<&'a EngramAuthorityStoreKey>,
 }
 
@@ -228,7 +218,6 @@ fn engram_session_reader_view_locked<'a>(
         .ok()
         .flatten()?;
     Some(EngramSessionReaderView {
-        routing_token: authority.record.engram.routing_token.as_deref(),
         store: authority.settings.authority_store_key.as_ref(),
     })
 }

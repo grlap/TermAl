@@ -1,188 +1,94 @@
 # Engram Host Adapter
 
-Related: [Supervised pilot onboarding](supervised-pilot-onboarding.md) (the
-settings a colleague's machine uses for the first supervised pilot: Base
-enabled, turn-gated control off).
+Related: [Execution Observability](execution-observability.md) (what the
+feature does for a session, in brief) and
+[Supervised pilot onboarding](supervised-pilot-onboarding.md) (the settings a
+colleague's machine uses for the first supervised pilot).
 
 See [Durability pending](durability-pending.md) for the versioned pending
 outcome on enqueued evaluation submission and named-root name/clear/release
 deadlines, exact-identity retries, MCP propagation and restart limits.
 
-## Status and product tiers
+## Status
 
-See [tier changes and queued work](engram-project-reset.md) for the shared
-reset budget, live phase API, exact recovery holds and fair capped scheduling.
+See [project settings changes and queued work](engram-project-reset.md) for
+how a settings change fences the Engram connection and what happens to queued
+prompts meanwhile.
 
-The local Engram integration has two independent tiers:
+The local Engram integration is available to every repository-declared local
+project whose `enabled` setting is on. Its turn reporting is
+[Execution Observability](execution-observability.md), a separate project
+setting, `executionObservability`, on by default and effective only while the
+integration is enabled. With the integration enabled, TermAl:
 
-- **Base** is available to every enabled, repository-declared local project.
-  TermAl injects the Engram MCP server into each local agent session and adds
-  advisory `engram work next --peek` context at session start and after compaction.
-- **Turn-gated control** is a premium project opt-in and defaults off. When it
-  is enabled, the existing host-private bind/evaluate/begin/checkpoint protocol
-  can withhold a prompt until Engram authorizes that exact turn.
+- injects the Engram MCP server into each local agent session and adds
+  `engram work next --peek` context at session start and after compaction;
+- measures each claim's named [source root](#source-root), records
+  [test evidence](#test-evidence) and runs
+  [acceptance evaluations](#acceptance-evaluation);
+- with Execution Observability also on, reports what each traced turn did, as
+  host observations sent to Engram after the fact: whether the turn changed
+  source, the checks it ran and their outcomes, and how it ended
+  ([Reporting turns as host observations](#reporting-turns-as-host-observations)).
 
-With local Base integration enabled and turn-gated control OFF, ordinary sends, queue drains, Resume and mailbox
-wakes do not depend on old grants, checkpoints, obligations or admission
-recovery. Base integration remains available. Resume releases the ordinary
-queue pause without replaying or accounting for an old control operation.
-Runtime ownership, Stop, settings-reset fences, provider durability and
-federation authorization still apply.
+The setting is sampled when an ordinary or adopted turn's trace would start:
+OFF starts no new trace, so it suppresses only those automatic turn, command,
+source and check observations, while a trace already started finishes and its
+report is delivered. It never changes turn delivery, the queue,
+Stop or reset, and it keeps claims, source-root naming, reads and explicit
+registered verification working.
 
-Absent or disabled integration, the global integration kill switch and unresolved
-project associations keep the existing queue behavior. Explicit Human sends keep
-their priority over paused automatic work. Queues without retained control history
-keep ordinary mailbox coalescing and manual recovery. The executing host projects
-the per-session OFF policy, including inherited projects; a proxy forwards that
-decision and leaves it unknown for an older host.
+TermAl never asks Engram for permission before it delivers a prompt. Sends,
+queue drains, Resume and mailbox wakes do not wait for Engram, and an Engram
+that is slow, refuses or is unreachable costs a turn its observations, never
+its delivery. Runtime ownership, Stop, settings-reset fences, provider
+durability and federation authorization still apply. Resume releases the
+ordinary queue pause. Explicit Human sends keep their priority over paused
+automatic work.
 
 An operator Pause or Stop remains visible as a paused queue after a runtime
-exits. Sessions paused before this fix whose cause cannot be proven stay
-paused until you click Resume. Their saved error or recovery preview remains
-visible. Positively control-owned holds release at OFF, and new control-origin
-Stops do not create an operator pause.
+exits. A session that an earlier build paused, whose cause cannot be proven,
+stays paused until you click Resume, and its saved error or recovery preview
+remains visible. Holds that turn gating owned are released.
 
-Queue selection preserves unknown provider attempts in place and skips them.
-A row can execute without gated admission only with positive evidence that
-it was never promoted and no receipt indicating possible provider delivery.
-Eligible ordinary rows retain FIFO order. Old control requests and checkpoint
-debts remain evidence; OFF does not mean they were settled. Local reset and
-removal retain their separate preservation and custody checks.
-
-**Where the tiers are deployed (2026-10-29):**
-- Turn-gated control has been ON for the Engram project since 2026-10-29,
-  after a passed steady-state canary.
-- It stays OFF for the TermAl projects until the fix for the long
-  project-settings reset lands. That reset held all project sessions for about
-  36 minutes, at about 3850 sessions, during the enable.
-- Retained prompts can stay interrupted after control is switched off and on
-  again. A fix has landed, but its evaluation is still open.
+Queue selection keeps a row whose provider delivery is unknown in place and
+skips it. A row runs only with positive evidence that it was never promoted and
+no receipt indicating possible provider delivery; eligible rows keep FIFO
+order. Control requests, grants, checkpoint debts and receipts recorded by
+earlier builds stay as evidence: no turn certifies, settles or replays them.
+Local reset and removal keep their separate preservation and custody checks.
 
 See [project status](project-status.md#active-limitations-and-open-top-priority-problems).
 
-Explicit human prompts are outside premium Evaluate/Begin/grant admission,
-with control ON or OFF. Their source is recorded before sender attribution and
+Explicit human prompts record their source before sender attribution, and it
 survives queue persistence and reload. Peer, mailbox, orchestrator and legacy
-default-source prompts do not acquire human provenance. A human turn may pass a
-separately retained control duty without changing its original request, key or
-outcome. Unknown provider delivery remains retained after restart and is never
-automatically replayed. Human delivery grants no additional tool permission,
-and its completion cannot report execution on an earlier turn's grant.
+default-source prompts do not acquire human provenance. Unknown provider
+delivery remains retained after restart and is never automatically replayed.
+Human delivery grants no additional tool permission.
 The project-action endpoint is a human-action ingress, including fixed actions
 invoked by the Telegram relay; it uses the same explicit Human dispatch path.
 Free-text Telegram messages, peer sends and internal follow-ups retain ordinary
 provenance. In the local unauthenticated HTTP model a client can assert Human
 origin; this classification does not authenticate a trusted UI client.
-
-With control ON, historical `User` or missing-source entries are ambiguous provenance. Resume
-can record an explicit choice of the displayed head and its session version,
-without rewriting that entry's source, request or id. Reusing its content
-requires the existing delivery receipt to prove an unsent attempt and a new
-acknowledged write-ahead record. A missing receipt or reloaded ambiguous handoff
-does not supply that proof: the original content and unknown attempt stay
-retained. A distinct new human Send remains available beside that control debt.
-These are separate outcomes; fresh-prompt availability is not historical replay
-recovery. Original checkpoint receipts can reconcile their own session's old
-operation independently of a completed human successor; the human turn itself
-never certifies the old outcome.
 Once intake accepts a Human envelope, a later provider startup failure keeps
 that same queued id and reports its failure on the session. The send remains
 accepted, so the composer does not restore a second copy. A definitely unsent
 entry can be retried with Resume; an unresolved handoff remains retained for
 delivery recovery.
-Known-unpromoted ordinary rows and retained control recovery continue through
-their original guarded Resume owners without changing source or acquiring a
-Human exemption. Selecting their displayed head does not require inventing a
-historical delivery receipt.
 
-Premium admission covers automated turns in ordinary root sessions and delegation children,
-including peer sends and queued mailbox and orchestrator turns. A root
-uses its session-shaped binding; a child retains its delegation-shaped effects
-and cannot fall back to root authority if its delegation metadata is missing.
-A root session binds and requests `observe`, `communicate` and `mutate_local`,
-because it edits its own workspace; a child mediates `mutate_local` only when
-its write policy lets it write (a shared or isolated worktree), so a read-only
-child never requests mutation. A session keeps the set it was bound with until
-its next bind. After a restart, unsettled sessions rebind during recovery;
-settled idle roots wait until their first admission. A changed set takes effect
-on that first bind after an upgrade. A session still bound under an earlier set, such
-as one whose retained bind was replayed across the upgrade, is refused with
-`control_assurance_insufficient` naming an effect its declared set lacks;
-when the current set includes that effect and it needs no more assurance than
-the host declares, admission rebinds with the current set and re-evaluates
-once, as it does for `stale_fence`, and a refusal that survives the rebind is
-final. The same code's other forms, a project policy stricter than the host's
-assurance or an effect that needs more assurance than the host declares, no
-rebind can cure, so they are reported at once. A retained evaluate replayed
-across the upgrade is granted the effects it requested, and when that grant's
-begin is refused the re-evaluation asks again for the same effects, since it
-runs under the same binding; only a `stale_fence` re-evaluation, which
-rebinds, asks for the current set, and the session otherwise takes the
-current set at its next admission. A begin refusal healed on the reused
-binding (every healable code but `stale_fence`, such as a
-`grant_scope_mismatch` whose grant status proves retired) can find that
-binding re-fenced, for example after a long park, and its re-evaluation is
-then refused `stale_fence`. Admission cures that once: it rebinds within the
-remaining budget and re-evaluates once more under the fresh binding and its
-own key, asking for the current set. A second `stale_fence` after that
-rebind, or a budget that runs out during it, holds the prompt with a card
-naming the code instead of ending it; there is never a second healing rebind
-in one admission. The turn's
-observation is judged against that grant's effects, which Engram checks it
-against, not against the session's current set, so a turn that changed
-source under such a grant reports nothing.
-Evaluate grants do not dispatch a provider prompt until begin succeeds, and
-successful completion checkpoints the begun grant. Refusal, deferral and failed
-Begin recovery withhold the prompt.
-For a fresh ordinary root User or Mailbox prompt, an availability failure at
-the initial bind or evaluation can instead deliver the prompt without a grant
-only when its causal evidence certifies `NotStarted`. A lost response with
-unknown remote application keeps its exact retained request and replay; it
-may conceal a policy decision or an issued grant.
-Its Degraded card retains the cause and says `sent_without_grant`; that turn
-has no Engram checkpoint or verification credit and starts no admission retry.
-This exception excludes delegated/orchestrator work, earlier retries, active or
-uncertain grants, prepared Begin, authority changes and local write failures.
-Local preparation deadlines and exhausted dispatch budgets remain holds even
-when no control request was sent. Only fresh control-process or RPC evidence
-can certify the availability exception; restored diagnostic cards cannot.
-An ordinary preparation retains its exact process-local owner while Stop
-arbitrates, including before the marker acknowledgement. A failed runtime
-shutdown preserves that unsent attempt, but provider enqueue still requires
-the successful marker acknowledgement; a successful Stop retires it.
-Once Begin is prepared, its exact recovery owns the prompt even if a later
-local acknowledgement misses its deadline. Explicit Resume can release the
-matching uncertain Prepared Begin after that local hold, preserving its key,
-grant, delivery tokens and authority. Only the producer's accepted receipt
-permits delivery; a producer refusal proving it never began permits a fresh
-evaluation. A mismatch, active attempt or different authority keeps the hold.
-Base-only and disabled projects retain ordinary ungated dispatch.
-Queue promotion rechecks the evaluated intent fingerprint, not just the queue
-entry ID: mailbox coalescing may change its sequence while evaluation is off-lock.
-An obsolete issued grant is repaired before fresh admission. Stop's successor
-path likewise leaves a changed head queued instead of using the old grant.
+A handoff marker that an earlier build saved on a queue head means, after a
+restart, that provider delivery is unknown; Resume does not make that row
+replayable. The primary reader floor `2-metadata-units-2-handoff-1` protects
+this meaning from older readers. The current joint floor
+`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`
+migrates supported predecessors through units-2 and handoff-1 in one
+transaction, preserving session JSON, authority and retained records.
+Unsupported numeric drafts and unknown floors are refused before recovery or
+rewriting.
 
-Ordinary degraded handoff saves a marker on the queue head and waits for its
-local durability acknowledgement before sending to the provider. Permission
-to perform that handoff is process-local and belongs to the exact head and
-turn. A marker loaded after restart means provider delivery is unknown;
-neither Resume nor disabling control makes it replayable. The primary reader
-floor `2-metadata-units-2-handoff-1` protects this meaning from older readers.
-The current joint floor `2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1` migrates
-supported predecessors through units-2 and handoff-1 in one transaction,
-preserving session JSON, authority and uncertain Begin records. Unsupported
-numeric drafts and unknown floors are refused before recovery or rewriting.
-
-Boot recovery retains eager work for open or uncertain grants, exact retained
-operations and legacy records that may hide an unrecorded Begin. Existing
-delegation recovery rules remain in force. A settled idle local root with an
-empty queue and only a saved routing token or rebind flag creates no boot
-readiness fence or control process. Its first real admission follows the
-existing status/rebind path before evaluation and Begin.
-
-Remote proxy sessions never enter either local tier. The global
+Remote proxy sessions never get local Execution Observability. The global
 `TERMAL_ENGRAM_DISABLED` kill switch and the per-project Enabled switch stop
-both MCP and context injection; turning premium control off leaves Base intact.
+MCP, context injection and host observations together.
 Project-scoped remote access remains a separate contract in
 [Project-scoped remotes](./project-scoped-remotes.md).
 
@@ -191,7 +97,7 @@ Project-scoped remote access remains a separate contract in
 The [Work visualizer](work-visualizer.md) reads the store this authority
 established (binary, home and validated store identity in the project
 settings) as its own host reader, independent of any agent session binding;
-opening that panel never enables either tier.
+opening that panel never enables the integration or Execution Observability.
 
 The repository declares the project and the host supplies non-secret runtime
 context:
@@ -199,21 +105,33 @@ context:
 - A local repository is declared only while its root contains a non-empty
   `.engram-project` file. Teams normally commit this marker so declaration is
   consistent across machines; TermAl validates the file, not Git index state.
-- The host stores one machine-wide `developerName`, `binaryPath`, `home`, and
-  `bootRecoveryBudgetMs`. The developer name defaults to `dev`, is normalized
-  to lowercase, and accepts only ASCII letters, digits, `.`, `_`, and `-`.
-  The binary defaults to `engram` on the server process `PATH`; home defaults
-  to the server user's `.engram` directory.
-- Each project stores `enabled` and the default-off `turnGatedControl` flag.
+- The host stores one machine-wide `developerName`, `binaryPath` and `home`.
+  The developer name defaults to `dev`, is normalized to lowercase, and
+  accepts only ASCII letters, digits, `.`, `_`, and `-`. The binary defaults
+  to `engram` on the server process `PATH`; home defaults to the server user's
+  `.engram` directory.
+- Each project stores `enabled`, which turns the Engram integration on, and
+  `executionObservability`, which turns automatic host observation on while
+  the integration is enabled. A project saved without `executionObservability`
+  reads it as on. A `turnGatedControl` value saved by an earlier build is
+  ignored when settings are read and dropped when they are written, and the
+  project settings PATCH refuses unknown fields, so no stored or sent value
+  can turn gating back on.
 
 ## Settings and verification
 
 Open **Settings > Engram** to configure the host-global developer principal,
-binary, home, and boot recovery budget. Declared local projects expose
-**Engram settings** with:
+binary and home. Declared local projects expose **Engram settings**, in the
+project's dialog and in the selected-project panel under Settings > Engram,
+with:
 
-- the Base Enabled/Disable switch;
-- a separate **Turn-gated control** checkbox;
+- the Enabled/Disable switch for the integration;
+- the **Execution Observability** checkbox, with the help text "Record
+  host-observed execution and source changes in Engram. Turns never wait for
+  observations. Turning this off stops new automatic observations; current
+  turns and already recorded facts are preserved." The project's status, shown
+  in the project list and the settings picker, reads
+  `Enabled · observations on` or `Enabled · observations off`;
 - **Verify**, which checks scoped readiness without changing settings;
 - **Save & enable**, which repeats readiness before persistence; and
 - **Run Full Audit**, an explicit, separate whole-store doctor action.
@@ -235,10 +153,7 @@ malformed receipts, nonzero exits and timeouts fail closed, never falling back
 to doctor or silently initializing/repairing a store. Engram may probe the
 checkout with a temporary file to resolve filesystem identity.
 
-Only the premium toggle requires `control.required_assurance == "turn_gated"`.
-Base access accepts advisory or turn-gated stores but remains explicitly
-advisory/unmediated: it does not satisfy a turn-gated control floor. Unknown or
-action-gated requirements are refused. There is no authority-grant setting, grant file,
+Enablement asks the store for no assurance level. There is no authority-grant setting, grant file,
 grant environment variable, or grant-installing verification step; obsolete
 persisted grant fields from development builds are ignored and are not written
 again.
@@ -284,7 +199,7 @@ receipts have a 16 KiB admission limit and fail closed above it without a doctor
 fallback. These admission and capture limits are distinct from the smaller
 display previews described above.
 
-## Base MCP composition
+## Engram MCP composition
 
 Every eligible local session receives an `engram` MCP stdio descriptor. TermAl
 invokes:
@@ -328,7 +243,7 @@ ENGRAM_SESSION_ID=<termal-session-id>
 (`codex`, `claude`, `cursor`, `gemini`, or `opencode`). Session display names
 and model aliases are never identity inputs. Engram matches actor ids exactly:
 the bare developer and every `<developer>/<agent-kind>` seat are distinct, and
-all hosted agent operations (including premium control) use the suffixed seat.
+all hosted agent operations, host observations included, use the suffixed seat.
 Exact agent kind, model id, and reasoning selection are rendered separately in
 optional free-text `ENGRAM_ACTOR_CONTEXT`; empty or unknown detail keys are
 omitted. TermAl collapses control characters and caps this context at 200 bytes,
@@ -410,7 +325,7 @@ production), rather than the shorter control-frame deadline. A failure is
 logged, does not block the user's turn, and leaves the nudge pending for a later
 prompt. Concurrent prompt admission waits for the owning refresh; the context
 is consumed only after the runtime command channel accepts the prompt, so spawn
-or delivery failure preserves it for retry. ACP runtimes receive Base MCP, but
+or delivery failure preserves it for retry. ACP runtimes receive the Engram MCP server, but
 this cut does not yet expose a portable ACP compaction event, so their refresh
 is session-start only.
 
@@ -523,318 +438,52 @@ This bootstrap applies only to new threads. Engram-disabled sessions and
 does not accept a replacement developer-instruction field. This change does not
 establish equivalent intra-turn recovery for Claude or ACP runtimes.
 
-## Premium turn lifecycle
+## Turn observations
 
-Only a project with both `enabled` and `turnGatedControl` enters the control
-path. For each eligible turn TermAl:
+TermAl asks Engram nothing before a turn: it delivers the prompt and reports
+the turn afterwards, as a host observation
+([Reporting turns as host observations](#reporting-turns-as-host-observations)).
+Turns a runtime starts by itself are reported the same way
+([Turns Claude Code starts by itself](#turns-claude-code-starts-by-itself)).
+This section says how a report finds its claim; the subsections below say
+what it carries and how named roots, checks and test evidence feed it.
 
-1. binds or refreshes the exact session with `assurance: "turn_gated"`;
-2. calls `turn_evaluate` for the stable prompt fingerprint;
-3. calls `turn_begin` for a returned grant and delivery tokens;
-4. delivers the prompt only after the matching begin receipt; and
-5. checkpoints the begun turn on completion, Stop, failure, reset, or deletion.
-
-The work binding the bind carries is read off-lock under the agent's own
-Engram session id, the one its MCP child uses, with `work core held`: one
-read-only snapshot, which selects no focus, stages or discards no delivery
-and appends nothing, listing every item the session holds a live claim on,
-newest claim first, each with its `control_binding` and whether it is the
-session's focus. A claim's binding is `null` when `session_bind` would
-refuse it (a pending handoff offer, a run no longer claimed or active); an
-absent key reads the same. A revision by the holder re-accepts its claim,
-so the item then shows a fresh binding at the new revision, which the next
-admission's read picks up and rebinds to. TermAl binds the
-focused claim if it has a binding; otherwise the claim the session is bound
-to now, while it still has one, with its current revision and fence;
-otherwise the most recently claimed one that has a binding; and without
-work when none has. Engram lists at most sixteen claims, newest first, with
-a count of those left out: when it left some out and the bound claim is not
-listed, TermAl keeps the bound claim rather than switching, and if that
-claim is in fact gone, Engram refuses the binding as stale and the refusal
-heal reads again. The read goes by claim, not by focus, because any agent
-verb that names another item moves focus: a note on another item must not
-unbind the session. A binding that is present but does not decode, or
-output without the item list, is a protocol error. A control session
-carries one binding, so a turn's evidence lands on that claim's run only.
-This read needs an Engram build that has `work core held`
-(w-ec12d89a0445); against an older build every bind fails, and the failure
-says to install a newer Engram. It replaced
+A turn is traced only if, when it starts, its project has a verified store or
+its session already has a work binding; a turn started with neither reports
+nothing, even if the agent claims work during it. A traced turn's report goes
+to one claim, found when the turn closes, not when it starts.
+If the session already has a claim association then, the report is pinned to
+it, and every later read must still show that same claim, revision and fence,
+or the report ends as `not reported: scope changed`. A turn that took a new
+claim is therefore not promised to report under it. With no association yet,
+TermAl confirms the work session's identity with Engram, then reads the claims the agent's own Engram session holds, under
+the session id its MCP child uses, with `work core held`: one read-only
+snapshot, which selects no focus, stages or discards no delivery and appends
+nothing, listing every item the session holds a live claim on, newest claim
+first, each with its `control_binding` and whether it is the session's focus.
+A claim's binding is `null` when Engram would not accept evidence under it (a
+pending handoff offer, a run no longer claimed or active); an absent key reads
+the same. TermAl takes the focused claim if it has a binding; otherwise the
+claim the report already belongs to, while it still has one; otherwise the
+most recently claimed one that has a binding. Engram lists at most sixteen
+claims, newest first, with a count of those left out: when it left some out
+and the current claim is not listed, TermAl keeps the current claim rather
+than switching. The read goes by claim, not by focus, because any agent verb
+that names another item moves focus: a note on another item must not move the
+report. A binding that is present but does not decode, or output without the
+item list, is a protocol error. A report with no claim to go to is not sent.
+This read needs an Engram build
+that has `work core held`; against an older build the read fails, and the
+failure says to install a newer Engram. It replaced
 `work core next --sections focus` followed by `work core focus`, which
-selected the focused item and so could move an
-agent's focus back and discard its staged delivery page.
-
-The binding is read at every bind, and again when a new turn is admitted
-after a turn has begun since the last read. An agent claims work
-mid-session, after its session was bound without work, and Engram counts a
-session bound without work as always current, so nothing else would carry
-the claim to Engram before a restart. Only the session's own agent takes or
-releases its claim, and only during a turn, so an admission after a turn
-that never began reads nothing. A read that differs from the bound binding
-(a claim taken, released, revised or retaken) arms one rebind, which binds
-exactly what was read; an unchanged read rebinds nothing, and each rebind is
-counted in the log. The read runs off-lock inside the admission budget,
-capped at two seconds; a read that fails or times out leaves the binding in
-place and is logged, and the next admission reads again. The rebind a read
-arms is a bind like any other: if it fails or times out, the turn is
-withheld as for any bind failure, its prompt retained, rather than evaluated
-under the routing token of the binding the read found outdated; resuming it
-replays that rebind exactly, without reading again. An admission that
-loses its queued prompt while the read runs acts on nothing it read. A
-retained evaluate or bind is replayed exactly, under the binding it was
-prepared with, without a read. The turn in which the agent claims cannot
-carry evidence for the claim: Engram refuses a rebind while a turn is begun
-and admits evidence only under the binding its grant was issued with, so
-the next turn is the first that reports under the claim.
-
-Engram validates a binding against more than the read checks (the item's
-ancestors, the run's root execution, a pending handoff), so a read can offer
-a binding that every bind and evaluate refuses as stale, and resending it
-would refuse every turn. Every binding Engram refuses as stale (at bind,
-evaluate or begin) is therefore left out of the reads for five minutes from
-its own refusal: the rebind that follows binds another claim the session
-holds, in the usual order (the focused one, then the one it is bound to,
-then the newest), so focus moving to a refused claim does not unbind a
-session from a valid one, and two refused claims cannot take turns being
-sent; with no other, it binds without work, which Engram always admits, and
-the turn goes ahead without evidence. A claim that moves on (a new revision
-or fence) is another binding and is not held back, and after its five
-minutes the same binding is tried again. At most sixteen refusals are
-remembered, the oldest forgotten first. Engram's `stale_fence` always
-concerns the work binding, but at begin it names the
-binding the grant was issued under: a begin refused for a grant issued
-before the session was rebound is that grant racing the rebind, so it is
-evaluated again under the current binding and the breaker blames neither.
-
-The checkpoint that closes a turn reports one execution observation for it:
-the outcome of the transition that closed it (succeeded on completion; failed
-on a failed or errored turn, an exit that reported an error, or a confirmed
-failure of a matching runtime through the atomic terminalization path;
-unknown for Stop, termination, reset, a silent exit, a missing runtime or a
-rejected delivery); `source_changed`, reported with the `mutate_local` effect
-Engram requires for it, else `observe`; the intent fingerprint the grant was
-issued for as the action fingerprint; and, when the session's workdir lies in
-a worktree, the canonical root of that worktree (a session in a subdirectory
-shares its worktree's) with the content revision of the files present in it
-as the source basis, together with the observation time (see
-[Content revision](#content-revision)).
-`source_changed` is decided by content: the same
-fingerprint is taken before the prompt reaches the runtime and again at the
-close, and a difference is a source change. When both exist, the turn's
-file-change tracking is not consulted: the watcher credits the turn with any
-write under the session's workdir, by any writer and inside a nested
-worktree too, so it reported changes the content never showed (tm-97wp).
-The tracking, a debounced hint, decides alone when a comparison basis is
-missing. A missing opening basis withholds the comparison and its closing
-source sighting; inability to read the source is not itself evidence of a
-change. Each capture
-runs under the reviewer's shared forty-second freeze budget, because a turn
-closes at the host's busiest moment and a tighter bound would drop the basis
-when Git is merely slow; at the close the capture is taken before the
-checkpoint is claimed, so session teardown's settle wait for a checkpoint
-still covers only the control call. Two limits are known and tracked
-separately. The captures run on the thread that dispatches or closes the
-turn, and for a shared Codex runtime that is the app-server's event reader,
-which every Codex session on that runtime shares: a capture (typically under
-a second, at most the freeze budget) delays their streamed events for as
-long as it runs, on top of the control call that already ran there. On the
-teardown paths (Stop, termination, reset, revocation) the capture is taken
-while the runtime may still be running and before it is shut down, so a
-write the runtime makes between the capture and its shutdown is not
-attributed to the turn. The comparison is also worktree-scoped: an edit
-another session makes in the same worktree during the turn counts as this
-turn's change, which withholds a
-read-only child's observation and, where mutation is granted, attributes the
-edit to the turn; over-reporting is the conservative direction, but children
-sharing a busy workspace will often report nothing. That fingerprint is what a
-later host-run check reports as its revision, so the two compare equal
-exactly when nothing changed in between. The first closing attempt builds
-the report and the record keeps it for that grant; a retried checkpoint
-repeats it verbatim, and the observation is folded into the idempotency key.
-A closing checkpoint that failed before Engram accepted it leaves the grant
-open, and the same-process rebind that follows closes it with the report the
-record still holds, while restart recovery, which has no cached report,
-closes it bare.
-A report Engram definitively refuses, whether on the turn's own close or on a
-rebind's recovery checkpoint, is not resent: it is dropped and logged, and the
-grant's next closing attempt goes bare, as every checkpoint did before turns
-reported observations. A definitive refusal is an explicit refuse answer, or
-one of the error codes Engram's `turn_checkpoint` raises to refuse the request
-itself before its storage transaction commits (`invalid_request`,
-`invalid_control_session`, `control_projection_invalid`,
-`work_claim_mismatch`, `observation_scope_mismatch`,
-`source_basis_text_refused`, `named_root_binding_refused`,
-`environment_basis_mismatch`, `environment_fingerprint_mismatch`,
-`environment_evidence_not_found` and `verification_producer_not_found`;
-`engram_turn_observations.rs` keeps the list). Any such refusal counts, not
-only one about the payload, because a refused report resent forever would hold
-the grant, and the session's queued prompts, until a restart; dropping it costs
-at most that turn's evidence. Every other answer from Engram, its generic
-`storage_error` or a code this build does not know, leaves it unresolved
-whether the report was applied: the report is kept and logged as unresolved,
-never dropped on a guess. The session's persisted checkpoint operation keeps
-that closing request, key and report, so after a restart original-checkpoint
-result recovery replays it exactly
-(`engram_checkpoint_result_recovery.rs`). A closer that finds another
-checkpoint of the session already in progress skips at once, without taking
-a capture it could never report.
-Only a session bound to claimed work reports it: Engram admits host evidence
-solely through an exact work binding, so an unbound session's checkpoint
-carries no observation rather than one the evidence gate would reject.
-A turn that changed source under a grant that mediates no local mutation (a
-read-only child's, or one issued from a retained evaluate prepared under an
-earlier effect set, as described under admission above) reports nothing
-rather than an observe-only claim, and logs the omission. Restart recovery, the
-compensating checkpoint of a superseded begin and the project-reset exit
-checkpoint close grants whose turn this process never saw end and report no
-observation.
-
-### Continuity between turns
-
-A turn's own `source_changed` compares its measured begin (or, under a grant
-that mediates local mutation, the revision of the last check its report
-carries) with its close and nothing else: a change made between two mediated
-turns belongs to neither,
-so the next turn's begin is never replaced by the previous turn's close
-(`engram_turn_continuity.rs`). Such changes include another session's
-writes, a turn Claude Code started by itself, and the naming turn's edits.
-The host keeps that change apart instead:
-
-- **The anchor.** When Engram acknowledges a checkpoint, the record keeps
-  where that turn's closing observation left the workspace, with the work,
-  run and claim it reported to. Only an acknowledged checkpoint moves it, so
-  a retry never advances it twice. A report without a closing basis clears it
-  rather than leaving an older one standing. This mediated continuity anchor
-  is process-local. A separate persisted copy of the measured checkpoint
-  endpoint supports adopted-turn history without extending the ordinary
-  mediated comparison across a restart.
-- **The comparison.** When the next turn's begin basis is taken, it is
-  compared with the anchor, and the result is kept for that grant:
-  - unchanged;
-  - drifted, with the previous grant, both revisions and their times, and
-    the cause recorded as unknown;
-  - not compared, with the reason: no previous checkpoint, another work, run
-    or claim, another workspace (a root named or cleared between), or a
-    begin that could not be measured. A reason never reads as "unchanged".
-- **Surfacing.** A drift is logged as a host diagnostic. A turn that then
-  edits nothing still reports `source_changed=false` for itself, and the
-  drift stays recorded beside that report.
-- **Reporting separately.** The accounted-source path below reports a
-  compatible measured opening as an inter-turn observation before provider
-  handoff. An adopted runtime-started turn has its own unadmitted history,
-  described below. Neither replaces a mediated turn's measured begin or
-  attributes the intervening writes to that turn.
-
-### Accounted source baseline
-
-A measured opening of a claim's named root is compared with that claim's
-accounted baseline (`engram_source_sightings.rs`); a difference is reported to
-Engram as an inter-turn observation with unknown causality before the prompt
-is delivered, and an equal opening reports nothing. Each claim keeps its own
-baseline, so a change accounted on one claim's run never moves another's.
-
-What each comparison measures, and what it does not:
-
-- **The turn's own flag.** A turn's `source_changed` compares the turn's
-  measured begin basis — or, under a grant that mediates local mutation, the
-  revision of the last check its report carries — with its close
-  (`engram_turn_observations.rs`); when a comparison basis is missing, the
-  watcher's tracked changes decide instead. Whoever made a write inside the
-  turn, the turn's close reports it. It says nothing about a change made
-  between turns.
-- **The inter-turn observation.** It compares the scope's accounted baseline
-  with the next measured opening of that scope — or, while the scope still
-  owes an unaccounted close, first with that close, then from the close to
-  the opening (How the baseline moves, below). A scope is one work, run and
-  claim on one naming of one root; renaming the root starts a new scope. Two
-  claims naming the same root are two scopes, even when one session holds
-  both: a turn reports its close to the scope its session is bound to, and
-  the other scope learns of the change only by its own measurement — at the
-  close of a turn of that scope that was open when the change landed, as
-  that turn's own change, or else at that scope's next measured opening, as
-  an inter-turn change whose cause is unknown.
-- **Neither compares with an evaluation.** No host observation compares a
-  revision with the one an acceptance evaluation declared; the evaluation's
-  first submission declares the revision taken at the request only if the
-  root still holds it, which is a request check, not an observation. An
-  opening equal to an evaluated revision is still reported as a change when
-  the scope's baseline differs from it.
-- **When the change is reported.** With no close owed, the reported interval
-  runs from the baseline's measured time to the opening sighting's; with a
-  close owed, the first interval ends at that close and the follow-up runs
-  from the close to the opening; without a compatible baseline the interval
-  is the sighting's own moment. None of these is the moment the change was
-  made: the host reports when the scope measures. So when a change made and
-  reported on another claim's run fell inside no measured turn of this scope
-  and no opening of this scope lay between it and an evaluation on this run
-  — as when the evaluation is requested from a session bound to the other
-  claim — the change reaches this run only at its next opening, after that
-  evaluation in the run's feed, and Engram's own rule treats an accounted
-  unadmitted change recorded after an evaluation's cut as new evidence
-  against it, whatever revision it reports. A change inside one of this
-  scope's own turns is instead reported at that turn's close as the turn's
-  own change, which Engram judges by revision. Reporting the change at the
-  earliest sighting of that revision the host holds for the workspace,
-  across scopes, is a planned change to what the host sends, not this
-  behaviour; how Engram judges it is
-  Engram's rule.
-
-How the baseline moves:
-
-- **The baseline advances only on an accounted change.** A close equal to the
-  baseline accounts itself. Any other close becomes the baseline only when
-  something accounts it: a granted checkpoint whose report carries the turn's
-  own observation (the turn's own close, or a later recovery checkpoint that
-  carries the report this process kept for that grant), or a recorded
-  inter-turn observation.
-- **An unaccounted close is kept and reported later.** When the report carries
-  no such observation (withheld for a grant without mutation or for mixed
-  attribution, refused, or dropped), the closing measurement is persisted as
-  owed. Before the checkpoint is sent the host waits, within the same call
-  bound as the checkpoint, until the owed close is confirmed stored. If that
-  cannot be confirmed (an uncertain acknowledgement, a failed write or
-  read-back, or a stopped writer that has no next tick) it logs and proceeds:
-  the close stays owed in memory until accounted and is left to the existing
-  persistence machinery, so a later successful write is conditional, not
-  assured. The owed close survives a crash only if its content committed, or
-  once Engram has accepted the accounting.
-- **The next measured opening reports it.** With a close owed, the opening is
-  never equal. It first reports the owed change itself, from the accounted
-  baseline to the owed close; once that is recorded, it reports any further
-  change from the owed close to the opening. So a change that was reverted
-  before the opening is still reported as two changes rather than lost.
-  Recording the first observation clears the owed close. When the second
-  cannot run (the opening's prompt is cancelled, or the host restarts, after
-  the first was recorded), recovery keeps the change from the owed close to
-  the opening as the new owed close, and the next opening reports it. A
-  delivered opening's observations are finalized only after a later
-  checkpoint, so their finalization never settles an owed close again: that
-  turn may owe a new close at the same revision.
-- **The newer measurement wins, by stamp.** A differing close is owed even
-  behind a baseline stamped later, and the owed interval then goes without a
-  baseline (assumed changed); a follow-up stamped before its owed close goes
-  without one too. With a close already owed, a newer close (one not stamped
-  strictly earlier, the same revision included) takes the slot with its own
-  grant, as the baseline keeps the newer measurement; an older one does not.
-  A recovered follow-up that never ran takes the slot on the same terms. A
-  close left owed at the baseline's own revision owes nothing and never holds
-  back a newer one. Accounting settles a duty even when a later measurement
-  keeps the accounted revision from becoming the baseline. Ordering by stamp
-  inherits the baseline's existing limits: a clock stepped back or two
-  revisions stamped in the same millisecond can still lose or hold a change,
-  as before this section existed.
-- **A duplicate, never a loss.** When the host cannot know that Engram accepted
-  a report (its reply was lost and the host restarted before the recovery
-  checkpoint, which then goes bare), the close stays owed and the next opening
-  reports the same change again, with unknown causality. Engram records a
-  repeat; nothing is lost.
+selected the focused item and so could move an agent's focus back and discard
+its staged delivery page.
 
 ### Turns Claude Code starts by itself
 
 Claude Code can start a turn TermAl never prompted, for example when a
-background Bash task finishes and its notice wakes the agent. Such a turn
-had no grant before its effects, and Engram's contract forbids authorizing
-it afterwards, so TermAl makes no turn evaluation or begin for it. Instead
-the host attributes it truthfully (`claude_turn_ownership.rs`,
+background Bash task finishes and its notice wakes the agent. TermAl did not
+send that turn's prompt, so the host attributes it truthfully (`claude_turn_ownership.rs`,
 `claude_frame_router.rs`, `claude_frame_application.rs`,
 `claude_runtime_turns.rs`).
 
@@ -873,14 +522,14 @@ The ownership rules come from live stream-json captures (Claude Code
     whose turn it was, and any waiting prompt whose `started` arrived inside
     it, which then waits no longer. Its result retires them all, as a
     settled attempt is retired, so their late frames move nothing. That is
-    routing only: no participant is settled, checkpointed or credited by it.
+    routing only: no participant is settled or credited by it.
     A prompt the result merely names, without having started, keeps waiting.
   - Frames nothing can be tied to (an unknown, plural or malformed identity,
     with no turn open) open an unresolved prefix with no owner and no
     participant. A waiting prompt's own `started`, or a result naming that
     prompt alone, takes the prefix up, as a turn no prompt owned would be
-    taken up. What ran before stays unassigned, the prompt's grant is marked
-    mixed, the replay barrier stays, the prompt is never retried, and its own
+    taken up. What ran before stays unassigned, the prompt's turn observation
+    is marked mixed, the replay barrier stays, the prompt is never retried, and its own
     result settles it. Inside an unresolved turn that a prompt or an
     unowned turn took part in, nothing is taken up.
 - **Taken up mid-turn.** A turn the runtime starts by itself (after a
@@ -888,8 +537,8 @@ The ownership rules come from live stream-json captures (Claude Code
   it runs can be taken up inside it: its `started` arrives mid-turn and the
   turn's result names it.
   - That result settles the prompt.
-  - The prompt's grant is marked as having mixed attribution, and what the
-    recorder saw in that turn stays unassigned.
+  - The prompt's turn observation is marked as having mixed attribution, and
+    what the recorder saw in that turn stays unassigned.
   - Inside a turn the host adopted, such a `started` leaves the turn
     unresolved instead.
 - **Runtimes without the capability.** These keep the echo rules:
@@ -907,11 +556,12 @@ The ownership rules come from live stream-json captures (Claude Code
   text and thinking are not rendered (its outcome reaches the transcript
   through its tool's result), and its `result` and lifecycle frames are not
   parsed at all. A subagent's frames bar the root attempt from replay.
-  A subagent's work is credited to no grant, not even its own prompt
+  A subagent's work is attributed to no turn, not even its own prompt
   attempt's: its commands and edits stay visible and still fence, but what it
-  records is kept as unassigned, and the live grant is excluded from it. A
-  command started under one prompt and ending under the next is never moved
-  to the next prompt's grant, and its late result still updates its own card:
+  records is kept as unassigned, and the live turn's observation is excluded
+  from it. A command started under one prompt and ending under the next is
+  never moved to the next prompt's turn, and its late result still updates its
+  own card:
   a subagent's pending tool calls outlive the root turn's reset.
   The cards, diffs and error lines a subagent records never close the root
   turn's open text message either. When root text streams while a background
@@ -924,21 +574,22 @@ The ownership rules come from live stream-json captures (Claude Code
   sink (`src/claude_outstanding_work.rs`); a subagent's frame names no turn.
   The router's verdict is only a candidate. Each handler decides under the
   state lock, in the section that applies the observation, whether the
-  session's grant may take it: only top-level work of the session's current
-  runtime and current turn's prompt attempt is credited. Another turn's or a
-  subagent's work on the same runtime is kept as unassigned, and the live
-  grant is excluded from it: marked mixed, so its own source report is
-  withheld as uncertain, and its open checks fenced. A replaced runtime's work
-  is kept nowhere on the session and never credited. It excludes the live
-  grant only when it shows new activity (a command starting); a buffered
-  result or edit report does not show that the work ran during the live
-  grant. A frame that proves such activity excludes the live grant when it is
-  admitted, before its handler runs, so no report installed afterwards is
-  clean of it.
+  session's current turn may take it: only top-level work of the session's
+  current runtime and current turn is attributed to it, that turn being its
+  prompt attempt or the runtime-started turn adopted at its generation. Another
+  turn's or a subagent's work on the same runtime is kept as unassigned, and
+  the live turn's observation is excluded from it: marked mixed, so its own
+  source report is withheld as uncertain, and its open checks fenced. A
+  replaced runtime's work is kept nowhere on the session and never attributed.
+  It excludes the live turn only when it shows new activity (a command
+  starting); a buffered result or edit report does not show that the work ran
+  during the live turn. A frame that proves such activity excludes the live
+  turn when it is admitted, before its handler runs, so no report installed
+  afterwards is clean of it.
 - **Work that outlives its frame.** Every shell command, every background
   launch and a subagent's own subagent launch are kept as outstanding, by
   runtime and turn, with every worktree each may write in: the session's
-  workdir worktree and the grant's named root when it was registered, and
+  workdir worktree and the turn's named root when it was registered, and
   every place its command was later placed. Those places only grow until the
   work ends. Each entry retires only on a correlated end from the session's
   current runtime: a foreground tool result, or a terminal task notification
@@ -953,9 +604,9 @@ The ownership rules come from live stream-json captures (Claude Code
   write.
   While background, subagent or orphaned work is outstanding, the session is
   restricted:
-  - its overlapping grants are mixed, the grant that launched the work
-    included, and a grant that begins meanwhile begins mixed, in the section
-    that begins it, with no later frame needed;
+  - its overlapping turns' observations are mixed, the turn that launched the
+    work included, and a turn traced meanwhile starts mixed, in the section
+    that starts it, with no later frame needed;
   - its checks start fenced, in whatever workspace they run;
   - another session's check in a worktree that work may write in is fenced
     too, whatever the owning session's status.
@@ -965,7 +616,7 @@ The ownership rules come from live stream-json captures (Claude Code
   process-local record; that is a limitation, not a reset. Recovering from
   orphaned work is separate work.
 - **One interference rule.** Whether outstanding work fences a record or
-  mixes a grant is decided in one place (`src/engram_claude_interference.rs`),
+  mixes a turn's observation is decided in one place (`src/engram_claude_interference.rs`),
   from the same retained facts, under the state lock. Work interferes with a
   check or a carried run when it was registered no later than the record's
   evidence interval closed, and, for another session's or a deleted
@@ -986,12 +637,13 @@ The ownership rules come from live stream-json captures (Claude Code
   of a recognised simple full gate, which does not fence the record of the
   run it launched itself and fences everything else. The rule runs both
   ways: work registered, moved to the background, placed further or orphaned
-  is applied to every unpublished record and to the session's live grant. A
-  check that starts, ends or is carried, and a checkpoint's publication, are
+  is applied to every unpublished record and to the session's live turn. A
+  check that starts, ends or is carried, and a report's publication, are
   reconciled with every retained hazard. That last step also catches work
   that became a hazard with no event of its own, such as a command whose turn
   or runtime is gone. Outstanding work a replaced runtime left that overlaps
-  the session's live grant marks that grant mixed. A late duplicate of work
+  the session's live turn marks that turn's observation mixed. A late
+  duplicate of work
   already proven complete does not. Fences stay; the restriction an agent is
   told lifts when the work ends.
 - **Saying why.** When a restriction takes effect, the session gets a
@@ -1018,18 +670,20 @@ The ownership rules come from live stream-json captures (Claude Code
 What the host does with a runtime-started turn:
 - **Adoption.** On an idle session (or one idle after an error) the turn is
   adopted: Active under a new turn generation, so prompts sent meanwhile
-  queue behind it. A System notice in the transcript says at once that
-  TermAl did not mediate it. With a claimed work binding, the notice explains
-  that the host attempts to report its observations as unadmitted history,
-  with unknown causality and uncredited checks. With no claimed binding it
-  says the turn is not reported to Engram. On a session busy with another
+  queue behind it. A System notice in the transcript says at once that TermAl
+  did not prompt it, and that its observations, of unknown causality, supply
+  no verification credit. Whether it says the host attempts to report them
+  follows whether the adopted turn has an automatic trace (Execution
+  Observability on), not whether a claim is bound; with Execution
+  Observability off, no report is promised. On a session busy with another
   turn, the turn is marked but not adopted, and the notice says it is not
   part of that turn.
   An unassigned turn is never adopted. Its notice says TermAl could not tie
   it to the waiting prompt, and that the session should be stopped if it
   stays busy.
 - **No attribution, full fencing.** While it is open, nothing the recorder
-  sees is attributed to a grant: no check starts and no credit is given. It
+  sees is attributed to a prompt's turn: no check starts and no credit is
+  given. It
   is kept on the session as unassigned observations instead (bounded to 64,
   newest last, each naming the notice that announced its turn). The separate
   adopted-turn trace used for reporting does not share that cap. Where its
@@ -1037,42 +691,24 @@ What the host does with a runtime-started turn:
   open checks, of its own session and of others, as any command does. An
   adopted turn's start makes the same overlap marks a dispatched turn's
   start makes.
-- **Beside an open grant.** A turn that runs beside the session's own turn
-  overlaps that grant's measurement interval, between its begin basis and
-  its close. Nothing proves where the unowned turn ended and the grant's own
-  turn began: the runtime may start the waiting prompt before the host
-  processes the unowned result. So the grant's measured begin, and the
-  watcher's hints, stay as they are, and the grant is marked as having
-  mixed attribution. Its report then emits no change observation measured
-  from the begin basis, and withholds its own source observation unless a
-  reported check gives it a base of its own. It reports neither a clean
-  no-change turn nor the whole difference as the grant's. Each check keeps
-  its own proof. The overlap is kept as unassigned.
-- **No checkpoint.** An adopted turn was granted nothing, and its
-  generation keeps that provenance in one process-local value until a
-  successor generation begins. Its open segment may close earlier. Every
-  checkpoint names its purpose, and the one common gate reads it:
-  - TurnTerminal: completion, error, failure, runtime exit, user Stop and the
-    atomic failure, with or without the runtime token. It never reports the
-    adopted turn as a grant's execution, so a grant left open on the session
-    stays open. This holds through a deferred completion replayed after a
-    stop, a failed Stop and a runtime exit.
-  - Teardown: session deletion and revocation teardown. It resolves under
-    the lock: TurnTerminal when the current turn owns the grant, Settlement
-    when the current turn was granted nothing.
-  - Settlement: closes the leftover grant without reporting any turn's
-    execution. A report an earlier attempt for that same grant already built
-    is preserved and repeated verbatim. Without one, the settlement carries no
-    observation. Project reset and restart recovery settle on their own
-    paths, as before.
-  - The plan and the claim resolve the purpose alike. A context that changes
-    between them closes nothing.
+- **Beside a prompted turn.** A turn that runs beside the session's own
+  prompted turn overlaps that turn's measurement interval. Nothing proves
+  where the unowned turn ended and the prompted turn began: the runtime may
+  start the waiting prompt before the host processes the unowned result. So
+  the prompted turn's observation is marked as having mixed attribution: its
+  report claims neither a clean no-change turn nor the whole difference as
+  its own. Each check keeps its own proof. The overlap is kept as unassigned.
+- **Reported like any turn.** An adopted turn is reported through the host
+  observation path ([Reporting turns as host observations](#reporting-turns-as-host-observations));
+  its generation keeps its provenance in one process-local value until a
+  successor generation begins, so no terminal path reports it as another
+  prompt's turn.
 - **Results.** A `result` finalizes only the turn its frames opened: a
   dispatched prompt's turn by that prompt's generation, an adopted turn by
   its own. A result of an unadopted or unassigned turn ends only that
   segment. A result with no turn open finalizes nothing; when a prompt still
   waits, the transcript says so. Either way, nothing else is finished,
-  errored, checkpointed or queue-drained, so an idle session never turns to
+  errored or queue-drained, so an idle session never turns to
   Error from it, and a waiting prompt stays visibly unresolved. On a runtime
   without lifecycle identities, an unadopted turn that ends while a prompt
   waits gets the same Stop guidance, since nothing will settle that prompt.
@@ -1085,8 +721,8 @@ What the host does with a runtime-started turn:
   - no prompt's attempt was part of it and none waits;
   - the session still runs that runtime and that adopted generation.
   The interval then ends through the guarded terminal paths. Its own error
-  stays an error. No prompt is settled and no grant is checkpointed or
-  credited, and the transcript says so. This ends the observed interval; it
+  stays an error. No prompt is settled or credited, and the transcript says
+  so. This ends the observed interval; it
   never gives the unknown identities to a prompt of TermAl's. Prompts queued
   behind the turn then run.
 - **One decision per frame, one application.** The stdout reader parses a
@@ -1160,21 +796,35 @@ What the host does with a runtime-started turn:
   session's live turn, and the same runtime. A new prompt, a stop, a new
   turn or a new runtime drops it.
 
-### Reporting adopted turns as unadmitted history
+### Reporting turns as host observations
 
-An adopted turn has no pre-effect admission. Its reporting path never calls
-`turn_evaluate`, `turn_begin` or a turn checkpoint, and never borrows a grant
-left open on the session. It publishes evidence through `execution_observe`
-with `account_if_eligible` and unknown causality
-(`engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
+Every turn is reported here after it ran: a turn TermAl delivered and a turn
+a runtime started by itself share one report owner and one shape, on every
+harness (Codex, Claude, Cursor, Gemini, OpenCode and Kimi). The report is one
+`unadmitted_turn` occurrence carrying the turn's observed outcome
+(`succeeded`, `failed`, `cancelled` or `unknown`), its source change and its
+checks. The reporting path never calls `turn_evaluate`, `turn_begin` or a turn
+checkpoint, and never borrows a grant an earlier build left open on the
+session. It publishes evidence through `execution_observe` with
+`account_if_eligible` and unknown causality. After the closing report, when
+the turn's attribution is certain, the same outbox appends a measured
+`source_sighting` occurrence: its source basis carries the exact source
+revision and it has no `host_turn_ref`. Engram accounts it as a sighting,
+which supplies measured freshness only, never mutation or check credit.
+Registered verification (`verification_record`, `verification_bind`) is a
+separate work-session service that carries no routing token. The reporting
+path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
 `engram_unadmitted_closing.rs`, `engram_unadmitted_delivery.rs` and
-`engram_unadmitted_worker.rs`).
+`engram_unadmitted_worker.rs`.
 
-- **Identity and checks.** Adoption assigns a stable `host_turn_ref` and
-  retains the actual adoption timestamp. Collection requires a root frame
-  whose runtime and adopted generation match both the ownership ledger and
-  the current session. Nested or unresolved work with no proven adopted
-  parent is excluded from that trace. Each collected test has a stable
+- **Identity and checks.** A delivered turn opens its trace when its prompt
+  is handed to the runtime; an adopted turn opens it at adoption. Either way
+  the trace has a stable `host_turn_ref` and its actual start time. Events
+  enter the trace only past the runtime and turn ownership fence: a Codex or
+  ACP event after its reader's routing, a Claude frame whose runtime and turn
+  (or adopted) generation match the ownership ledger and the current session.
+  Nested or unresolved work with no proven parent turn is excluded from that
+  trace. Each collected test has a stable
   `host_check_id` and remains uncredited, whether it passed, failed or has
   an indeterminate outcome. Up to 16 checks travel inside `unadmitted_turn`;
   further checks travel as standalone `observed_check` occurrences with the
@@ -1188,50 +838,43 @@ with `account_if_eligible` and unknown causality
   denied calls are local attempts, not observed runs; a missing end alone
   does not establish denial.
 - **Close and scope.** Guarded result, error, reader failure, runtime exit,
-  missing-runtime and successful Stop/revocation paths retain a closing job
-  before clearing adoption or runtime ownership. The terminal transition
+  missing-runtime and successful Stop/revocation paths retain a closing job,
+  with the outcome they observed, before clearing adoption or runtime
+  ownership. The terminal transition
   does no producer RPC or source measurement. The job pins the exact closing
   work binding, including revision and claim fence, authority store,
-  connection and routing identity, named-root generation and `named_at`,
+  connection identity, named-root generation and `named_at`,
   and local workdir. Capture requires current local scope and canonical
   binding/root proof to agree with those facts. A mismatch ends the job with
   a visible `not reported: scope changed` diagnostic naming the pinned and
   current identities; it never re-scopes the old trace to another work.
-  This strict comparison also treats a revision/fence-only advance or a
-  routing-token rotation before capture as a scope change.
+  This strict comparison also treats a revision/fence-only advance before
+  capture as a scope change.
 - **Measurement and policy.** The worker pins the observation policy once,
   off-thread, in a separately persisted phase before measuring source.
   Measurement and request construction use that same pinned policy. The
-  previous acknowledged checkpoint supplies a baseline only for the exact
-  same binding and workspace: differing revisions use `content_comparison`
-  with the baseline's original timestamp, equal revisions report a null
-  change, and no compatible baseline uses `assumed_missing_baseline`. The
+  baseline is the session's last checkpoint that an earlier build's grant
+  lifecycle acknowledged, and only for the exact same binding and workspace:
+  differing revisions use `content_comparison` with the baseline's original
+  timestamp, equal revisions report a null change, and no compatible
+  baseline uses `assumed_missing_baseline`. A report does not advance that
+  baseline, so successive turns do not compare with each other: without such
+  a historical checkpoint, every turn reports `assumed_missing_baseline`. The
   reported interval is an observation envelope, not the turn's execution
-  duration. It starts at adoption, or at the earlier original baseline time
+  duration. It starts when the trace opens, or at the earlier original baseline time
   when a comparison is included, and ends at the actual closing observation
   cut before request construction. It asserts neither continuous observation
   nor that the adopted turn caused the drift.
 - **Durability and replay.** The prepared request and delivery state live in
   the session's SQLite row. Exact row read-back precedes every send, and the
   turn/check identities determine immutable idempotency keys. An uncertain
-  reply or a restart replays the identical retained request and original
-  routing token; the host does not refresh a credential inside that request.
-  Retained reports may replay automatically after boot as evidence, without
+  reply or a restart replays the identical retained request. Retained
+  reports may replay automatically after boot as evidence, without
   activating a session. A restored closing job still needs its original
-  pinned scope; a rebind that changes it produces the visible scope failure.
-  Until the existing session binding/readiness owner finishes recovery,
-  Capture defers without changing the job or spending an attempt. Lazy idle
-  roots remain lazy: closing custody does not initiate a bind or a provider
-  prompt. Binding-guard release and boot-readiness completion wake retained
-  capture even when a bind installed its claim before later reconciliation
-  failed; the worker rechecks readiness and the original pinned scope.
-  Releasing a prepared-Begin hold does not establish an unread binding:
-  its recovery fence stays raised until the existing binding owner reads it.
-  A definitive no-claim bind still clears that fence and settles the original
-  closing scope as changed, rather than leaving it waiting forever.
-  Immutable delivery does not wait for the current session binding.
-  Historical receipts do not upgrade a successor grant or its current
-  source-sighting baseline. An active trace restored without a pre-crash
+  pinned scope; a scope that changed produces the visible scope failure.
+  Closing custody never starts a provider prompt. Immutable delivery does
+  not wait for the current claim association. Historical receipts do not
+  upgrade the current source-sighting baseline. An active trace restored without a pre-crash
   closing capture is not replayed or re-scoped. Boot archives its original
   turn/check facts in the recovery notice's expanded details and explicitly
   says it was not reported because the host restarted. The next adoption
@@ -1242,9 +885,8 @@ with `account_if_eligible` and unknown causality
   Delete uses the existing source-tracking removal barrier for active traces,
   unfinished closing jobs and unresolved delivery custody too. It keeps the
   session and exact request visible and durable, with queued work paused;
-  tracking-only Resume can explicitly recover a lazy binding through the existing
-  first-use binding owner, but never evaluates or begins a turn, unpauses queued
-  work, or sends a provider prompt. Recorded or definitively
+  a tracking-only Resume never unpauses queued work or sends a provider
+  prompt. Recorded or definitively
   refused envelopes release their removal duty only after the exact settlement
   passes the existing coupled durability fence. A terminal local failure keeps
   its custody: the Delete/Resume diagnostic names the turn and safe cause,
@@ -1289,7 +931,7 @@ with `account_if_eligible` and unknown causality
 
 ### Content revision
 
-Every source basis TermAl reports, at a turn's begin and close, at each
+Every source basis TermAl reports, at a turn's close, at each
 check's start and end, and as an evaluator's declared fingerprint, is taken by
 one function (`src/content_revision.rs`) and reads `content-v1:<sha256>`.
 Engram treats the value as an opaque string. It checks only the value's
@@ -1358,8 +1000,8 @@ shape, then compares it for equality.
   an obligation opened without a basis can only be waived. A path that is
   simply not there, its directory gone or turned into a file, has no entry
   and fails nothing.
-- **Cost.** Every capture reads every listed file, with no cache: at turn
-  begin and close, at each check's start and end, and for an evaluation at
+- **Cost.** Every capture reads every listed file, with no cache: at a
+  turn's close, at each check's start and end, and for an evaluation at
   request and at submission. The cost grows with the bytes listed. A capture
   that takes two seconds or more is logged with its entry count and bytes
   read, so the cost is measured where it runs. Past the bounds above a tree
@@ -1367,7 +1009,7 @@ shape, then compares it for equality.
   cost, at the price of its own staleness risk; there is none yet (tm-heis).
 - **Stalled reads.** A file read cannot be interrupted, so every capture a
   turn or an evaluation waits for runs on its own thread and is waited for
-  at most the budget. At a turn's begin and close, a capture that overruns
+  at most the budget. At a turn's close, a capture that overruns
   counts as not taken, the conservative path described above, and the close
   keeps one budget for its basis and its checks together. The thread is left
   to finish its read; at most 32 such threads take turn bases in the host at
@@ -1382,8 +1024,8 @@ shape, then compares it for equality.
   more evaluation. Upgrade while no evaluation is pending.
 - **Ignored files are not source.** A write only to a path the revision does
   not cover (an ignored file, a nested worktree under an ignored folder)
-  leaves the revision where it was, so a turn whose begin and closing bases
-  both exist reports no source change for it, whatever the file watcher saw.
+  leaves the revision where it was, so a turn whose closing basis is compared
+  reports no source change for it, whatever the file watcher saw.
 
 ### Source root
 
@@ -1396,8 +1038,8 @@ happens elsewhere. The agent therefore names the item's worktree once with
 
 - **Who names it, and what.** Only a root session that holds a live claim on
   `work` (its id or short reference), as `engram work core held` lists it
-  under that session's own Engram session id, with Engram control on for it
-  and its project (a name counts only for mediated turns). A project, folder
+  under that session's own Engram session id, with the Engram integration
+  enabled for its project. A project, folder
   or Engram store that changes while the name is being checked makes the
   call a conflict, and nothing is named. The path must be (a) the root
   of a worktree TermAl can measure, (b) of the same repository as the
@@ -1434,11 +1076,11 @@ happens elsewhere. The agent therefore names the item's worktree once with
   root. At most 64 entries are kept, and a full list refuses a new name,
   naming retained entries and whether a bounded reclamation pass was scheduled,
   rather than evicting one or promising a slot or successful retry.
-- **When it takes effect.** At the session's next admission: the turn
+- **When it takes effect.** At the session's next turn: the turn
   running when the name is given keeps the root it began with, and its tests
   and basis are not moved.
-- **What moves to the root.** A turn on that claim takes its begin and
-  closing basis there; a recognised test is credited only when it ran in
+- **What moves to the root.** A turn on that claim takes its closing basis
+  there; a recognised test is attributed to the claim only when it ran in
   the root (the command is still read from the session's workdir, where its
   runtime runs it), and its snapshots are taken there; the file watcher's
   hint, where it still decides (no closing basis), counts only paths inside
@@ -1451,9 +1093,8 @@ happens elsewhere. The agent therefore names the item's worktree once with
   hint must never miss the turn's own edits in its root, and the summary
   errs the same way; the
   root is added to the session's writer worktrees for overlap while the
-  turn's grant is held, and another session's check still open in it is
-  marked when the turn is admitted with it, as one in the workdir is at the
-  turn's start; and an acceptance evaluation requested by the claim's
+  turn runs, and another session's check still open in it is marked when the
+  turn starts with it, as one in the workdir is at the turn's start; and an acceptance evaluation requested by the claim's
   session runs its evaluator child in the root, takes its fingerprint
   there, and names the root in its notice. What stays on the workdir: how
   commands are read, the shell's `cd` tracking and the workdir's worktree
@@ -1471,7 +1112,7 @@ happens elsewhere. The agent therefore names the item's worktree once with
   another claim measured in the same worktree (two works may name one) is
   not sealed: its work still names the tree, so its later edits there
   count. Only a turn already running with that root when the naming call
-  began is sealed, and only while it still runs: a turn admitted during the
+  began is sealed, and only while it still runs: a turn started during the
   call, whose start the capture may predate, and a turn already finished
   are not, and with no such turn no capture is taken. The sealed turn's
   close uses a live capture of the old root when
@@ -1509,8 +1150,8 @@ happens elsewhere. The agent therefore names the item's worktree once with
   session while the host runs revokes local selection; it does not manufacture
   a restore event or a remote lifecycle end. Claim completion
   and release are Engram lifecycle events and need no synthetic host end.
-- **Authoritative readback.** Session bind, session status and turn begin carry
-  `named_root`: `none`, `bound` (workspace, generation, naming time), or
+- **Authoritative readback.** The work session's named-root read
+  (`named_root_read`) carries `named_root`: `none`, `bound` (workspace, generation, naming time), or
   `unbound_by_release` (last generation and release position). Release followed
   by re-claim cannot revive an old name; a new explicit name uses a fresh
   generation. Recovery and handoff preserve a bound root. Neither a changed
@@ -1519,27 +1160,23 @@ happens elsewhere. The agent therefore names the item's worktree once with
   cannot authorize evidence. A conflicting read invalidates the local selection
   and leaves a host line directing the agent to name the worktree again.
   Naming times compare as parsed instants, so `.000Z` and `Z` do not end a
-  valid binding; durable retry requests retain their original bytes. After a
-  successful turn begin, an unavailable auxiliary status read (including no
-  remaining budget) retains the admitted grant with an Unknown binding and an
-  agent notice. That turn keeps source, check and evaluation evidence withheld
-  even if a later read succeeds; its ordinary closing checkpoint still runs.
-  The next turn refreshes authority and captures its own provenance. Ownership
-  and routing-credential failures remain admission errors.
-  After a definitive bind or begin, source-only canonical reader, history or
-  candidate-publication failures also retain the admission with evidence
-  withheld. The host distinguishes those outcomes from invalid runtime, claim,
-  store, connection, routing credential or queued-turn ownership. It does not
-  decide from an HTTP status, error message or elapsed deadline. Unsupported
-  source readers and malformed source replies cannot authorize evidence;
-  a structured routing refusal still blocks delivery.
-  The acknowledged Prepared guard follows the control request into readback.
-  Before withholding, the host checks its current exact work/owner association
-  and admission identity. If a successor published that owner, the old proof
-  is unusable and a fresh acknowledged guard is required. Missing preparation
-  durability and failed admission persistence block provider handoff. A source
-  diagnostic belongs to the captured opening's turn generation and grant, with
-  a typed cause distinct from wire-field presence. It is composed at the final
+  valid binding; durable retry requests retain their original bytes. When the
+  named-root read is unavailable for a turn (including no remaining budget),
+  that turn keeps source, check and evaluation evidence withheld even
+  if a later read succeeds, and the agent is told; the turn itself goes ahead.
+  The next turn refreshes authority and captures its own provenance.
+  Source-only canonical reader, history or candidate-publication failures
+  likewise withhold evidence without holding the turn back. The host
+  distinguishes those outcomes from invalid runtime, claim, store, connection
+  or queued-turn ownership. It does not decide from an HTTP status, error
+  message or elapsed deadline. Unsupported source readers and malformed source
+  replies cannot authorize evidence.
+  The acknowledged Prepared guard of the naming authority follows into
+  readback. Before withholding, the host checks its current exact work/owner
+  association. If a successor published that owner, the old proof is unusable
+  and a fresh acknowledged guard is required. A source diagnostic belongs to
+  the captured opening's turn generation, with a typed cause distinct from
+  wire-field presence. It is composed at the final
   owner-checked prompt handoff, including missing opening provenance or store
   identity, and acknowledged only for that exact instance after the provider
   runtime channel accepts the prompt. A failed send does not deliver it or
@@ -1550,7 +1187,7 @@ happens elsewhere. The agent therefore names the item's worktree once with
   owner, runtime token and stop generation match. The existing handoff barrier
   still waits for Stop to settle: rollback can restore the same runtime,
   while a committed Stop or replacement cannot inherit delivery permission.
-  Evaluator defaults are separate from admission settings; store, connection
+  Evaluator defaults are separate from these settings; store, connection
   and claim identity are still checked independently.
   A read begun before a newer local transition cannot alter its selection,
   pending journal or runtime authority, including when that read is unknown.
@@ -1609,7 +1246,7 @@ happens elsewhere. The agent therefore names the item's worktree once with
   Another active root for the same claim, an orphan reconciliation, and legacy
   retirement without a known reason retain their refusal through focus changes
   and restore; a fresh confirmed name clears the reconciliation guard.
-  Active snapshots, checks, cached checkpoint retries and evaluation/submission
+  Active snapshots, checks, retained report retries and evaluation/submission
   references protect their history. A retired receipt never supplies named
   provenance when a later response omits the named-root projection.
   An omitted projection is a supported legacy receipt shape, not proof that
@@ -1618,7 +1255,7 @@ happens elsewhere. The agent therefore names the item's worktree once with
   canonical read and acknowledged candidate used for explicit projections.
   A failed read or uncertain acknowledgement keeps authority withheld.
   A restored epoch-zero naming history without a canonical explanation also
-  withholds evidence while allowing a valid admitted turn to continue. It
+  withholds evidence while allowing the turn to continue. It
   does not prove the old name from a no-event read. To resume prospectively,
   the current holder can run `termal_name_source_root` with its `work`
   reference and `path` set to a validated same-repository worktree (including
@@ -1639,7 +1276,7 @@ happens elsewhere. The agent therefore names the item's worktree once with
   Selection-loss instructions use the same current-status mechanism, scoped
   additionally to the claim and the lost naming identity. A canonical
   restoration, replacement or termination retires the obsolete instruction;
-  unresolved publication does not. A different admitted store, work or claim
+  unresolved publication does not. A different current store, work or claim
   suppresses delivery while retaining the instruction for a return to the
   still-live claim. A successful explicit clear also supersedes its covered
   preexisting instruction, without restoring authority or credit. Failed or
@@ -1647,10 +1284,9 @@ happens elsewhere. The agent therefore names the item's worktree once with
   owner-checked handoff, only TermAl's own prompt slot is recomposed; quoted
   user text and historical check messages remain intact. Notice instances
   are acknowledged only after an accepted provider send.
-  Recovery uses the current canonical cut; it does not reconstruct the
-  opening of a replayed begin receipt, which carries no feed cut. That original
-  turn remains without credited source provenance. A later fresh begin can
-  capture its own confirmed basis. A claim without validated store identity
+  Recovery uses the current canonical cut; it does not reconstruct an earlier
+  turn's opening, which then remains without credited source provenance. A
+  later turn captures its own confirmed basis. A claim without validated store identity
   is unconfirmed from opening and receives an actionable settings notice;
   discovering its store later cannot upgrade that turn. Unbound sessions
   remain valid without claimed source provenance.
@@ -1676,8 +1312,7 @@ happens elsewhere. The agent therefore names the item's worktree once with
   for thirty seconds so an unknown oldest entry cannot starve later work.
   Idle current bindings use their existing recovery owner; active owners are
   left alone. A matching local binding is a current owner only while its
-  session has a routing token for the exact store. A stale tokenless or
-  wrong-store binding does not block another eligible reader; it is not itself
+  session is connected to the exact store. A stale or wrong-store binding does not block another eligible reader; it is not itself
   lifecycle-end proof. The same owner check runs after the read, so authority
   restored during an unfocused read retains the entry for its current owner.
   A full-table new-name request does not synchronously sweep the
@@ -1773,9 +1408,9 @@ happens elsewhere. The agent therefore names the item's worktree once with
   `source_root_state` together (`named` or `ended`), including sightings in the
   ordinary workdir after an end. A capture retains its workspace identity;
   generation changes cannot relabel an earlier check as a check of the new
-  root. Known rename, end or retirement preserves an already admitted confirmed
+  root. Known rename, end or retirement preserves an already confirmed
   snapshot; pending or unknown authority still withholds evidence. A check whose opening and closing bases differ, including provenance,
-  receives no credit. Engram independently requires the verification and its
+  is not reported as a check of the root. Engram independently requires the verification and its
   producer to match the active root's workspace and generation.
 - **How long naming takes.** One budget of 102 seconds on the server covers
   two source captures, the commit reserve, and one shared 20-second control
@@ -1795,14 +1430,9 @@ happens elsewhere. The agent therefore names the item's worktree once with
   [architecture route](../architecture.md) and
   [delegation lifecycle](./agent-delegation-sessions.md#completed-codex-child-thread-lifecycle).
 - **What the agent and the operator see.**
-  - *The checkpoint card* of a bound turn names where it was measured: the
-    root and the item, or "session workdir (no worktree named)". The card
-    is built from the root the turn was admitted with, so a bound turn
-    whose begin-time capture never ran shows the workdir even if an entry
-    exists.
   - *When the agent gets a host line:* at a newly bound claim, after it
-    names or clears a root, and once a recognised test of a mediated turn
-    gets no check, whether or not it finishes, with the remedy. That is when
+    names or clears a root, and once a recognised test of a turn on claimed
+    work gets no check, whether or not it finishes, with the remedy. That is when
     the test started in another worktree than the one the turn is measured
     in, and when TermAl cannot confirm it did not: because it ran after
     another command on its line, because the runtime reports no directory
@@ -1869,10 +1499,9 @@ happens elsewhere. The agent therefore names the item's worktree once with
     the end instead of repeating, so the last line tells the latest state
     (name, clear, name again ends on the name). They come after the Engram
     context fence, when one is delivered, and before the prompt. A line
-    leaves once the runtime accepts a prompt that carried it, turn grant or
-    not, so a dispatch refused before that keeps it for the next; a line
-    set after the prompt was built (a rebind while the begin is recovered)
-    was not in it and reaches the next prompt, and so does a line the
+    leaves once the runtime accepts a prompt that carried it, so a dispatch
+    refused before that keeps it for the next; a line set after the prompt
+    was built was not in it and reaches the next prompt, and so does a line the
     prompt carried that was given again after it was built, so the next
     prompt still ends on the latest state.
 - **Limits.** The show receipt of the installed Engram carries no work id,
@@ -1883,24 +1512,31 @@ happens elsewhere. The agent therefore names the item's worktree once with
   same-session evaluation takes its fingerprint in the root but records
   none, having no evaluator child: a rename or a clear after it does not
   refuse its submission, and the tracker's own freshness check is what
-  stands. A
-  change made between two mediated turns is not attributed to either turn's
-  own source flag. A compatible accounted-source opening can report it as an
-  inter-turn observation; an adopted runtime-started turn can report its
-  own unadmitted history, both with unknown causality as described above.
-  Missing scope or measurement can still leave history unreported, with the
+  stands. A turn's report carries its source facts with unknown causality,
+  as described above; a change made between two turns is attributed to
+  neither. Missing scope or measurement can still leave history unreported, with the
   runtime reporting path's visible diagnostic. The main checkout of a
   `--separate-git-dir` repository cannot be named, since its `.git` file
   names no linked worktree; a linked worktree of it can.
 
 ### Test evidence
 
-A test the agent runs during a mediated turn on claimed work is reported on
-the same closing checkpoint as typed verification evidence with its
-environment, so Engram's stock source-change rule and a criterion bound with
-`--bind N=test` can be satisfied by what the host saw, not by what the agent
-says. TermAl does not run checks itself; it observes the commands the runtime
-reports.
+Test credit comes only from registered verification. A test-launcher run
+(`full`, `focused`, `live` or `category`) started with `--input commit`
+([committed-input runs](../test.md#ordinary-committed-input-runs---input-commit))
+in a claim's named source root, on the exact store, that ends with terminal
+results and a coherent committed-input record, is sent to Engram with
+`verification_record` over the initiating session's work session
+(`src/engram_verification_record.rs`), once that work session lists
+`verification_record_v1`, and its durable receipt is kept. Engram decides
+credit and acceptance from it; a criterion bound with `--bind N=test` is
+satisfied by that record, not by what the agent says. Every other recognised
+test (a plain `cargo test` or vitest run, the one-call form, a launcher run
+without those prerequisites) is an uncredited check in the turn's host
+observation ([Reporting turns as host observations](#reporting-turns-as-host-observations)).
+TermAl does not run checks itself; it observes the commands the runtime
+reports. The rules below decide which commands are tests, where a check
+counts and what fences it, and so what a turn's report says about a check.
 
 - **Which commands.** One shell wrapper is removed (`bash -lc 'X'`,
   `pwsh -Command X`, `cmd /c X`), and the first command of the line, with
@@ -1952,19 +1588,21 @@ reports.
   its description, names no test, and a script of several lines is not one
   test. A PowerShell or cmd script given as several words is taken as
   written, its quoting kept, so each argument is the one the runner saw.
-- **Which worktree.** A check is credited to the turn's worktree, the
+- **Which worktree.** A check is attributed to the turn's worktree, the
   claim's named [source root](#source-root) when there is one and else the
-  session's worktree, only when TermAl can tell it tested that worktree.
-  One turn reports evidence for one bound claim. At admission the host reads
-  the caller's other live claims that have named roots, solely for notices.
-  A test in another held claim's distinct root receives no credit for the
+  session's worktree, only when TermAl can tell it tested that worktree. That
+  attribution decides what the turn's report says; it is an uncredited
+  observation, and only registered verification earns credit.
+  One turn reports evidence for one bound claim. The host reads the caller's
+  other live claims that have named roots, solely for notices.
+  A test in another held claim's distinct root is not attributed to the
   bound claim; the line names both items and tells the agent to make the
   other item the focus and run its test in the next turn. A shared root
-  reports the test for the bound item only and names the other item that
-  receives no credit. Roots named for no live held claim keep the ordinary
+  reports the test for the bound item only and names the other item, to
+  which it is not attributed. Roots named for no live held claim keep the ordinary
   outside-root refusal. A failed held-claims read keeps that refusal too.
-  Making another held item the focus rebinds the next turn to it and its
-  named root. These notices never route one grant's evidence to several claims.
+  Making another held item the focus lets a later turn report to it and its
+  named root. These notices never route one turn's evidence to several claims.
   TermAl can tell a check tested that worktree when the command runs there (in
   the directory the runtime reports, Codex's item `cwd` or ACP's
   `rawInput.cwd`, else the session's workdir, a subdirectory included), and
@@ -2018,7 +1656,7 @@ reports.
   since a new one would begin its record after writes the old one saw. If
   the dropped check was a full-gate launch, its original root and start time
   stay in the bounded unmatched-launch window: a later gate must not borrow
-  a run it may already have started. Its check-credit notice names the
+  a run it may already have started. Its check notice names the
   original fingerprint and start, explains that its command or place changed,
   and advises launching again two minutes or more after the last launch in
   that worktree. A matching repeated start preserves the
@@ -2105,8 +1743,8 @@ reports.
   Claude's background Bash launch result is likewise not an exit: a carried
   launcher gate uses its matching terminal run record. Neither path settles
   merely because time passed. After an exit is received, closing source
-  capture must still finish before writes stop fencing the check; credit
-  is published at a checkpoint on the original claim.
+  capture must still finish before writes stop fencing the check, and the
+  check stays with its original claim.
 - **Passed needs evidence.** A run that tested nothing can exit 0, so a check
   claims success only when a result line shows tests passed: cargo's
   `test result:` or nextest's `Summary` with more than zero passed, pytest's
@@ -2189,7 +1827,7 @@ reports.
   it is known to be among. It does not count in every worktree. Read that
   way, one session with a command running from a lost shell (a Claude
   background call counts as running for the rest of its turn) marked every
-  check on the host, and no check earned credit while several sessions
+  check on the host, and no check was attributed while several sessions
   worked. What this leaves unseen: a session that went into another
   session's worktree by a `cd` TermAl could not follow, and wrote there
   only transiently or only in a directory Git ignores. A write that stays
@@ -2205,8 +1843,8 @@ reports.
   by path (`git -C`, a redirection) is not seen, nor is a directory run as a
   command, which a shell with `autocd` set changes to. Each is marked on
   the check as it happens, so a later report from that session cannot erase
-  it, and a mark made while the closing checkpoint waits for the snapshots
-  still counts. A read-only delegation child does not count. A command that
+  it, and a mark made while the turn's close waits for the snapshots still
+  counts. A read-only delegation child does not count. A command that
   reuses an earlier command's key is a new command. Which worktree a
   session works in, and each of its commands runs in, is resolved off the
   state lock as it starts a turn and whenever it reports a command or an
@@ -2223,11 +1861,8 @@ reports.
   command) drops its check, a turn
   keeps at most as many checks as it can report (a new one drops the oldest
   finished one; while every kept check still runs, a new test is not
-  checked and takes no snapshots), and the closing checkpoint drops the
-  turn's checks once its
-  report holds them. A grant that ends without its report (a compensating
-  close, a project reset) leaves its checks until the next grant clears
-  them; they are never reported, so they no longer count as open.
+  checked and takes no snapshots), and the turn's close drops its checks
+  once its report holds them.
   What TermAl cannot see: a process an agent left running in the background
   after its own turn, a terminal command already running when a check
   starts that ends after the check settles, and writes from outside TermAl.
@@ -2241,104 +1876,29 @@ reports.
   session in a folder under a repository at the home directory (a dotfiles
   repository) snapshots that whole repository at each check, within the
   freeze's budget (tm-x9fz tracks bounding it).
-- **Order.** Engram requires the evidence at or after the change it answers,
-  in time and in the feed. For each reported check, in start order: when its
-  revision differs from the last one reported (the turn's begin-time basis
-  at first), a change observation at that revision timed at the check's
-  start (only under a grant that mediates local mutation); the producer
-  observation (`observe`, timed at completion); environment evidence, shared
-  by checks on one revision and toolchain with no change reported between
-  them, so a check never cites an environment observed before the change it
-  answers; and the verification evidence
-  citing both. The turn's own observation follows; under a grant that
-  mediates local mutation it reports a change only if the source moved again
-  after the last check, judged by the revisions alone: TermAl's file-change
-  tracking, which can arrive late and would reopen a change a check
-  answered, no longer adds to it, so an edit only the tracking sees (an
-  ignored path) after the last check is not reported as a change. Under a
-  grant that does not mediate local mutation it is judged against the
-  begin-time basis, as without checks, and withheld when the source changed.
-  Observation ids include
-  the check's place in the turn, so they stay unique when a runtime reuses
-  a key.
-- **Environment.** TermAl runs the version commands itself, with its own
-  rights and outside any sandbox the check ran in, so it never runs a
-  program the workspace could have written or picked. `toolchain` is named
-  only for `cargo` run by name, which is the first `cargo` on TermAl's
-  `PATH`. When that is rustup's own proxy (rustup lies beside it), the
-  toolchain is its `+toolchain` selector, when that is a plain toolchain
-  name, or else the toolchain `rustup show active-toolchain` names in the
-  directory the check ran in (rustup reads the workspace's toolchain files
-  and overrides without running them). `rustup which` then
-  locates that
-  toolchain's `rustc` and `cargo`, which must lie outside the worktree, and
-  the label is the first line of their `-V`, each run by its path from its
-  own directory, with rustup's automatic installs off. Only a rustup of
-  1.28 or later is asked (`rustup --version` first): an older one ignores
-  that setting and may install the toolchain a workspace file names while it
-  is only asked to show it, so its checks go without a toolchain. Every version command
-  runs through the bounded reader the freeze's Git reads use, owning its
-  whole process tree (a Windows job without a console window, a Unix process
-  group). A cargo that is not rustup's proxy (a standalone install ahead of
-  rustup on the `PATH`, or no rustup) is labelled with the `rustc` beside
-  it, both outside the worktree, and a `+` selector names nothing for it. A
-  toolchain file that names a directory, a cargo run
-  by a path, and every Python, Go, Node and launcher run go without a
-  toolchain: those are commonly started through version-manager shims that
-  pick the program from files in the workspace, and naming it would mean
-  running what those files point at, or guessing. The label is TermAl's
-  resolution of the same name, so an agent shell with a different `PATH`
-  could have run another cargo. The label is taken as the check starts, on
-  its own thread, so a toolchain file edited after the check cannot relabel
-  it; each command takes at most five seconds, and the closing checkpoint
-  waits for the label within its freeze budget. When a command fails or the
-  budget runs out, the check has no environment evidence rather than a
-  guessed one. `sandbox` is the Codex sandbox mode
-  the turn ran under, and absent for other runtimes, whose approval modes are
-  no sandbox; `workspace_id` is the basis root; `capability_map_revision` is
-  the bind value. Each label is trimmed, non-empty and at most 256 bytes, so
-  a longer workspace root leaves the check without environment evidence. The
-  fingerprint is the SHA-256 of the components' RFC 8785 JSON, which Engram
-  recomputes.
-- **Text.** The summary names the command and how it ended, then only the
-  runner's result lines (cargo's `test result:` and nextest's `Summary`,
-  pytest's closing banner or `-q` summary, the vitest and jest totals, go's
-  package lines, the launcher's verdict and stage statuses without their log
-  paths), with
-  terminal codes stripped, within Engram's 4096 bytes. For cargo the lines
-  of a file-size inventory, `PATH: N physical lines (limit M)` at the start
-  of a line, count as result lines too, all or nothing: when they do not all
-  fit, every one is left out and `inventory omitted: N lines over the
-  summary budget` says so, since a partial list would misstate which paths
-  the check covered. Raw output is left out: it can carry secrets and paths,
-  and Engram's redactor refuses a report whole. The
-  references are `command:<normalised line>`, left out when longer than
-  1024 bytes, and, when known, `exit:<code>`. The command line itself is
-  sent as the agent ran it, in the summary's first line and that reference:
-  an argument carrying a secret (`--token=…`) goes with it. Engram answers a
-  redaction refusal with its generic `storage_error`, which TermAl cannot
-  tell from a failed write, so that report is kept for its exact replay
-  rather than falling back (below).
-- **Bounds.** At most 16 checks per turn, the latest kept, and 4 environment
-  records; a check past them is reported without one, which an unpinned
-  requirement allows. A source basis over 512 bytes is not sent.
-- **A success the host cannot judge is withheld.** A check whose own command
-  ended successfully but which could only be reported as unknown, because it
-  overlapped a write or its output shows no passing test, is not sent at all.
-  Engram judges a criterion bound to a kind by the newest verification of
-  that kind and counts an indeterminate one as not passed, so an unknown
-  record would hide an earlier pass at the same revision while saying
-  nothing the host can judge. The host logs it, and its holder is told
-  before the next prompt that the check earned no credit and why. A check
-  whose command failed is sent as before, overlapped or not: withheld, it
-  would leave an older pass the newest record. A pass still counts only at
-  the root's newest revision, so withholding cannot keep a stale one alive.
+- **What a report carries per check.** Its kind (`test`), its observed
+  result (`passed`, `failed` or `indeterminate`), its finish time and a
+  stable `host_check_id`; never the command line or its output, so a
+  secret in an argument is not sent. Up to 16 checks travel inside the
+  turn's `unadmitted_turn` occurrence, and further checks as standalone
+  `observed_check` occurrences with the same turn reference. A success the
+  host cannot judge is reported as `indeterminate`, never as `passed`.
+- **Environment.** No environment or toolchain evidence is sent to Engram.
+  TermAl still takes a check's toolchain label as the check starts
+  (`src/engram_check_toolchain.rs`: only for `cargo` run by name, resolved
+  outside the worktree without running anything the workspace chose) and
+  keeps it with the check, locally.
 
 #### Carried background gates
 
 A full gate outlasts a Claude tool call, which is capped at 10 minutes, so it
 runs in the runtime's background mode or detached, and its result marks only
-its launch (`src/engram_carried_checks.rs`).
+its launch (`src/engram_carried_checks.rs`). TermAl keeps local custody of
+such a launch: its run, its launch facts and the fences below. That custody
+is not verification and settles nothing at a later turn. A gate earns credit
+only as registered verification, launched with `--input commit` in the
+claim's named source root (Test evidence above); a carried launch without
+that registration earns none.
 
 - **Carrying.** When the launch of `node …/test-launcher.mjs full` (in the
   background, or with `--detach` and a successful launch) is recognised in a
@@ -2355,7 +1915,7 @@ its launch (`src/engram_carried_checks.rs`).
   launch of the session in the same worktree that has no run matched to it
   (one fenced before a poll found its run, one that left unmatched, or one
   dropped or not carried at its launch, which may still have started a run)
-  is refused at the next checkpoint: a run found then could be either's, and
+  is refused when its run is read: a run found then could be either's, and
   the host does not guess. Two minutes bounds what matching can confuse,
   since it takes only runs that started at most ten seconds before a launch;
   every line that asks the holder to launch again names that wait. A
@@ -2366,11 +1926,10 @@ its launch (`src/engram_carried_checks.rs`).
   once it is carried. A session carries at most four; a fifth drops the
   oldest, whose holder is told.
 - **Missing launch authority.** An enabled session's Current observation of
-  a recognised full-gate start without a work binding or active grant retains
+  a recognised full-gate start without a work binding retains
   only a bounded, memory-only diagnostic, not a check, source snapshot or
   verification. A matching background or successful detached completion says
-  `it began without a binding to claimed work, so it was not carried` or
-  `the turn has no active grant at its start, so it was not carried`.
+  `it began without a binding to claimed work, so it was not carried`.
   A failed or compound launch keeps its actual drop reason. The diagnostic
   observes the one-call directory, or all reported/presumed directories,
   independently of credit eligibility. Only known directories agreeing on
@@ -2475,18 +2034,16 @@ its launch (`src/engram_carried_checks.rs`).
   owned by the holder. A run that started in those ten seconds but had
   already ended by the launch belongs to an earlier launch, and so does a
   run a settled or dropped launch of the session used (the newest sixteen
-  are kept), so neither is taken. On the run index's tick, and before each
-  checkpoint, it reads the run's `results.json`; the first read that finds
+  are kept), so neither is taken. On the run index's tick it reads the run's
+  `results.json`; the first read that finds
   it terminal (it has `ended`, or a state other than `running`) keeps the
   record's SHA-256. The reads run off the state lock, one poll at a time, so
-  a read is stored before any other poll, or a checkpoint that polls first,
-  can read the same run, and a check read as terminal is not read by a poll
+  a read is stored before any other poll can read the same run, and a check read as terminal is not read by a poll
   again; settlement reads the record once more and refuses one that differs
   from that first terminal read. (Should two terminal reads ever disagree,
-  the check is refused too.) A checkpoint of a session with nothing to read
-  does not wait on a poll. A request root on a network path is compared as
+  the check is refused too.) A request root on a network path is compared as
   written, never resolved, since resolving it can block. A check
-  that can no longer be credited (fenced, its launcher gone, its run never
+  that can no longer settle (fenced, its launcher gone, its run never
   found, its six hours over) is not read again and finds no new run, so a
   later launch of the session can take one. A run directory whose request
   can never match the launch (another root, mode or owner, or an earlier
@@ -2498,63 +2055,18 @@ its launch (`src/engram_carried_checks.rs`).
   may have ended the run and exited in between, and a read that names
   another process (a detached run's creator handing over to its worker) has
   that one tested too.
-- **Settlement.** At the holder's next checkpoint on the same claim id,
-  measured in the same root generation, a carried check whose run is
-  terminal settles. It is credited as a test check when: the record still
-  has the digest first read; every stage its request lists passed with code
-  0 and no error, among them a test stage by its request record (`kind`
-  `test`, or, in a record with no kinds, `rust-tests` or `vitest`, as for a
-  foreground gate; [Which stages count as tests](../test.md#which-stages-count-as-tests)),
-  and the exit
-  code is 0 (a complete record that says failed is recorded as failed);
-  its expected, before and after input fingerprints, and the request's, are
-  present and equal; a fresh source basis equals the one taken at the
-  launch; nothing fenced it; and the host still records the same generation
-  for its claim. A source snapshot not ready within the checkpoint's budget
-  judges nothing: the check stays carried, still fenced and pinned to its
-  first terminal read, for the next checkpoint. One that failed, at the
-  launch or at settlement, never will give a basis, so the check is refused
-  at once. Its producer observation is
-  timed at the run's `ended`, which is also the verification's
-  `completed_at`; it is stored under the settling turn's grant, and the
-  grant it launched under is kept as the `launched-under-grant:ID`
-  reference. Its observation id is built from the grant it launched under,
-  where its command's sequence and key are unique. The summary names the
-  run, each stage in the launcher's own line (`rust-tests: failed exit=101`),
-  the run directory and the input fingerprint; the stage lines make a failed
-  run's exit its stages' own even in the one-call form, where an exit alone
-  could be its `pushd`'s.
-- **Refusal.** A carried check that fails any of those is dropped, not sent,
-  and its holder is told before the next prompt that it earned no credit and
-  why. A run that ended neither passed nor failed (stopped, or interrupted,
-  such as one the launcher's `recover` settled as failed and interrupted) is
-  neither a pass nor a failure: it is dropped, never recorded as failed. So
-  is a run whose launcher is gone without a terminal record; the holder is
-  told to settle it with `recover` and run the gate again. So is a run whose
-  record lacks an input fingerprint from before or after its stages (one
-  that ended before the launcher measured its input), a launch whose run was
-  not found within ten minutes, one whose claim was released or whose root
-  was renamed or cleared. A terminal carry at a checkpoint with a present
-  different claim is refused then: `its claim is no longer the one this
-  session holds`, even when the old root entry remains. Existing fences and
-  root-generation changes take precedence over that reason. An absent
-  binding or nonterminal run does not invent a claim mismatch: it stays
-  subject to the existing fence, generation, conflict and expiry rules.
-  A carry still unsettled six hours after its launch is refused by expiry.
-  Credit always requires the exact same claim. The holder is told which
-  reason applies. Every line about a check's credit is logged as it is set. Those
-  that wait for the same prompt are merged into one, so they seldom push out
-  a line about the session's source root; past 1,600 bytes the merge keeps
-  the newest and cuts the front, saying so. A line a prompt in flight
-  carries is not merged into, so accepting that prompt takes it out and the
-  new one waits for the next. A reset of the session's Engram
-  state drops its carried gates: when the project's Engram settings change,
-  each holder is told its gate earned no credit, and when the project is
-  removed, which ends Engram for the session, the gates are logged.
+- **Outcome.** When the run is read as terminal, the carry ends: nothing is
+  settled at a later turn and no credit is recorded from the carry. Its
+  holder is told before the next prompt when the carry was dropped and why
+  (fenced, its launcher gone without a terminal record, its run not found
+  within ten minutes, its claim released or its root renamed or cleared, or
+  six hours passed). Credit for the same run, if any, comes from its
+  registered verification. A reset of the session's Engram state drops its
+  carried gates.
 - **Restart.** Carried checks live in memory; a marker of each is persisted
   with the session. A host restart loses the checks, since the host could not
   watch the worktree while it was down, and loading the marker tells the
-  holder that the run lost its credit.
+  holder that the carry was lost.
 - **What it attests.** The host observed the launch, observed no write it
   can see reach the worktree until settlement, and read a terminal record
   that agrees with itself and with the source. It does not attest that no
@@ -2570,890 +2082,17 @@ its launch (`src/engram_carried_checks.rs`).
   for a foreground check, the evidence model assumes an agent acting in good
   faith. [Tests](../test.md) names the form agents use.
 
-The whole report is cached per grant and resent verbatim. Engram refuses a
-report whole, and evidence adds ways to be refused, so a refused report that
-carries checks falls back once to the turn's own observation alone, judged
-against its begin-time basis as before checks were reported; a refused
-fallback, or a refused report without checks, is dropped, as for the turn's
-own observation. The refusals the evidence itself adds are
-`environment_fingerprint_mismatch` (a fingerprint its components do not
-give), `environment_evidence_not_found` (a reference to no environment
-record) and `environment_basis_mismatch` (an environment recorded under
-another capability-map revision, or cited from another run or source
-revision). They are among the definitive refusals listed under the premium
-turn lifecycle above; the fallback is decided by the answer's code, never by
-its message text, so a lost call naming one keeps the evidence for the
-retry, and so does an answer whose code is not on that list. The stable
-code is shown on the checkpoint's control card.
-
-Refuse, defer, protocol/transport degradation, missing binding, begin refusal,
-or dispatch-budget exhaustion withhold the prompt and produce a durable Engram
-control card. Turning the premium flag off fences the transition, checkpoints
-open control state, clears the binding, and resumes ordinary Base-only
-dispatch.
-
 #### Batch full gates
 
-A carried full gate that passes can also be recorded for the other items its
-session holds and has named on the same worktree, each on its own run, through
-Engram's host-private `verification_bind`
-([batch full gates](batch-full-gates.md)). The gate's own item is credited as
-above; the binding never replaces that credit and never moves credit through
-the gate's grant (host architecture, Rule 10). In order:
-
-- At a carried launch whose root other items of the session name, the host
-  reads the session's held claims (off the lock, at most six seconds) and
-  records each member with its claim's fence then
-  (`engram_launch_batch_members`). A member missing from a list Engram cut
-  short, or every member when the read fails, is not recorded, with a line.
-- The credit leaves a pending batch until the checkpoint answers. The
-  answer's record id at the gate's own Test input (one id per input, in
-  input order) is the original; each member becomes an owed bind, persisted
-  before any call (`engram_owe_batch_binds`). This holds for a rebind's
-  recovery checkpoint too, against the report it sent. A refused checkpoint
-  drains its batches with a line per member (`forget_refused_engram_turn_report`).
-- The owed binds run on their own thread (`engram_owed_binds_tick`), at most
-  20 seconds of calls per tick. A member is decided once from its held claim
-  and newest sighting (`engram_bind_decision`); the decision is stored and
-  read back (`PersistFenceTarget::EngramOwedBindDecision`) before the first
-  send; every send rebuilds the same request under one key per gate and
-  member (`termal-verification-bind:{original}:{work_id}`). A credential
-  refusal of credentials still the session's own marks them stale and asks
-  for a rebind, in one critical section with the check. The owed binds make
-  that rebind themselves only while the session is idle (no turn open,
-  admitted or being dispatched), since the rebind's recovery checkpoint
-  would close a running turn's grant without its report; a busy session is
-  rebound by its own next admission. The idle and credentials check and the
-  claim of the bind happen in one critical section, so an admission that
-  arrives during the rebind finds the bind claimed and backs off.
-- A receipt counts only when it names the gate's original and a valid record
-  id for the member. `verification_bind_refused` and other definite refusals
-  settle the member; an expiry, a busy store, a storage error and every
-  uncertain answer are resent with backoff, capped at eight attempts or 30
-  minutes.
-- Pending batches and owed binds are persisted with the session; a restart
-  sends owed binds again and tells the members of pending or carried batches.
-  The acceptance binding read accepts Engram's bound records
-  (`AcceptanceBindingEvidenceBound`), ordering the producer on the original's
-  run.
-
-### Authorization timeout and retained prompts
-
-Ordinary gated admission uses one twenty-second remaining-time budget across the
-work-binding read, binding, evaluation, begin, and host persistence
-acknowledgements. Base
-context reads remain a separate operation. A timeout or unavailable transport
-does not mean policy denial: the session pauses its queue and keeps the
-original prompt, attachments, source and identifier. An unknown outcome with no
-grant begun is replayed automatically on the common recovery schedule, and the
-session says so ("Engram: waiting for admission; retrying automatically,
-attempt n, next at T"; Automatic re-admission of a parked admission, below);
-any other hold shows **Waiting/Unknown** and waits for Resume. Resume retries
-unknown authorization at once in either case, except that after a restart a
-retry head whose readiness fence is still raised starts its recovery only
-when a retry slot is free and no deferred attempt waits for one, and otherwise
-leaves it to its own due attempt; Cancel and Stop remain available without
-waiting for the Engram call. An explicit Refuse still withholds
-delivery as a refusal.
-
-If a retained prompt already appears in the visible transcript, a paused queue
-shows an action-only recovery card without repeating the prompt body. When the
-prompt was never promoted or its transcript row is outside the resident window,
-the recovery card also shows the original prompt content and context. Retryable held
-authorization offers Resume and Cancel; a pending prompt projected with
-`engramInterrupted: true` offers Cancel/reconciliation guidance, not a no-op
-Resume. Removing it preserves the operator's intentional queue pause.
-A Stop-marked head remains ahead of later mailbox and user
-prompts even when Stop arrived before the first authorization request was saved.
-An unresolved Stop defers an already-admitted handoff in the Stop callback queue.
-Failed Stop replays the exact delivery only while the original runtime, turn and
-authorization still own it; successful Stop or replacement discards it.
-The public asynchronous Stop restores that admitted turn before replaying a
-failed shutdown's handoff, while still publishing the Stop failure. Successful
-rollback also restores the exact admitted owner when the handoff has not yet
-arrived; callback arrival order is not evidence of admission. Successful
-Stop retires its promoted queue head even after the durable begin receipt has
-consumed the pending dispatch marker; Resume can start a successor, not replay
-the stopped authorization.
-Definite supersession is a no-op, not a channel failure. Retryable authorization
-is parked before terminal delegation/orchestrator failure handling, so a child
-or follow-up keeps its original prompt. An immutable mailbox head also covers
-its original wake boundary: recovery does not insert a second copy of that wake,
-while genuinely newer inbound sequences remain separate.
-
-The default timeout for an individual control call is also twenty seconds (or
-the configured project call timeout, which may not exceed twenty seconds).
-Outside admission this bounds each completion,
-project-reset or stale-begin checkpoint independently; these calls do not share
-the admission deadline. A completion checkpoint can
-therefore delay the next queued turn by that call timeout. Admission itself still
-uses one shared twenty-second budget, not twenty seconds per step.
-
-Prepared bind and evaluation requests live on the existing queued prompt. They
-are acknowledged by the host persistence writer before transmission, retain
-their original store/principal, and replay with the same payload and idempotency
-key after a lost reply. A received Defer completes that evaluation; explicit
-Resume asks a new operation for the same retained prompt. Authority-relevant
-settings changes do not silently authorize replay under another principal;
-an incompatible retained bind/evaluation stays paused and explicitly interrupted
-for cancellation or reconciliation, including in delegated children;
-completion-evaluator defaults do not invalidate an otherwise identical retry.
-Public settings resets preserve that barrier even when they clear the transient
-recovery flag. Refusal (or control disabled before an operation) retires the
-failed head. Other degraded outcomes with retained intent, including protocol,
-store and local persistence faults, remain interrupted and cancelable; they are
-not silently retried or allowed to terminalize a waiting child. The one
-exception is a delivery the host itself withheld before provider handoff whose
-grant is then closed (Retained prompt recovery, below). Transient transport
-failures with no grant begun are replayed automatically (Automatic re-admission
-of a parked admission, below); a known Defer remains explicitly retryable.
-
-A pure structured mailbox notification on a live root can also reconcile a
-nonfatal remote Bind failure before Evaluate. The existing live admission
-owner must still match the original head, content, authority and prepared Bind.
-Recovery retains that exact request and key, waits for its local persistence
-acknowledgement and uses the existing bounded retry schedule. It does not
-acknowledge the mailbox, infer non-application, or authorize a grantless turn.
-Real user/delegation content, attachments, recovered authorization, prepared
-Begin and unresolved grants remain outside this exception.
-
-Resume checks the prompt actually admitted by its drain after delivery
-preparation, including when mailbox revalidation removed an earlier wake.
-If recovery leaves that admitted head interrupted and paused without an attempt in flight,
-Resume returns a conflict with reconciliation or cancellation guidance instead
-of an unchanged successful response. A scheduled durable continuation is
-distinct from provider delivery and keeps its existing success semantics.
-
-Queue records persist their original promoted transcript position. Trimming the
-resident transcript cannot cause a retry to append the same prompt or composer
-history again. Older retained records recover the marker from known transcript
-positions; absent historical evidence requires explicit reconciliation.
-
-On restart, recovery checks the original control session before rebinding.
-Engram expires issued-but-unbegun grants when its control connection restarts:
-the host reconciles an obsolete replayed grant before requesting a fresh one.
-A **begun** grant has unknown provider delivery after host restart. Its begin
-acknowledgment is persisted on the retained evaluation before provider handoff,
-so a later closed remote grant cannot erase possibly-delivered evidence during
-an asynchronous queue-removal write. Recovery persists the interrupted state
-before checkpointing a still-open grant. The prompt remains held for explicit
-resolution, never automatically resent. If control is off after a restart, the
-retained authorization is surfaced for cancellation rather than silently
-blocking or sending it without admission. This is at-most-once host handoff,
-not a claim of exactly-once model execution.
-
-### Retained prompt recovery
-
-A granted, begun admission can still fail before the prompt reaches the
-provider: the admission durability fence misses its twenty-second budget
-(a slow local writer), or the dispatch card cannot be saved. The host then
-withholds the delivery and closes the begun grant with a stale-begin
-checkpoint (`next_intent: exit`). When that checkpoint returns a receipt for
-the same grant, this host knows the prompt never reached the provider and
-that its grant is closed, so the prompt is not left interrupted for good
-(`src/engram_abort_retry.rs`; the schedule, the durable acknowledgement and the
-tick are shared with every automatic retry, `src/engram_retry_schedule.rs`):
-
-1. Under the same lock, the head loses the evaluation and bind it was admitted
-   with, the session forgets the closed grant and moves to a new dispatch
-   generation, and an abort record names the head, the reason, the closed
-   grant, the attempt count, when it was first held, when the retry is due,
-   and the authority (project, connection and admission settings) it ran
-   under. The head stays interrupted and the queue paused, and the session
-   shows "delivery not attempted; waiting for local durability".
-2. The settlement is saved and its admission content, abort record included,
-   is acknowledged by the persistence writer against the stored record. A
-   failed acknowledgement is asked for again on the next tick; nothing is
-   admitted before it succeeds. The acknowledgement is then saved on the
-   abort record itself. Its 20-second wait (`ENGRAM_ABORT_SETTLEMENT_FENCE`,
-   for abort, admission and bind retry records alike) is measured, and
-   polled by the tick, on the state's budget clock: real time in production,
-   and a fixture's scripted clock alone in tests, so no test's outcome
-   depends on real elapsed time.
-3. Once acknowledged, the head stays interrupted, and so retained (delegation
-   polling, mailbox coalescing and cancellation keep treating it as held), but
-   it projects as a retryable hold rather than an unknown delivery, and only
-   the retried admission or an explicit Resume may pass it while nothing has
-   moved the dispatch generation since the settlement. It waits behind the
-   paused queue until its retry is due: 2, 5, 10, 20, 30, then every 60
-   seconds after each aborted attempt, plus up to 20% jitter spread by session
-   and attempt. A known Defer whose card could not be saved is settled the
-   same way (no grant to close) and is due no earlier than its `retry_after`.
-4. When due, the automatic retry tick (its own thread, every two seconds)
-   admits the same prompt again as a fresh operation: a new evaluation key,
-   the same prompt, attachments and transcript identity. It needs no Resume,
-   new message or restart. The queue stays paused: the admission bypasses the pause only for
-   the exact head (prompt, dispatch and turn generation) it was due for, and
-   only while, under the promotion lock, its acknowledged abort record still
-   names that head under the same authority. A head cancelled in between, a
-   takeover or a changed authority starts nothing. A successful admission
-   clears the abort record; another withheld delivery settles again with the
-   next attempt and the original held-since time. A retry the drain could not
-   start counts as an attempt and moves to the next delay.
-
-Nothing else is retried. A checkpoint answered for another grant,
-`grant_not_begun` (the grant is still issued and keeps its retirement
-protocol), or an unknown checkpoint outcome keeps the conservative hold. So do
-a Stop in progress at settlement, a head that changed or was cancelled, a
-retained state another path took over, and a changed authority, which drops
-the abort record and leaves the prompt interrupted for Cancel. A committed
-change only: while a settings transaction holds the project's fence (it may
-still roll back), the tick waits. A public Stop of a session waiting for its
-retry, or of the retried admission before it stores its intent, cancels the
-retry (moving the dispatch generation, so that admission never reaches the
-provider) and keeps the prompt interrupted for explicit removal, as a Stop
-of a waiting admission does. The abort record is saved with the session: a restart after
-its acknowledgement was saved rebuilds the retry, which the tick admits when
-due; a restart before it (the record written by the failed admission, or the
-settlement saved but not yet acknowledged) keeps the interrupted hold. While
-an automatic retry owns the head with a due time (an admission,
-begin-preparation, abort or bind retry, matched to the head as its next
-attempt requires, with no operator pause and control not disabled), a mailbox
-wake to the session reports `waitingForAutomaticRetry` and the session's API
-state carries `queueHold` with the retry's cause code and next due time
-(`src/engram_retry_hold.rs`); the latch, and so `queuePaused`, is unchanged.
-A session held any other way, an interrupted hold that no due retry owns
-included, reports
-`heldBehindPausedQueue`
-([agent mailboxes](agent-mailboxes.md#dispatch-outcome-versus-notification-state)).
-A remote proxy session's own record carries no retry records, so it reports
-no `queueHold`.
-A delegation whose child holds a retained prompt reports `held`, with the
-reason these states give it: `retryScheduled` while an acknowledged abort record
-holds the head, `persistenceUnknown` before the acknowledgement, `stopped` after a
-public Stop, `deliveryUnknown` for any other interruption, and
-`admissionDeferred` for a parked admission. Its parent's waits wake on that hold
-([agent delegation sessions](agent-delegation-sessions.md#held-attempts)).
-
-### Automatic re-admission of a parked admission
-
-Remote `control_request_expired` and `control_store_busy` replies certify that
-**this invocation committed no changes**. The causal card calls this
-`not_applied`; it does not say the process never started or determine whether
-an earlier attempt applied. Admission retries the retained operation and key.
-A closing checkpoint keeps its entire request, including its report and
-Wait/Exit intent, and the next admission replays it before evaluating another
-turn on the same valid binding. These replies do not arm a fresh bind. A
-successful Exit or a subsequently expired binding still follows the existing
-binding reconciliation rules. Local deadlines remain `deadline_exceeded`
-with unknown application, and COMMIT or rollback failures remain
-`storage_error` with unknown application.
-
-An admission whose outcome is unknown before any grant was begun parks its
-retained prompt (Authorization timeout and retained prompts, above): an
-evaluate that missed its deadline or lost its transport after the request was
-saved (`deadline_exceeded`, `control_unavailable`), an open circuit
-(`control_circuit_open`), a bind backoff (`control_backoff`) or an exhausted
-admission budget (`dispatch_budget_exhausted`). Such a park is re-admitted
-automatically, without Resume, a new message or a restart, except when the
-current head's attributed attempt consumed its whole attempt budget: that
-measured admission latency hold requires Resume or Cancel (see the measured
-hold below). The automatic path (`src/engram_admission_retry.rs`) works as follows:
-
-1. The park writes a retry record with the head: its prompt and intent
-   fingerprint, the card code, the attempt index, when the prompt was first
-   held, when the next attempt is due, the authority (project, connection and
-   admission settings) and the dispatch generation of the retained intent.
-   The session shows "Engram: waiting for admission; retrying automatically,
-   attempt n, next at T". Nothing is replayed until the persistence writer
-   has acknowledged that record against the stored session.
-2. Attempts are due 2, 5, 10, 20 and 30 seconds after each park and then
-   every 60 seconds, each with up to 20% jitter spread by session and attempt,
-   and never earlier than the session's circuit deadline or bind backoff.
-   When due, the automatic retry tick replays the exact retained intent
-   through ordinary admission: a retained evaluate goes out again with its
-   original idempotency key (Engram returns the recorded decision if the
-   first request landed, or evaluates once if not), and a retained bind is
-   sent again byte for byte. No new key is minted while the outcome is
-   unresolved. The queue stays paused: the attempt bypasses the pause only
-   for the exact head (prompt, dispatch and turn generation) it was due for,
-   and only while, under the promotion lock, the acknowledged record still
-   names that parked head under the same authority.
-3. A replay that times out again parks as the next attempt with the original
-   first-held time; a Grant is delivered once and clears the record; a Defer
-   ends that evaluation and parks as a Defer does (a new generation and the
-   explicit Resume-or-Cancel hold). An attempt that fails before admission
-   counts as an attempt and moves to the next delay; one the drain declines
-   (another admission holds the head, or something now holds it that the
-   next tick reads) is not charged.
-4. One attempt runs per head: while any admission of the head is running (an
-   explicit Resume included), a due tick starts nothing. Host-wide, at most
-   four are in flight at once, counting the automatic attempts of every retry
-   (this one, the abort retry and the bind retry) and each parked admission's
-   boot reconciliation (step 5); an abort retry's boot recovery after a
-   restart keeps its existing path outside the cap. Due attempts start in
-   due-time order; an attempt the cap defers is logged and keeps its attempt
-   index and first-held time, and a later tick starts it. A slot is released when its
-   attempt completes, however it ends; a delivery that moves to the Codex
-   Fast discovery worker takes the slot with it and keeps it until that
-   worker finishes. The tick runs every two seconds on a thread of its own,
-   apart from carried-gate polling and the test-run index, so a slow Engram
-   delays only the retries. An attempt whose thread cannot be created runs
-   on the tick's thread instead, and an attempt that panics, on any thread,
-   is logged and kept for a later tick.
-5. The record is saved with the session. A restart after its acknowledgement
-   was saved rebuilds it while the head is still exactly that park; the
-   first attempt after the restart is the one reconciliation (recovery reads
-   the original control session, then replays), and the cadence continues
-   from the saved attempt index without a new wake. No automatic retry of
-   any kind starts before boot has raised the restarted sessions' readiness
-   fences, although the tick runs from construction. The eager boot recovery
-   and a lazy one never reconcile the same session at once: whichever starts
-   first claims it, and the other leaves it to that recovery and its fence
-   stays raised until it finishes; the eager pass also skips a session whose
-   fence a finished lazy recovery has already lowered. When the restart's eager
-   boot recovery left the session's readiness fence raised, the due attempt
-   starts the session's one lazy boot recovery instead of admitting, hands it
-   its slot under the cap until that recovery finishes, and is not charged;
-   once that recovery has lowered the fence, the next due tick replays. The
-   eager boot recovery itself reconciles such a session only under the same
-   cap: its worker holds a retry slot until it finishes, and with none free
-   the session is left fenced for its own due attempt. The same rule holds
-   for every automatic Engram reconciliation or bind of a session that holds
-   a retry record: a lazy recovery requested outside an attempt (an ordinary
-   drain, a first use or an explicit Resume), the rebind after a runtime
-   loss, the best-effort bind of a delegation's parent or child, and the
-   bind after a settings change each take a free retry slot and hold it
-   until they return, or, with none free, leave the session to its own due
-   attempt (a deferred rebind keeps the session marked for rebinding; a
-   deferred delegation bind leaves the delegation as a failed best-effort
-   bind does). Such a call takes no slot while the tick has a due attempt
-   waiting for one, so it never runs ahead of an attempt the cap deferred.
-   Once its retry record is dropped, any trigger recovers or binds the
-   session as before. Every other session is unchanged. A head that still
-   holds its saved wire intent is never freshly bound by these calls; only
-   its own admission replays it. A restart before
-   the acknowledgement keeps the hold. A bind retry left on a retained head has
-   no live runtime proof after a restart; once acknowledged it becomes the
-   same record and its retained bind is replayed the same way.
-
-One active grant does not keep the hold: the prior turn's, left open only
-because its closing checkpoint ended without settling (a lost reply, a missed
-deadline) while the next prompt waited behind it, so that prompt's admission
-met the bind backoff and parked. The schedule takes that park when the newest
-checkpoint card for the active grant is the Degraded `turn_checkpoint` whose
-cause names this head as its continuation, under the same authority. Both the
-session preview and the control card show the scheduled attempt number and
-next due time from the retained retry, respecting the pending bind backoff. When
-the attempt is due, its rebind reads the session status first: a grant still open
-there is closed once by the recovery checkpoint, carrying the report the lost
-close built, and one the producer already closed is cleared, all before the
-head's own evaluate; the head is then delivered once, without Resume. A
-recovery that is refused, or answered with a receipt for another grant, ends
-the retry in the explicit hold, its card naming the code and, through the
-refused request, the grant. Any other active grant, and any uncertain grant,
-keeps the hold. Tests: `src/tests/engram_closing_checkpoint_retry.rs`.
-
-Nothing else enters the schedule, and each of these keeps its hold and its
-preview: a Reconcile disposition; a refusal; control disabled, or a fatal disabled
-reason; a Stop or a cancellation; a committed change of the project,
-connection or admission settings; an operator queue pause; and a superseded
-owner (another head, changed content or a moved generation). An operator queue
-pause is the pause a public Stop leaves for an explicit Resume. It carries its
-own marker, saved with the session and distinct from the pause a park sets, and
-no automatic retry passes it. A Stop of a head waiting for its automatic
-retry ends that retry behind this pause and leaves the head as it was before
-the retry: a head still holding its saved wire intent is held as a Stop of a
-waiting admission holds it, and one without (after a restart) stays queued,
-uninterrupted and resumable, with the held preview; an explicit Resume admits
-it afresh. A known Defer's `retry_after` and wake condition are not part of
-this schedule.
-
-Opt-in tests in `src/tests/engram_root_recovery_live.rs` use a caller-identified
-Engram binary (`TERMAL_TEST_LIVE_ENGRAM_BINARY` and its SHA-256 in
-`TERMAL_TEST_LIVE_ENGRAM_SHA256`), disposable stores and a simulated provider
-receiver. They exercise real control replies, committed-reply loss, restart,
-deadline, explicit refusal and writer contention without touching live stores.
-
-### Prepared Begin and failure diagnostics
-
-Before the first `turn_begin` for a grant leaves the host, the exact begin is
-recorded on the queued head's retained evaluate (`prepared_begin`):
-
-- the idempotency key string that is sent;
-- the grant id and its delivery tokens;
-- `issued_no_later_than`, the local time by which the grant had been issued,
-  which is its expiry basis;
-- the phase `prepared`.
-
-The persistence writer acknowledges it through the same admission fence that
-covers the retained evaluate, and only then is the begin sent
-(`src/engram_queued_admission.rs`). A recovery that reads this record replays
-that stored key string, never a recomputed one.
-
-When the acknowledgement does not arrive, the begin is not sent. Its cause is
-a `local_state` failure of `turn_begin` whose request did not start. What
-happens to the prepared record depends on what the fence proved
-(`src/engram_queued_admission.rs`, `src/engram_begin_preparation_retry.rs`):
-
-- The attempt's wait ran out (a missed deadline, as under a release build's
-  load). A timeout proves nothing about the write, so the exact prepared begin
-  (key, grant, delivery tokens) is kept as pending. The card's code is
-  `begin_preparation_pending`; no orphan repair is armed and no fresh
-  admission races it. The head parks for an admission retry of that code. Its
-  attempt sends no evaluate: it acknowledges the same content again through
-  the admission fence, then sends that same begin. A pending record whose
-  re-acknowledgement fails stays pending.
-- The write is reported failed. The begin was never sent, so withdrawing the
-  record is safe, and it is not saved later as a possibly sent begin. (A
-  failed report can hide a commit whose acknowledgement was lost, and a write
-  that runs before the withdrawal may still save it; either errs only toward
-  one needless exact replay after a crash.) The card's code is
-  `begin_preparation_unacknowledged`. The head is settled as a
-  [Retained prompt recovery](#retained-prompt-recovery) abort record of its
-  own reason: the queued prompt and its content are kept, only the stale
-  retained evaluate is dropped, and the rebind is required. The issued grant
-  was never begun, so the rebind settles it before the fresh evaluate under a
-  new key, and there are never two live grants.
-- The writer stopped. The host that met it cannot wait that out, so the
-  record is withdrawn and the head keeps the local-persistence hold, named
-  `begin_preparation_unacknowledged`.
-- Only a begin proven never sent is ever withdrawn. A preparation that replays
-  a saved record (the same grant and key) whose pending marker a restart
-  dropped may be re-acknowledging a begin an earlier host sent. Whatever its
-  fence did, that record is kept, never marked as this host's pending begin,
-  and its grant is not armed for the orphan rebind. On a fence failure the
-  head keeps the hold, and a Resume says it may have been sent. When it is
-  acknowledged late and its begin then fails before transmission, it is left
-  possibly begun, for its exact replay.
-
-A head without a retained evaluate has nowhere to keep the begin, so it is not
-sent either.
-
-An acknowledgement that arrives only after the attempt's wait still made the
-prepared record durable. It is classified by what happened: the record is
-kept, never withdrawn as unacknowledged, and the begin later sent is that
-prepared begin. Such an acknowledgement usually leaves the attempt no time to
-transmit the begin. A begin that fails before transmission was never sent.
-After such a late acknowledgement, or while the head's budget is enforced, it
-stays the pending begin above. Its hold enforces the budget, counted from
-acceptance, so the budget still bounds it. Otherwise (an on-time
-acknowledgement whose begin's guard fails) the exact begin replay takes it. Whether a
-durable outcome may still advance is a separate question, answered by the
-budget below and by the holds.
-
-Two different bounds apply. Each control call and each dispatch attempt,
-including its fence waits, stays at most 20 seconds
-(`ENGRAM_DISPATCH_BUDGET_MS`). Above them, one admitted request's automatic
-recovery has an overall budget of 240 seconds
-(`ENGRAM_ADMISSION_BUDGET_SECONDS`):
-
-- **Start.** It starts when the queue head is accepted for control admission,
-  before any control, persistence or capacity wait. Ordinary prompt backlog
-  behind an earlier provider turn is not counted.
-- **Saved state.** Its start and deadline are saved with the head
-  (`begin_preparation_lineage`), together with the first prepared-begin hold,
-  a pending begin's grant and the automatic attempts started. It is kept
-  through retries, backoff, the rebind, fence waits, a change of retry kind
-  and a restart. It belongs to that prompt only; another head drops it.
-- **Enforcement.** It bounds every automatic recovery of the head: bind,
-  admission and abort retries, the exact replay of a begin possibly sent,
-  and the certified non-application codes (`control_request_expired`,
-  `control_store_busy`) replayed on the admission schedule. This holds
-  whether or not a prepared begin of the head was ever withheld; the first
-  prepared-begin hold only marks that recovery. Only a begin Engram applied
-  (an active grant) ends the budget.
-- **Accounting.** Each attempt is clipped to what is left of the budget.
-  Waiting on the shared schedule (2, 5, 10, 20, 30, then every 60 seconds,
-  with jitter, one attempt per head, under the host-wide cap) uses up the
-  budget but starts no attempt.
-- **Exhaustion.** At or after the deadline no automatic send starts, even with
-  an attempt, an acknowledgement or a capacity slot due. The retry tick ends
-  the recovery before the step of whichever retry holds the head. The head
-  takes the resumable Resume/Cancel hold "automatic re-admission exhausted
-  after N attempts; last cause …", with no further control call. The last
-  cause is the code of the head's newest dispatch card. The hold says what
-  is known of that last invocation:
-  - for a producer certificate (`control_request_expired`,
-    `control_store_busy`), that it committed no changes, though earlier
-    attempts with the same key may have;
-  - for any other control outcome, such as `deadline_exceeded`, that its
-    outcome is unknown;
-  - for a local preparation cause, nothing, since nothing was sent.
-  An uncertain outcome is never reported as not applied. An attempt that
-  finds the window already spent, withheld as `dispatch_budget_exhausted`,
-  ends in this hold at its park: no further retry is scheduled, and no card
-  promises one. A begin still pending
-  then is kept as it is, with its marker, grant, key and delivery tokens: its
-  write may still be unresolved, so nothing proves it absent, and no rebind
-  is armed to expire its grant. Resume sends that same begin, never a fresh
-  grant.
-- **Holds.** Control disabled and an operator's pause stop automatic advancement
-  immediately, with the hold every park shows. A Stop ends it at once and
-  keeps its stopped hold, so only an explicit Resume admits the head again.
-  None of them grants the head more time or resets the clock. Each of them,
-  and exhaustion, ends the window but keeps it, with its start, deadline and
-  first hold (`ended`), so no later admission, boot or re-enablement reads
-  the head as having no budget and starts another. The boot pass leaves a
-  head with an ended window to its hold, since control disabled is not saved
-  across a restart: it marks a saved prepared begin possibly sent, so that
-  Resume replays it exactly, but schedules nothing. A project's Engram
-  settings change keeps the ended window but drops a pending begin's marker:
-  a begin evaluated under the old settings is never sent under the new ones,
-  so Resume says it may have been sent and keeps the hold. Only an explicit accepted Resume opens a new window (see below).
-- **Begin possibly sent.** A begin sent with an unknown outcome is not an
-  applied one, so the budget still bounds it. Its exact replay
-  ([Begin-unknown replay](#begin-unknown-replay)) runs inside what is left of
-  the budget. At the deadline it ends in the explicit hold with "last cause
-  begin_unknown": its prepared begin, grant and delivery tokens are kept,
-  never withdrawn and never replaced by a fresh grant, and Resume replays
-  that same begin. The same holds after a restart, which reads this host's
-  pending begin as possibly sent.
-- **Begin applied.** Once a begin was applied (an active grant), it was the
-  last automatic send and the budget ends: the steps that complete its turn,
-  such as the delivery durability fence and source observation, keep their
-  own per-attempt bounds and are not clipped to the budget. Receipt time is
-  when the host first observed the complete matching Begin response (or the
-  status read that settles a scope mismatch as applied), on the operation
-  budget clock, not when local application or delivery happens. A receipt
-  observed strictly before the deadline ends the budget even if the steps
-  after it cross the deadline. A receipt first observed at or after the
-  deadline is kept as the actual outcome ("applied, first observed after the
-  deadline", card code `begin_applied_after_deadline`, saved with the hold)
-  but delivers nothing automatically: the grant stays possibly begun, the
-  head ends in the explicit hold, and Resume replays that same begin, whose
-  idempotent receipt delivers the prompt once. Cancel removes the prompt and
-  keeps the applied grant recorded as possibly begun, with the rebind armed,
-  so the next bind settles it by a session status before any successor is
-  admitted; it never relabels the begin as not started.
-- **Boot reconciliation.** A restarted head's reconciliation (its status read,
-  focus read and bind) is clipped to the same saved deadline, so no control
-  call of it starts after the budget.
-
-An attempt can also stop automatic retry before the overall window ends.
-When the current retained head's typed `dispatch_budget_exhausted` dispatch
-was withheld after consuming its 20,000 ms attempt budget, the host holds
-instead of repeating the same full evaluation on the unchanged schedule.
-The preview and saved cause name the original prompt and dispatch generation,
-total, admission/evaluate span, its included admission fence, configured budget,
-and the condition for retry: explicitly Resume after the observed latency cause clears, or
-Cancel. The fence is not added to the admission/evaluate span a second time.
-The initial admission span and total use the same operation clock; the span
-starts before bind and may include work outside Evaluate itself. Begin-refusal
-healing retains its separate re-evaluation measurement. The diagnostic must
-name this exact head, turn and authority; a stale or unattributed card cannot create this hold.
-Automatic recovery ticks do not poll Engram to measure whether latency has
-improved, and the hold does not reset the head or its recovery window.
-
-The overall window-spent check precedes this per-attempt decision, retaining
-the separate exhaustion disposition above. Slow successful admission,
-explicit Refuse/Defer, ordinary proven-unsent fail-open, and exact replay of
-a possibly sent Begin keep their own rules. A measured latency hold is not
-a grant-retirement receipt or proof that an earlier operation did not apply;
-issued-grant settlement and ambiguous Begin recovery remain separate.
-
-While a retry is scheduled, its preview names the wait (for a pending begin,
-"the prepared begin awaits its durable acknowledgement; nothing sent"), the
-attempt, the next time and when automatic recovery ends.
-
-After a restart, only the time left before the saved deadline counts: the
-downtime is part of it, and a restart never grants another budget. A saved
-pending begin proves nothing after a restart, because the begin may have been
-sent after the marker was last saved. The boot pass therefore reads it as
-possibly sent and replays it exactly
-([Begin recovery after a restart](#begin-recovery-after-a-restart)).
-A stopped writer's saved hold is settled at boot the same way as a failed
-write, since nothing was sent. The head is admitted afresh once the new host's
-settlement is durably acknowledged, but only while its saved budget has time
-left. A hold whose budget is spent, or one saved by an earlier build with no
-budget to date it, keeps its hold at boot. A boot reconciliation of such a
-head runs under the host-wide cap.
-
-An explicit Resume on such a hold is never a silent no-op. It first looks at
-an interrupted head that nothing schedules any more and that has no grant
-active or possibly begun:
-
-- Its newest card names `begin_preparation_unacknowledged` and no prepared
-  begin is kept. This covers the hold a park leaves, or a Stop after a failed
-  write's settlement. Nothing was sent, so the stale evaluate is dropped and
-  the session moves to a new dispatch generation. The head takes the
-  resumable park, and the drain then admits it afresh, rebind first.
-- It keeps this host's pending prepared begin, for example after a Stop,
-  whatever its card's cause. That begin was never sent, so it is released
-  for its exact replay. Its grant is kept, without a rebind. The drain
-  acknowledges the same content again and sends the same begin, as an
-  acknowledged prepared begin requires.
-
-When Resume cannot release the head, it returns an error that says why and
-leaves the hold unchanged. That happens when:
-
-- control is disabled;
-- an automatic re-admission's settlement is not yet saved;
-- the release cannot be saved;
-- a prepared begin is kept without this host's pending marker, as a restart
-  leaves one (it may have been sent). Whatever its card's cause, it stays held
-  for reconciliation or Cancel.
-
-An accepted Resume that releases such a hold, or finds the head's window
-ended or spent, opens one new 240-second window in the same write; the head
-stays in prepared-begin recovery, so the new window is enforced. A Resume
-refused before its release (control disabled, an unsaved settlement, a
-begin that may have been sent, a failed save) keeps the old window. A
-repeated Resume, while that window's attempt is in flight, neither starts a
-second admission nor resets its deadline. A Resume that releases a head is
-bound to that head, so a successor a cancellation exposes meanwhile is never
-admitted in its place. A Resume bound to an owner that has since been
-superseded promotes nothing and changes nothing, and a delegation's Resume
-reports it as superseded. The provider receives the prompt at most once.
-
-The card's cause is published only once the card itself is durably saved
-(`src/engram_causal_publication.rs`), and under the load that withheld the
-begin that save can miss its deadline too. Such a card still names its code
-and boundary ("Failure: begin_preparation_unacknowledged · Boundary:
-prepared-Begin durable acknowledgement") instead of "Original failure details
-unavailable". Its latency carries the split: `evaluate`, `admissionFence` (the
-retained evaluate's durability wait, inside `evaluate`), `preparationFence`
-(the prepared begin's), `begin` and `total`. In the field cases the
-preparation fence took most of the twenty-second budget: the wait is on this
-host's single persistence writer, not on Engram.
-
-The queued bind's idempotency key includes the session's dispatch generation.
-A replay of a bind (a lost reply, a backoff, a restart) resends the exact bind
-retained on the head, so it keeps its key; only a new bind derives one. The
-generation is saved with the session, so it is unchanged after a restart. A
-settlement moves it on, so the rebind after one is a new bind that expires the
-issued grant, never a replay of the first bind's cached reply.
-
-Every causal failure names the control process it was observed on
-(`controlProcess`). Its identity is `pid N`, and its exit state is what was seen
-at the failure: `exited: …` or `running when the failure was seen`. When the
-transport captured no process, both read `unavailable`; so do causes saved
-before this field existed. Nothing is inferred from latency. The Engram card
-shows both values.
-
-### Begin-unknown replay
-
-A begin whose outcome is unknown leaves its grant possibly begun: a reply lost
-after the send, a transport failure or deadline after it, or a structured
-error reply, whatever card code that failure carries. A producer refusal, a
-mismatched receipt or a local hold that never sent the begin is not unknown,
-and keeps its own hold. A begin the control transport proved it never handed
-to its worker (a worker already gone, or the startup budget run out before
-the hand-off) is no local hold: its card cause says `not_started` with
-`transportUnsent`, the failure counts for the transport's circuit, and its
-grant is kept possibly begun, so it takes the same exact replay. Such a begin is settled only by replaying it exactly
-(`src/engram_begin_replay.rs`). The head is begin-unknown while its retained
-evaluate's prepared begin names the session's uncertain grant and no grant is
-active.
-
-Any admission of a begin-unknown head resends the stored begin, whether the
-automatic retry or an explicit Resume admits it:
-
-- the stored key string, grant and delivery tokens, with the original expiry
-  basis kept;
-- never an evaluate, whether retained or fresh;
-- never a new grant, key or turn.
-
-The begin is acknowledged again through the admission fence before it is
-resent. A failed or ambiguous acknowledgement withholds the replay and keeps
-the prepared begin unchanged, since that begin may have been applied before.
-No session status read clears the uncertain grant, no rebind expires it first,
-and no orphan-grant rebind is armed after an unknown begin outcome. No restart
-checkpoint closes it either, before or after a restart: the cold recovery of a
-restored admission leaves a begin-unknown head to its replay, without reading
-status first (see "Begin recovery after a restart" below).
-
-The park schedules the replay as its own retry kind, the admission retry code
-`begin_unknown`. It runs on the common schedule: 2, 5, 10, 20, 30, then every
-60 seconds, with up to 20% positive jitter, under circuit and bind not-before
-times, the one-attempt-per-head guard and the host-wide slot cap. A cap
-deferral charges neither the attempt index nor the first-held time. The
-original 20-second admission budget does not end the schedule: each replay has
-its own call bound, and a failed replay schedules the next one with the same
-key while the head's 240-second budget runs. At its deadline the replay ends
-in the explicit hold, with that same begin and its uncertain grant kept, and
-the hold says the outcome is unknown (see the budget above). While a replay is
-scheduled, the preview reads
-"waiting for admission; retrying automatically (begin reconciliation:
-replaying the same begin), attempt N, next at T."
-
-Engram's answer to a replay decides the head:
-
-- **A receipt for the grant.** The begin is applied, so the head is handed to
-  the provider exactly once through the ordinary post-begin path.
-- **A refusal that proves the grant never began.** The codes are
-  `stale_fence` (also when it arrives as an error reply), `task_unbound`,
-  `task_access_denied`, `grant_expired`, `policy_epoch_changed` and
-  `task_admission_epoch_changed`. The uncertain grant is settled. Where the
-  existing refusal-healing route allows it, the retained evaluate is retired
-  and the head is admitted through a fresh ordinary evaluate under a new key.
-  Otherwise (`task_unbound`, `task_access_denied`) the refusal ends the head
-  and arms the orphan-grant repair for the possibly still issued grant, as a
-  first send's refusal does.
-- **`grant_scope_mismatch`.** This proves nothing. It settles as applied only
-  when producer status names this grant open in the begun state; then the head
-  is delivered once. Status names an issued grant open too, so an issued or
-  unknown state settles nothing. Otherwise the head stays held with its
-  possibly begun grant and the refusal as its cause, a Reconcile hold that
-  sends no fresh evaluate.
-- **Any other refusal.** It holds the head the same way, even one such as
-  `delta_required` that heals a first send through a fresh evaluate.
-- **A structured error saying the routing token no longer names a bound
-  session** (`control_session_token_mismatch`, `control_session_not_bound`,
-  `control_connection_superseded`, `invalid_routing_token`,
-  `unknown_routing_token`). That begin can never be answered under that token,
-  and a rebind to get another could expire its grant. So it is not an unknown
-  outcome to replay: on the first send or on a replay, whatever card code it
-  carries, the head ends in an explicit interrupted hold naming the error, with
-  its grant still possibly begun.
-
-A Stop, a Cancel or an operator pause ends the replay at once. A replay whose
-owner changed while it was in flight can neither deliver nor restart the
-schedule.
-
-A synchronous Begin's call bound is the configured control call bound
-(`deadline_ms`, 20,000 ms by default), but at least 10,000 ms. It is capped at
-the shared 20,000 ms limit and at the remaining admission deadline.
-
-### Begin recovery after a restart
-
-A begin left unknown when TermAl stops is recovered after the restart without
-Resume (`src/engram_begin_boot.rs`). Boot preparation reads every saved head
-before boot recovery picks its targets, so no cold or restart-checkpoint
-recovery takes the head first:
-
-- **A scheduled replay** saved with its acknowledgement is rebuilt on load with
-  its attempt index, first-held time, due time and owner, and runs on as it
-  would have.
-- **A prepared begin with nothing marking its grant possibly begun.** It was
-  durably acknowledged before its send, so the host may have sent it before it
-  stopped. Its grant becomes the session's uncertain grant and the exact replay
-  is scheduled, replacing an ordinary retry the head may still hold (that
-  retry's own attempt may have prepared the begin); the replacement is
-  acknowledged again before its attempt. A begin Engram had already refused
-  definitively is replayed once, and that answer settles it.
-- **A head saved by a host before the prepared begin** (a retained evaluate and
-  an uncertain grant, no prepared begin) is scheduled for reconstruction, the
-  admission retry code `begin_reconstruct`. Its preview reads "waiting for
-  admission; retrying automatically (begin reconciliation: replaying the
-  retained evaluate to recover the same begin), attempt N, next at T." Each
-  attempt replays the exact retained evaluate. When Engram answers with its
-  stored grant and that grant is the uncertain one, the begin is rebuilt under
-  the key derived from that evaluate, as the earlier host derived it, prepared
-  durably and replayed from then on like any other begin-unknown head. An
-  answer naming another grant, a refusal or a Defer begins nothing and proves
-  nothing about the earlier begin: the head ends in a Reconcile hold
-  (`begin_reconstruction_unverified`) with its retained evaluate and its
-  possibly begun grant, before any refusal healing, deferral or retirement
-  could drop them. No begin
-  is ever built from anything but the retained request and Engram's own answer
-  to it.
-
-A head that another hold owns keeps that hold: an interrupted one, a Stop, an
-operator pause, disabled control, or a head whose transcript position is
-unknown. So does an uncertain grant whose id was never learned.
-
-### Lost answers to a bind outside queued admission
-
-A `session_bind` sent outside queued admission keeps its identity while its
-outcome is unknown (`src/engram_bind_retention.rs`). This covers boot
-recovery, a rebind, a delegation's bind, a bind after a settings change and an
-owed batch bind's rebind: every bind that goes through the turn binder without
-a queued admission. Queued admission binds keep their prepared request in the
-queue instead.
-
-- **Retained before it is sent.** Under the session's bind claim, the host
-  keeps the exact request, its idempotency key included, with the connection,
-  project and settings it goes out under.
-- **Settled only by its own answer.** These settle it:
-  - a valid answer: one with a routing token and a phase, whose status names
-    this session. Engram names the session in every status, so an answer
-    that names none, or another, is malformed and fails closed;
-  - evidence that it never left this host;
-  - Engram certifying the call unapplied (`control_store_busy`,
-    `control_request_expired`);
-  - one of the bind refusals that come before Engram's one storage
-    transaction or roll it back: `invalid_request`, `invalid_control_session`,
-    `stale_fence`, `control_session_bind_conflict` or
-    `control_connection_superseded`.
-
-  A lost answer, an invalid one, a deadline, a cancellation or any other
-  error leaves it unresolved. An invalid answer's token is never used. A
-  timeout alone never proves that nothing was written.
-- **Replayed before anything replaces it.** The session's next bind first
-  sends the retained request again, unchanged and under its key, on the same
-  connection and settings. Engram answers a bind under the session's current
-  key with that session's current row and status, without writing again.
-  - If the work focus is unchanged, that answer is the binding and its token
-    is adopted.
-  - If the focus moved, a new bind follows, only once the original is settled
-    and only while the answer's current status holds no turn. A session in a
-    turn is not rebound.
-  - A queued admission recovers the original the same way before its own bind,
-    under the same turn check.
-  - A source-root naming bind is refused while a retained bind is held.
-    Nothing recovers the original before the session's next bind, so naming
-    stays refused until then.
-- **Given up, never relabelled.** In these cases the host gives the original
-  up and does not replay it:
-  - its connection or the project's Engram settings changed, at the next bind
-    or when the settings are saved;
-  - Engram refused the replay itself with one of the refusals above;
-  - the project was removed.
-
-  A refusal of the replay says nothing of the earlier send. In the first two
-  cases the holder is told the earlier bind's key and that whether Engram
-  recorded it is unknown. On a project removal the same line is only logged:
-  the session has no Engram left to tell. The original is never called unsent.
-  A new bind then replaces it. A replay that is lost again keeps it retained,
-  and the next bind replays it again.
-
-The retention is process memory only and is never stored. A host crash or
-restart loses it, and a bind after a connection or settings change, or after
-the original was given up, may replace a session row the original had written.
-None of this is resolved here: restart-safe custody, connection and settings
-changes, an intervening replacement bind and a refused replay all remain open
-gaps.
-
-### Strict Save and absent control sessions
-
-A strict settings Save still refuses uncertain checkpoint failures. The only
-absence recovery is an exact `control_session_not_bound` refusal for an errored
-session with no attached runtime, while TermAl owns its project-reset and
-checkpoint fences. That error alone is **not** proof: Engram also uses it for a
-binding belonging to another project, and `session_status` is not read-only.
-
-TermAl asks the old configured binary/store for a separate read-only snapshot:
-
-```text
-engram --project-file <marker> --home <home> control-session-inspect \
-  --target-session-id=<session> --retained-grant-id=<grant> --json
-```
-
-Only an exit-0 v1 `control_session_inspect` receipt with mutation disabled,
-matched host-path policy, exact project/canonical database/session/grant identity,
-and all three presence flags false is admitted. The producer checks the session
-row, **all** grant rows for that session, and the retained grant anywhere in the
-store, including project mismatches and orphan rows. Missing/older commands,
-malformed or oversized receipts, nonzero exits and unresolved identity refuse
-recovery. A Save shares one twenty-second inspection deadline, starting at the
-first eligible probe. Every later probe, pipe collection and evidence admission
-uses that same deadline; exhausted budgets refuse the Save and retain authority.
-The 16 KiB receipt limit applies per probe. This is not a bound on the whole
-Save: checkpoint RPCs before the first probe and post-commit rebinding have
-their own budgets. OS filesystem calls are not cancellable, so they can return
-late, but late evidence is refused and no further probe is launched.
-
-On Windows, absence inspection refuses configured `.cmd`/`.bat` wrappers before
-launch: their `cmd.exe` argument reparsing cannot safely transport arbitrary
-producer selectors. Configure the native Engram executable instead. Native
-executables and supported PowerShell scripts keep the producer selector grammar;
-selectors use `--flag=value` to keep leading hyphens literal. Other diagnostic
-commands and the disable/authority-retirement escape paths are unchanged.
-
-The receipt is snapshot evidence, not a store lock or authority to repair it.
-TermAl checks the old project/canonical-path routing identity before and after
-the probe and again off-lock just before acquiring the commit lock. Under that
-lock it rechecks the persisted identity, reset ownership, exact
-connection/token/grant and session generations using only in-memory state.
-Filesystem reads and canonicalization never run under that final state lock.
-These observations do not lock external filesystem routing or authenticate a
-copied/replaced database at the same path. Only the atomic settings Save clears
-the stale local state; rollback retains it and a retry requires fresh evidence.
-No session deletion,
-policy-floor reduction, rebinding or grant expiration is part of inspection.
-This does not cover active/attached sessions or arbitrary checkpoint refusals.
-See the [settings API](../architecture.md#http-api).
+A gate is no longer bound to the other items its session holds and has named
+on the same worktree: TermAl sends no `verification_bind` for them, and the
+owed-bind sender of earlier builds was removed
+([batch full gates](batch-full-gates.md)). Each item needs its own registered
+verification. A carried launch still records the members it saw at launch
+(`engram_launch_batch_members`), and owed binds an earlier build stored stay
+in the session's history as raw records (`engramOwedBinds`), never sent or
+retried. The acceptance binding read still reads bound records Engram
+already holds (`AcceptanceBindingEvidenceBound`).
 
 ## Obligation waivers
 
@@ -3464,9 +2103,16 @@ finalizer turn; an operator waives an obligation with the Engram CLI
 
 ## Acceptance evaluation
 
-An Engram project whose policy evaluates acceptance refuses `done` until a
-per-criterion evaluation is recorded. TermAl produces that evaluation for the
-Base tier and up; it needs no premium control session. The delegation side is
+> **Temporarily non-blocking.** Acceptance evaluation is temporarily switched
+> off as a blocker until Execution Observability is implemented: completing an
+> item does not wait for an evaluation. It stays part of the product, and this
+> section describes how it works when requested and when a project's policy
+> requires it.
+
+When the project's acceptance policy requires an evaluation, Engram refuses
+`done` until a per-criterion evaluation is recorded. TermAl produces that evaluation for any
+project with the Engram integration enabled, whether Execution Observability is
+on or off. The delegation side is
 described under
 [evaluator delegations](agent-delegation-sessions.md#evaluator-delegations).
 
@@ -3542,14 +2188,14 @@ run, acceptance revision and evidence basis; movement refuses the request
 before an evaluator starts.
 
 The ordinary agent `show` projections omit canonical work and run IDs. When
-existing turn-gated authority is available, the host first resolves the requested
-work with the read-only `work core inspect` boundary, before the notes and full
+the requesting session's work session is available, the host first resolves
+the requested work with the read-only `work core inspect` boundary, before the notes and full
 criteria reads. It retains that canonical work/revision/active-run association
 separately from the agent projection. After all discovery it reads the notes
 basis again, then inspects the canonical identity again. Both must agree with
 the opening bracket, even if a replacement run has the same numeric evidence
 cut. Supplied identity fields are checked; omitted projection IDs are supported.
-The existing store and control connection/token are also revalidated locally.
+The existing store and work-session connection are also revalidated locally.
 
 For `sub_agent`, the requester must be the run's holder or executor. Preflight
 uses the requester's held-claim read and the executor from that same validated
@@ -3574,12 +2220,11 @@ work ID and reference, even when the ordinary show omitted the ID; a mismatch
 cannot select the session's workdir instead.
 
 For bound criteria with canonical work/run identities, the host also reads
-`acceptance_binding_read` through its existing turn-gated Engram session and
-current routing token. Missing existing turn-gated authority, a missing routing
-token, legacy receipts without identities, or a definitively unsupported operation
-leave the canonical index unavailable. Evaluation proceeds using the existing
+`acceptance_binding_read` over the requesting session's work session, with no
+routing token. A missing work session, legacy receipts without identities, or a
+definitively unsupported operation leave the canonical index unavailable. Evaluation proceeds using the existing
 tracker reads, with an explicit `canonical index unavailable` association and no
-inferred closure. Discovery never enables control or binds a session. Transport,
+inferred closure. Discovery never binds a session. Transport,
 integrity and moving-basis errors still refuse the request. The consumer exhausts
 at most 16 whole pages of eight rows and 16 KiB
 each, validating their common project, work, revision, active run and run cut,
@@ -3989,15 +2634,14 @@ rollout grants no restart authority; task identities belong in the tracker
 handoff rather than this product documentation.
 
 *Typed Build observations.* A claimed command is classified once: supported
-Cargo builds produce Build verification, while test runners remain Test.
-The closing checkpoint links that kind to the host observation and captured
-source/environment; Engram derives the stored result from that observation,
-not an asserted gate result. Build success requires an owned native exit,
+Cargo builds are Build, while test runners remain Test. Like a test check, an
+observed build earns no credit by itself; credit comes only from registered
+verification ([Test evidence](#test-evidence)). Build success requires an owned native exit,
 or an invocation-matching foreground launcher's native Build stage. Test
 summaries and generic runtime success cannot manufacture Build success.
 Missing or inconsistent stage evidence is Unknown; help, planning and
 unsupported build runners are not classified. The existing source-root,
-grant, provenance, overlap and outstanding-work guards remain in force.
+provenance, overlap and outstanding-work guards remain in force.
 Build-bound criteria cite passed host-minted Build evidence, never a passed
 Test merely because that test compiled code.
 
@@ -4442,8 +3086,9 @@ default tests check both advertised and required flags. On 2026-09-21, isolated
 real-binary tests also passed against build `d7d8caddc923`, schema `025fb9bb102f`,
 SHA-256 `11c88b50b5602f226694e3da79e8ad5adde93d0c7f50690448d88084b6ccf444`:
 reason-free init, acceptance-policy write and exact receipt replay, readiness
-verify/save/audit, and bind/evaluate/begin/checkpoint with a fake provider.
-These tests use disposable stores, not the installed runtime or live projects.
+verify/save/audit, and, before turn gating was removed,
+bind/evaluate/begin/checkpoint with a fake provider. These tests use
+disposable stores, not the installed runtime or live projects.
 The form sends the complete replacement policy, the displayed opaque policy ID
 (`expectedPolicy`), the host reader identity, and a stable idempotency key.
 `control-policy set-acceptance-evaluation` uses the policy ID as its CAS guard;
@@ -4509,405 +3154,87 @@ waiting on its persistence acknowledgement is shown as submission in progress.
 
 Not delivered yet: supplying the evaluated source fingerprint at completion
 for `require_source_freshness`; observed build
-evidence through the control checkpoint; and Work-panel evaluation actions.
-
-## Premium boot recovery and lazy retry
-
-Boot recovery applies only to visible local premium control sessions with a
-routing token, an active grant, an uncertain grant or a rebind marker,
-including roots that have never created a delegation. Never-bound sessions
-are not eagerly bound or readiness-fenced: their first turn performs normal
-lazy admission. A child of a delegation that already ended (completed, failed
-or canceled) is skipped unless it still holds a mirrored or uncertain grant,
-which recovery checkpoints or clears as before. That skip is safe because
-every grant that may be open on Engram is recorded locally:
-
-- **What is recorded.** A begun turn is mirrored when its dispatch record
-  commits (a failed turn-end checkpoint keeps it). A begin whose outcome never
-  arrived is recorded as uncertain: abandoned in flight by a stop or a
-  cancellation, failed in transport, answered for another grant, or its
-  durable queued intent dropped by a cancellation after a restart (then only
-  an unknown-grant marker). A live runtime marker naming the exact grant wins
-  over the intent; an intent this process issued whose marker sent no begin
-  records nothing, so only a restored or interrupted intent can. Retiring a
-  promoted head for a terminal callback or a Stop records the intent it
-  carried first, and a dispatch record keeps a begin its released marker
-  still names when it mirrored nothing.
-- **What settles it.** Only the status-authoritative paths: a clean session
-  status or an accepted fresh bind clears it; an open grant reported by
-  status is checkpointed and cleared on a receipt that names it (a receipt
-  for another grant settles nothing, and recovery asks again later); a begin
-  that completes for the still-current dispatch mirrors it as begun; and the
-  released begin's own compensating checkpoint clears it on a receipt or
-  keeps it on failure, taking a settled begin off its marker. Turn-end, stop
-  and reset checkpoints ignore it. The unknown marker is cleared by a clean
-  status or by the accepted bind that follows a checkpoint.
-- **Project reset.** On the same authority store the reset keeps an uncertain
-  grant, a record whose begins may be unrecorded, or retained queued intent
-  that may be the only evidence of a begin, with the token that can ask about
-  it, for the session's next bind to settle; a home change drops it with the
-  binding.
-- **Records written before begins were recorded.** A failed or canceled
-  child loaded from such a store may hide a begin, so it keeps being
-  recovered, after the live sessions, until one accepted bind settles it and
-  marks it recorded; each bounded boot settles as many such records as its
-  budget allows. A completed child's turn ran, so its begin was mirrored
-  before the outcome, and it stays skipped whatever its record says.
-
-The skipped child's stale token stays in place for the ordinary rebind path
-of a later follow-up. TermAl publishes
-`engramBootRecoveryPending` before recovering bindings, bounds the overall
-work by `bootRecoveryBudgetMs`, and retries an unfinished target lazily on the
-next targeted read or prompt. Base MCP/context injection does not bind a
-control session and never withholds delivery.
-
-Recovery diagnostics keep the stable single-line form
-`boot-recovery session=<id> command=<phase> attempt=<n> elapsed_ms=<n>
-outcome=<ok|error>`. Phases include `session_status`, `turn_checkpoint`, the
-work-binding read (`work_core_held`), `session_bind`,
-and the whole target. The coordinator emits
-an `overall` line with elapsed time, budget, outcome, and unfinished count.
-These diagnostics contain no routing token or other host-private control data.
+evidence as credit; and Work-panel evaluation actions.
 
 ## Settings transitions
 
 An Engram settings transaction owns a project-generation fence while the old
-premium connection drains. Prompts arriving during the transition remain in
-the durable queue and cannot bypass the committed tier. When the exact owner
-releases the fence, TermAl drains the queue against the new settings:
+connection drains. Prompts arriving during the transition remain in the
+durable queue. When the exact owner releases the fence, TermAl drains the
+queue against the new settings: with Engram enabled, sessions get the
+integration, and Execution Observability when that setting is on as well;
+with Engram disabled, none of it is composed. See
+[settings changes and queued work](engram-project-reset.md).
 
-- with premium still enabled, the prompt receives a fresh
-  bind/evaluate/begin sequence;
-- with only premium disabled, Base MCP/context remains active and ordinary
-  delivery resumes; and
-- with Engram disabled, neither Base nor premium work is composed.
+### Records from earlier builds
 
-Turning only `turnGatedControl` from true to false under the same enabled
-connection is containment. Settings, original recovery identities and session
-exclusions commit together, with a writer acknowledgement before settlement
-requests. A refused or unavailable checkpoint leaves that session excluded;
-the applied project flag remains false and unaffected sessions may proceed.
-A failed project-reset checkpoint says where it left the request, read from
-where it failed rather than from the error's kind:
-- "not sent": the request was never built (no routing token or grant), the
-  budget ran out before the send, or the control transport proved it unsent;
-- "not applied": a certified no-change answer;
-- "refused": Engram refused it;
-- "outcome unknown": it was dispatched without a valid reply.
-Its log line (`outcome=not_sent|not_applied|refused|unresolved`), its failure
-text and the Degraded checkpoint card's cause all carry this classification.
-The request uses a fixed key over a fixed exit request, so the next reset
-replays it identically (`src/engram_project_containment.rs`).
-The response and state snapshots list unresolved sessions separately in
-`engramControlRecovery`, with project/session identity, operation, code,
-`excluded`, `settlementConfirmed`, and supported next actions. Inspect the
-session through its existing detail route; a still-running session can use
-the existing Stop route. A Stop request is not a confirmed interruption.
-Private connections, requests, tokens and grant identities are not in this view.
-The UI presents this canonical projection under Settings > Engram and in each
-project's Engram settings. Global recovery remains available even if the project
-no longer declares Engram. Entries identify the original session and unresolved
-operation with a public explanation, independently of session rows or transcript
-cards. Full state hydration, reconnect and live diff updates share the same
-projection; the UI keeps no separate debt ledger. An absent session has no
-Inspect, Resume, Stop or clear-debt action. Existing sessions offer only
-advertised, usable actions, and Inspect closes settings to reveal that session.
-Changing control settings never removes an unresolved entry; only a canonical
-confirmed-settlement update or removal does. Unknown operation/reason values
-receive a generic explanation instead of exposing private diagnostic text.
-Independent checkpoint or interruption obligations have no general settlement
-scheduler in this slice. Inspecting, stopping, waiting, toggling control, or
-restarting does not by itself settle that debt; it remains visibly excluded.
+Earlier builds ran turn gating (turn grants: Evaluate/Begin). It has been
+removed. A session can still hold the control requests, grants, checkpoint
+debts and receipts it left, and they stay readable as stored. The host only
+reads them and checks their integrity: no turn, Resume, settings change or
+restart replays, resumes, accounts, admits or certifies them. The
+`session_bind`, `session_status`, `turn_evaluate`, `turn_begin`,
+`turn_grant_read` and `turn_checkpoint` requests no longer exist.
 
-An unresolved original turn checkpoint has a separate result-recovery path.
-It retains the exact original request, report, key, grant, routing and store
-authority. A current recovery owner may replay that request after confirming
-the same authority and work binding, including through a replacement Engram
-process or after loading a restarted host. It never uses a fresh SessionBind
-to escape the retained operation. Both pre-send persistence cuts and the
-accepted result's local acknowledgement remain required. An absent session
-can retain and recover its canonical operation without inventing a session row.
+They never hold a session, its queue or a new turn back. There is no recovery
+view or action for them: a stored control card in a transcript keeps its
+factual fields and is shown read-only, with no buttons and no replay or resume
+action.
 
-The existing retry tick schedules this work through the shared bounded slots
-and retry cadence. Automatic attempts stop at the persisted attempt limit;
-explicit recovery still requires a valid current owner. A later busy or expired
-invocation does not prove an earlier Unknown was unapplied. A stored Refuse is
-kept as an invocation result and does not settle older uncertainty. Only the
-matching authoritative Checkpointed result can settle the original operation.
-Accepted results awaiting local acknowledgement use local accounting without
-another wire request. Original-head retirement is exact; a successor or an
-independent obligation is not discharged by recovering an older checkpoint.
-An inactive original checkpoint, including an unowned Accepted ordinary reply
-or an unsettled OFF checkpoint, may outlive explicit local session/project
-removal or settings changes, including same-store re-enable.
-Those administrative actions preserve its complete immutable request and report
-in mandatory metadata; they do not confirm settlement or release admission.
-An existing session keeps its canonical mirror when disabled or detached from
-its deleted project. A live flight, active receipt accounting, receipt custody
-with a matching live owner, and independent duties still retain their owners.
-An idle receipt whose original owner no longer matches does not block local
-administration; it supplies no settlement or admission authority.
-An already Confirmed OFF entry with its exact accepted receipt keeps the
-existing boot materialization rule after owner removal. That receipt is real
-settlement evidence; Sent or failed entries and ordinary Accepted-but-unowned
-entries whose protection remains Sent do not gain confirmation from removal.
-Disable and project detach retain the original debt's grant and mirror only;
-grants successfully closed by the reset follow ordinary identity clearing.
-Boot restores the durable exclusion, not a live
-checkpoint flight from the previous process.
+Retained observation envelopes are also checked before transport. An older
+stored request carrying `routing_token` cannot round-trip through the current
+request type without losing that unsupported field. It is not sent or
+rewritten into a new request: its original bytes remain retained, and its
+delivery settles as `LocalFailure` with code
+`runtime_observation_invalid_retained_image`.
 
-An explicitly OFF or disabled project, or a detached session, may start a fresh unmediated local turn
-when every matching unresolved duty is inactive, unowned original checkpoint
-report debt and the provider is quiescent. A replacement grant, uncertain or
-possibly-sent Begin, live receipt/accounting/flight/status owner, active provider
-or independent duty prevents this exception. Promotion and final provider
-handoff both check the current settings and owner. The original prompt is never
-replayed, and local completion or Stop cannot reuse or settle the old grant.
-The complete original debt remains durable and reported. Re-enabling control
-keeps the first Bind/Evaluate/Begin and automatic boot rebind excluded until
-supported original reconciliation succeeds. No generic replay API is added.
-A fatal session error does not count as an operator OFF decision: while project
-control is ON, its disabled reason cannot authorize unmediated dispatch.
+The Claude per-turn gate write guard (`claude_gate_write_guard.rs`) was
+deliberately removed with turn gating. Ordinary Claude control requests now
+follow the normal permission and delegation-child checks in
+`src/claude_frame_application.rs`; there is no Engram grant-based write
+guard to reactivate.
 
-An ordinary closing checkpoint publishes its claim together with its complete
-original request, report, key, connection, work binding and owner identity.
-Mandatory metadata protects that operation before transport; its session field
-is a validated mirror. The writer acknowledges the retained image and the
-conservative send-intent boundary before the first RPC. OFF adopts this same
-operation and its explicit owner lineage. Its original matching callback can
-record the full receipt and owned local effects, then acknowledge them, without
-starting another checkpoint. That receipt settles only the checkpoint component;
-an independent runtime, head, Bind or Begin duty stays excluded. Frozen history
-is unchanged, and separate typed progress records the actual settlement.
-
-While an ordinary ON checkpoint is the sole excluding duty, a valid local
-root Send may persist a plain queued envelope. It starts no control call or
-provider work, preserves mailbox provenance and pause state, and borrows none
-of the checkpoint's ownership. Healthy acknowledged completion drains through
-the ordinary lifecycle; an unknown result keeps execution withheld. A caller
-that ends releases only its exact local operation/attempt flight reservation,
-leaving the independently retained duty and any newer caller untouched.
-
-Checkpoint transport reserves bounded volatile reply custody before sending:
-at most 16 entries and 64 MiB of aggregate reservations, including identity,
-card and response representation. A bounded encoder allows up to six times
-the 256 KiB accepted control-frame bound for the retained JSON representation;
-adapter results are checked at this boundary too. Unknown fields are retained.
-The sidecar's read-until-newline allocation precedes its frame-size check;
-this custody bound does not certify bounded transport allocation.
-
-OFF-created checkpoints share this same custody budget. If an accepted receipt
-cannot yet be published or acknowledged, its complete value remains in volatile
-custody and the original duty stays excluded. The recovery view offers
-`resume_local_accounting` through the existing Resume action. While control is
-OFF, that invocation only accounts the retained receipt under its original
-identity and one deadline; it sends no RPC and does not dispatch or drain a
-queued prompt. Changed ownership or settings keep the receipt and exclusion.
-The receipt is acknowledged before the live grant is cleared, and the cleared
-row is acknowledged before exclusion is released. Automatic admission and
-capacity retries cannot select this local OFF accounting path. A restart may
-lose volatile custody; unresolved durable duties remain excluded.
-
-A complete prospective ledger, every affected enclosing image and the session
-mirror must validate before publication, including late or missing-session
-responses. If a received receipt cannot be accounted locally, it stays in
-operation/attempt-owned volatile custody and the durable duty stays excluded.
-Ordinary snapshots never serialize that buffer. Existing local accounting may
-retry the same receipt without another RPC; no release or verification/batch
-effect is supplied by the buffer alone. A crash can lose an uncommitted reply,
-but cannot erase its prior valid durable request or imply settlement. Capacity
-pressure does not prune history or enlarge durable metadata limits.
-
-Original-checkpoint recovery uses an action-specific view of the validated
-metadata and matching session mirror, rather than ordinary binding eligibility.
-Local OFF adoption can preserve an in-flight operation alongside a runtime duty.
-Certified replay requires the latest actual producer certificate, unchanged
-enabled settings and exact live owner; it never refreshes the frozen work binding.
-A separately owned status read uses only the original connection and token for
-diagnostics. It cannot clear the checkpoint duty or supply a binding target.
-The generic admission and binding exclusions remain in effect throughout.
-
-Original-result recovery uses the existing shared retry scheduler. The original
-invocation counts as attempt one. With one through seven allocated attempts,
-the delays before the next attempt are respectively 2, 5, 10, 20, 30, 60 and
-60 seconds, plus deterministic positive jitter of at most 20%. At eight or
-more allocated attempts the delay is ten minutes plus the same bounded jitter;
-there is no lifetime eight-attempt stop. A read-only policy probe precedes
-allocation, so a failed probe consumes no attempt. Original result recovery
-never requires reacquiring or rebinding a current claim. The existing local
-schedule counts consecutive passes that fail before allocation, saturating at
-eight, and uses the greater of this count and the durable attempt count to
-choose the delay. Early probe success does not reset this history if a later
-preflight step fails. Only a newly allocated durable attempt or Accepted
-progress resets it; temporary owner ineligibility and repeated Send/Resume
-triggers retain the due time. Each tick starts at most one original recovery, oldest due
-first, within the four shared retry slots after ordinary admission retries.
-Accepted results can finish local accounting without another network attempt.
-If that component's exact stored receipt and effects are proved but its selected
-enclosure has independent unsettled custody, recovery reports held, retains the
-exclusion, and schedules the ten-minute class. Re-entry proves the stored cut
-without rewriting unchanged accounting or acknowledgement state. A failed proof
-uses the short local retry delay; after restart a fresh proof is required before
-the held class applies. The enclosure's own settlement remains independent.
-
-Restart derives a minimum delay class from the durable attempt lineage and
-schedules a full delay from the first new tick. The additional local failure
-counter restarts at zero, so an original with few allocated attempts may get
-a fresh bounded fast grace per process; this is not a restart-independent rate
-guarantee. A durable slow lineage never returns to the fast class.
-Repeated restarts can postpone progress. With healthy authority, a stable owner,
-an available shared slot and storage capacity, the slow class becomes eligible
-within twelve minutes plus a tick after scheduling. This is a conditional
-eligibility bound, not an unconditional completion guarantee or a change to the
-two-minute canary stop condition.
-
-The existing limit of 65,536 attempts is per original operation. At that limit,
-network recovery reports explicit capacity backpressure and retains every
-identity, attempt and exclusion; it never reuses a possibly-sent attempt or
-discards history. Aggregate ledger byte limits can also apply earlier. Capacity
-maintenance needs a separate supported workflow; continued recovery beyond the
-storage limit is not promised. Already Accepted local accounting remains
-available without allocating another attempt.
-
-For an owned matching receipt, its first Accepted result, evidence associations,
-owed batch binds and original confirmation are published together. The writer
-rejects an incoherent checkpoint mirror cut; ACK additionally reads back the
-actual evidence and batch images before exclusion release. An adopted enclosing
-duty sharing the checkpoint ID requires its own confirmation proof. A refusal
-retains only its validated diagnostic code, not private extension payloads.
-This boundary also applies to ordinary closing checkpoints and valid rejected
-delivery settlement. A fresh host loading the Accepted cut already has the
-evidence and batch effects; it needs no volatile reply pool to reconstruct them.
-A late non-owning reply can settle evidence addressed by its exact original
-store, binding, source and producer identity, but cannot convert successor-owned
-pending batches or retire its queued head. Failed persistence keeps receipt
-custody until the existing local accounting path proves the durable cut.
-
-Pending batch inputs with one unambiguous validated canonical original survive
-restart before Accepted and after an unowned Accepted reply. Their grant,
-successful producer, unique Test input, source measurement and original target
-fences must match; their original timestamps and targets are retained. This is
-receipt custody, not restored launcher verification. These matched inputs are
-protected from the ordinary pending expiry and later-invocation refusal drains.
-Only the exact Checkpointed receipt and a current safe accounting owner convert
-the matched slice. Existing owed identities deduplicate by original record and
-target fences; conflicting measurements or targets refuse conversion without
-discarding custody. Successor and unmatched slices are never consumed. Inputs
-without canonical provenance keep the existing lost-credit policy at load.
-
-The existing certified-not-applied retry remains finite and on demand. A busy
-or expired invocation records its qualified result against one local attempt;
-the next supported original-runtime close, ordinary Send settlement preflight,
-or binding settlement may claim one new attempt on the same original request
-and key. It cannot replace the report or use an old certificate after a later
-unknown result. The protected attempt and send boundary are acknowledged before
-replay. Settlement does not authorize admission: current settings, owner and all
-exclusions are checked again before the same caller may Bind, Evaluate, Begin
-or deliver a provider turn. Its existing admission budget includes preflight.
-Reservation, writer acknowledgement, checkpoint RPC, any permitted status read
-and continuation share that caller's absolute deadline, without a new phase budget.
-An invalid checkpoint token followed by an invalid status token supplies no
-settlement evidence and cannot erase the request or authorize a fresh Bind.
-
-Only a matching checkpoint receipt or supported `turn_grant_read` proving
-that exact original grant completed, expired or was superseded can clear its
-local reference, under the final original owner/generation fence. An issued,
-begun, absent, malformed or mismatched read does not establish terminality;
-a refusal code does not establish NeverSent. A terminal grant read alone
-does not account for an existing checkpoint's report, checks or owed close;
-those duties and their exact request remain protected. Exact pending Begin
-recovery is retained rather than replaced by a fresh bind. Its session cannot bypass the
-obligation through ungated dispatch, Resume, queue replacement, generic bind
-or boot recovery. Still-running affected providers use the existing Stop
-lifecycle, and remain unresolved until interruption is confirmed.
-
-A supported command on PATH remains the original executable configuration.
-Containment still validates local home, executable shape, declaration and any
-previously admitted store identity. A legacy connection without that identity
-can retain a prospective route as unconfirmed provenance: it cannot initialize
-the store, authenticate a settlement, enable admission or retire a grant. The
-public gating-only PATCH preserves the existing work authority and deadline.
-
-A validated return to gating ON preserves every unresolved obligation and sends
-no control request. Explicit Resume can reconcile a retained admission only
-when the original frozen image identifies the exact Bind or Evaluate, queued
-prompt and current owner, with no independent grant, checkpoint, possibly sent
-Begin or provider-interruption duty. Other sessions and fresh Send remain
-excluded from admission. With gating OFF, a plain user prompt may be appended
-behind an already retained, paused root-session head; it neither starts nor
-changes that head's recovery, and sends no control or provider request.
-A matching Evaluate grant transfers that one admission into its exact
-prepared-Begin protocol only after the successor queue and typed ledger proof
-are acknowledged together. This is a transfer, not terminal-grant evidence.
-The original Begin expiry, root/work, delivery and persistence fences still
-apply. Failed preparation keeps the transferred successor; restart treats a
-saved prepared Begin as potentially sent. A known Refuse or Defer preserves
-its actual withheld decision and records it with the ledger, without a grant
-or provider handoff. Missing or contradictory recovery evidence stays excluded.
-
-The joint `2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1` reader floor keeps these obligations in mandatory metadata outside session
-rows. Its `entries` and `checkpointOperations` collections are mandatory known
+An inactive original checkpoint may outlive explicit local session or project
+removal and settings changes, including a same-store re-enable. Those
+administrative actions preserve its complete immutable request and report in
+mandatory metadata; they do not confirm settlement. The joint
+`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`
+reader floor keeps these records in mandatory metadata outside session rows.
+Its `entries` and `checkpointOperations` collections are mandatory known
 fields, with explicit empty collections representing no retained operation.
-Containment, issued-grant retirement and pre-OFF existing-checkpoint protection
-are read and enforced by every reader of the joint obligation floor;
-an unavailable retirement handler leaves its record visibly excluded. Only
-positive NeverSent evidence permits the retirement producer's distinct-key
-SessionBind protocol. Confirmed containment history is retained; its exclusion
-lifts only after the writer acknowledgement, or a matching committed image at
-restart. A retained admission transfer must still match its current exact
-head, Evaluate and prepared Begin. Once a matching Begin result transfers
-responsibility to the ordinary grant lifecycle, that progress is committed
-explicitly with the successor. A still-unbegun prepared transfer additionally
-requires the original enabled admission settings and authority before and after
-its local acknowledgement and at boot; OFF revokes that permission even if a
-prior latch existed. No-grant decisions and terminal or begun-successor
-settlement keep their separate proof rules; a missing head alone is never
-proof of progress.
-Distinct completed admission cycles retain their original operation/head/owner
-identities without blocking a later OFF cycle. Unsupported ledger shapes
-refuse the whole load, before effects.
-Ordinary handoff uncertainty from the handoff-1 reader floor remains unchanged.
-Ordinary successful checkpoint reports keep only the latest full operation per
-session once older operations are Confirmed and durably acknowledged. Publishing
-a different successor close retires that eligible history in the same metadata
-transaction. The existing session-removal transaction also retires eligible
-history of removed sessions; later checkpoint publications can reclaim it once
-its active receipt custody ends. Unresolved or unacknowledged operations, active receipt/flight
-owners, reused wire identities and operations linked by containment entries
-remain intact. Compaction grants no replay permission: an old callback without
-its exact canonical operation cannot change a successor. Transcript control
-cards and processed verification receipts retain their existing audit owners.
+Unsupported ledger shapes refuse the whole load, before effects. Transcript
+control cards and processed verification receipts keep their existing audit
+owners.
 
 Session deletion checks the complete transitive delegation subtree before
-teardown and again under the final removal lock. Live flights, owned receipt custody
-and independent duties keep their session rows available for supported recovery.
-Inactive original checkpoint debt can remain after explicit removal, including
-the exact operation and attempt published by that deletion's own teardown.
-Its unresolved metadata is retained without declaring the report settled.
-Strictly matched pending batch targets and measurements remain in their
-session row, and converted member binds retain their own accounting lifetime.
-Session or project deletion is refused while those inputs or their project
-context are still needed. Supported same-store settings resets preserve them
-through the existing session-state owner. This does not alter OFF dispatch
-eligibility or settle an independent enclosing duty.
+teardown and again under the final removal lock. Live flights, owned receipt
+custody and independent duties keep their session rows available. Strictly
+matched pending batch targets and measurements remain in their session row,
+and converted member binds keep their own accounting lifetime. Session or
+project deletion is refused while those inputs or their project context are
+still needed. Supported same-store settings resets preserve them through the
+existing session-state owner.
 
-Developer-principal, binary/home changes and project deletion retain the same
-generation-fenced runtime teardown and checkpoint ordering as other premium
-transitions. Host principal or path changes require every Engram project to be
-disabled first.
+### Host identity changes
+
+Developer-principal, binary/home changes and project deletion keep the
+generation-fenced runtime teardown of other settings transitions. Host
+principal or path changes require every Engram project to be disabled first.
 Affected local runtimes are marked for reset so the next turn spawns the agent
-process with the new base-tier identity instead of rewriting a live process
-environment in place.
+process with the new identity instead of rewriting a live process environment
+in place.
 
 ## Mailbox and Stop behavior
 
-Mailbox wakes use the same premium gate as user prompts. If a mailbox turn is
-stopped or fails after acceptance, TermAl restores the exact delivered-through
-sequence before successor work. A wake refused by Engram is never sent to the
-agent runtime. The public Stop route remains asynchronous for a live local
-turn: runtime interruption and the premium checkpoint finish on the background
-owner, while repeated Stop calls remain idempotent. Persisted `Stopping` is
-classified as an interrupted turn during restart recovery.
+Mailbox wakes use the same ordinary handoff as user prompts, with no Engram
+per-turn authorization. Queued wakes share the remaining synchronous
+[context-preparation exception](execution-observability.md#delivery-and-context-preparation).
+If a mailbox turn is stopped or fails after acceptance, TermAl restores the exact
+delivered-through sequence before successor work. The public Stop route
+remains asynchronous for a live local turn: runtime interruption finishes on
+the background owner, the turn's closing observation is retained before
+runtime ownership clears, and repeated Stop calls remain idempotent. Persisted
+`Stopping` is classified as an interrupted turn during restart recovery.
 
 See [Agent mailboxes](./agent-mailboxes.md) for the durable delivery and
 recovery contract.
@@ -4926,28 +3253,13 @@ control-startup codes are the exception. `control_startup_busy` and
 followed by a nonzero exit with that frame never dispatched. TermAl matches
 them on the code alone, never the message, and evicts and reaps that worker,
 so the next call starts a new one.
-- Busy is not fatal. It takes the recovery an unavailable control takes: a
-  backoff, then the bounded status/rebind re-admission of the exact retained
-  request and key on the common recovery schedule.
-- Refused fails closed: control is disabled with that code and the retained
-  prompt is held, with nothing sent automatically.
 - Startup may have written, so neither code counts as a process that never
   started or as certified non-application.
-- A closing or recovery checkpoint answered this way was never judged, so its
-  report is kept rather than dropped as refused. The original-result recovery
-  records either code against the session too, but only while the recovery
-  owner it captured before the call still matches, so a late reply from an
-  old control never touches a replacement.
-- `control_startup_refused`, met by a closing checkpoint, by the recovery's
-  read-only probe or by its send, holds that original from automatic and
-  admission-triggered recovery. Like the fatal disabled reason it mirrors,
-  the hold is process-local, and a TermAl restart releases it. Within the
-  process only a real re-enable releases it: the session seen disabled for
-  that code and later no longer. A hold whose session was never disabled for
-  it (a late reply fenced off from its accounting), or whose row is gone,
-  lasts until restart.
+- A host observation report answered this way was never judged: it is kept
+  for the identical replay, never dropped as refused.
 Every other remote code, a live `storage_error` among them, keeps its worker;
-whether it drops a carried report follows the definitive-refusal rule above.
+whether it settles a report follows the delivery outcomes under
+[Reporting turns as host observations](#reporting-turns-as-host-observations).
 
 The proposed split of this adapter by ownership, the contract it keeps with
 Engram, and the order in which its parts move are in
@@ -4962,63 +3274,33 @@ will use:
 engram --project-file <project>/.engram-project --home <home> doctor --json
 ```
 
-Save Base settings through the project UI/API. If premium control is enabled,
-one live smoke turn must show the complete sequence:
+Save the settings through the project UI/API. One live smoke turn in a session
+holding claimed work must show the prompt delivered to the agent and, after
+the turn ends, its host observation (`unadmitted_turn`, with the turn's
+outcome) on the claim's run in Engram.
 
-```text
-session_bind(turn_gated) -> turn_evaluate(grant) -> turn_begin(begin) \
-  -> agent delivery -> turn_checkpoint(checkpointed)
-```
-
-A fixture-only test, direct SQLite inspection, or control card without runtime
-delivery is not an end-to-end proof. Installing a new Engram build or switching
+A fixture-only test, direct SQLite inspection, or a transcript card without
+runtime delivery is not an end-to-end proof. Installing a new Engram build or switching
 the live host remains an explicit operator action outside settings validation.
 
-Named-root settlement during turn admission shares the original admission
-absolute deadline across Prepared persistence, canonical reads, recovery and
-Candidate publication. Each RPC recalculates its cap from the lesser of the
-configured call timeout and the remaining total; local writer waits use the
-remaining total. An expired admission cannot acquire a new standalone allowance.
-Standalone naming and cleanup retain their existing entry budgets and carry one
-absolute deadline through their phases. A stopped production writer withholds
+Naming and cleanup of a named root keep their entry budgets and carry one
+absolute deadline through their phases. Each RPC recalculates its cap from the
+lesser of the configured call timeout and the remaining total; local writer
+waits use the remaining total. A stopped production writer withholds
 authority without entering synchronous SQLite under the state lock.
 
-## Dormant Begin contracts and exact ACK
+## Provider handoff observations
 
-The unused recovery format retains the original Begin wire request and its
-authority. Its unused persistence fence reads session metadata and the complete
-ordered transcript from the same writer connection; metadata alone cannot prove
-a cancellation message durable. This prerequisite adds no live recovery fields
-or callers. Runtime validation, cancellation, foundation ownership, automatic
-recovery and the begin-unknown incident remain open work.
-
-The unused raw decoder preserves invalid evidence and binds immutable head inputs.
-Its local cancellation proof requires the complete persisted queue and a hydrated
-transcript or exact persisted message lookup; a resident tail cannot establish
-non-terminal durable truth. These helpers grant no replay or admission authority.
-
-## Prompt timing and provider observations
-
-`GET /api/sessions/{id}` exposes `promptAdmissionBudgets`, keyed by retained prompt id:
-`originalAdmittedAt`, `originalDeadline`, `currentAdmittedAt`, `currentDeadline`,
-`renewedAt`, `attempts`, and `ended`. Automatic retries keep the original and
-current window. An accepted explicit Resume can renew the current window;
-it preserves the original pair and records `renewedAt`. Older saved rows omit
-unknown original timing rather than reconstructing history. These fields are
-diagnostics; admission and retry decisions continue to use their saved owner.
-These diagnostics describe native sessions on the responding host. Remote
-proxies omit the budget map and provider observation fields; sample each
-owning host under its own server instance instead of counting its enqueues
-again through a proxy with different session and project ids.
-
-The same response has a separate `providerHandoffs` array. Each item identifies
+`GET /api/sessions/{id}` has a `providerHandoffs` array, for native sessions on
+the responding host. Remote proxies omit it; sample each owning host under its
+own server instance instead of counting its enqueues again through a proxy
+with different session and project ids. Each item identifies
 the prompt, session, project record (`projectId`, possibly null for a session
 without one), source (`user`, `mailbox`, or `orchestrator`), RFC3339 `at`, attempt
 (the process-local turn generation), and outcome (`enqueued` or `enqueueFailed`).
 An item records the actual provider-channel send result. An `enqueued` item
-does not establish runtime acceptance or a completed turn. Preparation cards,
-including `SentWithoutGrant`, and deferred or superseded dispatches do not count
-as enqueues. `promptDeliveries` retains its existing receipt semantics.
+does not establish runtime acceptance or a completed turn. Preparation cards
+and deferred or superseded dispatches do not count as enqueues. `promptDeliveries` retains its existing receipt semantics.
 
 Use `?handoffFrom=<RFC3339>&handoffTo=<RFC3339>` to filter this array by the
 half-open interval `[from, to)`; either bound may be omitted. Invalid bounds or

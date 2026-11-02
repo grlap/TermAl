@@ -11,10 +11,11 @@
 // authority fence's own phases (engram_authority_fence_phases.rs).
 // New module.
 use super::*;
+use super::reclamation::{root_fixture, request_fixture_name};
 
 /// Another owner (such as the automatic reclamation pass) replaces this
 /// work's authority image once, at the naming's owner check.
-fn supersede_once_at_owner_check(claimed: &ClaimedRoot) -> Arc<std::sync::atomic::AtomicBool> {
+fn supersede_once_at_owner_check(claimed: &EOCheckedTurn) -> Arc<std::sync::atomic::AtomicBool> {
     let superseded = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_superseded = superseded.clone();
     let state = claimed.state.clone();
@@ -44,9 +45,8 @@ fn a_kept_re_name_clears_the_holders_own_stale_journal_flags() {
     // every evaluation under the binding would stay refused.
     for stale in ["displaced", "reconciliation"] {
         let label = format!("naming-kept-clears-{stale}");
-        let claimed = ClaimedRoot::new_scripted(&label, Vec::new());
-        let tree = add_claimed_root_worktree(&claimed.root);
-        let first = name_root(&claimed, &label, Some(&tree), vec![claimed_root_held(&label)])
+        let (claimed, tree) = root_fixture(&label);
+        let first = request_fixture_name(&claimed, Some(&tree))
             .expect("the first name");
         {
             let mut inner = claimed.state.inner.lock().unwrap();
@@ -74,7 +74,7 @@ fn a_kept_re_name_clears_the_holders_own_stale_journal_flags() {
             }
         }
 
-        let again = name_root(&claimed, &label, Some(&tree), vec![claimed_root_held(&label)])
+        let again = request_fixture_name(&claimed, Some(&tree))
             .expect("the same name again");
         assert_eq!(again.generation, first.generation, "{stale}: the re-name is kept");
 
@@ -96,9 +96,8 @@ fn a_kept_re_name_clears_the_holders_own_stale_journal_flags() {
 fn an_unsuperseded_naming_completes() {
     // Control: the fixture names successfully when nothing supersedes it.
     let label = "naming-unsuperseded";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let tree = add_claimed_root_worktree(&claimed.root);
-    let named = name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)])
+    let (claimed, tree) = root_fixture(label);
+    let named = request_fixture_name(&claimed, Some(&tree))
         .expect("an undisturbed naming completes");
     assert!(named.generation > 0, "{named:?}");
 }
@@ -106,11 +105,10 @@ fn an_unsuperseded_naming_completes() {
 #[test]
 fn a_naming_superseded_mid_acknowledgement_completes_under_its_unchanged_binding() {
     let label = "naming-superseded-image";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let tree = add_claimed_root_worktree(&claimed.root);
+    let (claimed, tree) = root_fixture(label);
     let superseded = supersede_once_at_owner_check(&claimed);
 
-    let named = name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]);
+    let named = request_fixture_name(&claimed, Some(&tree));
     claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
 
     assert!(
@@ -128,7 +126,7 @@ fn a_naming_superseded_mid_acknowledgement_completes_under_its_unchanged_binding
     let entries = inner
         .engram_work_source_roots
         .iter()
-        .filter(|entry| entry.short_ref == format!("w-{label}"))
+        .filter(|entry| entry.work_id == test_control_work_binding(&format!("eo-check-{label}"), 1).work_id)
         .collect::<Vec<_>>();
     assert_eq!(entries.len(), 1, "exactly one effective naming: {entries:#?}");
     assert_eq!(entries[0].generation, named.generation, "no spurious generation change");

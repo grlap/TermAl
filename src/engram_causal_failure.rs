@@ -27,10 +27,6 @@ enum EngramRemoteApplication {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramCausalFailure {
-    // Fresh control-process/RPC evidence only. Local preparation deadlines
-    // and restored diagnostics cannot authorize ordinary availability.
-    #[serde(skip)]
-    control_availability: bool,
     // Visibility is process-local; only the persistence clone clears this
     // before the exact message is acknowledged by the durable writer.
     #[serde(skip)]
@@ -143,23 +139,9 @@ fn engram_causal_text(text: &str, secrets: &[&str]) -> String {
 }
 
 impl EngramCausalFailure {
-    fn unsent_request(
-        error: &EngramTransportError,
-        request: &EngramControlRequest,
-        boundary: &str,
-    ) -> Self {
-        let mut cause = Self::request(error, request);
-        cause.control_availability = false;
-        if error.causal_failure.is_none() {
-            cause.boundary = boundary.to_owned();
-            cause.remote_application = EngramRemoteApplication::NotStarted;
-        }
-        cause
-    }
-
+    #[cfg(test)]
     fn local(error: &EngramTransportError, operation: &str, boundary: &str) -> Self {
         let mut cause = Self::error(error, operation, None, &[]);
-        cause.control_availability = false;
         if error.causal_failure.is_none() {
             cause.boundary = boundary.to_owned();
             // This preparation did not send its request; a prior replay may
@@ -167,16 +149,6 @@ impl EngramCausalFailure {
             cause.remote_application = EngramRemoteApplication::NotStarted;
         }
         cause
-    }
-
-    fn local_hold(operation: &str, code: &str, detail: &str, boundary: &str) -> Self {
-        let mut error = if code == "dispatch_budget_exhausted" {
-            EngramTransportError::deadline(detail)
-        } else {
-            EngramTransportError::local_state(detail)
-        };
-        error.code = Some(code.to_owned());
-        Self::local(&error, operation, boundary)
     }
 
     fn error(
@@ -194,16 +166,10 @@ impl EngramCausalFailure {
             EngramTransportErrorKind::Transport => EngramCausalFailureClass::Transport,
             EngramTransportErrorKind::Protocol => EngramCausalFailureClass::Protocol,
             EngramTransportErrorKind::Remote => EngramCausalFailureClass::Remote,
+            #[cfg(test)]
             EngramTransportErrorKind::Backoff => EngramCausalFailureClass::Backoff,
         };
         Self {
-            control_availability: error.process_never_started
-                && matches!(
-                    error.kind,
-                    EngramTransportErrorKind::Transport
-                        | EngramTransportErrorKind::Deadline
-                        | EngramTransportErrorKind::Backoff
-                ),
             publication_pending: false,
             operation: operation.to_owned(),
             failure_class,
@@ -227,7 +193,7 @@ impl EngramCausalFailure {
                 EngramRemoteApplication::Unknown
             },
             continuation_reason:
-                "Provider handoff withheld; owning control operation is not settled.".to_owned(),
+                "The Engram work-service request did not finish; its original facts remain retained.".to_owned(),
             continuation_id: None,
             turn_generation: None,
             authority_fingerprint: None,
@@ -251,18 +217,11 @@ impl EngramCausalFailure {
                 &[],
             );
         };
-        let mut secrets = Vec::new();
-        if let Some(token) = wire["routing_token"].as_str() {
-            secrets.push(token);
-        }
-        if let Some(tokens) = wire["delivery_tokens"].as_array() {
-            secrets.extend(tokens.iter().filter_map(Value::as_str));
-        }
         let mut cause = Self::error(
             error,
             wire["operation"].as_str().unwrap_or("unknown"),
             wire["idempotency_key"].as_str(),
-            &secrets,
+            &[],
         );
         // An unsent protocol failure (an oversize or unencodable request) had
         // no response to validate; it keeps the request boundary.
@@ -275,59 +234,9 @@ impl EngramCausalFailure {
         cause
     }
 
-    fn request_refusal(request: &EngramControlRequest, code: &str) -> Self {
-        let mut error = EngramTransportError::local_state(
-            "Engram explicitly refused this request; prior application is not determined",
-        );
-        error.code = Some(code.to_owned());
-        let mut cause = Self::request(&error, request);
-        cause.failure_class = EngramCausalFailureClass::ProducerRefusal;
-        cause.remote_application = EngramRemoteApplication::Refused;
-        cause.continuation_reason =
-            "Provider handoff withheld by explicit producer refusal.".to_owned();
-        cause
-    }
 }
-
-// Called only from binding's existing backoff branch. A checkpoint failure
-// can explain that hold only for the exact still-open grant and queued head.
-// The newest checkpoint wins, so a later success cannot resurrect old failure.
-fn engram_checkpoint_cause_for_owner(
-    record: &SessionRecord,
-    target: &EngramBindingTarget,
-    owner: &EngramQueuedAdmissionOwner,
-) -> Option<EngramCausalFailure> {
-    if !owner.matches(record)
-        || record.runtime_stop_in_progress
-        || record.engram.project_reset_in_progress
-    {
-        return None;
-    }
-    let grant = record.engram.active_grant_id.as_deref()?;
-    let card = record
-        .session
-        .messages
-        .iter()
-        .rev()
-        .find_map(|message| match message {
-            Message::EngramControl { card, .. }
-                if card.stage == EngramControlStage::Checkpoint
-                    && card.grant_id.as_deref() == Some(grant) =>
-            {
-                Some(card)
-            }
-            _ => None,
-        })?;
-    let cause = card.causal_failure.as_ref()?;
-    if card.decision != EngramControlCardDecision::Degraded
-        || cause.operation != "turn_checkpoint"
-        || cause.continuation_id.as_deref() != Some(owner.prompt_id.as_str())
-        || cause.turn_generation != Some(owner.active_turn_generation)
-        || cause.authority_fingerprint.as_deref() != Some(engram_abort_authority(target).as_str())
-    {
-        return None;
-    }
-    let mut cause = cause.clone();
-    cause.continuation_reason = "Admission held by binding backoff after this unsettled closing checkpoint; no new Evaluate was sent.".to_owned();
-    Some(cause)
+// Historical details that never acquired a durable publication proof stay
+// hidden. No retired admission or card-publication operation is resumed.
+fn engram_causal_unpublished(cause: &Option<EngramCausalFailure>) -> bool {
+    cause.as_ref().is_none_or(|cause| cause.publication_pending)
 }

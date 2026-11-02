@@ -1,35 +1,10 @@
-// Owns the end-to-end witness that a turn-gated-control OFF session whose Base
-// token a host reload flagged for rebinding gets its pending verification
-// record delivered once its own source-root naming binds it again: the record
-// stays pending and nothing is sent until then, the same record, key and
-// original registration association go out under the re-established token,
-// and later ticks send no duplicate. Does not own the naming bind's fences,
-// rollback or replacement rules (engram_source_root_off_rebind.rs) or the
-// sender's other rules (engram_verification_record.rs, whose fixture this
-// child module uses). New module.
+// Reload and unavailable ordinary-child recovery preserve the frozen native
+// record, operation key and registration association. Naming can recover its
+// own work association without replacing a historical control token; neither
+// naming nor verification may create a control bind. Later ticks do not resend.
 use super::*;
 
 const SHORT_REF: &str = "w-record";
-
-/// A naming bind's answer as Engram gives it, listing what the connection
-/// supports beside its status (the shape `old_and_new_bind_and_status_answers_both_parse`
-/// pins).
-fn naming_bind_reply(token: &str) -> ScriptedEngramControlResponse {
-    ScriptedEngramControlResponse::Reply(Ok(json!({
-        "routing_token": token,
-        "status": { "phase": "ready" },
-        "capabilities": ["verification_record_v1"],
-    })))
-}
-
-/// A session status answer as Engram gives it, listing what the connection
-/// supports. The named-roots model adds the claim's `named_root`.
-fn naming_status_reply() -> ScriptedEngramControlResponse {
-    ScriptedEngramControlResponse::Reply(Ok(json!({
-        "phase": "ready",
-        "capabilities": ["verification_record_v1"],
-    })))
-}
 
 fn held_claim() -> EngramHeldClaims {
     let binding = binding();
@@ -94,7 +69,7 @@ fn of_kind(requests: &[Value], operation: &str) -> Vec<Value> {
 }
 
 #[test]
-fn a_reloaded_off_session_naming_its_root_again_gets_the_same_pending_record_delivered_once() {
+fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_record() {
     let fixture = RunFixture::new("verification-record-naming-rebind");
     for (key, value) in [
         ("user.email", "termal-tests@example.com"),
@@ -106,39 +81,28 @@ fn a_reloaded_off_session_naming_its_root_again_gets_the_same_pending_record_del
     run_git_test_command(&fixture.root, &["add", "README.md"]);
     run_git_test_command(&fixture.root, &["commit", "--quiet", "-m", "named"]);
 
-    let (session, _recording) = engram_session(&fixture, false, None);
-    // In the host's order: each naming binds, then reads the claim's
-    // named_root through the session's status; the sender then sends the
-    // record. The second naming asks under a key of its own, so Engram
-    // answers it with a fresh binding.
-    let transport = ScriptedEngramControlTransport::new_with_work_bindings(
-        [
-            naming_bind_reply("naming-token"),
-            naming_status_reply(),
-            naming_bind_reply("rebound-token"),
-            naming_status_reply(),
-            ScriptedEngramControlResponse::Reply(Ok(receipt_for("failed"))),
-        ],
-        [Ok(Some(binding()))],
-    );
+    let (session, _recording) = engram_session(&fixture, false);
+    // The exact ordinary response is explicit, including the original store
+    // and session identity. Reload loses the process-local capability cache.
+    let transport = ScriptedEngramControlTransport::new([
+        ScriptedEngramControlResponse::Reply(Ok(receipt_for("failed"))),
+    ]);
+    transport.set_current_work_binding(Some(binding()));
     transport.enable_named_roots(&session, &binding());
     {
         let mut roots = transport.named_roots.lock().unwrap();
         let roots = roots.get_or_insert_with(TestEngramNamedRoots::default);
         roots.project_id = Some(store().project_id);
-        // Status answers come from the script, in the producer's shape; the
-        // model's own status answer lists no capabilities.
-        roots.scripted_status = true;
+        roots.work_session_read_reply = Some(Ok(work_supported(&session)));
     }
     transport.replace_held_claims([Ok(held_claim())]);
     fixture
         .state
         .install_control_test_transport(transport.clone());
 
-    // Ordinary naming binds the fresh OFF session; its run is registered with
-    // the association that naming gave it.
+    // Ordinary naming establishes the work association, without a control bind.
     let first = name_the_root(&fixture, &session);
-    assert_eq!(of_kind(&operations(&transport), "session_bind").len(), 1);
+    assert!(of_kind(&operations(&transport), "session_bind").is_empty());
     let mut run = record_run(
         &fixture,
         "test-record-naming-rebind",
@@ -154,43 +118,37 @@ fn a_reloaded_off_session_naming_its_root_again_gets_the_same_pending_record_del
     attach_launch_row(&fixture, &run);
     let original = current(&fixture, &run);
 
-    // A reload flags the restored token: the sender holds the record and
-    // sends nothing.
+    // A historical token remains passive data across reload.
+    with_session_engram(&fixture, &session, |engram| {
+        engram.historical_control.insert("engramRoutingToken".to_owned(), json!("historical-token"));
+    });
     reload(&fixture, &session, &transport);
-    assert!(session_engram(&fixture, &session, |engram| engram.rebind_required));
+    transport.named_roots.lock().unwrap().as_mut().unwrap().work_session_read_reply =
+        Some(Err(EngramTransportError::transport("ordinary child unavailable after reload")));
     let before_tick = operations(&transport).len();
     fixture.state.engram_verification_records_tick();
-    assert_eq!(operations(&transport).len(), before_tick, "nothing is sent");
-    assert_eq!(
+    assert_eq!(operations(&transport).len(), before_tick + 1, "only ordinary read attempted");
+    assert!(matches!(
         engram_verification_record_progress(&run.run_dir),
         Some(EngramVerificationRecordProgress::Pending {
-            reason: EngramVerificationRecordPending::AwaitingNamingBinding,
+            reason: EngramVerificationRecordPending::TransportFailed { .. },
         })
-    );
+    ));
     let body_path = run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
     let frozen_text = fs::read_to_string(&body_path).expect("the body is frozen");
 
-    // The session names the same root again under the same live claim: one
-    // naming bind with the same intent under a key of its own, and the root
-    // keeps its generation.
+    // The same held claim/root keeps its generation and does not alter the
+    // original passive history.
+    transport.named_roots.lock().unwrap().as_mut().unwrap().work_session_read_reply =
+        Some(Ok(work_supported(&session)));
     let again = name_the_root(&fixture, &session);
     assert_eq!(again.generation, first.generation);
     let binds = of_kind(&operations(&transport), "session_bind");
-    assert_eq!(binds.len(), 2, "exactly one more session_bind");
-    let without_key = |bind: &Value| {
-        let mut bind = bind.clone();
-        bind.as_object_mut().unwrap().remove("idempotency_key");
-        bind
-    };
-    assert_eq!(without_key(&binds[1]), without_key(&binds[0]), "the same naming intent");
-    assert_ne!(
-        binds[1]["idempotency_key"], binds[0]["idempotency_key"],
-        "under a key of its own"
-    );
-    assert!(!session_engram(&fixture, &session, |engram| engram.rebind_required));
+    assert!(binds.is_empty(), "ordinary naming never replaces control identity");
+    assert_eq!(session_engram(&fixture, &session, |engram|
+        engram.historical_control.get("engramRoutingToken").cloned()), Some(json!("historical-token")));
 
-    // The next tick sends the same frozen record under the re-established
-    // token, with the registration's original association.
+    // The next tick uses the ordinary child and the original registration.
     let before_tick = operations(&transport).len();
     fixture.state.engram_verification_records_tick();
     let sent = operations(&transport)[before_tick..].to_vec();
@@ -202,7 +160,6 @@ fn a_reloaded_off_session_naming_its_root_again_gets_the_same_pending_record_del
     );
     let expected = serde_json::to_value(engram_verification_record_request(
         &ready(&original),
-        "rebound-token",
     ))
     .expect("the request serializes");
     assert_eq!(records[0], expected, "the same frozen body and key");

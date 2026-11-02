@@ -984,6 +984,69 @@ fn resume_of_a_paused_queue_prepares_then_sends_its_receipted_head_once() {
     assert_eq!(fixture.delivered_prompts(), 0, "sent once");
 }
 
+#[test]
+fn a_promoted_handing_off_entry_requires_its_exact_resume_continuation() {
+    for changed in ["missing", "nonce", "attempt", "generation", "stop", "pause", "content", "promotion"] {
+        let mut state = test_app_state();
+        let writer = DeliveryWriter::attach(&mut state);
+        let fixture = Fixture::new(state, changed);
+        let id = fixture.enqueue_receipted("the restored unsent entry");
+        fixture.set_paused(true);
+        {
+            // The restored shape has its original transcript message, a
+            // Pending receipt and a fresh hold of that exact queued image.
+            // The round-five federation test covers the actual shutdown/load.
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let record = inner.session_mut(&fixture.session).unwrap();
+            let queued = record.queued_prompts[0].clone();
+            let index = push_message_on_record(record, Message::Text {
+                id: id.clone(), timestamp: queued.pending_prompt.timestamp.clone(),
+                author: Author::You, text: queued.pending_prompt.text.clone(),
+                expanded_text: queued.pending_prompt.expanded_text.clone(),
+                attachments: queued.attachments.iter().map(|attachment| attachment.metadata.clone()).collect(),
+                source: queued.pending_prompt.source.clone(),
+            });
+            record.queued_prompts[0].promoted_message_index = Some(global_message_index(record, index));
+            let content = queued_prompt_durability_content(&record.queued_prompts[0]);
+            record.queued_prompt_durability_holds.get_mut(&id).unwrap().content = content;
+            fixture.state.commit_locked(&mut inner).unwrap();
+        }
+        assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+        writer.take(HeldFence::Durability).finish(Ok(()));
+        fixture.wait_for_hold_acknowledged(&id);
+        assert_preparing(&fixture);
+        let _write_ahead = writer.take(HeldFence::WriteAhead);
+        let nonce = fixture.delivery(&id).unwrap().write_ahead;
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let record = inner.session_mut(&fixture.session).unwrap();
+            assert!(prompt_delivery_resume_holds(record, &id), "{changed}: the original Resume holds");
+            assert_eq!(ordinary_queue_position(record), Some(0));
+            let receipt = record.prompt_deliveries.get_mut(&id).unwrap();
+            match changed {
+                "missing" => receipt.resume = None,
+                "nonce" => receipt.write_ahead = Uuid::new_v4().to_string(),
+                "attempt" => receipt.attempt += 1,
+                "generation" => record.active_turn_generation += 1,
+                "stop" => record.runtime_stop_generation += 1,
+                "pause" => record.set_auto_dispatch_blocked(true),
+                "content" => record.queued_prompts[0].pending_prompt.text = "different content".into(),
+                "promotion" => {
+                    let index = record.queued_prompts[0].promoted_message_index.unwrap();
+                    record.queued_prompts[0].promoted_message_index = Some(index + 1);
+                }
+                _ => unreachable!(),
+            }
+            assert!(!prompt_delivery_resume_holds(record, &id), "{changed}: stale Resume is rejected");
+            assert!(ordinary_queue_position(record).is_none(), "{changed}: no blanket HandingOff replay");
+        }
+        fixture.state.settle_prompt_delivery_write_ahead(&fixture.session, &id, &nonce, Ok(()));
+        assert_eq!(fixture.delivered_prompts(), 0, "{changed}: no provider handoff");
+        assert_eq!(fixture.queue_ids(), vec![id]);
+        assert!(queue_paused(&fixture));
+    }
+}
+
 /// A Resume while the head's initial durability is still pending keeps the
 /// landed refusal and remembers nothing: that acknowledgement sends nothing,
 /// and only a fresh Resume begins the hand-off.
@@ -1079,7 +1142,7 @@ fn acknowledged_resume(
     fixture: &Fixture,
     writer: &DeliveryWriter,
     text: &str,
-) -> (String, EngramQueuedAdmissionOwner, Box<PersistFence>) {
+) -> (String, QueuedTurnOwner, Box<PersistFence>) {
     let id = durable_paused_head(fixture, writer, text);
     assert_preparing(fixture);
     let write_ahead = writer.take(HeldFence::WriteAhead);
@@ -1701,11 +1764,14 @@ fn promoted_retained_receipt(fixture: &Fixture, writer: &DeliveryWriter) -> (Str
     let index = inner.find_session_index(&fixture.session).unwrap();
     let record = inner.session_mut_by_index(index).unwrap();
     let turn_generation = record.active_turn_generation.wrapping_add(1).max(1);
+    record.active_turn_generation = turn_generation;
     let delivery = record.prompt_deliveries.get_mut(&id).unwrap();
     delivery.disposition = PromptDeliveryDisposition::HandingOff;
     delivery.attempt = 1;
     delivery.write_ahead_acknowledged = true;
     delivery.turn_generation = Some(turn_generation);
+    assert_eq!(handing_off_head(record), Some((id.clone(), turn_generation)),
+        "the queued receipt belongs to the current turn before removal");
     fixture.state.commit_locked(&mut inner).unwrap();
     (id, turn_generation)
 }
@@ -1738,29 +1804,6 @@ fn a_dispatch_held_before_its_hand_off_returns_the_receipt_to_pending() {
     assert_eq!(fixture.delivered_prompts(), 0, "sent once");
 }
 
-/// A Stop of a retained admission that never handed its head off returns
-/// that head's receipt to pending in the Stop's own write.
-#[test]
-fn a_stop_of_a_retained_admission_returns_the_receipt_to_pending() {
-    let mut state = test_app_state();
-    let writer = DeliveryWriter::attach(&mut state);
-    let fixture = Fixture::new(state, "stop-retained-admission");
-    let (id, _turn_generation) = promoted_retained_receipt(&fixture, &writer);
-    {
-        let mut inner = fixture.state.inner.lock().unwrap();
-        let index = inner.find_session_index(&fixture.session).unwrap();
-        inner.session_mut_by_index(index).unwrap().engram.admission_in_progress =
-            Some(Arc::new(AtomicBool::new(true)));
-    }
-    assert!(fixture.state.stop_waiting_engram_admission(&fixture.session).unwrap());
-    let delivery = fixture.delivery(&id).unwrap();
-    assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
-    assert_eq!(delivery.turn_generation, None);
-    assert!(delivery.resume.is_none());
-    assert!(queue_paused(&fixture));
-    assert_eq!(fixture.delivered_prompts(), 0);
-}
-
 /// Runs `change` on the session's record under the state lock and commits.
 fn with_record<T>(fixture: &Fixture, change: impl FnOnce(&mut SessionRecord) -> T) -> T {
     let mut inner = fixture.state.inner.lock().unwrap();
@@ -1783,8 +1826,8 @@ fn reloaded_delivery(fixture: &Fixture, prompt_id: &str) -> PromptDelivery {
 
 /// A deferred hand-off of `turn_generation` to the fixture's runtime, as a
 /// Stop in progress defers one (`api.rs`).
-fn deferred_hand_off(fixture: &Fixture, turn_generation: u64, text: &str) -> DeferredEngramHandoff {
-    DeferredEngramHandoff(Arc::new(Mutex::new(Some(TurnDispatch::PersistentClaude {
+fn deferred_hand_off(fixture: &Fixture, turn_generation: u64, text: &str) -> DeferredTurnHandoff {
+    DeferredTurnHandoff(Arc::new(Mutex::new(Some(TurnDispatch::PersistentClaude {
         human_prompt_id: None,
         federation_handoff: None,
         active_turn_generation: turn_generation,
@@ -1795,7 +1838,6 @@ fn deferred_hand_off(fixture: &Fixture, turn_generation: u64, text: &str) -> Def
             text: text.to_owned(),
             turn_generation,
         },
-        engram_dispatch_generation: None,
         mailbox_notification: None,
         runtime_token: fixture.token.clone(),
         sender: fixture.runtime_input.clone(),
@@ -1803,9 +1845,9 @@ fn deferred_hand_off(fixture: &Fixture, turn_generation: u64, text: &str) -> Def
     }))))
 }
 
-fn defer(fixture: &Fixture, turn_generation: u64, carrier: &DeferredEngramHandoff) {
+fn defer(fixture: &Fixture, turn_generation: u64, carrier: &DeferredTurnHandoff) {
     with_record(fixture, |record| {
-        record.deferred_stop_callbacks.push(DeferredStopCallback::EngramHandoff {
+        record.deferred_stop_callbacks.push(DeferredStopCallback::TurnHandoff {
             active_turn_generation: turn_generation,
             dispatch: carrier.clone(),
         })
@@ -1822,28 +1864,13 @@ fn remove_by_source(fixture: &Fixture, _id: &str) {
     });
 }
 
-fn remove_without_admission_owner(fixture: &Fixture, _id: &str) {
+fn remove_without_delivery_owner(fixture: &Fixture, _id: &str) {
     with_record(fixture, |record| {
-        clear_queued_prompts_by_source_except_admission_owner(
+        clear_queued_prompts_by_source_except_delivery_owner(
             record,
             QueuedPromptSource::Orchestrator,
             None,
         )
-    });
-}
-
-fn remove_as_retired_promotion(fixture: &Fixture, _id: &str) {
-    with_record(fixture, |record| {
-        let head = record.queued_prompts.front_mut().unwrap();
-        head.promoted_message_index = Some(0);
-        let fingerprint = engram_turn_intent_fingerprint(
-            &head.pending_prompt.text,
-            head.pending_prompt.expanded_text.as_deref(),
-            &head.attachments,
-            head.pending_prompt.source.as_ref(),
-            head.source,
-        );
-        retire_promoted_engram_head(record, &fingerprint);
     });
 }
 
@@ -1859,11 +1886,10 @@ fn remove_by_child_detach(fixture: &Fixture, _id: &str) {
 /// receipt is what a restart reads back (never an ambiguous hand-off).
 #[test]
 fn a_removed_head_promoted_for_its_hand_off_is_rejected_durably_and_never_sent() {
-    let removals: [(&str, fn(&Fixture, &str)); 5] = [
+    let removals: [(&str, fn(&Fixture, &str)); 4] = [
         ("cancel", remove_by_cancel),
         ("clear-by-source", remove_by_source),
-        ("clear-without-owner", remove_without_admission_owner),
-        ("retire-promoted", remove_as_retired_promotion),
+        ("clear-without-owner", remove_without_delivery_owner),
         ("child-detach", remove_by_child_detach),
     ];
     for (label, remove) in removals {
@@ -1896,9 +1922,9 @@ fn a_head_already_handed_off_keeps_its_receipt_through_every_removal() {
     assert!(fixture.queue_ids().is_empty());
     assert!(fixture.state.cancel_queued_prompt(&fixture.session, &id).is_err());
     remove_by_source(&fixture, &id);
-    remove_without_admission_owner(&fixture, &id);
+    remove_without_delivery_owner(&fixture, &id);
     // A carrier the hand-off emptied belongs to that hand-off.
-    let emptied = DeferredEngramHandoff(Arc::new(Mutex::new(None)));
+    let emptied = DeferredTurnHandoff(Arc::new(Mutex::new(None)));
     defer(&fixture, turn_generation, &emptied);
     assert!(!with_record(&fixture, discard_deferred_stop_callbacks));
     let delivery = fixture.delivery(&id).unwrap();

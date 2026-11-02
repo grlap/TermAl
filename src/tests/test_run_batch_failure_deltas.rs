@@ -1,8 +1,9 @@
 // Regression child of test_run_registration.rs, using its real observation
 // fixture. Owns the failure-publication contract of both test-run observation
 // writers: an evidence batch whose stopped-worker synchronous save fails, and
-// the single-row writer. Every changed row publishes its failed tracking at a
-// revision its own commit allocated, and no revision is reused. Does not own
+// the single-row writer. Every changed row publishes at its own allocated
+// revision; row persistence failures remain distinct from the public artifact
+// card's registration durability, and no revision is reused. Does not own
 // the batch's fences or durable saves (test_run_lifecycle_batch.rs) or delta
 // allocation itself (sse_broadcast.rs). New file, not split from another.
 use super::*;
@@ -19,7 +20,9 @@ fn sibling_row(row: &TestRunCommandObservation, suffix: &str) -> TestRunCommandO
 /// Two changed rows, a stopped persistence worker, a disconnected sender and a
 /// state path that cannot be written: every synchronous save attempt fails.
 fn failing_stopped_worker_batch(label: &str) -> (RunFixture, [String; 2], EngramNamedRootReadResponse, EngramAuthorityStoreKey, EngramControlWorkBinding) {
-    let (mut fixture, id, store, binding, _) = evidence_fixture(label);
+    let (mut fixture, _, store, binding, native) = native_evidence_fixture(label);
+    record_native_evidence(&fixture, &native);
+    let id = native.execution_id;
     let second = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let second = sibling_row(&inner.test_run_observations[&id], "second");
@@ -65,6 +68,8 @@ fn every_row_of_a_failed_stopped_worker_batch_publishes_its_failure_at_its_own_r
     for id in &ids {
         assert!(inner.test_runs.observations_failed.contains(id));
         assert!(!inner.test_runs.observations_durable.contains(id));
+        assert_eq!(test_run_observation_summary(&*inner, &inner.test_run_observations[id])
+            .registration.tracking_durability.as_deref(), Some("failed"));
     }
     assert_eq!(
         published.iter().map(|(revision, _)| *revision).collect::<Vec<_>>(),
@@ -73,11 +78,16 @@ fn every_row_of_a_failed_stopped_worker_batch_publishes_its_failure_at_its_own_r
     );
     let mut published_ids: Vec<_> = published.iter().map(|(_, run)| run.run_id.clone()).collect();
     published_ids.sort();
-    let mut expected_ids = ids.to_vec();
-    expected_ids.sort();
-    assert_eq!(published_ids, expected_ids);
+    let public_id = &inner.test_run_observations[&ids[0]].artifact.as_ref().unwrap().run_id;
+    assert_eq!(published_ids, [public_id.clone(), public_id.clone()]);
+    let mut expected_observations = ids.to_vec();
+    expected_observations.sort();
     for (_, run) in &published {
-        assert_eq!(run.registration.tracking_durability.as_deref(), Some("failed"));
+        assert_eq!(run.registration.superseded_run_ids, expected_observations);
+        assert_eq!(run.registration.tracking_durability.as_deref(), Some("durable"),
+            "the registration was durable before observation persistence failed");
+        assert_eq!(run.registration.restart_would_void_evidence, None,
+            "a durable registration cannot make the failed observation save safe");
     }
     assert_eq!(inner.revision, before + 2);
 }
@@ -133,13 +143,21 @@ fn the_single_row_writer_still_publishes_a_failed_save_at_its_allocated_revision
     let (fixture, [id, _], _, _, _) = failing_stopped_worker_batch("single-row-failed-save");
     let before = fixture.state.inner.lock().unwrap().revision;
     let published = persist_single_row(&fixture, &id);
+    let inner = fixture.state.inner.lock().unwrap();
+    let row = &inner.test_run_observations[&id];
+    let public_id = row.artifact.as_ref().unwrap().run_id.clone();
     assert_eq!(
         published.iter().map(|(revision, run)| (*revision, run.run_id.clone())).collect::<Vec<_>>(),
-        [(before + 1, id.clone())],
+        [(before + 1, public_id)],
         "a save that fails after allocation still publishes its failure at that revision"
     );
-    assert_eq!(published[0].1.registration.tracking_durability.as_deref(), Some("failed"));
-    let inner = fixture.state.inner.lock().unwrap();
+    assert_eq!(test_run_observation_summary(&*inner, row)
+        .registration.tracking_durability.as_deref(), Some("failed"));
+    assert!(published[0].1.registration.superseded_run_ids.contains(&id));
+    assert_eq!(published[0].1.registration.tracking_durability.as_deref(), Some("durable"),
+        "the registration was durable before observation persistence failed");
+    assert_eq!(published[0].1.registration.restart_would_void_evidence, Some(true),
+        "this single-row save does not complete the associated work lifecycle");
     assert_eq!(inner.revision, before + 1);
     assert!(inner.test_runs.observations_failed.contains(&id));
     assert!(!inner.test_runs.observations_durable.contains(&id));

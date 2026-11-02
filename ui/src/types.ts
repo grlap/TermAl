@@ -232,7 +232,6 @@ export type EngramHostSettings = {
   developerName: string;
   binaryPath: string;
   home: string;
-  bootRecoveryBudgetMs: number;
 };
 
 export type TelegramUiConfig = {
@@ -257,7 +256,7 @@ export type Project = {
 export type EngramProjectSettings = {
   acceptanceEvaluation?: EvaluatorDefaults;
   enabled: boolean;
-  turnGatedControl?: boolean;
+  executionObservability?: boolean;
   binaryPath?: string | null;
   home?: string | null;
   deadlineMs?: number | null;
@@ -271,7 +270,6 @@ export type EngramProjectVerification = {
   home: string;
   projectId: string;
   database: string;
-  requiredAssurance: string;
   ready: boolean;
   fullAudit: "not_run";
   hostPathStatus: string;
@@ -409,10 +407,6 @@ export type Session = {
   agentCommandsRevision?: number;
   codexThreadState?: CodexThreadState | null;
   liveActivity?: SessionLiveActivity | null;
-  /** True while TermAl restores this session's Engram authority after restart. */
-  engramBootRecoveryPending?: boolean;
-  /** Executing host's ordinary OFF queue policy; absent on older remote hosts. */
-  engramControlOff?: boolean;
   status: SessionStatus;
   preview: string;
   messages: Message[];
@@ -430,13 +424,12 @@ export type Session = {
   hasNewerHistory?: boolean;
   markers?: ConversationMarker[];
   pendingPrompts?: PendingPrompt[];
+  /** Existing backend delivery receipts; these observations never authorize replay. */
+  promptDeliveries?: PromptDeliveryView[];
   /** True while queued prompts are parked behind the explicit-resume latch a
    * Stop leaves behind; nothing starts until the user resumes the queue or
    * sends a new prompt. */
   queuePaused?: boolean;
-  /** Why the paused queue is held and when it moves on by itself, while a
-   * due automatic Engram retry owns its head; absent for any other hold. */
-  queueHold?: SessionQueueHold | null;
   providerCapacityWaiting?: boolean;
   /** Delete retained the original session; Resume recovers tracking only. */
   sourceTrackingRecovery?: boolean;
@@ -447,14 +440,6 @@ export type Session = {
   /** Upstream per-session body snapshot sequence; absent on older peers. */
   bodySeq?: number;
   bodySeqEpoch?: string;
-};
-
-/** A queue hold that a due automatic Engram retry owns: the retry's code and
- * its next due time (RFC 3339). The backend's `SessionQueueHold`. */
-export type SessionQueueHold = {
-  kind: "automaticRetry";
-  cause: string;
-  retryAt: string;
 };
 
 /** Transcript-free metadata returned by broad state snapshots and summary
@@ -469,6 +454,7 @@ export type StateSessionSummary = Omit<
   | "hasOlderHistory"
   | "hasNewerHistory"
   | "pendingPrompts"
+  | "promptDeliveries"
   | "messageCount"
   | "queuePaused"
 > & {
@@ -837,7 +823,17 @@ export type MailboxMessage = {
   notificationCause?: string | null;
 };
 
+/** The backend's canonical PromptDeliveryView, mirrored without scheduling state. */
+export type PromptDeliveryView = {
+  promptId: string;
+  disposition: "pending" | "handingOff" | "accepted" | "rejected" | "ambiguous";
+  attempt: number;
+  messageId?: string | null;
+  reason?: string | null;
+};
+
 export type PendingPrompt = {
+  /** Historical stored-row diagnostics only; never a queue/replay owner. */
   engramInterrupted?: boolean;
   isEngramRetained?: boolean;
   id: string;
@@ -1222,8 +1218,6 @@ export type MessageCreatedEvent = {
   sessionQueue?: {
     pendingPrompts: PendingPrompt[];
     queuePaused: boolean;
-    /** Absent when no due automatic retry owns the head. */
-    queueHold?: SessionQueueHold | null;
     queueProjectionHash?: string | null;
   } | null;
   sessionMutationStamp?: number | null;

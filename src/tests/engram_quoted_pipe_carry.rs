@@ -1,9 +1,55 @@
-// Qualified command identity at the foreground-to-carried full-gate boundary.
+// Qualified command identity at the foreground-to-carried launcher boundary.
 // Synthetic reader provenance and full-run records drive the real recorder
-// and settlement; these tests execute no launcher or shell command.
+// and artifact reader; these tests execute no launcher or shell command.
+// A carried artifact never becomes automatic checkpoint/native verification.
 use super::*;
 
-fn launch_bash_gate(turn: &CheckedTurn, worktree: &FsPath, started: &str, finished: &str) {
+fn quoted_turn(label: &str) -> (EOCheckedTurn, PathBuf) {
+    let turn = EOCheckedTurn::start_named(label);
+    let worktree = turn.root.join(".worktrees").join("wt");
+    (turn, worktree)
+}
+
+fn assert_launch_fact(turn: &EOCheckedTurn, observation: &Value) {
+    let checks = observation["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "{observation:#}");
+    assert_eq!(checks[0]["check_kind"], "test");
+    assert_eq!(checks[0]["host_check_id"], unadmitted_host_check_id(
+        observation["occurrence"]["host_turn_ref"].as_str().unwrap(), "gate"));
+    assert_eq!(checks[0]["observed_result"], "indeterminate");
+    assert!(checks[0].get("finished_at").is_none(), "a launch ACK is not a test end");
+    assert!(checks[0].get("source_basis").is_none());
+    assert_ordinary_observation_has_no_native_credit(turn, observation);
+}
+
+fn assert_quoted_launch_dropped(turn: &EOCheckedTurn, why: &str) {
+    turn.record(|record| {
+        assert!(record.engram.carried_checks.is_empty());
+        assert!(record.engram.active_turn_checks.is_empty());
+        let line = record.engram.pending_source_root_line.as_deref().unwrap();
+        assert!(line.contains(ENGRAM_CHECK_CREDIT_LINE_PREFIX) && line.contains(why), "{line}");
+    });
+}
+
+fn assert_matched_artifact_is_not_verification(turn: &EOCheckedTurn, run: &FsPath) {
+    let digest = engram_terminal_record_digest(run).expect("a real terminal fixture record");
+    let verdict = engram_read_carried_run(run, &digest).expect("the exact artifact validates");
+    assert!(verdict.passed);
+    assert_eq!(verdict.exit_code, 0);
+    assert_eq!(verdict.fingerprint, "f".repeat(64));
+    turn.state.poll_engram_carried_runs();
+    turn.record(|record| {
+        assert_eq!(record.engram.carried_checks.len(), 1);
+        let carried = &record.engram.carried_checks[0];
+        assert_eq!(carried.run_directory.as_deref(), Some(run));
+        assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
+    });
+    assert_launch_fact(turn, &turn.finish());
+    assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1,
+        "closing an ordinary turn does not consume an artifact into verification");
+}
+
+fn launch_bash_gate(turn: &EOCheckedTurn, worktree: &FsPath, started: &str, finished: &str) {
     let provenance = turn.record(|record| {
         EngramObservationProvenance::Claude(ClaudeObservationProvenance {
             token: record.runtime.runtime_token().expect("matching fixture runtime"),
@@ -30,17 +76,16 @@ fn launch_bash_gate(turn: &CheckedTurn, worktree: &FsPath, started: &str, finish
 #[test]
 fn qualified_detached_full_cannot_borrow_generic_terminal_stages() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("qualified-full-carry");
+    let (turn, worktree) = quoted_turn("qualified-full-carry");
     let command = format!("{DETACHED_GATE} --notify 'a|b'");
     let check = engram_check_command_in(&command, EngramShellDialect::Bash).unwrap();
     assert!(check.literal_pipe && check.simple, "the witness must reach qualification");
     launch_bash_gate(&turn, &worktree, &command, &command);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let checkpoint = turn.finish();
-    assert!(checkpoint.get("verification_evidence").is_none(),
-        "qualified argv cannot borrow the generic full stages at {run:?}: {checkpoint:#}");
-    assert_dropped_at_launch(&turn, "qualified pipe");
+    assert_launch_fact(&turn, &turn.finish());
+    assert!(engram_terminal_record_digest(&run).is_some());
+    assert_quoted_launch_dropped(&turn, "qualified pipe");
     assert_eq!(turn.record(|record| record.engram.carried_unmatched_launches.len()), 1,
         "a refused invocation may have launched a run; retain its ambiguity window");
 }
@@ -48,16 +93,15 @@ fn qualified_detached_full_cannot_borrow_generic_terminal_stages() {
 #[test]
 fn detached_full_completion_must_match_the_started_argv() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("full-carry-association");
+    let (turn, worktree) = quoted_turn("full-carry-association");
     let started = format!("{DETACHED_GATE} --notify session-original");
     let finished = format!("{DETACHED_GATE} --notify session-other");
     launch_bash_gate(&turn, &worktree, &started, &finished);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let checkpoint = turn.finish();
-    assert!(checkpoint.get("verification_evidence").is_none(),
-        "a changed completion cannot transfer its old start to {run:?}: {checkpoint:#}");
-    assert_dropped_at_launch(&turn, "does not match");
+    assert_launch_fact(&turn, &turn.finish());
+    assert!(engram_terminal_record_digest(&run).is_some());
+    assert_quoted_launch_dropped(&turn, "does not match");
     assert_eq!(turn.record(|record| record.engram.carried_unmatched_launches.len()), 1,
         "the unmatched completion must not free its run for a later launch");
 }
@@ -75,22 +119,21 @@ fn qualified_full_is_never_carried_by_any_launch_exit() {
 }
 
 #[test]
-fn matched_pipe_free_bash_full_keeps_its_carried_credit() {
+fn matched_pipe_free_bash_full_keeps_artifact_custody_without_verification() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("plain-bash-full-carry");
+    let (turn, worktree) = quoted_turn("plain-bash-full-carry");
     let command = format!("{DETACHED_GATE} --notify session-original");
     launch_bash_gate(&turn, &worktree, &command, &command);
     assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_matched_artifact_is_not_verification(&turn, &run);
 }
 
 // Applies actual ACP terminal updates, keeping display titles distinct from
-// rawInput.command. Synthetic full-run records exercise later settlement.
-fn acp_full_completion(label: &str, title: Option<&str>, ran: Option<&str>, credited: bool) {
+// rawInput.command. Synthetic full-run records exercise artifact custody.
+fn acp_full_completion(label: &str, title: Option<&str>, ran: Option<&str>, matched: bool) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn(label);
+    let (turn, worktree) = quoted_turn(label);
     let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
     let started = format!("{DETACHED_GATE} --notify session-original");
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
@@ -118,30 +161,29 @@ fn acp_full_completion(label: &str, title: Option<&str>, ran: Option<&str>, cred
         &mut state, &mut recorder, AcpAgent::Kimi).unwrap();
     turn.wait_for_snapshots();
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    if credited {
-        assert_credited(&turn, &checkpoint, &run, "succeeded");
+    if matched {
+        assert_matched_artifact_is_not_verification(&turn, &run);
     } else {
-        assert!(checkpoint.get("verification_evidence").is_none(),
-            "an explicitly substituted command cannot borrow the full run: {checkpoint:#}");
+        assert_launch_fact(&turn, &turn.finish());
         assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
+        assert!(engram_terminal_record_digest(&run).is_some());
     }
 }
 
 #[test]
-fn acp_titleless_full_keeps_its_carried_credit() {
+fn acp_titleless_full_keeps_its_artifact_custody() {
     acp_full_completion("acp-titleless-full", None, None, true);
 }
 
 #[test]
-fn acp_title_only_full_keeps_its_carried_credit() {
+fn acp_title_only_full_keeps_its_artifact_custody() {
     // A title can itself look like a recognised runner without becoming a
     // report that this different command ran.
     acp_full_completion("acp-title-full", Some("cargo test"), None, true);
 }
 
 #[test]
-fn acp_explicit_matching_full_keeps_its_carried_credit() {
+fn acp_explicit_matching_full_keeps_its_artifact_custody() {
     acp_full_completion("acp-matched-full", None,
         Some(&format!("{DETACHED_GATE} --notify session-original")), true);
 }
@@ -158,19 +200,17 @@ fn acp_explicit_changed_full_has_no_credit() {
 #[test]
 fn an_unrecognized_explicit_end_does_not_borrow_the_started_full() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("unrecognized-full-end");
+    let (turn, worktree) = quoted_turn("unrecognized-full-end");
     launch_bash_gate(&turn, &worktree, DETACHED_GATE, "echo finished");
     finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert!(checkpoint.get("verification_evidence").is_none(),
-        "parsed=None is not proof that the actual command was absent: {checkpoint:#}");
-    assert_dropped_at_launch(&turn, "does not match");
+    assert_launch_fact(&turn, &turn.finish());
+    assert_quoted_launch_dropped(&turn, "does not match");
 }
 
 #[test]
 fn a_qualified_full_is_dropped_even_with_an_acp_titleless_completion() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("qualified-titleless-full");
+    let (turn, worktree) = quoted_turn("qualified-titleless-full");
     let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
     let command = format!("{DETACHED_GATE} --notify 'a|b'");
     let provenance = turn.record(|record| {
@@ -194,7 +234,6 @@ fn a_qualified_full_is_dropped_even_with_an_acp_titleless_completion() {
         &turn.state, &turn.session_id, &input_tx, &mut AcpTurnState::default(),
         &mut recorder, AcpAgent::Kimi).unwrap();
     finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert!(checkpoint.get("verification_evidence").is_none(), "{checkpoint:#}");
-    assert_dropped_at_launch(&turn, "qualified pipe");
+    assert_launch_fact(&turn, &turn.finish());
+    assert_quoted_launch_dropped(&turn, "qualified pipe");
 }

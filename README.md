@@ -47,9 +47,12 @@ TermAl's supported adapter boundaries. OpenCode and Kimi have dedicated
 ## Work tracking
 
 TermAl uses **Engram** for work tracking. A repository declares its project in
-`.engram-project`; the operator configures and enables the local integration.
-The [Engram host adapter](docs/features/engram-host-adapter.md) supplies agent
-tools and advisory context, with optional turn-gated control.
+`.engram-project`; the operator configures and enables the local integration,
+which gives agents Engram tools and work context. Its project setting
+[Execution Observability](docs/features/execution-observability.md), on by
+default, reports to Engram what each turn did, after the turn ran. The
+[Engram host adapter](docs/features/engram-host-adapter.md) is the full host
+contract.
 
 The [Work tab](docs/features/work-visualizer.md) is an **Engram-only, read-only**
 view with its own project selector. It offers Dependencies, Hierarchy, Labels,
@@ -58,7 +61,8 @@ the integration, create a claim, or change tracker data.
 
 ## Where TermAl stands
 
-As of 2026-10-29 (master `3fc13725`). The full snapshot, with limitations
+As of 2026-10-29 (master `3fc13725`), updated 2026-11-01 for Execution
+Observability. The full snapshot, with limitations
 and next steps, is in [Project status](docs/features/project-status.md).
 
 **Works now**
@@ -73,18 +77,16 @@ and next steps, is in [Project status](docs/features/project-status.md).
 - **Remote full gates.** The five-stage gate runs on a satellite and reports
   back to the coordinator. It passed on master on both the Windows satellite
   and the Mac. See [Remote full gates](docs/features/remote-full-gates.md).
-- **Turn-gated control for the Engram project.** It has been ON there since
-  2026-10-29, after a passed steady-state canary. A turn normally waits for
-  Engram's authorization. The one bounded exception: a fresh ordinary root
-  prompt whose control request provably never started is delivered, marked
-  degraded, when control is unavailable. See the
-  [Engram host adapter](docs/features/engram-host-adapter.md).
+- **Execution Observability on every harness (live observation pending).**
+  Codex, Claude, Cursor, Gemini, OpenCode and Kimi turns are delivered without
+  waiting for Engram, and each turn's end reaches Engram as one host
+  observation of its outcome, source change and checks. Tests on every harness
+  cover this; it is not yet observed on a running host. Turn gating has been
+  removed. See
+  [Execution Observability](docs/features/execution-observability.md).
 
 **Active limitations**
 
-- Turn-gated control stays OFF for the TermAl projects until the fix for the
-  long project-settings reset lands. That reset held all project sessions for
-  about 36 minutes during the Engram enable. The fix is in progress.
 - A program cannot yet send a prompt directly to a chosen session on another
   machine. A mailbox message is the supported route.
 - The running hosts do not yet have the SSH link diagnostics now on master.
@@ -96,9 +98,7 @@ and next steps, is in [Project status](docs/features/project-status.md).
 
 1. Run the SSH link diagnostics on the live hosts and evaluate hostname
    recovery there.
-2. Bound the control reset, then enable turn-gated control for TermAl.
-3. Close the open turn-gated control repairs.
-4. Add direct remote prompts.
+2. Add direct remote prompts.
 
 ## Architecture
 
@@ -501,7 +501,8 @@ Instances can be **paused**, **resumed**, or **stopped** from the control panel 
   - [Current agent contracts](docs/features/current-agent-contracts.md) — supported boundaries for Claude, Codex, Gemini, Cursor, OpenCode, and Kimi
   - [OpenCode integration](docs/features/opencode-acp-integration.md) — OpenCode over ACP
   - [Kimi integration](docs/features/kimi-cli-integration.md) — Kimi Code CLI setup and ACP behavior
-  - [Engram host adapter](docs/features/engram-host-adapter.md) — project configuration, agent context, and turn-gated control
+  - [Engram host adapter](docs/features/engram-host-adapter.md) — project configuration, agent context, and host observations
+  - [Execution Observability](docs/features/execution-observability.md) — what the Engram integration does for a session
   - [Work visualizer](docs/features/work-visualizer.md) — read-only Engram task and memory views
   - [Test Runs](docs/features/test-runs.md) — launcher history, stage details, logs, and verification settlement
   - [Response board](docs/features/response-board.md) — spatial board of immutable agent-response snapshots

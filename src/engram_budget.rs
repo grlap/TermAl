@@ -41,6 +41,7 @@ impl EngramBudgetClock {
     /// The wall time this clock measures a saved wall-clock deadline from:
     /// real wall time, or, on a scripted clock whose wall reading a fixture
     /// pinned, that reading moved on by the scripted time since.
+    #[cfg(test)]
     fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
         match self {
             Self::Real => chrono::Utc::now(),
@@ -186,6 +187,7 @@ impl EngramBudgetClock {
         }
     }
 
+    #[cfg(test)]
     fn recv_until<T>(
         &self,
         receiver: &mpsc::Receiver<T>,

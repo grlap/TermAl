@@ -1,349 +1,218 @@
-//! Deletion capture/persistence and remote-failure regressions on public paths.
+//! Delayed ordinary capture/delivery and exact deletion acknowledgement races.
 use super::*;
 use crate::tests::*;
 
 #[test]
-fn source_observation_reset_settings_keeps_delete_recovery_and_queued_successor() {
-    reset_delete_recovery_case(false);
-}
-
-#[test]
-fn source_observation_reset_project_removal_keeps_delete_recovery_and_queued_successor() {
-    reset_delete_recovery_case(true);
-}
-
-fn reset_observation_project(claimed: &ClaimedRoot, remove: bool) {
-    let project = claimed.record(|record| record.session.project_id.clone().unwrap());
-    if remove {
-        claimed.state.delete_project(&project).unwrap();
-    } else {
-        claimed
-            .state
-            .update_project_engram_settings(&project, EngramProjectSettings::default())
-            .unwrap();
-    }
-}
-
-fn reset_delete_recovery_case(remove: bool) {
-    let claimed = held_observation(if remove {
-        "source-observation-reset-delete-project"
-    } else {
-        "source-observation-reset-delete-settings"
-    });
-    let original = original_intent(&claimed);
-    let head = claimed.record(|record| {
-        record
-            .queued_prompts
-            .front()
-            .unwrap()
-            .pending_prompt
-            .id
-            .clone()
-    });
-    queue_test_engram_prompt(
-        &claimed.state,
-        &claimed.session_id,
-        "Successor must stay paused",
-        QueuedPromptSource::User,
-        None,
-    );
-    assert!(claimed.state.kill_session(&claimed.session_id).is_err());
-    claimed
-        .state
-        .cancel_queued_prompt(&claimed.session_id, &head)
-        .unwrap();
-    reset_observation_project(&claimed, remove);
-    let recovery_visible = claimed.record(|record| {
-        AppState::wire_session_from_record(&claimed.state.server_instance_id, record)
-            .source_tracking_recovery
-    });
-    claimed
-        .state
-        .resume_session_queue(&claimed.session_id)
-        .unwrap();
-    let provider_prompt = claimed
-        .runtime_rx
-        .try_iter()
-        .any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. }));
-    assert!(
-        recovery_visible,
-        "a project reset must retain the deletion recovery action"
-    );
-    assert!(
-        !provider_prompt,
-        "public Resume must recover tracking without dispatching the queued successor"
-    );
-    claimed.record(|record| {
-        assert!(record.engram.source_observation_delete_requested);
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(
-            record.queued_prompts.front().unwrap().pending_prompt.text,
-            "Successor must stay paused"
-        );
-        assert!(record.session.preview.contains("retry Delete"));
-    });
-    finalized_observation_receipt(&claimed, &original);
-    claimed.state.kill_session(&claimed.session_id).unwrap();
-}
-
-#[test]
-fn source_observation_reset_settings_then_delete_keeps_live_capture_owner() {
-    reset_before_capture_delete_case(false);
-}
-
-#[test]
-fn source_observation_reset_project_removal_then_delete_keeps_live_capture_owner() {
-    reset_before_capture_delete_case(true);
-}
-
-fn reset_before_capture_delete_case(remove: bool) {
-    let claimed = opening_fixture(if remove {
-        "source-observation-reset-capture-project"
-    } else {
-        "source-observation-reset-capture-settings"
-    });
-    let state = claimed.state.clone();
-    let session = claimed.session_id.clone();
-    let project = claimed.record(|record| record.session.project_id.clone().unwrap());
-    let observed = Arc::new(Mutex::new(None));
-    let observed_hook = observed.clone();
-    TEST_ENGRAM_BEFORE_SOURCE_OBSERVATION_CAPTURE.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            {
-                let inner = state.inner.lock().unwrap();
-                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-                assert!(record.engram.active_turn_start_basis.is_some());
-                assert_eq!(record.engram.source_observation_preparations, 1);
-                assert!(inner.engram_source_sightings.is_empty());
-            }
-            if remove {
-                state.delete_project(&project).unwrap();
-            } else {
-                state
-                    .update_project_engram_settings(&project, EngramProjectSettings::default())
-                    .unwrap();
-            }
-            let count = {
-                let inner = state.inner.lock().unwrap();
-                inner.sessions[inner.find_session_index(&session).unwrap()]
-                    .engram
-                    .source_observation_preparations
+fn ordinary_observation_public_delete_retains_on_lost_or_deferred_removal_ack() {
+    for defer_row in [false, true] {
+        let mut fixture = ObservationSession::new();
+        let mut report = fixture.report();
+        for envelope in &mut report.envelopes {
+            envelope.delivery = EngramRuntimeObservationDelivery::LocalFailure {
+                code: "runtime_observation_retry_exhausted".into(), message: "unknown outcome".into(),
             };
-            let refused = state.kill_session(&session).is_err();
-            *observed_hook.lock().unwrap() = Some((count, refused));
-        }));
-    });
-    let outcome = deliver_turn_dispatch(&claimed.state, claimed.dispatch());
-    let (count, refused) = observed.lock().unwrap().take().unwrap();
-    assert_eq!(
-        count, 1,
-        "a reset must not release a still-live preparation guard"
-    );
-    assert!(
-        refused,
-        "Delete must retain the original session before the late outbox capture"
-    );
-    assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Superseded));
-    let original = original_intent(&claimed);
-    assert!(original.delivery_retired);
-    claimed.record(|record| {
-        assert_eq!(record.engram.source_observation_preparations, 0);
-        assert!(record.engram.source_observation_delete_requested);
-    });
-    // The reset consumed the fixture's first checkpoint reply before the
-    // superseded outbox existed. Recovery closes that same original grant.
-    claimed
-        .transport
-        .responses
-        .lock()
-        .unwrap()
-        .push_back(checkpoint_reply(&original.grant_id));
-    claimed
-        .state
-        .resume_session_queue(&claimed.session_id)
-        .unwrap();
-    finalized_observation_receipt(&claimed, &original);
-    claimed.state.kill_session(&claimed.session_id).unwrap();
-    assert!(
-        claimed
-            .runtime_rx
-            .try_iter()
-            .all(|command| !matches!(command, CodexRuntimeCommand::Prompt { .. }))
-    );
-}
-
-struct CaptureDeleteWriter {
-    done: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl CaptureDeleteWriter {
-    fn finish(mut self) {
-        self.done.store(true, Ordering::SeqCst);
-        self.thread.take().unwrap().join().unwrap();
-    }
-}
-
-impl Drop for CaptureDeleteWriter {
-    fn drop(&mut self) {
-        self.done.store(true, Ordering::SeqCst);
-        if let Some(thread) = self.thread.take() {
-            let result = thread.join();
-            if !std::thread::panicking() {
-                result.unwrap();
-            }
         }
-    }
-}
-
-#[test]
-fn source_observation_delete_capture_waits_for_explicit_coupled_recovery() {
-    for quarantine in [false, true] {
-        capture_delete_recovery_case(quarantine, false);
-    }
-}
-
-#[test]
-fn source_observation_delete_superseded_capture_waits_for_explicit_coupled_recovery() {
-    for quarantine in [false, true] {
-        capture_delete_recovery_case(quarantine, true);
-    }
-}
-
-fn capture_delete_recovery_case(quarantine: bool, superseded: bool) {
-    let mut claimed = opening_fixture("source-observation-delete-capture-ack");
-    let (tx, rx) = std::sync::mpsc::channel();
-    claimed.state.persist_tx = tx;
-    let state = claimed.state.clone();
-    let id = claimed.session_id.clone();
-    let ready = Arc::new(AtomicBool::new(false));
-    let done = Arc::new(AtomicBool::new(false));
-    let writer_ready = ready.clone();
-    let writer_done = done.clone();
-    let writer = std::thread::spawn(move || {
+        fixture.retain(report.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        fixture.state.persist_tx = tx;
+        let state = fixture.state.clone();
+        let id = fixture.id.clone();
+        let deleting = std::thread::spawn(move || state.kill_session(&id));
+        let fence = loop {
+            match rx.recv_timeout(DEADLOCK_GUARD).expect("public Delete must issue its removal fence") {
+                PersistRequest::Fence(fence) => break fence,
+                _ => {},
+            }
+        };
+        assert!(matches!(&fence.target, PersistFenceTarget::EngramObservationRemoval { .. }));
+        let mut delta = collect_persist_delta_from_shared_state(&fixture.state.inner, 0);
+        assert!(delta.changed_sessions.iter().any(|record| record.session.id == fixture.id));
+        if defer_row {
+            delta.changed_sessions.retain(|record| record.session.id != fixture.id);
+            delta.deferred_session_ids.push(fixture.id.clone());
+        }
         let mut cache = SqlitePersistConnectionCache::new();
-        let prime = collect_persist_delta_from_shared_state(&state.inner, 0);
-        persist_delta_via_cache(&mut cache, state.persistence_path.as_path(), &prime).unwrap();
-        let mut watermark = prime.watermark;
-        let mut batch = PersistFenceBatch::default();
-        let mut failed_marker = false;
-        while !writer_done.load(Ordering::SeqCst) {
-            if let Ok(PersistRequest::Fence(fence)) = rx.recv_timeout(Duration::from_millis(20)) {
-                let mut delta = collect_persist_delta_from_shared_state(&state.inner, watermark);
-                let recovering = writer_ready.load(Ordering::SeqCst);
-                let removal_fence = matches!(
-                    &fence.target,
-                    PersistFenceTarget::EngramSourceRemoval { .. }
-                );
-                // Admission must commit normally. Withhold the row only once
-                // Delete reaches its coupled marker fence, then keep it withheld
-                // through automatic capture completion until explicit recovery.
-                if !recovering && quarantine && (failed_marker || removal_fence) {
-                    delta
-                        .changed_sessions
-                        .retain(|record| record.session.id != id);
-                    delta.deferred_session_ids.push(id.clone());
-                }
-                if !recovering && removal_fence {
-                    failed_marker = true;
-                    persist_delta_via_cache(&mut cache, state.persistence_path.as_path(), &delta)
-                        .unwrap();
-                    watermark = delta.watermark;
-                    assert_eq!(
-                        fence
-                            .target
-                            .is_already_durable(cache.connection.as_ref().unwrap())
-                            .unwrap(),
-                        !quarantine
-                    );
-                    fence.finish(Err(PersistFenceError::WriteFailed(
-                        "marker ACK unavailable during capture".to_owned(),
-                    )));
-                } else {
-                    batch.accept(PersistRequest::Fence(fence));
-                    persist_delta_with_fences(
-                        &mut cache,
-                        state.persistence_path.as_path(),
-                        &delta,
-                        &mut batch,
-                    )
-                    .unwrap();
-                    watermark = delta.watermark;
-                }
-            }
-        }
-        batch.fail(PersistFenceError::Shutdown);
-        assert!(failed_marker);
-    });
-    let writer = CaptureDeleteWriter {
-        done,
-        thread: Some(writer),
-    };
-    let state = claimed.state.clone();
-    let id = claimed.session_id.clone();
-    TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            let error = state
-                .kill_session(&id)
-                .err()
-                .expect("capture Delete must retain its owner");
-            assert!(error.message.contains("persistence is uncertain"));
-        }));
-    });
-    let dispatch = claimed.dispatch();
-    if superseded {
-        let state = claimed.state.clone();
-        let id = claimed.session_id.clone();
-        let prompt_id = claimed.record(|record| {
-            record
-                .queued_prompts
-                .front()
-                .unwrap()
-                .pending_prompt
-                .id
-                .clone()
+        persist_delta_via_cache(&mut cache, fixture.state.persistence_path.as_ref(), &delta).unwrap();
+        assert_eq!(fence.target.is_already_durable(cache.connection.as_ref().unwrap()).unwrap(), !defer_row);
+        fence.finish(Err(PersistFenceError::WriteFailed("removal acknowledgement unavailable".into())));
+        let error = deleting.join().unwrap().err().expect("public Delete cannot use an unknown local acknowledgement");
+        assert!(error.message.contains("persistence is uncertain"));
+        fixture.record(|record| {
+            assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
+            assert_eq!(record.engram.unadmitted_reports, vec![report]);
         });
-        TEST_ENGRAM_BEFORE_SOURCE_OBSERVATION_CAPTURE.with(|hook| {
-            *hook.borrow_mut() = Some(Box::new(move || {
-                state.cancel_queued_prompt(&id, &prompt_id).unwrap();
-            }));
-        });
+        assert!(fixture.state.inner.lock().unwrap().find_visible_session_index(&fixture.id).is_some());
     }
-    let outcome = deliver_turn_dispatch(&claimed.state, dispatch);
-    let requests = claimed.transport.requests();
-    let premature_closes = requests
-        .iter()
-        .filter(|r| r.request["operation"] == "turn_checkpoint")
-        .count();
-    // Always release and join the real writer before a failing assertion.
-    ready.store(true, Ordering::SeqCst);
-    let recovery = claimed
-        .state
-        .resume_local_session_queue(&claimed.session_id, None);
-    writer.finish();
-    if superseded {
-        assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Superseded));
-    } else {
-        assert!(matches!(outcome, TurnDispatchDeliveryOutcome::Held { .. }));
-    }
-    assert_eq!(
-        premature_closes, 0,
-        "a failed deletion marker ACK must park capture settlement until explicit Resume"
-    );
-    recovery.unwrap();
-    assert_eq!(
-        claimed
-            .transport
-            .requests()
-            .iter()
-            .filter(|r| r.request["operation"] == "turn_checkpoint")
-            .count(),
-        1
-    );
-    assert!(claimed.runtime_rx.try_recv().is_err());
 }
 
+fn observation_closing_job(fixture: &ObservationSession) -> EngramRuntimeClosingJob {
+    let root = FsPath::new(&fixture.state.default_workdir);
+    EngramRuntimeClosingJob::new(observation_trace(), None, EngramRuntimeClosingScope {
+        binding: Some(observation_binding()), store: observation_store(root),
+        connection: observation_connection(root), historical_fields: BTreeMap::new(),
+        root: EngramNamedRootState::None, workdir: fixture.state.default_workdir.clone(),
+    })
+}
+
+#[test]
+fn ordinary_observation_superseded_capture_cannot_overwrite_a_newer_closing_job() {
+    let fixture = ObservationSession::new();
+    let old = observation_closing_job(&fixture);
+    let mut newer = old.clone();
+    newer.attempts += 1;
+    newer.policy = Some(observation_policy());
+    fixture.record(|record| record.engram.unadmitted_closing_jobs.push(newer.clone()));
+    fixture.state.install_runtime_closing_result(&fixture.id, &old,
+        Ok(EngramRuntimeClosingOutcome::Report(fixture.report()))).unwrap();
+    fixture.record(|record| {
+        assert_eq!(record.engram.unadmitted_closing_jobs, vec![newer]);
+        assert!(record.engram.unadmitted_reports.is_empty());
+        assert!(record.engram.runtime_checkpoint.is_none());
+    });
+}
+
+#[test]
+fn ordinary_observation_delete_during_capture_transfers_custody_to_original_report() {
+    let fixture = ObservationSession::new();
+    let job = observation_closing_job(&fixture);
+    let report = fixture.report();
+    let mut successor = observation_trace();
+    successor.host_turn_ref = "newer-active-turn".into();
+    successor.generation += 1;
+    fixture.record(|record| {
+        record.engram.unadmitted_closing_jobs.push(job.clone());
+        record.engram.unadmitted_active_turn = Some(successor.clone());
+        record.active_turn_generation = successor.generation;
+        record.engram.observation_delete_requested = true;
+        record.set_auto_dispatch_blocked(true);
+    });
+    fixture.state.install_runtime_closing_result(&fixture.id, &job,
+        Ok(EngramRuntimeClosingOutcome::Report(report.clone()))).unwrap();
+    fixture.record(|record| {
+        assert!(record.engram.unadmitted_closing_jobs.is_empty());
+        assert_eq!(record.engram.unadmitted_reports, vec![report]);
+        assert_eq!(record.engram.unadmitted_active_turn, Some(successor));
+        assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
+        assert!(runtime_observation_has_removal_duty(record));
+    });
+}
+
+#[test]
+fn ordinary_observation_late_receipt_preserves_delete_marker_and_successor() {
+    let fixture = ObservationSession::new();
+    let report = fixture.report();
+    fixture.retain(report.clone());
+    fixture.record(|record| {
+        record.engram.observation_delete_requested = true;
+        record.set_auto_dispatch_blocked(true);
+        record.session.preview = "Delete retained this session".into();
+        record.engram.unadmitted_active_turn = Some(observation_trace());
+    });
+    fixture.state.install_runtime_observation_result(&fixture.id, &report, recorded_report(&report), 0).unwrap();
+    fixture.record(|record| {
+        assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
+        assert!(record.engram.unadmitted_active_turn.is_some());
+        assert_eq!(record.session.preview, "Delete retained this session");
+        assert!(record.engram.runtime_checkpoint.is_none());
+    });
+}
+
+#[test]
+fn ordinary_observation_closing_failure_retains_original_scope_without_inventing_a_report() {
+    let fixture = ObservationSession::new();
+    let mut job = observation_closing_job(&fixture);
+    job.attempts = ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS - 1;
+    fixture.record(|record| record.engram.unadmitted_closing_jobs.push(job.clone()));
+    fixture.state.install_runtime_closing_result(&fixture.id, &job,
+        Err(EngramTransportError::transport("capture unavailable"))).unwrap();
+    fixture.record(|record| {
+        let failed = &record.engram.unadmitted_closing_jobs[0];
+        assert_eq!(failed.scope, job.scope);
+        assert_eq!(failed.trace, job.trace);
+        assert!(failed.terminal_failure.is_some());
+        assert!(record.engram.unadmitted_reports.is_empty());
+        assert!(record.engram.runtime_checkpoint.is_none());
+    });
+}
+
+#[test]
+fn ordinary_observation_delayed_result_after_connection_replacement_uses_retained_scope() {
+    let fixture = ObservationSession::new();
+    let report = fixture.report();
+    fixture.retain(report.clone());
+    fixture.record(|record| {
+        record.engram.work_binding = Some(EngramControlWorkBinding { run_id: "successor-run".into(), ..observation_binding() });
+    });
+    let transport = Arc::new(ObservationReplies::default());
+    transport.replies.lock().unwrap().push_back(Ok(observation_receipt(&report_observation(&report, 0), &report.observing_session)));
+    let adapter = observation_adapter(transport.clone(), FsPath::new(&fixture.state.default_workdir));
+    let next = deliver_runtime_observation_envelope(&adapter, &report, 0, Duration::from_secs(1)).unwrap();
+    fixture.state.install_runtime_observation_result(&fixture.id, &report, next, 0).unwrap();
+    let sent = transport.sent.lock().unwrap();
+    assert_eq!(sent[0].0, report.connection);
+    assert_eq!(sent[0].1, report.envelopes[0].request);
+    fixture.record(|record| assert_eq!(record.engram.work_binding.as_ref().unwrap().run_id, "successor-run"));
+}
+
+#[test]
+fn ordinary_observation_delete_ack_requires_commit_receipt_and_current_owner() {
+    for race in ["lost_ack", "owner_changed", "success"] {
+        let mut fixture = ObservationSession::new();
+        fixture.retain(fixture.report());
+        fixture.record(|record| {
+            record.engram.observation_delete_requested = true;
+            record.set_auto_dispatch_blocked(true);
+        });
+        let (tx, rx) = std::sync::mpsc::channel();
+        fixture.state.persist_tx = tx;
+        let state = fixture.state.clone();
+        let id = fixture.id.clone();
+        let task = std::thread::spawn(move || state.confirm_source_observation_removal_durable(&id));
+        let fence = loop {
+            match rx.recv_timeout(DEADLOCK_GUARD).expect("removal must issue a bounded persistence fence") {
+                PersistRequest::Fence(fence) => break fence,
+                _ => {},
+            }
+        };
+        assert!(matches!(&fence.target, PersistFenceTarget::EngramObservationRemoval { .. }));
+        let delta = collect_persist_delta_from_shared_state(&fixture.state.inner, 0);
+        let mut cache = SqlitePersistConnectionCache::new();
+        persist_delta_via_cache(&mut cache, fixture.state.persistence_path.as_ref(), &delta).unwrap();
+        assert!(fence.target.is_already_durable(cache.connection.as_ref().unwrap()).unwrap());
+        if race == "lost_ack" {
+            fence.finish(Err(PersistFenceError::WriteFailed("commit acknowledgement lost".into())));
+        } else if race == "owner_changed" {
+            fixture.record(|record| record.engram.unadmitted_reports[0].version += 1);
+            fence.finish(Ok(()));
+        } else {
+            fence.finish(Ok(()));
+        }
+        assert_eq!(task.join().unwrap().is_ok(), race == "success", "wrong disposition for {race}");
+        fixture.record(|record| {
+            assert!(record.engram.observation_delete_requested);
+            assert!(record.orchestrator_auto_dispatch_blocked);
+            assert!(runtime_observation_has_removal_duty(record));
+        });
+    }
+}
+
+#[test]
+fn ordinary_observation_retired_process_cannot_install_delayed_capture_or_receipt() {
+    let fixture = ObservationSession::new();
+    let report = fixture.report();
+    let job = observation_closing_job(&fixture);
+    fixture.retain(report.clone());
+    fixture.record(|record| record.engram.unadmitted_closing_jobs.push(job.clone()));
+    fixture.state.runtime_observation_lifetime.stop_and_join();
+    fixture.state.install_runtime_observation_result(&fixture.id, &report, recorded_report(&report), 0).unwrap();
+    fixture.state.install_runtime_closing_result(&fixture.id, &job,
+        Ok(EngramRuntimeClosingOutcome::Report(report.clone()))).unwrap();
+    fixture.record(|record| {
+        assert_eq!(record.engram.unadmitted_reports, vec![report]);
+        assert_eq!(record.engram.unadmitted_closing_jobs, vec![job]);
+        assert!(record.engram.runtime_checkpoint.is_none());
+    });
+}
 #[test]
 fn source_observation_delete_remote_refusal_preserves_proxy_queue_authority() {
     let state = test_app_state();
@@ -429,7 +298,7 @@ fn source_observation_delete_remote_refusal_preserves_proxy_queue_authority() {
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&local).unwrap()];
     assert!(
-        !record.engram.source_observation_delete_requested,
+        !record.engram.observation_delete_requested,
         "failed ordinary remote Delete must not install local recovery authority"
     );
     assert!(!record.orchestrator_auto_dispatch_blocked);

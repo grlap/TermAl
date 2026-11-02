@@ -299,14 +299,7 @@ struct PromptImageAttachment {
 struct ClaudePendingApproval {
     permission_mode_for_session: Option<String>,
     request_id: String,
-    /// The tool the request is for, so an approval given later is checked
-    /// again by the same rules (`claude_gate_write_guard.rs`).
-    tool_name: String,
     tool_input: Value,
-    /// The directory a relative target was resolved against when the
-    /// request arrived, the runtime's own, so the later check resolves it
-    /// the same way.
-    cwd: String,
 }
 
 /// Represents an AskUserQuestion permission request waiting for structured
@@ -498,6 +491,9 @@ impl AcpPendingApproval {
 ///   call. Outside that window it must be false.
 #[derive(Default)]
 struct AcpRuntimeState {
+    // Set by the serialized prompt writer before the request is flushed.
+    // Reader events retain this owner rather than borrowing a successor's.
+    observation_turn_generation: Option<u64>,
     /// Writer-owned: set only after the first host-guided prompt is flushed.
     /// Process-local; external-session resume skips teaching independently.
     host_guidance_sent: bool,
@@ -587,7 +583,6 @@ enum TurnDispatch {
         active_turn_generation: u64,
         opening_prompt: Option<EngramOpeningPrompt>,
         command: ClaudePromptCommand,
-        engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
         runtime_token: RuntimeToken,
         sender: Sender<ClaudeRuntimeCommand>,
@@ -600,7 +595,6 @@ enum TurnDispatch {
         opening_prompt: Option<EngramOpeningPrompt>,
         command: CodexPromptCommand,
         service_tier: Result<Option<String>>,
-        engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
         runtime_token: RuntimeToken,
         sender: Sender<CodexRuntimeCommand>,
@@ -612,7 +606,6 @@ enum TurnDispatch {
         active_turn_generation: u64,
         opening_prompt: Option<EngramOpeningPrompt>,
         command: AcpPromptCommand,
-        engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
         runtime_token: RuntimeToken,
         sender: Sender<AcpRuntimeCommand>,
@@ -659,23 +652,6 @@ impl TurnDispatch {
             Self::PersistentClaude { session_id, .. }
             | Self::PersistentCodex { session_id, .. }
             | Self::PersistentAcp { session_id, .. } => session_id,
-        }
-    }
-
-    fn engram_dispatch_generation(&self) -> Option<u64> {
-        match self {
-            Self::PersistentClaude {
-                engram_dispatch_generation,
-                ..
-            }
-            | Self::PersistentCodex {
-                engram_dispatch_generation,
-                ..
-            }
-            | Self::PersistentAcp {
-                engram_dispatch_generation,
-                ..
-            } => *engram_dispatch_generation,
         }
     }
 

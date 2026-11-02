@@ -56,7 +56,6 @@ export type ComposerSessionSnapshot = Readonly<{
   codexFastMode?: boolean;
   committedDraft: string;
   cursorMode?: CursorMode | null;
-  engramBootRecoveryPending?: boolean;
   draftAttachments: readonly ComposerDraftAttachment[];
   geminiApprovalMode?: GeminiApprovalMode | null;
   opencodeModel?: string | null;
@@ -92,7 +91,6 @@ export type SessionSummarySnapshot = Readonly<{
   codexThreadState?: Session["codexThreadState"];
   codexFastMode?: boolean;
   cursorMode?: CursorMode | null;
-  engramBootRecoveryPending?: boolean;
   externalSessionId?: string | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
   opencodeModel?: string | null;
@@ -513,7 +511,6 @@ function buildComposerSessionSnapshot(
     previous.codexFastMode === session.codexFastMode &&
     previous.sandboxMode === session.sandboxMode &&
     previous.cursorMode === session.cursorMode &&
-    previous.engramBootRecoveryPending === session.engramBootRecoveryPending &&
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
     previous.opencodeModel === session.opencodeModel &&
@@ -548,7 +545,6 @@ function buildComposerSessionSnapshot(
     codexFastMode: session.codexFastMode,
     committedDraft,
     cursorMode: session.cursorMode,
-    engramBootRecoveryPending: session.engramBootRecoveryPending,
     draftAttachments: nextDraftAttachments,
     geminiApprovalMode: session.geminiApprovalMode,
     opencodeModel: session.opencodeModel,
@@ -698,7 +694,6 @@ function buildSessionSummarySnapshot(
     previous.workdir === session.workdir &&
     previous.projectId === session.projectId &&
     previous.remoteId === session.remoteId &&
-    previous.engramBootRecoveryPending === session.engramBootRecoveryPending &&
     previous.status === session.status &&
     previous.model === session.model &&
     previous.modelOptions === nextModelOptions &&
@@ -741,7 +736,6 @@ function buildSessionSummarySnapshot(
     codexThreadState: session.codexThreadState,
     codexFastMode: session.codexFastMode,
     cursorMode: session.cursorMode,
-    engramBootRecoveryPending: session.engramBootRecoveryPending,
     externalSessionId: session.externalSessionId,
     geminiApprovalMode: session.geminiApprovalMode,
     opencodeModel: session.opencodeModel,

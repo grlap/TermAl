@@ -10,7 +10,6 @@ enum DelegationInventoryState {
         token: String,
         source: FederationImageFileIdentity,
         worker_started: bool,
-        queue_pause_images: Vec<OrdinaryQueueLoadPause>,
     },
     Failed {
         reason: &'static str,
@@ -137,16 +136,15 @@ impl AppState {
     fn load_delegation_inventory_observed(
         &self,
         mut observe: impl FnMut(&str),
-    ) -> Result<Option<EngramBootRecoveryPlan>> {
+    ) -> Result<()> {
         let (token, source) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             match &mut inner.delegation_inventory {
-                DelegationInventoryState::Ready => return Ok(None),
+                DelegationInventoryState::Ready => return Ok(()),
                 DelegationInventoryState::Loading {
                     token,
                     source,
                     worker_started,
-                    ..
                 } if !*worker_started => {
                     *worker_started = true;
                     (token.clone(), source.clone())
@@ -247,45 +245,26 @@ impl AppState {
                 *inner.delegation_catalog_children.get_mut().expect("catalog child index poisoned") =
                     catalog_children;
                 inner.repair_delegation_child_session_links_with(links);
-                let queue_pause_images = match std::mem::replace(
-                    &mut inner.delegation_inventory, DelegationInventoryState::Ready,
-                ) {
-                    DelegationInventoryState::Loading { queue_pause_images, .. } => queue_pause_images,
-                    _ => unreachable!("publication owner was checked above"),
-                };
+                inner.delegation_inventory = DelegationInventoryState::Ready;
                 // Publication is linearized while external SQL writers are
                 // excluded. Release before recovery can synchronously persist.
                 drop(publication.take());
-                restore_ordinary_queue_load_pauses(&mut inner, queue_pause_images);
                 inner.recover_interrupted_delegations();
-                let revision = inner.revision;
-                let prepared = self
-                    .prepare_engram_sessions_for_boot_recovery_locked(&mut inner)
-                    .and_then(|plan| {
-                        if inner.revision == revision {
-                            self.commit_locked(&mut inner)?;
-                        }
-                        Ok(plan)
-                    });
-                let plan = match prepared {
-                    Ok(plan) => plan,
-                    Err(error) => {
-                        inner.delegation_inventory = DelegationInventoryState::Failed {
-                            reason: "recoveryPreparationFailed",
-                        };
-                        drop(inner);
-                        eprintln!("startup> inventory recovery preparation failed: {error:#}");
-                        return Err(error);
-                    }
-                };
+                if let Err(error) = self.commit_locked(&mut inner) {
+                    inner.delegation_inventory = DelegationInventoryState::Failed {
+                        reason: "recoveryPreparationFailed",
+                    };
+                    drop(inner);
+                    eprintln!("startup> inventory recovery preparation failed: {error:#}");
+                    return Err(error);
+                }
                 let count = inner.delegations.len();
                 drop(inner);
-                drop(self.engram_retry_slots.release_boot_hold_on_drop());
                 eprintln!(
                     "startup> delegation inventory complete rows={count} elapsed_ms={}",
                     started.elapsed().as_millis()
                 );
-                Ok(Some(plan))
+                Ok(())
             }
             Err(error) => {
                 inner.delegation_inventory = DelegationInventoryState::Failed {

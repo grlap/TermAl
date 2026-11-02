@@ -11,8 +11,7 @@ fn ready_receipt(root: &FsPath) -> Value {
         "schema_version": 1, "scope": "readiness", "ready": true,
         "full_audit": "not_run", "mutation_enabled": false, "work_schema_version": 1,
         "project_id": "readiness-test", "database": fs::canonicalize(database).unwrap(),
-        "host_path_policy": {"stored":"case_sensitive", "resolved":"case_sensitive", "status":"matched"},
-        "control": {"required_assurance":"turn_gated"}
+        "host_path_policy": {"stored":"case_sensitive", "resolved":"case_sensitive", "status":"matched"}
     })
 }
 
@@ -20,22 +19,17 @@ fn ready_receipt(root: &FsPath) -> Value {
 fn readiness_admission_rejects_unsupported_envelopes_paths_and_identity() {
     let root = TestTempRoot::create("readiness-admission");
     let valid = ready_receipt(root.path());
-    let admit = |value: Value, premium| -> Result<EngramAuthorityStoreKey, String> {
+    let admit = |value: Value| -> Result<EngramAuthorityStoreKey, String> {
         let receipt: EngramReadinessReceipt =
             serde_json::from_value(value).map_err(|e| e.to_string())?;
         validate_engram_readiness(
             &receipt,
             &root.path().join(".engram-project"),
             root.path(),
-            premium,
         )
         .map_err(|e| e.message)
     };
-    assert!(admit(valid.clone(), true).is_ok());
-    assert!(
-        admit(valid.clone(), false).is_ok(),
-        "base access is unmediated, not control assurance"
-    );
+    assert!(admit(valid.clone()).is_ok());
     for (pointer, replacement) in [
         ("/schema_version", json!(2)),
         ("/scope", json!("doctor")),
@@ -50,28 +44,21 @@ fn readiness_admission_rejects_unsupported_envelopes_paths_and_identity() {
         ("/project_id", json!("another-project")),
         ("/database", json!("relative.db")),
         ("/database", json!(root.path().join("wrong.db"))),
-        ("/control/required_assurance", json!("action_gated")),
-        ("/control/required_assurance", json!("unknown")),
     ] {
         let mut invalid = valid.clone();
         *invalid.pointer_mut(pointer).unwrap() = replacement;
-        assert!(admit(invalid, true).is_err(), "{pointer} must fail closed");
+        assert!(admit(invalid).is_err(), "{pointer} must fail closed");
     }
-    let mut advisory = valid.clone();
-    advisory["control"]["required_assurance"] = json!("advisory");
-    assert!(admit(advisory.clone(), false).is_ok());
-    assert!(admit(advisory, true).is_err());
     for field in [
         "scope",
         "full_audit",
-        "control",
         "host_path_policy",
         "database",
         "work_schema_version",
     ] {
         let mut missing = valid.clone();
         missing.as_object_mut().unwrap().remove(field);
-        assert!(admit(missing, true).is_err(), "missing {field}");
+        assert!(admit(missing).is_err(), "missing {field}");
     }
 }
 
@@ -129,7 +116,7 @@ fn readiness_large_outputs_are_bounded_refusals_without_fallback() {
         fs::write(root.join(".engram-project"), mode).unwrap();
         let draft = || UpdateProjectEngramSettingsRequest {
             enabled: true,
-            turn_gated_control: true,
+            execution_observability: Some(true),
             acceptance_evaluation: None,
             binary_path: None,
             home: None,
@@ -285,7 +272,7 @@ fn diagnostic_declaration_invalid_preflight_never_launches_readiness_or_audit() 
         assert!(run_engram_readiness(&binary, &marker, &root, &root, &root,).is_err());
         let draft = || UpdateProjectEngramSettingsRequest {
             enabled: true,
-            turn_gated_control: true,
+            execution_observability: Some(true),
             acceptance_evaluation: None,
             binary_path: None,
             home: None,
@@ -387,7 +374,7 @@ async fn readiness_verify_save_and_explicit_audit_routes_are_separate() {
                     .method(method)
                     .uri(uri)
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"enabled":true,"turnGatedControl":true}"#))
+                    .body(Body::from(r#"{"enabled":true,"executionObservability":true}"#))
                     .unwrap(),
             )
             .await
@@ -601,7 +588,7 @@ fn readiness_process_failures_never_fall_back_to_doctor_or_save() {
                 &id,
                 UpdateProjectEngramSettingsRequest {
                     enabled: true,
-                    turn_gated_control: true,
+                    execution_observability: Some(true),
                     acceptance_evaluation: None,
                     binary_path: None,
                     home: None,
@@ -657,8 +644,6 @@ fn real_readiness_verify_save_audit_disposable_store() {
         .arg(&home)
         .args([
             "init",
-            "--required-assurance",
-            "turn_gated",
             "--authorized-by",
             "termal-test",
         ])
@@ -678,7 +663,7 @@ fn real_readiness_verify_save_audit_disposable_store() {
     }
     let draft = || UpdateProjectEngramSettingsRequest {
         enabled: true,
-        turn_gated_control: true,
+        execution_observability: Some(true),
         acceptance_evaluation: None,
         binary_path: None,
         home: None,
@@ -696,7 +681,7 @@ fn real_readiness_verify_save_audit_disposable_store() {
     {
         let inner = state.inner.lock().unwrap();
         let saved = inner.find_project(&id).unwrap().engram.as_ref().unwrap();
-        assert!(saved.enabled && saved.turn_gated_control);
+        assert!(saved.enabled && saved.execution_observability);
         assert_eq!(
             saved.authority_store_key.as_ref().unwrap().project_id,
             "termal-readiness-disposable"
@@ -721,11 +706,11 @@ fn real_readiness_verify_save_audit_disposable_store() {
         .as_ref()
         .unwrap();
     assert!(
-        persisted.enabled && persisted.turn_gated_control,
+        persisted.enabled && persisted.execution_observability,
         "saved settings survive reloading the disposable TermAl database"
     );
     println!(
-        "DISPOSABLE evidence: verify={}ms save={}ms audit={}ms enabled=true turnGatedControl=true; not a live-host acceptance",
+        "DISPOSABLE evidence: verify={}ms save={}ms audit={}ms enabled=true executionObservability=true; not a live-host acceptance",
         verify.elapsed_ms, save_ms, audit.elapsed_ms
     );
 }

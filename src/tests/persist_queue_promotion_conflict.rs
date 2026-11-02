@@ -34,19 +34,17 @@ fn queue_fixture(source: Option<QueuedPromptSource>) -> QueueFixture {
         record.session.prompt_history = vec!["earlier prompt".into()];
         record.prompt_history_mutation_stamp = record.mutation_stamp;
         record.set_auto_dispatch_blocked(true);
-        let bad_prompt = if let Some(source) = source {
-            let owner = queue_admission_owner(record);
+        let bad_prompt = format!("ack-head-{bad}");
+        if let Some(source) = source {
+            queue_ordinary_prompt(record, &bad_prompt);
             record.queued_prompts[0].source = source;
-            owner.prompt_id
-        } else {
-            format!("ack-head-{bad}")
-        };
+        }
         let record = inner.session_mut(&good).unwrap();
         record.runtime = SessionRuntime::Claude(good_runtime);
         record.session.status = SessionStatus::Idle;
         record.set_auto_dispatch_blocked(true);
         if let Some(source) = source {
-            queue_admission_owner(record);
+            queue_ordinary_prompt(record, &format!("ack-head-{good}"));
             record.queued_prompts[0].source = source;
         }
         (bad, good, bad_prompt, bad_input, good_input)
@@ -168,7 +166,58 @@ fn direct_queued_promotion_sql_conflict_uses_the_existing_rollback_owner() {
     assert_original_head_retained(&fixture);
 }
 
-fn causal_card() -> EngramControlCard {
+#[test]
+fn refused_ordinary_promotion_does_not_lend_its_trace_to_a_different_prompt() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = ordinary_queue_fixture();
+    let root = fixture._store.root.path();
+    let project = create_test_project(&fixture.state, root, "ordinary observation rollback");
+    crate::tests::engram_host_adapter::enable_test_project_engram(&fixture.state, &project, root);
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        inner.projects.iter_mut().find(|row| row.id == project).unwrap()
+            .engram.as_mut().unwrap().authority_store_key = Some(EngramAuthorityStoreKey {
+                database_path: root.join("observation-fixture.db"), project_id: project.clone(),
+            });
+        let record = inner.session_mut(&fixture.bad).unwrap();
+        record.session.project_id = Some(project);
+        assert!(record.engram.unadmitted_active_turn.is_none());
+    }
+    let error = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.bad).unwrap();
+        fixture.state.start_and_commit_queued_dispatch_locked(
+            &mut inner, index, None, &fixture.bad_prompt,
+        ).err().expect("the real SQL conflict must refuse promotion")
+    };
+    assert!(format!("{error:#}").contains("UNIQUE constraint failed"));
+    assert_original_head_retained(&fixture);
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.bad).unwrap();
+        let record = &mut inner.sessions[index];
+        assert!(record.engram.unadmitted_active_turn.is_none(), "unsent trace rolled back");
+        // Preserve the old intent separately, then select a genuinely different
+        // prompt at the same restored generation after correcting the row.
+        let mut replacement = record.queued_prompts.front().unwrap().clone();
+        replacement.pending_prompt.id = "different-observed-prompt".into();
+        replacement.pending_prompt.text = "a different ordinary task".into();
+        record.queued_prompts[0] = replacement;
+        record.session.messages[0] = message("body-2");
+        record.message_positions = build_message_positions(&record.session.messages);
+        let started = fixture.state.start_and_commit_queued_dispatch_locked(
+            &mut inner, index, None, "different-observed-prompt",
+        ).unwrap();
+        assert!(started.is_some());
+        let record = &inner.sessions[index];
+        let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        assert_eq!(trace.notice_message_id, "different-observed-prompt");
+        assert_eq!(trace.generation, fixture.bad_generation + 1);
+        assert!(trace.commands.is_empty());
+    }
+}
+
+fn historical_causal_card() -> EngramControlCard {
     let mut cause = EngramCausalFailure::local(
         &EngramTransportError::transport("retained concrete control failure"),
         "turn_evaluate", "synchronous card write",
@@ -178,7 +227,7 @@ fn causal_card() -> EngramControlCard {
         causal_failure: Some(cause),
         schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
         stage: EngramControlStage::Dispatch,
-        assurance: ENGRAM_CONTROL_ASSURANCE.into(),
+        assurance: "turn_gated".into(),
         decision: EngramControlCardDecision::Refuse,
         dispatch: EngramControlCardDispatch::Withheld,
         refusal_code: Some("control_unavailable".into()),
@@ -198,13 +247,13 @@ fn causal_card() -> EngramControlCard {
 }
 
 #[test]
-fn causal_publication_waits_for_its_own_session_after_partial_synchronous_save() {
+fn historical_cause_reaches_only_its_own_committed_row_after_partial_synchronous_save() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let (store, state, bad, good) = partial_synchronous_fixture(false);
-    let (bad_index, good_index, bad_publication, good_publication) = {
+    let (bad_index, good_index) = {
         let mut inner = state.inner.lock().unwrap();
-        // Causal publication allocates local body sequences. This test's
-        // saved sibling is local, unlike the proxy-retry fixture's default.
+        // This test's saved sibling is local, unlike the proxy-retry
+        // fixture's default, so its own row really carries the transcript.
         let record = inner.session_mut(&good).unwrap();
         record.remote_id = None;
         record.remote_session_id = None;
@@ -214,38 +263,43 @@ fn causal_publication_waits_for_its_own_session_after_partial_synchronous_save()
             let record = inner.session_mut(id).unwrap();
             indexes.push(push_message_on_record(record, Message::EngramControl {
                 id: format!("causal-{id}"), timestamp: stamp_now(), author: Author::Assistant,
-                card: causal_card(),
+                card: historical_causal_card(),
             }));
         }
-        let (_, outcome) = state.commit_locked_with_persist_outcome(&mut inner).unwrap();
-        let bad_publication = state.prepare_engram_causal_publication_locked(&inner, &bad, indexes[0], &outcome);
-        let good_publication = state.prepare_engram_causal_publication_locked(&inner, &good, indexes[1], &outcome);
-        (indexes[0], indexes[1], bad_publication, good_publication)
+        state.commit_locked_with_persist_outcome(&mut inner).unwrap();
+        (indexes[0], indexes[1])
     };
-    assert!(bad_publication.is_none());
-    assert!(good_publication.is_some());
-    state.finish_engram_causal_publication(good_publication);
+    // In memory the cause stays hidden: no publication callback runs.
     let visible = |id: &str, index| {
         let inner = state.inner.lock().unwrap();
         serde_json::to_value(&inner.sessions[inner.find_session_index(id).unwrap()].session.messages[index])
             .unwrap().get("causalFailure").is_some()
     };
+    // The committed row alone carries the cause, and only for its own session.
+    let stored_causes = |id: &str| -> Vec<bool> {
+        let connection = store.cache.connection.as_ref().unwrap();
+        let mut statement = connection.prepare(
+            "SELECT value_json FROM messages WHERE session_id=?1 AND message_id=?2",
+        ).unwrap();
+        statement.query_map(rusqlite::params![id, format!("causal-{id}")], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|json| serde_json::from_str::<Value>(&json.unwrap()).unwrap().get("causalFailure").is_some())
+            .collect()
+    };
     assert!(!visible(&bad, bad_index));
-    assert!(visible(&good, good_index));
-    let connection = store.cache.connection.as_ref().unwrap();
-    assert_eq!(connection.query_row("SELECT count(*) FROM messages WHERE session_id=?1 AND message_id=?2",
-        rusqlite::params![bad, format!("causal-{bad}")], |row| row.get::<_, i64>(0)).unwrap(), 0);
-    let publication = {
+    assert!(!visible(&good, good_index));
+    assert_eq!(stored_causes(&bad), Vec::<bool>::new(), "the rejected own row stores no card");
+    assert_eq!(stored_causes(&good), [true], "the saved sibling's committed row carries its cause");
+    {
         let mut inner = state.inner.lock().unwrap();
         let record = inner.session_mut(&bad).unwrap();
         record.session.messages[0] = message("body-2");
         record.message_positions = build_message_positions(&record.session.messages);
-        let (_, outcome) = state.commit_locked_with_persist_outcome(&mut inner).unwrap();
-        state.prepare_engram_causal_publication_locked(&inner, &bad, bad_index, &outcome)
-    };
-    assert!(publication.is_some());
-    state.finish_engram_causal_publication(publication);
-    assert!(visible(&bad, bad_index));
+        state.commit_locked_with_persist_outcome(&mut inner).unwrap();
+    }
+    assert_eq!(stored_causes(&bad), [true], "the corrected own row now commits its cause");
+    assert_eq!(stored_causes(&good), [true]);
+    assert!(!visible(&bad, bad_index), "a commit does not recreate a publication callback");
 }
 
 #[test]
@@ -278,10 +332,23 @@ fn send_human(
     }
 }
 
+/// The session's own-row ACK image is scoped to it and already committed:
+/// nothing about its queue, deliveries, holds or choices awaits a save.
+fn own_row_image_is_durable(state: &AppState, inner: &StateInner, session: &str) -> bool {
+    let record = &inner.sessions[inner.find_session_index(session).unwrap()];
+    let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
+    PersistFenceTarget::OrdinarySessionRow {
+        session_id: session.to_owned(),
+        content: ordinary_session_row_persisted_content(&PersistedSessionRecord::from_record(record)),
+    }
+        .is_already_durable(&connection)
+        .unwrap()
+}
+
 fn human_selection(state: &AppState, session: &str) -> HumanPromptSelection {
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(session).unwrap()];
-    assert!(human_prompt_persistence_fence(&inner, session).unwrap().is_none());
+    assert!(own_row_image_is_durable(state, &inner, session));
     assert!(record.prompt_deliveries.is_empty(), "exercise an unreceipted Human head");
     HumanPromptSelection {
         prompt: projected_pending_prompts(record)[0].clone(),
@@ -306,7 +373,8 @@ fn human_intake_sql_conflict_leaves_the_draft_unaccepted_and_sibling_delivers() 
     assert_eq!(stored_ids(&fixture, &fixture.bad), ["body-0", "body-1", "body-2"]);
     {
         let inner = fixture.state.inner.lock().unwrap();
-        assert!(human_prompt_persistence_fence(&inner, &fixture.bad).unwrap().is_none());
+        assert!(own_row_image_is_durable(&fixture.state, &inner, &fixture.bad),
+            "a rejected draft leaves no unsaved own-row image");
         let record = &inner.sessions[inner.find_session_index(&fixture.bad).unwrap()];
         assert!(record.queued_prompts.is_empty());
         assert!(record.human_prompt_turn.is_none());

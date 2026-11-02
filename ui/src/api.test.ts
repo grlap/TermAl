@@ -129,7 +129,6 @@ describe("updateEngramHostSettings", () => {
         developerName: "dev",
         binaryPath: "C:\\tools\\engram.exe",
         home: "C:\\EngramHome",
-        bootRecoveryBudgetMs: 5_000,
       }),
     ).resolves.toEqual(result);
 
@@ -142,7 +141,6 @@ describe("updateEngramHostSettings", () => {
       developerName: "dev",
       binaryPath: "C:\\tools\\engram.exe",
       home: "C:\\EngramHome",
-      bootRecoveryBudgetMs: 5_000,
     });
   });
 });
@@ -223,7 +221,7 @@ describe("verifyProjectEngramSettings", () => {
       home: "C:\\Users\\greg\\.engram",
       projectId: "engram-project-1",
       database: "C:\\Users\\greg\\.engram\\engram.db",
-      requiredAssurance: "turn_gated",
+
       ready: true,
       fullAudit: "not_run",
       hostPathStatus: "matched",
@@ -240,7 +238,7 @@ describe("verifyProjectEngramSettings", () => {
     await expect(
       verifyProjectEngramSettings("project/one two", {
         enabled: true,
-        turnGatedControl: true,
+        executionObservability: true,
         binaryPath: "engram",
         home: "%USERPROFILE%\\.engram",
       }),
@@ -253,7 +251,7 @@ describe("verifyProjectEngramSettings", () => {
     const [, init] = fetchMock.mock.calls[0] ?? [];
     expect(JSON.parse(String(init?.body))).toEqual({
       enabled: true,
-      turnGatedControl: true,
+      executionObservability: true,
       binaryPath: "engram",
       home: "%USERPROFILE%\\.engram",
     });

@@ -213,8 +213,9 @@ fn superseded_or_deadline_exhausted_candidate_recovery_never_admits() {
 }
 
 /// What an attempted automatic pass that keeps this fixture's root reports:
-/// the fixture has no eligible reader, and that check comes first.
-const KEPT_ROOT_OUTCOME: &str = "state unknown: no eligible reader in the original store; entry retained";
+/// ordinary reader eligibility no longer needs a routing token. This fixture
+/// has a current binding, so its existing owner must reconcile it.
+const KEPT_ROOT_OUTCOME: &str = "the entry now has a current binding; its existing owner must reconcile it";
 
 #[test]
 fn a_kept_roots_pass_outcome_and_cooldown_are_named_in_the_in_flight_refusal() {

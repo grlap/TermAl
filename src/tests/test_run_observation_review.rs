@@ -17,7 +17,7 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
         claim_id: "original-claim".to_owned(),
         claim_fence: 1,
     };
-    {
+    let original_turn = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
         let record = &mut inner.sessions[index];
@@ -25,8 +25,9 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
         record.runtime = SessionRuntime::Acp(runtime);
         record.active_turn_generation = 5;
         record.engram.work_binding = Some(original.clone());
-        record.engram.active_grant_id = Some("original-grant".to_owned());
-    }
+        adopt_runtime_observation(record, "original-prompt", 5, None);
+        record.engram.observed_turn_ref().unwrap().to_owned()
+    };
     let mut turn_state = AcpTurnState::default();
     let mut recorder = SessionRecorder::new(fixture.state.clone(), session.clone());
     handle_acp_session_update(
@@ -62,7 +63,10 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
         let record = &mut inner.sessions[index];
         record.active_turn_generation = 6;
         record.engram.work_binding.as_mut().unwrap().work_id = "successor-work".to_owned();
-        record.engram.active_grant_id = None;
+        // Fixture a distinct successor boundary through the current trace owner.
+        record.engram.unadmitted_active_turn = None;
+        adopt_runtime_observation(record, "successor-prompt", 6, None);
+        assert_ne!(record.engram.observed_turn_ref(), Some(original_turn.as_str()));
     }
     for status in ["pending", "in_progress", "pending"] {
         handle_acp_session_update(
@@ -90,7 +94,7 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
             Some(original_start.as_str())
         );
         assert_eq!(row.work_binding.as_ref(), Some(&original));
-        assert_eq!(row.grant_identity, Some(sha256_hex(b"original-grant")));
+        assert_eq!(row.grant_identity, Some(sha256_hex(original_turn.as_bytes())));
         assert_eq!(row.turn_generation, 5);
         assert!(row.evidence.is_empty());
         assert!(

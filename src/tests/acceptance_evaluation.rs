@@ -76,7 +76,7 @@ type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>
 /// These request/submission fixtures begin after a canonical no-event read
 /// has settled. Enabling a store alone no longer establishes naming absence.
 fn install_store(state: &AppState, project: &str, root: &FsPath) {
-    super::engram_host_adapter::select_scripted_engram_budget_clock_before_enable(state);
+    state.select_test_scripted_engram_budget_clock();
     install_store_on_chosen_clock(state, project, root);
 }
 
@@ -488,6 +488,22 @@ fn show_receipt(pin: Option<&str>) -> Value {
         receipt["status"]["work"]["evaluation_mode"] = json!(pin);
     }
     receipt
+}
+
+/// A producer-shaped notes+gates catalog window. Callers supply the exact
+/// index boundary; it is independent of the task's acceptance/evidence bases.
+fn canonical_notes_window(
+    total: u64,
+    newer: u64,
+    shown: u64,
+    position: i64,
+    after: Option<&str>,
+) -> Value {
+    json!({"selection":"newest_first", "order":"oldest_first",
+        "newer":newer, "older":total - newer - shown, "shown":shown,
+        "total":total, "after":after, "includes_gates":true,
+        "read_cut":{"project_position":position,
+            "observed_at":"2026-10-05T22:00:00Z", "valid_until_ms":1790000000000_i64}})
 }
 
 /// `engram work show REF --full --json`: the complete contract at revision 7,
@@ -2757,7 +2773,7 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
     let seen = calls.clone();
     let mut first = show_receipt(None);
     first["notes_omitted"] = json!(1);
-    first["notes_window"] = json!({"after": "s1-token", "older": 1, "newer": 0});
+    first["notes_window"] = canonical_notes_window(3, 0, 2, 42, Some("s1-token"));
     let reader = move |connection: &EngramConnectionConfig, args: &[String], _: Duration| {
         seen.lock()
             .unwrap()
@@ -2772,9 +2788,10 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
             Ok(full_receipt())
         } else if args.iter().any(|arg| arg == "--after") {
             Ok(json!({
+                "work": {"short_ref":"w-task", "title":"Ship the route"},
                 "notes": [{"locator": "99999999aaaa", "kind": "generic", "family": "notes",
                     "summary": "The oldest note"}],
-                "notes_window": {"after": null, "older": 0, "newer": 2}
+                "notes_window": canonical_notes_window(3, 2, 1, 43, None)
             }))
         } else {
             Ok(first.clone())
@@ -2829,7 +2846,7 @@ fn acceptance_request_reports_the_evidence_behind_a_refused_continuation() {
     let seen = calls.clone();
     let mut first = show_receipt(None);
     first["notes_omitted"] = json!(3);
-    first["notes_window"] = json!({"after": "s1-token", "older": 3, "newer": 0});
+    first["notes_window"] = canonical_notes_window(5, 0, 2, 42, Some("s1-token"));
     let reader = move |connection: &EngramConnectionConfig, args: &[String], _: Duration| {
         seen.lock()
             .unwrap()
@@ -5313,7 +5330,7 @@ fn engram_cli_stream_failures_name_the_operation_that_ran() {
 
 // ---- request budget ------------------------------------------------------
 
-/// A store whose evidence never ends: every page names a further one.
+/// A 100-note catalog: the bounded request always stops before its last page.
 fn endless_evidence_reader(
     calls: Arc<AtomicUsize>,
 ) -> impl Fn(
@@ -5333,11 +5350,21 @@ fn endless_evidence_reader(
         } else if args.iter().any(|arg| arg == "--full") {
             Ok(full_receipt())
         } else {
-            let mut page = show_receipt(None);
+            let continuation = args.iter().any(|arg| arg == "--after");
+            // The opening core read is call 0 and the initial notes read is
+            // call 1. Only continuation calls advance the catalog boundary.
+            let newer = if continuation { call as u64 - 1 } else { 0 };
+            let mut page = if continuation {
+                json!({"work":{"short_ref":"w-task", "title":"Ship the route"}})
+            } else {
+                show_receipt(None)
+            };
             page["notes"] = json!([{"locator": format!("{call:08x}cafe"), "kind": "generic",
                 "family": "notes"}]);
-            page["notes_window"] =
-                json!({"after": format!("token-{call}"), "older": 99, "newer": 0});
+            page["notes_omitted"] = json!(99 - newer);
+            page["notes_window"] = canonical_notes_window(
+                100, newer, 1, 42, Some(&format!("token-{call}")),
+            );
             Ok(page)
         }
     }
@@ -5617,7 +5644,9 @@ fn finished_evaluator_fixture(runtime: &str) -> (AppState, String, String, PathB
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&first_child).unwrap();
-        inner.sessions[index].engram.project_reset_in_progress = true;
+        // Model a busy child so its follow-up is admitted to the ordinary
+        // queue without starting another provider turn in this fixture.
+        inner.sessions[index].session.status = SessionStatus::Active;
     }
     (state, project, parent, root, first)
 }

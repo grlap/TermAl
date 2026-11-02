@@ -169,9 +169,9 @@ struct QueuedPromptRecord {
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
     engram_waiting: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_bind: Option<EngramQueuedBind>,
+    engram_bind: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_evaluate: Option<EngramQueuedEvaluate>,
+    engram_evaluate: Option<Value>,
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
     engram_interrupted: bool,
     source: QueuedPromptSource,
@@ -179,21 +179,27 @@ struct QueuedPromptRecord {
     pending_prompt: PendingPrompt,
 }
 
+impl QueuedPromptRecord {
+    // History protects immutable stored content from mailbox coalescing. It
+    // is never consulted as an authorization or a prerequisite to dispatch.
+    fn has_stored_history(&self) -> bool {
+        self.engram_bind.is_some() || self.engram_evaluate.is_some()
+            || self.engram_waiting || self.engram_interrupted
+            || self.engram_ordinary_handoff || self.promoted_message_index.is_some()
+            || !self.promotion_disposition_known
+    }
+}
+
 /// Syncs pending prompts.
 fn projected_pending_prompts(record: &SessionRecord) -> Vec<PendingPrompt> {
-    // A head an acknowledged abort record holds for its automatic retry is
-    // retained, but its delivery is known not to have happened: it projects
-    // as a retryable hold, not as an interrupted (delivery-unknown) one.
-    let retry_held_head = engram_abort_retry_holds_head(record);
     record
         .queued_prompts
         .iter()
-        .enumerate()
-        .map(|(position, queued)| {
+        .map(|queued| {
             let mut prompt = queued.pending_prompt.clone();
-            prompt.engram_interrupted =
-                queued.engram_interrupted && !(position == 0 && retry_held_head);
-            prompt.is_engram_retained = queued.is_engram_retained();
+            prompt.engram_interrupted = queued.engram_interrupted
+                || queued.engram_ordinary_handoff || !queued.promotion_disposition_known;
+            prompt.is_engram_retained = queued.has_stored_history();
             prompt
         })
         .collect()
@@ -239,7 +245,6 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
         .retain(|prompt_id, _| live_prompt_ids.contains(&prompt_id.as_str()));
     prune_queued_prompt_durability_holds(record);
     prune_prompt_deliveries(record);
-    prune_human_queue_choices(record);
     record.session.pending_prompts = projected_pending_prompts(record);
 }
 
@@ -614,7 +619,7 @@ fn append_to_tail_peer_message_batch(
         // (queued_prompt_durability.rs).
         (queued.source == source
             && queued.attachments.is_empty()
-            && !queued.is_engram_retained()
+            && !queued.has_stored_history()
             && !queued_prompt_kept_standalone(record, queued))
             .then(|| {
                 (
@@ -705,40 +710,24 @@ To reply, use the TermAl MCP tool `termal_send_to_session` with the `sessionId` 
 
 /// Handles prioritize user queued prompts.
 fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
-    if record
-        .queued_prompts
-        .front()
-        .is_some_and(QueuedPromptRecord::is_engram_retained)
-        || queued_head_held_for_durability(record)
-    {
+    if record.queued_prompts.iter().any(|queued| queued_prompt_held_for_durability(record, queued)) {
         return;
     }
-    let mut user_prompts = VecDeque::new();
-    let mut deferred_prompts = VecDeque::new();
-
-    while let Some(queued) = record.queued_prompts.pop_front() {
-        if matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human) {
-            user_prompts.push_back(queued);
-        } else {
-            deferred_prompts.push_back(queued);
-        }
+    let positions = record.queued_prompts.iter().enumerate()
+        .filter(|(_, queued)| ordinary_queue_entry_is_runnable(record, queued))
+        .map(|(position, _)| position).collect::<Vec<_>>();
+    let mut ordered = positions.iter().map(|position| record.queued_prompts[*position].clone())
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|queued| !matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human));
+    for (position, queued) in positions.into_iter().zip(ordered) {
+        record.queued_prompts[position] = queued;
     }
-
-    user_prompts.append(&mut deferred_prompts);
-    record.queued_prompts = user_prompts;
     sync_pending_prompts(record);
 }
 
 /// Clears queued prompts by source.
 fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedPromptSource) {
     let original_len = record.queued_prompts.len();
-    let dropped_begin = dropped_engram_intent_grant(
-        record,
-        record
-            .queued_prompts
-            .iter()
-            .filter(|queued| queued.source == source),
-    );
     let removed_head = handing_off_head(record);
     record
         .queued_prompts
@@ -747,37 +736,23 @@ fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedProm
         // A removed head promoted for its hand-off was never sent: its
         // receipt turns terminal in this same write (prompt_delivery.rs).
         settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
-        record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
     }
 }
 
 /// Clears queued prompts from `source`, except for the exact promoted head
 /// whose admitted provider handoff is owned by an in-flight public Stop.
-fn clear_queued_prompts_by_source_except_admission_owner(
+fn clear_queued_prompts_by_source_except_delivery_owner(
     record: &mut SessionRecord,
     source: QueuedPromptSource,
-    admission_owner: Option<&EngramQueuedAdmissionOwner>,
+    admission_owner: Option<&QueuedTurnOwner>,
 ) {
-    let preserve_head = admission_owner.is_some_and(|owner| owner.matches(record))
-        && record.queued_prompts.front().is_some_and(|queued| {
-            queued.source == source && queued.promoted_message_index.is_some()
-        });
-    // One predicate decides both what is dropped and what stays, so the
-    // begin recorded below is found over exactly the prompts that go.
-    let keep = |index: usize, queued: &QueuedPromptRecord| {
-        queued.source != source || (index == 0 && preserve_head)
+    let preserved_id = admission_owner.filter(|owner| owner.matches(record))
+        .map(|owner| owner.prompt_id.clone());
+    let keep = |_index: usize, queued: &QueuedPromptRecord| {
+        queued.source != source || preserved_id.as_ref() == Some(&queued.pending_prompt.id)
     };
     let original_len = record.queued_prompts.len();
-    let dropped_begin = dropped_engram_intent_grant(
-        record,
-        record
-            .queued_prompts
-            .iter()
-            .enumerate()
-            .filter(|(index, queued)| !keep(*index, queued))
-            .map(|(_, queued)| queued),
-    );
     let removed_head = handing_off_head(record);
     let mut index = 0usize;
     record.queued_prompts.retain(|queued| {
@@ -789,7 +764,6 @@ fn clear_queued_prompts_by_source_except_admission_owner(
         // A removed head promoted for its hand-off was never sent; a
         // preserved one stays with its Stop (prompt_delivery.rs).
         settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
-        record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
     }
 }

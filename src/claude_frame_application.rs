@@ -551,31 +551,6 @@ fn apply_claude_control(
             }
         }
         ClaudeControlStep::Request(origin) => {
-            // A file write Claude asks permission for, into a running gate's
-            // worktree, is denied before any policy can allow it, whoever
-            // asks: nothing is written, so the gate keeps its credit. Writes
-            // Claude makes without asking (acceptEdits, allow rules,
-            // bypassPermissions) never reach this point
-            // (`claude_gate_write_guard.rs`).
-            if let Some(denial) =
-                context
-                    .state
-                    .claude_gate_write_guard(&context.session_id, message, &context.cwd)
-            {
-                if let Some(request_id) = request_id {
-                    frames.control_origins.record(request_id, origin.clone());
-                }
-                return match send_claude_permission_response(
-                    &frames.input_tx,
-                    denial,
-                    "deny a write into a running gate's worktree",
-                ) {
-                    Ok(()) => ClaudeFrameApplied::Continue,
-                    Err(err) => ClaudeFrameApplied::TerminateRuntime(format!(
-                        "failed to handle Claude control request: {err:#}"
-                    )),
-                };
-            }
             // Approval mode and delegation-child identity are read under one
             // state lock so the attendedness policy never sees a torn pair.
             let (approval_mode, delegation_child) = match context

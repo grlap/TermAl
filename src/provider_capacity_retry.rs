@@ -1,5 +1,5 @@
 // Capacity recovery owns a bounded Resume budget, never a replayable prompt.
-// Driven by the existing shared retry tick; no additional timer/thread.
+// Driven after delegation inventory publication by the ordinary runtime tick.
 const PROVIDER_CAPACITY_DELAYS_SECONDS: [u64; 8] = [120, 300, 600, 600, 600, 600, 600, 600];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -10,7 +10,6 @@ struct ProviderCapacityRetry {
     generation: u64,
     stop_generation: u64,
     pause_epoch: u64,
-    dispatch_generation: u64,
     settings: String,
     attempts: usize,
     due_at: Option<String>,
@@ -20,7 +19,7 @@ struct ProviderCapacityRetry {
     #[serde(skip)]
     saved: bool,
     #[serde(skip)]
-    fence: Option<EngramAbortAckWaiter>,
+    fence: Option<ProviderCapacityAckWaiter>,
 }
 
 fn provider_capacity_delay(session_id: &str, attempt: usize) -> chrono::Duration {
@@ -49,59 +48,14 @@ fn provider_capacity_settings(record: &SessionRecord) -> String {
 }
 
 fn provider_capacity_manual_hold(record: &SessionRecord) -> bool {
-    provider_capacity_manual_hold_except_owned_admission(record, false)
-}
-
-fn provider_capacity_manual_hold_except_owned_admission(
-    record: &SessionRecord,
-    owned: bool,
-) -> bool {
     record.codex_terminal_identity_unresolved
         || record.engram.operator_paused
         || record.runtime_stop_in_progress
-        || record.engram.uncertain_grant_id.is_some()
-        || record.engram.abort_retry.is_some()
-        || record.engram.bind_retry.is_some()
-        || record.engram.admission_retry.is_some()
-        || record.engram.pending_dispatch.is_some()
-        || (!owned && record.engram.admission_in_progress.is_some())
-        || record.engram.source_observation_gate.is_some()
-        || record.engram_boot_recovery_pending
-        || record.engram.disabled_reason.is_some()
         || record.engram_mcp_runtime_quarantined
-        || record
-            .queued_prompts
-            .front()
-            .is_some_and(|head| head.engram_interrupted)
         || record.prompt_deliveries.values().any(|delivery| {
             delivery.disposition == PromptDeliveryDisposition::Ambiguous
                 && delivery.turn_generation == Some(record.active_turn_generation)
         })
-}
-
-fn provider_capacity_owns_ack_admission(record: &SessionRecord, nonce: &str) -> bool {
-    let Some(progress) = &record.engram.admission_in_progress else {
-        return false;
-    };
-    let Some(attempt) = &record.engram.admission_attempt else {
-        return false;
-    };
-    let Some(head) = record.queued_prompts.front() else {
-        return false;
-    };
-    let prompt_id = &head.pending_prompt.id;
-    let Some(delivery) = record.prompt_deliveries.get(prompt_id) else {
-        return false;
-    };
-    Arc::ptr_eq(progress, &attempt.token)
-        && record.engram.admission_prompt_id.as_ref() == Some(prompt_id)
-        && attempt.prompt_id == *prompt_id
-        && attempt.write_ahead == delivery.write_ahead
-        && delivery
-            .resume
-            .as_ref()
-            .is_some_and(|resume| resume.capacity_nonce.as_deref() == Some(nonce))
-        && prompt_delivery_resume_holds(record, prompt_id)
 }
 
 fn provider_capacity_resume_owned(record: &SessionRecord, nonce: &str) -> bool {
@@ -121,7 +75,6 @@ fn provider_capacity_resume_owned(record: &SessionRecord, nonce: &str) -> bool {
                 && retry.settings == provider_capacity_settings(record)
                 && !record.runtime_stop_in_progress
                 && !record.engram.operator_paused
-                && record.engram.disabled_reason.is_none()
         })
 }
 
@@ -278,7 +231,6 @@ impl AppState {
             generation,
             stop_generation: record.runtime_stop_generation,
             pause_epoch: record.auto_dispatch_pause_epoch,
-            dispatch_generation: record.engram.dispatch_generation,
             settings: provider_capacity_settings(record),
             attempts,
             due_at: None,
@@ -319,7 +271,6 @@ impl AppState {
             clear_provider_capacity_retry(record);
         } else {
             retry.pause_epoch = record.auto_dispatch_pause_epoch;
-            retry.dispatch_generation = record.engram.dispatch_generation;
             retry.original_preview = record.session.preview.clone();
             if retry.attempts >= 8 {
                 record.session.preview = "Paused: provider at capacity, retries exhausted (8 attempts, last error serverOverloaded); Resume to retry".to_owned();
@@ -352,7 +303,7 @@ impl AppState {
                 session_id: inner.sessions[index].session.id.clone(),
                 content: serde_json::to_value(Some(retry)).expect("capacity record serializable"),
             },
-            clock.now() + ENGRAM_ABORT_SETTLEMENT_FENCE,
+            clock.now() + PROVIDER_CAPACITY_ACK_BUDGET,
             clock,
         );
         if self
@@ -366,7 +317,7 @@ impl AppState {
                 .provider_capacity_retry
                 .as_mut()
                 .unwrap()
-                .fence = Some(EngramAbortAckWaiter(Arc::new(waiter)));
+                .fence = Some(ProviderCapacityAckWaiter(Arc::new(waiter)));
         } else if self.persist_session_internal_locked(inner, &inner.sessions[index].session.id).is_ok() {
             inner.sessions[index]
                 .provider_capacity_retry
@@ -387,7 +338,7 @@ impl AppState {
                 .collect::<Vec<_>>()
         };
         for session_id in ids {
-            let Some(_slot) = self.engram_retry_slots.try_acquire_opportunistic() else {
+            let Some(_slot) = self.runtime_retry_slots.try_acquire() else {
                 break;
             };
             let attempt = {
@@ -395,6 +346,7 @@ impl AppState {
                 let Some(index) = inner.find_session_index(&session_id) else {
                     continue;
                 };
+                if session_resource_reset_in_progress(&inner, &inner.sessions[index]) { continue; }
                 let record = &mut inner.sessions[index];
                 let Some(retry) = record.provider_capacity_retry.as_ref() else {
                     continue;
@@ -412,21 +364,16 @@ impl AppState {
                 {
                     continue;
                 }
-                let owns_ack_admission = provider_capacity_owns_ack_admission(record, &retry.nonce);
                 let owns = retry.server_instance == self.server_instance_id
                     && retry.generation == record.active_turn_generation
                     && retry.stop_generation == record.runtime_stop_generation
                     && retry.pause_epoch == record.auto_dispatch_pause_epoch
-                    && retry.dispatch_generation == record.engram.dispatch_generation
                     && retry.settings == provider_capacity_settings(record)
                     && record.orchestrator_auto_dispatch_blocked
                     && record
                         .runtime
                         .matches_runtime_token(&RuntimeToken::Codex(retry.runtime_id.clone()))
-                    && !provider_capacity_manual_hold_except_owned_admission(
-                        record,
-                        owns_ack_admission,
-                    );
+                    && !provider_capacity_manual_hold(record);
                 if !owns {
                     clear_provider_capacity_retry(record);
                     inner.stamp_session_at_index(index);
@@ -455,7 +402,7 @@ impl AppState {
                     if retry
                         .due_at
                         .as_ref()
-                        .is_none_or(|due| !engram_retry_due_passed(due, now))
+                        .is_none_or(|due| !runtime_retry_due_passed(due, now))
                     {
                         continue;
                     }
@@ -476,7 +423,7 @@ impl AppState {
                 let nonce = retry.nonce.clone();
                 record.session.status = SessionStatus::Error;
                 record.session.preview = retry.original_preview.clone();
-                let mut owner = EngramQueuedAdmissionOwner::capture(record);
+                let mut owner = QueuedTurnOwner::capture(record);
                 if let Some(owner) = &mut owner {
                     owner.capacity_nonce = Some(nonce.clone());
                 }
@@ -507,10 +454,59 @@ impl AppState {
                         self.cancel_provider_capacity_retry(&session_id);
                     }
                 }
-                // An empty queue or any held/refused admission ends this
-                // schedule. It cannot loosen the admission's own hold.
+                // An empty or refused queue ends this exact recovery attempt.
                 Ok(None) | Err(_) => self.cancel_provider_capacity_retry(&session_id),
             }
+        }
+    }
+}
+
+const PROVIDER_CAPACITY_ACK_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+
+#[derive(Clone)]
+struct ProviderCapacityAckWaiter(Arc<PersistFenceWaiter>);
+impl std::fmt::Debug for ProviderCapacityAckWaiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ProviderCapacityAckWaiter")
+    }
+}
+
+#[derive(Clone, Default)]
+struct RuntimeRetrySlots {
+    in_flight: Arc<std::sync::atomic::AtomicUsize>,
+}
+struct RuntimeRetrySlot(Arc<std::sync::atomic::AtomicUsize>);
+impl RuntimeRetrySlots {
+    fn try_acquire(&self) -> Option<RuntimeRetrySlot> {
+        self.in_flight.try_update(
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+            |count| (count < 4).then_some(count + 1),
+        ).ok().map(|_| RuntimeRetrySlot(self.in_flight.clone()))
+    }
+}
+impl Drop for RuntimeRetrySlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+fn runtime_retry_due_passed(due: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+    chrono::DateTime::parse_from_rfc3339(due).is_ok_and(|due| due <= now)
+}
+impl AppState {
+    #[cfg(not(test))]
+    fn spawn_runtime_retry_tick(&self) {
+        let state = self.clone();
+        let shutdown = self.subscribe_shutdown_signal();
+        if let Err(error) = std::thread::Builder::new()
+            .name("termal-runtime-retry".to_owned())
+            .spawn(move || {
+                while !*shutdown.borrow() {
+                    state.provider_capacity_retry_tick(chrono::Utc::now());
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            }) {
+            eprintln!("runtime retry> failed to start: {error}");
         }
     }
 }

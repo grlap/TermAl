@@ -1,0 +1,412 @@
+{
+  "source_commit": "7a812915c97d721abdcc1067ae5c10089a28ad8c",
+  "note": "Producer-authored transport fixture; asserted registered check, not execution attestation.",
+  "frames": [
+    {
+      "request": {
+        "operation": "work_session_read"
+      },
+      "response": {
+        "status": "ok",
+        "result": {
+          "capabilities": [
+            "host_work_v1",
+            "verification_record_v1"
+          ],
+          "project_id": "github.com/grlap/Engram",
+          "session_id": "eo-producer-fixture",
+          "verification_evidence_git_tree_applicability_v1": true,
+          "work_session": true
+        }
+      }
+    },
+    {
+      "request": {
+        "operation": "named_root_read",
+        "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+        "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108"
+      },
+      "response": {
+        "status": "ok",
+        "result": {
+          "claim": {
+            "expires_at": "2026-11-02T02:42:12.865411Z",
+            "fence": 1,
+            "holder": "eo-producer-fixture",
+            "revision": 1,
+            "state": "active"
+          },
+          "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108",
+          "latest_event": null,
+          "named_root": {
+            "state": "none"
+          },
+          "project_id": "github.com/grlap/Engram",
+          "read_cut": {
+            "feed": {
+              "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+              "kind": "run_execution"
+            },
+            "position": 2
+          },
+          "root_execution_id": "01a199eb-d869-79a2-a0c1-fe501aa96eca",
+          "run": {
+            "generation": 1,
+            "state": "claimed"
+          },
+          "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+          "work_id": "01a199eb-d869-79a2-a0c1-fe319e473383"
+        }
+      }
+    },
+    {
+      "request": {
+        "operation": "named_root_bind",
+        "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108",
+        "claim_fence": 1,
+        "workspace_id": "ordinary-producer-fixture",
+        "generation": 1,
+        "named_at": "2026-11-02T01:42:13.024Z",
+        "kind": "bound",
+        "idempotency_key": "producer-wire-root"
+      },
+      "response": {
+        "status": "ok",
+        "result": {
+          "event": "68c2dfa5655d420abf23b3046784871d",
+          "generation": 1,
+          "kind": "bound",
+          "position": {
+            "feed": {
+              "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+              "kind": "run_execution"
+            },
+            "position": 3
+          },
+          "workspace_id": "ordinary-producer-fixture"
+        }
+      }
+    },
+    {
+      "request": {
+        "operation": "named_root_read",
+        "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+        "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108"
+      },
+      "response": {
+        "status": "ok",
+        "result": {
+          "claim": {
+            "expires_at": "2026-11-02T02:42:12.865411Z",
+            "fence": 1,
+            "holder": "eo-producer-fixture",
+            "revision": 1,
+            "state": "active"
+          },
+          "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108",
+          "latest_event": {
+            "event": "68c2dfa5655d420abf23b3046784871d",
+            "generation": 1,
+            "kind": "bound",
+            "named_at": "2026-11-02T01:42:13.024Z",
+            "position": {
+              "feed": {
+                "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+                "kind": "run_execution"
+              },
+              "position": 3
+            },
+            "workspace_id": "ordinary-producer-fixture"
+          },
+          "named_root": {
+            "generation": 1,
+            "named_at": "2026-11-02T01:42:13.024Z",
+            "state": "bound",
+            "workspace_id": "ordinary-producer-fixture"
+          },
+          "project_id": "github.com/grlap/Engram",
+          "read_cut": {
+            "feed": {
+              "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+              "kind": "run_execution"
+            },
+            "position": 3
+          },
+          "root_execution_id": "01a199eb-d869-79a2-a0c1-fe501aa96eca",
+          "run": {
+            "generation": 1,
+            "state": "claimed"
+          },
+          "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+          "work_id": "01a199eb-d869-79a2-a0c1-fe319e473383"
+        }
+      }
+    },
+    {
+      "request": {
+        "operation": "named_root_read",
+        "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+        "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108"
+      },
+      "response": {
+        "status": "ok",
+        "result": {
+          "claim": {
+            "expires_at": "2026-11-02T02:42:12.865411Z",
+            "fence": 1,
+            "holder": "eo-producer-fixture",
+            "revision": 1,
+            "state": "active"
+          },
+          "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108",
+          "latest_event": {
+            "event": "68c2dfa5655d420abf23b3046784871d",
+            "generation": 1,
+            "kind": "bound",
+            "named_at": "2026-11-02T01:42:13.024Z",
+            "position": {
+              "feed": {
+                "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+                "kind": "run_execution"
+              },
+              "position": 3
+            },
+            "workspace_id": "ordinary-producer-fixture"
+          },
+          "named_root": {
+            "generation": 1,
+            "named_at": "2026-11-02T01:42:13.024Z",
+            "state": "bound",
+            "workspace_id": "ordinary-producer-fixture"
+          },
+          "project_id": "github.com/grlap/Engram",
+          "read_cut": {
+            "feed": {
+              "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+              "kind": "run_execution"
+            },
+            "position": 3
+          },
+          "root_execution_id": "01a199eb-d869-79a2-a0c1-fe501aa96eca",
+          "run": {
+            "generation": 1,
+            "state": "claimed"
+          },
+          "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+          "work_id": "01a199eb-d869-79a2-a0c1-fe319e473383"
+        }
+      }
+    },
+    {
+      "request": {
+        "operation": "execution_observe",
+        "idempotency_key": "producer-quiet",
+        "binding": {
+          "claim_fence": 1,
+          "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108",
+          "root_execution_id": "01a199eb-d869-79a2-a0c1-fe501aa96eca",
+          "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+          "work_id": "01a199eb-d869-79a2-a0c1-fe319e473383",
+          "work_revision": 1
+        },
+        "root_basis": {
+          "capture_run_cut": 3,
+          "latest_event": "68c2dfa5655d420abf23b3046784871d",
+          "state": {
+            "generation": 1,
+            "named_at": "2026-11-02T01:42:13.024Z",
+            "state": "bound",
+            "workspace_id": "ordinary-producer-fixture"
+          }
+        },
+        "observed_interval": {
+          "from": "2026-11-02T01:42:13.031Z",
+          "through": "2026-11-02T01:42:13.031Z"
+        },
+        "occurrence": {
+          "kind": "source_sighting",
+          "source_basis": {
+            "workspace_id": "ordinary-producer-fixture",
+            "source_revision": "git-commit:7a812915c97d721abdcc1067ae5c10089a28ad8c",
+            "source_root_generation": 1,
+            "source_root_state": "named"
+          },
+          "observed_at": "2026-11-02T01:42:13.031Z"
+        },
+        "causality": {
+          "kind": "unknown"
+        },
+        "policy_basis": {
+          "mode": "account_if_eligible",
+          "project_policy_epoch": 1,
+          "policy": "e2d50b85a0aa40448bfca9f041ba4c02",
+          "obligation_rule_set": "9bf0112742cf48f6933e49e7477f1995"
+        }
+      },
+      "response": {
+        "status": "ok",
+        "result": {
+          "accounting": {
+            "kind": "sighting"
+          },
+          "admission": "unadmitted",
+          "binding": {
+            "claim_fence": 1,
+            "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108",
+            "root_execution_id": "01a199eb-d869-79a2-a0c1-fe501aa96eca",
+            "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+            "work_id": "01a199eb-d869-79a2-a0c1-fe319e473383",
+            "work_revision": 1
+          },
+          "causality": {
+            "kind": "unknown"
+          },
+          "decision": "recorded",
+          "observation": "9fd665d065b24bbb87bd13be05a05a35",
+          "observed_checks": [],
+          "observing_session": "eo-producer-fixture",
+          "opened_obligations": [],
+          "policy_basis": {
+            "mode": "account_if_eligible",
+            "obligation_rule_set": "9bf0112742cf48f6933e49e7477f1995",
+            "policy": "e2d50b85a0aa40448bfca9f041ba4c02",
+            "project_policy_epoch": 1
+          },
+          "position": {
+            "feed": {
+              "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+              "kind": "run_execution"
+            },
+            "position": 4
+          },
+          "recorded_at": "2026-11-02T01:42:13.032428500Z"
+        }
+      }
+    },
+    {
+      "request": {
+        "operation": "named_root_read",
+        "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+        "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108"
+      },
+      "response": {
+        "status": "ok",
+        "result": {
+          "claim": {
+            "expires_at": "2026-11-02T02:42:12.865411Z",
+            "fence": 1,
+            "holder": "eo-producer-fixture",
+            "revision": 1,
+            "state": "active"
+          },
+          "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108",
+          "latest_event": {
+            "event": "68c2dfa5655d420abf23b3046784871d",
+            "generation": 1,
+            "kind": "bound",
+            "named_at": "2026-11-02T01:42:13.024Z",
+            "position": {
+              "feed": {
+                "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+                "kind": "run_execution"
+              },
+              "position": 3
+            },
+            "workspace_id": "ordinary-producer-fixture"
+          },
+          "named_root": {
+            "generation": 1,
+            "named_at": "2026-11-02T01:42:13.024Z",
+            "state": "bound",
+            "workspace_id": "ordinary-producer-fixture"
+          },
+          "project_id": "github.com/grlap/Engram",
+          "read_cut": {
+            "feed": {
+              "id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+              "kind": "run_execution"
+            },
+            "position": 4
+          },
+          "root_execution_id": "01a199eb-d869-79a2-a0c1-fe501aa96eca",
+          "run": {
+            "generation": 1,
+            "state": "claimed"
+          },
+          "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+          "work_id": "01a199eb-d869-79a2-a0c1-fe319e473383"
+        }
+      }
+    },
+    {
+      "request": {
+        "operation": "verification_record",
+        "operation_key": "termal-run:test-producer-wire",
+        "registration": {
+          "host_run_id": "test-producer-wire",
+          "request_identity": "producer-wire",
+          "registered_at": "2026-11-02T01:42:13.037Z",
+          "initiating_session_id": "eo-producer-fixture",
+          "owning_session_id": "eo-producer-fixture",
+          "binding": {
+            "claim_fence": 1,
+            "claim_id": "01a199eb-d894-7351-9e1f-a758b9f85108",
+            "root_execution_id": "01a199eb-d869-79a2-a0c1-fe501aa96eca",
+            "run_id": "01a199eb-d869-79a2-a0c1-fe4e923d50aa",
+            "work_id": "01a199eb-d869-79a2-a0c1-fe319e473383",
+            "work_revision": 1
+          },
+          "root": {
+            "workspace_id": "ordinary-producer-fixture",
+            "generation": 1,
+            "state": "named"
+          }
+        },
+        "input": {
+          "kind": "commit",
+          "commit": "7a812915c97d721abdcc1067ae5c10089a28ad8c"
+        },
+        "run": {
+          "mode": "focused",
+          "command": "fixture registered check",
+          "started_at": "2026-11-02T01:42:13.037Z",
+          "finished_at": "2026-11-02T01:42:13.037Z",
+          "outcome": "passed"
+        },
+        "checks": [
+          {
+            "stage": "focused",
+            "check_kind": "test",
+            "command": "fixture registered check",
+            "check_fingerprint": "798af144538642d05cbdbe1b2ee2a017a174ad14f46a0923f80a98da21994785",
+            "started_at": "2026-11-02T01:42:13.037Z",
+            "completed_at": "2026-11-02T01:42:13.037Z",
+            "outcome": "passed",
+            "summary": "fixture host check",
+            "refs": []
+          }
+        ],
+        "post_run": {
+          "outcome": "clean",
+          "clean_before": true,
+          "clean_after": true,
+          "dirty_paths": []
+        }
+      },
+      "response": {
+        "status": "ok",
+        "result": {
+          "operation": "89d25552fb4c44aea8ad3f79552e121a",
+          "producer": "89d25552fb4c44aea8ad3f79552e121a",
+          "run_outcome": "passed",
+          "verifications": [
+            {
+              "record_id": "f48617d826e84e51856ecfe445f8fbbe",
+              "stage": "focused"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

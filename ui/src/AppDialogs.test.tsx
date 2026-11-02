@@ -201,7 +201,6 @@ function createBaseProps(
       developerName: "dev",
       binaryPath: "engram",
       home: "C:\\Users\\greg\\.engram",
-      bootRecoveryBudgetMs: 5_000,
     },
     projects: [],
     sessions: [],
@@ -507,7 +506,7 @@ describe("AppDialogs settings agent defaults", () => {
     expect(screen.getByLabelText("Engram host home")).toHaveValue(
       "C:\\Users\\greg\\.engram",
     );
-    expect(screen.getByLabelText("Turn-gated control")).not.toBeChecked();
+    expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
     await screen.findByText("Policy unknown — Policy unavailable");
   });
 

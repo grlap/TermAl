@@ -5,7 +5,8 @@
 // has none there. Does not own the rest of the acceptance-evaluation tests,
 // whose fixtures and helpers it uses from its parent module. A child module of
 // src/tests/acceptance_evaluation.rs, as the source-fingerprint tests are, so
-// that file stays within the size the architecture lens allows.
+// that file stays within the size the architecture lens allows. These source
+// fixtures do not enable evaluation in the running host.
 use super::*;
 
 #[path = "acceptance_evaluation_committed_input.rs"]
@@ -370,11 +371,6 @@ fn acceptance_request_proceeds_on_engrams_sighting_without_any_local_record_of_i
     // same run, or before this host restarted, admits the request on
     // Engram's answer alone. This parent never checkpointed a turn here.
     let (state, parent, _store, named_root) = named_root_parent();
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&parent).unwrap()];
-        assert!(record.engram.continuity_anchor.is_none());
-    }
     install_sighting_transport(&state, &named_root, 1, present_sighting());
 
     let response = state
@@ -462,12 +458,21 @@ fn acceptance_request_treats_an_unreadable_sighting_as_unknown_never_as_absent()
     unknown_field["root"]["sighting"]["note"] = json!("an unknown shape");
     let mut no_root = sighting_reply("ROOT", 1, json!({"state":"absent"}));
     no_root.as_object_mut().unwrap().remove("root");
+    let mut other_project = sighting_reply("ROOT", 1, present_sighting());
+    other_project["project_id"] = json!("another-store-project");
+    let mut other_work = sighting_reply("ROOT", 1, present_sighting());
+    other_work["work_id"] = json!("01a0b6c5-4b4f-7b41-9e32-0000000000b2");
+    let mut other_run = sighting_reply("ROOT", 1, present_sighting());
+    other_run["run_id"] = json!("01a0b6c5-4b4f-7b41-9e32-0000000000b3");
     for (case, answer) in [
         ("unsupported operation", unsupported),
         ("newer schema", Ok(newer_schema)),
         ("another cut", Ok(other_cut)),
         ("unknown field", Ok(unknown_field)),
         ("missing root", Ok(no_root)),
+        ("another project", Ok(other_project)),
+        ("another work", Ok(other_work)),
+        ("another run", Ok(other_run)),
     ] {
         let (state, parent, _store, named_root) = named_root_parent();
         let answer = answer.map(|answer| {
@@ -536,9 +541,6 @@ impl EngramControlTransport for RenamingSightingTransport {
 fn acceptance_request_refuses_when_the_local_root_is_renamed_during_the_read() {
     for present in [true, false] {
         let (state, parent, _store, named_root) = named_root_parent();
-        if !present {
-            record_naming_and_turn(&state, &parent, false, None, None, None);
-        }
         state.install_test_engram_transport(Arc::new(RenamingSightingTransport {
             inner: Arc::downgrade(&state.inner),
             named_root,
@@ -562,177 +564,143 @@ fn acceptance_request_refuses_when_the_local_root_is_renamed_during_the_read() {
     }
 }
 
-/// The grant of the turn the fixture's root is named in.
-const NAMING_GRANT: &str = "grant-of-the-naming-turn";
-
-/// Puts `parent`'s project under turn-gated control (when `gated`), records
-/// the fixture's root as named during the turn of `named_in` (None: named
-/// between turns, or forgotten since), and makes `active` the session's
-/// current grant, opened in `turn_root` (None: the session's workdir).
-fn record_naming_and_turn(
-    state: &AppState,
-    parent: &str,
-    gated: bool,
-    named_in: Option<&str>,
-    active: Option<&str>,
-    turn_root: Option<EngramTurnSourceRoot>,
-) {
-    let mut inner = state.inner.lock().unwrap();
-    let entry = inner.engram_work_source_roots[0].clone();
-    let index = inner.find_session_index(parent).unwrap();
-    let project = inner.sessions[index].session.project_id.clone().unwrap();
-    inner
-        .projects
-        .iter_mut()
-        .find(|row| row.id == project)
-        .unwrap()
-        .engram
-        .as_mut()
-        .unwrap()
-        .turn_gated_control = gated;
-    let engram = &mut inner.sessions[index].engram;
-    engram.roots_named_in_turn = named_in
-        .map(|grant_id| EngramRootNamedInTurn {
-            store: entry.store.clone(),
-            claim_id: entry.claim_id.clone(),
-            generation: entry.generation,
-            grant_id: grant_id.to_owned(),
-        })
-        .into_iter()
-        .collect();
-    engram.active_grant_id = active.map(str::to_owned);
-    engram.active_turn_source_root = turn_root;
-}
-
-/// The named root's own turn record, as a turn that opens in it keeps it.
-fn named_turn_root(state: &AppState) -> EngramTurnSourceRoot {
-    EngramTurnSourceRoot::from_entry(&state.inner.lock().unwrap().engram_work_source_roots[0])
-}
-
 fn sighting_reads(transport: &ScriptedEngramControlTransport) -> usize {
-    transport
-        .requests()
-        .iter()
+    transport.requests().iter()
         .filter(|recorded| recorded.request["operation"] == "named_root_sighting_read")
         .count()
 }
 
-#[test]
-fn acceptance_request_in_the_turn_that_named_the_root_is_refused_before_the_read() {
-    // The root was named during the session's turn that is still running in
-    // its workdir: no turn has opened in the root, so Engram cannot have
-    // sighted it. The host says so itself, before any read or evaluator.
-    let (state, parent, _store, named_root) = named_root_parent();
-    let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
-    record_naming_and_turn(&state, &parent, true, Some(NAMING_GRANT), Some(NAMING_GRANT), None);
-
-    let response = state.request_acceptance_evaluation_with_runner(
-        &parent,
-        evaluation_request(Some(Agent::Codex)),
-        independent_reader(),
+// Trusted metadata fixtures for the ordinary source preflight. They model
+// an observed turn and its opening root; they neither run a provider nor
+// produce a source measurement, verification or Engram sighting receipt.
+fn ordinary_naming_trace(
+    state: &AppState,
+    parent: &str,
+    opened_in_root: bool,
+) -> EngramRuntimeObservedTurn {
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(parent).unwrap()];
+    let mut trace = EngramRuntimeObservedTurn::started(
+        "fixture-ordinary-prompt".to_owned(), record.active_turn_generation,
     );
-
-    let error = refusal(&state, response, "named mid-turn");
-    assert_eq!(error.kind, Some(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending));
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(
-        error.message.contains("was named during a turn of the naming session, and no turn has opened in it since")
-            && error.message.contains("(named_root_turn_pending)")
-            && error.message.contains("next turn")
-            && error.message.contains("not from the turn the root was named in"),
-        "the refusal says why, with its stable code, and what to do: {}",
-        error.message
-    );
-    assert_eq!(sighting_reads(&transport), 0, "refused before the Engram read");
-}
-
-#[test]
-fn acceptance_request_after_the_next_turn_opens_in_the_named_root_proceeds_past_the_check() {
-    // The naming turn ended and the next gated turn opened in the named root;
-    // or the turn running at the commit had begun but captured its root only
-    // after it, so it opened in the new root under the naming grant. Either
-    // way a turn opened in the root: the preflight reads Engram's sighting,
-    // and the request goes on.
-    for (case, active) in [
-        ("next turn opened in the root", "grant-of-the-next-turn"),
-        ("naming grant's turn captured the new root", NAMING_GRANT),
-    ] {
-        let (state, parent, _store, named_root) = named_root_parent();
-        let transport = install_sighting_transport(&state, &named_root, 1, present_sighting());
-        let turn_root = named_turn_root(&state);
-        record_naming_and_turn(
-            &state,
-            &parent,
-            true,
-            Some(NAMING_GRANT),
-            Some(active),
-            Some(turn_root),
-        );
-
-        let response = state
-            .request_acceptance_evaluation_with_runner(
-                &parent,
-                evaluation_request(Some(Agent::Codex)),
-                independent_reader(),
-            )
-            .unwrap_or_else(|error| panic!("{case}: {}", error.message));
-
-        assert!(
-            matches!(response, AcceptanceEvaluationRequestResponse::Spawned { .. }),
-            "{case}"
-        );
-        assert_eq!(sighting_reads(&transport), 1, "{case}: the sighting check ran");
+    if opened_in_root {
+        let entry = &inner.engram_work_source_roots[0];
+        trace.opening_root = Some(EngramRuntimeOpeningRoot {
+            store: entry.store.clone(),
+            binding: record.engram.work_binding.clone().unwrap(),
+            provenance: EngramRootCapture::Unconfirmed,
+            source_root: Some(EngramTurnSourceRoot::from_entry(entry)),
+        });
     }
+    trace
 }
 
-#[test]
-fn acceptance_request_keeps_the_refusal_after_another_claim_is_named_in_the_same_turn() {
-    // The session named this claim's root, then another claim's, in the same
-    // turn: each claim keeps its own mark, so this claim is still refused
-    // before any read.
-    let (state, parent, store, named_root) = named_root_parent();
-    let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
-    record_naming_and_turn(&state, &parent, true, Some(NAMING_GRANT), Some(NAMING_GRANT), None);
-    let entry = state.inner.lock().unwrap().engram_work_source_roots[0].clone();
-    let other = EngramWorkSourceRoot {
-        work_id: "01a0b6c5-4b4f-7b41-9e32-0000000000b2".to_owned(),
-        claim_id: "claim-other".to_owned(),
-        generation: 2,
-        ..entry
-    };
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&parent).unwrap();
-        record_engram_root_named_in_turn(
-            &mut inner.sessions[index].engram,
-            &store,
-            &naming_event(&other, &parent, EngramNamedRootKind::Bound),
-            Some(NAMING_GRANT.to_owned()),
-        );
-    }
-
-    let response = state.request_acceptance_evaluation_with_runner(
-        &parent,
-        evaluation_request(Some(Agent::Codex)),
-        independent_reader(),
-    );
-
-    let error = refusal(&state, response, "after another claim's name");
-    assert_eq!(error.kind, Some(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending));
-    assert_eq!(sighting_reads(&transport), 0, "refused before the Engram read");
-}
-
-fn naming_event(
+fn ordinary_naming_event(
     root: &EngramWorkSourceRoot,
     reporter: &str,
     kind: EngramNamedRootKind,
 ) -> EngramNamedRootEvent {
     EngramNamedRootEvent {
-        root: root.clone(),
-        reporter: reporter.to_owned(),
-        kind,
-        end_reason: None,
+        root: root.clone(), reporter: reporter.to_owned(), kind, end_reason: None,
     }
+}
+
+fn install_ordinary_naming_turn(
+    state: &AppState,
+    parent: &str,
+    trace: EngramRuntimeObservedTurn,
+) {
+    let mut inner = state.inner.lock().unwrap();
+    let entry = inner.engram_work_source_roots[0].clone();
+    let index = inner.find_session_index(parent).unwrap();
+    let engram = &mut inner.sessions[index].engram;
+    engram.unadmitted_active_turn = Some(trace);
+    // The public naming path calls this same owner with the current observed
+    // turn identity when it installs the selection, under the same state lock.
+    let naming_turn = engram.observed_turn_ref().map(str::to_owned);
+    record_engram_root_named_in_turn(
+        engram, &entry.store,
+        &ordinary_naming_event(&entry, parent, EngramNamedRootKind::Bound),
+        naming_turn,
+    );
+}
+
+#[test]
+fn acceptance_request_in_the_turn_that_named_the_root_is_refused_before_the_read() {
+    let (state, parent, _store, named_root) = named_root_parent();
+    let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
+    let trace = ordinary_naming_trace(&state, &parent, false);
+    install_ordinary_naming_turn(&state, &parent, trace);
+    let response = state.request_acceptance_evaluation_with_runner(
+        &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
+    );
+    let error = refusal(&state, response, "ordinary naming turn before the root opens");
+    assert_eq!(error.kind, Some(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending));
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("no turn has opened in it since")
+        && error.message.contains("(named_root_turn_pending)")
+        && error.message.contains("not from the turn the root was named in"), "{}", error.message);
+    assert_eq!(sighting_reads(&transport), 0, "the local ordinary boundary precedes the producer read");
+}
+
+#[test]
+fn acceptance_request_after_the_next_turn_opens_in_the_named_root_proceeds_past_the_check() {
+    for same_turn_opening in [false, true] {
+        let (state, parent, _store, named_root) = named_root_parent();
+        let transport = install_sighting_transport(&state, &named_root, 1, present_sighting());
+        let naming_trace = ordinary_naming_trace(&state, &parent, false);
+        let naming_turn = naming_trace.host_turn_ref.clone();
+        install_ordinary_naming_turn(&state, &parent, naming_trace);
+        let mut opening_trace = ordinary_naming_trace(&state, &parent, true);
+        if same_turn_opening {
+            // A root capture can follow selection installation within the
+            // same turn. Its actual opening, rather than a clock, decides.
+            opening_trace.host_turn_ref = naming_turn;
+        } else {
+            opening_trace.generation = opening_trace.generation.saturating_add(1);
+        }
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&parent).unwrap();
+            inner.sessions[index].active_turn_generation = opening_trace.generation;
+            inner.sessions[index].engram.unadmitted_active_turn = Some(opening_trace);
+        }
+        let response = state.request_acceptance_evaluation_with_runner(
+            &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
+        ).unwrap();
+        assert!(matches!(response, AcceptanceEvaluationRequestResponse::Spawned { .. }));
+        assert_eq!(sighting_reads(&transport), 1,
+            "an opening permits the real producer receipt check; it does not replace it");
+    }
+}
+
+#[test]
+fn acceptance_request_keeps_the_refusal_after_another_claim_is_named_in_the_same_turn() {
+    let (state, parent, store, named_root) = named_root_parent();
+    let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
+    let trace = ordinary_naming_trace(&state, &parent, false);
+    install_ordinary_naming_turn(&state, &parent, trace);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let other = EngramWorkSourceRoot {
+            work_id: "01a0b6c5-4b4f-7b41-9e32-0000000000b2".to_owned(),
+            claim_id: "claim-other".to_owned(), generation: 2,
+            ..inner.engram_work_source_roots[0].clone()
+        };
+        let index = inner.find_session_index(&parent).unwrap();
+        let engram = &mut inner.sessions[index].engram;
+        let naming_turn = engram.observed_turn_ref().map(str::to_owned);
+        record_engram_root_named_in_turn(
+            engram, &store,
+            &ordinary_naming_event(&other, &parent, EngramNamedRootKind::Bound), naming_turn,
+        );
+    }
+    let response = state.request_acceptance_evaluation_with_runner(
+        &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
+    );
+    let error = refusal(&state, response, "another claim named during the ordinary turn");
+    assert_eq!(error.kind, Some(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending));
+    assert_eq!(sighting_reads(&transport), 0);
 }
 
 #[test]
@@ -741,145 +709,87 @@ fn naming_marks_are_kept_per_claim_and_only_for_the_running_turn() {
     let first = state.inner.lock().unwrap().engram_work_source_roots[0].clone();
     let second = EngramWorkSourceRoot {
         work_id: "01a0b6c5-4b4f-7b41-9e32-0000000000b2".to_owned(),
-        claim_id: "claim-other".to_owned(),
-        generation: 2,
-        ..first.clone()
-    };
-    let marks = |engram: &EngramSessionState| {
-        engram
-            .roots_named_in_turn
-            .iter()
-            .map(|mark| (mark.claim_id.clone(), mark.generation, mark.grant_id.clone()))
-            .collect::<Vec<_>>()
-    };
-    let mark = |claim: &str, generation: u64, grant: &str| {
-        (claim.to_owned(), generation, grant.to_owned())
+        claim_id: "claim-other".to_owned(), generation: 2, ..first.clone()
     };
     let mut engram = EngramSessionState::default();
-    engram.active_grant_id = Some(NAMING_GRANT.to_owned());
-    let record = |engram: &mut EngramSessionState,
-                  root: &EngramWorkSourceRoot,
-                  kind: EngramNamedRootKind,
-                  grant: &str| {
-        record_engram_root_named_in_turn(
-            engram,
-            &store,
-            &naming_event(root, &parent, kind),
-            Some(grant.to_owned()),
-        )
+    let trace = ordinary_naming_trace(&state, &parent, false);
+    let naming_turn = trace.host_turn_ref.clone();
+    engram.unadmitted_active_turn = Some(trace);
+    let marks = |engram: &EngramSessionState| engram.roots_named_in_turn.iter()
+        .map(|mark| (mark.claim_id.clone(), mark.generation, mark.host_turn_ref.clone()))
+        .collect::<Vec<_>>();
+    let mark = |claim: &str, generation: u64, turn: &str| (claim.to_owned(), generation, turn.to_owned());
+    let record = |engram: &mut EngramSessionState, root: &EngramWorkSourceRoot,
+                  kind: EngramNamedRootKind, turn: &str| {
+        record_engram_root_named_in_turn(engram, &store,
+            &ordinary_naming_event(root, &parent, kind), Some(turn.to_owned()))
     };
-
-    record(&mut engram, &first, EngramNamedRootKind::Bound, NAMING_GRANT);
-    record(&mut engram, &second, EngramNamedRootKind::Bound, NAMING_GRANT);
-    assert_eq!(
-        marks(&engram),
-        [mark("claim-task", 1, NAMING_GRANT), mark("claim-other", 2, NAMING_GRANT)],
-        "naming another claim keeps the first claim's mark"
-    );
-    record(&mut engram, &second, EngramNamedRootKind::Ended, NAMING_GRANT);
-    assert_eq!(
-        marks(&engram),
-        [mark("claim-task", 1, NAMING_GRANT)],
-        "clearing a claim's root removes only its own mark"
-    );
-    record(&mut engram, &second, EngramNamedRootKind::Bound, "grant-that-already-ended");
-    assert_eq!(
-        marks(&engram),
-        [mark("claim-task", 1, NAMING_GRANT)],
-        "a name committed in a turn that has since ended is not marked"
-    );
-    engram.active_grant_id = Some("grant-of-the-next-turn".to_owned());
-    record(&mut engram, &second, EngramNamedRootKind::Bound, "grant-of-the-next-turn");
-    assert_eq!(
-        marks(&engram),
-        [mark("claim-other", 2, "grant-of-the-next-turn")],
-        "marks of an ended turn are dropped"
-    );
+    record(&mut engram, &first, EngramNamedRootKind::Bound, &naming_turn);
+    record(&mut engram, &second, EngramNamedRootKind::Bound, &naming_turn);
+    assert_eq!(marks(&engram), [mark("claim-task", 1, &naming_turn), mark("claim-other", 2, &naming_turn)]);
+    record(&mut engram, &second, EngramNamedRootKind::Ended, &naming_turn);
+    assert_eq!(marks(&engram), [mark("claim-task", 1, &naming_turn)]);
+    record(&mut engram, &second, EngramNamedRootKind::Bound, "ended-ordinary-turn");
+    assert_eq!(marks(&engram), [mark("claim-task", 1, &naming_turn)],
+        "a transition from an ended turn cannot mark the current one");
+    let next_trace = ordinary_naming_trace(&state, &parent, false);
+    let next_turn = next_trace.host_turn_ref.clone();
+    engram.unadmitted_active_turn = Some(next_trace);
+    record(&mut engram, &second, EngramNamedRootKind::Bound, &next_turn);
+    assert_eq!(marks(&engram), [mark("claim-other", 2, &next_turn)],
+        "old-turn marks are pruned by the existing ordinary owner");
 }
 
 #[test]
-fn acceptance_request_leaves_every_case_it_cannot_tell_locally_to_engrams_read() {
-    // A later turn opened elsewhere (a focus change after the root was
-    // sighted, for example, whatever the clock says), the naming turn already
-    // ended, a name given between turns or forgotten since a restart, and a
-    // project without turn-gated control: none is refused locally. Engram's
-    // answer decides; the remedy describes the current capture capability.
-    let cases: [(&str, bool, Option<&str>, Option<&str>); 4] = [
-        ("later turn elsewhere", true, Some(NAMING_GRANT), Some("grant-of-a-later-turn")),
-        ("naming turn ended", true, Some(NAMING_GRANT), None),
-        ("named between turns", true, None, Some(NAMING_GRANT)),
-        ("not turn-gated", false, Some(NAMING_GRANT), Some(NAMING_GRANT)),
-    ];
-    for (case, gated, named_in, active) in cases {
-        let (state, parent, _store, named_root) = named_root_parent();
-        let transport =
-            install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
-        record_naming_and_turn(&state, &parent, gated, named_in, active, None);
-
-        let response = state.request_acceptance_evaluation_with_runner(
-            &parent,
-            evaluation_request(Some(Agent::Codex)),
-            independent_reader(),
-        );
-
-        let error = refusal(&state, response, case);
-        let expected_kind = if gated { None } else {
-            Some(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable)
-        };
-        assert_eq!(error.kind, expected_kind, "{case}: not the local turn refusal");
-        let remedy = if gated { "opens in the named root after its naming" } else {
-            "Another ordinary turn does not produce"
-        };
-        assert!(
-            error.message.contains("has no sighting")
-                && error.message.contains(remedy),
-            "{case}: {}",
-            error.message
-        );
-        assert_eq!(sighting_reads(&transport), 1, "{case}: Engram's read decides");
-    }
+fn acceptance_request_reads_engram_without_a_local_capture() {
+    let (state, parent, _store, named_root) = named_root_parent();
+    let transport = install_sighting_transport(
+        &state, &named_root, 1, json!({"state":"absent"}),
+    );
+    let response = state.request_acceptance_evaluation_with_runner(
+        &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
+    );
+    let error = refusal(&state, response, "ordinary named root without a capture");
+    assert_eq!(error.kind,
+        Some(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable));
+    assert!(error.message.contains("has no sighting")
+        && error.message.contains("acknowledged matching named-root sighting")
+        && error.message.contains("supported measured capture"), "{}", error.message);
+    assert_eq!(sighting_reads(&transport), 1,
+        "naming alone never substitutes for Engram's read");
 }
 
 #[test]
-fn acceptance_request_under_control_off_uses_the_sighting_read_and_gives_a_truthful_remedy() {
+fn acceptance_request_uses_the_ordinary_sighting_receipt_without_manufacturing_evidence() {
     for present in [false, true] {
         let (state, parent, _store, named_root) = named_root_parent();
         let transport = install_sighting_transport(
             &state, &named_root, 1,
             if present { present_sighting() } else { json!({"state":"absent"}) },
         );
-        // An ordinary OFF turn has no mediated Begin, grant or source-opening
-        // measurement. Its existing named root remains a valid read target.
-        record_naming_and_turn(&state, &parent, false, None, None, None);
-
         let response = state.request_acceptance_evaluation_with_runner(
             &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
         );
-        assert_eq!(sighting_reads(&transport), 1, "OFF must not skip the real sighting read");
+        assert_eq!(sighting_reads(&transport), 1);
         if present {
             assert!(matches!(response.unwrap(), AcceptanceEvaluationRequestResponse::Spawned { .. }),
-                "an existing matching sighting still permits evaluation under OFF");
+                "an existing matching producer sighting passes the source preflight");
         } else {
-            let error = refusal(&state, response, "OFF without a sighting");
+            let error = refusal(&state, response, "no producer sighting");
             assert_eq!(error.status, StatusCode::CONFLICT);
             assert_eq!(error.kind, Some(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable));
             assert!(error.message.contains("has no sighting")
                 && error.message.contains("cut 42")
                 && error.message.contains("eligible measured execution observation")
-                && error.message.contains("Another ordinary turn does not produce")
-                && error.message.contains("project coordinator")
+                && error.message.contains("source_root_generation")
+                && error.message.contains("supported measured capture")
                 && error.message.contains("(named_root_sighting_unavailable)")
                 && !error.message.contains("Then request a new evaluation from a later turn"),
-                "the refusal names the evidence needed and the unavailable remedy: {}", error.message);
+                "the refusal describes the evidence actually required: {}", error.message);
         }
-        {
-            let inner = state.inner.lock().unwrap();
-            assert!(!engram_project_for_session_locked(&inner, &parent).unwrap()
-                .engram.as_ref().unwrap().turn_gated_control, "the request never enables control");
-        }
-        assert!(transport.requests().iter().all(|request| !matches!(
+        assert!(transport.requests().iter().all(|request| matches!(
             request.request["operation"].as_str(),
-            Some("turn_evaluate" | "turn_begin" | "turn_checkpoint")
-        )), "the preflight does not manufacture a mediated observation");
+            Some("work_session_read" | "named_root_sighting_read")
+        )), "a sighting read cannot create a measurement or verification");
     }
 }

@@ -316,16 +316,13 @@ export const SessionComposer = memo(function SessionComposer({
       : (slashPalette.items[Math.min(slashActiveIndex, slashPalette.items.length - 1)] ?? null);
   const canDelegateActiveSlashCommand =
     slashPalette.kind !== "none" && activeSlashItem?.kind === "agent-command";
-  const isEngramBootRecoveryPending = session?.engramBootRecoveryPending === true;
   const composerInputDisabled =
     !session ||
-    isEngramBootRecoveryPending ||
     isStopping ||
     isAgentCommandResolving ||
     isDelegationSpawning;
   const composerSendDisabled =
     !session ||
-    isEngramBootRecoveryPending ||
     isSending ||
     isStopping ||
     isUpdating ||
@@ -333,7 +330,6 @@ export const SessionComposer = memo(function SessionComposer({
     (slashPalette.kind !== "none" && slashPalette.items.length === 0);
   const composerDelegateDisabled =
     !session ||
-    isEngramBootRecoveryPending ||
     !canSpawnDelegation ||
     !onSpawnDelegation ||
     isSending ||
@@ -344,7 +340,6 @@ export const SessionComposer = memo(function SessionComposer({
     (slashPalette.kind !== "none" && !canDelegateActiveSlashCommand);
   const composerActionMenuDisabled =
     !session ||
-    isEngramBootRecoveryPending ||
     isSending ||
     isStopping ||
     isUpdating ||
@@ -1471,11 +1466,7 @@ export const SessionComposer = memo(function SessionComposer({
           onKeyDown={handleComposerKeyDown}
           onPaste={onPaste}
           placeholder={
-            isEngramBootRecoveryPending
-              ? "Resuming Engram recovery after restart..."
-              : session
-                ? `Send a prompt to ${session.agent}...`
-                : "Open a session..."
+            session ? `Send a prompt to ${session.agent}...` : "Open a session..."
           }
           rows={1}
         />
@@ -1537,10 +1528,8 @@ export const SessionComposer = memo(function SessionComposer({
       </div>
       {session ? (
         <p className="composer-hint">
-          {isEngramBootRecoveryPending
-            ? "Opening this session resumes Engram recovery. Prompts will be available when its background retry finishes."
-            : "Paste PNG, JPEG, GIF, or WebP images into the prompt. Drag-and-drop is not supported yet."}
-          {!isEngramBootRecoveryPending && composerActionMode !== "send"
+          Paste PNG, JPEG, GIF, or WebP images into the prompt. Drag-and-drop is not supported yet.
+          {composerActionMode !== "send"
             ? ` Enter still sends normally; click ${composerPrimaryLabel} to delegate.`
             : null}
         </p>

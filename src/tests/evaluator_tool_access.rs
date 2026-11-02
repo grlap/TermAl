@@ -36,10 +36,9 @@ pub(super) fn tracker_project(state: &AppState, name: &str) -> (String, PathBuf)
         .engram = Some(EngramProjectSettings {
         acceptance_evaluation: None,
         enabled: true,
-        turn_gated_control: true,
+        execution_observability: false,
         binary_path: Some("C:/tools/engram.exe".to_owned()),
         home: Some("C:/engram-home".to_owned()),
-        work_authority_grant: None,
         authority_store_key: None,
         deadline_ms: Some(250),
     });

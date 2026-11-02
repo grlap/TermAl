@@ -48,8 +48,9 @@ fn add_claimed_work(fixture: &CompletionFixture, former: &str, pin: bool) -> Str
         .or_else(|| added["short_ref"].as_str()).unwrap().to_owned();
     fixture.work(former, &["claim", &work, "--json"]);
     handoff(fixture, &work, former, &fixture.live.session_id);
-    fixture.live.state.ensure_engram_session_bound_off_lock(&fixture.live.session_id)
-        .expect("actual parent claim binds").expect("control enabled");
+    let binding = fixture.claim_binding(&fixture.live.session_id);
+    let core = fixture.work(&fixture.live.session_id, &["core", "inspect", &work, "--json"]);
+    assert_eq!(core["run"]["id"], binding.run_id, "actual held claim, not a control bind");
     work
 }
 

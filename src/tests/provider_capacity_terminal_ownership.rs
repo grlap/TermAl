@@ -437,7 +437,7 @@ fn an_old_capacity_terminal_cannot_settle_a_new_armed_receipted_request() {
         record.session.status = SessionStatus::Error;
         record.session.provider_capacity_waiting = false;
         sync_prompt_delivery_view(record);
-        let mut owner = EngramQueuedAdmissionOwner::capture(record).unwrap();
+        let mut owner = QueuedTurnOwner::capture(record).unwrap();
         owner.capacity_nonce = Some(nonce.clone());
         (head_id, nonce, owner)
     };

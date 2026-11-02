@@ -2592,8 +2592,6 @@ fn remote_session_create_forwards_configured_default_model() {
         agent_commands_revision: 0,
         codex_thread_state: None,
         live_activity: None,
-        engram_boot_recovery_pending: false,
-        engram_control_off: None,
         status: SessionStatus::Idle,
         preview: "Remote Default Model ready.".to_owned(),
         messages: (Vec::new()).into(),
@@ -2605,10 +2603,8 @@ fn remote_session_create_forwards_configured_default_model() {
         pending_prompts: Vec::new(),
         prompt_deliveries: Vec::new(),
         provider_handoffs: Vec::new(),
-        prompt_admission_budgets: BTreeMap::new(),
         provider_handoff_history: None,
         queue_paused: false,
-        queue_hold: None,
         provider_capacity_waiting: false,
         source_tracking_recovery: false,
         queue_projection_hash: None,
@@ -3544,13 +3540,6 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
                         source: None,
                     }],
                     queue_paused: true,
-                    // The remote's own automatic-retry hold is not carried
-                    // into the proxy: not by this delta, nor by a snapshot.
-                    queue_hold: Some(SessionQueueHold {
-                        kind: "automaticRetry".to_owned(),
-                        cause: "dispatch_budget_exhausted".to_owned(),
-                        retry_at: "2026-10-23T02:56:51Z".to_owned(),
-                    }),
                     queue_projection_hash: Some("remote-queue-held".to_owned()),
                 }),
                 session_mutation_stamp: None,
@@ -3567,7 +3556,10 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
     assert_eq!(session.preview, "Second final.");
     assert_eq!(session.status, SessionStatus::Idle);
     assert!(session.queue_paused);
-    assert_eq!(session.queue_hold, None, "a proxy snapshot carries no hold");
+    let wire = serde_json::to_value(session).unwrap();
+    for field in ["queueHold", "promptAdmissionBudgets", "engramBootRecoveryPending", "engramControlOff"] {
+        assert!(wire.get(field).is_none(), "retired admission field is absent from current wire: {field}");
+    }
     assert_eq!(
         session.queue_projection_hash.as_deref(),
         Some("remote-queue-held")
@@ -3624,10 +3616,7 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
             assert_eq!(status, SessionStatus::Idle);
             let session_queue = session_queue.expect("queue metadata should bridge atomically");
             assert!(session_queue.queue_paused);
-            assert_eq!(
-                session_queue.queue_hold, None,
-                "the forwarded queue carries no hold, as the snapshot does"
-            );
+            assert!(serde_json::to_value(&session_queue).unwrap().get("queueHold").is_none());
             assert_eq!(
                 session_queue.queue_projection_hash.as_deref(),
                 Some("remote-queue-held")

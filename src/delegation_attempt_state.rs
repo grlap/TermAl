@@ -1,17 +1,6 @@
-// Held and not-yet-started delegation attempts. Owns the pure reading of a
-// delegation child that decides whether the delegation's current attempt is
-// held (its turn withheld behind an Engram-retained prompt) or has not started
-// (its prompt admitting, or a follow-up still queued), the update of the
-// record's `DelegationAttemptState` from that reading, the lifecycle delta that
-// reports a change of either, the off-lock refresh the dispatch, Stop, cancel
-// and retry paths call, the text a held child contributes to a parent card
-// and a wait's fan-in, how a create or follow-up response reports the turn it
-// started (`delegation_turn_delivery`), and the parent-scoped resume. Does not
-// own the retained prompt states themselves
-// (`engram_queued_admission.rs`, `engram_abort_retry.rs`), terminal
-// transitions (`refresh_delegation_from_child_locked` in `delegations.rs`), or
-// the wait lifecycle (`delegations.rs`). New module: before it a held child was
-// reported `running` and its spawn answered a bare error.
+// Ordinary delegation queue state and exact parent-scoped Resume.
+// Runtime, pause, durability and delivery receipts determine whether an attempt
+// is waiting; stored control history supplies no admission or retry authority.
 
 /// What a held child's queue head says about the delegation's attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,112 +12,46 @@ struct DelegationChildHold {
     detail: String,
     /// The retained queue head the hold is for.
     prompt_id: String,
-    /// Aborted delivery attempts of that head (`EngramAbortRetry::attempts`).
+    /// Automatic provider-capacity retries of this delivery, if scheduled.
     attempts: u32,
-    /// When the abort record says the head was first held.
+    /// First observed pause of this prompt.
     held_since: Option<String>,
 }
 
 /// Whether the child's current attempt is held: the child is not executing,
-/// its queue is paused, and the head is a prompt Engram retained. Reads the
+/// its queue is paused and a prompt remains queued. Reads the
 /// child only.
 fn delegation_child_hold(child: &SessionRecord) -> Option<DelegationChildHold> {
-    if matches!(
-        child.session.status,
-        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-    ) || !child.orchestrator_auto_dispatch_blocked
-    {
+    if matches!(child.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+        || !child.orchestrator_auto_dispatch_blocked || delegation_child_admitting(child) {
         return None;
     }
-    // A resume or an automatic retry admits the retained head while the
-    // paused latch and the head stay in place until promotion: an admission
-    // running now owns the attempt, which is admitting, no longer held.
-    if delegation_child_admitting(child) {
-        return None;
-    }
-    let head = child
-        .queued_prompts
-        .front()
-        .filter(|queued| queued.is_engram_retained())?;
-    let abort_for_head = child.engram.abort_retry.as_ref().filter(|retry| {
-        retry.prompt_id == head.pending_prompt.id
-            && retry.generation == child.engram.dispatch_generation
-    });
-    // A parked head scheduled for its automatic replay
-    // (`engram_admission_retry.rs`) reports when and how often it retries.
-    let admission_for_head = child.engram.admission_retry.as_ref().filter(|retry| {
-        retry.prompt_id == head.pending_prompt.id
-            && retry.generation == child.engram.dispatch_generation
-    });
-    use DelegationHoldAction::{Cancel, Resume};
-    let (reason, retry_eligible, next_retry_at, actions) = if engram_abort_retry_holds_head(child)
-    {
-        // Proven unsent and durably settled: the tick retries it, and an
-        // explicit Resume may run that admission now.
-        (
-            DelegationHoldReason::RetryScheduled,
-            true,
-            abort_for_head.map(|retry| retry.due_at.clone()),
-            vec![Resume, Cancel],
-        )
-    } else if head.engram_interrupted {
-        if abort_for_head.is_some() {
-            // Settled but not yet durably acknowledged: no Resume passes the
-            // interruption until it is, and the tick then schedules the retry.
-            (
-                DelegationHoldReason::PersistenceUnknown,
-                false,
-                None,
-                vec![Cancel],
-            )
-        } else if child.engram.stopped_prompt_id.as_deref() == Some(head.pending_prompt.id.as_str())
-        {
-            (DelegationHoldReason::Stopped, false, None, vec![Cancel])
-        } else {
-            (DelegationHoldReason::DeliveryUnknown, false, None, vec![Cancel])
-        }
-    } else if head.engram_waiting {
-        (
-            DelegationHoldReason::AdmissionDeferred,
-            true,
-            admission_for_head.map(|retry| retry.due_at.clone()),
-            vec![Resume, Cancel],
-        )
-    } else {
-        // A prepared authorization whose promotion was not confirmed durable:
-        // a Resume replays exactly that authorization.
-        (
-            DelegationHoldReason::PersistenceUnknown,
-            true,
-            None,
-            vec![Resume, Cancel],
-        )
-    };
+    let head = ordinary_queue_position(child)
+        .and_then(|position| child.queued_prompts.get(position))
+        .or_else(|| child.queued_prompts.front())?;
+    let runnable = ordinary_queue_entry_is_runnable(child, head);
+    let durable = !queued_prompt_held_for_durability(child, head);
     Some(DelegationChildHold {
-        reason,
-        retry_eligible,
-        next_retry_at,
-        actions,
+        reason: if !durable { DelegationHoldReason::PersistenceUnknown }
+            else if !runnable { DelegationHoldReason::DeliveryUnknown }
+            else { DelegationHoldReason::Stopped },
+        retry_eligible: runnable && durable,
+        next_retry_at: None,
+        actions: if runnable && durable { vec![DelegationHoldAction::Resume, DelegationHoldAction::Cancel] }
+            else { vec![DelegationHoldAction::Cancel] },
         detail: child.session.preview.clone(),
         prompt_id: head.pending_prompt.id.clone(),
-        attempts: abort_for_head
-            .map(|retry| retry.attempts)
-            .or_else(|| admission_for_head.map(|retry| retry.attempts))
-            .unwrap_or(0),
-        held_since: abort_for_head
-            .map(|retry| retry.held_since.clone())
-            .or_else(|| admission_for_head.map(|retry| retry.held_since.clone())),
+        attempts: 0,
+        held_since: None,
     })
 }
 
-/// Whether the child has taken the attempt's prompt but not yet handed it to
-/// its provider: an Engram admission is running for it, either for a queued
-/// head (before its promotion, while the child may still read idle) or for a
-/// dispatched turn whose begin is not yet receipted.
 fn delegation_child_admitting(child: &SessionRecord) -> bool {
-    child.engram.admission_in_progress.is_some()
-        || (child.session.status == SessionStatus::Active
-            && child.engram.pending_dispatch.is_some())
+    child.prompt_deliveries.values().any(|delivery| {
+        delivery.disposition == PromptDeliveryDisposition::HandingOff
+            && (delivery.turn_generation == Some(child.active_turn_generation)
+                || (delivery.turn_generation.is_none() && delivery.resume.is_some()))
+    })
 }
 
 /// The hold a record carries while its stored status is `running`; none once
@@ -475,7 +398,7 @@ impl AppState {
             }
             inner
                 .find_session_index(&child_session_id)
-                .and_then(|child| EngramQueuedAdmissionOwner::capture(&inner.sessions[child]))
+                .and_then(|child| QueuedTurnOwner::capture(&inner.sessions[child]))
                 .filter(|owner| owner.prompt_id == hold.prompt_id)
                 .ok_or_else(|| {
                     ApiError::conflict(

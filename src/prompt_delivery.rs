@@ -55,23 +55,6 @@ enum PromptDeliveryDisposition {
     Ambiguous,
 }
 
-/// Positive evidence owned by the existing receipt, never by a human choice
-/// or a missing observation. A promoted/reloaded handoff is not an unsent one.
-fn human_choice_receipt_pending(record: &SessionRecord, prompt_id: &str) -> bool {
-    record.prompt_deliveries.get(prompt_id).is_some_and(|delivery|
-        delivery.federation_operation.is_none()
-            && delivery.disposition == PromptDeliveryDisposition::Pending
-            && delivery.turn_generation.is_none())
-}
-
-fn human_choice_receipt_ready(record: &SessionRecord, prompt_id: &str) -> bool {
-    record.prompt_deliveries.get(prompt_id).is_some_and(|delivery|
-        delivery.federation_operation.is_none()
-            && delivery.disposition == PromptDeliveryDisposition::HandingOff
-            && delivery.turn_generation.is_none() && delivery.write_ahead_acknowledged)
-        && prompt_delivery_resume_holds(record, prompt_id)
-}
-
 impl PromptDeliveryDisposition {
     fn is_settled(self) -> bool {
         matches!(self, Self::Accepted | Self::Rejected | Self::Ambiguous)
@@ -130,6 +113,54 @@ struct PromptDelivery {
     runtime_write: PromptRuntimeWrite,
 }
 
+/// Exact custody of a promoted receipt across a failed Stop. Ordinary
+/// promotion removes the queue row, but retains its entry in the receipt.
+/// This snapshot never authorizes a new attempt or changes the receipt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PromotedPromptReceiptOwner {
+    prompt_id: String,
+    active_turn_generation: u64,
+    stop_generation: u64,
+    pause_epoch: u64,
+    attempt: u32,
+    write_ahead: String,
+    message_id: String,
+    attempt_key: String,
+    intent: String,
+}
+
+impl PromotedPromptReceiptOwner {
+    fn capture(record: &SessionRecord) -> Option<Self> {
+        let mut current = record.prompt_deliveries.iter().filter(|(_, delivery)| {
+            delivery.disposition == PromptDeliveryDisposition::HandingOff
+                && delivery.turn_generation == Some(record.active_turn_generation)
+        });
+        let (prompt_id, delivery) = current.next()?;
+        if current.next().is_some() || !delivery.write_ahead_acknowledged {
+            return None;
+        }
+        let entry = delivery.entry.as_ref()?;
+        if entry.pending_prompt.id != *prompt_id {
+            return None;
+        }
+        Some(Self {
+            prompt_id: prompt_id.clone(),
+            active_turn_generation: record.active_turn_generation,
+            stop_generation: record.runtime_stop_generation,
+            pause_epoch: record.auto_dispatch_pause_epoch,
+            attempt: delivery.attempt,
+            write_ahead: delivery.write_ahead.clone(),
+            message_id: delivery.message_id.clone()?,
+            attempt_key: delivery.attempt_key.clone()?,
+            intent: receipted_prompt_intent(entry),
+        })
+    }
+
+    fn matches(&self, record: &SessionRecord) -> bool {
+        Self::capture(record).as_ref() == Some(self)
+    }
+}
+
 /// Where the promoted prompt stands against its runtime's prompt-carrying
 /// write. `Untracked` (Claude, ACP, and every receipt read back after a
 /// restart) gives no proof either way. `Pending` is positive proof that the
@@ -166,8 +197,9 @@ struct CodexPromptReceipt {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PromptDeliveryResume {
     capacity_nonce: Option<String>,
-    dispatch_generation: u64,
     active_turn_generation: u64,
+    promoted_message_index: Option<usize>,
+    attempt: u32,
     intent: String,
     write_ahead: String,
     stop_generation: u64,
@@ -177,13 +209,16 @@ struct PromptDeliveryResume {
 impl PromptDeliveryResume {
     /// The owner the continuation's drain is bound to: exactly the head it
     /// was captured for, never one captured afresh.
-    fn owner(&self, prompt_id: &str) -> EngramQueuedAdmissionOwner {
-        EngramQueuedAdmissionOwner {
-            ordinary: None,
+    fn owner(&self, prompt_id: &str) -> QueuedTurnOwner {
+        QueuedTurnOwner {
+            intent: self.intent.clone(),
+            stop_generation: self.stop_generation,
+            pause_epoch: self.pause_epoch,
+            write_ahead: Some(self.write_ahead.clone()),
+            promoted_message_index: self.promoted_message_index,
             receipt_resume: Some(self.clone()),
             capacity_nonce: self.capacity_nonce.clone(),
             prompt_id: prompt_id.to_owned(),
-            generation: self.dispatch_generation,
             active_turn_generation: self.active_turn_generation,
         }
     }
@@ -193,7 +228,7 @@ impl PromptDeliveryResume {
 /// text, expansion, attachments and source), not the Engram admission state
 /// that the release and the admission change on the same head.
 fn receipted_prompt_intent(head: &QueuedPromptRecord) -> String {
-    engram_turn_intent_fingerprint(
+    queued_prompt_intent_fingerprint(
         &head.pending_prompt.text,
         head.pending_prompt.expanded_text.as_deref(),
         &head.attachments,
@@ -206,20 +241,28 @@ fn receipted_prompt_intent(head: &QueuedPromptRecord) -> String {
 /// attempt still authorizes crossing the pause for it: the same head, content
 /// and attempt, and no Stop or pause since.
 fn prompt_delivery_resume_holds(record: &SessionRecord, prompt_id: &str) -> bool {
-    let Some(head) = record.queued_prompts.front() else {
-        return false;
-    };
     let Some(delivery) = record.prompt_deliveries.get(prompt_id) else {
         return false;
     };
     let Some(resume) = delivery.resume.as_ref() else {
         return false;
     };
-    head.pending_prompt.id == prompt_id
+    // This attempt already owns its entry. A promoted Pending entry becomes
+    // HandingOff when its own write-ahead begins, so reselecting only proven
+    // unsent Pending entries here would revoke the continuation itself.
+    let Some(head) = record.queued_prompts.iter()
+        .find(|head| head.pending_prompt.id == prompt_id) else {
+        return false;
+    };
+    head.promotion_disposition_known
+        && !head.engram_ordinary_handoff
+        && head.promoted_message_index == resume.promoted_message_index
         && delivery.disposition == PromptDeliveryDisposition::HandingOff
         && delivery.turn_generation.is_none()
+        && !delivery.federation_handoff_started
+        && delivery.runtime_write == PromptRuntimeWrite::Untracked
+        && delivery.attempt == resume.attempt
         && delivery.write_ahead == resume.write_ahead
-        && record.engram.dispatch_generation == resume.dispatch_generation
         && record.active_turn_generation == resume.active_turn_generation
         && record.runtime_stop_generation == resume.stop_generation
         && record.auto_dispatch_pause_epoch == resume.pause_epoch
@@ -230,8 +273,7 @@ fn prompt_delivery_resume_holds(record: &SessionRecord, prompt_id: &str) -> bool
 
 /// What an explicit Resume accepted, under its first lock, of a receipted
 /// head: exactly that head and content, and the Stop and pause it crossed.
-/// Its write-ahead is begun after the Engram release (which may move the
-/// head to a new dispatch generation) only while all of it still holds.
+/// Its write-ahead begins only while that original identity still holds.
 struct ReceiptedResumeIdentity {
     prompt_id: String,
     intent: String,
@@ -243,12 +285,12 @@ struct ReceiptedResumeIdentity {
 /// receipt and is the one this Resume may start (no owner, or a matching one).
 fn receipted_resume_identity(
     record: &SessionRecord,
-    owner: Option<&EngramQueuedAdmissionOwner>,
+    owner: Option<&QueuedTurnOwner>,
 ) -> Option<ReceiptedResumeIdentity> {
     if owner.is_some_and(|owner| !owner.matches(record)) {
         return None;
     }
-    let head = record.queued_prompts.front()?;
+    let head = record.queued_prompts.get(ordinary_queue_position(record)?)?;
     record
         .prompt_deliveries
         .contains_key(&head.pending_prompt.id)
@@ -273,7 +315,8 @@ enum ReceiptedResume {
     Refused(String),
 }
 
-/// A delivery receipt as clients see it, on the session.
+/// Delivery status as clients see it. An ambiguous historical row may have
+/// no tracked attempt; this view creates no receipt, nonce or send authority.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PromptDeliveryView {
@@ -453,7 +496,24 @@ fn sync_prompt_delivery_view(record: &mut SessionRecord) {
         })
         .collect::<Vec<_>>();
     view.sort_by_key(|(sequence, _)| *sequence);
-    record.session.prompt_deliveries = view.into_iter().map(|(_, view)| view).collect();
+    let mut views = view.into_iter().map(|(_, view)| view).collect::<Vec<_>>();
+    for queued in &record.queued_prompts {
+        if !record.prompt_deliveries.contains_key(&queued.pending_prompt.id)
+            && (!queued.promotion_disposition_known || queued.engram_ordinary_handoff
+                || queued.promoted_message_index.is_some())
+        {
+            // No positive provider effect is inferred from a stored queue
+            // record or a transcript position. Preserve its content as history.
+            views.push(PromptDeliveryView {
+                prompt_id: queued.pending_prompt.id.clone(),
+                disposition: PromptDeliveryDisposition::Ambiguous,
+                attempt: 0,
+                message_id: None,
+                reason: Some("Earlier provider delivery could not be established; this historical queue entry will not be replayed".to_owned()),
+            });
+        }
+    }
+    record.session.prompt_deliveries = views;
 }
 
 /// Drops the receipts of prompts that left the queue before any hand-off
@@ -461,6 +521,7 @@ fn sync_prompt_delivery_view(record: &mut SessionRecord) {
 /// receipts beyond the limit. Called wherever the queue is synchronized.
 fn prune_prompt_deliveries(record: &mut SessionRecord) {
     if record.prompt_deliveries.is_empty() && record.session.prompt_deliveries.is_empty() {
+        sync_prompt_delivery_view(record);
         return;
     }
     let queued = &record.queued_prompts;
@@ -513,17 +574,9 @@ fn settle_prompt_deliveries_after_load(record: &mut SessionRecord) {
         .iter()
         .any(|queued| ambiguous.contains(&queued.pending_prompt.id))
     {
-        let dropped_begin = dropped_engram_intent_grant(
-            record,
-            record
-                .queued_prompts
-                .iter()
-                .filter(|queued| ambiguous.contains(&queued.pending_prompt.id)),
-        );
         record
             .queued_prompts
             .retain(|queued| !ambiguous.contains(&queued.pending_prompt.id));
-        record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
     }
     sync_prompt_delivery_view(record);
@@ -533,17 +586,9 @@ fn settle_prompt_deliveries_after_load(record: &mut SessionRecord) {
 /// its Engram intent may own, as the restart settlement does
 /// (`settle_prompt_deliveries_after_load`).
 fn retire_queued_prompt(record: &mut SessionRecord, prompt_id: &str) {
-    let dropped_begin = dropped_engram_intent_grant(
-        record,
-        record
-            .queued_prompts
-            .iter()
-            .filter(|queued| queued.pending_prompt.id == prompt_id),
-    );
     record
         .queued_prompts
         .retain(|queued| queued.pending_prompt.id != prompt_id);
-    record_dropped_engram_intent(record, dropped_begin);
     sync_pending_prompts(record);
 }
 
@@ -655,17 +700,6 @@ fn unsent_attempt_matches(record: &SessionRecord, prompt_id: &str, write_ahead: 
         .any(|queued| queued.pending_prompt.id == prompt_id)
 }
 
-/// The turn generation the queue head's receipted attempt was promoted
-/// under, while that attempt is handing off: what a path that ends a
-/// retained admission without a hand-off settles (`apply_prompt_delivery_outcome`).
-fn head_prompt_delivery_turn(record: &SessionRecord) -> Option<u64> {
-    let head = record.queued_prompts.front()?;
-    let delivery = record.prompt_deliveries.get(&head.pending_prompt.id)?;
-    (delivery.disposition == PromptDeliveryDisposition::HandingOff)
-        .then_some(delivery.turn_generation)
-        .flatten()
-}
-
 /// Settles, at a runtime's retirement, the attempt of `ending_turn` that the
 /// retired runtime had not acknowledged. Call after the retirement took the
 /// provably unsent deferred carriers (`discard_deferred_stop_callbacks`), in
@@ -691,72 +725,10 @@ fn settle_retired_runtime_attempt(record: &mut SessionRecord, ending_turn: u64) 
 /// begun: a promotion refuses it, and its caller wakes the ordinary drain
 /// after its own commit (`wake_receipted_head_after_commit`).
 fn receipted_head_awaiting_write_ahead(record: &SessionRecord) -> Option<String> {
-    let head = record.queued_prompts.front()?;
+    let head = record.queued_prompts.get(ordinary_queue_position(record)?)?;
     let delivery = record.prompt_deliveries.get(&head.pending_prompt.id)?;
     (delivery.disposition == PromptDeliveryDisposition::Pending)
         .then(|| head.pending_prompt.id.clone())
-}
-
-/// What a session shows while an automatic Engram retry of its receipted
-/// head is parked until an explicit Resume.
-const PROMPT_DELIVERY_PARKED_FOR_RESUME_PREVIEW: &str = "Paused, waiting for Resume: this receipted prompt is sent only after an explicit Resume; its automatic retry is parked and charges no attempt.";
-
-/// Why an automatic Engram retry (bind, abort or admission) of the queue
-/// head must park instead of beginning an attempt.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReceiptedRetryPark {
-    /// The paused queue may send this receipted head only on an explicit
-    /// Resume, and no Resume authority holds for it.
-    WaitingForResume,
-    /// A Resume's write-ahead for the head is still in flight: its
-    /// acknowledgement continues the head, so a retry now is no attempt.
-    WriteAheadInFlight,
-}
-
-/// Whether an automatic retry of the session's head must park, and why: it
-/// could only be refused at the receipt gate, so it begins nothing and is
-/// charged nothing, and its retry record, lineage and spent count stay as
-/// they are. `None` when the head is not receipted, or its attempt may go on.
-fn receipted_head_retry_park(record: &SessionRecord) -> Option<ReceiptedRetryPark> {
-    let head = record.queued_prompts.front()?;
-    let prompt_id = &head.pending_prompt.id;
-    let delivery = record.prompt_deliveries.get(prompt_id)?;
-    let paused_without_resume =
-        record.orchestrator_auto_dispatch_blocked && !prompt_delivery_resume_holds(record, prompt_id);
-    match delivery.disposition {
-        PromptDeliveryDisposition::Pending if paused_without_resume => {
-            Some(ReceiptedRetryPark::WaitingForResume)
-        }
-        PromptDeliveryDisposition::HandingOff if delivery.turn_generation.is_none() => {
-            if !delivery.write_ahead_acknowledged {
-                Some(ReceiptedRetryPark::WriteAheadInFlight)
-            } else if paused_without_resume {
-                Some(ReceiptedRetryPark::WaitingForResume)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Parks an automatic retry of the session's head that
-/// `receipted_head_retry_park` says must park: nothing is begun or charged,
-/// and a head waiting for Resume says so. Returns whether it parked and
-/// whether the session changed (to stamp and commit). Call with the state
-/// lock held.
-fn park_receipted_head_retry(record: &mut SessionRecord) -> (bool, bool) {
-    match receipted_head_retry_park(record) {
-        None => (false, false),
-        Some(ReceiptedRetryPark::WriteAheadInFlight) => (true, false),
-        Some(ReceiptedRetryPark::WaitingForResume) => {
-            let changed = record.session.preview != PROMPT_DELIVERY_PARKED_FOR_RESUME_PREVIEW;
-            if changed {
-                record.session.preview = PROMPT_DELIVERY_PARKED_FOR_RESUME_PREVIEW.to_owned();
-            }
-            (true, changed)
-        }
-    }
 }
 
 /// The reason a removed, never handed-off head's receipt records.
@@ -766,9 +738,12 @@ const QUEUE_REMOVAL_UNSENT_REASON: &str =
 /// The queue head promoted for its hand-off, as a removal captures it before
 /// it changes the queue: its prompt and its attempt's turn.
 fn handing_off_head(record: &SessionRecord) -> Option<(String, u64)> {
-    let turn_generation = head_prompt_delivery_turn(record)?;
-    let head = record.queued_prompts.front()?;
-    Some((head.pending_prompt.id.clone(), turn_generation))
+    record.queued_prompts.iter().find_map(|queued| {
+        let delivery = record.prompt_deliveries.get(&queued.pending_prompt.id)?;
+        (delivery.disposition == PromptDeliveryDisposition::HandingOff
+            && delivery.turn_generation == Some(record.active_turn_generation))
+            .then(|| (queued.pending_prompt.id.clone(), record.active_turn_generation))
+    })
 }
 
 /// Settles the receipt of a head that `handing_off_head` captured before a
@@ -812,7 +787,7 @@ fn discard_deferred_stop_callbacks(record: &mut SessionRecord) -> bool {
     let callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
     let mut settled = false;
     for callback in callbacks {
-        let DeferredStopCallback::EngramHandoff {
+        let DeferredStopCallback::TurnHandoff {
             active_turn_generation,
             dispatch,
         } = callback
@@ -979,9 +954,8 @@ impl AppState {
             .queued_prompts
             .iter()
             .find(|head| head.pending_prompt.id == prompt_id)
-            .map(receipted_prompt_intent);
-        let (dispatch_generation, active_turn_generation) =
-            (record.engram.dispatch_generation, record.active_turn_generation);
+            .map(|head| (receipted_prompt_intent(head), head.promoted_message_index));
+        let active_turn_generation = record.active_turn_generation;
         let (stop_generation, pause_epoch) =
             (record.runtime_stop_generation, record.auto_dispatch_pause_epoch);
         let Some(delivery) = record.prompt_deliveries.get_mut(prompt_id) else {
@@ -994,10 +968,11 @@ impl AppState {
         delivery.federation_handoff_started = false;
         delivery.write_ahead_acknowledged = false;
         delivery.resume = match (explicit_resume, content) {
-            (true, Some(content)) => Some(PromptDeliveryResume {
+            (true, Some((content, promoted_message_index))) => Some(PromptDeliveryResume {
                 capacity_nonce: capacity_nonce.map(str::to_owned),
-                dispatch_generation,
                 active_turn_generation,
+                promoted_message_index,
+                attempt: delivery.attempt,
                 intent: content,
                 write_ahead: write_ahead.clone(),
                 stop_generation,
@@ -1029,38 +1004,15 @@ impl AppState {
     fn resume_receipted_head(
         &self,
         session_id: &str,
-        owner: Option<&EngramQueuedAdmissionOwner>,
+        owner: Option<&QueuedTurnOwner>,
         accepted: &ReceiptedResumeIdentity,
-    ) -> ReceiptedResume {
-        self.resume_receipted_head_with_choice(session_id, owner, accepted, false)
-    }
-
-    fn resume_selected_human_receipted_head(
-        &self, session_id: &str, owner: Option<&EngramQueuedAdmissionOwner>, accepted: &ReceiptedResumeIdentity,
-    ) -> ReceiptedResume {
-        self.resume_receipted_head_with_choice(session_id, owner, accepted, true)
-    }
-
-    fn resume_receipted_head_with_choice(
-        &self, session_id: &str, owner: Option<&EngramQueuedAdmissionOwner>, accepted: &ReceiptedResumeIdentity,
-        human: bool,
     ) -> ReceiptedResume {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_visible_session_index(session_id) else {
             return ReceiptedResume::NotReceipted;
         };
         let record = &inner.sessions[index];
-        // Unpaused meanwhile: the Resume goes on as for any head.
-        let human_choice = human && record.queued_prompts.front().is_some_and(|head|
-            human_choice_matches(record, head, &self.server_instance_id)
-                && human_choice_control_intent_preserved(&inner, session_id, head));
-        if human && !human_choice {
-            return ReceiptedResume::Refused("the exact human choice changed before its write-ahead".into());
-        }
-        if !record.orchestrator_auto_dispatch_blocked && !human_choice {
-            return ReceiptedResume::NotReceipted;
-        }
-        let unchanged = record.queued_prompts.front().is_some_and(|head| {
+        let unchanged = ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position)).is_some_and(|head| {
             head.pending_prompt.id == accepted.prompt_id
                 && receipted_prompt_intent(head) == accepted.intent
         }) && record.runtime_stop_generation == accepted.stop_generation
@@ -1179,10 +1131,7 @@ impl AppState {
             // the pause only while it still holds; its drain is bound to the
             // head it was captured for, and the promotion's own gate checks
             // and consumes it again.
-            let human_choice = record.queued_prompts.front().is_some_and(|head|
-                human_choice_matches(record, head, &self.server_instance_id));
-            let resume_owner = ((record.orchestrator_auto_dispatch_blocked || human_choice)
-                && prompt_delivery_resume_holds(record, prompt_id))
+            let resume_owner = prompt_delivery_resume_holds(record, prompt_id)
             .then(|| {
                 record.prompt_deliveries[prompt_id]
                     .resume
@@ -1242,33 +1191,30 @@ impl AppState {
         session_id: &str,
         prompt_id: &str,
         write_ahead: &str,
-        resume_owner: Option<EngramQueuedAdmissionOwner>,
+        resume_owner: Option<QueuedTurnOwner>,
     ) {
-        let resume_owner = {
+        let automatic_owner = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if ordinary_off_execution_applies(&inner, session_id) {
-                let ordinary = inner.find_session_index(session_id)
-                    .filter(|index| inner.sessions[*index].prompt_deliveries.get(prompt_id).is_some_and(|delivery|
-                        delivery.write_ahead == write_ahead && delivery.write_ahead_acknowledged
-                            && delivery.disposition == PromptDeliveryDisposition::HandingOff
-                            && delivery.turn_generation.is_none()))
-                    .and_then(|index| EngramQueuedAdmissionOwner::capture_ordinary(&inner.sessions[index]))
-                    .filter(|owner| owner.prompt_id == prompt_id);
-                match (ordinary, resume_owner) {
-                    (Some(mut ordinary), previous) => {
-                        if let Some(previous) = previous {
-                            ordinary.receipt_resume = previous.receipt_resume;
-                            ordinary.capacity_nonce = previous.capacity_nonce;
-                        }
-                        Some(ordinary)
-                    }
-                    (None, _) => return,
-                }
-            } else { resume_owner }
+            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let record = &inner.sessions[index];
+            if !record.prompt_deliveries.get(prompt_id).is_some_and(|delivery| {
+                delivery.write_ahead == write_ahead && delivery.write_ahead_acknowledged
+                    && delivery.disposition == PromptDeliveryDisposition::HandingOff
+                    && delivery.turn_generation.is_none()
+            }) || ordinary_queue_position(record).is_none_or(|position|
+                record.queued_prompts[position].pending_prompt.id != prompt_id)
+                || resume_owner.as_ref().is_some_and(|owner| !owner.matches(record))
+            {
+                return;
+            }
+            QueuedTurnOwner::capture(record)
         };
         let drained = match resume_owner {
             Some(owner) => self.dispatch_next_queued_turn_for_resume(session_id, owner),
-            None => self.dispatch_next_queued_turn(session_id, false),
+            None => match automatic_owner {
+                Some(owner) => self.dispatch_next_queued_turn_for_activation(session_id, owner),
+                None => return,
+            },
         };
         match drained {
             Ok(Some(dispatch)) => {
@@ -1298,7 +1244,13 @@ impl AppState {
     /// it. A head that changed meanwhile is the changing operation's to
     /// drain.
     fn wake_receipted_head_after_commit(&self, session_id: &str, prompt_id: &str) {
-        match self.dispatch_next_queued_turn(session_id, false) {
+        let owner = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id).and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
+                .filter(|owner| owner.prompt_id == prompt_id)
+        };
+        let Some(owner) = owner else { return; };
+        match self.dispatch_next_queued_turn_for_activation(session_id, owner) {
             Ok(Some(dispatch)) => {
                 if let TurnDispatchDeliveryOutcome::Rejected(error) =
                     deliver_turn_dispatch(self, dispatch)
@@ -1334,20 +1286,8 @@ impl AppState {
         DispatchTurnResult::Queued
     }
 
-    /// After an acknowledged write-ahead's dispatch: if the entry was not
-    /// promoted (the session was busy or paused, or another prompt went
-    /// first), nothing was sent, and a hand-off record that stayed durable
-    /// would make a restart drop a prompt that never reached a runtime. It
-    /// returns to pending by a superseding write; the next dispatch of the
-    /// queue starts a new attempt. While the queued admission of this very
-    /// prompt is evaluating it off-lock (it passed the receipt gate after the
-    /// acknowledgement, and this dispatch only left it a wake), the attempt
-    /// is left to that admission instead, bound to its guard token, the
-    /// prompt and this exact nonce, in this same critical section: that
-    /// admission promotes the attempt, or returns it to pending when its
-    /// guard is released (`release_admission_attempt_locked`). A return to
-    /// pending here would make its promotion refuse the head and abandon its
-    /// admission, stranding the queue.
+    /// Return an acknowledged but unpromoted exact nonce to pending. Nothing
+    /// reached a runtime; a later attempt must obtain a fresh acknowledgement.
     fn return_unpromoted_write_ahead_to_pending(
         &self,
         session_id: &str,
@@ -1359,27 +1299,6 @@ impl AppState {
             return;
         };
         if !unsent_attempt_matches(&inner.sessions[index], prompt_id, write_ahead) {
-            return;
-        }
-        let record = &mut inner.sessions[index];
-        let admitting = record
-            .engram
-            .admission_in_progress
-            .as_ref()
-            .filter(|_| {
-                record.engram.admission_prompt_id.as_deref() == Some(prompt_id)
-                    && record
-                        .queued_prompts
-                        .front()
-                        .is_some_and(|head| head.pending_prompt.id == prompt_id)
-            })
-            .cloned();
-        if let Some(token) = admitting {
-            record.engram.admission_attempt = Some(EngramAdmissionAttempt {
-                token,
-                prompt_id: prompt_id.to_owned(),
-                write_ahead: write_ahead.to_owned(),
-            });
             return;
         }
         self.return_unsent_attempt_to_pending_locked(&mut inner, index, prompt_id);
@@ -1434,23 +1353,6 @@ impl AppState {
         }
         delivery.runtime_write = PromptRuntimeWrite::Begun;
         true
-    }
-
-    /// The release of the admission guard that `attempt` was left to: the
-    /// admission ended, by a promotion or without one. If it is still that
-    /// exact unsent attempt (same prompt and nonce, acknowledged, never
-    /// promoted, still queued), it returns to pending; a promoted, settled,
-    /// superseded or removed one is left to its own path. Never dispatches
-    /// or waits; call with the state lock held, from the guard's release.
-    fn release_admission_attempt_locked(
-        &self,
-        inner: &mut StateInner,
-        index: usize,
-        attempt: EngramAdmissionAttempt,
-    ) {
-        if unsent_attempt_matches(&inner.sessions[index], &attempt.prompt_id, &attempt.write_ahead) {
-            self.return_unsent_attempt_to_pending_locked(inner, index, &attempt.prompt_id);
-        }
     }
 
     /// Returns the session's unsent attempt of `prompt_id` to pending by a
@@ -1740,4 +1642,36 @@ impl AppState {
         self.request_queued_prompt_durability(session_id, &new_prompt_id);
         Ok(new_prompt_id)
     }
+}
+
+fn queued_prompt_intent_fingerprint(
+    text: &str,
+    expanded_text: Option<&str>,
+    attachments: &[PromptImageAttachment],
+    source: Option<&MessageSource>,
+    queued_source: QueuedPromptSource,
+) -> String {
+    if let Some(mailbox) = source.and_then(|source| source.mailbox.as_ref()) {
+        return sha256_hex(
+            format!("mailbox\0{}\0{}", mailbox.mailbox_id, mailbox.sequence).as_bytes(),
+        );
+    }
+    let source_kind = match queued_source {
+        QueuedPromptSource::User => "user",
+        QueuedPromptSource::Human => "human",
+        QueuedPromptSource::Mailbox => "mailbox",
+        QueuedPromptSource::Orchestrator => "orchestrator",
+    };
+    let attachment_digests = attachments
+        .iter()
+        .map(|attachment| sha256_hex(attachment.data.as_bytes()))
+        .collect::<Vec<_>>()
+        .join("\0");
+    sha256_hex(
+        format!(
+            "text\0{text}\0expanded\0{}\0attachments\0{attachment_digests}\0source\0{source_kind}",
+            expanded_text.unwrap_or_default()
+        )
+        .as_bytes(),
+    )
 }

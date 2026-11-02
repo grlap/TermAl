@@ -30,6 +30,9 @@ fn engram_node_focused_recognition_preserves_quoted_filter_and_test_kind() {
 #[test]
 fn engram_focused_outer_options_preserve_node_and_other_test_recognition() {
     for options in [
+        "--input commit",
+        "--input commit --notify session-recipient",
+        "--require-binary-env FIXTURE_BINARY --input commit",
         "--notify session-recipient",
         "--item fixture-work",
         "--notify session-recipient --item fixture-work",
@@ -40,6 +43,8 @@ fn engram_focused_outer_options_preserve_node_and_other_test_recognition() {
         let command = format!("node scripts/test-launcher.mjs focused {options} -- node --test --test-name-pattern \"selected case\" fixture.test.mjs");
         let check = engram_check_command(&command).expect("supported launcher options retain test recognition");
         assert_eq!(check.kind, EngramVerificationKind::Test, "{command}");
+        assert_eq!(check.normalized, command);
+        assert_eq!(check.argv, engram_shell_words(&command).unwrap());
         assert_eq!(engram_focused_node_words(&check.program, &check.argv[1..]).unwrap(),
             ["node", "--test", "--test-name-pattern", "selected case", "fixture.test.mjs"]);
         for inner in ["cargo test", "npx vitest run"] {
@@ -50,6 +55,8 @@ fn engram_focused_outer_options_preserve_node_and_other_test_recognition() {
         let command = format!("node scripts/test-launcher.mjs focused {options} -- cargo +stable build --release");
         let check = engram_check_command(&command).unwrap();
         assert_eq!(check.kind, EngramVerificationKind::Build, "{command}");
+        assert_eq!(check.normalized, command);
+        assert_eq!(check.argv, engram_shell_words(&command).unwrap());
         assert_eq!(engram_focused_build_words(&check.program, &check.argv[1..]).unwrap(),
             ["cargo", "+stable", "build", "--release"]);
     }
@@ -58,7 +65,16 @@ fn engram_focused_outer_options_preserve_node_and_other_test_recognition() {
 #[test]
 fn engram_focused_outer_options_unknown_or_malformed_have_named_refusals() {
     for (options, named) in [
+        ("--input", "--input"),
+        ("--input ''", "--input"),
+        ("--input staged", "--input"),
+        ("--input Commit", "--input"),
+        ("--input 'commit '", "--input"),
+        ("--input=commit", "--input=commit"),
+        ("--input commit --input commit", "--input"),
+        ("--input --notify session-recipient", "--input"),
         ("--future-option value", "--future-option"),
+        ("--input commit --future-option value", "--future-option"),
         ("--notify", "--notify"),
         ("--require-binary-env invalid-name", "--require-binary-env"),
         ("--next-owner session-recipient", "--next-action"),
@@ -83,6 +99,8 @@ fn engram_focused_outer_options_unknown_or_malformed_have_named_refusals() {
         }
     }
     for command in [
+        "node scripts/test-launcher.mjs focused --input commit",
+        "node scripts/test-launcher.mjs focused --input commit --",
         "node scripts/test-launcher.mjs focused --notify session-recipient",
         "node scripts/test-launcher.mjs focused --notify session-recipient --",
     ] {
@@ -91,14 +109,16 @@ fn engram_focused_outer_options_unknown_or_malformed_have_named_refusals() {
     }
     // Outer metadata does not change the existing inner runner exclusions.
     for inner in ["node --test --watch", "node --test --test-reporter=json", "cargo test --no-run", "node fixture.mjs"] {
-        let command = format!("node scripts/test-launcher.mjs focused --notify session-recipient -- {inner}");
-        assert!(engram_check_command(&command).is_none(), "{command}");
-        assert!(engram_unsupported_focused_line(&command).is_some(), "{command}");
+        for options in ["--notify session-recipient", "--input commit"] {
+            let command = format!("node scripts/test-launcher.mjs focused {options} -- {inner}");
+            assert!(engram_check_command(&command).is_none(), "{command}");
+            assert!(engram_unsupported_focused_line(&command).is_some(), "{command}");
+        }
     }
 }
 
 #[test]
-fn engram_focused_outer_options_keep_owner_and_one_checkpoint_test() {
+fn engram_focused_outer_options_keep_owner_and_one_observation_test() {
     let command = "node scripts/test-launcher.mjs focused --notify session-recipient --item fixture-work -- node --test fixture.test.mjs";
     let mut fixture = FocusedNodeFixture::with_test(
         "node-outer-options", 0, false, command, &["--test", "fixture.test.mjs"],
@@ -107,7 +127,7 @@ fn engram_focused_outer_options_keep_owner_and_one_checkpoint_test() {
     assert_eq!(fixture.request["owner"], fixture.turn.session_id);
     assert_ne!(fixture.request["owner"], fixture.request["notifyTo"]);
     fixture.assert_started();
-    one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "succeeded");
+    one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "passed");
 }
 
 #[test]
@@ -246,7 +266,7 @@ fn engram_node_counts_skip_and_todo_are_not_executed_passes() {
 #[test]
 fn engram_node_unsupported_focused_form_announces_no_test_record() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start("node-unsupported-feedback", true);
+    let turn = EOCheckedTurn::start("node-unsupported-feedback", true);
     let command = "node scripts/test-launcher.mjs focused -- node ordinary.mjs";
     let mut recorder = turn.recorder();
     recorder
@@ -268,7 +288,7 @@ fn engram_node_unsupported_focused_form_announces_no_test_record() {
 #[test]
 fn engram_node_ordinary_commands_have_no_launcher_specific_notice() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start("node-ordinary-no-feedback", true);
+    let turn = EOCheckedTurn::start("node-ordinary-no-feedback", true);
     let command = "node ordinary.mjs";
     let mut recorder = turn.recorder();
     recorder
@@ -308,9 +328,9 @@ fn engram_node_launcher_native_result_and_parser_controls() {
 }
 
 /// Synthetic matched records exercise the actual recorder, check start/end,
-/// source captures and checkpoint. They are not live producer/test evidence.
+/// source captures and observation. They are not live producer/test evidence.
 struct FocusedNodeFixture {
-    turn: CheckedTurn,
+    turn: EOCheckedTurn,
     provenance: EngramObservationProvenance,
     command: String,
     directory: PathBuf,
@@ -352,7 +372,7 @@ impl FocusedNodeFixture {
         label: &str, native: i64, one_call: bool, test: &str, args: &[&str], known_bash: bool,
     ) -> Self {
         let _placement = TestTempRootDirectoryScope::repository_local();
-        let turn = CheckedTurn::start(label, true);
+        let turn = EOCheckedTurn::start(label, true);
         let provenance = if known_bash {
             turn.record(|record| EngramObservationProvenance::Claude(ClaudeObservationProvenance {
                 token: record.runtime.runtime_token().expect("matching fixture runtime"),
@@ -419,7 +439,7 @@ impl FocusedNodeFixture {
             "the runtime-qualified command must start a Test observation");
     }
 
-    fn finish(self, exit: EngramCommandExit) -> Value {
+    fn finish(&self, exit: EngramCommandExit) -> Value {
         for (name, value) in [
             ("request.json", &self.request),
             ("results.json", &self.results),
@@ -446,24 +466,38 @@ impl FocusedNodeFixture {
             )
             .unwrap();
         self.turn.wait_for_snapshots();
-        self.turn.finish()
+        let observation = self.turn.finish();
+        assert_ordinary_observation_has_no_native_credit(&self.turn, &observation);
+        observation
     }
 }
 
-fn one_node_test(checkpoint: &Value, outcome: &str) {
-    let rows = checkpoint["verification_evidence"]
-        .as_array()
-        .expect("typed verification");
-    assert_eq!(rows.len(), 1, "{checkpoint:#}");
-    assert_eq!(rows[0]["check_kind"], "test");
-    let id = &rows[0]["producer_observation"]["observation_id"];
-    let producers = observations(checkpoint)
-        .into_iter()
-        .filter(|row| &row["observation_id"] == id)
-        .collect::<Vec<_>>();
-    assert_eq!(producers.len(), 1);
-    assert_eq!(producers[0]["outcome"], outcome, "{checkpoint:#}");
-    assert_eq!(producers[0]["source_changed"], false);
+fn one_node_test(observation: &Value, outcome: &str) {
+    let checks = observation["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "{observation:#}");
+    assert_eq!(checks[0]["check_kind"], "test");
+    assert_eq!(checks[0]["observed_result"], outcome, "{observation:#}");
+    assert!(checks[0].get("source_basis").is_none(), "ordinary facts carry no automatic source verification");
+    assert!(observation.get("verification_evidence").is_none());
+    assert!(observation.get("environment_evidence").is_none());
+}
+
+fn node_diagnostic(turn: &EOCheckedTurn) -> EngramTurnCheck {
+    turn.record(|record| record.engram.active_turn_checks.last().unwrap().clone())
+}
+
+fn node_summary(turn: &EOCheckedTurn) -> String {
+    let check = node_diagnostic(turn);
+    let end = check.end.as_ref().unwrap();
+    end.build_diagnostic.as_ref().map_or_else(
+        || engram_check_summary(&check.command, end.exit, &end.result_lines),
+        |diagnostic| diagnostic.summary(&check.command))
+}
+
+fn node_refs(turn: &EOCheckedTurn) -> Vec<String> {
+    let check = node_diagnostic(turn);
+    let end = check.end.as_ref().unwrap();
+    engram_check_refs(&check.command, end.exit, &end.result_lines)
 }
 
 #[test]
@@ -472,7 +506,7 @@ fn engram_node_matched_native_pass_and_failure_record_one_test() {
         let fixture = FocusedNodeFixture::new(&format!("node-matched-{native}"), native);
         one_node_test(
             &fixture.finish(EngramCommandExit::Code(native)),
-            if native == 0 { "succeeded" } else { "failed" },
+            if native == 0 { "passed" } else { "failed" },
         );
     }
 }
@@ -487,7 +521,7 @@ fn engram_node_one_call_matched_pass_and_failure_keep_native_outcome() {
         );
         one_node_test(
             &fixture.finish(EngramCommandExit::Code(native)),
-            if native == 0 { "succeeded" } else { "failed" },
+            if native == 0 { "passed" } else { "failed" },
         );
     }
 }
@@ -507,14 +541,14 @@ fn engram_node_one_call_invalid_artifacts_do_not_prove_execution() {
             &[],
         ));
         fixture.request["owner"] = json!("foreign");
-        one_node_test(&fixture.finish(EngramCommandExit::Code(native)), "unknown");
+        one_node_test(&fixture.finish(EngramCommandExit::Code(native)), "indeterminate");
     }
 }
 
 fn assert_wrapped_unsupported_notice(cmd_wrapper: bool) {
     let _placement = TestTempRootDirectoryScope::repository_local();
     for late_description in [false, true] {
-        let turn = CheckedTurn::start("node-wrapped-feedback", true);
+        let turn = EOCheckedTurn::start("node-wrapped-feedback", true);
         let inner = "node scripts/test-launcher.mjs focused -- node ordinary.mjs";
         let command = if cmd_wrapper {
             format!("cmd /c {inner}")
@@ -673,7 +707,7 @@ fn engram_node_invalid_artifacts_cannot_be_rescued_by_summary_or_counts() {
         fixture
             .output
             .push_str("tests: passed=20 failed=0 ignored=0\n");
-        one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "unknown");
+        one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "indeterminate");
     }
     for exit in [
         EngramCommandExit::Unknown,
@@ -681,11 +715,14 @@ fn engram_node_invalid_artifacts_cannot_be_rescued_by_summary_or_counts() {
         EngramCommandExit::Code(1),
     ] {
         let fixture = FocusedNodeFixture::new("node-no-terminal", 0);
-        let checkpoint = fixture.finish(exit);
+        let observation = fixture.finish(exit);
         if exit == EngramCommandExit::NotFinished {
-            assert!(checkpoint.get("verification_evidence").is_none());
+            assert!(observation.get("verification_evidence").is_none());
+            one_node_test(&observation, "indeterminate");
+            assert!(observation["occurrence"]["observed_checks"][0].get("finished_at").is_none(),
+                "a launch acknowledgment is not a completed test");
         } else {
-            one_node_test(&checkpoint, "unknown");
+            one_node_test(&observation, "indeterminate");
         }
     }
 }
@@ -744,6 +781,7 @@ fn engram_node_records_without_provenance_fields_are_refused_with_the_native_exi
                 FocusedNodeFixture::new(&format!("node-provenance-{label}-{native}"), native);
             change(&mut fixture);
             assert_truthful_refusal(
+                &fixture.turn,
                 &fixture.finish(EngramCommandExit::Code(native)),
                 native,
                 guard,
@@ -768,6 +806,7 @@ fn engram_node_compound_command_is_refused_with_the_native_exit() {
         );
         assert!(!engram_check_command(&fixture.command).unwrap().simple);
         assert_truthful_refusal(
+            &fixture.turn,
             &fixture.finish(EngramCommandExit::Code(native)),
             native,
             "compound command",
@@ -777,10 +816,9 @@ fn engram_node_compound_command_is_refused_with_the_native_exit() {
 
 /// One unknown Test whose summary keeps `native` and names `guard`, and whose
 /// exit is not an eligible reference.
-fn assert_truthful_refusal(checkpoint: &Value, native: i64, guard: &str) {
-    one_node_test(checkpoint, "unknown");
-    let row = &checkpoint["verification_evidence"][0];
-    let text = row["summary"].as_str().expect("one Test summary");
+fn assert_truthful_refusal(turn: &EOCheckedTurn, observation: &Value, native: i64, guard: &str) {
+    one_node_test(observation, "indeterminate");
+    let text = node_summary(turn);
     assert!(
         text.contains(&format!("observed native exit {native}")),
         "the refusal must keep the native exit: {text}"
@@ -792,11 +830,8 @@ fn assert_truthful_refusal(checkpoint: &Value, native: i64, guard: &str) {
     assert!(!text.contains("without an exit status"), "{text}");
     assert!(text.len() <= ENGRAM_CHECK_SUMMARY_MAX_BYTES, "{text}");
     assert!(
-        row.get("refs").is_none_or(|refs| !refs
-            .as_array()
-            .expect("present refs must be an array")
-            .contains(&json!(format!("exit:{native}")))),
-        "a refused run's exit is not eligible evidence: {checkpoint:#}"
+        !node_refs(turn).contains(&format!("exit:{native}")),
+        "a refused run's exit is not eligible evidence: {observation:#}"
     );
 }
 
@@ -821,7 +856,7 @@ fn engram_node_scoped_fixture_placement_restores_after_unwind() {
 #[test]
 fn engram_node_unsupported_notice_is_deduplicated_across_start_and_description() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start("node-feedback-dedup", true);
+    let turn = EOCheckedTurn::start("node-feedback-dedup", true);
     let command = "node scripts/test-launcher.mjs focused -- node ordinary.mjs";
     let mut recorder = turn.recorder();
     recorder
@@ -876,31 +911,33 @@ fn engram_node_unsupported_notice_is_deduplicated_across_start_and_description()
 }
 
 #[test]
-fn engram_node_source_and_grant_fences_remain_non_passing() {
+fn engram_node_changed_source_and_stale_owner_do_not_acquire_verification() {
     let fixture = FocusedNodeFixture::new("node-source-changed", 0);
     fixture.turn.change_readme("changed during Node tests\n");
-    assert!(
-        fixture
-            .finish(EngramCommandExit::Code(0))
-            .get("verification_evidence")
-            .is_none()
-    );
-    let fixture = FocusedNodeFixture::new("node-grant-changed", 0);
-    fixture
-        .turn
-        .record_mut(|record| record.engram.active_grant_id = Some("replacement-grant".to_owned()));
-    assert!(
-        fixture
-            .finish(EngramCommandExit::Code(0))
-            .get("verification_evidence")
-            .is_none()
-    );
+    let observation = fixture.finish(EngramCommandExit::Code(0));
+    let check = node_diagnostic(&fixture.turn);
+    let start = check.start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+    let end = check.end.as_ref().unwrap().end_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+    assert_ne!(start.source_revision, end.source_revision);
+    assert!(observation.get("verification_evidence").is_none());
+    assert!(observation["occurrence"]["observed_checks"][0].get("source_basis").is_none());
+
+    let mut fixture = FocusedNodeFixture::new("node-stale-owner", 0);
+    fixture.provenance = fixture.turn.record(|record| EngramObservationProvenance::Runtime {
+        token: record.runtime.runtime_token().unwrap(),
+        turn_generation: record.active_turn_generation.saturating_add(1),
+    });
+    let observation = fixture.finish(EngramCommandExit::Code(0));
+    one_node_test(&observation, "indeterminate");
+    assert!(observation["occurrence"]["observed_checks"][0].get("finished_at").is_none(),
+        "a frame for another generation cannot supply this invocation's terminal");
 }
 
 #[test]
 fn engram_node_no_claim_starts_no_test_and_stale_feedback_is_suppressed() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start("node-unclaimed", false);
+    let turn = EOCheckedTurn::start("node-unclaimed", false);
     turn.recorder()
         .command_started_in(
             "node",
@@ -910,7 +947,7 @@ fn engram_node_no_claim_starts_no_test_and_stale_feedback_is_suppressed() {
         )
         .unwrap();
     assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
-    let turn = CheckedTurn::start("node-stale-feedback", true);
+    let turn = EOCheckedTurn::start("node-stale-feedback", true);
     let mut recorder = turn.recorder();
     let provenance = turn.record(|record| {
         EngramObservationProvenance::Claude(ClaudeObservationProvenance {

@@ -1,10 +1,10 @@
-// Owns strict shared-ledger decoding and producer-identity exclusion controls.
+// Strict historical ledger decoding; no live producer exclusion or replay owner.
 // Does not certify activation, migration, RPC settlement or dispatch guards.
 use super::*;
 
 pub(super) fn entry(root: &FsPath) -> EngramSessionObligation {
     let connection = EngramConnectionConfig {
-        binary_path: real_engram_control_fixture_path(),
+        binary_path: PathBuf::from("engram"),
         project_file: root.join(".engram-project"),
         home: root.to_path_buf(),
         project_root: root.to_path_buf(),
@@ -12,17 +12,12 @@ pub(super) fn entry(root: &FsPath) -> EngramSessionObligation {
         actor_context: None,
         session_id: "producer-session".to_owned(),
     };
-    let request = EngramControlRequest::TurnCheckpoint {
-        routing_token: "old-token".to_owned(),
-        grant_id: "old-grant".to_owned(),
-        next_intent: EngramNextIntent::Exit,
-        report: EngramTurnReport::default(),
-        idempotency_key: "frozen-checkpoint-key".to_owned(),
-    };
+    let request = json!({"operation":"turn_checkpoint", "routing_token":"old-token",
+        "grant_id":"old-grant", "next_intent":"exit", "idempotency_key":"frozen-checkpoint-key"});
     EngramSessionObligation {
         id: "obligation-one".to_owned(),
         project_id: "fixture-project".to_owned(),
-        authority: materialize_fixture_engram_store(root, root),
+        authority: EngramAuthorityStoreKey { database_path: root.join("historical.sqlite"), project_id: "historical-project".into() },
         authority_confirmed: true,
         connection,
         external_ref: "termal:session:old-local-session".to_owned(),
@@ -35,41 +30,19 @@ pub(super) fn entry(root: &FsPath) -> EngramSessionObligation {
         phase: EngramSessionObligationPhase::Sent,
         basis: EngramSessionObligationBasis::CheckpointUnsettled,
         reason_code: "GrantScopeMismatch".to_owned(),
-        frozen_request: serde_json::to_value(request).unwrap(),
+        frozen_request: request,
         settlement_evidence: Value::Null,
     }
 }
 
 #[test]
 fn project_containment_ledger_requires_complete_supported_metadata() {
-    let (_state, _project, _session, root, _receiver) = fixture();
-    let ledger = EngramSessionObligationLedger::empty()
-        .with_entry(entry(&root))
-        .unwrap();
+    let root = TestTempRoot::create("historical-ledger");
+    let ledger = ledger(vec![entry(root.path())]).unwrap();
     let value = serde_json::to_value(&ledger).unwrap();
     let decoded: EngramSessionObligationLedger = serde_json::from_value(value.clone()).unwrap();
-    let original = &ledger.entries[0];
-    assert!(decoded.excludes(
-        &original.authority,
-        &original.connection,
-        &original.external_ref,
-        None
-    ));
-    let mut replacement = original.connection.clone();
-    replacement.session_id = "new-local-generation".to_owned();
-    assert!(decoded.excludes(
-        &original.authority,
-        &replacement,
-        &original.external_ref,
-        None
-    ));
-    assert!(decoded.excludes(
-        &original.authority,
-        &replacement,
-        "another-alias",
-        Some("old-token")
-    ));
-    assert!(!decoded.excludes(&original.authority, &replacement, "healthy-reference", None));
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), value,
+        "historical identity remains exact without a live excludes API");
     assert!(serde_json::from_value::<EngramSessionObligationLedger>(json!({})).is_err());
     assert!(
         serde_json::from_value::<EngramSessionObligationLedger>(json!({"schemaVersion":1}))
@@ -116,21 +89,18 @@ fn project_containment_ledger_requires_complete_supported_metadata() {
 }
 
 #[test]
-fn project_containment_ledger_rejects_conflicting_identity_and_changed_replay() {
-    let (_state, _project, _session, root, _receiver) = fixture();
-    let first = entry(&root);
-    let ledger = EngramSessionObligationLedger::empty()
-        .with_entry(first.clone())
-        .unwrap();
-    assert_eq!(ledger.with_entry(first.clone()).unwrap().entries.len(), 1);
+fn project_containment_ledger_rejects_conflicting_identity_and_changed_frozen_request() {
+    let root = TestTempRoot::create("historical-ledger");
+    let first = entry(root.path());
+    let ledger = ledger(vec![first.clone()]).unwrap();
     let mut changed = first.clone();
     changed.frozen_request["idempotency_key"] = json!("replacement-key");
-    assert!(ledger.with_entry(changed).is_err());
-    let mut conflicting = first;
-    conflicting.id = "new-id".to_owned();
-    conflicting.local_session_id = "recreated-local-session".to_owned();
+    assert!(self::ledger(vec![first.clone(), changed]).is_err(), "same original cannot have two frozen requests");
+    let mut conflicting = first.clone();
+    conflicting.id = "new-id".into();
+    conflicting.local_session_id = "recreated-local-session".into();
     conflicting.owner_generation = 2;
-    assert!(ledger.with_entry(conflicting).is_err());
+    assert!(self::ledger(vec![first, conflicting]).is_err());
     let mut value = serde_json::to_value(&ledger).unwrap();
     let duplicate = value["entries"][0].clone();
     value["entries"].as_array_mut().unwrap().push(duplicate);
@@ -139,48 +109,34 @@ fn project_containment_ledger_rejects_conflicting_identity_and_changed_replay() 
 
 #[test]
 fn project_containment_ledger_keeps_distinct_kinds_and_exact_request_shape() {
-    let (_state, _project, _session, root, _receiver) = fixture();
-    let containment = entry(&root);
+    let root = TestTempRoot::create("historical-ledger");
+    let containment = entry(root.path());
     let mut retirement = containment.clone();
     retirement.id = "retirement-two".to_owned();
     retirement.kind = EngramSessionObligationKind::IssuedGrantRetirement;
     retirement.prompt_id = Some("original-owner-head".to_owned());
     retirement.basis = EngramSessionObligationBasis::ProvenNeverSentBegin;
     retirement.phase = EngramSessionObligationPhase::Intended;
-    retirement.frozen_request = serde_json::to_value(EngramControlRequest::SessionBind {
-        external_ref: "termal:session:old-local-session".to_owned(),
-        title: "Fixture".to_owned(),
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: Vec::new(),
-        capability_map_revision: 1,
-        work_binding: None,
-        idempotency_key: "distinct-retirement-key".to_owned(),
-    })
-    .unwrap();
-    let ledger = EngramSessionObligationLedger::empty()
-        .with_entry(containment.clone())
-        .unwrap()
-        .with_entry(retirement)
-        .unwrap();
+    retirement.frozen_request = json!({"operation":"session_bind",
+        "external_ref":"termal:session:old-local-session", "title":"Fixture",
+        "assurance":"turn_gated", "mediated_effects":[], "capability_map_revision":1,
+        "idempotency_key":"distinct-retirement-key"});
+    let ledger = ledger(vec![containment.clone(), retirement]).unwrap();
     assert_eq!(ledger.entries.len(), 2);
-    assert!(ledger.excludes(
-        &containment.authority,
-        &containment.connection,
-        &containment.external_ref,
-        None
-    ));
     let mut unsupported = containment.clone();
     unsupported.frozen_request["future_private_field"] = json!(true);
     assert!(
-        EngramSessionObligationLedger::empty()
-            .with_entry(unsupported)
-            .is_err()
+        self::ledger(vec![unsupported]).is_err()
     );
     let mut mismatched = containment;
     mismatched.frozen_request["grant_id"] = json!("successor-grant");
     assert!(
-        EngramSessionObligationLedger::empty()
-            .with_entry(mismatched)
-            .is_err()
+        self::ledger(vec![mismatched]).is_err()
     );
+}
+
+fn ledger(entries: Vec<EngramSessionObligation>) -> Result<EngramSessionObligationLedger> {
+    let ledger = EngramSessionObligationLedger { schema_version: 1, entries, checkpoint_operations: Vec::new() };
+    ledger.validate()?;
+    Ok(ledger)
 }

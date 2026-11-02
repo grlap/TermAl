@@ -15,7 +15,7 @@ fn fixture_ready_root(prefix: &str) -> (TestTempRoot, PathBuf) {
 fn admitted_store_key(receipt: &Value, marker: &FsPath, home: &FsPath) -> EngramAuthorityStoreKey {
     let receipt: EngramReadinessReceipt =
         serde_json::from_value(receipt.clone()).expect("readiness receipt should deserialize");
-    validate_engram_readiness(&receipt, marker, home, true)
+    validate_engram_readiness(&receipt, marker, home)
         .unwrap_or_else(|error| panic!("readiness receipt should be admitted: {}", error.message))
 }
 
@@ -91,7 +91,7 @@ fn a_staged_home_is_answered_without_a_process() {
     let receipt = run_engram_readiness(&binary, &marker, root.path(), root.path(), root.path())
         .unwrap_or_else(|error| panic!("staged readiness should succeed: {}", error.message));
 
-    validate_engram_readiness(&receipt, &marker, root.path(), true)
+    validate_engram_readiness(&receipt, &marker, root.path())
         .unwrap_or_else(|error| panic!("staged receipt should be admitted: {}", error.message));
     assert!(
         !root.path().join("diagnostic-commands").exists(),
@@ -99,22 +99,13 @@ fn a_staged_home_is_answered_without_a_process() {
     );
 }
 
-/// The witness the grant and quarantine tests' staging answers. Their setup
-/// Saves, made exactly as those tests make them but WITHOUT staged readiness,
-/// fail on setup with the product's readiness budget once the fixture launch
-/// outlasts it: the failure a stalled machine causes, reproduced here by the
-/// expired-launch seam instead of by load. The three tests
-/// (engram_mcp_rechecks_retired_grants_under_the_commit_lock_across_projects,
-/// engram_mcp_rechecks_active_grant_ownership_under_the_commit_lock and the
-/// quarantine-transition tests) register staged readiness, so they never take
-/// this path.
+/// Enabling an ordinary connection must use the readiness budget even when
+/// observation capture is disabled. The staging seam must not hide a real
+/// expired-launch refusal in either preference state.
 #[test]
-fn unstaged_grant_and_quarantine_setups_fail_on_the_readiness_budget_when_a_launch_expires() {
-    for (label, grant) in [
-        ("retired-grant-race", Some("grant-race")),
-        ("active-grant-race", None),
-        ("quarantine-transition", Some("grant-old")),
-    ] {
+fn unstaged_connection_setup_fails_on_the_readiness_budget_when_a_launch_expires() {
+    for observations in [false, true] {
+        let label = if observations { "observed" } else { "ordinary" };
         let state = test_app_state();
         let root = state
             .test_temp_root
@@ -128,7 +119,7 @@ fn unstaged_grant_and_quarantine_setups_fail_on_the_readiness_budget_when_a_laun
         let _seam = expire_test_engram_diagnostic_launches(&[&root]);
         let project_id = create_test_project(&state, &root, label);
         let mut settings = super::engram_host_adapter::real_fixture_engram_settings(&root);
-        settings.work_authority_grant = grant.map(str::to_owned);
+        settings.execution_observability = observations;
 
         let error = match state.update_project_engram_settings(&project_id, settings) {
             Ok(_) => panic!("{label}: an expired setup launch must not enable Engram"),

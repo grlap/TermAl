@@ -5,28 +5,15 @@
 // resumed by the awaited work; Stop is the operator's brake on that resume. It
 // consumes the session's waits, sets the explicit-resume latch, drops queued
 // workflow continuations and records one stopped message, all in one durable
-// commit that is rolled back whole if persistence fails. It also consumes the
-// waits left behind when a Stop is answered by the Engram admission or retry
-// shortcut, so one Stop brakes every resume.
+// commit that is rolled back whole if persistence fails.
 //
 // Does not own: Stop of a running session and its runtime interrupt
-// (`session_lifecycle.rs`), the Engram admission and retry Stop itself
-// (`engram_queued_admission.rs`, `engram_abort_retry.rs`), wait settling
+// (`session_lifecycle.rs`), wait settling
 // (`delegations.rs`, `test_run_waits.rs`), or the explicit Resume
 // (`session_lifecycle.rs`). An Idle session with no pending wait is left to
 // the caller, which still refuses it as not running.
 //
 // New fragment; not split from an existing file.
-
-/// Which Stop is consuming an Idle session's pending waits.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum IdleWaitStop {
-    /// The whole Stop: nothing else answered it.
-    Brake,
-    /// The Engram admission or retry Stop already answered it, held the queue
-    /// head and wrote its own preview; only the waits remain.
-    AfterAdmissionStop,
-}
 
 impl AppState {
     /// Stops an Idle session that waits for delegations or test runs.
@@ -36,37 +23,19 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> std::result::Result<Option<StateResponse>, ApiError> {
-        self.stop_pending_waits(session_id, IdleWaitStop::Brake)
-    }
-
-    /// Consumes the pending waits of a session whose Stop the Engram
-    /// admission or retry shortcut answered. Does nothing without a wait.
-    fn stop_pending_waits_after_admission_stop(
-        &self,
-        session_id: &str,
-    ) -> std::result::Result<(), ApiError> {
-        self.stop_pending_waits(session_id, IdleWaitStop::AfterAdmissionStop)
-            .map(|_| ())
+        self.stop_pending_waits(session_id)
     }
 
     fn stop_pending_waits(
         &self,
         session_id: &str,
-        mode: IdleWaitStop,
     ) -> std::result::Result<Option<StateResponse>, ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_visible_session_index(session_id) else {
             return Ok(None);
         };
         let status = inner.sessions[index].session.status;
-        let status_allows = match mode {
-            IdleWaitStop::Brake => status == SessionStatus::Idle,
-            // The admission and retry shortcuts answer Idle and Error.
-            IdleWaitStop::AfterAdmissionStop => {
-                matches!(status, SessionStatus::Idle | SessionStatus::Error)
-            }
-        };
-        if !status_allows || inner.sessions[index].runtime_stop_in_progress {
+        if status != SessionStatus::Idle || inner.sessions[index].runtime_stop_in_progress {
             return Ok(None);
         }
         let has_pending_wait = inner
@@ -90,7 +59,7 @@ impl AppState {
             consume_delegation_waits_for_stopped_parent_locked(&mut inner, session_id);
         let stopped_test_run_waits =
             consume_test_run_waits_for_stopped_session_locked(&mut inner, session_id);
-        let message_id = (mode == IdleWaitStop::Brake).then(|| inner.next_message_id());
+        let message_id = Some(inner.next_message_id());
         let created_messages = {
             let record = inner
                 .session_mut_by_index(index)
@@ -150,24 +119,14 @@ impl AppState {
     }
 }
 
-/// Drops queued workflow continuations, except a queue head that Engram holds
-/// (interrupted, waiting, or carrying intent): that head waits for the
-/// operator's explicit cancel or Resume, as the admission Stop left it.
+/// Drops unsent workflow continuations while preserving historical records
+/// and possible provider deliveries. Stop is not evidence they were unsent.
 fn drop_queued_workflow_continuations_keeping_held_head(record: &mut SessionRecord) {
-    let keep = |index: usize, queued: &QueuedPromptRecord| {
+    let keep = |_index: usize, queued: &QueuedPromptRecord| {
         queued.source != QueuedPromptSource::Orchestrator
-            || (index == 0 && queued.is_engram_retained())
+            || queued.has_stored_history()
     };
     let original_len = record.queued_prompts.len();
-    let dropped_begin = dropped_engram_intent_grant(
-        record,
-        record
-            .queued_prompts
-            .iter()
-            .enumerate()
-            .filter(|(index, queued)| !keep(*index, queued))
-            .map(|(_, queued)| queued),
-    );
     let mut index = 0usize;
     record.queued_prompts.retain(|queued| {
         let retain = keep(index, queued);
@@ -175,7 +134,6 @@ fn drop_queued_workflow_continuations_keeping_held_head(record: &mut SessionReco
         retain
     });
     if record.queued_prompts.len() != original_len {
-        record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
     }
 }

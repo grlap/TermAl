@@ -315,7 +315,7 @@ fn durability_pending_review_own_unpublished_canonical_is_not_current_state() {
 fn late_canonical_release(
     label: &str,
 ) -> (
-    ClaimedRoot,
+    EOCheckedTurn,
     EngramWorkSourceRoot,
     EngramNamedRootReleaseAudit,
     EngramAuthorityTransition,
@@ -391,12 +391,12 @@ fn late_canonical_release(
     (claimed, entry, original, owner, error)
 }
 
-fn reload_release_fixture(claimed: &ClaimedRoot) {
+fn reload_release_fixture(claimed: &EOCheckedTurn) {
     let selection = audit(claimed)[0].selection.clone();
     reload_release_fixture_for(claimed, &selection);
 }
 
-fn reload_release_fixture_for(claimed: &ClaimedRoot, selection: &EngramWorkSourceRoot) {
+fn reload_release_fixture_for(claimed: &EOCheckedTurn, selection: &EngramWorkSourceRoot) {
     // The source fixture moved on to a successor claim. Re-establish THAT
     // current caller after boot, not the old label's completed claim.
     // work_binding is deliberately runtime-only, absent on a real load.
@@ -420,15 +420,12 @@ fn reload_release_fixture_for(claimed: &ClaimedRoot, selection: &EngramWorkSourc
     claimed
         .transport
         .enable_named_roots(&claimed.session_id, &current_binding);
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         assert!(
             record.engram.work_binding.is_none(),
             "boot does not restore a local current-claim mirror"
         );
-        record
-            .engram
-            .routing_token
-            .get_or_insert_with(|| "fixture-root-token".to_owned());
+        // The current fixture association is explicit; no credential is restored.
         record.engram.work_binding = Some(current_binding.clone());
     });
     let inner = claimed.state.inner.lock().unwrap();
@@ -439,7 +436,7 @@ fn reload_release_fixture_for(claimed: &ClaimedRoot, selection: &EngramWorkSourc
     );
 }
 
-fn release_owner(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot) -> EngramAuthorityTransition {
+fn release_owner(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) -> EngramAuthorityTransition {
     claimed
         .state
         .inner
@@ -712,7 +709,7 @@ fn durability_pending_release_restart_changed_payload_preserves_original_fields(
 fn late_retained_candidate(
     label: &str,
     explicit: bool,
-) -> (ClaimedRoot, EngramWorkSourceRoot, EngramAuthorityImage) {
+) -> (EOCheckedTurn, EngramWorkSourceRoot, EngramAuthorityImage) {
     let (mut claimed, entry) = settled_root(label, "live");
     let (tx, rx) = mpsc::channel();
     claimed.state.persist_tx = tx;
@@ -758,7 +755,7 @@ fn late_retained_candidate(
     (claimed, entry, image)
 }
 
-fn close_retained_candidate_run(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot) {
+fn close_retained_candidate_run(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) {
     let mut transport = claimed.transport.named_roots.lock().unwrap();
     let proof = transport.as_mut().unwrap().root_reads.get_mut(&entry.claim_id).unwrap();
     proof["run"]["state"] = json!("completed");

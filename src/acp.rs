@@ -672,6 +672,18 @@ fn handle_acp_prompt_command(
         termal_root_mailbox_guidance(state, session_id)
     };
     let mut prompt_blocks = Vec::with_capacity(2);
+    let observation_turn_generation = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner.find_session_index(session_id).and_then(|index| {
+            let record = &inner.sessions[index];
+            (record.runtime.matches_runtime_token(runtime_token)
+                && record.session.status == SessionStatus::Active
+                && !record.runtime_stop_in_progress)
+                .then_some(record.active_turn_generation)
+        })
+    };
+    runtime_state.lock().expect("ACP runtime state mutex poisoned")
+        .observation_turn_generation = observation_turn_generation;
     prompt_blocks.push(json!({"type": "text", "text": command.prompt}));
     if let Some(guidance) = &guidance {
         prompt_blocks.push(json!({"type": "text", "text": guidance}));
@@ -1589,6 +1601,14 @@ fn handle_acp_notification(
 ) -> Result<()> {
     match method {
         "session/update" => {
+            let generation = runtime_state.lock()
+                .expect("ACP runtime state mutex poisoned").observation_turn_generation;
+            recorder.set_observation_provenance(match generation {
+                Some(turn_generation) => EngramObservationProvenance::Runtime {
+                    token: runtime_token.clone(), turn_generation,
+                },
+                None => EngramObservationProvenance::Ambient,
+            });
             if runtime_state
                 .lock()
                 .expect("ACP runtime state mutex poisoned")

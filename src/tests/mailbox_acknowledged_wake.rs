@@ -483,7 +483,7 @@ async fn acknowledgement_leaves_a_retained_head_untouched() {
             .expect("the wake is queued");
         // The record's retention state, not the projected display flag.
         head.engram_waiting = true;
-        assert!(head.is_engram_retained());
+        assert!(head.has_stored_history());
         head.pending_prompt.text.clone()
     };
     read_and_acknowledge(&state, &target_id, &receipt.mailbox_id).await;

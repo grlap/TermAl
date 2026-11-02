@@ -1,6 +1,7 @@
 # Project status: where TermAl stands
 
-**As of 2026-10-29, master `3fc13725`.** This page is a dated snapshot. The
+**As of 2026-10-29, master `3fc13725`, updated 2026-11-01 for Execution
+Observability.** This page is a dated snapshot. The
 tracker stays the source of truth for open work, and the feature briefs linked
 below describe each mechanism. A later refresh replaces this snapshot instead of
 appending to it.
@@ -11,7 +12,9 @@ Linked from the [README](../../README.md#where-termal-stands). Related briefs:
 [federation link](federation-link.md),
 [remote full gates](remote-full-gates.md),
 [native mailbox relay](native-mailbox-relay.md),
-[Engram host adapter](engram-host-adapter.md) and [Test Runs](test-runs.md).
+[Engram host adapter](engram-host-adapter.md),
+[Execution Observability](execution-observability.md) and
+[Test Runs](test-runs.md).
 
 ## What works now
 
@@ -42,36 +45,22 @@ Linked from the [README](../../README.md#where-termal-stands). Related briefs:
   - on the Windows satellite, with 6842 Rust tests and 4885 Vitest tests;
   - on the Mac, with 6733 Rust tests and 4885 Vitest tests.
 
-### Turn-gated control for the Engram project
+### Execution Observability on every harness
 
-- [Turn-gated control](engram-host-adapter.md#status-and-product-tiers) has
-  been ON for the Engram project since 2026-10-29, after a passed steady-state
-  canary. It stays OFF for the TermAl projects until the fix for the long
-  project-settings reset lands; that reset held all project sessions for about
-  36 minutes during the enable.
-- In that project, a turn normally waits for Engram to authorize it. In one
-  bounded case a fresh ordinary prompt is still delivered, marked degraded and
-  without a grant: control was unavailable and the request provably never
-  started. See the [adapter brief](engram-host-adapter.md#status-and-product-tiers).
-- After the switch-on hold cleared, the central host counted 27 gated turns in
-  about 40 minutes. All were granted, none were refused or paused, and the
-  longest wait from grant to start was under one second.
+- [Execution Observability](execution-observability.md) is a project setting
+  of the Engram integration, on by default. A turn is delivered without
+  waiting for Engram, and its end reaches Engram as one host observation of
+  its outcome, source change and checks. See the
+  [adapter brief](engram-host-adapter.md#status).
+- Codex, Claude, Cursor, Gemini, OpenCode and Kimi turns report in the same
+  shape. Cursor, Gemini and OpenCode report a test's result as indeterminate
+  unless their tool update carries the command's exit code.
+- Tests on every harness cover this. Observing it on a running host is still
+  pending: a host runs it only after it restarts on a build that includes it.
+- Turn gating has been removed.
 
 ## Active limitations and open top-priority problems
 
-- **Turn-gated control is OFF for the TermAl projects.** Turning control on or
-  off for a project resets every session in it, and the whole project is held
-  until the reset finishes.
-  - When the Engram project was switched on, the reset held all of its
-    sessions for about 36 minutes, at about 3850 sessions.
-  - A rollback during the hold was refused, and the reset's progress showed
-    only in the host's log.
-  - Control stays off for TermAl until the reset is bounded for settled
-    sessions and reports its progress. The fix is in progress.
-- **Turning control off and on again can strand retained prompts.** Prompts
-  retained before the change can stay interrupted: Resume reports success but
-  does nothing, and only Cancel clears them. A fix has landed, but its
-  post-landing evaluation is still open.
 - **A program cannot yet send a prompt straight to a chosen session on another
   machine** and get durable acceptance back. Today a mailbox message wakes the
   session, or someone types on that machine.
@@ -95,15 +84,10 @@ Linked from the [README](../../README.md#where-termal-stands). Related briefs:
 - **A Codex turn on a satellite can fail with an authorization error during
   compaction**, and Resume does not unpause the queue. Signing in again did not
   help; only restarting TermAl on that machine did.
-- **A full gate run under turn-gated control can leave no host verification
-  record**, either a pass or a refusal. It did not block a landing, but the
-  record is missing.
+- **A full gate run on 2026-10-29 left no host verification record**, either
+  a pass or a refusal. It did not block a landing, but the record is missing.
 - **On a busy host, the shared state lock can be held for seconds** at a time,
   because every commit rebuilds the full snapshot under it.
-- **Degraded dispatch still needs its evaluation after landing.** When
-  optional Engram control fails before a turn begins, a fresh ordinary prompt
-  is delivered, marked degraded. The change has landed on master, but its
-  post-landing evaluation is still open.
 - **The Mac test-fixture isolation fix is not yet on master.** It is reviewed
   and waits for a Mac full gate.
 
@@ -111,17 +95,11 @@ Linked from the [README](../../README.md#where-termal-stands). Related briefs:
 
 1. **Federation diagnostics in use.** Run the landed SSH link diagnostics on
    the live hosts, then run the live hostname-migration evaluation there.
-2. **Bounded control resets.** Fix the long project-wide hold when turn-gated
-   control changes: bound the hold for settled sessions, refuse unsafe
-   authority changes before commit, and expose the reset's phase and elapsed
-   time. After that lands and is evaluated, turn-gated control is planned for
-   the TermAl projects as well.
-3. **Repairs to turn-gated control.** Fix the state-lock hold. Finish the
-   post-landing evaluations of the retained-prompt and degraded-dispatch
-   changes. Then enable control in both projects.
-4. **Direct remote prompts.** Add a supported way to send a prompt to a chosen
+2. **State-lock hold.** Fix the multi-second hold of the shared state lock on
+   a busy host.
+3. **Direct remote prompts.** Add a supported way to send a prompt to a chosen
    remote session: first permissions and receiver consent, then the caller
    API, tests and docs.
-5. **Unowned bugs.** The Codex authorization failure with queue recovery on a
+4. **Unowned bugs.** The Codex authorization failure with queue recovery on a
    satellite, and the gate that left no verification record, wait for an
    owner.

@@ -91,7 +91,8 @@ struct EngramReadinessReceipt {
     database: PathBuf,
     work_schema_version: u64,
     host_path_policy: EngramReadinessPathPolicy,
-    control: EngramDoctorControl,
+    #[serde(default, rename = "control")]
+    observation_policy: Option<EngramDoctorControl>,
 }
 
 #[derive(Deserialize)]
@@ -209,7 +210,6 @@ fn validate_engram_readiness(
     receipt: &EngramReadinessReceipt,
     marker: &FsPath,
     home: &FsPath,
-    turn_gated: bool,
 ) -> Result<EngramAuthorityStoreKey, ApiError> {
     if receipt.schema_version != 1
         || receipt.scope != "readiness"
@@ -230,13 +230,6 @@ fn validate_engram_readiness(
         return Err(ApiError::bad_request(format!(
             "Engram host path policy is {}; resolved, matched identity is required (readiness does not bind or repair it)",
             engram_diagnostic_excerpt(path.status.as_bytes()),
-        )));
-    }
-    let required = receipt.control.required_assurance.as_str();
-    if (turn_gated && required != "turn_gated") || !matches!(required, "advisory" | "turn_gated") {
-        return Err(ApiError::bad_request(format!(
-            "cannot enable Engram: readiness requires `{}`, incompatible with the selected TermAl tier",
-            engram_diagnostic_excerpt(required.as_bytes()),
         )));
     }
     validate_engram_diagnostic_identity(&receipt.project_id, &receipt.database, marker, home)

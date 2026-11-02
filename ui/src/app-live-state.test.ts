@@ -519,7 +519,6 @@ describe("deferred session-store sync", () => {
             developerName: "greg",
             binaryPath: "C:\\tools\\engram.exe",
             home: "C:\\EngramHome",
-            bootRecoveryBudgetMs: 8_000,
           },
         },
       });
@@ -529,7 +528,6 @@ describe("deferred session-store sync", () => {
       developerName: "greg",
       binaryPath: "C:\\tools\\engram.exe",
       home: "C:\\EngramHome",
-      bootRecoveryBudgetMs: 8_000,
     });
   });
 
@@ -1174,7 +1172,7 @@ describe("deferred session-store sync", () => {
     expect(setBackendConnectionState).toHaveBeenLastCalledWith("connected");
   });
 
-  it("hydrates every newer retained-admission revision and rejects private replay at the same revision", async () => {
+  it("hydrates every newer queue-body revision and rejects private replay at the same revision", async () => {
     vi.stubGlobal(
       "EventSource",
       EventSourceMock as unknown as typeof EventSource,
@@ -1196,7 +1194,6 @@ describe("deferred session-store sync", () => {
           id: "queued",
           timestamp: "10:00",
           text: "Queued",
-          isEngramRetained: false,
         },
       ],
       sessionMutationStamp: 1,
@@ -1214,8 +1211,9 @@ describe("deferred session-store sync", () => {
     const emitAndHydrate = async (
       revision: number,
       sessionMutationStamp: number,
-      retained: boolean,
-      interrupted = false,
+      text: string,
+      expandedText?: string,
+      paused = false,
     ) => {
       fetchSessionTail.mockResolvedValueOnce({
         revision,
@@ -1223,14 +1221,13 @@ describe("deferred session-store sync", () => {
         session: makeSession({
           messagesLoaded: true,
           messageCount: 0,
-          queuePaused: interrupted,
+          queuePaused: paused,
           pendingPrompts: [
             {
               id: "queued",
               timestamp: "10:00",
-              text: "Queued",
-              isEngramRetained: retained,
-              engramInterrupted: interrupted,
+              text,
+              expandedText,
             },
           ],
           sessionMutationStamp,
@@ -1243,26 +1240,35 @@ describe("deferred session-store sync", () => {
           makeStateResponse(
             makeSession({
               sessionMutationStamp,
-              queuePaused: interrupted,
+              queuePaused: paused,
               queueProjectionHash: `queue-${revision}`,
             }),
             revision,
           ),
         );
       });
-      await waitFor(() =>
+      await waitFor(() => {
         expect(
           params.adoptionRefs.sessionsRef.current[0]?.pendingPrompts?.[0]
-            ?.isEngramRetained,
-        ).toBe(retained),
-      );
+            ?.text,
+        ).toBe(text);
+        expect(
+          params.adoptionRefs.sessionsRef.current[0]?.pendingPrompts?.[0]
+            ?.expandedText,
+        ).toBe(expandedText);
+      });
+      expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(revision);
+      expect(params.adoptionRefs.sessionsRef.current[0]?.sessionMutationStamp)
+        .toBe(sessionMutationStamp);
+      expect(params.adoptionRefs.sessionsRef.current[0]?.queueProjectionHash)
+        .toBe(`queue-${revision}`);
     };
 
-    // Cold bind preparation, accepted-bind retirement, and evaluate
-    // preparation are three distinct backend publications.
-    await emitAndHydrate(3, 2, true);
-    await emitAndHydrate(4, 3, false);
-    await emitAndHydrate(5, 4, true);
+    // Ordinary text and expanded-body changes are distinct publications,
+    // including an expanded-body-only change under a newer queue identity.
+    await emitAndHydrate(3, 2, "Queued revision 3");
+    await emitAndHydrate(4, 3, "Queued revision 3", "Expanded revision 4");
+    await emitAndHydrate(5, 4, "Queued revision 5", "Expanded revision 5");
     expect(fetchSessionTail).toHaveBeenCalledTimes(3);
 
     // Exact replay is host-private bookkeeping and must not manufacture a
@@ -1286,12 +1292,12 @@ describe("deferred session-store sync", () => {
 
     // A failed revision-consuming commit publishes fail-closed uncertainty
     // at its consumed revision, which must hydrate without another commit.
-    await emitAndHydrate(6, 5, true, true);
+    await emitAndHydrate(6, 5, "Queued revision 6", "Expanded revision 6", true);
     expect(params.adoptionRefs.sessionsRef.current[0]?.queuePaused).toBe(true);
     expect(
       params.adoptionRefs.sessionsRef.current[0]?.pendingPrompts?.[0]
-        ?.engramInterrupted,
-    ).toBe(true);
+        ?.expandedText,
+    ).toBe("Expanded revision 6");
   });
 
   it.each([false, true])("hydrates opaque queue changes independently of visible transcript repair (visible=%s)", async (visible) => {

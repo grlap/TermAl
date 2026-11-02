@@ -533,10 +533,10 @@ fn shutdown_terminal_delegation_child_runtime(
 /// Defines the deferred stop callback variants.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DeferredStopCallback {
-    /// Admission is durable, but the Stop owner has not resolved yet.
-    EngramHandoff {
+    /// Delivery is durable, but the Stop owner has not resolved yet.
+    TurnHandoff {
         active_turn_generation: u64,
-        dispatch: DeferredEngramHandoff,
+        dispatch: DeferredTurnHandoff,
     },
     /// `fail_turn_if_runtime_matches` was called.
     TurnFailed {
@@ -560,7 +560,7 @@ enum DeferredStopCallback {
 impl DeferredStopCallback {
     fn active_turn_generation(&self) -> u64 {
         match self {
-            Self::EngramHandoff {
+            Self::TurnHandoff {
                 active_turn_generation,
                 ..
             }

@@ -1,219 +1,72 @@
-//! Read-only prompt admission and provider-enqueue observations. Uses the
-//! existing root fixture, saved budget owner and real provider channel; no
-//! live provider, Engram store or admission-policy substitute.
+//! Read-only provider-enqueue observations, never runtime ACK or receipt authority.
 use super::*;
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 
 fn wire(state: &AppState, session: &str) -> Value {
-    inspect(state, session, |record| {
-        serde_json::to_value(AppState::wire_session_from_record(
-            &state.server_instance_id,
-            record,
-        ))
-        .unwrap()
-    })
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(session).unwrap()];
+    serde_json::to_value(AppState::wire_session_from_record(&state.server_instance_id, record)).unwrap()
 }
 
-fn change_record<T>(
-    state: &AppState,
-    session: &str,
-    change: impl FnOnce(&mut SessionRecord) -> T,
-) -> T {
+fn change_record<T>(state: &AppState, session: &str, change: impl FnOnce(&mut SessionRecord) -> T) -> T {
     let mut inner = state.inner.lock().unwrap();
-    let index = inner.find_session_index(session).unwrap();
-    change(inner.session_mut_by_index(index).unwrap())
+    change(inner.session_mut(session).unwrap())
 }
 
 #[test]
-fn prompt_observation_automatic_attempts_keep_the_original_public_deadline() {
-    let (state, session, receiver, _) = root_fixture([]);
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "retained prompt",
-        QueuedPromptSource::User,
-        None,
-    );
-    let admitted = chrono::DateTime::parse_from_rfc3339("2026-10-20T10:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    change_record(&state, &session, |record| {
-        let owner = EngramQueuedAdmissionOwner::capture(record).unwrap();
-        assert!(accept_engram_admission_budget(record, &owner, admitted));
-        for seconds in [1, 20, 60] {
-            assert!(count_engram_begin_preparation_attempt(record));
-            assert!(!accept_engram_admission_budget(
-                record,
-                &owner,
-                admitted + chrono::Duration::seconds(seconds),
-            ));
-        }
+fn removed_admission_budget_wire_fields_are_not_restored_as_permission_or_display() {
+    let turn = OrdinaryRoot::new("removed-budget-wire-view");
+    turn.enqueue("ordinary queued content", QueuedPromptSource::User);
+    let original = json!({"admittedAt":"2026-10-20T10:00:00Z","deadline":"2026-10-20T10:04:00Z",
+        "attempts":3,"renewedAt":"2026-10-20T10:05:00Z","unknown":[null,"unchanged"]});
+    turn.edit(|record| {
+        record.engram.historical_control.insert("engramBeginPreparationLineage".into(), original.clone());
     });
-    let view = wire(&state, &session);
-    let budget = &view["promptAdmissionBudgets"][view["pendingPrompts"][0]["id"].as_str().unwrap()];
-    assert_eq!(budget["originalAdmittedAt"], "2026-10-20T10:00:00.000Z");
-    assert_eq!(budget["originalDeadline"], "2026-10-20T10:04:00.000Z");
-    assert_eq!(budget["currentDeadline"], budget["originalDeadline"]);
-    assert_eq!(budget["attempts"], 3);
-    assert!(budget["renewedAt"].is_null());
-    assert!(
-        receiver.try_recv().is_err(),
-        "reading a budget never dispatches a prompt"
-    );
-}
-
-#[test]
-fn prompt_observation_explicit_window_renewal_keeps_original_times() {
-    let (state, session, _, _) = root_fixture([]);
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "retained resume",
-        QueuedPromptSource::Mailbox,
-        None,
-    );
-    let admitted = chrono::DateTime::parse_from_rfc3339("2026-10-20T10:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    change_record(&state, &session, |record| {
-        let owner = EngramQueuedAdmissionOwner::capture(record).unwrap();
-        assert!(accept_engram_admission_budget(record, &owner, admitted));
-        assert!(renew_engram_admission_budget_for_resume(
-            record,
-            admitted + chrono::Duration::minutes(5),
-        ));
-        assert!(count_engram_begin_preparation_attempt(record));
-        // Repeating Resume while the new window is running cannot renew it.
-        assert!(!renew_engram_admission_budget_for_resume(
-            record,
-            admitted + chrono::Duration::minutes(6),
-        ));
-    });
-    let view = wire(&state, &session);
-    let budget = &view["promptAdmissionBudgets"][view["pendingPrompts"][0]["id"].as_str().unwrap()];
-    assert_eq!(budget["originalAdmittedAt"], "2026-10-20T10:00:00.000Z");
-    assert_eq!(budget["originalDeadline"], "2026-10-20T10:04:00.000Z");
-    assert_eq!(budget["currentAdmittedAt"], "2026-10-20T10:05:00.000Z");
-    assert_eq!(budget["currentDeadline"], "2026-10-20T10:09:00.000Z");
-    assert_eq!(budget["renewedAt"], "2026-10-20T10:05:00.000Z");
-    assert_eq!(budget["attempts"], 1);
+    let mut encoded = turn.saved();
+    encoded["session"]["promptAdmissionBudgets"] = json!({"old-head":original});
+    let loaded = serde_json::from_value::<PersistedSessionRecord>(encoded).unwrap().into_record().unwrap();
+    assert_eq!(loaded.engram.historical_control["engramBeginPreparationLineage"], original);
+    let view = serde_json::to_value(AppState::wire_session_from_record(&turn.state.server_instance_id, &loaded)).unwrap();
+    assert!(view["promptAdmissionBudgets"].is_null());
+    assert!(loaded.prompt_deliveries.is_empty());
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 fn actual_enqueue(source: QueuedPromptSource, receiver_closed: bool) {
-    let responses = if source == QueuedPromptSource::Orchestrator {
-        let mut replies = vec![
-            bind_reply("observation-token"),
-            grant_reply("observation-grant"),
-            begin_reply("observation-grant"),
-        ];
-        if receiver_closed {
-            replies.push(checkpoint_reply("observation-grant"));
-        }
-        replies
-    } else {
-        vec![ScriptedEngramControlResponse::Reply(Err(
-            EngramTransportError::spawn_failed("optional control unavailable"),
-        ))]
-    };
-    let (state, session, receiver, transport) = root_fixture(responses);
-    queue_test_engram_prompt(&state, &session, "ordinary observed prompt", source, None);
-    let (prompt_id, project_id) = inspect(&state, &session, |record| {
-        assert!(
-            record.prompt_deliveries.is_empty(),
-            "ordinary head has no receipt"
-        );
-        (
-            record
-                .queued_prompts
-                .front()
-                .unwrap()
-                .pending_prompt
-                .id
-                .clone(),
-            record.session.project_id.clone().unwrap(),
-        )
-    });
-    let started = state
-        .start_next_queued_turn_off_lock(&session, false, false)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        state.prepare_engram_turn_delivery_off_lock(
-            &session,
-            started.dispatch.engram_dispatch_generation().unwrap(),
-        ),
-        EngramTurnDeliveryPreparation::Ready,
-    );
-    if source == QueuedPromptSource::Orchestrator {
-        assert_eq!(
-            operations(&transport),
-            ["session_bind", "turn_evaluate", "turn_begin"]
-        );
-    }
-    assert!(
-        wire(&state, &session)["providerHandoffs"]
-            .as_array()
-            .is_none_or(Vec::is_empty),
-        "preparation is not a provider enqueue"
-    );
+    let mut turn = OrdinaryRoot::new("actual-handoff-observation");
+    let id = turn.enqueue("ordinary observed prompt", source);
+    let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap();
+    assert!(wire(&turn.state, &turn.session)["providerHandoffs"].as_array().is_none_or(Vec::is_empty),
+        "preparation is not an enqueue");
+    let (_, empty) = mpsc::channel();
+    let receiver = std::mem::replace(&mut turn.receiver, empty);
     let mut receiver = Some(receiver);
+    if receiver_closed { drop(receiver.take()); }
+    let outcome = handoff_prepared_turn_dispatch(&turn.state, started.dispatch);
     if receiver_closed {
-        drop(receiver.take());
-    }
-    let result = handoff_prepared_turn_dispatch(&state, started.dispatch);
-    if receiver_closed {
-        assert!(result.is_err(), "the actual provider receiver is closed");
+        assert!(outcome.is_err(), "the actual receiver was closed");
     } else {
-        assert!(matches!(
-            result.unwrap(),
-            HandoffPreparedTurnDispatchOutcome::Delivered
-        ));
-        assert!(matches!(
-            receiver.as_ref().unwrap().try_recv().unwrap(),
-            CodexRuntimeCommand::Prompt { .. }
-        ));
-        assert!(
-            receiver.as_ref().unwrap().try_recv().is_err(),
-            "exactly one command"
-        );
+        assert!(matches!(outcome.unwrap(), HandoffPreparedTurnDispatchOutcome::Delivered));
+        assert!(matches!(receiver.as_ref().unwrap().try_recv().unwrap(), CodexRuntimeCommand::Prompt { .. }));
+        assert!(receiver.as_ref().unwrap().try_recv().is_err());
     }
-    let view = wire(&state, &session);
-    let handoffs = view["providerHandoffs"]
-        .as_array()
-        .expect("provider observations are readable");
-    assert_eq!(handoffs.len(), 1);
-    let handoff = &handoffs[0];
-    assert_eq!(handoff["sessionId"], session);
-    assert_eq!(handoff["projectId"], project_id);
-    assert_eq!(handoff["promptId"], prompt_id);
-    assert_eq!(
-        handoff["source"],
-        match source {
-            QueuedPromptSource::User => "user",
-            QueuedPromptSource::Human => "human",
-            QueuedPromptSource::Mailbox => "mailbox",
-            QueuedPromptSource::Orchestrator => "orchestrator",
-        }
-    );
-    assert_eq!(
-        handoff["outcome"],
-        if receiver_closed {
-            "enqueueFailed"
-        } else {
-            "enqueued"
-        }
-    );
-    chrono::DateTime::parse_from_rfc3339(handoff["at"].as_str().unwrap()).unwrap();
-    assert!(
-        inspect(&state, &session, |record| record
-            .prompt_deliveries
-            .is_empty()),
-        "observing an ordinary handoff must never create receipt authority"
-    );
-    assert!(
-        view["promptDeliveries"]
-            .as_array()
-            .is_none_or(Vec::is_empty)
-    );
+    let view = wire(&turn.state, &turn.session);
+    let rows = view["providerHandoffs"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row["sessionId"], turn.session);
+    assert_eq!(row["projectId"], turn.project);
+    assert_eq!(row["promptId"], id);
+    assert_eq!(row["source"], match source {
+        QueuedPromptSource::User => "user", QueuedPromptSource::Human => "human",
+        QueuedPromptSource::Mailbox => "mailbox", QueuedPromptSource::Orchestrator => "orchestrator",
+    });
+    assert_eq!(row["outcome"], if receiver_closed { "enqueueFailed" } else { "enqueued" });
+    chrono::DateTime::parse_from_rfc3339(row["at"].as_str().unwrap()).unwrap();
+    turn.record(|record| assert!(record.prompt_deliveries.is_empty()));
+    assert!(view["promptDeliveries"].as_array().is_none_or(Vec::is_empty));
+    turn.assert_no_control();
 }
 
 #[test]
@@ -232,33 +85,6 @@ fn prompt_observation_failed_user_and_mailbox_enqueues_are_distinct_outcomes() {
 
 #[test]
 fn prompt_observation_orchestrator_enqueues_keep_the_queued_source() {
-    let (state, session, receiver, _) = root_fixture([ScriptedEngramControlResponse::Reply(Err(
-        EngramTransportError::spawn_failed("workflow control unavailable"),
-    ))]);
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "withheld orchestrator prompt",
-        QueuedPromptSource::Orchestrator,
-        None,
-    );
-    let started = state
-        .start_next_queued_turn_off_lock(&session, false, false)
-        .unwrap()
-        .unwrap();
-    assert!(matches!(
-        state.prepare_engram_turn_delivery_off_lock(
-            &session,
-            started.dispatch.engram_dispatch_generation().unwrap(),
-        ),
-        EngramTurnDeliveryPreparation::RetainedBindRetry(_)
-    ));
-    assert!(receiver.try_recv().is_err());
-    assert!(
-        wire(&state, &session)["providerHandoffs"]
-            .as_array()
-            .is_none_or(Vec::is_empty)
-    );
     for receiver_closed in [false, true] {
         actual_enqueue(QueuedPromptSource::Orchestrator, receiver_closed);
     }
@@ -266,74 +92,21 @@ fn prompt_observation_orchestrator_enqueues_keep_the_queued_source() {
 
 #[test]
 fn prompt_observation_direct_idle_dispatch_uses_the_user_source() {
-    let (state, session, receiver, _) = root_fixture([ScriptedEngramControlResponse::Reply(Err(
-        EngramTransportError::spawn_failed("optional control unavailable"),
-    ))]);
-    assert!(inspect(&state, &session, |record| record
-        .queued_prompts
-        .is_empty()));
-    let dispatch = root_dispatch(&state, &session, false);
-    assert_eq!(
-        state.prepare_engram_turn_delivery_off_lock(
-            &session,
-            dispatch.engram_dispatch_generation().unwrap(),
-        ),
-        EngramTurnDeliveryPreparation::Ready,
-    );
-    assert!(matches!(
-        handoff_prepared_turn_dispatch(&state, dispatch).unwrap(),
-        HandoffPreparedTurnDispatchOutcome::Delivered
-    ));
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err());
-    let view = wire(&state, &session);
+    let turn = OrdinaryRoot::new("direct-user-handoff-observation");
+    let dispatch = turn.prepare("Direct ordinary prompt.");
+    assert!(matches!(handoff_prepared_turn_dispatch(&turn.state, dispatch).unwrap(),
+        HandoffPreparedTurnDispatchOutcome::Delivered));
+    turn.prompt();
+    turn.assert_no_prompt();
+    let view = wire(&turn.state, &turn.session);
     let rows = view["providerHandoffs"].as_array().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["source"], "user");
-    assert_eq!(rows[0]["sessionId"], session);
-    assert_eq!(rows[0]["projectId"], view["projectId"]);
+    assert_eq!(rows[0]["sessionId"], turn.session);
+    assert_eq!(rows[0]["projectId"], turn.project);
     assert_eq!(rows[0]["outcome"], "enqueued");
-    assert!(inspect(&state, &session, |record| record
-        .prompt_deliveries
-        .is_empty()));
-}
-
-#[test]
-fn prompt_observation_legacy_window_does_not_fabricate_original_history() {
-    let (state, session, _, _) = root_fixture([]);
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "legacy retained prompt",
-        QueuedPromptSource::User,
-        None,
-    );
-    let now = chrono::DateTime::parse_from_rfc3339("2026-10-20T10:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    change_record(&state, &session, |record| {
-        let owner = EngramQueuedAdmissionOwner::capture(record).unwrap();
-        assert!(accept_engram_admission_budget(record, &owner, now));
-        let mut old =
-            serde_json::to_value(record.engram.begin_preparation_lineage.as_ref().unwrap())
-                .unwrap();
-        old.as_object_mut().unwrap().remove("originalWindow");
-        old.as_object_mut().unwrap().remove("renewedAt");
-        record.engram.begin_preparation_lineage = Some(serde_json::from_value(old).unwrap());
-        assert!(renew_engram_admission_budget_for_resume(
-            record,
-            now + chrono::Duration::minutes(5)
-        ));
-    });
-    let view = wire(&state, &session);
-    let budget = &view["promptAdmissionBudgets"][view["pendingPrompts"][0]["id"].as_str().unwrap()];
-    assert!(budget["originalAdmittedAt"].is_null());
-    assert!(budget["originalDeadline"].is_null());
-    assert_eq!(budget["currentDeadline"], "2026-10-20T10:09:00.000Z");
-    assert_eq!(budget["renewedAt"], "2026-10-20T10:05:00.000Z");
+    turn.record(|record| assert!(record.prompt_deliveries.is_empty()));
+    turn.assert_no_control();
 }
 
 fn seed_observation(state: &AppState, session: &str, ordinal: u64, at: &str) {
@@ -355,7 +128,9 @@ fn seed_observation(state: &AppState, session: &str, ordinal: u64, at: &str) {
 
 #[test]
 fn prompt_observation_history_is_bounded_and_never_restored_as_receipt_authority() {
-    let (state, session, _, _) = root_fixture([]);
+    let turn = OrdinaryRoot::new("bounded-handoff-observations");
+    let state = &turn.state;
+    let session = &turn.session;
     for ordinal in 0..=PROVIDER_HANDOFF_OBSERVATION_LIMIT {
         seed_observation(&state, &session, ordinal as u64, "2026-10-20T10:00:00Z");
     }
@@ -371,7 +146,7 @@ fn prompt_observation_history_is_bounded_and_never_restored_as_receipt_authority
             .unwrap(),
     )
     .unwrap();
-    inspect(&state, &session, |record| {
+    turn.record(|record| {
         assert!(record.prompt_deliveries.is_empty());
         let persisted = PersistedSessionRecord::from_record(record);
         let encoded = serde_json::to_value(&persisted).unwrap();
@@ -384,38 +159,26 @@ fn prompt_observation_history_is_bounded_and_never_restored_as_receipt_authority
     });
 }
 
-fn observed_session_fixture() -> (AppState, String, Session) {
-    let (state, session, _, _) = root_fixture([]);
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "retained observed prompt",
-        QueuedPromptSource::User,
-        None,
-    );
-    change_record(&state, &session, |record| {
-        let owner = EngramQueuedAdmissionOwner::capture(record).unwrap();
-        assert!(accept_engram_admission_budget(
-            record,
-            &owner,
-            chrono::Utc::now()
-        ));
-    });
+fn observed_session_fixture() -> (OrdinaryRoot, Session) {
+    let turn = OrdinaryRoot::new("bounded-handoff-observations");
+    let state = &turn.state;
+    let session = &turn.session;
+    turn.enqueue("retained observed prompt", QueuedPromptSource::User);
     seed_observation(&state, &session, 1, "2026-10-20T10:00:00Z");
-    let projected = inspect(&state, &session, |record| {
+    let projected = turn.record(|record| {
         AppState::wire_session_from_record(&state.server_instance_id, record)
     });
-    assert!(!projected.prompt_admission_budgets.is_empty());
     assert!(!projected.provider_handoffs.is_empty());
     assert!(projected.provider_handoff_history.is_some());
-    (state, session, projected)
+    (turn, projected)
 }
 
 #[test]
 fn prompt_observation_serialization_and_restore_drop_seeded_wire_fields() {
-    let (state, session, projected) = observed_session_fixture();
+    let (turn, projected) = observed_session_fixture();
+    let state = &turn.state;
+    let session = &turn.session;
     let persisted = change_record(&state, &session, |record| {
-        record.session.prompt_admission_budgets = projected.prompt_admission_budgets.clone();
         record.session.provider_handoffs = projected.provider_handoffs.clone();
         record.session.provider_handoff_history = projected.provider_handoff_history.clone();
         PersistedSessionRecord::from_record(record)
@@ -438,11 +201,11 @@ fn prompt_observation_serialization_and_restore_drop_seeded_wire_fields() {
     ] {
         encoded["session"][field] = wire_fields[field].clone();
     }
+    encoded["session"]["promptAdmissionBudgets"] = json!({"old-head":{"originalDeadline":"historical-only"}});
     let loaded = serde_json::from_value::<PersistedSessionRecord>(encoded)
         .unwrap()
         .into_record()
         .unwrap();
-    assert!(loaded.session.prompt_admission_budgets.is_empty());
     assert!(loaded.session.provider_handoffs.is_empty());
     assert!(loaded.session.provider_handoff_history.is_none());
     assert!(loaded.provider_handoff_observations.rows.is_empty());
@@ -451,7 +214,9 @@ fn prompt_observation_serialization_and_restore_drop_seeded_wire_fields() {
 
 #[tokio::test]
 async fn prompt_observation_proxy_hydration_and_summary_never_publish_foreign_diagnostics() {
-    let (state, session, mut upstream) = observed_session_fixture();
+    let (turn, mut upstream) = observed_session_fixture();
+    let state = &turn.state;
+    let session = &turn.session;
     let remote = RemoteConfig {
         id: "observation-upstream".into(),
         name: "Observation upstream".into(),
@@ -482,7 +247,6 @@ async fn prompt_observation_proxy_hydration_and_summary_never_publish_foreign_di
         let project = record.session.project_id.clone();
         apply_remote_session_to_record(record, &remote.id, project, &upstream);
         assert!(record.session.messages_loaded);
-        assert!(record.session.prompt_admission_budgets.is_empty());
         assert!(record.session.provider_handoffs.is_empty());
         assert!(record.session.provider_handoff_history.is_none());
     });
@@ -519,7 +283,6 @@ async fn prompt_observation_proxy_hydration_and_summary_never_publish_foreign_di
     }
     // Even a stale embedded wire cache cannot bypass the local projection.
     change_record(&state, &proxy, |record| {
-        record.session.prompt_admission_budgets = upstream.prompt_admission_budgets.clone();
         record.session.provider_handoffs = upstream.provider_handoffs.clone();
         record.session.provider_handoff_history = upstream.provider_handoff_history.clone();
     });
@@ -554,7 +317,9 @@ async fn session_read(state: &AppState, session: &str, query: &str) -> (StatusCo
 
 #[tokio::test]
 async fn prompt_observation_session_route_filters_half_open_time_window() {
-    let (state, session, _, _) = root_fixture([]);
+    let turn = OrdinaryRoot::new("bounded-handoff-observations");
+    let state = &turn.state;
+    let session = &turn.session;
     for (ordinal, at) in [
         (1, "2026-10-20T09:59:59Z"),
         (2, "2026-10-20T10:00:00Z"),
@@ -594,7 +359,9 @@ async fn prompt_observation_session_route_filters_half_open_time_window() {
 
 #[tokio::test]
 async fn prompt_observation_session_route_refuses_bad_or_inverted_time_bounds() {
-    let (state, session, _, _) = root_fixture([]);
+    let turn = OrdinaryRoot::new("bounded-handoff-observations");
+    let state = &turn.state;
+    let session = &turn.session;
     for query in [
         "?handoffFrom=not-a-time",
         "?handoffTo=not-a-time",

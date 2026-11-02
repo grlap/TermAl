@@ -40,7 +40,7 @@ describe("ProjectListSection Engram settings", () => {
       />,
     );
 
-    expect(screen.getByText("Engram · Enabled · base")).toBeInTheDocument();
+    expect(screen.getByText("Engram · Enabled · observations on")).toBeInTheDocument();
 
     const projectRow = screen.getByRole("button", { name: /TermAl/ });
     fireEvent.contextMenu(projectRow, { clientX: 40, clientY: 50 });
@@ -50,7 +50,7 @@ describe("ProjectListSection Engram settings", () => {
     expect(
       screen.getByRole("tab", { name: "Engram", selected: true }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Turn-gated control")).not.toBeChecked();
+    expect(screen.queryByLabelText("Turn-gated control")).not.toBeInTheDocument();
     await screen.findByText("Policy unknown — Policy unavailable");
   });
 

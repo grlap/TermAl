@@ -801,7 +801,7 @@ describe("applyDeltaToSessions", () => {
     ]);
   });
 
-  it("preserves an explicitly retained Engram prompt when its user message is created", () => {
+  it("does not let historical retained flags duplicate a prompt whose body arrived", () => {
     const pendingPrompts = [
       {
         id: "message-retained-1",
@@ -840,7 +840,7 @@ describe("applyDeltaToSessions", () => {
     if (result.kind !== "applied") {
       throw new Error("expected retained delta to apply");
     }
-    expect(result.sessions[0].pendingPrompts).toBe(pendingPrompts);
+    expect(result.sessions[0].pendingPrompts).toBeUndefined();
     expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
       "message-retained-1",
     ]);
@@ -926,69 +926,22 @@ describe("applyDeltaToSessions", () => {
     expect(updated.messages.filter((message) => message.id === "engram-defer-1")).toHaveLength(1);
   });
 
-  it("takes a queue delta's automatic-retry hold, and a queue delta without one clears it", () => {
-    const hold = {
-      kind: "automaticRetry" as const,
-      cause: "dispatch_budget_exhausted",
-      retryAt: "2026-10-23T02:56:51Z",
+  it("adopts the actual pause latch and keeps queued user content from an atomic delta", () => {
+    const queuedPrompt = { id: "pending-head", timestamp: "10:00", text: "Keep this queued prompt" };
+    const delta: Extract<DeltaEvent, { type: "messageCreated" }> = {
+      type: "messageCreated", revision: 7, sessionId: "session-a",
+      messageId: "message-a", messageIndex: 0, messageCount: 1,
+      message: { id: "message-a", type: "text", timestamp: "10:01", author: "assistant", text: "Turn stopped by user." },
+      preview: "Turn stopped by user.", status: "idle",
+      sessionQueue: { queuePaused: true, queueProjectionHash: "paused", pendingPrompts: [queuedPrompt] },
+      sessionMutationStamp: 100,
     };
-    const retainedPrompt = {
-      id: "message-retained-1",
-      timestamp: "10:00",
-      text: "Retained wake",
-      isEngramRetained: true,
-      engramInterrupted: false,
-    };
-    const card = (
-      id: string,
-      index: number,
-    ): Extract<DeltaEvent, { type: "messageCreated" }> => ({
-      type: "messageCreated",
-      revision: 7 + index,
-      sessionId: "session-a",
-      messageId: id,
-      messageIndex: index,
-      messageCount: index + 1,
-      message: {
-        id,
-        type: "text",
-        timestamp: "10:01",
-        author: "assistant",
-        text: "Engram held the wake.",
-      },
-      preview: "Engram held the wake.",
-      status: "idle",
-      sessionQueue: {
-        queuePaused: true,
-        queueProjectionHash: `queue-${index}`,
-        pendingPrompts: [retainedPrompt],
-        ...(index === 0 ? { queueHold: hold } : {}),
-      },
-      sessionMutationStamp: 100 + index,
-    });
-    const sessions = [
-      makeSession("session-a", {
-        status: "idle",
-        queuePaused: false,
-        pendingPrompts: undefined,
-        messageCount: 0,
-        sessionMutationStamp: 99,
-        messages: [],
-      }),
-    ];
-
-    const held = applyDeltaToSessions(sessions, card("held-1", 0));
-    if (held.kind !== "applied") {
-      throw new Error("expected the held queue delta to apply");
-    }
-    expect(held.sessions[0].queueHold).toEqual(hold);
-
-    const cleared = applyDeltaToSessions(held.sessions, card("held-2", 1));
-    if (cleared.kind !== "applied") {
-      throw new Error("expected the clearing queue delta to apply");
-    }
-    expect(cleared.sessions[0].queueHold ?? null).toBeNull();
-    expect(cleared.sessions[0].queuePaused).toBe(true);
+    const previous = makeSession("session-a", { queuePaused: false, pendingPrompts: undefined, messageCount: 0, messages: [] });
+    const applied = applyDeltaToSessions([previous], delta);
+    if (applied.kind !== "applied") throw new Error("expected queue delta to apply");
+    expect(applied.sessions[0].queuePaused).toBe(true);
+    expect(applied.sessions[0].pendingPrompts).toEqual([queuedPrompt]);
+    expect(applied.sessions[0].queueProjectionHash).toBe("paused");
   });
 
   it("keeps an unmatched optimistic successor across an atomic Defer and its replay", () => {
@@ -1633,7 +1586,7 @@ describe("applyDeltaToSessions", () => {
     ]);
   });
 
-  it("preserves an explicitly retained Engram prompt on the metadata-only live-update path", () => {
+  it("removes a duplicate pending projection on the metadata-only live-update path", () => {
     const pendingPrompts = [
       {
         id: "message-retained-tail",
@@ -1676,7 +1629,7 @@ describe("applyDeltaToSessions", () => {
     if (result.kind !== "applied") {
       throw new Error("expected metadata-only retained delta to apply");
     }
-    expect(result.sessions[0].pendingPrompts).toBe(pendingPrompts);
+    expect(result.sessions[0].pendingPrompts).toBeUndefined();
   });
 
   it("removes a matching optimistic prompt when its user message is created", () => {

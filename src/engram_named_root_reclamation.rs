@@ -185,7 +185,7 @@ fn engram_root_reclamation_session_is_reader(
     store: &EngramAuthorityStoreKey,
 ) -> bool {
     engram_session_reader_view_locked(inner, session_id)
-        .is_some_and(|view| view.routing_token.is_some() && view.store == Some(store))
+        .is_some_and(|view| view.store == Some(store))
 }
 
 fn engram_root_reclamation_reader_exists(inner: &StateInner, store: &EngramAuthorityStoreKey) -> bool {
@@ -211,12 +211,12 @@ fn engram_named_root_current_binding(inner: &StateInner, root: &EngramWorkSource
 fn engram_root_reclamation_idle_owner(inner: &StateInner, session_id: &str) -> bool {
     inner.find_session_index(session_id).is_some_and(|index| {
         let record = &inner.sessions[index];
-        record.engram.active_grant_id.is_none() && record.engram.uncertain_grant_id.is_none()
-            && !record.engram.checkpoint_in_progress
+        !record.runtime_stop_in_progress && record.engram.source_root_bind_owner.is_none()
+            && !session_resource_reset_in_progress(inner, record)
             && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error)
             && record.unmediated_claude_turn.is_none()
             && engram_session_reader_view_locked(inner, session_id)
-                .is_some_and(|view| view.routing_token.is_some())
+                .is_some()
     })
 }
 

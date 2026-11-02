@@ -52,6 +52,7 @@ fn engram_note_run_registered(run_directory: &FsPath) {
 /// The watcher order at which this process accepted the first registration
 /// of the launcher run in `run_directory`, if it did and still remembers it.
 /// Resolves the directory first, so call it off the state lock.
+#[cfg(test)]
 fn engram_run_registration_order(run_directory: &FsPath) -> Option<u64> {
     let key = engram_path_key(&fs::canonicalize(run_directory).ok()?);
     ENGRAM_RUN_REGISTRATION_ORDERS

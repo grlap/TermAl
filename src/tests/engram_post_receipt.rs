@@ -1,1092 +1,82 @@
-//! Post-receipt ownership and nonterminal recovery regressions. Scripted control
-//! and provider channels only; the live Engram fixture remains unchanged.
+//! Ordinary provider handoff, receipt and Stop ownership regressions.
+//! No control grant or checkpoint authorizes these turns. Historical queue
+//! metadata stays passive; real receipt WAL, runtime/turn and Stop owners remain.
 use super::*;
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 use crate::tests::delegation_support::finish_delegation_child_with_assistant_text;
 
-/// Replaces the synchronous store with a directory when turn_begin is sent,
-/// so persistence that follows the begin is ambiguous.
-struct StoreLostAtBegin {
-    scripted: Arc<ScriptedEngramControlTransport>,
-    store: PathBuf,
-}
-
-impl EngramControlTransport for StoreLostAtBegin {
-    fn request(
-        &self,
-        connection: &EngramConnectionConfig,
-        request: &EngramControlRequest,
-        timeout: Duration,
-    ) -> std::result::Result<Value, EngramTransportError> {
-        if matches!(request, EngramControlRequest::TurnBegin { .. }) {
-            fs::remove_file(&self.store).unwrap();
-            fs::create_dir_all(&self.store).unwrap();
-        }
-        self.scripted.request(connection, request, timeout)
-    }
-
-    fn shutdown_session(&self, session_id: &str) {
-        self.scripted.shutdown_session(session_id);
-    }
-}
-
-#[test]
-fn ambiguous_dispatch_card_commit_is_an_error_and_never_reaches_provider() {
-    let (state, session, receiver, scripted) = root_fixture([
-        bind_reply("persistence-unknown-token"),
-        grant_reply("persistence-unknown-grant"),
-        begin_reply("persistence-unknown-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    let generation = dispatch.engram_dispatch_generation().unwrap();
-    state.shutdown_persist_blocking();
-    let failing_path = state.persistence_path.as_ref().clone();
-    // The prepared Begin is acknowledged on a working store. The store
-    // becomes unusable as the begin is sent, so the dispatch card after it is
-    // what meets the ambiguous persistence.
-    state.install_control_test_transport(Arc::new(StoreLostAtBegin {
-        scripted,
-        store: failing_path.clone(),
-    }));
-
-    let error = deliver_turn_dispatch_now(&state, dispatch)
-        .expect_err("ambiguous dispatch-card persistence must reach the caller");
-    assert!(error.message.contains("persistence is unknown"));
-    assert!(receiver.try_recv().is_err());
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.engram.dispatch_generation, generation);
-    assert!(record.engram.pending_dispatch.is_none());
-    assert_eq!(record.session.status, SessionStatus::Idle);
-    assert!(record.session.live_activity.is_none());
-    assert!(record.orchestrator_auto_dispatch_blocked);
-    assert!(record.queued_prompts[0].engram_interrupted);
-    assert!(!record.queued_prompts[0].engram_waiting);
-    assert_eq!(
-        record.queued_prompts[0]
-            .engram_evaluate
-            .as_ref()
-            .and_then(|prepared| prepared.begun_grant_id.as_deref()),
-        Some("persistence-unknown-grant")
-    );
-    assert!(record.session.preview.contains("persistence unknown"));
-    drop(inner);
-
-    // A retained, possibly delivered owner is an explicit refusal even when
-    // the optional preview write meets the same broken store.
-    let refusal = state
-        .resume_session_queue(&session)
-        .err()
-        .expect("retained head must refuse Resume");
-    assert_eq!(refusal.status, StatusCode::CONFLICT);
-    assert!(
-        refusal
-            .message
-            .contains("retained prompt cannot resume until its admission state is reconciled")
-    );
-    assert!(receiver.try_recv().is_err());
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.session.status, SessionStatus::Idle);
-    assert!(record.orchestrator_auto_dispatch_blocked);
-    assert!(record.queued_prompts[0].engram_interrupted);
-    drop(inner);
-
-    fs::remove_dir_all(failing_path).unwrap();
-}
-
-#[test]
-fn failed_grant_fence_and_interruption_commit_publish_one_fail_closed_owner() {
-    let (state, session, receiver, _) = root_fixture([
-        bind_reply("fence-unknown-token"),
-        grant_reply("fence-unknown-grant"),
-        begin_reply("fence-unknown-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    let generation = dispatch.engram_dispatch_generation().unwrap();
-    let (persist_tx, persist_rx) = mpsc::channel();
-    let mut state = AppState {
-        persist_tx,
-        ..state
-    };
-    let failing_path = state
-        .test_temp_root
-        .as_ref()
-        .unwrap()
-        .path()
-        .join("grant-fence-interrupt-is-directory");
-    fs::create_dir_all(&failing_path).unwrap();
-    state.persistence_path = Arc::new(failing_path.clone());
-    let mut state_events = state.subscribe_events();
-
-    let result = std::thread::scope(|scope| {
-        let worker = scope.spawn(|| deliver_turn_dispatch_now(&state, dispatch));
-        let PersistRequest::Fence(prepared) =
-            persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap()
-        else {
-            panic!("the prepared Begin must request its fence before the send")
-        };
-        prepared.finish(Ok(()));
-        assert!(matches!(
-            persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap(),
-            PersistRequest::Delta
-        ));
-        let PersistRequest::Fence(fence) =
-            persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap()
-        else {
-            panic!("grant durability must request its exact-content fence")
-        };
-        fence.finish(Err(PersistFenceError::WriteFailed(
-            "injected grant fence failure".to_owned(),
-        )));
-        drop(persist_rx);
-        worker.join().unwrap()
+// A known-unsent original carrying historical bytes is promoted by the real
+// ordinary queue owner. The product retains that row after promotion, so the
+// Stop tests exercise exact retirement rather than a synthetic admission.
+fn prepare_ordinary_owned_head(turn: &OrdinaryRoot) -> TurnDispatch {
+    turn.enqueue("Prepared ordinary input", QueuedPromptSource::User);
+    turn.edit(|record| {
+        record.queued_prompts.back_mut().unwrap().engram_evaluate =
+            Some(json!({"historical":"known-unsent","future":[null,"żółw"]}));
     });
-    let error = result.expect_err("fence uncertainty must reach the caller");
-    assert!(error.message.contains("persistence is unknown"));
-    assert!(receiver.try_recv().is_err());
-    let published_payload = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .unwrap()
-        .block_on(async {
-            tokio::time::timeout(phase_sync::DEADLOCK_GUARD, state_events.recv())
-                .await
-                .expect("interruption failure publication timed out")
-                .unwrap()
-        });
-    let published: Value = serde_json::from_str(&published_payload).unwrap();
-    let published_session = published["sessions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|candidate| candidate["id"] == session)
-        .unwrap();
-    assert_eq!(published_session["queuePaused"], true);
-    assert_eq!(published_session["status"], "idle");
-    assert!(published_session["liveActivity"].is_null());
-    assert!(
-        published_session["preview"]
-            .as_str()
-            .unwrap()
-            .contains("interrupted/unknown")
-    );
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.engram.dispatch_generation, generation);
-    assert_eq!(record.session.status, SessionStatus::Idle);
-    assert!(record.session.live_activity.is_none());
-    assert!(record.queued_prompts[0].engram_interrupted);
-    assert!(!record.queued_prompts[0].engram_waiting);
-    assert_eq!(
-        record.queued_prompts[0]
-            .engram_evaluate
-            .as_ref()
-            .and_then(|prepared| prepared.begun_grant_id.as_deref()),
-        Some("fence-unknown-grant")
-    );
-    drop(inner);
-
-    fs::remove_dir_all(failing_path).unwrap();
+    turn.state.start_next_queued_turn_off_lock(&turn.session, false, false)
+        .unwrap().unwrap().dispatch
 }
 
-#[test]
-fn public_root_send_surfaces_post_begin_fence_uncertainty_and_resume_requires_reconcile() {
-    let (mut state, session, receiver, _) = root_fixture([]);
-    state.shutdown_persist_blocking();
-    let (persist_tx, persist_rx) = mpsc::channel();
-    state.persist_tx = persist_tx;
-    let stop_persister = Arc::new(AtomicBool::new(false));
-    let fail_next_fence = Arc::new(AtomicBool::new(false));
-    let persist_stop = stop_persister.clone();
-    let persist_failure = fail_next_fence.clone();
-    let persister = std::thread::spawn(move || {
-        while let Ok(request) = persist_rx.recv() {
-            if persist_stop.load(Ordering::SeqCst) {
-                break;
-            }
-            if let PersistRequest::Fence(fence) = request {
-                if persist_failure.swap(false, Ordering::SeqCst) {
-                    fence.finish(Err(PersistFenceError::Deadline));
-                } else {
-                    fence.finish(Ok(()));
-                }
-            }
-        }
+// A fresh receipted promotion keeps custody in delivery.entry, not a queued
+// history row. DeliveryWriter acknowledges without writing SQLite; only the
+// WAL ACK latch is set here to capture a prepared dispatch before automatic
+// enqueue. Production code creates HandingOff and the promoted identities.
+fn prepare_receipted_ordinary_promotion(
+    turn: &mut OrdinaryRoot,
+    source: QueuedPromptSource,
+) -> (TurnDispatch, String, crate::tests::prompt_delivery::DeliveryWriter, Box<PersistFence>) {
+    use crate::tests::prompt_delivery::{DeliveryWriter, HeldFence};
+    let writer = DeliveryWriter::attach(&mut turn.state);
+    let id = turn.enqueue_durable("Prepared ordinary input", true);
+    // Select the queue-source variant before its WAL intent is captured.
+    // Neither variant is a Human prompt or a historical admission alias.
+    assert!(matches!(source, QueuedPromptSource::User | QueuedPromptSource::Orchestrator));
+    turn.edit(|record| record.queued_prompts.back_mut().unwrap().source = source);
+    assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+    writer.take(HeldFence::Durability).finish(Ok(()));
+    if source == QueuedPromptSource::User {
+        // The producer initially held Orchestrator content. Its real
+        // settlement refreshes that hold after this source choice, so only
+        // an acknowledgement of the changed entry can release it.
+        writer.take(HeldFence::Durability).finish(Ok(()));
+    }
+    let write_ahead = writer.take(HeldFence::WriteAhead);
+    turn.record(|record| {
+        let delivery = &record.prompt_deliveries[&id];
+        assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
+        assert!(!delivery.write_ahead_acknowledged);
+        assert!(delivery.turn_generation.is_none() && delivery.entry.is_none());
     });
-    let (begin, begin_gate) = gated_engram_step("turn_begin", begin_reply("public-root-grant"));
-    state.install_control_test_transport(GatedEngramControlTransport::new([
-        immediate_engram_step("session_bind", bind_reply("public-root-token")),
-        immediate_engram_step("turn_evaluate", grant_reply("public-root-grant")),
-        begin,
-        immediate_engram_step("turn_checkpoint", checkpoint_reply("public-root-grant")),
-    ]));
-
-    let result = std::thread::scope(|scope| {
-        let worker = scope.spawn(|| {
-            dispatch_turn_and_snapshot(
-                &state,
-                &session,
-                SendMessageRequest {
-                    text: "Public root send retained across fence uncertainty".to_owned(),
-                    expanded_text: None,
-                    attachments: Vec::new(),
-                    source_session_id: None,
-                    source_mailbox: None,
-                },
-            )
-        });
-        begin_gate.wait();
-        fail_next_fence.store(true, Ordering::SeqCst);
-        begin_gate.release();
-        worker.join().unwrap()
+    turn.edit(|record| record.prompt_deliveries.get_mut(&id).unwrap().write_ahead_acknowledged = true);
+    let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false)
+        .unwrap().expect("acknowledged receipted queue entry promotes");
+    turn.record(|record| {
+        assert!(record.queued_prompts.is_empty());
+        let delivery = &record.prompt_deliveries[&id];
+        assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
+        assert_eq!(delivery.turn_generation, Some(started.dispatch.active_turn_generation()));
+        let entry = delivery.entry.as_ref().unwrap();
+        assert_eq!(entry.pending_prompt.id, id);
+        assert_eq!(entry.pending_prompt.text, "Prepared ordinary input");
+        assert_eq!(entry.source, source);
+        assert!(entry.engram_evaluate.is_none() && entry.engram_bind.is_none());
+        assert!(delivery.message_id.is_some() && delivery.attempt_key.is_some());
     });
-    let error = match result {
-        Ok(_) => panic!("public Send must surface post-begin persistence uncertainty"),
-        Err(error) => error,
-    };
-    assert!(error.message.contains("persistence is unknown"));
-    stop_persister.store(true, Ordering::SeqCst);
-    state.persist_tx.send(PersistRequest::Delta).unwrap();
-    persister.join().unwrap();
-    assert!(receiver.try_recv().is_err());
-
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.session.status, SessionStatus::Idle);
-        assert!(record.session.live_activity.is_none());
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert!(record.queued_prompts[0].engram_interrupted);
-    }
-    // Resume must explain that reconciliation still owns the head; a silent
-    // success would claim progress while preserving the same paused queue.
-    let refusal = state
-        .resume_session_queue(&session)
-        .err()
-        .expect("retained head must refuse Resume");
-    assert_eq!(refusal.status, StatusCode::CONFLICT);
-    assert!(
-        refusal
-            .message
-            .contains("retained prompt cannot resume until its admission state is reconciled")
-    );
-    assert!(receiver.try_recv().is_err());
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.session.status, SessionStatus::Idle);
-    assert!(record.orchestrator_auto_dispatch_blocked);
-    assert!(record.queued_prompts[0].engram_interrupted);
+    turn.assert_no_prompt();
+    (started.dispatch, id, writer, write_ahead)
 }
 
 #[test]
-fn orphan_recovery_retains_exact_ids_on_persistence_uncertainty_without_requeue() {
-    for mailbox_before_orchestrator in [false, true] {
-        let (mut state, session, receiver, _) = root_fixture([]);
-        if mailbox_before_orchestrator {
-            queue_test_engram_prompt(
-                &state,
-                &session,
-                "durable mailbox wake before workflow",
-                QueuedPromptSource::Mailbox,
-                None,
-            );
-        }
-        queue_test_engram_prompt(
-            &state,
-            &session,
-            "durable orphaned orchestrator workflow",
-            QueuedPromptSource::Orchestrator,
-            None,
-        );
-        let original_ids = {
-            let inner = state.inner.lock().unwrap();
-            inner.sessions[inner.find_session_index(&session).unwrap()]
-                .queued_prompts
-                .iter()
-                .map(|queued| queued.pending_prompt.id.clone())
-                .collect::<Vec<_>>()
-        };
-
-        state.shutdown_persist_blocking();
-        let (persist_tx, persist_rx) = mpsc::channel();
-        state.persist_tx = persist_tx;
-        let stop_persister = Arc::new(AtomicBool::new(false));
-        let fail_next_fence = Arc::new(AtomicBool::new(false));
-        let persist_stop = stop_persister.clone();
-        let persist_failure = fail_next_fence.clone();
-        let persister = std::thread::spawn(move || {
-            while let Ok(request) = persist_rx.recv() {
-                if persist_stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                if let PersistRequest::Fence(fence) = request {
-                    if persist_failure.swap(false, Ordering::SeqCst) {
-                        fence.finish(Err(PersistFenceError::Deadline));
-                    } else {
-                        fence.finish(Ok(()));
-                    }
-                }
-            }
-        });
-        let grant_id = if mailbox_before_orchestrator {
-            "mailbox-orchestrator-orphan-grant"
-        } else {
-            "orchestrator-orphan-grant"
-        };
-        let (begin, begin_gate) = gated_engram_step("turn_begin", begin_reply(grant_id));
-        state.install_control_test_transport(GatedEngramControlTransport::new([
-            immediate_engram_step("session_bind", bind_reply("orphan-token")),
-            immediate_engram_step("turn_evaluate", grant_reply(grant_id)),
-            begin,
-            immediate_engram_step("turn_checkpoint", checkpoint_reply(grant_id)),
-        ]));
-
-        std::thread::scope(|scope| {
-            let worker = scope.spawn(|| state.dispatch_orphaned_workflow_prompts());
-            begin_gate.wait();
-            fail_next_fence.store(true, Ordering::SeqCst);
-            begin_gate.release();
-            worker.join().unwrap();
-        });
-        stop_persister.store(true, Ordering::SeqCst);
-        state.persist_tx.send(PersistRequest::Delta).unwrap();
-        persister.join().unwrap();
-        assert!(receiver.try_recv().is_err());
-
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.session.status, SessionStatus::Idle);
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert_eq!(
-            record
-                .queued_prompts
-                .iter()
-                .map(|queued| queued.pending_prompt.id.clone())
-                .collect::<Vec<_>>(),
-            original_ids,
-            "retained uncertainty must not create a replacement ID"
-        );
-        assert!(record.queued_prompts[0].engram_interrupted);
-        if mailbox_before_orchestrator {
-            assert_eq!(record.queued_prompts.len(), 2);
-            assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::Mailbox);
-            assert_eq!(
-                record.queued_prompts[1].source,
-                QueuedPromptSource::Orchestrator
-            );
-        } else {
-            assert_eq!(record.queued_prompts.len(), 1);
-            assert_eq!(
-                record.queued_prompts[0].source,
-                QueuedPromptSource::Orchestrator
-            );
-        }
-    }
-}
-
-#[test]
-fn initial_child_post_begin_persistence_unknown_reports_a_held_delegation_and_settles_abort() {
-    for fail_card_commit in [true, false] {
-        let (mut state, parent, receiver, _) = root_fixture([]);
-        state.shutdown_persist_blocking();
-        let failing_path =
-            state
-                .test_temp_root
-                .as_ref()
-                .unwrap()
-                .path()
-                .join(if fail_card_commit {
-                    "child-card-commit-is-directory"
-                } else {
-                    "child-fence-unused-directory"
-                });
-        fs::create_dir_all(&failing_path).unwrap();
-        if fail_card_commit {
-            state.persistence_path = Arc::new(failing_path.clone());
-        }
-
-        let (persist_tx, persist_rx) = mpsc::channel();
-        state.persist_tx = persist_tx;
-        let stop_persister = Arc::new(AtomicBool::new(false));
-        let fail_next_fence = Arc::new(AtomicBool::new(false));
-        let persist_stop = stop_persister.clone();
-        let persist_failure = fail_next_fence.clone();
-        let mut persister = Some(std::thread::spawn(move || {
-            while let Ok(request) = persist_rx.recv() {
-                if persist_stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                if let PersistRequest::Fence(fence) = request {
-                    if persist_failure.swap(false, Ordering::SeqCst) {
-                        fence.finish(Err(PersistFenceError::Deadline));
-                    } else {
-                        fence.finish(Ok(()));
-                    }
-                }
-            }
-        }));
-
-        let (begin, begin_gate) = gated_engram_step(
-            "turn_begin",
-            begin_reply(if fail_card_commit {
-                "child-card-grant"
-            } else {
-                "child-fence-grant"
-            }),
-        );
-        state.install_control_test_transport(GatedEngramControlTransport::new([
-            immediate_engram_step("session_bind", bind_reply("parent-child-test")),
-            immediate_engram_step("session_bind", bind_reply("child-test")),
-            immediate_engram_step(
-                "turn_evaluate",
-                grant_reply(if fail_card_commit {
-                    "child-card-grant"
-                } else {
-                    "child-fence-grant"
-                }),
-            ),
-            begin,
-            immediate_engram_step(
-                "turn_checkpoint",
-                checkpoint_reply(if fail_card_commit {
-                    "child-card-grant"
-                } else {
-                    "child-fence-grant"
-                }),
-            ),
-        ]));
-
-        let result = std::thread::scope(|scope| {
-            let worker = scope.spawn(|| {
-                state.create_read_only_delegation(
-                    &parent,
-                    CreateDelegationRequest {
-                        prompt: "retain the exact initial child owner".to_owned(),
-                        title: Some("Post-begin persistence recovery".to_owned()),
-                        cwd: None,
-                        agent: Some(Agent::Codex),
-                        model: None,
-                        mode: Some(DelegationMode::Explorer),
-                        write_policy: Some(DelegationWritePolicy::ReadOnly),
-                    },
-                )
-            });
-            begin_gate.wait();
-            if fail_card_commit {
-                stop_persister.store(true, Ordering::SeqCst);
-                state.persist_tx.send(PersistRequest::Delta).unwrap();
-                persister.take().unwrap().join().unwrap();
-            } else {
-                fail_next_fence.store(true, Ordering::SeqCst);
-            }
-            begin_gate.release();
-            worker.join().unwrap()
-        });
-
-        // The created delegation is durable: its held first turn is reported
-        // with it, never as an error that would invite a duplicate spawn.
-        let response = result.expect("a held first turn still returns the delegation");
-        let first_turn = response
-            .first_turn
-            .as_ref()
-            .expect("the first turn is reported");
-        assert_eq!(first_turn.state, DelegationTurnDeliveryState::Held);
-        assert!(
-            first_turn
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains("persistence is unknown"))
-        );
-        assert_eq!(
-            delegation_turn_response_status(&response),
-            StatusCode::ACCEPTED
-        );
-        if !fail_card_commit {
-            stop_persister.store(true, Ordering::SeqCst);
-            state.persist_tx.send(PersistRequest::Delta).unwrap();
-            persister.take().unwrap().join().unwrap();
-        }
-        assert!(receiver.try_recv().is_err());
-        let inner = state.inner.lock().unwrap();
-        assert_eq!(inner.delegations.len(), 1);
-        assert_eq!(inner.delegations[0].id, response.delegation.id);
-        assert_eq!(inner.delegations[0].status, DelegationStatus::Running);
-        assert_eq!(
-            public_delegation_status(&inner.delegations[0]),
-            DelegationStatus::Held
-        );
-        let child_id = &inner.delegations[0].child_session_id;
-        assert_eq!(child_id, &response.delegation.child_session_id);
-        let child = &inner.sessions[inner.find_session_index(child_id).unwrap()];
-        assert_eq!(child.session.status, SessionStatus::Idle);
-        assert!(child.session.live_activity.is_none());
-        assert!(child.orchestrator_auto_dispatch_blocked);
-        assert_eq!(child.queued_prompts.len(), 1);
-        // The matching stale-begin checkpoint closed the begun grant of a
-        // delivery this owner withheld: the head's evaluation is retired and
-        // an abort record holds it, interrupted until the settlement is
-        // acknowledged, for a fresh admission.
-        assert!(child.queued_prompts[0].engram_interrupted);
-        assert!(child.queued_prompts[0].engram_evaluate.is_none());
-        let retry = child.engram.abort_retry.as_ref().expect("an abort record");
-        assert_eq!(
-            retry.settled_grant_id.as_deref(),
-            Some(if fail_card_commit {
-                "child-card-grant"
-            } else {
-                "child-fence-grant"
-            })
-        );
-        assert_eq!(
-            retry.reason,
-            if fail_card_commit {
-                EngramAbortReason::DispatchCard
-            } else {
-                EngramAbortReason::AdmissionFence
-            }
-        );
-        assert!(child.engram.active_grant_id.is_none());
-        drop(inner);
-        fs::remove_dir_all(failing_path).unwrap();
-    }
-}
-
-struct AfterRejectedCheckpointReply {
-    scripted: Arc<ScriptedEngramControlTransport>,
-    after: Mutex<Option<Box<dyn FnOnce() + Send>>>,
-}
-
-impl EngramControlTransport for AfterRejectedCheckpointReply {
-    fn read_observation_policy(
-        &self, connection: &EngramConnectionConfig, store: &EngramAuthorityStoreKey,
-        timeout: Duration, host_workdir: &FsPath,
-    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.scripted.read_observation_policy(connection, store, timeout, host_workdir)
-    }
-
-    fn read_work_binding(
-        &self, connection: &EngramConnectionConfig, preference: EngramBindingPreference<'_>,
-        timeout: Duration,
-    ) -> Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.scripted.read_work_binding(connection, preference, timeout)
-    }
-
-    fn read_held_claims(
-        &self, connection: &EngramConnectionConfig, timeout: Duration,
-    ) -> Result<EngramHeldClaims, EngramTransportError> {
-        self.scripted.read_held_claims(connection, timeout)
-    }
-
-    fn request(
-        &self,
-        connection: &EngramConnectionConfig,
-        request: &EngramControlRequest,
-        timeout: Duration,
-    ) -> std::result::Result<Value, EngramTransportError> {
-        let response = self.scripted.request(connection, request, timeout);
-        if matches!(request, EngramControlRequest::TurnCheckpoint { .. })
-            && let Some(after) = self.after.lock().unwrap().take()
-        {
-            after();
-        }
-        response
-    }
-
-    fn shutdown_session(&self, session_id: &str) {
-        self.scripted.shutdown_session(session_id);
-    }
-}
-
-#[test]
-fn rejected_checkpoint_receipt_keeps_custody_on_owner_drift_or_failed_commit() {
-    for failure in ["head", "successor", "stop", "runtime", "turn", "dispatch", "persist"] {
-        let (state, session, receiver, scripted) = root_fixture([
-            bind_reply("rejected-token"), grant_reply("rejected-grant"),
-            begin_reply("rejected-grant"), checkpoint_reply("rejected-grant"),
-        ]);
-        let dispatch = root_dispatch(&state, &session, false);
-        let generation = dispatch.engram_dispatch_generation().unwrap();
-        assert!(matches!(state.prepare_engram_turn_delivery_off_lock(&session, generation),
-            EngramTurnDeliveryPreparation::Ready));
-        if failure == "successor" {
-            queue_test_engram_prompt(&state, &session, "successor at receipt",
-                QueuedPromptSource::User, None);
-        }
-        drop(receiver);
-        let original_head = {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            let queued = if failure == "successor" { record.queued_prompts.back().unwrap() }
-                else { record.queued_prompts.front().unwrap() };
-            queued.pending_prompt.clone()
-        };
-        let (replacement_runtime, replacement_receiver) = test_codex_runtime_handle("receipt-owner-replacement");
-        let replacement_token = SessionRuntime::Codex(replacement_runtime.clone()).runtime_token().unwrap();
-        let store = state.persistence_path.as_ref().clone();
-        let before_receipt = store.with_extension("before-rejected-receipt.sqlite");
-        let saved_store = before_receipt.clone();
-        let changed_state = state.clone();
-        let changed_session = session.clone();
-        state.install_control_test_transport(Arc::new(AfterRejectedCheckpointReply {
-            scripted: scripted.clone(),
-            after: Mutex::new(Some(Box::new(move || {
-                if failure == "persist" {
-                    // The send/intent and interruption are already durable.
-                    // Fail the receipt+retirement cut, preserving that file.
-                    fs::rename(&store, &saved_store).unwrap();
-                    fs::create_dir(&store).unwrap();
-                } else {
-                    let mut inner = changed_state.inner.lock().unwrap();
-                    let index = inner.find_session_index(&changed_session).unwrap();
-                    let record = inner.session_mut_by_index(index).unwrap();
-                    match failure {
-                        "head" => record.queued_prompts.front_mut().unwrap()
-                            .pending_prompt.text = "replacement at receipt".into(),
-                        "successor" => { record.queued_prompts.pop_front(); }
-                        "stop" => {
-                            let token = record.runtime.runtime_token().unwrap();
-                            record.claim_runtime_stop(RuntimeStopOwnerKind::LostRuntimeTerminalization, token);
-                        }
-                        "runtime" => record.runtime = SessionRuntime::Codex(replacement_runtime),
-                        "turn" => record.active_turn_generation += 1,
-                        "dispatch" => record.engram.dispatch_generation += 1,
-                        _ => unreachable!(),
-                    }
-                }
-            }))),
-        }));
-        let outcome = handoff_prepared_turn_dispatch(&state, dispatch);
-        if matches!(failure, "stop" | "runtime" | "turn") {
-            assert!(matches!(outcome, Ok(HandoffPreparedTurnDispatchOutcome::Superseded)),
-                "the replacement owner supersedes the rejected dispatch: {failure}: {outcome:?}");
-        } else {
-            outcome.expect_err("provider channel is closed");
-        }
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        let operation = inner.engram_session_obligations.checkpoint_operations.iter()
-            .find(|operation| operation.protection.local_session_id == session).unwrap();
-        assert!(engram_obligation_requires_exclusion(&inner, &operation.protection));
-        assert!(!inner.engram_confirmed_containment_ids.contains(&operation.original.id));
-        if failure == "persist" {
-            assert!(inner.engram_pending_checkpoint_receipts.entries.values().any(|entry| entry.accepted));
-            assert_eq!(record.engram.dispatch_generation, generation + 1);
-            assert!(record.queued_prompts.is_empty());
-            assert!(record.engram.active_grant_id.is_none());
-            assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
-        } else {
-            assert_eq!(record.engram.dispatch_generation, generation + if failure == "dispatch" { 1 } else { 0 });
-            assert_eq!(record.queued_prompts.len(), 1);
-            assert_eq!(record.queued_prompts[0].pending_prompt.id, original_head.id);
-            assert_eq!(record.queued_prompts[0].pending_prompt.text,
-                if failure == "head" { "replacement at receipt" } else { original_head.text.as_str() });
-            if failure == "runtime" {
-                assert!(record.runtime.matches_runtime_token(&replacement_token));
-            }
-            assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
-            assert_ne!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
-        }
-        drop(inner);
-        if failure == "persist" {
-            let loaded = load_state(&before_receipt).unwrap().unwrap();
-            let record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
-            assert_eq!(record.engram.dispatch_generation, generation);
-            assert!(record.queued_prompts[0].engram_interrupted);
-            let operation = loaded.engram_session_obligations.checkpoint_operations.iter()
-                .find(|operation| operation.protection.local_session_id == session).unwrap();
-            assert!(engram_obligation_requires_exclusion(&loaded, &operation.protection));
-            assert!(!matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
-        } else {
-            let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
-            let operation = loaded.engram_session_obligations.checkpoint_operations.iter()
-                .find(|operation| operation.protection.local_session_id == session).unwrap();
-            operation.validate().unwrap();
-            assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
-            assert_ne!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
-            assert!(engram_obligation_requires_exclusion(&loaded, &operation.protection));
-            let request = scripted.requests().into_iter()
-                .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
-            assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), request);
-        }
-        assert!(replacement_receiver.try_recv().is_err());
-        assert_eq!(scripted.requests().iter()
-            .filter(|request| request.request["operation"] == "turn_checkpoint").count(), 1);
-    }
-}
-
-#[test]
-fn rejected_checkpoint_retirement_recovers_a_failed_ack_without_restart_or_resend() {
-    let (state, session, receiver, scripted) = root_fixture([
-        bind_reply("ack-token"), grant_reply("ack-grant"),
-        begin_reply("ack-grant"), checkpoint_reply("ack-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    let generation = dispatch.engram_dispatch_generation().unwrap();
-    assert!(matches!(state.prepare_engram_turn_delivery_off_lock(&session, generation),
-        EngramTurnDeliveryPreparation::Ready));
-    queue_test_engram_prompt(&state, &session, "successor after delayed ACK",
-        QueuedPromptSource::User, None);
-    drop(receiver);
-    let clock = state.engram_budget_clock();
-    let budget = {
-        let inner = state.inner.lock().unwrap();
-        engram_project_for_session_locked(&inner, &session).unwrap()
-            .engram.as_ref().unwrap().call_timeout()
-    };
-    state.install_control_test_transport(Arc::new(AfterRejectedCheckpointReply {
-        scripted: scripted.clone(),
-        // A valid reply consumes its existing call budget. Receipt publication
-        // can commit, but the following ACK must fail its expired deadline.
-        after: Mutex::new(Some(Box::new(move || clock.advance(budget)))),
-    }));
-    handoff_prepared_turn_dispatch(&state, dispatch).expect_err("provider channel is closed");
-    let retained = {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(matches!(record.runtime, SessionRuntime::None));
-        assert!(record.runtime_stop_owner.is_none());
-        assert_eq!(record.engram.dispatch_generation, generation + 1);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(record.queued_prompts[0].pending_prompt.text, "successor after delayed ACK");
-        assert!(!record.queued_prompts[0].has_engram_intent());
-        let operation = inner.engram_session_obligations.checkpoint_operations.iter()
-            .find(|operation| operation.protection.local_session_id == session).unwrap();
-        assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
-        assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
-        assert!(engram_obligation_requires_exclusion(&inner, &operation.protection));
-        assert!(inner.engram_pending_checkpoint_receipts.entries.values().any(|entry| entry.accepted));
-        serde_json::to_value(operation).unwrap()
-    };
-    // Observe the committed file without replacing the running StateInner.
-    let request = scripted.requests().into_iter()
-        .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
-    let _durable = load_rejected_checkpoint_retirement(&state, &session, generation, &request);
-    assert!(state.account_pending_checkpoint_receipt(&session).unwrap());
-    assert!(!state.account_pending_checkpoint_receipt(&session).unwrap());
-    let inner = state.inner.lock().unwrap();
-    let operation = inner.engram_session_obligations.checkpoint_operations.iter()
-        .find(|operation| operation.protection.local_session_id == session).unwrap();
-    assert_eq!(serde_json::to_value(operation).unwrap(), retained);
-    assert!(!engram_obligation_requires_exclusion(&inner, &operation.protection));
-    assert!(inner.engram_pending_checkpoint_receipts.entries.is_empty());
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.queued_prompts.len(), 1);
-    assert_eq!(record.queued_prompts[0].pending_prompt.text, "successor after delayed ACK");
-    assert!(!record.queued_prompts[0].has_engram_intent());
-    assert_eq!(scripted.requests().iter()
-        .filter(|request| request.request["operation"] == "turn_checkpoint").count(), 1);
-}
-
-fn load_rejected_checkpoint_retirement(
-    state: &AppState,
-    session: &str,
-    failed_generation: u64,
-    request: &Value,
-) -> StateInner {
-    // Read the actual writer's SQLite cut, without a shutdown/final persist.
-    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
-    let record = &loaded.sessions[loaded.find_session_index(session).unwrap()];
-    assert!(record.engram.dispatch_generation > failed_generation);
-    let operation = loaded.engram_session_obligations.checkpoint_operations.iter()
-        .find(|operation| operation.protection.local_session_id == session).unwrap();
-    operation.validate().unwrap();
-    assert_eq!(serde_json::to_value(&operation.original.request).unwrap(), *request);
-    assert!(matches!(operation.progress, EngramExistingCheckpointProgress::Accepted { .. }));
-    assert_eq!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
-    assert!(matches!(operation.attempts.last().unwrap().result, Some(EngramCheckpointAttemptResult::Accepted)));
-    let retired_id = operation.attempts.last().unwrap().queued_prompt_id.as_ref().unwrap();
-    assert!(!record.queued_prompts.iter().any(|queued| &queued.pending_prompt.id == retired_id));
-    assert!(!engram_obligation_requires_exclusion(&loaded, &operation.protection));
-    loaded
-}
-
-#[test]
-fn admitted_channel_rejection_checkpoints_and_retires_only_its_exact_owner() {
-    let (state, session, receiver, _) = root_fixture([]);
-    let transport = StatefulEngramControlTransport::new();
-    state.install_control_test_transport(transport.clone());
-    let dispatch = root_dispatch(&state, &session, false);
-    let failed_generation = dispatch.engram_dispatch_generation().unwrap();
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "successor after rejected provider channel",
-        QueuedPromptSource::User,
-        None,
-    );
-    drop(receiver);
-
-    let error = deliver_turn_dispatch_now(&state, dispatch)
-        .expect_err("closed provider channel must reject the admitted turn");
-    assert!(error.message.contains("failed to queue prompt for Codex"));
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.session.status, SessionStatus::Error);
-        assert!(record.engram.active_grant_id.is_none());
-        assert!(record.engram.pending_dispatch.is_none());
-        assert!(record.engram.dispatch_generation > failed_generation);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(
-            record.queued_prompts[0].pending_prompt.text,
-            "successor after rejected provider channel"
-        );
-        assert!(!record.queued_prompts[0].has_engram_intent());
-        assert!(inner.delegations.is_empty());
-    }
-    let durable: PersistedSessionRecord =
-        serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
-    assert_eq!(durable.queued_prompts.len(), 1);
-    assert_eq!(
-        durable.queued_prompts[0].pending_prompt.text,
-        "successor after rejected provider channel"
-    );
-    assert!(durable.queued_prompts[0].engram_evaluate.is_none());
-
-    let request = transport.requests().into_iter()
-        .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
-    let reloaded = load_rejected_checkpoint_retirement(&state, &session, failed_generation, &request);
-    let reloaded_record = &reloaded.sessions[reloaded.find_session_index(&session).unwrap()];
-    assert!(reloaded_record.engram.active_grant_id.is_none());
-    assert_eq!(reloaded_record.queued_prompts.len(), 1);
-    assert_eq!(
-        reloaded_record.queued_prompts[0].pending_prompt.text,
-        "successor after rejected provider channel"
-    );
-    assert!(!reloaded_record.queued_prompts[0].has_engram_intent());
-
-    let (retry_runtime, retry_receiver) = test_codex_runtime_handle("channel-rejection-successor");
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = &mut inner.sessions[index];
-        record.runtime = SessionRuntime::Codex(retry_runtime);
-        record.session.status = SessionStatus::Idle;
-    }
-    state.resume_session_queue(&session).unwrap();
-    let CodexRuntimeCommand::Prompt { command, .. } = retry_receiver
-        .try_recv()
-        .expect("freshly authorized channel-rejection successor")
-    else {
-        panic!("successor must reach the provider only after fresh authorization")
-    };
-    assert_eq!(command.prompt, "successor after rejected provider channel");
-    assert!(retry_receiver.try_recv().is_err());
-
-    let requests = transport.requests();
-    let evaluate_keys = requests
-        .iter()
-        .filter(|request| request.request["operation"] == "turn_evaluate")
-        .map(|request| request.request["idempotency_key"].clone())
-        .collect::<Vec<_>>();
-    let begin_keys = requests
-        .iter()
-        .filter(|request| request.request["operation"] == "turn_begin")
-        .map(|request| request.request["idempotency_key"].clone())
-        .collect::<Vec<_>>();
-    assert_eq!(evaluate_keys.len(), 2);
-    assert_eq!(begin_keys.len(), 2);
-    assert_ne!(evaluate_keys[0], evaluate_keys[1]);
-    assert_ne!(begin_keys[0], begin_keys[1]);
-    assert_eq!(
-        requests
-            .iter()
-            .filter(|request| request.request["operation"] == "turn_checkpoint")
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn admitted_channel_rejection_stays_interrupted_when_persistence_is_unavailable() {
-    let (mut state, session, receiver, _) = root_fixture([]);
-    let transport = StatefulEngramControlTransport::new();
-    state.install_control_test_transport(transport.clone());
-    let dispatch = root_dispatch(&state, &session, false);
-    let failed_generation = dispatch.engram_dispatch_generation().unwrap();
-    assert!(matches!(
-        state.prepare_engram_turn_delivery_off_lock(&session, failed_generation),
-        EngramTurnDeliveryPreparation::Ready
-    ));
-    drop(receiver);
-
-    let failing_persistence_path = state
-        .test_temp_root
-        .as_ref()
-        .unwrap()
-        .path()
-        .join("rejected-delivery-persistence-is-directory");
-    fs::create_dir_all(&failing_persistence_path)
-        .expect("a directory at the persistence path should force failure");
-    state.persistence_path = Arc::new(failing_persistence_path);
-
-    let error = handoff_prepared_turn_dispatch(&state, dispatch)
-        .expect_err("closed provider channel must reject the admitted turn");
-    assert!(error.message.contains("failed to queue prompt for Codex"));
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.session.status, SessionStatus::Error);
-        assert_eq!(record.engram.dispatch_generation, failed_generation);
-        assert!(record.engram.active_grant_id.is_some());
-        assert!(record.engram.pending_dispatch.is_none());
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert!(record.queued_prompts[0].engram_interrupted);
-        assert!(!record.queued_prompts[0].engram_waiting);
-        assert!(record.queued_prompts[0].has_engram_intent());
-    }
-
-    let requests = transport.requests();
-    assert_eq!(
-        requests
-            .iter()
-            .filter(|request| request.request["operation"] == "turn_checkpoint")
-            .count(),
-        0,
-        "a grant must not be checkpointed unless its interrupted owner was durable"
-    );
-}
-
-#[test]
-fn admitted_fast_discovery_failure_cannot_replay_checkpointed_authority() {
-    let (state, session, receiver, _) = root_fixture([]);
-    let transport = StatefulEngramControlTransport::new();
-    state.install_control_test_transport(transport.clone());
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = &mut inner.sessions[index];
-        record.session.model = "catalog-model".into();
-        record.session.codex_fast_mode = true;
-        record.session.model_options.clear();
-    }
-    let dispatch = root_dispatch(&state, &session, false);
-    let failed_generation = dispatch.engram_dispatch_generation().unwrap();
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "successor after Fast discovery failure",
-        QueuedPromptSource::User,
-        None,
-    );
-    let worker_state = state.clone();
-    let worker = std::thread::spawn(move || deliver_turn_dispatch_now(&worker_state, dispatch));
-    let CodexRuntimeCommand::RefreshModelList { response_tx } =
-        phase_sync::receive(&receiver, "admitted Fast discovery request")
-    else {
-        panic!("Fast discovery must precede provider delivery")
-    };
-    response_tx
-        .send(Err("forced catalog failure".to_owned()))
-        .unwrap();
-    let error = worker
-        .join()
-        .unwrap()
-        .expect_err("Fast discovery failure must reject the admitted turn");
-    assert!(error.message.contains("failed to resolve Codex Fast"));
-    assert!(receiver.try_recv().is_err());
-
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.session.status, SessionStatus::Error);
-        assert!(record.engram.active_grant_id.is_none());
-        assert!(record.engram.pending_dispatch.is_none());
-        assert!(record.engram.dispatch_generation > failed_generation);
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(
-            record.queued_prompts[0].pending_prompt.text,
-            "successor after Fast discovery failure"
-        );
-        assert!(!record.queued_prompts[0].has_engram_intent());
-        assert!(inner.delegations.is_empty());
-    }
-    let durable: PersistedSessionRecord =
-        serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
-    assert_eq!(durable.queued_prompts.len(), 1);
-    assert_eq!(
-        durable.queued_prompts[0].pending_prompt.text,
-        "successor after Fast discovery failure"
-    );
-    assert!(durable.queued_prompts[0].engram_evaluate.is_none());
-
-    let request = transport.requests().into_iter()
-        .find(|request| request.request["operation"] == "turn_checkpoint").unwrap().request;
-    let reloaded = load_rejected_checkpoint_retirement(&state, &session, failed_generation, &request);
-    let reloaded_record = &reloaded.sessions[reloaded.find_session_index(&session).unwrap()];
-    assert!(reloaded_record.engram.active_grant_id.is_none());
-    assert_eq!(reloaded_record.queued_prompts.len(), 1);
-    assert_eq!(
-        reloaded_record.queued_prompts[0].pending_prompt.text,
-        "successor after Fast discovery failure"
-    );
-    assert!(!reloaded_record.queued_prompts[0].has_engram_intent());
-
-    let (retry_runtime, retry_receiver) = test_codex_runtime_handle("fast-rejection-successor");
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = &mut inner.sessions[index];
-        record.runtime = SessionRuntime::Codex(retry_runtime);
-        record.session.status = SessionStatus::Idle;
-        record.session.codex_fast_mode = false;
-    }
-    state.resume_session_queue(&session).unwrap();
-    let CodexRuntimeCommand::Prompt { command, .. } = phase_sync::receive(
-        &retry_receiver,
-        "freshly authorized successor provider send",
-    ) else {
-        panic!("successor must reach the provider only after fresh authorization")
-    };
-    assert_eq!(command.prompt, "successor after Fast discovery failure");
-    assert!(retry_receiver.try_recv().is_err());
-
-    let requests = transport.requests();
-    let evaluate_keys = requests
-        .iter()
-        .filter(|request| request.request["operation"] == "turn_evaluate")
-        .map(|request| request.request["idempotency_key"].clone())
-        .collect::<Vec<_>>();
-    let begin_keys = requests
-        .iter()
-        .filter(|request| request.request["operation"] == "turn_begin")
-        .map(|request| request.request["idempotency_key"].clone())
-        .collect::<Vec<_>>();
-    assert_eq!(evaluate_keys.len(), 2);
-    assert_eq!(begin_keys.len(), 2);
-    assert_ne!(evaluate_keys[0], evaluate_keys[1]);
-    assert_ne!(begin_keys[0], begin_keys[1]);
-    assert_eq!(
-        requests
-            .iter()
-            .filter(|request| request.request["operation"] == "turn_checkpoint")
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
+fn ordinary_handoff_waits_for_real_stop_failure_or_success() {
     for failed_stop in [true, false] {
-        let (state, session, root_rx, _) = root_fixture([
-            bind_reply("token"),
-            grant_reply("grant"),
-            begin_reply("grant"),
-            checkpoint_reply("grant"),
-            grant_reply("successor"),
-            begin_reply("successor"),
-        ]);
-        let dispatch = root_dispatch(&state, &session, false);
-        let generation = dispatch.engram_dispatch_generation();
+        let turn = OrdinaryRoot::new("ordinary-stop-handoff");
+    let state = turn.state.clone();
+    let session = turn.session.clone();
+    let root_rx = &turn.receiver;
+        let dispatch = prepare_ordinary_owned_head(&turn);
         let active_turn_generation = dispatch.active_turn_generation();
-        assert!(matches!(
-            state.prepare_engram_turn_delivery_off_lock(&session, generation.unwrap()),
-            EngramTurnDeliveryPreparation::Ready
-        ));
-        // This is the deterministic boundary AFTER the actual durable receipt,
-        // not the older gated turn_begin window.
+        // The real ordinary promotion is complete; provider handoff has not run.
         let (runtime, receiver) = test_acp_runtime_handle(AcpAgent::OpenCode, "post-receipt-stop");
         let token = RuntimeToken::Acp(runtime.runtime_id.clone());
         let process = runtime.process.clone();
@@ -1096,27 +86,13 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
             let record = &mut inner.sessions[index];
-            assert!(record.engram.pending_dispatch.is_none());
-            assert!(
-                record.queued_prompts[0]
-                    .engram_evaluate
-                    .as_ref()
-                    .unwrap()
-                    .begun_grant_id
-                    .is_some()
-            );
+            assert!(record.queued_prompts[0].engram_ordinary_handoff);
             record.runtime = SessionRuntime::Acp(runtime);
         }
         let failure =
             failed_stop.then(|| force_test_kill_child_process_failure(&process, "OpenCode"));
         if !failed_stop {
-            queue_test_engram_prompt(
-                &state,
-                &session,
-                "successor prompt",
-                QueuedPromptSource::User,
-                None,
-            );
+            turn.enqueue("successor prompt", QueuedPromptSource::User);
         }
         let stop_gate = install_test_stop_fence_gate(&state, &session);
         std::thread::scope(|scope| {
@@ -1129,7 +105,6 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
                     federation_handoff: None,
                     opening_prompt: None,
                     active_turn_generation,
-                    engram_dispatch_generation: generation,
                     runtime_token: token.clone(),
                     session_id: session.clone(),
                     mailbox_notification: None,
@@ -1141,7 +116,7 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
                         model: String::new(),
                         opencode_effort: None,
                         opencode_mode: None,
-                        prompt: "exact admitted prompt".into(),
+                        prompt: "exact ordinary prompt".into(),
                         resume_session_id: None,
                     },
                 },
@@ -1159,7 +134,7 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
             };
             assert!(matches!(
                 callbacks.as_slice(),
-                [DeferredStopCallback::EngramHandoff { .. }]
+                [DeferredStopCallback::TurnHandoff { .. }]
             ));
             stop_gate.release();
             let result = stop.join().unwrap();
@@ -1186,7 +161,7 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
         assert_eq!(
             prompts,
             if failed_stop {
-                vec!["exact admitted prompt".to_owned()]
+                vec!["exact ordinary prompt".to_owned()]
             } else {
                 vec![]
             }
@@ -1201,7 +176,8 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
                     record.queued_prompts[0].pending_prompt.text,
                     "successor prompt"
                 );
-                assert!(!record.queued_prompts[0].has_engram_intent());
+                assert!(record.queued_prompts[0].engram_bind.is_none());
+                assert!(record.queued_prompts[0].engram_evaluate.is_none());
             }
             let durable: PersistedSessionRecord =
                 serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
@@ -1215,52 +191,35 @@ fn post_receipt_handoff_waits_for_real_stop_failure_or_success() {
                 panic!("successor should reach provider");
             };
             assert!(command.prompt.contains("successor prompt"));
-            assert!(!command.prompt.contains("Root controlled turn"));
+            assert!(!command.prompt.contains("Prepared ordinary input"));
             assert!(root_rx.try_recv().is_err());
         }
+        turn.assert_no_control();
     }
 }
 
+
 #[tokio::test]
-async fn unresolved_fast_post_receipt_handoff_obeys_public_stop_outcome() {
+async fn unresolved_fast_ordinary_handoff_obeys_public_stop_outcome() {
     for failed_stop in [true, false] {
-        let (state, session, _root_receiver, _) = root_fixture([
-            bind_reply("token"),
-            grant_reply("grant"),
-            begin_reply("grant"),
-            checkpoint_reply("grant"),
-        ]);
+        let mut turn = OrdinaryRoot::new("ordinary-stop-handoff");
         let (runtime, receiver) = test_codex_runtime_handle("fast-stop-runtime");
         let process = runtime.process.clone();
         let runtime_token = RuntimeToken::Codex(runtime.runtime_id.clone());
         {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
+            let mut inner = turn.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&turn.session).unwrap();
             let record = inner.session_mut_by_index(index).unwrap();
             record.session.model = "catalog-model".into();
             record.session.codex_fast_mode = true;
             record.session.model_options.clear();
             record.runtime = SessionRuntime::Codex(runtime);
         }
-        let dispatch = root_dispatch(&state, &session, false);
-        let generation = dispatch.engram_dispatch_generation().unwrap();
-        assert!(matches!(
-            state.prepare_engram_turn_delivery_off_lock(&session, generation),
-            EngramTurnDeliveryPreparation::Ready
-        ));
-        {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].queued_prompts[0].source = QueuedPromptSource::Orchestrator;
-            sync_pending_prompts(&mut inner.sessions[index]);
-        }
-        queue_test_engram_prompt(
-            &state,
-            &session,
-            "ordinary orchestrator successor",
-            QueuedPromptSource::Orchestrator,
-            None,
-        );
+        let (dispatch, prompt_id, _writer, _write_ahead) =
+            prepare_receipted_ordinary_promotion(&mut turn, QueuedPromptSource::Orchestrator);
+        let state = turn.state.clone();
+        let session = turn.session.clone();
+        turn.enqueue("ordinary orchestrator successor", QueuedPromptSource::Orchestrator);
         let failure = failed_stop.then(|| force_test_kill_child_process_failure(&process, "Codex"));
         let stop_gate = install_test_stop_fence_gate(&state, &session);
         let mut events = state.subscribe_events();
@@ -1280,22 +239,19 @@ async fn unresolved_fast_post_receipt_handoff_obeys_public_stop_outcome() {
         let callbacks = {
             let inner = state.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert_eq!(
-                record.queued_prompts.len(),
-                1,
-                "preliminary Stop cleanup keeps only its admitted Orchestrator owner"
-            );
-            assert_eq!(
-                record.queued_prompts[0].pending_prompt.text,
-                "Root controlled turn"
-            );
+            assert!(record.queued_prompts.is_empty(), "Stop drops the Orchestrator successor");
+            let receipt = &record.prompt_deliveries[&prompt_id];
+            assert_eq!(receipt.disposition, PromptDeliveryDisposition::HandingOff);
+            assert_eq!(receipt.turn_generation, Some(record.active_turn_generation));
+            assert_eq!(receipt.entry.as_ref().unwrap().pending_prompt.text, "Prepared ordinary input");
+            assert_eq!(receipt.entry.as_ref().unwrap().source, QueuedPromptSource::Orchestrator);
             assert!(matches!(
                 receiver.try_recv(),
                 Err(mpsc::TryRecvError::Empty)
             ));
             assert!(matches!(
                 record.deferred_stop_callbacks.as_slice(),
-                [DeferredStopCallback::EngramHandoff { .. }]
+                [DeferredStopCallback::TurnHandoff { .. }]
             ));
             record.deferred_stop_callbacks.clone()
         };
@@ -1318,7 +274,7 @@ async fn unresolved_fast_post_receipt_handoff_obeys_public_stop_outcome() {
             else {
                 panic!("resolved Fast dispatch should reach the provider");
             };
-            assert_eq!(command.prompt, "Root controlled turn");
+            assert_eq!(command.prompt, "Prepared ordinary input");
             assert_eq!(command.model, "catalog-model");
             assert_eq!(command.service_tier.as_deref(), Some("Turbo-EXACT"));
             state.replay_deferred_runtime_stop_callbacks(&session, &runtime_token, callbacks);
@@ -1330,6 +286,8 @@ async fn unresolved_fast_post_receipt_handoff_obeys_public_stop_outcome() {
             let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
             assert_eq!(record.session.status, SessionStatus::Active);
             assert!(record.queued_prompts.is_empty());
+            assert_eq!(record.prompt_deliveries[&prompt_id].entry.as_ref().unwrap().pending_prompt.id, prompt_id);
+            assert!(ordinary_queue_position(record).is_none());
         } else {
             tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
                 loop {
@@ -1351,45 +309,37 @@ async fn unresolved_fast_post_receipt_handoff_obeys_public_stop_outcome() {
             assert!(receiver.try_recv().is_err());
         }
         drop(failure);
+        turn.assert_no_control();
+    }
+}
+
+
+#[tokio::test]
+async fn public_failed_stop_restores_ordinary_handoff_before_replay() {
+    for orchestrator_source in [false, true] {
+        assert_public_failed_stop_restores_ordinary_handoff(true, orchestrator_source).await;
     }
 }
 
 #[tokio::test]
-async fn public_failed_stop_restores_admitted_handoff_before_replay() {
+async fn public_failed_stop_restores_ordinary_owner_before_handoff_arrives() {
     for orchestrator_source in [false, true] {
-        assert_public_failed_stop_restores_admitted_handoff(true, orchestrator_source).await;
+        assert_public_failed_stop_restores_ordinary_handoff(false, orchestrator_source).await;
     }
 }
 
-#[tokio::test]
-async fn public_failed_stop_restores_admitted_owner_before_handoff_arrives() {
-    for orchestrator_source in [false, true] {
-        assert_public_failed_stop_restores_admitted_handoff(false, orchestrator_source).await;
-    }
-}
-
-async fn assert_public_failed_stop_restores_admitted_handoff(
+async fn assert_public_failed_stop_restores_ordinary_handoff(
     callback_first: bool,
     orchestrator_source: bool,
 ) {
-    let (state, session, root_rx, _) = root_fixture([
-        bind_reply("token"),
-        grant_reply("grant"),
-        begin_reply("grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    let generation = dispatch.engram_dispatch_generation();
+    let mut turn = OrdinaryRoot::new("ordinary-stop-handoff");
+    let source = if orchestrator_source { QueuedPromptSource::Orchestrator } else { QueuedPromptSource::User };
+    let (dispatch, prompt_id, _writer, _write_ahead) = prepare_receipted_ordinary_promotion(&mut turn, source);
+    let state = turn.state.clone();
+    let session = turn.session.clone();
+    let root_rx = &turn.receiver;
     let active_turn_generation = dispatch.active_turn_generation();
-    assert!(matches!(
-        state.prepare_engram_turn_delivery_off_lock(&session, generation.unwrap()),
-        EngramTurnDeliveryPreparation::Ready
-    ));
-    if orchestrator_source {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].queued_prompts[0].source = QueuedPromptSource::Orchestrator;
-        sync_pending_prompts(&mut inner.sessions[index]);
-    }
+    let receipt_before_stop = turn.record(|record| serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap());
     let (runtime, receiver) =
         test_acp_runtime_handle(AcpAgent::OpenCode, "public-post-receipt-stop");
     let token = RuntimeToken::Acp(runtime.runtime_id.clone());
@@ -1424,7 +374,8 @@ async fn assert_public_failed_stop_restores_admitted_handoff(
                     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
                     if !record.runtime_stop_in_progress {
                         assert_eq!(record.session.status, SessionStatus::Active);
-                        assert_eq!(record.queued_prompts.len(), 1);
+                        assert!(record.queued_prompts.is_empty());
+                        assert_eq!(serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap(), receipt_before_stop);
                         assert!(record.deferred_stop_callbacks.is_empty());
                         break;
                     }
@@ -1442,7 +393,6 @@ async fn assert_public_failed_stop_restores_admitted_handoff(
             federation_handoff: None,
             opening_prompt: None,
             active_turn_generation,
-            engram_dispatch_generation: generation,
             runtime_token: token.clone(),
             session_id: session.clone(),
             mailbox_notification: None,
@@ -1454,7 +404,7 @@ async fn assert_public_failed_stop_restores_admitted_handoff(
                 model: String::new(),
                 opencode_effort: None,
                 opencode_mode: None,
-                prompt: "public admitted prompt".into(),
+                prompt: "public ordinary prompt".into(),
                 resume_session_id: None,
             },
         },
@@ -1475,57 +425,51 @@ async fn assert_public_failed_stop_restores_admitted_handoff(
             {
                 let inner = state.inner.lock().unwrap();
                 let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-                if !record.runtime_stop_in_progress && record.queued_prompts.is_empty() {
+                if !record.runtime_stop_in_progress {
                     assert_eq!(record.session.status, SessionStatus::Active);
                     assert!(record.runtime.matches_runtime_token(&token));
                     assert!(record.session.messages.iter().any(|message| matches!(message,
                         Message::Text { text, .. } if text.contains("Stop failed in the background"))));
                     break;
                 }
-                assert_ne!(record.session.status, SessionStatus::Error, "public Stop must not discard admitted handoff");
+                assert_ne!(record.session.status, SessionStatus::Error, "public Stop must not discard its ordinary handoff");
             }
             events.recv().await.unwrap();
         }
     }).await.expect("public Stop rollback did not release handoff");
+    let prompt = loop {
+        if let AcpRuntimeCommand::Prompt(command) = phase_sync::receive(&receiver, "failed Stop releases the original ordinary handoff") {
+            break command.prompt;
+        }
+    };
+    assert_eq!(prompt, "public ordinary prompt");
     state.replay_deferred_runtime_stop_callbacks(&session, &token, callbacks);
-    let prompts = receiver
-        .try_iter()
-        .filter_map(|command| match command {
-            AcpRuntimeCommand::Prompt(command) => Some(command.prompt),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(prompts, ["public admitted prompt"]);
+    assert!(!receiver.try_iter().any(|command| matches!(command, AcpRuntimeCommand::Prompt(_))), "cloned callbacks cannot repeat the handoff");
+    turn.record(|record| {
+        assert!(record.queued_prompts.is_empty());
+        assert_eq!(serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap(), receipt_before_stop);
+        assert_eq!(record.prompt_deliveries[&prompt_id].entry.as_ref().unwrap().source, source);
+        assert!(ordinary_queue_position(record).is_none());
+    });
     assert!(root_rx.try_recv().is_err());
+    turn.assert_no_control();
 }
+
 
 #[tokio::test]
 async fn successful_public_stop_never_retires_a_replacement_for_its_orchestrator_owner() {
-    let (state, session, root_rx, _) = root_fixture([
-        bind_reply("token"),
-        grant_reply("grant"),
-        begin_reply("grant"),
-        checkpoint_reply("grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    let generation = dispatch.engram_dispatch_generation().unwrap();
-    assert!(matches!(
-        state.prepare_engram_turn_delivery_off_lock(&session, generation),
-        EngramTurnDeliveryPreparation::Ready
-    ));
+    let turn = OrdinaryRoot::new("ordinary-stop-handoff");
+    let state = turn.state.clone();
+    let session = turn.session.clone();
+    let root_rx = &turn.receiver;
+    let dispatch = prepare_ordinary_owned_head(&turn);
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
         inner.sessions[index].queued_prompts[0].source = QueuedPromptSource::Orchestrator;
         sync_pending_prompts(&mut inner.sessions[index]);
     }
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "replacement user successor",
-        QueuedPromptSource::User,
-        None,
-    );
+    turn.enqueue("replacement user successor", QueuedPromptSource::User);
     let (runtime, _receiver) =
         test_acp_runtime_handle(AcpAgent::OpenCode, "public-stop-owner-fence");
     {
@@ -1572,24 +516,23 @@ async fn successful_public_stop_never_retires_a_replacement_for_its_orchestrator
     .await
     .expect("successful Stop should settle without consuming a replacement owner");
     assert!(root_rx.try_recv().is_err());
+    turn.assert_no_control();
 }
 
-/// Engram on: a successful Stop whose drain meets a pending receipted
+/// A successful ordinary Stop whose drain meets a pending receipted
 /// successor does not begin its write-ahead inside the Stop's transaction;
 /// the Stop publishes its own message once, and the drain it wakes after its
-/// commit begins the write-ahead, whose acknowledgement admits and hands the
+/// commit begins the write-ahead, whose acknowledgement hands the
 /// successor off exactly once, with no further input.
+
 #[test]
-fn an_engram_stop_wakes_its_receipted_successor_after_its_own_commit() {
+fn an_ordinary_stop_wakes_its_receipted_successor_after_its_own_commit() {
     use crate::tests::prompt_delivery::{DeliveryWriter, HeldFence};
-    // The Stop evaluates its successor once; the woken drain evaluates the
-    // same intent again under the same idempotency key, then begins it.
-    let (mut state, session, receiver, transport) = root_fixture([
-        grant_reply("successor-grant"),
-        grant_reply("successor-grant"),
-        begin_reply("successor-grant"),
-        checkpoint_reply("successor-grant"),
-    ]);
+    // The ordinary Stop must commit before its separately woken drain starts WAL.
+    let turn = OrdinaryRoot::new("ordinary-stop-handoff");
+    let mut state = turn.state.clone();
+    let session = turn.session.clone();
+    let receiver = &turn.receiver;
     // Hands the test the receipt's durability and write-ahead fences.
     let writer = DeliveryWriter::attach(&mut state);
     let prompt_id = {
@@ -1601,13 +544,13 @@ fn an_engram_stop_wakes_its_receipted_successor_after_its_own_commit() {
             attachments: Vec::new(),
             id: inner.next_message_id(),
             timestamp: stamp_now(),
-            text: "the receipted Engram successor".to_owned(),
+            text: "the receipted ordinary successor".to_owned(),
             expanded_text: None,
             source: None,
         };
         let id = prompt.id.clone();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.engram.routing_token = Some("old-token".into());
+        record.engram.historical_control.insert("engramRoutingToken".into(), json!("old-token"));
         // Exercise Stop's missing-runtime recovery of a running session; a
         // busy session's durability acknowledgement dispatches nothing.
         record.session.status = SessionStatus::Active;
@@ -1672,7 +615,7 @@ fn an_engram_stop_wakes_its_receipted_successor_after_its_own_commit() {
         Ok(_) => panic!("the runtime got another command first"),
         Err(error) => panic!(
             "the successor was not handed off: {error:?}; Engram saw {:?}",
-            operations(&transport)
+            turn.transport.requests()
         ),
     }
     let promoted = phase_sync::PollGuard::new();
@@ -1691,35 +634,24 @@ fn an_engram_stop_wakes_its_receipted_successor_after_its_own_commit() {
         !receiver.try_iter().any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. })),
         "handed off once"
     );
-    assert_eq!(
-        operations(&transport).iter().filter(|op| *op == "turn_begin").count(),
-        1,
-        "one admission begins: {:?}",
-        operations(&transport)
-    );
+    turn.assert_no_control();
 }
 
-/// A Stop of a session whose receipted head was promoted for its admission and
+/// A Stop of a session whose receipted head was promoted for ordinary dispatch and
 /// never handed off retires that head with its receipt rejected, in the
 /// Stop's own retirement write (prompt_delivery.rs), and a restart reads that
 /// terminal receipt back: none is left handing off for a prompt that provably
 /// never reached the runtime.
+
 #[tokio::test]
 async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably() {
-    let (state, session, root_rx, _) = root_fixture([
-        bind_reply("token"),
-        grant_reply("grant"),
-        begin_reply("grant"),
-        checkpoint_reply("grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    let generation = dispatch.engram_dispatch_generation().unwrap();
+    let turn = OrdinaryRoot::new("ordinary-stop-handoff");
+    let state = turn.state.clone();
+    let session = turn.session.clone();
+    let root_rx = &turn.receiver;
+    let dispatch = prepare_ordinary_owned_head(&turn);
     let turn_generation = dispatch.active_turn_generation();
-    assert!(matches!(
-        state.prepare_engram_turn_delivery_off_lock(&session, generation),
-        EngramTurnDeliveryPreparation::Ready
-    ));
-    // The admitted head as a receipted one: handing off under this turn, its
+    // The ordinary head as a receipted one: handing off under this turn, its
     // write-ahead acknowledged, the prompt not yet sent.
     let prompt_id = {
         let mut inner = state.inner.lock().unwrap();
@@ -1733,7 +665,7 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
                 federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::HandingOff,
                 attempt: 1,
-                write_ahead: "admitted-write-ahead".to_owned(),
+                write_ahead: "ordinary-write-ahead".to_owned(),
                 sequence: 1,
                 message_id: None,
                 turn_generation: Some(turn_generation),
@@ -1775,7 +707,7 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
     {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.queued_prompts.is_empty(), "the Stop retired the admitted head");
+        assert!(record.queued_prompts.is_empty(), "the Stop retired its promoted head");
         let delivery = &record.prompt_deliveries[&prompt_id];
         assert_eq!(delivery.disposition, PromptDeliveryDisposition::Rejected);
         assert_eq!(delivery.turn_generation, Some(turn_generation));
@@ -1790,681 +722,423 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
     }
     drop(dispatch);
     assert!(root_rx.try_recv().is_err(), "never handed off");
+    let durable: PersistedSessionRecord = serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
+    assert!(!durable.queued_prompts.iter().any(|row| row.pending_prompt.id == prompt_id));
+    assert_eq!(durable.prompt_deliveries[&prompt_id].disposition, PromptDeliveryDisposition::Rejected);
+    turn.assert_no_control();
+
 }
 
-// Reading-backed coverage: checkpoint preparation also stamps the session.
-// This checks the retirement image at that boundary, not whether the earlier
-// retirement stamp alone is necessary or whether an async wake is a disk fence.
+#[test]
+fn ordinary_send_commit_failure_never_reaches_the_provider() {
+    let mut turn = OrdinaryRoot::new("ordinary-send-commit-refusal");
+    turn.state.shutdown_persist_blocking();
+    let failing = turn.root.join("persistence-is-directory");
+    fs::create_dir_all(&failing).unwrap();
+    turn.state.persistence_path = Arc::new(failing);
+    let error = dispatch_turn_and_snapshot(&turn.state, &turn.session, SendMessageRequest {
+        text: "Uncommitted ordinary input.".into(), expanded_text: None,
+        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
+    }).err().expect("the real dispatch commit must refuse the unusable store");
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn ordinary_orphan_recovery_keeps_original_ids_and_source_order_on_commit_failure() {
+    for mailbox_first in [false, true] {
+        let mut turn = OrdinaryRoot::new("ordinary-orphan-commit-refusal");
+        if mailbox_first { turn.enqueue("Mailbox before workflow.", QueuedPromptSource::Mailbox); }
+        turn.enqueue("Original workflow.", QueuedPromptSource::Orchestrator);
+        let before = turn.record(|record| record.queued_prompts.iter()
+            .map(|row| (row.pending_prompt.id.clone(), row.pending_prompt.text.clone(), row.source))
+            .collect::<Vec<_>>());
+        turn.state.shutdown_persist_blocking();
+        let failing = turn.root.join("orphan-store-is-directory");
+        fs::create_dir_all(&failing).unwrap();
+        turn.state.persistence_path = Arc::new(failing);
+        turn.state.dispatch_orphaned_workflow_prompts();
+        turn.record(|record| assert_eq!(record.queued_prompts.iter()
+            .map(|row| (row.pending_prompt.id.clone(), row.pending_prompt.text.clone(), row.source))
+            .collect::<Vec<_>>(), before));
+        turn.assert_no_prompt();
+        turn.assert_no_control();
+    }
+}
+
+#[test]
+fn stale_ordinary_rejection_cannot_terminalize_a_replacement_runtime_turn_or_stop_owner() {
+    for change in ["runtime", "turn", "stop"] {
+        let turn = OrdinaryRoot::new("ordinary-rejected-owner-drift");
+        let dispatch = prepare_ordinary_owned_head(&turn);
+        let token = dispatch.runtime_token().clone();
+        let generation = dispatch.active_turn_generation();
+        let (runtime, replacement_rx) = test_codex_runtime_handle("ordinary-rejection-replacement");
+        turn.edit(|record| match change {
+            "runtime" => record.runtime = SessionRuntime::Codex(runtime),
+            "turn" => record.active_turn_generation += 1,
+            _ => { record.claim_runtime_stop(RuntimeStopOwnerKind::LostRuntimeTerminalization, token.clone()); },
+        });
+        let before = turn.saved();
+        assert!(!record_rejected_turn_dispatch(&turn.state, &turn.session,
+            "stale provider channel rejection", None, &token, generation));
+        assert_eq!(turn.saved(), before, "{change}: the newer owner stays untouched");
+        drop(dispatch);
+        turn.assert_no_prompt();
+        assert!(replacement_rx.try_recv().is_err());
+        turn.assert_no_control();
+    }
+}
+
+#[test]
+fn ordinary_channel_rejection_preserves_history_and_only_the_fresh_successor_can_run() {
+    let turn = OrdinaryRoot::new("ordinary-closed-provider-channel");
+    let (runtime, closed) = test_codex_runtime_handle("ordinary-channel-rejection");
+    turn.edit(|record| record.runtime = SessionRuntime::Codex(runtime));
+    let dispatch = prepare_ordinary_owned_head(&turn);
+    let next = turn.enqueue("Successor after channel rejection.", QueuedPromptSource::User);
+    drop(closed);
+    let error = deliver_turn_dispatch_now(&turn.state, dispatch).expect_err("the actual provider channel is closed");
+    assert!(error.message.contains("failed to queue prompt for Codex"), "{}", error.message);
+    turn.record(|record| {
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert!(matches!(record.runtime, SessionRuntime::None));
+        assert!(record.queued_prompts.iter().any(|row| row.pending_prompt.id == next && row.pending_prompt.text == "Successor after channel rejection."));
+        let old = record.queued_prompts.iter().find(|row| row.pending_prompt.text == "Prepared ordinary input").unwrap();
+        assert!(old.engram_ordinary_handoff, "the saved original is not a runnable successor");
+    });
+    let durable: PersistedSessionRecord = serde_json::from_str(&persisted_session_json(&turn.state, &turn.session)).unwrap();
+    assert!(durable.queued_prompts.iter().any(|row| row.pending_prompt.id == next));
+    let (runtime, receiver) = test_codex_runtime_handle("ordinary-channel-successor");
+    turn.edit(|record| {
+        record.runtime = SessionRuntime::Codex(runtime);
+        record.session.status = SessionStatus::Idle;
+    });
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    let CodexRuntimeCommand::Prompt { command, .. } = phase_sync::receive(&receiver, "the ordinary successor") else {
+        panic!("only the successor may reach the replacement runtime");
+    };
+    assert_eq!(command.prompt, "Successor after channel rejection.");
+    assert!(!receiver.try_iter().any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. })));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn ordinary_channel_rejection_keeps_the_terminal_owner_visible_when_its_commit_fails() {
+    let mut turn = OrdinaryRoot::new("ordinary-rejection-failed-commit");
+    let (runtime, closed) = test_codex_runtime_handle("ordinary-rejection-failed-store");
+    turn.edit(|record| record.runtime = SessionRuntime::Codex(runtime));
+    let dispatch = prepare_ordinary_owned_head(&turn);
+    let next = turn.enqueue("Original successor id.", QueuedPromptSource::User);
+    drop(closed);
+    turn.state.shutdown_persist_blocking();
+    let failing = turn.root.join("rejected-owner-store-is-directory");
+    fs::create_dir_all(&failing).unwrap();
+    turn.state.persistence_path = Arc::new(failing);
+    let error = handoff_prepared_turn_dispatch(&turn.state, dispatch).unwrap_err();
+    assert!(error.message.contains("failed to queue prompt for Codex"));
+    turn.record(|record| {
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert!(matches!(record.runtime, SessionRuntime::None), "a dead runtime cannot be restored after a failed commit");
+        assert!(record.queued_prompts.iter().any(|row| row.pending_prompt.id == next));
+    });
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn ordinary_fast_discovery_failure_keeps_the_successor_and_cannot_replay_the_failed_turn() {
+    let turn = OrdinaryRoot::new("ordinary-fast-discovery-rejection");
+    turn.edit(|record| {
+        record.session.model = "catalog-model".into();
+        record.session.codex_fast_mode = true;
+        record.session.model_options.clear();
+    });
+    let dispatch = prepare_ordinary_owned_head(&turn);
+    let next = turn.enqueue("Successor after discovery failure.", QueuedPromptSource::User);
+    let state = turn.state.clone();
+    let worker = std::thread::spawn(move || deliver_turn_dispatch_now(&state, dispatch));
+    let CodexRuntimeCommand::RefreshModelList { response_tx } = phase_sync::receive(&turn.receiver, "actual Fast discovery") else {
+        panic!("discovery precedes the provider prompt");
+    };
+    response_tx.send(Err("forced catalog failure".into())).unwrap();
+    let error = worker.join().unwrap().expect_err("discovery failure must surface");
+    assert!(error.message.contains("failed to resolve Codex Fast"));
+    turn.record(|record| {
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert!(record.queued_prompts.iter().any(|row| row.pending_prompt.id == next));
+        assert!(record.queued_prompts[0].engram_ordinary_handoff);
+    });
+    let durable: PersistedSessionRecord = serde_json::from_str(&persisted_session_json(&turn.state, &turn.session)).unwrap();
+    assert!(durable.queued_prompts.iter().any(|row| row.pending_prompt.id == next));
+    turn.edit(|record| {
+        record.session.codex_fast_mode = false;
+        record.session.status = SessionStatus::Idle;
+    });
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    assert_eq!(turn.prompt().prompt, "Successor after discovery failure.");
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn ordinary_child_initial_and_followup_turns_survive_polling_without_control_authorization() {
+    let turn = OrdinaryRoot::new("ordinary-child-initial-followup");
+    let response = turn.state.create_read_only_delegation(&turn.session, CreateDelegationRequest {
+        prompt: "Initial child input.".into(), title: None, cwd: None, agent: Some(Agent::Codex),
+        model: None, mode: Some(DelegationMode::Explorer), write_policy: Some(DelegationWritePolicy::ReadOnly),
+    }).unwrap();
+    let child = response.delegation.child_session_id;
+    let delegation = response.delegation.id;
+    let CodexRuntimeCommand::Prompt { session_id, command } = phase_sync::receive(&turn.receiver, "initial ordinary child handoff") else { panic!("child prompt"); };
+    assert_eq!(session_id, child);
+    assert!(command.prompt.contains("Initial child input."));
+    let token = {
+        let inner = turn.state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&child).unwrap()].runtime.runtime_token().unwrap()
+    };
+    finish_delegation_child_with_assistant_text(&turn.state, &child, "Initial result.");
+    {
+        let mut inner = turn.state.inner.lock().unwrap();
+        inner.session_mut(&child).unwrap().session.status = SessionStatus::Active;
+    }
+    turn.state.finish_turn_ok_if_runtime_matches(&child, &token).unwrap();
+    turn.state.refresh_delegation_for_child_session(&child).unwrap();
+    turn.state.followup_delegation(&turn.session, &delegation, "Follow-up child input.".into()).unwrap();
+    for _ in 0..3 { turn.state.refresh_delegation_for_child_session(&child).unwrap(); }
+    let CodexRuntimeCommand::Prompt { session_id, command } = phase_sync::receive(&turn.receiver, "ordinary child followup") else { panic!("child followup"); };
+    assert_eq!(session_id, child);
+    assert!(command.prompt.contains("Follow-up child input."));
+    turn.assert_no_prompt();
+    let inner = turn.state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert!(record.queued_prompts.is_empty());
+    assert_eq!(record.session.messages.iter().filter(|message| matches!(message,
+        Message::Text { text, .. } if text == "Follow-up child input.")).count(), 1);
+    drop(inner);
+    turn.assert_no_control();
+}
+
+#[test]
+fn passive_unknown_authorization_keeps_exact_root_and_child_bytes_cancelable_without_replay() {
+    for child in [false, true] {
+        let turn = OrdinaryRoot::new("ordinary-passive-authority-cancel");
+        let session = if child {
+            let response = turn.state.create_read_only_delegation(&turn.session, CreateDelegationRequest {
+                prompt: "Ordinary child setup.".into(), title: None, cwd: None, agent: Some(Agent::Codex),
+                model: None, mode: Some(DelegationMode::Explorer), write_policy: Some(DelegationWritePolicy::ReadOnly),
+            }).unwrap();
+            let child = response.delegation.child_session_id;
+            let CodexRuntimeCommand::Prompt { session_id, .. } = phase_sync::receive(&turn.receiver, "ordinary child setup") else { panic!("child prompt"); };
+            assert_eq!(session_id, child);
+            let token = {
+                let inner = turn.state.inner.lock().unwrap();
+                inner.sessions[inner.find_session_index(&child).unwrap()].runtime.runtime_token().unwrap()
+            };
+            turn.state.finish_turn_ok_if_runtime_matches(&child, &token).unwrap();
+            child
+        } else { turn.session.clone() };
+        let (id, expected) = {
+            let mut inner = turn.state.inner.lock().unwrap();
+            let id = inner.next_message_id();
+            let record = inner.session_mut(&session).unwrap();
+            record.set_auto_dispatch_blocked(true);
+            queue_prompt_on_record_with_source(record, PendingPrompt {
+                engram_interrupted: false, is_engram_retained: false, attachments: Vec::new(),
+                id: id.clone(), timestamp: stamp_now(), text: "Original unknown provider attempt.".into(),
+                expanded_text: None, source: None,
+            }, Vec::new(), QueuedPromptSource::User);
+            let row = record.queued_prompts.back_mut().unwrap();
+            row.engram_bind = Some(json!({"request":{"idempotency_key":"old-key"},"connection":{"session":"original"}}));
+            row.engram_ordinary_handoff = true;
+            row.promotion_disposition_known = false;
+            let expected = serde_json::to_value(&*row).unwrap();
+            turn.state.commit_locked(&mut inner).unwrap();
+            (id, expected)
+        };
+        {
+            let mut inner = turn.state.inner.lock().unwrap();
+            inner.projects.iter_mut().find(|project| project.id == turn.project).unwrap()
+                .engram.as_mut().unwrap().binary_path = Some("changed-work-service".into());
+            turn.state.commit_locked(&mut inner).unwrap();
+        }
+        if child { turn.state.refresh_delegation_for_child_session(&session).unwrap(); }
+        turn.state.resume_session_queue(&session).unwrap();
+        let inner = turn.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), expected);
+        assert!(ordinary_queue_position(record).is_none(), "no old grant may become an executor");
+        drop(inner);
+        turn.assert_no_prompt();
+        turn.assert_no_control();
+        turn.state.cancel_queued_prompt(&session, &id).unwrap();
+        let inner = turn.state.inner.lock().unwrap();
+        assert!(!inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts.iter().any(|row| row.pending_prompt.id == id));
+    }
+}
+
+#[test]
+fn prepared_mailbox_history_deduplicates_equal_boundary_and_keeps_a_newer_wake_separate() {
+    for newer in [false, true] {
+        let mut turn = OrdinaryRoot::new("ordinary-mailbox-retained-boundary");
+        let coordination = resolve_coordination_persistence_path(turn.state.persistence_path.as_ref());
+        turn.state.mailbox_store = Arc::new(MailboxStore::open(&coordination).unwrap());
+        let sender = test_session_id(&turn.state, Agent::Claude);
+        turn.edit(|record| record.session.status = SessionStatus::Active);
+        let send = |key: &str| turn.state.append_mailbox_message_and_notify(&sender, SendMailboxMessageRequest {
+            target_session_id: turn.session.clone(), message: key.into(), idempotency_key: key.into(),
+            topic: None, state_stamp: None, class: Some("routine".into()),
+        }).unwrap();
+        send("ordinary-retained-one");
+        turn.edit(|record| {
+            record.session.status = SessionStatus::Idle;
+            record.queued_prompts[0].engram_evaluate = Some(json!({"historical":"original-mailbox-boundary"}));
+        });
+        let dispatch = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap().dispatch;
+        let notification = dispatch.mailbox_notification().unwrap().clone();
+        let before = turn.record(|record| serde_json::to_value(&record.queued_prompts[0]).unwrap());
+        for _ in 0..2 {
+            turn.state.requeue_rejected_mailbox_notification(&notification).unwrap();
+            turn.record(|record| {
+                assert_eq!(record.queued_prompts.len(), 1);
+                assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before);
+            });
+        }
+        if newer {
+            send("ordinary-retained-two");
+            turn.record(|record| {
+                assert_eq!(record.queued_prompts.len(), 2);
+                assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before);
+                assert!(record.queued_prompts[1].pending_prompt.source.as_ref().unwrap().mailbox.as_ref().unwrap().sequence > notification.through_sequence);
+            });
+        }
+        // Sending the original dispatch completes its original boundary only.
+        deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+        turn.prompt();
+        turn.assert_no_prompt();
+        turn.record(|record| {
+            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before);
+            assert_eq!(record.queued_prompts.len(), 1 + usize::from(newer));
+        });
+        let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        if newer {
+            let command = turn.prompt();
+            assert!(command.prompt.contains(&notification.mailbox_id));
+            turn.record(|record| {
+                assert_eq!(record.queued_prompts.len(), 1, "only the passive original row remains");
+                assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before);
+                assert!(record.session.messages.iter().any(|message| matches!(message,
+                    Message::Text { source: Some(source), .. }
+                        if source.mailbox.as_ref().is_some_and(|mailbox|
+                            mailbox.mailbox_id == notification.mailbox_id && mailbox.sequence > notification.through_sequence))));
+            });
+        }
+        turn.assert_no_prompt();
+        turn.assert_no_control();
+    }
+}
+
+#[test]
+fn fresh_ordinary_prompt_preserves_existing_message_index_allocation() {
+    let turn = OrdinaryRoot::new("ordinary-fresh-message-index");
+    let capacity = turn.edit(|record| {
+        record.message_positions.reserve(4096);
+        assert!(cached_message_index_on_record(record, "fresh-missing-id").is_none());
+        record.message_positions.capacity()
+    });
+    turn.record(|record| {
+        assert!(cached_message_index_on_record(record, "another-fresh-id").is_none());
+        assert_eq!(record.message_positions.capacity(), capacity);
+    });
+    let _dispatch = turn.prepare("New ordinary prompt.");
+    turn.record(|record| {
+        for (id, index) in &record.message_positions {
+            assert_eq!(record.session.messages[*index].id(), id);
+        }
+    });
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+// Reading-backed port of the upstream Stop-retirement delta witness. The
+// checkpoint callback no longer exists. This inspects the ordinary Stop's
+// post-shutdown delta; a later Stop commit also stamps, so it does not isolate
+// the retirement stamp or prove physical SQLite fencing.
 #[tokio::test]
-async fn a_stop_retirement_is_in_the_checkpoint_preparation_delta() {
-    let (mut state, session, root_rx, _) = root_fixture([
-        bind_reply("token"),
-        grant_reply("grant"),
-        begin_reply("grant"),
-        checkpoint_reply("grant"),
-    ]);
-    // A live writer keeps commits on the production path, which only wakes
-    // the delta worker; tests otherwise fall back to a full synchronous save.
-    // It acknowledges each fence as a worker would: this test inspects which
-    // sessions the delta persist selects, not physical SQLite durability.
+async fn a_stop_retirement_is_in_the_ordinary_post_shutdown_delta() {
+    let mut turn = OrdinaryRoot::new("ordinary-stop-retirement-delta");
+    let session = turn.session.clone();
     let (tx, persist_rx) = mpsc::channel();
-    state.persist_tx = tx.clone();
+    turn.state.persist_tx = tx.clone();
+    let state = turn.state.clone();
     let writer = std::thread::spawn(move || {
         while let Ok(request) = persist_rx.recv() {
             match request {
                 PersistRequest::Fence(fence) => fence.finish(Ok(())),
                 PersistRequest::Shutdown => break,
-                _ => {}
+                _ => {},
             }
         }
     });
-    let dispatch = root_dispatch(&state, &session, false);
-    let generation = dispatch.engram_dispatch_generation().unwrap();
+    let dispatch = prepare_ordinary_owned_head(&turn);
     let turn_generation = dispatch.active_turn_generation();
-    assert!(matches!(
-        state.prepare_engram_turn_delivery_off_lock(&session, generation),
-        EngramTurnDeliveryPreparation::Ready
-    ));
     let prompt_id = {
         let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let record = inner.session_mut_by_index(index).unwrap();
-        let head = record.queued_prompts[0].pending_prompt.id.clone();
-        record.prompt_deliveries.insert(
-            head.clone(),
-            PromptDelivery {
-                federation_operation: None,
-                federation_handoff_started: false,
-                disposition: PromptDeliveryDisposition::HandingOff,
-                attempt: 1,
-                write_ahead: "admitted-write-ahead".to_owned(),
-                sequence: 1,
-                message_id: None,
-                turn_generation: Some(turn_generation),
-                attempt_key: None,
-                reason: None,
-                entry: None,
-                write_ahead_acknowledged: true,
-                resume: None,
-                runtime_write: PromptRuntimeWrite::Untracked,
-            },
-        );
-        head
+        let record = inner.session_mut(&session).unwrap();
+        let id = record.queued_prompts[0].pending_prompt.id.clone();
+        record.prompt_deliveries.insert(id.clone(), PromptDelivery {
+            federation_operation: None, federation_handoff_started: false,
+            disposition: PromptDeliveryDisposition::HandingOff, attempt: 1,
+            write_ahead: "ordinary-write-ahead".into(), sequence: 1, message_id: None,
+            turn_generation: Some(turn_generation), attempt_key: None, reason: None,
+            entry: None, write_ahead_acknowledged: true, resume: None,
+            runtime_write: PromptRuntimeWrite::Untracked,
+        });
+        id
     };
-    let (runtime, receiver) =
-        test_acp_runtime_handle(AcpAgent::OpenCode, "receipted-stop-delta");
-    // The Stop stamps the session as it starts, then shuts the runtime down
-    // off the lock before retiring the head. A delta persist woken by any
-    // other commit in that window has collected the session already, so the
-    // later checkpoint preparation must carry the retirement. The watcher
-    // makes that window deterministic: it holds the runtime's turn lifecycle
-    // so the Stop's cancellation wait cannot return, records the watermark
-    // such a persist would leave when the Cancel arrives, then lets it go.
-    let turn_lifecycle = runtime.turn_lifecycle.clone();
-    *turn_lifecycle.0.lock().unwrap() = true;
+    let (runtime, receiver) = test_acp_runtime_handle(AcpAgent::OpenCode, "ordinary-stop-delta");
+    let lifecycle = runtime.turn_lifecycle.clone();
+    *lifecycle.0.lock().unwrap() = true;
     let watermark = Arc::new(Mutex::new(None::<u64>));
     let (held_tx, held_rx) = mpsc::channel();
     let watcher = {
-        let watermark = watermark.clone();
         let observed = state.clone();
+        let watermark = watermark.clone();
         std::thread::spawn(move || {
-            let (active_lock, settled) = &*turn_lifecycle;
+            let (active_lock, settled) = &*lifecycle;
             let mut active = active_lock.lock().unwrap();
             held_tx.send(()).unwrap();
-            assert!(
-                matches!(
-                    receiver.recv_timeout(phase_sync::DEADLOCK_GUARD),
-                    Ok(AcpRuntimeCommand::Cancel)
-                ),
-                "the Stop cancels the runtime's turn"
-            );
+            assert!(matches!(receiver.recv_timeout(phase_sync::DEADLOCK_GUARD), Ok(AcpRuntimeCommand::Cancel)),
+                "the real Stop cancels its runtime before retirement");
             *watermark.lock().unwrap() = Some(observed.inner.lock().unwrap().last_mutation_stamp);
             *active = false;
             settled.notify_all();
         })
     };
-    held_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
+    phase_sync::receive(&held_rx, "the runtime shutdown window is held");
     {
         let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+        inner.session_mut(&session).unwrap().runtime = SessionRuntime::Acp(runtime);
     }
     let options = StopSessionOptions::default();
     let (_, claim) = state.begin_requested_stop_session(&session, &options).unwrap();
-    let claim = claim.expect("the Stop claims the runtime");
-    let selected = Arc::new(Mutex::new(None::<Option<PersistedSessionRecord>>));
-    let captured = selected.clone();
-    let observed = state.clone();
-    let observed_session = session.clone();
-    let recorded = watermark.clone();
-    TEST_ENGRAM_BEFORE_TURN_CHECKPOINT_REQUEST.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            let watermark = recorded
-                .lock()
-                .unwrap()
-                .expect("the watcher recorded the watermark during the runtime shutdown");
-            let delta = collect_persist_delta_from_shared_state(&observed.inner, watermark);
-            *captured.lock().unwrap() = Some(
-                delta
-                    .changed_sessions
-                    .into_iter()
-                    .find(|record| record.session.id == observed_session),
-            );
-        }))
-    });
-
-    state
-        .stop_local_session_with_options(&session, options, Some(claim))
-        .unwrap();
+    let claim = claim.expect("Stop owns the actual runtime");
+    state.stop_local_session_with_options(&session, options, Some(claim)).unwrap();
     watcher.join().unwrap();
-
-    let persisted = selected
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("the Stop's turn checkpoint was sent")
-        .expect("the retirement must be selected by the delta persist before the checkpoint");
-    assert!(persisted.queued_prompts.is_empty(), "the retired head stays retired");
-    assert_eq!(
-        persisted.prompt_deliveries[&prompt_id].disposition,
-        PromptDeliveryDisposition::Rejected,
-        "its receipt is terminal in that same write"
-    );
+    let watermark = watermark.lock().unwrap().expect("shutdown recorded the delta watermark");
+    let delta = collect_persist_delta_from_shared_state(&state.inner, watermark);
+    let selected = delta.changed_sessions.into_iter().find(|record| record.session.id == session)
+        .expect("the retirement image is selected after shutdown");
+    assert!(!selected.queued_prompts.iter().any(|row| row.pending_prompt.id == prompt_id));
+    assert_eq!(selected.prompt_deliveries[&prompt_id].disposition, PromptDeliveryDisposition::Rejected);
+    assert_eq!(selected.prompt_deliveries[&prompt_id].turn_generation, Some(turn_generation));
     drop(dispatch);
-    assert!(root_rx.try_recv().is_err(), "never handed off");
+    turn.assert_no_prompt();
+    turn.assert_no_control();
     tx.send(PersistRequest::Shutdown).unwrap();
     writer.join().unwrap();
-}
-
-/// The session's bind sent outside queued admission whose answer was lost is
-/// sent again as the identical request before anything else binds the
-/// session (`engram_bind_retention.rs`): the same key and intent, on the same
-/// connection, which carries the project's Engram settings. Returns its key.
-fn assert_lost_bind_replayed_identically(
-    transport: &ScriptedEngramControlTransport,
-    session: &str,
-) -> String {
-    let binds: Vec<RecordedEngramControlRequest> = transport
-        .requests()
-        .into_iter()
-        .filter(|recorded| {
-            recorded.connection.session_id == session
-                && recorded.request["operation"] == "session_bind"
-        })
-        .collect();
-    let pair = binds
-        .windows(2)
-        .find(|pair| pair[0].request == pair[1].request)
-        .unwrap_or_else(|| {
-            panic!("a lost bind is sent again as the identical request: {binds:#?}")
-        });
-    assert_eq!(pair[0].connection, pair[1].connection, "on the same connection");
-    pair[0].request["idempotency_key"]
-        .as_str()
-        .expect("a bind names its key")
-        .to_owned()
-}
-
-#[test]
-fn retained_authority_mismatch_stays_paused_cancelable_for_root_and_child() {
-    for child in [false, true] {
-        for lost_bind in [false, true] {
-            let mut replies = Vec::new();
-            if child {
-                replies.push(bind_reply("parent"));
-            }
-            if !lost_bind {
-                replies.push(bind_reply("token"));
-            }
-            replies.push(ScriptedEngramControlResponse::Reply(Err(
-                EngramTransportError::deadline("lost authorization"),
-            )));
-            if child && lost_bind {
-                // The first child bind is eager setup, before a queue record
-                // exists, and its lost answer leaves it unresolved: the queued
-                // admission first sends it again, identically
-                // (`engram_bind_retention.rs`), and that replay is answered.
-                replies.push(bind_reply("replayed-child"));
-                // Lose the queued retry too so this case owns durable
-                // retained bind input rather than only a backoff/wait flag.
-                replies.push(ScriptedEngramControlResponse::Reply(Err(
-                    EngramTransportError::deadline("lost queued bind"),
-                )));
-            }
-            let (state, parent, receiver, transport) = root_fixture(replies);
-            let (session, delegation) = if child {
-                let created = state
-                    .create_read_only_delegation(
-                        &parent,
-                        CreateDelegationRequest {
-                            prompt: "held child".into(),
-                            title: None,
-                            cwd: None,
-                            agent: Some(Agent::Codex),
-                            model: None,
-                            mode: Some(DelegationMode::Explorer),
-                            write_policy: Some(DelegationWritePolicy::ReadOnly),
-                        },
-                    )
-                    .unwrap();
-                (
-                    created.delegation.child_session_id,
-                    Some(created.delegation.id),
-                )
-            } else {
-                let dispatch = root_dispatch(&state, &parent, false);
-                deliver_turn_dispatch(&state, dispatch).unwrap();
-                (parent.clone(), None)
-            };
-            if child && lost_bind {
-                elapse_bind_backoff(&state, &session);
-                state.resume_session_queue(&session).unwrap();
-            }
-            elapse_bind_backoff(&state, &session);
-            let (prompt_id, retained) = {
-                let mut inner = state.inner.lock().unwrap();
-                let index = inner.find_session_index(&session).unwrap();
-                let project_id = inner.sessions[index].session.project_id.clone().unwrap();
-                let project = inner
-                    .projects
-                    .iter_mut()
-                    .find(|p| p.id == project_id)
-                    .unwrap();
-                project.engram.as_mut().unwrap().binary_path =
-                    Some("changed-engram-authority-binary".into());
-                let record = &mut inner.sessions[index];
-                let queued = &record.queued_prompts[0];
-                assert!(
-                    queued.has_engram_intent(),
-                    "fixture must retain authorization before settings change"
-                );
-                (
-                    queued.pending_prompt.id.clone(),
-                    serde_json::to_value((&queued.engram_bind, &queued.engram_evaluate)).unwrap(),
-                )
-            };
-            if child && lost_bind {
-                assert_lost_bind_replayed_identically(&transport, &session);
-            }
-            let requests_before = transport.requests().len();
-            assert_eq!(
-                state
-                    .resume_session_queue(&session)
-                    .err()
-                    .expect("retained head must refuse Resume")
-                    .status,
-                StatusCode::CONFLICT
-            );
-            if child {
-                state
-                    .refresh_delegation_for_child_session(&session)
-                    .unwrap();
-            }
-            {
-                let inner = state.inner.lock().unwrap();
-                let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-                assert_eq!(record.session.status, SessionStatus::Idle);
-                assert!(record.orchestrator_auto_dispatch_blocked);
-                assert_eq!(record.queued_prompts.len(), 1);
-                assert!(record.queued_prompts[0].engram_interrupted);
-                assert_eq!(
-                    serde_json::to_value((
-                        &record.queued_prompts[0].engram_bind,
-                        &record.queued_prompts[0].engram_evaluate
-                    ))
-                    .unwrap(),
-                    retained
-                );
-                assert!(record.session.queue_paused);
-                assert!(record.session.pending_prompts[0].engram_interrupted);
-                if let Some(id) = delegation.as_ref() {
-                    assert_eq!(
-                        inner.delegations[inner.find_delegation_index(id).unwrap()].status,
-                        DelegationStatus::Running
-                    );
-                }
-            }
-            assert_eq!(
-                transport.requests().len(),
-                requests_before,
-                "mismatched authority must never transmit"
-            );
-            assert!(receiver.try_recv().is_err());
-            state.cancel_queued_prompt(&session, &prompt_id).unwrap();
-            let inner = state.inner.lock().unwrap();
-            assert!(
-                inner.sessions[inner.find_session_index(&session).unwrap()]
-                    .queued_prompts
-                    .is_empty()
-            );
-        }
-    }
-}
-
-/// Real time a child's admission is held after its eager bind: just longer
-/// than the first bind backoff (`engram_bind_retry_delay(1)`, 1 s).
-const LATE_CHILD_ADMISSION: Duration = Duration::from_millis(1_100);
-
-/// The positive control for the stall above. On real time, a child admission
-/// held past the bind backoff finds the backoff spent, so it rebinds and
-/// delivers at once; that is what made the held-child test depend on the
-/// scheduler before its fixture moved to the scripted clock.
-#[test]
-fn a_late_child_admission_on_real_time_outlives_the_bind_backoff_and_delivers() {
-    let (state, parent, receiver, transport) = root_fixture_on_real_clock([
-        bind_reply("parent"),
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline("lost reply"))),
-        // The lost eager bind is sent again, identically, before the child's
-        // admission binds (`engram_bind_retention.rs`).
-        bind_reply("replayed-child"),
-        rebind_reply("child"),
-        grant_reply("retry"),
-        begin_reply("retry"),
-    ]);
-    state
-        .inner
-        .lock()
-        .unwrap()
-        .test_delegation_child_admission_stall = Some(LATE_CHILD_ADMISSION);
-    let created = state
-        .create_read_only_delegation(
-            &parent,
-            CreateDelegationRequest {
-                prompt: "initial child prompt".into(),
-                title: Some("late child".into()),
-                cwd: None,
-                agent: Some(Agent::Codex),
-                model: None,
-                mode: Some(DelegationMode::Explorer),
-                write_policy: Some(DelegationWritePolicy::ReadOnly),
-            },
-        )
-        .unwrap();
-    let child = created.delegation.child_session_id;
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
-        assert_eq!(
-            record.session.status,
-            SessionStatus::Active,
-            "a real-time backoff spent during the stall no longer holds the child"
-        );
-        assert!(record.queued_prompts.is_empty());
-    }
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert_lost_bind_replayed_identically(&transport, &child);
-}
-
-#[test]
-fn held_child_initial_and_followup_authorization_survive_polling_then_resume() {
-    for followup in [false, true] {
-        for failure in ["defer", "bind", "evaluate", "begin"] {
-            let mut responses = vec![bind_reply("parent")];
-            if followup {
-                responses.extend([
-                    bind_reply("child"),
-                    grant_reply("first"),
-                    begin_reply("first"),
-                    checkpoint_reply("first"),
-                ]);
-            }
-            if failure != "bind" && !followup {
-                responses.push(bind_reply("child"));
-            }
-            if failure == "begin" {
-                responses.push(grant_reply("retry"));
-            }
-            responses.push(if failure == "defer" {
-                defer_reply("busy")
-            } else {
-                ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-                    "lost reply",
-                )))
-            });
-            if failure == "bind" && !followup {
-                // The lost answer is the eager bind's, sent outside queued
-                // admission: the admission first sends it again, identically
-                // (`engram_bind_retention.rs`), and that replay is answered.
-                // With a follow-up the lost answer is the queued admission's
-                // own bind, which its queue keeps instead.
-                responses.push(bind_reply("replayed-child"));
-            }
-            if failure == "bind" {
-                responses.push(rebind_reply("child"));
-            }
-            // A lost begin is resumed by replaying that exact begin alone; any
-            // other loss is admitted again through its evaluate.
-            if failure != "begin" {
-                responses.push(grant_reply("retry"));
-            }
-            responses.push(begin_reply("retry"));
-            let (state, parent, receiver, transport) = root_fixture(responses);
-            if failure == "bind" && !followup {
-                // The child's admission runs late, past the 1 s bind backoff
-                // its lost eager bind armed, as on a loaded machine. The
-                // backoff is on the scripted clock, so it still holds. (With a
-                // follow-up the eager bind succeeds and the lost reply comes
-                // in the follow-up admission, which this stall does not reach.)
-                state
-                    .inner
-                    .lock()
-                    .unwrap()
-                    .test_delegation_child_admission_stall = Some(LATE_CHILD_ADMISSION);
-            }
-            let created = state
-                .create_read_only_delegation(
-                    &parent,
-                    CreateDelegationRequest {
-                        prompt: "initial child prompt".into(),
-                        title: Some("held child".into()),
-                        cwd: None,
-                        agent: Some(Agent::Codex),
-                        model: None,
-                        mode: Some(DelegationMode::Explorer),
-                        write_policy: Some(DelegationWritePolicy::ReadOnly),
-                    },
-                )
-                .unwrap();
-            let child = created.delegation.child_session_id;
-            let delegation = created.delegation.id;
-            if followup {
-                assert!(matches!(
-                    receive_synchronous_engram_prompt(&state, &receiver, "initial prompt").unwrap(),
-                    CodexRuntimeCommand::Prompt { .. }
-                ));
-                let token = {
-                    let inner = state.inner.lock().unwrap();
-                    inner.sessions[inner.find_session_index(&child).unwrap()]
-                        .runtime
-                        .runtime_token()
-                        .unwrap()
-                };
-                finish_delegation_child_with_assistant_text(&state, &child, "initial completed");
-                {
-                    let mut inner = state.inner.lock().unwrap();
-                    let index = inner.find_session_index(&child).unwrap();
-                    inner.sessions[index].session.status = SessionStatus::Active;
-                }
-                state
-                    .finish_turn_ok_if_runtime_matches(&child, &token)
-                    .unwrap();
-                state.refresh_delegation_for_child_session(&child).unwrap();
-                {
-                    let inner = state.inner.lock().unwrap();
-                    assert_eq!(
-                        inner.delegations[inner.find_delegation_index(&delegation).unwrap()].status,
-                        DelegationStatus::Completed
-                    );
-                }
-                if failure == "bind" {
-                    let mut inner = state.inner.lock().unwrap();
-                    let index = inner.find_session_index(&child).unwrap();
-                    inner.sessions[index].engram.rebind_required = true;
-                    inner.sessions[index].engram.routing_token = None;
-                }
-                state
-                    .followup_delegation(&parent, &delegation, "follow-up child prompt".into())
-                    .unwrap();
-            }
-            state.refresh_delegation_for_child_session(&child).unwrap();
-            let saved = {
-                let inner = state.inner.lock().unwrap();
-                let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
-                assert_eq!(
-                    record.session.status,
-                    SessionStatus::Idle,
-                    "{failure}, followup={followup}"
-                );
-                assert!(record.orchestrator_auto_dispatch_blocked);
-                assert_eq!(record.queued_prompts.len(), 1);
-                assert!(!record.queued_prompts[0].engram_interrupted);
-                assert_eq!(
-                    inner.delegations[inner.find_delegation_index(&delegation).unwrap()].status,
-                    DelegationStatus::Running
-                );
-                serde_json::to_value(&record.queued_prompts[0].pending_prompt).unwrap()
-            };
-            assert!(receiver.try_recv().is_err());
-            if failure == "bind" {
-                // The lost bind armed a retry backoff. Its time passes on the
-                // scripted clock, not by waiting; the stall above is the
-                // late-scheduling witness, not synchronization.
-                elapse_bind_backoff(&state, &child);
-            }
-            state.resume_session_queue(&child).unwrap();
-            assert!(matches!(
-                receiver.try_recv().unwrap(),
-                CodexRuntimeCommand::Prompt { .. }
-            ));
-            assert!(receiver.try_recv().is_err());
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
-            assert!(record.queued_prompts.is_empty());
-            assert_eq!(
-                record
-                    .session
-                    .messages
-                    .iter()
-                    .filter(|message| Some(message.id()) == saved["id"].as_str())
-                    .count(),
-                1
-            );
-            let requests = transport.requests();
-            if failure == "evaluate" || failure == "begin" {
-                let operation = if failure == "evaluate" {
-                    "turn_evaluate"
-                } else {
-                    "turn_begin"
-                };
-                let matching = requests
-                    .iter()
-                    .filter(|r| r.request["operation"] == operation)
-                    .rev()
-                    .take(2)
-                    .collect::<Vec<_>>();
-                assert_eq!(matching[0].request, matching[1].request, "exact replay");
-            }
-            if failure == "bind" && !followup {
-                drop(inner);
-                assert_lost_bind_replayed_identically(&transport, &child);
-            }
-        }
-    }
-}
-
-#[test]
-fn retained_mailbox_coverage_deduplicates_equal_boundary_and_keeps_newer_separate() {
-    for newer in [false, true] {
-        assert_retained_mailbox_coverage(newer);
-    }
-}
-
-fn assert_retained_mailbox_coverage(newer: bool) {
-    let (state, session, receiver, _) = root_fixture([
-        bind_reply("token"),
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline("lost evaluate"))),
-        grant_reply("retry"),
-        begin_reply("retry"),
-    ]);
-    let coordination_path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
-    let state = AppState {
-        mailbox_store: Arc::new(MailboxStore::open(&coordination_path).unwrap()),
-        ..state
-    };
-    let sender = test_session_id(&state, Agent::Claude);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].session.status = SessionStatus::Active;
-    }
-    state
-        .append_mailbox_message_and_notify(
-            &sender,
-            SendMailboxMessageRequest {
-                target_session_id: session.clone(),
-                message: "one inbound".into(),
-                idempotency_key: "retained-one".into(),
-                topic: None,
-                state_stamp: None,
-                class: Some("routine".into()),
-            },
-        )
-        .unwrap();
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].session.status = SessionStatus::Idle;
-    }
-    let dispatch = state
-        .start_next_queued_turn_off_lock(&session, false, false)
-        .unwrap()
-        .unwrap()
-        .dispatch;
-    let notification = dispatch.mailbox_notification().unwrap().clone();
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    let before = {
-        let inner = state.inner.lock().unwrap();
-        serde_json::to_value(
-            &inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts[0],
-        )
-        .unwrap()
-    };
-    for _ in 0..2 {
-        state
-            .requeue_rejected_mailbox_notification(&notification)
-            .unwrap();
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(
-            serde_json::to_value(&record.queued_prompts[0]).unwrap(),
-            before
-        );
-    }
-    assert!(receiver.try_recv().is_err());
-    if newer {
-        state
-            .append_mailbox_message_and_notify(
-                &sender,
-                SendMailboxMessageRequest {
-                    target_session_id: session.clone(),
-                    message: "newer inbound".into(),
-                    idempotency_key: "retained-two".into(),
-                    topic: None,
-                    state_stamp: None,
-                    class: Some("routine".into()),
-                },
-            )
-            .unwrap();
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.queued_prompts.len(), 2);
-        assert_eq!(
-            serde_json::to_value(&record.queued_prompts[0]).unwrap(),
-            before
-        );
-    }
-    state.resume_session_queue(&session).unwrap();
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    let inner = state.inner.lock().unwrap();
-    assert_eq!(
-        inner.sessions[inner.find_session_index(&session).unwrap()]
-            .queued_prompts
-            .len(),
-        usize::from(newer)
-    );
-}
-
-#[test]
-fn fresh_prompt_preserves_existing_message_index_allocation() {
-    let (state, session, _, _) = root_fixture([bind_reply("token"), grant_reply("grant")]);
-    let capacity = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].message_positions.reserve(4096);
-        assert!(
-            cached_message_index_on_record(&inner.sessions[index], "fresh-missing-id").is_none()
-        );
-        inner.sessions[index].message_positions.capacity()
-    };
-    {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(cached_message_index_on_record(record, "another-fresh-id").is_none());
-        assert_eq!(record.message_positions.capacity(), capacity);
-    }
-    // Append has its own pre-existing index maintenance; only the preliminary
-    // absent-ID membership check must avoid an additional rebuilding pass.
-    let _dispatch = root_dispatch(&state, &session, false);
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    for (id, index) in &record.message_positions {
-        assert_eq!(record.session.messages[*index].id(), id);
-    }
 }

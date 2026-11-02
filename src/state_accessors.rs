@@ -290,14 +290,11 @@ mod visible_session_hydration_error_tests {
             agent_commands_revision: 0,
             codex_thread_state: None,
             live_activity: None,
-            engram_boot_recovery_pending: false,
-            engram_control_off: None,
             status: SessionStatus::Idle,
             preview: "Remote session ready.".to_owned(),
             message_count: 0,
             markers: Vec::new(),
             queue_paused: false,
-            queue_hold: None,
             provider_capacity_waiting: false,
             source_tracking_recovery: false,
             queue_projection_hash: Some("remote-queue-projection".to_owned()),
@@ -679,28 +676,12 @@ impl AppState {
         sha256_hex(&serialized)
     }
 
-    fn wire_session_for_inner(inner: &StateInner, local_instance_id: &str, record: &SessionRecord) -> Session {
-        let mut session = Self::wire_session_from_record(local_instance_id, record);
-        session.engram_control_off = session_ordinary_off_projection(inner, record);
-        session
-    }
-
-    fn wire_session_summary_for_inner(inner: &StateInner, local_instance_id: &str, record: &SessionRecord) -> StateSessionSummary {
-        let mut summary = Self::wire_session_summary_from_record(local_instance_id, record);
-        summary.engram_control_off = session_ordinary_off_projection(inner, record);
-        summary
-    }
-
     fn wire_session_from_record(local_instance_id: &str, record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
         if record.is_local_session() {
-            session.prompt_admission_budgets = engram_begin_preparation_lineage(record)
-                .map(|lineage| (lineage.prompt_id.clone(), PromptAdmissionBudgetView::from(lineage)))
-                .into_iter().collect();
             session.provider_handoffs = record.provider_handoff_observations.rows.iter().cloned().collect();
             session.provider_handoff_history = Some(record.provider_handoff_observations.history());
         } else {
-            session.prompt_admission_budgets.clear();
             session.provider_handoffs.clear();
             session.provider_handoff_history = None;
         }
@@ -711,11 +692,8 @@ impl AppState {
         // derives the projection from it so no code path can publish a
         // stale `queuePaused`, whichever site last flipped the latch.
         session.queue_paused = record.orchestrator_auto_dispatch_blocked;
-        // Why it is held, when a due automatic retry owns the head; derived
-        // from the same record authority.
-        session.queue_hold = engram_automatic_retry_hold(record);
         session.source_tracking_recovery = if record.is_local_session() {
-            record.engram.source_observation_delete_requested
+            record.engram.observation_delete_requested
         } else { record.session.source_tracking_recovery };
         session.queue_projection_hash = if record.is_local_session() {
             Some(Self::queue_projection_hash(record))
@@ -723,8 +701,8 @@ impl AppState {
             record.session.queue_projection_hash.clone()
         };
         if record.is_local_session() && !record.queued_prompts.is_empty() {
-            // QueuedPromptRecord owns retained authorization. Derive the
-            // public queue whenever that authority exists so an internal
+            // QueuedPromptRecord owns the original queued content. Derive the
+            // public queue from that record so an internal
             // preparation can never leak an older embedded Session projection.
             // Legacy/test-local records with no queue authority retain their
             // embedded projection until their next ordinary queue mutation.
@@ -736,7 +714,6 @@ impl AppState {
         session.body_seq = record.wire_body_seq();
         session.body_seq_epoch = record.wire_body_seq_epoch(local_instance_id);
         session.session_mutation_stamp = Some(record.mutation_stamp);
-        session.engram_boot_recovery_pending = record.engram_boot_recovery_pending;
         if session.status != SessionStatus::Active {
             session.live_activity = None;
         }
@@ -831,8 +808,6 @@ impl AppState {
             live_activity: (session.status == SessionStatus::Active)
                 .then(|| bounded_live_activity_summary(&session.live_activity))
                 .flatten(),
-            engram_boot_recovery_pending: record.engram_boot_recovery_pending,
-            engram_control_off: session.engram_control_off,
             status: session.status,
             preview: session.preview.clone(),
             message_count: session_message_count(record),
@@ -842,10 +817,9 @@ impl AppState {
             // card even before targeted detail hydrates the prompt bodies.
             // Derived from record authority, like the full projection.
             queue_paused: record.orchestrator_auto_dispatch_blocked,
-            queue_hold: engram_automatic_retry_hold(record),
             provider_capacity_waiting: session.provider_capacity_waiting,
             source_tracking_recovery: if record.is_local_session() {
-                record.engram.source_observation_delete_requested
+                record.engram.observation_delete_requested
             } else { session.source_tracking_recovery },
             queue_projection_hash: if record.is_local_session() {
                 Some(Self::queue_projection_hash(record))
@@ -913,7 +887,6 @@ impl AppState {
         );
         debug_assert_eq!(summary.opencode_mode, full.opencode_mode);
         debug_assert_eq!(summary.queue_paused, full.queue_paused);
-        debug_assert_eq!(summary.queue_hold, full.queue_hold);
         debug_assert_eq!(summary.queue_projection_hash, full.queue_projection_hash);
         debug_assert_eq!(summary.opencode_current_mode, full.opencode_current_mode);
         debug_assert_eq!(summary.opencode_mode_options, full.opencode_mode_options);
@@ -923,10 +896,6 @@ impl AppState {
             full.agent_commands_revision
         );
         debug_assert_eq!(summary.codex_thread_state, full.codex_thread_state);
-        debug_assert_eq!(
-            summary.engram_boot_recovery_pending,
-            full.engram_boot_recovery_pending
-        );
         debug_assert_eq!(
             summary.live_activity,
             bounded_live_activity_summary(&full.live_activity)
@@ -1073,11 +1042,6 @@ impl AppState {
         session_id: &str,
         message_limit: usize,
     ) -> Result<SessionResponse, ApiError> {
-        // Opening a targeted session is a first use just like a prompt or a
-        // queue activation. This matters for the browser: the readiness fence
-        // deliberately disables its composer, so hydration must be able to
-        // launch the lazy retry that will eventually re-enable it.
-        self.request_engram_boot_recovery_retry(session_id);
         let should_hydrate_remote_proxy = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -1111,13 +1075,14 @@ impl AppState {
         let record = &inner.sessions[index];
         let tail_start_index = Self::session_tail_start_index(record, message_limit);
         let messages_loaded = record.session.messages_loaded && tail_start_index == 0;
-        let mut session = Self::wire_session_tail_from_record(
-            &self.server_instance_id, record, message_limit, messages_loaded,
-        );
-        session.engram_control_off = session_ordinary_off_projection(&inner, record);
         Ok(SessionResponse {
             revision: inner.revision,
-            session,
+            session: Self::wire_session_tail_from_record(
+                &self.server_instance_id,
+                record,
+                message_limit,
+                messages_loaded,
+            ),
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -1493,13 +1458,8 @@ impl AppState {
         }
         #[cfg(test)]
         observe_state_snapshot_projection_for_test();
-        let control_projection = OrdinaryOffProjection::new(inner);
         let sessions = inner.sessions.iter().filter(|record| !record.hidden)
-            .map(|record| {
-                let mut summary = Self::wire_session_summary_from_record(&self.server_instance_id, record);
-                summary.engram_control_off = control_projection.for_record(record);
-                summary
-            })
+            .map(|record| Self::wire_session_summary_from_record(&self.server_instance_id, record))
             .collect();
         self.snapshot_header_from_inner(inner, agent_readiness, sessions)
     }
@@ -1509,7 +1469,6 @@ impl AppState {
         sessions: Vec<StateSessionSummary>,
     ) -> StateResponse {
         StateResponse {
-            engram_control_recovery: engram_control_recovery_summaries(inner),
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
             codex: inner.codex.clone(),
@@ -1543,7 +1502,6 @@ impl AppState {
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,
     ) -> FullStateSnapshot {
-        let control_projection = OrdinaryOffProjection::new(inner);
         FullStateSnapshot {
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
@@ -1557,11 +1515,7 @@ impl AppState {
                 .sessions
                 .iter()
                 .filter(|record| !record.hidden)
-                .map(|record| {
-                    let mut session = Self::wire_session_from_record(&self.server_instance_id, record);
-                    session.engram_control_off = control_projection.for_record(record);
-                    session
-                })
+                .map(|record| Self::wire_session_from_record(&self.server_instance_id, record))
                 .collect(),
             delegations: inner
                 .delegations

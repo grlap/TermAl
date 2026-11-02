@@ -1,8 +1,7 @@
-//! Root-session coverage at the same dispatch/delivery/completion boundaries
-//! exercised by the child conformance tests in engram_host_adapter.rs.
-//! No provider subprocess or live Engram store is used.
-
+//! Ordinary root dispatch, queue delivery, completion and historical data.
+//! Reuses the shared local runtime owner; no control admission is recreated.
 use super::*;
+use super::uncertain_begin::OrdinaryRoot;
 
 #[path = "off_disables_gated_control.rs"]
 mod off_disables_gated_control;
@@ -55,1582 +54,696 @@ mod capacity_retry_admission;
 #[path = "engram_project_reset_wait.rs"]
 mod project_reset_wait;
 
-#[test]
-fn root_known_defer_resume_uses_new_evaluation_identity() {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("root-token"),
-        defer_reply("busy"),
-        grant_reply("new-grant"),
-        begin_reply("new-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).expect("defer parks original prompt");
-    assert!(receiver.try_recv().is_err());
-    state
-        .resume_session_queue(&session)
-        .expect("explicit resume is a new evaluation");
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err());
-    let requests = transport.requests();
-    assert_eq!(
-        requests[1].request["intent_fingerprint"],
-        requests[2].request["intent_fingerprint"]
-    );
-    assert_ne!(
-        requests[1].request["idempotency_key"],
-        requests[2].request["idempotency_key"]
-    );
+
+// Data only: opaque saved queue metadata is never decoded as an executable
+// control request or used to authorize the provider handoff.
+fn passive_evaluate_bytes(with_begin: bool, effects: Value) -> Value {
+    json!({
+        "connection":{"session":"historical-connection"},
+        "settings":{"turnGatedControl":true,"unknown":[null,"żółw"]},
+        "request":{"operation":"turn_evaluate","routing_token":"historical-token",
+            "idempotency_key":"original-unknown-evaluate","intent_fingerprint":"original-intent",
+            "purpose":"original task","requested_effects":effects,"resource_intents":[]},
+        "operation_generation":17,"begun_grant_id":null,
+        "prepared_begin":if with_begin { json!({"idempotency_key":"original-unknown-begin",
+            "grant_id":"historical-grant","delivery_tokens":["original-delivery"],
+            "issued_no_later_than":"2026-10-01T01:02:03Z","phase":"prepared","delivered_range":null}) } else { Value::Null }
+    })
 }
 
 #[test]
-fn root_unknown_evaluate_retains_exact_prompt_and_replays_without_rebind() {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("root-token"),
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-            "reply lost after evaluate",
-        ))),
-        grant_reply("replayed-grant"),
-        begin_reply("replayed-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).expect("unknown admission should remain waiting");
-    assert!(receiver.try_recv().is_err());
-    let (prompt, generation) = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        let record = &inner.sessions[inner.find_session_index(&session).expect("root exists")];
-        // Scheduled for its automatic replay (`engram_admission_retry.rs`);
-        // an explicit Resume may still run that replay now.
-        assert!(record
-            .session
-            .preview
-            .starts_with("Engram: waiting for admission; retrying automatically, attempt 1"));
-        assert!(record.orchestrator_auto_dispatch_blocked);
-        assert!(
-            record
-                .queued_prompts
-                .front()
-                .expect("prompt retained")
-                .engram_evaluate
-                .is_some()
-        );
-        (
-            serde_json::to_value(&record.queued_prompts[0].pending_prompt).unwrap(),
-            record.engram.dispatch_generation,
-        )
-    };
-    state
-        .resume_session_queue(&session)
-        .expect("exact retry succeeds");
-    assert!(matches!(
-        receiver.try_recv().expect("one provider attempt"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err());
-    let requests = transport.requests();
-    assert_eq!(
-        requests[1].request, requests[2].request,
-        "byte-equivalent evaluate replay"
-    );
-    assert_eq!(
-        operations(&transport),
-        [
-            "session_bind",
-            "turn_evaluate",
-            "turn_evaluate",
-            "turn_begin"
-        ]
-    );
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.engram.dispatch_generation, generation);
-    assert!(record.queued_prompts.is_empty());
-    assert_eq!(
-        record
-            .session
-            .messages
-            .iter()
-            .filter(|message| message.id() == prompt["id"].as_str().unwrap())
-            .count(),
-        1
-    );
+fn root_ordinary_dispatch_does_not_consult_a_scripted_control_defer() {
+    let turn = OrdinaryRoot::new("ordinary-root-unused-defer");
+    let replies = [
+        json!({"routing_token":"root-token"}),
+        json!({"decision":"defer","reason":"busy"}),
+        json!({"decision":"grant","grant_id":"unused-grant"}),
+        json!({"decision":"begin","receipt":{"grant_id":"unused-grant"}}),
+    ];
+    turn.transport.responses.lock().unwrap().extend(replies.into_iter()
+        .map(|reply| ScriptedEngramControlResponse::Reply(Ok(reply))));
+    let dispatch = turn.prepare("Ordinary input ignores old control replies.");
+    deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+    let prompt = turn.prompt();
+    assert!(prompt.prompt.contains("Ordinary input ignores old control replies."));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    assert_eq!(turn.transport.responses.lock().unwrap().len(), 4);
+    turn.record(|record| {
+        assert!(record.queued_prompts.is_empty());
+        assert_eq!(record.session.status, SessionStatus::Active);
+    });
 }
 
 #[test]
-fn root_unknown_bind_is_durable_and_cancelable_without_provider_delivery() {
-    let (state, session, receiver, transport) =
-        root_fixture([ScriptedEngramControlResponse::Reply(Err(
-            EngramTransportError::deadline("bind response lost"),
-        ))]);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).expect("unknown bind remains waiting");
-    let prompt_id = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        let prompt = record.queued_prompts.front().expect("prompt retained");
-        assert!(prompt.engram_bind.is_some());
-        prompt.pending_prompt.id.clone()
-    };
-    let persisted = persisted_session_json(&state, &session);
-    assert!(persisted.contains("engram_bind"));
-    state
-        .cancel_queued_prompt(&session, &prompt_id)
-        .expect("cancel is immediate");
-    assert!(receiver.try_recv().is_err());
-    assert_eq!(operations(&transport), ["session_bind"]);
+fn root_ordinary_successor_preserves_unknown_evaluate_bytes_without_replaying_them() {
+    let turn = OrdinaryRoot::new("ordinary-root-unknown-evaluate");
+    let id = turn.enqueue("original uncertain provider attempt", QueuedPromptSource::User);
+    let expected = turn.edit(|record| {
+        let head = record.queued_prompts.front_mut().unwrap();
+        head.promotion_disposition_known = false;
+        head.engram_ordinary_handoff = true;
+        head.engram_interrupted = true;
+        head.engram_evaluate = Some(passive_evaluate_bytes(false, json!(["observe"])));
+        record.engram.historical_control.insert("engramDispatchGeneration".into(), json!(17));
+        serde_json::to_value(&record.queued_prompts[0]).unwrap()
+    });
+    deliver_turn_dispatch(&turn.state, turn.prepare("Independent ordinary successor.")).unwrap();
+    assert!(turn.prompt().prompt.contains("Independent ordinary successor."));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    turn.record(|record| {
+        assert_eq!(record.engram.historical_control["engramDispatchGeneration"], 17);
+        let retained = record.queued_prompts.iter().find(|row| row.pending_prompt.id == id).unwrap();
+        assert_eq!(serde_json::to_value(retained).unwrap(), expected);
+        assert!(!record.session.messages.iter().any(|message| message.id() == id));
+    });
 }
 
 #[test]
-fn root_default_admission_budget_is_twenty_seconds() {
-    assert_eq!(
-        EngramProjectSettings::default().call_timeout(),
-        Duration::from_secs(20)
-    );
-    assert_eq!(ENGRAM_DISPATCH_BUDGET_MS, 20_000);
+fn root_ordinary_send_preserves_passive_unknown_binding_bytes_without_replay() {
+    let turn = OrdinaryRoot::new("ordinary-root-passive-bind");
+    let original = json!({"request":{"operation":"session_bind",
+        "external_ref":format!("termal:{}", turn.session),"title":"original binding",
+        "assurance":"turn_gated","mediated_effects":["observe"],"capability_map_revision":1,
+        "idempotency_key":"original-unknown-bind","work_binding":null},
+        "connection":{"session":"original-connection"},"future":[null,true,{"text":"żółw"}]});
+    turn.edit(|record| {
+        record.engram.historical_control.insert("engramRetainedBind".into(), original.clone());
+    });
+    deliver_turn_dispatch(&turn.state, turn.prepare("Ordinary send beside passive history.")).unwrap();
+    turn.prompt();
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    turn.record(|record| assert_eq!(record.engram.historical_control["engramRetainedBind"], original));
+    let saved = turn.saved();
+    assert_eq!(saved["engramRetainedBind"], original,
+        "saved historical data stays readable, without rebuilding the deleted process-local bind owner");
+}
+
+#[test]
+fn root_default_work_service_call_budget_is_twenty_seconds() {
+    assert_eq!(EngramProjectSettings::default().call_timeout(), Duration::from_secs(20));
 }
 
 #[test]
 fn a_project_may_bound_an_engram_call_up_to_twenty_seconds() {
-    // The deadline check runs before the project is looked up, so an
-    // unknown project shows what the check alone decides.
     let state = test_app_state();
-    let update = |deadline_ms| {
-        state
-            .update_project_engram_settings(
-                "no-such-project",
-                EngramProjectSettings {
-                    deadline_ms: Some(deadline_ms),
-                    ..Default::default()
-                },
-            )
-            .err()
-            .expect("an unknown project is never updated")
-    };
+    let update = |deadline_ms| state.update_project_engram_settings("no-such-project",
+        EngramProjectSettings { deadline_ms: Some(deadline_ms), ..Default::default() })
+        .err().expect("an unknown project is never updated");
     for refused in [0, 20_001] {
         let error = update(refused);
         assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
-        assert!(
-            error
-                .message
-                .contains("Engram deadline must be between 1 and 20000 ms"),
-            "{refused}: {}",
-            error.message
-        );
+        assert!(error.message.contains("Engram deadline must be between 1 and 20000 ms"),
+            "{refused}: {}", error.message);
     }
-    // The cap itself passes the check and reaches the project lookup.
     let error = update(20_000);
     assert_eq!(error.status, StatusCode::NOT_FOUND, "{}", error.message);
-    assert!(
-        error.message.contains("project not found"),
-        "{}",
-        error.message
-    );
-}
-
-/// Resuming a lost begin replays only that exact begin: no evaluate goes out
-/// again, retained or fresh, and no new generation is taken.
-#[test]
-fn root_lost_begin_resume_replays_only_the_exact_begin_without_new_generation() {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("root-token"),
-        grant_reply("original-grant"),
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-            "begin reply lost",
-        ))),
-        begin_reply("original-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    assert!(receiver.try_recv().is_err());
-    state.resume_session_queue(&session).unwrap();
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err());
-    let requests = transport.requests();
-    assert_eq!(requests.len(), 4);
-    assert_eq!(requests[3].request["operation"], "turn_begin");
-    assert_eq!(requests[2].request, requests[3].request, "the exact begin");
-}
-
-/// Shapes the head a host saves once its begin is durably recorded begun:
-/// the begun grant noted on the retained evaluate and no longer uncertain,
-/// with no retry record. A head whose begin outcome is unknown is not this
-/// head; its exact begin replay owns it after a restart
-/// (`engram_begin_boot.rs`).
-fn mark_retained_begin_begun(state: &AppState, session: &str, grant_id: &str) {
-    let mut inner = state.inner.lock().expect("state mutex poisoned");
-    let index = inner.find_session_index(session).unwrap();
-    let record = &mut inner.sessions[index];
-    record
-        .queued_prompts
-        .front_mut()
-        .and_then(|head| head.engram_evaluate.as_mut())
-        .expect("the retained evaluate")
-        .begun_grant_id = Some(grant_id.to_owned());
-    record.engram.uncertain_grant_id = None;
-    record.engram.admission_retry = None;
-}
-
-/// A head whose begin is durably recorded begun: after a restart, cold
-/// recovery reads producer status, closes the begun grant with a restart
-/// checkpoint, and never resends the retained prompt.
-#[test]
-fn root_cold_begun_recovery_checkpoints_but_never_resends_retained_prompt() {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("root-token"),
-        grant_reply("original-grant"),
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-            "begin reply lost",
-        ))),
-        ScriptedEngramControlResponse::Reply(Ok(
-            json!({ "phase": "turn_open", "open_grant_id": "original-grant", "open_grant_state": "begun" }),
-        )),
-        checkpoint_reply("original-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    mark_retained_begin_begun(&state, &session, "original-grant");
-    let encoded = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        serde_json::to_string(&PersistedSessionRecord::from_record(
-            &inner.sessions[inner.find_session_index(&session).unwrap()],
-        ))
-        .unwrap()
-    };
-    let restored: PersistedSessionRecord = serde_json::from_str(&encoded).unwrap();
-    let restored = restored.into_record().unwrap();
-    assert_eq!(restored.engram.dispatch_generation, 1);
-    assert!(restored.engram.recovered_admission);
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index] = restored;
-    }
-    assert_eq!(
-        state
-            .resume_session_queue(&session)
-            .err()
-            .expect("retained head must refuse Resume")
-            .status,
-        StatusCode::CONFLICT
-    );
-    assert!(receiver.try_recv().is_err());
-    assert_eq!(
-        operations(&transport),
-        [
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin",
-            "session_status",
-            "turn_checkpoint"
-        ]
-    );
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert!(record.queued_prompts.front().unwrap().engram_interrupted);
-    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert!(error.message.contains("project not found"), "{}", error.message);
 }
 
 #[test]
-fn root_stop_while_bind_waits_prevents_late_provider_handoff() {
-    let (state, session, receiver, _) = root_fixture([]);
-    let (bind, gate) = gated_engram_step("session_bind", bind_reply("late-token"));
-    let transport = GatedEngramControlTransport::new([bind]);
-    state.install_control_test_transport(transport.clone());
-    std::thread::scope(|scope| {
-        let worker = scope.spawn(|| {
-            state.dispatch_turn(
-                &session,
-                SendMessageRequest {
-                    text: "Keep this exact prompt".to_owned(),
-                    expanded_text: None,
-                    attachments: vec![],
-                    source_session_id: None,
-                    source_mailbox: None,
-                },
-            )
-        });
-        gate.wait();
-        state
-            .request_stop_session(&session)
-            .expect("Stop does not wait for transport");
-        gate.release();
-        assert!(matches!(
-            worker.join().unwrap().unwrap(),
-            DispatchTurnResult::Queued
-        ));
+fn root_unknown_prepared_begin_bytes_stay_passive_beside_a_fresh_ordinary_turn() {
+    let turn = OrdinaryRoot::new("ordinary-root-unknown-begin");
+    let id = turn.enqueue("original uncertain provider attempt", QueuedPromptSource::User);
+    let expected = turn.edit(|record| {
+        let head = record.queued_prompts.front_mut().unwrap();
+        head.promotion_disposition_known = false;
+        head.engram_ordinary_handoff = true;
+        head.engram_interrupted = true;
+        head.engram_evaluate = Some(passive_evaluate_bytes(true, json!(["observe"])));
+        record.engram.historical_control.insert("engramDispatchGeneration".into(), json!(17));
+        serde_json::to_value(&record.queued_prompts[0]).unwrap()
     });
-    assert!(receiver.try_recv().is_err());
-    assert_eq!(transport.requests().len(), 1);
-}
-
-type RootFixture = (
-    AppState,
-    String,
-    mpsc::Receiver<CodexRuntimeCommand>,
-    Arc<ScriptedEngramControlTransport>,
-);
-
-/// A root session on a scripted Engram budget clock. Admission budgets and
-/// the bind backoff run on that clock, so a late-scheduled thread cannot move
-/// them; a test about their expiry advances the clock across the boundary.
-fn root_fixture(responses: impl IntoIterator<Item = ScriptedEngramControlResponse>) -> RootFixture {
-    root_fixture_on_clock(
-        responses,
-        AppState::select_test_scripted_engram_budget_clock,
-    )
-}
-
-/// The same root session on real time, for a test that shows what real
-/// scheduling delay does to a budget or backoff.
-fn root_fixture_on_real_clock(
-    responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
-) -> RootFixture {
-    root_fixture_on_clock(responses, AppState::declare_test_real_engram_budget_clock)
-}
-
-/// Arms the session's bind backoff `delay` ahead on the state's scripted
-/// clock, the clock `elapse_bind_backoff` advances.
-fn arm_bind_backoff(state: &AppState, session: &str, delay: Duration) {
-    let retry_at = state.engram_budget_clock().now() + delay;
-    let mut inner = state.inner.lock().unwrap();
-    let index = inner.find_session_index(session).unwrap();
-    inner.sessions[index].engram.next_bind_retry_at = Some(retry_at);
-}
-
-/// Lets the session's armed bind backoff run out the way time does: the
-/// state's scripted budget clock advances just past it. The backoff is first
-/// shown still pending, then due. A session with no armed backoff has none
-/// to elapse.
-fn elapse_bind_backoff(state: &AppState, session: &str) {
-    let clock = state.engram_budget_clock();
-    let retry_at = {
-        let inner = state.inner.lock().unwrap();
-        inner.sessions[inner.find_session_index(session).unwrap()]
-            .engram
-            .next_bind_retry_at
-    };
-    let Some(retry_at) = retry_at else {
-        return;
-    };
-    let before = clock.now();
-    assert!(
-        retry_at > before,
-        "the bind backoff must still be pending before its time passes"
-    );
-    // Past the instant itself: a backoff at exactly now still delays a bind.
-    clock.advance(retry_at.duration_since(before) + Duration::from_millis(1));
-    assert!(
-        retry_at < clock.now(),
-        "the bind backoff is due once its time has passed"
-    );
-}
-
-fn root_fixture_on_clock(
-    responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
-    choose_clock: fn(&AppState) -> EngramBudgetClock,
-) -> RootFixture {
-    let (state, receiver) = test_app_state_with_delegation_codex_runtime("engram-root-runtime");
-    // The clock is chosen before Engram is enabled or any target exists.
-    choose_clock(&state);
-    let root = state
-        .test_temp_root
-        .as_ref()
-        .unwrap()
-        .path()
-        .join("root-project");
-    fs::create_dir_all(&root).unwrap();
-    let project = create_test_project(&state, &root, "Root control");
-    let session = create_test_project_session(&state, Agent::Codex, &project, &root);
-    enable_test_project_engram(&state, &project, &root);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        // This suite tests admission, not the separate advisory CLI reader.
-        inner.sessions[index].engram.context_nudge_pending = false;
-    }
-    let transport = ScriptedEngramControlTransport::new(responses);
-    state.install_control_test_transport(transport.clone());
-    assert!(state.inner.lock().unwrap().delegations.is_empty());
-    (state, session, receiver, transport)
-}
-
-fn root_dispatch(state: &AppState, session: &str, queued: bool) -> TurnDispatch {
-    if queued {
-        queue_test_engram_prompt(
-            state,
-            session,
-            "Root controlled turn",
-            QueuedPromptSource::User,
-            None,
-        );
-        state
-            .start_next_queued_turn_off_lock(session, false, false)
-            .unwrap()
-            .expect("queued root should reach admission")
-            .dispatch
-    } else {
-        match state
-            .dispatch_turn(
-                session,
-                SendMessageRequest {
-                    text: "Root controlled turn".to_owned(),
-                    expanded_text: None,
-                    attachments: Vec::new(),
-                    source_session_id: None,
-                    source_mailbox: None,
-                },
-            )
-            .expect("root should reach admission")
-        {
-            DispatchTurnResult::Dispatched(dispatch)
-            | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-            DispatchTurnResult::Queued => panic!("idle root should dispatch"),
-        }
-    }
-}
-
-fn operations(transport: &ScriptedEngramControlTransport) -> Vec<String> {
-    transport
-        .requests()
-        .iter()
-        .map(|r| r.request["operation"].as_str().unwrap().to_owned())
-        .collect()
-}
-
-/// Engram's refusal of a turn that asked for an effect outside the
-/// session's declared mediation envelope: the one form of
-/// `control_assurance_insufficient` a rebind declaring the current set cures.
-fn envelope_refusal_reply(effect: &str, declared: &[&str]) -> ScriptedEngramControlResponse {
-    assurance_refusal_reply(effect, "turn_gated", declared)
-}
-
-/// A `control_assurance_insufficient` refusal naming `effect`, the assurance
-/// its rule requires, and the session's declared set.
-fn assurance_refusal_reply(
-    effect: &str,
-    required_assurance: &str,
-    declared: &[&str],
-) -> ScriptedEngramControlResponse {
-    ScriptedEngramControlResponse::Reply(Ok(json!({
-        "decision": "refuse",
-        "directive": {
-            "directive_id": format!("directive-envelope-{effect}"),
-            "code": "control_assurance_insufficient",
-            "effect": effect,
-            "required_assurance": required_assurance,
-            "declared_mediated_effects": declared,
-            "effective_mediated_effects": declared,
-            "target": "host",
-            "satisfaction": "rebind declaring the requested effect"
-        }
-    })))
+    deliver_turn_dispatch(&turn.state, turn.prepare("Fresh ordinary input.")).unwrap();
+    turn.prompt();
+    turn.assert_no_prompt();
+    turn.record(|record| {
+        assert_eq!(record.engram.historical_control["engramDispatchGeneration"], 17);
+        let retained = record.queued_prompts.iter().find(|row| row.pending_prompt.id == id).unwrap();
+        assert_eq!(serde_json::to_value(retained).unwrap(), expected);
+        assert!(retained.engram_ordinary_handoff);
+    });
+    turn.assert_no_control();
 }
 
 #[test]
-fn root_bound_under_an_older_effect_set_rebinds_and_reevaluates_once() {
-    // A session bound before roots mediated local mutation (a retained bind
-    // replayed across the upgrade) keeps that set until its next bind, and
-    // Engram refuses a turn that asks for an effect outside it.
-    // Admission rebinds with the current set and re-evaluates once, so the
-    // prompt still reaches the runtime, on the direct and the queued path.
+fn root_reload_keeps_begun_history_without_reconstructing_a_control_executor() {
+    let turn = OrdinaryRoot::new("ordinary-root-begun-history");
+    let id = turn.enqueue("original uncertain provider attempt", QueuedPromptSource::User);
+    let expected = turn.edit(|record| {
+        let head = record.queued_prompts.front_mut().unwrap();
+        head.promotion_disposition_known = false;
+        head.engram_ordinary_handoff = true;
+        let mut raw = passive_evaluate_bytes(true, json!(["observe"]));
+        raw["begun_grant_id"] = json!("historical-grant");
+        head.engram_evaluate = Some(raw);
+        record.engram.historical_control.insert("engramDispatchGeneration".into(), json!(17));
+        serde_json::to_value(&record.queued_prompts[0]).unwrap()
+    });
+    let loaded = turn.record(|record| PersistedSessionRecord::from_record(record).into_record().unwrap());
+    let row = loaded.queued_prompts.iter().find(|row| row.pending_prompt.id == id).unwrap();
+    // Complete transcript residency resolves the legacy knowledge bit; the
+    // original handoff and exact saved operation remain non-replayable.
+    let mut expected = expected;
+    expected["promotion_disposition_known"] = json!(true);
+    assert_eq!(serde_json::to_value(row).unwrap(), expected);
+    assert!(row.promotion_disposition_known && row.engram_ordinary_handoff);
+    assert_eq!(row.engram_evaluate.as_ref().unwrap()["begun_grant_id"], "historical-grant");
+    assert_eq!(row.engram_evaluate.as_ref().unwrap()["prepared_begin"]["idempotency_key"], "original-unknown-begin");
+    assert_eq!(loaded.engram.historical_control["engramDispatchGeneration"], 17);
+    assert!(ordinary_queue_position(&loaded).is_none(), "unknown provider delivery is never replayable");
+    assert!(matches!(loaded.runtime, SessionRuntime::None));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn root_stop_before_ordinary_handoff_prevents_late_provider_delivery_without_control_rpc() {
+    let turn = OrdinaryRoot::new("ordinary-root-stop-before-handoff");
+    let dispatch = turn.prepare("The unsent prompt.");
+    turn.state.request_stop_session(&turn.session).unwrap();
+    deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn root_ordinary_dispatch_does_not_rebind_an_older_control_effect_set() {
     for queued in [false, true] {
-        let (state, session, receiver, transport) = root_fixture([
-            bind_reply("root-token"),
-            envelope_refusal_reply("mutate_local", &["observe", "communicate"]),
-            status_reply("ready"),
-            rebind_reply("root-token-rebound"),
-            grant_reply("healed-grant"),
-            begin_reply("healed-grant"),
-        ]);
-        let dispatch = root_dispatch(&state, &session, queued);
-        deliver_turn_dispatch(&state, dispatch).expect("the healed root turn should be delivered");
-        assert!(matches!(
-            receiver.try_recv().expect("one provider prompt"),
-            CodexRuntimeCommand::Prompt { .. }
-        ));
-        assert!(receiver.try_recv().is_err(), "exactly one provider prompt");
-        assert_eq!(
-            operations(&transport),
-            [
-                "session_bind",
-                "turn_evaluate",
-                "session_status",
-                "session_bind",
-                "turn_evaluate",
-                "turn_begin"
-            ],
-            "queued={queued}"
-        );
-        let requests = transport.requests();
-        assert_eq!(requests[1].request["routing_token"], "root-token");
-        assert_eq!(requests[4].request["routing_token"], "root-token-rebound");
-        assert_eq!(
-            requests[3].request["mediated_effects"],
-            json!(["observe", "communicate", "mutate_local"]),
-            "the rebind is a fresh bind declaring the current set (queued={queued})"
-        );
-        assert_ne!(
-            requests[0].request["idempotency_key"], requests[3].request["idempotency_key"],
-            "the rebind is not a replay of the first bind (queued={queued})"
-        );
-        assert_ne!(
-            requests[1].request["idempotency_key"], requests[4].request["idempotency_key"],
-            "the re-evaluation is a new evaluation (queued={queued})"
-        );
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(
-            record.engram.active_grant_id.as_deref(),
-            Some("healed-grant")
-        );
+        let turn = OrdinaryRoot::new("ordinary-root-passive-effect-set");
+        let original = json!({"routing_token":"old-token","declared_mediated_effects":["observe","communicate"],
+            "refusal":{"code":"control_assurance_insufficient","effect":"mutate_local",
+                "required_assurance":"turn_gated","satisfaction":"rebind"}});
+        turn.edit(|record| { record.engram.historical_control.insert("engramEffectHistory".into(), original.clone()); });
+        let dispatch = if queued {
+            turn.enqueue("Ordinary queued input.", QueuedPromptSource::User);
+            turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap().dispatch
+        } else { turn.prepare("Ordinary direct input.") };
+        deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+        turn.prompt();
+        turn.assert_no_prompt();
+        turn.assert_no_control();
+        turn.record(|record| assert_eq!(record.engram.historical_control["engramEffectHistory"], original));
     }
 }
 
 #[test]
-fn root_heal_effect_names_match_their_wire_form() {
-    // The heal compares Engram's wire string with wire_name(); a name that
-    // drifted from the serde form would silently stop the heal matching.
-    for effect in [
-        EngramEffect::Observe,
-        EngramEffect::Communicate,
-        EngramEffect::MutateLocal,
-    ] {
-        assert_eq!(
-            serde_json::to_value(&effect).expect("effect serializes"),
-            json!(effect.wire_name())
-        );
-    }
-}
-
-#[test]
-fn root_heal_assurance_coverage_follows_the_declared_level() {
-    // Coverage is computed from the assurance TermAl declares, so raising
-    // the declaration moves it; today that is turn_gated.
-    assert_eq!(ENGRAM_CONTROL_ASSURANCE, "turn_gated");
-    assert!(engram_host_assurance_covers("advisory"));
-    assert!(engram_host_assurance_covers("turn_gated"));
-    assert!(!engram_host_assurance_covers("action_gated"));
-    assert!(!engram_host_assurance_covers("unknown_level"));
-}
-
-#[test]
-fn root_heal_classifies_each_envelope_refusal_form() {
-    let current = [
-        EngramEffect::Observe,
-        EngramEffect::Communicate,
-        EngramEffect::MutateLocal,
-    ];
-    let envelope =
-        |effect: &str, required: Option<&str>, declared: &[&str]| EngramDirectiveResponse {
-            directive_id: "directive".to_owned(),
-            code: "control_assurance_insufficient".to_owned(),
-            target: "host".to_owned(),
-            satisfaction: "rebind".to_owned(),
-            effect: Some(effect.to_owned()),
-            required_assurance: required.map(str::to_owned),
-            declared_mediated_effects: Some(
-                declared.iter().map(|name| (*name).to_owned()).collect(),
-            ),
-        };
-    let old_set = ["observe", "communicate"];
-    assert!(
-        engram_evaluation_refusal_heals_by_rebind(
-            &envelope("mutate_local", Some("turn_gated"), &old_set),
-            &current
-        ),
-        "an effect the old set lacks and the current set has is healed"
-    );
-    assert!(
-        engram_evaluation_refusal_heals_by_rebind(
-            &envelope("mutate_local", None, &old_set),
-            &current
-        ),
-        "an envelope refusal naming no assurance counts as covered"
-    );
-    assert!(
-        !engram_evaluation_refusal_heals_by_rebind(
-            &envelope("mutate_shared", Some("turn_gated"), &old_set),
-            &current
-        ),
-        "an effect the current set lacks too is not rebound for"
-    );
-    assert!(
-        !engram_evaluation_refusal_heals_by_rebind(
-            &envelope("mutate_local", Some("action_gated"), &old_set),
-            &current
-        ),
-        "an effect needing more assurance than declared is not rebound for"
-    );
-}
-
-#[test]
-fn root_refused_by_policy_or_assurance_is_not_rebound() {
-    // control_assurance_insufficient also covers refusals no rebind can cure:
-    // a project policy stricter than the host (no effect named), an effect
-    // the session already declares, and an effect missing from the declared
-    // set that needs more assurance than the host declares. Those are
-    // reported at once, without a rebind.
+fn retired_control_policy_and_assurance_refusal_bytes_do_not_gate_ordinary_turns() {
     for refusal in [
-        evaluation_refusal_reply("control_assurance_insufficient"),
-        envelope_refusal_reply("mutate_local", &["observe", "communicate", "mutate_local"]),
-        assurance_refusal_reply("mutate_local", "action_gated", &["observe", "communicate"]),
+        json!({"decision":"refuse","directive":{"code":"control_assurance_insufficient"}}),
+        json!({"decision":"refuse","directive":{"code":"control_assurance_insufficient",
+            "effect":"mutate_local","required_assurance":"turn_gated",
+            "declared_mediated_effects":["observe","communicate","mutate_local"]}}),
+        json!({"decision":"refuse","directive":{"code":"control_assurance_insufficient",
+            "effect":"mutate_local","required_assurance":"action_gated",
+            "declared_mediated_effects":["observe","communicate"]}}),
     ] {
-        let (state, session, receiver, transport) =
-            root_fixture([bind_reply("root-token"), refusal]);
-        let dispatch = root_dispatch(&state, &session, false);
-        let _ = deliver_turn_dispatch(&state, dispatch);
-        assert!(
-            receiver.try_recv().is_err(),
-            "a refused turn never reaches the runtime"
-        );
-        assert_eq!(
-            operations(&transport),
-            ["session_bind", "turn_evaluate"],
-            "no rebind for a refusal a rebind cannot cure"
-        );
+        let turn = OrdinaryRoot::new("ordinary-root-passive-refusal");
+        turn.transport.responses.lock().unwrap().push_back(ScriptedEngramControlResponse::Reply(Ok(refusal.clone())));
+        turn.edit(|record| { record.engram.historical_control.insert("engramRefusal".into(), refusal.clone()); });
+        deliver_turn_dispatch(&turn.state, turn.prepare("Ordinary input.")).unwrap();
+        turn.prompt();
+        turn.assert_no_prompt();
+        turn.assert_no_control();
+        assert_eq!(turn.transport.responses.lock().unwrap().len(), 1);
+        turn.record(|record| assert_eq!(record.engram.historical_control["engramRefusal"], refusal));
     }
 }
 
 #[test]
-fn root_begin_reevaluation_asks_again_for_what_the_refused_grant_asked() {
-    // A retained evaluate prepared before roots mediated local mutation is
-    // replayed under the old binding and granted; its begin is refused as
-    // expired. The re-evaluation runs under the same binding, so it asks
-    // again for the older set instead of one that binding would refuse, and
-    // the prompt still reaches the runtime.
-    assert_begin_reevaluation_after_replayed_old_set(
-        "grant_expired",
-        json!(["observe", "communicate"]),
-        false,
-    );
+fn ordinary_turn_preserves_passive_older_effect_bytes_without_reevaluation() {
+    let turn = OrdinaryRoot::new("ordinary-root-older-effects");
+    let id = turn.enqueue("original uncertain provider attempt", QueuedPromptSource::User);
+    let expected = turn.edit(|record| {
+        let row = &mut record.queued_prompts[0];
+        row.promotion_disposition_known = false;
+        row.engram_ordinary_handoff = true;
+        row.engram_evaluate = Some(passive_evaluate_bytes(true, json!(["observe","communicate"])));
+        serde_json::to_value(row).unwrap()
+    });
+    deliver_turn_dispatch(&turn.state, turn.prepare("An independent ordinary task.")).unwrap();
+    turn.prompt();
+    turn.assert_no_prompt();
+    turn.record(|record| {
+        let row = record.queued_prompts.iter().find(|row| row.pending_prompt.id == id).unwrap();
+        assert_eq!(row.engram_evaluate.as_ref().unwrap()["request"]["requested_effects"], json!(["observe","communicate"]));
+        assert_eq!(serde_json::to_value(row).unwrap(), expected);
+    });
+    turn.assert_no_control();
 }
 
 #[test]
-fn root_begin_stale_fence_reevaluation_asks_for_the_current_set() {
-    // A stale_fence begin refusal rebinds first, declaring the current set,
-    // so its re-evaluation asks for the current set even though the refused
-    // grant's retained evaluate asked for the older one.
-    assert_begin_reevaluation_after_replayed_old_set(
-        "stale_fence",
-        json!(["observe", "communicate", "mutate_local"]),
-        true,
-    );
-}
-
-/// A retained evaluate prepared under the older root set is replayed under
-/// the old binding and granted, and its begin is refused with
-/// `begin_refusal`. The re-evaluation must ask for `expected_effects`, the
-/// grant must be recorded with whether that re-evaluation requested
-/// mutation, and the prompt must still reach the runtime.
-fn assert_begin_reevaluation_after_replayed_old_set(
-    begin_refusal: &str,
-    expected_effects: Value,
-    expected_mutates: bool,
-) {
-    let rebinds = begin_refusal == "stale_fence";
-    let mut responses = vec![
-        bind_reply("root-token"),
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-            "evaluate reply lost",
-        ))),
-        grant_reply("replayed-grant"),
-        checkpoint_refusal_reply(begin_refusal),
-    ];
-    if rebinds {
-        responses.push(status_reply("ready"));
-        responses.push(rebind_reply("root-token-rebound"));
-    }
-    responses.push(grant_reply("reevaluated-grant"));
-    responses.push(begin_reply("reevaluated-grant"));
-    let (state, session, receiver, transport) = root_fixture(responses);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).expect("an unknown admission retains the prompt");
-    assert!(receiver.try_recv().is_err());
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let prepared = inner.sessions[index]
-            .queued_prompts
-            .front_mut()
-            .and_then(|queued| queued.engram_evaluate.as_mut())
-            .expect("the unknown evaluate is retained for replay");
-        let EngramControlRequest::TurnEvaluate {
-            requested_effects, ..
-        } = &mut prepared.request
-        else {
-            panic!("the retained request is an evaluate");
-        };
-        // As prepared before the upgrade, under the older root set.
-        *requested_effects = vec![EngramEffect::Observe, EngramEffect::Communicate];
-    }
-
-    state
-        .resume_session_queue(&session)
-        .expect("the retained evaluate replays");
-    assert!(matches!(
-        receiver
-            .try_recv()
-            .expect("the re-evaluated turn reaches the runtime"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err(), "exactly one provider prompt");
-    let mut expected_operations = vec![
-        "session_bind",
-        "turn_evaluate",
-        "turn_evaluate",
-        "turn_begin",
-    ];
-    if rebinds {
-        expected_operations.extend(["session_status", "session_bind"]);
-    }
-    expected_operations.extend(["turn_evaluate", "turn_begin"]);
-    assert_eq!(
-        operations(&transport),
-        expected_operations,
-        "{begin_refusal}: a rebind only for stale_fence"
-    );
-    let requests = transport.requests();
-    let reevaluation = requests
-        .iter()
-        .filter(|request| request.request["operation"] == "turn_evaluate")
-        .last()
-        .expect("the turn is re-evaluated");
-    assert_eq!(
-        reevaluation.request["requested_effects"], expected_effects,
-        "{begin_refusal}: the re-evaluation's requested effects"
-    );
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(
-        record.engram.active_grant_id.as_deref(),
-        Some("reevaluated-grant")
-    );
-    assert_eq!(
-        record.engram.active_turn_grant_mutates,
-        Some(("reevaluated-grant".to_owned(), expected_mutates)),
-        "{begin_refusal}: the grant is recorded with what its re-evaluation requested"
-    );
+fn ordinary_turn_preserves_passive_mutating_effect_bytes_without_a_new_grant() {
+    let turn = OrdinaryRoot::new("ordinary-root-mutating-effects");
+    let id = turn.enqueue("original uncertain provider attempt", QueuedPromptSource::User);
+    let expected = turn.edit(|record| {
+        let row = &mut record.queued_prompts[0];
+        row.promotion_disposition_known = false;
+        row.engram_ordinary_handoff = true;
+        row.engram_evaluate = Some(passive_evaluate_bytes(true, json!(["observe","communicate","mutate_local"])));
+        serde_json::to_value(row).unwrap()
+    });
+    deliver_turn_dispatch(&turn.state, turn.prepare("An independent ordinary task.")).unwrap();
+    turn.prompt();
+    turn.assert_no_prompt();
+    turn.record(|record| {
+        let row = record.queued_prompts.iter().find(|row| row.pending_prompt.id == id).unwrap();
+        assert_eq!(row.engram_evaluate.as_ref().unwrap()["request"]["requested_effects"],
+            json!(["observe","communicate","mutate_local"]));
+        assert_eq!(serde_json::to_value(row).unwrap(), expected);
+    });
+    turn.assert_no_control();
 }
 
 #[test]
-fn root_that_stays_refused_after_the_rebind_reports_the_refusal() {
-    // The rebind is attempted once; a refusal that survives it is final and
-    // the prompt is withheld rather than retried again.
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("root-token"),
-        envelope_refusal_reply("mutate_local", &["observe", "communicate"]),
-        status_reply("ready"),
-        rebind_reply("root-token-rebound"),
-        envelope_refusal_reply("mutate_local", &["observe", "communicate"]),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    let _ = deliver_turn_dispatch(&state, dispatch);
-    assert!(
-        receiver.try_recv().is_err(),
-        "a refused turn never reaches the runtime"
-    );
-    assert_eq!(
-        operations(&transport),
-        [
-            "session_bind",
-            "turn_evaluate",
-            "session_status",
-            "session_bind",
-            "turn_evaluate"
-        ],
-        "one rebind and one re-evaluation, no more"
-    );
-    let inner = state.inner.lock().unwrap();
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert!(record.session.messages.iter().any(|message| matches!(
-        message,
-        Message::EngramControl { card, .. }
-            if card.decision == EngramControlCardDecision::Refuse
-                && card.refusal_code.as_deref() == Some("control_assurance_insufficient")
-    )));
+fn repeated_retired_control_refusals_are_never_polled_by_ordinary_dispatch() {
+    let turn = OrdinaryRoot::new("ordinary-root-unpolled-refusals");
+    let refusal = json!({"decision":"refuse","directive":{"code":"control_assurance_insufficient",
+        "effect":"mutate_local","required_assurance":"turn_gated"}});
+    turn.transport.responses.lock().unwrap().extend((0..5).map(|_| ScriptedEngramControlResponse::Reply(Ok(refusal.clone()))));
+    deliver_turn_dispatch(&turn.state, turn.prepare("Ordinary input beside old refusals.")).unwrap();
+    turn.prompt();
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    assert_eq!(turn.transport.responses.lock().unwrap().len(), 5);
+    turn.record(|record| assert!(!record.session.messages.iter().any(|message| matches!(message,
+        Message::EngramControl { card, .. } if card.refusal_code.as_deref() == Some("control_assurance_insufficient")))));
 }
 
 #[test]
-fn root_direct_and_queued_turns_bind_evaluate_begin_and_complete() {
+fn root_direct_and_queued_turns_deliver_and_complete_without_a_control_lifecycle() {
     for queued in [false, true] {
-        let (state, session, receiver, transport) = root_fixture([
-            bind_reply("root-token"),
-            grant_reply("root-grant"),
-            begin_reply("root-grant"),
-            checkpoint_reply("root-grant"),
-        ]);
-        let dispatch = root_dispatch(&state, &session, queued);
-        assert!(
-            receiver.try_recv().is_err(),
-            "evaluate alone must not deliver a prompt"
-        );
-        assert_eq!(operations(&transport), ["session_bind", "turn_evaluate"]);
-        deliver_turn_dispatch(&state, dispatch)
-            .expect("begun root turn should reach the provider channel");
-        assert!(matches!(
-            receiver.try_recv().unwrap(),
-            CodexRuntimeCommand::Prompt { .. }
-        ));
-        assert!(receiver.try_recv().is_err(), "exactly one provider prompt");
-        assert_eq!(
-            operations(&transport),
-            ["session_bind", "turn_evaluate", "turn_begin"]
-        );
-        let token = {
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert_eq!(record.engram.active_grant_id.as_deref(), Some("root-grant"));
-            record.runtime.runtime_token().unwrap()
-        };
-        state
-            .finish_turn_ok_if_runtime_matches(&session, &token)
-            .unwrap();
-        assert_eq!(
-            operations(&transport),
-            [
-                "session_bind",
-                "turn_evaluate",
-                "turn_begin",
-                "turn_checkpoint"
-            ]
-        );
-        let requests = transport.requests();
-        assert!(requests.iter().all(|r| r.connection.session_id == session));
-        assert_eq!(
-            requests[0].request["external_ref"],
-            format!("termal:session:{session}")
-        );
-        assert_eq!(
-            requests[0].request["mediated_effects"],
-            json!(["observe", "communicate", "mutate_local"]),
-            "a root session edits its own workspace, so it mediates local mutation"
-        );
-        assert_eq!(
-            requests[1].request["requested_effects"],
-            requests[0].request["mediated_effects"]
-        );
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.engram.active_grant_id.is_none());
-        assert!(record.session.messages.iter().any(|m| match m {
-            Message::EngramControl { card, .. } => {
-                card.stage == EngramControlStage::Checkpoint
-                    && card.decision == EngramControlCardDecision::Grant
-            }
-            _ => false,
-        }));
+        let turn = OrdinaryRoot::new("ordinary-root-delivery-completion");
+        let operation = super::turn_checks::checkpoint_result_recovery::passive_checkpoint(
+            &turn.root, &turn.session);
+        let original = serde_json::to_value(&operation).unwrap();
+        {
+            let mut inner = turn.state.inner.lock().unwrap();
+            super::turn_checks::checkpoint_result_recovery::install_historical_checkpoint(
+                &mut inner, &turn.session, &operation);
+            turn.state.commit_locked(&mut inner).unwrap();
+        }
+        let dispatch = if queued {
+            turn.enqueue("Ordinary queued input.", QueuedPromptSource::User);
+            turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap().dispatch
+        } else { turn.prepare("Ordinary direct input.") };
+        turn.assert_no_prompt();
+        turn.assert_no_control();
+        deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+        turn.prompt();
+        turn.assert_no_prompt();
+        let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        turn.assert_no_control();
+        turn.record(|record| {
+            assert_eq!(record.session.status, SessionStatus::Idle);
+            assert!(record.queued_prompts.is_empty());
+            assert_eq!(record.engram.historical_control["engramCheckpointOperation"], original);
+            assert!(!record.session.messages.iter().any(|message| matches!(message,
+                Message::EngramControl { card, .. } if card.stage == EngramControlStage::Checkpoint)));
+        });
     }
 }
 
 #[test]
-fn root_direct_and_queued_denials_and_failures_never_reach_provider() {
+fn retired_control_denials_and_transport_failures_cannot_withhold_ordinary_root_turns() {
     for queued in [false, true] {
         for failure in ["evaluate", "defer", "begin", "bind", "protocol", "fatal"] {
-            let responses = match failure {
-                "evaluate" => vec![
-                    bind_reply("root-token"),
-                    evaluation_refusal_reply("policy_denied"),
-                ],
-                "defer" => vec![bind_reply("root-token"), defer_reply("not_ready")],
-                "begin" => vec![
-                    bind_reply("root-token"),
-                    grant_reply("root-grant"),
-                    // Begin and checkpoint share the same refusal response shape.
-                    checkpoint_refusal_reply("policy_denied"),
-                ],
-                "bind" => vec![ScriptedEngramControlResponse::Reply(Err(
-                    EngramTransportError::transport("unavailable"),
-                ))],
-                "protocol" => vec![ScriptedEngramControlResponse::Reply(Err(
-                    EngramTransportError::protocol("malformed binding response"),
-                ))],
-                "fatal" => vec![],
+            let turn = OrdinaryRoot::new("ordinary-root-unused-errors");
+            let reply = match failure {
+                "evaluate" => Ok(json!({"decision":"refuse","code":"policy_denied"})),
+                "defer" => Ok(json!({"decision":"defer","reason":"not_ready"})),
+                "begin" => Ok(json!({"decision":"refuse","code":"begin_policy_denied"})),
+                "bind" => Err(EngramTransportError::transport("unavailable")),
+                "protocol" => Err(EngramTransportError::protocol("old binding response malformed")),
+                "fatal" => Ok(json!({"code":"control_disabled"})),
                 _ => unreachable!(),
             };
-            let (state, session, receiver, transport) = root_fixture(responses);
-            if failure == "fatal" {
-                let mut inner = state.inner.lock().unwrap();
-                let index = inner.find_session_index(&session).unwrap();
-                inner.sessions[index].engram.disabled_reason = Some("control_disabled".to_owned());
-            }
-            let dispatch = root_dispatch(&state, &session, queued);
-            let delivery = deliver_turn_dispatch(&state, dispatch);
-            if matches!(failure, "defer" | "bind" | "protocol") {
-                delivery.expect("uncertain admission remains waiting, not denied");
-            } else {
-                assert_eq!(
-                    delivery
-                        .expect_err("must withhold denied root prompt")
-                        .status,
-                    StatusCode::CONFLICT
-                );
-            }
-            assert!(
-                receiver.try_recv().is_err(),
-                "queued={queued} failure={failure}"
-            );
-            let ops = operations(&transport);
-            if failure == "fatal" {
-                assert!(
-                    transport.requests().is_empty(),
-                    "fatal sessions make no control calls"
-                );
-            }
-            assert_eq!(
-                ops.iter().filter(|op| op.as_str() == "turn_begin").count(),
-                usize::from(failure == "begin")
-            );
-            assert!(!ops.iter().any(|op| op == "turn_checkpoint"));
-            let inner = state.inner.lock().unwrap();
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert!(record.engram.active_grant_id.is_none());
-            assert!(
-                record
-                    .session
-                    .messages
-                    .iter()
-                    .any(|m| matches!(m, Message::EngramControl { card, .. }
-                if card.dispatch == EngramControlCardDispatch::Withheld))
-            );
+            turn.transport.responses.lock().unwrap().push_back(ScriptedEngramControlResponse::Reply(reply));
+            turn.edit(|record| {
+                record.engram.historical_control.insert("engramOldFailure".into(), json!(failure));
+                if failure == "fatal" {
+                    record.engram.historical_control.insert("engramDisabledReason".into(), json!("control_disabled"));
+                }
+            });
+            let dispatch = if queued {
+                turn.enqueue("Ordinary queued input.", QueuedPromptSource::User);
+                turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap().dispatch
+            } else { turn.prepare("Ordinary direct input.") };
+            deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+            turn.prompt();
+            turn.assert_no_prompt();
+            turn.assert_no_control();
+            assert_eq!(turn.transport.responses.lock().unwrap().len(), 1, "{failure}");
+            turn.record(|record| {
+                assert_eq!(record.session.status, SessionStatus::Active);
+                assert_eq!(record.engram.historical_control["engramOldFailure"], failure);
+                if failure == "fatal" {
+                    assert_eq!(record.engram.historical_control["engramDisabledReason"], "control_disabled");
+                }
+            });
         }
     }
 }
 
 #[test]
-fn root_queued_mailbox_and_orchestrator_turns_use_admission() {
-    for source in [
-        QueuedPromptSource::Mailbox,
-        QueuedPromptSource::Orchestrator,
-    ] {
-        let (state, session, receiver, transport) = root_fixture([
-            bind_reply("root-token"),
-            evaluation_refusal_reply("policy_denied"),
-        ]);
-        queue_test_engram_prompt(&state, &session, "Automatic root wake", source, None);
-        let dispatch = state
-            .start_next_queued_turn_off_lock(&session, false, false)
-            .unwrap()
-            .unwrap()
-            .dispatch;
-        assert_eq!(
-            deliver_turn_dispatch(&state, dispatch).unwrap_err().status,
-            StatusCode::CONFLICT
-        );
-        assert!(receiver.try_recv().is_err());
-        assert_eq!(operations(&transport), ["session_bind", "turn_evaluate"]);
-    }
-}
-
-#[test]
-fn queued_mailbox_coalescing_retires_old_grant_and_evaluates_new_intent_for_roots_and_children() {
-    for child in [false, true] {
-        let (state, root, receiver, _) = root_fixture([
-            bind_reply("setup-parent"),
-            bind_reply("setup-child"),
-            grant_reply("setup-grant"),
-            begin_reply("setup-grant"),
-            checkpoint_reply("setup-grant"),
-        ]);
-        let (session, external_ref) = if child {
-            let created = state
-                .create_read_only_delegation(
-                    &root,
-                    CreateDelegationRequest {
-                        prompt: "Set up the child".into(),
-                        title: None,
-                        cwd: None,
-                        agent: Some(Agent::Codex),
-                        model: None,
-                        mode: Some(DelegationMode::Reviewer),
-                        write_policy: Some(DelegationWritePolicy::ReadOnly),
-                    },
-                )
-                .unwrap();
-            assert!(matches!(
-                receive_synchronous_engram_prompt(&state, &receiver, "setup prompt").unwrap(),
-                CodexRuntimeCommand::Prompt { .. }
-            ));
-            let session = created.delegation.child_session_id;
-            let token = {
-                let inner = state.inner.lock().expect("state mutex poisoned");
-                inner.sessions[inner.find_session_index(&session).unwrap()]
-                    .runtime
-                    .runtime_token()
-                    .unwrap()
-            };
-            state
-                .finish_turn_ok_if_runtime_matches(&session, &token)
-                .unwrap();
-            (
-                session,
-                format!("termal:delegation:{}", created.delegation.id),
-            )
-        } else {
-            (root.clone(), format!("termal:session:{root}"))
-        };
-        {
-            let mut inner = state.inner.lock().expect("state mutex poisoned");
-            let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].engram.routing_token = Some("old-token".into());
-            inner.sessions[index].engram.context_nudge_pending = false;
-        }
-        let source = |sequence| {
-            Some(MessageSource::mailbox(
-                root.clone(),
-                "Sender".into(),
-                MailboxMessageSource {
-                    mailbox_id: "coalesced-mailbox".into(),
-                    message_id: format!("mail-{sequence}"),
-                    sequence,
-                    unread_count: sequence,
-                },
-            ))
-        };
-        queue_test_engram_prompt(
-            &state,
-            &session,
-            "Sequence 1",
-            QueuedPromptSource::Mailbox,
-            source(1),
-        );
-        let (evaluate, gate) = gated_engram_step("turn_evaluate", grant_reply("obsolete-grant"));
-        let transport = GatedEngramControlTransport::new([
-            evaluate,
-            immediate_engram_step(
-                "session_status",
-                ScriptedEngramControlResponse::Reply(Ok(json!({
-                    "phase": "ready", "open_grant_id": "obsolete-grant"
-                }))),
-            ),
-            immediate_engram_step(
-                "turn_checkpoint",
-                checkpoint_refusal_reply("grant_not_begun"),
-            ),
-            immediate_engram_step("session_bind", rebind_reply("new-token")),
-            immediate_engram_step("turn_evaluate", grant_reply("current-grant")),
-            immediate_engram_step("turn_begin", begin_reply("current-grant")),
-            immediate_engram_step("turn_checkpoint", checkpoint_reply("current-grant")),
-        ]);
-        state.install_control_test_transport(transport.clone());
-        let dispatch = std::thread::scope(|scope| {
-            let worker =
-                scope.spawn(|| state.start_next_queued_turn_off_lock(&session, false, false));
-            let evaluated = gate.wait();
-            let new_fingerprint = {
-                let mut inner = state.inner.lock().expect("state mutex poisoned");
-                let index = inner.find_session_index(&session).unwrap();
-                let record = &mut inner.sessions[index];
-                let generation = record.engram.dispatch_generation;
-                let queued = record.queued_prompts.front_mut().unwrap();
-                let id = queued.pending_prompt.id.clone();
-                // Isolate the exact in-place mutation made by mailbox coalescing;
-                // queue identity and dispatch generation deliberately stay put.
-                queued.pending_prompt.text = "Sequence 2".into();
-                queued.pending_prompt.source = source(2);
-                let fingerprint = engram_turn_intent_fingerprint(
-                    &queued.pending_prompt.text,
-                    None,
-                    &queued.attachments,
-                    queued.pending_prompt.source.as_ref(),
-                    queued.source,
-                );
-                assert_eq!(queued.pending_prompt.id, id);
-                assert_eq!(record.engram.dispatch_generation, generation);
-                state.commit_locked(&mut inner).unwrap();
-                fingerprint
-            };
-            assert_ne!(evaluated.request["intent_fingerprint"], new_fingerprint);
-            assert!(receiver.try_recv().is_err());
-            gate.release();
-            let started = worker.join().unwrap().unwrap().unwrap();
-            let requests = transport.requests();
-            assert_eq!(requests.len(), 5, "repair must precede fresh evaluation");
-            assert_eq!(requests[4].request["intent_fingerprint"], new_fingerprint);
-            assert_ne!(
-                requests[0].request["idempotency_key"],
-                requests[4].request["idempotency_key"]
-            );
-            assert_eq!(requests[3].request["external_ref"], external_ref);
-            started.dispatch
-        });
-        deliver_turn_dispatch(&state, dispatch).unwrap();
-        assert!(matches!(
-            receiver.try_recv().unwrap(),
-            CodexRuntimeCommand::Prompt { .. }
-        ));
-        assert!(
-            receiver.try_recv().is_err(),
-            "only the newly admitted prompt is delivered"
-        );
-        let token = {
-            let inner = state.inner.lock().expect("state mutex poisoned");
-            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert_eq!(
-                record.engram.active_grant_id.as_deref(),
-                Some("current-grant")
-            );
+fn root_queued_mailbox_and_orchestrator_turns_need_no_control_admission() {
+    for source in [QueuedPromptSource::Mailbox, QueuedPromptSource::Orchestrator] {
+        let turn = OrdinaryRoot::new("ordinary-root-automatic-wake");
+        turn.enqueue("Automatic root wake", source);
+        let dispatch = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false)
+            .unwrap().unwrap().dispatch;
+        deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+        assert!(turn.prompt().prompt.contains("Automatic root wake"));
+        turn.assert_no_prompt();
+        turn.assert_no_control();
+        turn.record(|record| {
             assert!(record.queued_prompts.is_empty());
-            record.runtime.runtime_token().unwrap()
-        };
-        state
-            .finish_turn_ok_if_runtime_matches(&session, &token)
-            .unwrap();
-        let requests = transport.requests();
-        let begins: Vec<_> = requests
-            .iter()
-            .filter(|r| r.request["operation"] == "turn_begin")
-            .collect();
-        assert_eq!(begins.len(), 1);
-        assert_eq!(begins[0].request["grant_id"], "current-grant");
-    }
-}
-
-#[test]
-fn root_completion_drains_a_busy_queued_prompt_through_fresh_admission() {
-    for allow_followup in [false, true] {
-        let mut responses = vec![
-            bind_reply("root-token"),
-            grant_reply("first"),
-            begin_reply("first"),
-            checkpoint_reply("first"),
-        ];
-        if allow_followup {
-            responses.extend([
-                grant_reply("second"),
-                begin_reply("second"),
-                checkpoint_reply("second"),
-            ]);
-        } else {
-            responses.push(evaluation_refusal_reply("policy_denied"));
-        }
-        let (state, session, receiver, transport) = root_fixture(responses);
-        let first = root_dispatch(&state, &session, false);
-        deliver_turn_dispatch(&state, first).unwrap();
-        assert!(matches!(
-            receiver.try_recv().unwrap(),
-            CodexRuntimeCommand::Prompt { .. }
-        ));
-        let queued = state
-            .dispatch_turn(
-                &session,
-                SendMessageRequest {
-                    text: "Queued while busy".to_owned(),
-                    expanded_text: None,
-                    attachments: Vec::new(),
-                    source_session_id: None,
-                    source_mailbox: None,
-                },
-            )
-            .unwrap();
-        assert!(matches!(queued, DispatchTurnResult::Queued));
-        assert_eq!(
-            operations(&transport),
-            ["session_bind", "turn_evaluate", "turn_begin"]
-        );
-        let token = {
-            let inner = state.inner.lock().unwrap();
-            inner.sessions[inner.find_session_index(&session).unwrap()]
-                .runtime
-                .runtime_token()
-                .unwrap()
-        };
-        let completion = state.finish_turn_ok_if_runtime_matches(&session, &token);
-        if allow_followup {
-            completion.expect("allowed queued turn should drain");
-            assert!(matches!(
-                receiver.try_recv().unwrap(),
-                CodexRuntimeCommand::Prompt { .. }
-            ));
-            state
-                .finish_turn_ok_if_runtime_matches(&session, &token)
-                .unwrap();
-            assert_eq!(
-                operations(&transport),
-                [
-                    "session_bind",
-                    "turn_evaluate",
-                    "turn_begin",
-                    "turn_checkpoint",
-                    "turn_evaluate",
-                    "turn_begin",
-                    "turn_checkpoint"
-                ]
-            );
-        } else {
-            assert!(
-                completion
-                    .unwrap_err()
-                    .to_string()
-                    .contains("Engram did not authorize")
-            );
-            assert!(
-                receiver.try_recv().is_err(),
-                "denied queued turn never reaches provider"
-            );
-            assert_eq!(
-                operations(&transport),
-                [
-                    "session_bind",
-                    "turn_evaluate",
-                    "turn_begin",
-                    "turn_checkpoint",
-                    "turn_evaluate"
-                ]
-            );
-        }
-    }
-}
-
-#[test]
-fn stop_does_not_promote_a_mailbox_head_changed_during_successor_evaluation() {
-    let (state, session, receiver, _) = root_fixture([]);
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].engram.routing_token = Some("old-token".into());
-        // Exercise Stop's missing-runtime recovery of a running session.
-        inner.sessions[index].session.status = SessionStatus::Active;
-    }
-    let source = |sequence| {
-        Some(MessageSource::mailbox(
-            "sender".into(),
-            "Sender".into(),
-            MailboxMessageSource {
-                mailbox_id: "stop-mailbox".into(),
-                message_id: format!("mail-{sequence}"),
-                sequence,
-                unread_count: sequence,
-            },
-        ))
-    };
-    queue_test_engram_prompt(
-        &state,
-        &session,
-        "Sequence 1",
-        QueuedPromptSource::Mailbox,
-        source(1),
-    );
-    let (evaluate, gate) = gated_engram_step("turn_evaluate", grant_reply("obsolete-stop-grant"));
-    let transport = GatedEngramControlTransport::new([evaluate]);
-    state.install_control_test_transport(transport.clone());
-    std::thread::scope(|scope| {
-        let worker = scope.spawn(|| {
-            state.stop_session_with_options(
-                &session,
-                StopSessionOptions {
-                    dispatch_queued_prompts_on_success: true,
-                    pause_automatic_resumes_on_success: false,
-                    orchestrator_stop_instance_id: None,
-                },
-            )
+            assert_eq!(record.session.prompt_history.last().map(String::as_str), Some("Automatic root wake"));
         });
-        gate.wait();
-        {
-            let mut inner = state.inner.lock().expect("state mutex poisoned");
-            let index = inner.find_session_index(&session).unwrap();
-            let head = inner.sessions[index].queued_prompts.front_mut().unwrap();
-            head.pending_prompt.text = "Sequence 2".into();
-            head.pending_prompt.source = source(2);
-            state.commit_locked(&mut inner).unwrap();
-        }
-        gate.release();
-        worker.join().unwrap().unwrap();
+    }
+}
+
+#[test]
+fn queued_mailbox_coalescing_preserves_selected_payload_for_ordinary_roots_and_children() {
+    for child in [false, true] {
+        let turn = OrdinaryRoot::new("ordinary-root-child-coalescing");
+        let session = if child {
+            let created = turn.state.create_read_only_delegation(&turn.session, CreateDelegationRequest {
+                prompt: "Set up the child".into(), title: None, cwd: None,
+                agent: Some(Agent::Codex), model: None, mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            }).unwrap();
+            let session = created.delegation.child_session_id;
+            let command = receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "actual child setup").unwrap();
+            assert!(matches!(command, CodexRuntimeCommand::Prompt { session_id, .. } if session_id == session));
+            let token = {
+                let inner = turn.state.inner.lock().unwrap();
+                inner.sessions[inner.find_session_index(&session).unwrap()].runtime.runtime_token().unwrap()
+            };
+            turn.state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
+            session
+        } else { turn.session.clone() };
+        let source = |sequence| Some(MessageSource::mailbox(turn.session.clone(), "Sender".into(),
+            MailboxMessageSource { mailbox_id:"coalesced-mailbox".into(),
+                message_id:format!("mail-{sequence}"), sequence, unread_count:sequence }));
+        let id = {
+            let mut inner = turn.state.inner.lock().unwrap();
+            let id = inner.next_message_id();
+            let record = inner.session_mut(&session).unwrap();
+            record.engram.context_nudge_pending = false;
+            record.engram.historical_control.insert("engramRoutingToken".into(), json!("historical-token"));
+            queue_prompt_on_record_with_source(record, PendingPrompt {
+                engram_interrupted: false, is_engram_retained: false, attachments: Vec::new(),
+                id: id.clone(), timestamp: stamp_now(), text: "Sequence 1".into(),
+                expanded_text: None, source: source(1),
+            }, Vec::new(), QueuedPromptSource::Mailbox);
+            let queued = record.queued_prompts.front_mut().unwrap();
+            queued.pending_prompt.text = "Sequence 2".into();
+            queued.pending_prompt.source = source(2);
+            sync_pending_prompts(record);
+            turn.state.commit_locked(&mut inner).unwrap();
+            id
+        };
+        let dispatch = turn.state.start_next_queued_turn_off_lock(&session, false, false).unwrap().unwrap().dispatch;
+        deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+        let command = receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "coalesced ordinary handoff").unwrap();
+        assert!(matches!(command, CodexRuntimeCommand::Prompt { session_id, .. } if session_id == session));
+        turn.assert_no_prompt();
+        let inner = turn.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert!(record.queued_prompts.is_empty());
+        assert!(record.session.messages.iter().any(|message| matches!(message,
+            Message::Text { id: actual, text, source: actual_source, .. }
+                if actual == &id && text == "Sequence 2" && actual_source == &source(2))));
+        assert_eq!(record.engram.historical_control["engramRoutingToken"], "historical-token");
+        turn.assert_no_control();
+    }
+}
+
+#[test]
+fn root_completion_drains_the_busy_ordinary_queue_despite_an_unused_control_refusal() {
+    for reply in [json!({"decision":"grant","grant_id":"unused"}), json!({"decision":"refuse","code":"policy_denied"})] {
+        let turn = OrdinaryRoot::new("ordinary-root-busy-completion");
+        turn.transport.responses.lock().unwrap().push_back(ScriptedEngramControlResponse::Reply(Ok(reply)));
+        deliver_turn_dispatch(&turn.state, turn.prepare("First ordinary turn.")).unwrap();
+        turn.prompt();
+        let queued = turn.state.dispatch_turn(&turn.session, SendMessageRequest {
+            text: "Queued while busy".into(), expanded_text: None, attachments: Vec::new(),
+            source_session_id: None, source_mailbox: None,
+        }).unwrap();
+        assert!(matches!(queued, DispatchTurnResult::Queued));
+        let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        assert!(turn.prompt().prompt.contains("Queued while busy"));
+        turn.assert_no_prompt();
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        turn.record(|record| {
+            assert_eq!(record.session.status, SessionStatus::Idle);
+            assert!(record.queued_prompts.is_empty());
+            assert_eq!(record.session.prompt_history.iter().filter(|text| text.as_str() == "Queued while busy").count(), 1);
+        });
+        turn.assert_no_control();
+        assert_eq!(turn.transport.responses.lock().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn stop_successor_uses_the_current_mailbox_head_without_a_control_evaluation_window() {
+    let turn = OrdinaryRoot::new("ordinary-root-stop-successor");
+    let source = |sequence| Some(MessageSource::mailbox("sender".into(), "Sender".into(),
+        MailboxMessageSource { mailbox_id:"stop-mailbox".into(),
+            message_id:format!("mail-{sequence}"), sequence, unread_count:sequence }));
+    let id = {
+        let mut inner = turn.state.inner.lock().unwrap();
+        let id = inner.next_message_id();
+        let record = inner.session_mut(&turn.session).unwrap();
+        record.engram.historical_control.insert("engramRoutingToken".into(), json!("historical-token"));
+        queue_prompt_on_record_with_source(record, PendingPrompt {
+            engram_interrupted: false, is_engram_retained: false, attachments: Vec::new(),
+            id: id.clone(), timestamp: stamp_now(), text: "Sequence 1".into(),
+            expanded_text: None, source: source(1),
+        }, Vec::new(), QueuedPromptSource::Mailbox);
+        record.session.status = SessionStatus::Active;
+        let head = record.queued_prompts.front_mut().unwrap();
+        head.pending_prompt.text = "Sequence 2".into();
+        head.pending_prompt.source = source(2);
+        sync_pending_prompts(record);
+        turn.state.commit_locked(&mut inner).unwrap();
+        id
+    };
+    turn.state.stop_session_with_options(&turn.session, StopSessionOptions {
+        dispatch_queued_prompts_on_success: true, pause_automatic_resumes_on_success: false,
+        orchestrator_stop_instance_id: None,
+    }).unwrap();
+    assert!(turn.prompt().prompt.contains("Sequence 2"));
+    turn.assert_no_prompt();
+    turn.record(|record| {
+        assert!(record.queued_prompts.is_empty());
+        assert!(record.session.messages.iter().any(|message| matches!(message,
+            Message::Text { id: actual, text, source: actual_source, .. }
+                if actual == &id && text == "Sequence 2" && actual_source == &source(2))));
+        assert_eq!(record.engram.historical_control["engramRoutingToken"], "historical-token");
     });
-    assert!(
-        receiver.try_recv().is_err(),
-        "obsolete grant must not release a provider prompt"
-    );
-    assert_eq!(
-        transport.requests().len(),
-        1,
-        "no begin for changed queue head"
-    );
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert!(
-        record.engram.rebind_required,
-        "repair issued grant before next admission"
-    );
-    assert!(record.engram.active_grant_id.is_none());
-    assert_eq!(
-        record.queued_prompts.front().unwrap().pending_prompt.text,
-        "Sequence 2"
-    );
+    turn.assert_no_control();
 }
 
 #[test]
 fn root_disabled_and_base_only_projects_preserve_ordinary_dispatch() {
     for queued in [false, true] {
         for settings_mode in ["absent", "disabled", "base"] {
-            let (state, session, receiver, transport) = root_fixture([]);
+            let turn = OrdinaryRoot::new("ordinary-root-base-settings");
             {
-                let mut inner = state.inner.lock().unwrap();
-                let index = inner.find_session_index(&session).unwrap();
-                // Base context is separately covered by the context fixture.
-                inner.sessions[index].engram.context_nudge_pending = false;
-                let project_id = inner.sessions[index].session.project_id.clone().unwrap();
-                let project = inner
-                    .projects
-                    .iter_mut()
-                    .find(|p| p.id == project_id)
-                    .unwrap();
+                let mut inner = turn.state.inner.lock().unwrap();
+                let project = inner.projects.iter_mut().find(|project| project.id == turn.project).unwrap();
                 match settings_mode {
                     "absent" => project.engram = None,
                     "disabled" => project.engram.as_mut().unwrap().enabled = false,
-                    "base" => project.engram.as_mut().unwrap().turn_gated_control = false,
+                    "base" => project.engram.as_mut().unwrap().execution_observability = false,
                     _ => unreachable!(),
                 }
             }
-            let dispatch = root_dispatch(&state, &session, queued);
-            deliver_turn_dispatch(&state, dispatch).unwrap();
-            assert!(matches!(
-                receiver.try_recv().unwrap(),
-                CodexRuntimeCommand::Prompt { .. }
-            ));
-            assert!(transport.requests().is_empty());
+            let dispatch = if queued {
+                turn.enqueue("Ordinary queued input.", QueuedPromptSource::User);
+                turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap().dispatch
+            } else { turn.prepare("Ordinary direct input.") };
+            deliver_turn_dispatch(&turn.state, dispatch).unwrap();
+            turn.prompt();
+            turn.assert_no_prompt();
+            turn.assert_no_control();
         }
     }
 }
 
 #[test]
-fn marked_child_with_missing_delegation_cannot_fall_back_to_root_admission() {
-    let (state, session, receiver, transport) = root_fixture([]);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].session.parent_delegation_id = Some("missing-delegation".to_owned());
-    }
-    let dispatch = root_dispatch(&state, &session, false);
-    assert_eq!(
-        deliver_turn_dispatch(&state, dispatch).unwrap_err().status,
-        StatusCode::CONFLICT
-    );
-    assert!(receiver.try_recv().is_err());
-    assert!(
-        transport.requests().is_empty(),
-        "never bind a damaged child as a root"
-    );
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.engram.consecutive_transport_failures, 0);
-    assert!(record.engram.next_bind_retry_at.is_none());
-    assert!(!record.engram.rebind_required);
+fn ordinary_handoff_with_a_missing_delegation_never_creates_a_root_binding() {
+    let turn = OrdinaryRoot::new("ordinary-root-damaged-child");
+    turn.edit(|record| record.session.parent_delegation_id = Some("missing-delegation".into()));
+    let dispatch = turn.prepare("An ordinary handoff grants no root authority.");
+    assert!(matches!(deliver_turn_dispatch(&turn.state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+    assert!(turn.prompt().prompt.contains("An ordinary handoff grants no root authority."));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    turn.record(|record| {
+        assert_eq!(record.session.parent_delegation_id.as_deref(), Some("missing-delegation"));
+        assert_eq!(record.session.status, SessionStatus::Active);
+        assert!(record.engram.historical_control.is_empty(),
+            "ordinary delivery cannot invent historical retry or root binding state");
+    });
 }
 
 #[test]
-fn root_without_children_recovers_open_grant_before_its_next_turn() {
-    let (state, session, receiver, transport) = root_fixture([
-        ScriptedEngramControlResponse::Reply(Ok(json!({
-            "phase": "executing", "open_grant_id": "pre-crash-grant"
-        }))),
-        checkpoint_reply("pre-crash-grant"),
-        rebind_reply("recovered-root"),
-        grant_reply("next-root-grant"),
-        begin_reply("next-root-grant"),
-        checkpoint_reply("next-root-grant"),
-    ]);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].engram.routing_token = Some("pre-crash-token".to_owned());
-        inner.sessions[index].engram.active_grant_id = Some("pre-crash-grant".to_owned());
-        inner.sessions[index].engram.rebind_required = true;
-    }
-    let plan = state.prepare_engram_sessions_for_boot_recovery().unwrap();
-    assert_eq!(plan.targets.len(), 1, "ordinary root must be a boot target");
-    assert_eq!(plan.targets[0].connection.session_id, session);
-    {
-        let inner = state.inner.lock().unwrap();
-        assert!(
-            inner.sessions[inner.find_session_index(&session).unwrap()]
-                .engram_boot_recovery_pending
-        );
-    }
-    state.recover_prepared_engram_sessions_after_boot(plan);
-    assert!(
-        receiver.try_recv().is_err(),
-        "recovery alone must not prompt"
-    );
-    assert_eq!(
-        operations(&transport),
-        ["session_status", "turn_checkpoint", "session_bind"]
-    );
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    let token = {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(!record.engram_boot_recovery_pending);
-        record.runtime.runtime_token().unwrap()
-    };
-    state
-        .finish_turn_ok_if_runtime_matches(&session, &token)
-        .unwrap();
-    assert_eq!(
-        operations(&transport),
-        [
-            "session_status",
-            "turn_checkpoint",
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin",
-            "turn_checkpoint"
-        ]
-    );
+fn ordinary_dispatch_and_completion_preserve_open_historical_grant_bytes() {
+    let turn = OrdinaryRoot::new("ordinary-root-historical-open-grant");
+    let historical = json!({"engramRoutingToken":"pre-crash-token","engramActiveGrantId":"pre-crash-grant",
+        "engramRebindRequired":true,"engramBootRecoveryPending":true});
+    turn.edit(|record| {
+        for (key, value) in historical.as_object().unwrap() {
+            record.engram.historical_control.insert(key.clone(), value.clone());
+        }
+    });
+    let loaded = turn.record(|record| PersistedSessionRecord::from_record(record).into_record().unwrap());
+    assert_eq!(serde_json::to_value(&loaded.engram.historical_control).unwrap(), historical);
+    assert!(matches!(loaded.runtime, SessionRuntime::None));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    deliver_turn_dispatch(&turn.state, turn.prepare("Fresh ordinary prompt.")).unwrap();
+    turn.prompt();
+    let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    turn.record(|record| assert_eq!(serde_json::to_value(&record.engram.historical_control).unwrap(), historical));
+    turn.assert_no_control();
 }
 
 #[test]
-fn boot_plan_excludes_unused_hidden_remote_and_base_only_sessions() {
-    let (state, root_session, _receiver, transport) = root_fixture([]);
-    let (project, root) = {
-        let inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&root_session).unwrap()];
-        (
-            record.session.project_id.clone().unwrap(),
-            PathBuf::from(&record.session.workdir),
-        )
-    };
-    let mut expected = Vec::new();
-    for kind in [
-        "token",
-        "grant",
-        "rebind",
-        "hidden",
-        "remote",
-        "partial-remote",
-        "base",
-    ] {
-        let id = create_test_project_session(&state, Agent::Codex, &project, &root);
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&id).unwrap();
-        let record = &mut inner.sessions[index];
+fn loading_unused_hidden_remote_and_base_only_history_constructs_no_runtime_or_observation_job() {
+    let turn = OrdinaryRoot::new("ordinary-root-history-session-shapes");
+    let mut histories = Vec::new();
+    for kind in ["token", "grant", "rebind", "hidden", "remote", "partial-remote", "base"] {
+        let id = create_test_project_session(&turn.state, Agent::Codex, &turn.project, &turn.root);
+        let mut inner = turn.state.inner.lock().unwrap();
+        let record = inner.session_mut(&id).unwrap();
         match kind {
-            "token" => record.engram.routing_token = Some("old-token".into()),
-            "grant" => record.engram.active_grant_id = Some("open-grant".into()),
-            "rebind" => record.engram.rebind_required = true,
-            "hidden" => {
-                record.hidden = true;
-                record.engram.rebind_required = true;
-            }
-            "remote" | "partial-remote" => {
-                record.remote_id = Some("other-host".into());
-                if kind == "remote" {
-                    record.remote_session_id = Some("remote-session".into());
-                }
-                record.engram.rebind_required = true;
-            }
-            "base" => {
-                record.engram.rebind_required = true;
-                record.session.project_id = Some("base-project".into());
-                let mut base = inner.find_project(&project).unwrap().clone();
-                base.id = "base-project".into();
-                base.engram.as_mut().unwrap().turn_gated_control = false;
-                inner.projects.push(base);
-            }
-            _ => unreachable!(),
+            "token" => { record.engram.historical_control.insert("engramRoutingToken".into(), json!("old-token")); }
+            "grant" => { record.engram.historical_control.insert("engramActiveGrantId".into(), json!("open-grant")); }
+            _ => { record.engram.historical_control.insert("engramRebindRequired".into(), json!(true)); }
         }
-        if kind == "grant" {
-            expected.push(id);
+        if kind == "hidden" { record.hidden = true; }
+        if matches!(kind, "remote" | "partial-remote") {
+            record.remote_id = Some("other-host".into());
+            if kind == "remote" { record.remote_session_id = Some("remote-session".into()); }
         }
+        let expected = record.engram.historical_control.clone();
+        let saved = PersistedSessionRecord::from_record(record);
+        if kind == "base" {
+            let project = inner.projects.iter_mut().find(|project| project.id == turn.project).unwrap();
+            project.engram.as_mut().unwrap().execution_observability = false;
+        }
+        histories.push((kind.to_owned(), id, saved, expected));
     }
-    // Many unused sessions must not create boot work or readiness fences.
     for _ in 0..40 {
-        create_test_project_session(&state, Agent::Codex, &project, &root);
+        let id = create_test_project_session(&turn.state, Agent::Codex, &turn.project, &turn.root);
+        let saved = {
+            let inner = turn.state.inner.lock().unwrap();
+            PersistedSessionRecord::from_record(&inner.sessions[inner.find_session_index(&id).unwrap()])
+        };
+        histories.push(("unused".to_owned(), id, saved, BTreeMap::new()));
     }
-    let plan = state.prepare_engram_sessions_for_boot_recovery().unwrap();
-    assert_eq!(
-        plan.targets
-            .iter()
-            .map(|target| target.connection.session_id.clone())
-            .collect::<Vec<_>>(),
-        expected
-    );
-    let inner = state.inner.lock().unwrap();
-    for record in &inner.sessions {
-        assert_eq!(
-            record.engram_boot_recovery_pending,
-            expected.contains(&record.session.id)
-        );
+    for (kind, id, saved, expected) in histories {
+        let restored = saved.into_record();
+        if kind == "partial-remote" {
+            let error = restored.err().expect("an incomplete proxy identity cannot become a local runtime");
+            assert!(format!("{error:#}").contains("remoteId requires remoteSessionId"), "{error:#}");
+            continue;
+        }
+        let loaded = restored.unwrap();
+        assert_eq!(loaded.session.id, id);
+        assert_eq!(loaded.engram.historical_control, expected);
+        assert!(matches!(loaded.runtime, SessionRuntime::None));
+        assert!(loaded.engram.unadmitted_active_turn.is_none());
+        assert!(loaded.engram.unadmitted_closing_jobs.is_empty());
+        assert!(loaded.provider_capacity_retry.is_none());
     }
-    assert!(
-        transport.requests().is_empty(),
-        "planning performs no control I/O"
-    );
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn root_failed_boot_recovery_withholds_next_prompt() {
-    let (state, session, receiver, transport) =
-        root_fixture([remote_error_reply("unknown_control_schema")]);
-    {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].engram.rebind_required = true;
-        // A legacy record can hide an unrecorded Begin, so its boot recovery
-        // stays eager even though settled idle roots are now lazy.
-        inner.sessions[index].engram.begins_recorded = false;
-    }
-    let plan = state.prepare_engram_sessions_for_boot_recovery().unwrap();
-    assert_eq!(plan.targets.len(), 1);
-    state.recover_prepared_engram_sessions_after_boot(plan);
-    let dispatch = root_dispatch(&state, &session, false);
-    assert_eq!(
-        deliver_turn_dispatch(&state, dispatch).unwrap_err().status,
-        StatusCode::CONFLICT
-    );
-    assert!(receiver.try_recv().is_err());
-    assert_eq!(operations(&transport), ["session_bind"]);
+fn passive_boot_retry_bytes_cannot_withhold_a_fresh_ordinary_prompt() {
+    let turn = OrdinaryRoot::new("ordinary-root-passive-boot-retry");
+    let historical = json!({"engramRebindRequired":true,"engramBeginsRecorded":false,
+        "engramBootRecoveryPending":true,"engramAdmissionRetry":{"code":"unknown_control_schema","future":[null,true]}});
+    turn.edit(|record| {
+        for (key, value) in historical.as_object().unwrap() {
+            record.engram.historical_control.insert(key.clone(), value.clone());
+        }
+    });
+    let loaded = turn.record(|record| PersistedSessionRecord::from_record(record).into_record().unwrap());
+    assert_eq!(serde_json::to_value(&loaded.engram.historical_control).unwrap(), historical);
+    deliver_turn_dispatch(&turn.state, turn.prepare("An independent ordinary prompt.")).unwrap();
+    turn.prompt();
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+    turn.record(|record| assert_eq!(serde_json::to_value(&record.engram.historical_control).unwrap(), historical));
 }
 
 #[test]
-fn root_completion_checkpoints_existing_grant_after_control_is_switched_off() {
-    let (state, session, receiver, transport) = root_fixture([
-        bind_reply("root-token"),
-        grant_reply("root-grant"),
-        begin_reply("root-grant"),
-        checkpoint_reply("root-grant"),
-    ]);
-    let dispatch = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    let token = {
-        let mut inner = state.inner.lock().unwrap();
-        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        let token = record.runtime.runtime_token().unwrap();
-        let project = record.session.project_id.clone().unwrap();
-        inner
-            .projects
-            .iter_mut()
-            .find(|p| p.id == project)
-            .unwrap()
-            .engram
-            .as_mut()
-            .unwrap()
-            .turn_gated_control = false;
-        token
-    };
-    state
-        .finish_turn_ok_if_runtime_matches(&session, &token)
-        .unwrap();
-    assert_eq!(
-        operations(&transport),
-        [
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin",
-            "turn_checkpoint"
-        ]
-    );
+fn ordinary_completion_does_not_checkpoint_or_erase_preexisting_grant_bytes_or_reactivate_a_saved_setting() {
+    for saved_setting in [false, true] {
+        let turn = OrdinaryRoot::new("ordinary-root-removed-setting");
+        {
+            let mut inner = turn.state.inner.lock().unwrap();
+            let settings = inner.projects.iter_mut().find(|project| project.id == turn.project).unwrap().engram.as_mut().unwrap();
+            let mut raw = serde_json::to_value(&*settings).unwrap();
+            raw["turnGatedControl"] = json!(saved_setting);
+            *settings = serde_json::from_value(raw).unwrap();
+            assert!(serde_json::to_value(settings).unwrap().get("turnGatedControl").is_none());
+        }
+        let historical = json!({"engramRoutingToken":"historical-token","engramActiveGrantId":"historical-grant"});
+        turn.edit(|record| {
+            for (key, value) in historical.as_object().unwrap() {
+                record.engram.historical_control.insert(key.clone(), value.clone());
+            }
+        });
+        deliver_turn_dispatch(&turn.state, turn.prepare("Fresh ordinary input.")).unwrap();
+        turn.prompt();
+        let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        turn.record(|record| assert_eq!(serde_json::to_value(&record.engram.historical_control).unwrap(), historical));
+        turn.assert_no_control();
+    }
+}
+
+
+#[test]
+fn ordinary_root_completion_drains_independent_busy_prompts_once_in_fifo_order() {
+    let turn = OrdinaryRoot::new("ordinary-root-completion-fifo");
+    deliver_turn_dispatch(&turn.state, turn.prepare("First prompt.")).unwrap();
+    assert!(turn.prompt().prompt.contains("First prompt."));
+    for text in ["FIFO second.", "FIFO third."] {
+        let result = turn.state.dispatch_turn(&turn.session, SendMessageRequest {
+            text: text.into(), expanded_text: None, attachments: Vec::new(),
+            source_session_id: None, source_mailbox: None,
+        }).unwrap();
+        assert!(matches!(result, DispatchTurnResult::Queued));
+    }
+    let token = turn.record(|record| record.runtime.runtime_token().unwrap());
+    for text in ["FIFO second.", "FIFO third."] {
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        assert!(turn.prompt().prompt.contains(text), "the next handoff is the original FIFO head");
+        turn.assert_no_prompt();
+    }
+    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    turn.record(|record| {
+        assert!(record.queued_prompts.is_empty());
+        assert_eq!(record.session.status, SessionStatus::Idle);
+        let selected = record.session.prompt_history.iter()
+            .filter(|text| matches!(text.as_str(), "FIFO second." | "FIFO third."))
+            .map(String::as_str).collect::<Vec<_>>();
+        assert_eq!(selected, ["FIFO second.", "FIFO third."]);
+    });
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }

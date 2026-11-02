@@ -122,18 +122,11 @@ fn test_run_can_finalize_unbound(
         && engram_project_for_session_locked(inner, &record.session.id)
             .is_some_and(|project| project.engram.is_none())
         && engram.work_binding.is_none()
-        && engram.active_grant_id.is_none()
-        && engram.uncertain_grant_id.is_none()
-        && engram.routing_token.is_none()
-        && engram.admission_attempt.is_none()
-        && engram.admission_in_progress.is_none()
-        && engram.source_observation_preparations == 0
+        && engram.unadmitted_active_turn.is_none()
         && engram.active_turn_checks.is_empty()
         && engram.carried_checks.is_empty()
         && engram.running_codex_tests.is_empty()
         && engram.carried_unmatched_launches.is_empty()
-        && engram.active_turn_report.is_none()
-        && engram.active_turn_report_fallback.is_none()
 }
 
 fn test_run_observation_boot(row: &mut TestRunCommandObservation) {
@@ -144,9 +137,7 @@ fn test_run_observation_boot(row: &mut TestRunCommandObservation) {
             .get_or_insert_with(test_run_timestamp);
         row.summary.state = TestRunState::Unknown;
         row.summary.interrupted = true;
-    } else if row.evidence.iter().any(|association| {
-        association.verification_record_id.is_none() || association.checkpoint_id.is_none()
-    }) {
+    } else if row.evidence.iter().any(|association| association.verification_record_id.is_none()) {
         row.monitoring_interrupted_at
             .get_or_insert_with(test_run_timestamp);
     }
@@ -238,6 +229,21 @@ struct TestRunUnclassifiedCommand {
     directories: Option<Vec<Option<String>>>,
 }
 
+/// What a command's start or description found of its invocation's original
+/// start in the test-run registry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TestCommandOriginalStart {
+    /// None: this frame may be the invocation's own start.
+    None,
+    /// An original start of the turn the frame names, or, for an Ambient
+    /// frame, of the session's current turn. Also an original placeholder
+    /// consumed now, or several that cannot be told apart.
+    ThisTurn,
+    /// Only a still-unended start an Ambient frame matched in an earlier turn
+    /// of the session.
+    EarlierTurn,
+}
+
 impl TestRunCommandOrigin {
     fn execution_id(&self) -> String {
         format!(
@@ -273,6 +279,7 @@ impl TestRunCommandOrigin {
             runtime_identity: test_run_runtime_identity(record, provenance),
             tool_identity: sha256_hex(key.as_bytes()),
             turn_generation: match provenance {
+                EngramObservationProvenance::Runtime { turn_generation, .. } => *turn_generation,
                 EngramObservationProvenance::Claude(origin) => match &origin.origin {
                     ClaudeWorkOrigin::Attempt { turn_generation } => *turn_generation,
                     ClaudeWorkOrigin::Adopted { turn_generation } => *turn_generation,
@@ -280,15 +287,10 @@ impl TestRunCommandOrigin {
                 },
                 EngramObservationProvenance::Ambient => record.active_turn_generation,
             },
-            grant_identity: owns_current
-                .then(|| {
-                    record
-                        .engram
-                        .active_grant_id
-                        .as_ref()
-                        .map(|grant| sha256_hex(grant.as_bytes()))
-                })
-                .flatten(),
+            // The stored field is only a correlation bucket. It carries the
+            // observed host-turn identity and grants no verification credit.
+            grant_identity: owns_current.then(|| record.engram.observed_turn_ref()
+                .map(|owner| sha256_hex(owner.as_bytes()))).flatten(),
             work_binding: work_binding.clone(),
             source_root: project
                 .and_then(|project| project.engram.as_ref())
@@ -327,6 +329,7 @@ fn test_run_runtime_identity(
 ) -> Option<String> {
     let runtime = match provenance {
         EngramObservationProvenance::Ambient => record.runtime.runtime_token(),
+        EngramObservationProvenance::Runtime { token, .. } => Some(token.clone()),
         EngramObservationProvenance::Claude(origin) => Some(origin.token.clone()),
     }?;
     // Runtime tokens and provider tool keys remain host-private. Only opaque
@@ -366,14 +369,14 @@ impl AppState {
         key: &str,
         ran: Option<&str>,
         cwd: Option<&str>,
-    ) -> bool {
+    ) -> TestCommandOriginalStart {
         let Some(ran) = ran else {
-            return false;
+            return TestCommandOriginalStart::None;
         };
         let pending = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
-                return false;
+                return TestCommandOriginalStart::None;
             };
             let runtime = test_run_runtime_identity(&inner.sessions[index], provenance);
             let tool = sha256_hex(key.as_bytes());
@@ -387,6 +390,9 @@ impl AppState {
                         && pending.origin.runtime_identity.is_some()
                         && pending.origin.tool_identity == tool
                         && match provenance {
+                            EngramObservationProvenance::Runtime { turn_generation, .. } => {
+                                pending.origin.turn_generation == *turn_generation
+                            }
                             EngramObservationProvenance::Claude(origin) => match &origin.origin {
                                 ClaudeWorkOrigin::Attempt { turn_generation } => {
                                     pending.origin.turn_generation == *turn_generation
@@ -399,13 +405,21 @@ impl AppState {
             let Some(pending) = candidates.next().cloned() else {
                 // Further ACP pending/in-progress frames may repeat a start
                 // after its original placeholder has already been consumed.
-                return inner.test_run_observations.values().any(|row| {
+                // An Ambient frame carries no turn, so it matches its
+                // invocation's still-unended start in any turn; whether that
+                // start is of the session's current turn is kept apart.
+                let current_turn = inner.sessions[index].active_turn_generation;
+                let mut found = TestCommandOriginalStart::None;
+                for row in inner.test_run_observations.values().filter(|row| {
                     row.summary.owner_session_id.as_deref() == Some(session_id)
                         && row.runtime_identity == runtime
                         && row.runtime_identity.is_some()
                         && row.tool_identity == tool
                         && row.summary.ended_at.is_none()
                         && match provenance {
+                            EngramObservationProvenance::Runtime { turn_generation, .. } => {
+                                row.turn_generation == *turn_generation
+                            }
                             EngramObservationProvenance::Claude(origin) => match &origin.origin {
                                 ClaudeWorkOrigin::Attempt { turn_generation } => {
                                     row.turn_generation == *turn_generation
@@ -414,11 +428,20 @@ impl AppState {
                             },
                             EngramObservationProvenance::Ambient => true,
                         }
-                });
+                }) {
+                    // A frame that names its turn matched only that turn.
+                    if !matches!(provenance, EngramObservationProvenance::Ambient)
+                        || row.turn_generation == current_turn
+                    {
+                        return TestCommandOriginalStart::ThisTurn;
+                    }
+                    found = TestCommandOriginalStart::EarlierTurn;
+                }
+                return found;
             };
             if candidates.next().is_some() {
                 // Ambiguous original starts cannot acquire the current owner.
-                return true;
+                return TestCommandOriginalStart::ThisTurn;
             }
             pending
         };
@@ -442,10 +465,10 @@ impl AppState {
             .as_ref()
             .or_else(|| declared.as_ref().map(|(command, _, _)| command))
         else {
-            return true;
+            return TestCommandOriginalStart::ThisTurn;
         };
         if command.kind != EngramVerificationKind::Test {
-            return true;
+            return TestCommandOriginalStart::ThisTurn;
         }
         let worktree = engram_check_worktree_from(
             command,
@@ -469,7 +492,7 @@ impl AppState {
             .test_runs
             .unclassified_commands
             .remove(&id);
-        true
+        TestCommandOriginalStart::ThisTurn
     }
 
     fn observe_test_command_start(
@@ -562,16 +585,20 @@ impl AppState {
         self.persist_test_command_observation_locked(&mut inner, observation);
     }
 
+    /// Ends the session's open rows for `key` with the runtime's exit and
+    /// returns the execution ids this call actually ended: rows still open
+    /// when selected that it marked ended, never a background launch or a
+    /// launch-only row it only noted, nor a row an earlier end already closed.
     fn observe_test_command_end(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
         key: &str,
         exit: Option<EngramCommandExit>,
-    ) {
+    ) -> Vec<String> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
-            return;
+            return Vec::new();
         };
         let runtime_identity = test_run_runtime_identity(&inner.sessions[index], provenance);
         let tool_identity = sha256_hex(key.as_bytes());
@@ -583,6 +610,7 @@ impl AppState {
             });
         }
         let turn = match provenance {
+            EngramObservationProvenance::Runtime { turn_generation, .. } => Some(*turn_generation),
             EngramObservationProvenance::Claude(origin) => match &origin.origin {
                 ClaudeWorkOrigin::Attempt { turn_generation } => Some(*turn_generation),
                 ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => None,
@@ -601,7 +629,9 @@ impl AppState {
             })
             .map(|row| row.execution_id.clone())
             .collect();
+        let mut ended = Vec::new();
         for id in &matches {
+            let mut transitioned = false;
             let can_finalize = inner
                 .test_run_observations
                 .get(id)
@@ -625,6 +655,7 @@ impl AppState {
                     return Some(row.clone());
                 }
                 row.summary.ended_at = Some(test_run_timestamp());
+                transitioned = true;
                 row.summary.state = if matches.len() != 1 {
                     TestRunState::Unknown
                 } else {
@@ -654,7 +685,11 @@ impl AppState {
             if let Some(Some(observation)) = persist {
                 self.persist_test_command_observation_locked(&mut inner, observation);
             }
+            if transitioned {
+                ended.push(id.clone());
+            }
         }
+        ended
     }
 
     fn persist_test_command_observation_locked(

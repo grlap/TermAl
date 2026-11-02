@@ -11,9 +11,28 @@
 // (src/tests/engram_turn_checks.rs). New module.
 use super::*;
 
+// Record the real command events and inspect the owner's dropped-launch
+// custody. This fixture never settles a check or manufactures verification.
+fn record_overlapping_launch(turn: &EOCheckedTurn, worktree: &FsPath) {
+    let cwd = reported_directory(worktree);
+    let mut recorder = turn.recorder();
+    recorder.command_started_in("gate", GATE, Some(GATE), Some(&cwd)).unwrap();
+    turn.wait_for_snapshots();
+    recorder.command_completed_with_exit(
+        "gate", GATE, "STARTED", CommandStatus::Success, EngramCommandExit::NotFinished,
+    ).unwrap();
+    turn.wait_for_snapshots();
+    turn.record(|record| {
+        assert!(record.engram.carried_checks.is_empty());
+        let line = record.engram.pending_source_root_line.as_deref().expect("the drop is disclosed");
+        assert!(line.contains("another command or another writable session"), "{line}");
+    });
+    assert_ordinary_turn_has_no_native_requests(turn);
+}
+
 /// A read-only reviewer child of the holder, working in `worktree` and in a
 /// turn, with a command still running there that only reads.
-fn read_only_child_reading_in(turn: &CheckedTurn, worktree: &FsPath) -> String {
+fn read_only_child_reading_in(turn: &EOCheckedTurn, worktree: &FsPath) -> String {
     let (_, child) = install_required_review_delegation(&turn.state, &turn.session_id);
     let cwd = fs::canonicalize(worktree)
         .expect("the worktree canonicalizes")
@@ -32,13 +51,13 @@ fn read_only_child_reading_in(turn: &CheckedTurn, worktree: &FsPath) -> String {
     child
 }
 
-fn set_status(turn: &CheckedTurn, session_id: &str, status: SessionStatus) {
+fn set_status(turn: &EOCheckedTurn, session_id: &str, status: SessionStatus) {
     let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(session_id).expect("session");
     inner.sessions[index].session.status = status;
 }
 
-fn session_name(turn: &CheckedTurn, session_id: &str) -> String {
+fn session_name(turn: &EOCheckedTurn, session_id: &str) -> String {
     let inner = turn.state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(session_id).expect("session");
     inner.sessions[index].session.name.clone()
@@ -49,10 +68,10 @@ fn a_lone_launch_beside_a_reading_read_only_child_is_carried() {
     // The reviewers of a change read the worktree its gate runs in; they
     // cannot write, so they overlap nothing, nor do the watcher's changes in
     // directories it ignores.
-    let (turn, worktree) = named_turn("overlap-read-only-child");
+    let (turn, worktree) = ordinary_carried_turn("overlap-read-only-child");
     read_only_child_reading_in(&turn, &worktree);
-    launch_gate(&turn, &worktree, false);
-    assert_eq!(carried_fence(&turn), None);
+    ordinary_launch_gate(&turn, &worktree, false);
+    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None);
     let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
     let change = |path: PathBuf| WorkspaceFileChangeEvent {
         path: path.to_string_lossy().into_owned(),
@@ -70,7 +89,7 @@ fn a_lone_launch_beside_a_reading_read_only_child_is_carried() {
     // The worktree's own scratch directory reaches it and fences nothing.
     turn.state
         .note_engram_workspace_file_changes(&[change(canonical.join(".tmp").join("reviewer.log"))]);
-    assert_eq!(carried_fence(&turn), None);
+    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None);
 }
 
 #[test]
@@ -79,14 +98,14 @@ fn a_writable_session_in_a_turn_elsewhere_not_yet_resolved_leaves_a_lone_launch_
     // (one whose session state was rebuilt, say) is resolved before it is
     // counted, so its turn in another worktree overlaps nothing here. The
     // read-only child reading in this worktree overlaps nothing either.
-    let (turn, worktree) = named_turn("overlap-unresolved-elsewhere");
+    let (turn, worktree) = ordinary_carried_turn("overlap-unresolved-elsewhere");
     let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
     let elsewhere = sibling_worktree(&turn, "overlap-unresolved-elsewhere-sibling");
     let other = create_test_project_session(&turn.state, Agent::Codex, &project_id, &elsewhere);
     set_status(&turn, &other, SessionStatus::Active);
     read_only_child_reading_in(&turn, &worktree);
-    launch_gate(&turn, &worktree, false);
-    assert_eq!(carried_fence(&turn), None);
+    ordinary_launch_gate(&turn, &worktree, false);
+    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None);
 }
 
 #[test]
@@ -94,7 +113,7 @@ fn a_remote_proxy_in_a_turn_is_never_resolved_and_is_named_as_such() {
     // A proxy's workdir is the other host's path: TermAl does not resolve it
     // here, so the proxy keeps counting in every worktree, and the holder is
     // told it was an unresolved remote proxy.
-    let (turn, worktree) = named_turn("overlap-remote-proxy");
+    let (turn, worktree) = ordinary_carried_turn("overlap-remote-proxy");
     let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
     let elsewhere = sibling_worktree(&turn, "overlap-remote-proxy-sibling");
     let proxy = create_test_project_session(&turn.state, Agent::Codex, &project_id, &elsewhere);
@@ -104,8 +123,7 @@ fn a_remote_proxy_in_a_turn_is_never_resolved_and_is_named_as_such() {
         inner.sessions[index].remote_id = Some("ssh-test".to_owned());
     }
     set_status(&turn, &proxy, SessionStatus::Active);
-    launch_command(&turn, &worktree, GATE, EngramCommandExit::NotFinished);
-    assert_dropped_at_launch(&turn, "another command or another writable session");
+    record_overlapping_launch(&turn, &worktree);
     let line = turn
         .record(|record| record.engram.pending_source_root_line.clone())
         .expect("the holder should be told");
@@ -126,13 +144,12 @@ fn a_remote_proxy_in_a_turn_is_never_resolved_and_is_named_as_such() {
 fn a_launch_beside_a_writable_session_in_a_turn_there_names_that_session() {
     // The control: the same session working in this worktree overlaps the
     // launch, and the holder is told which session it was and why it matched.
-    let (turn, worktree) = named_turn("overlap-named-writer");
+    let (turn, worktree) = ordinary_carried_turn("overlap-named-writer");
     let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
     let other = create_test_project_session(&turn.state, Agent::Codex, &project_id, &worktree);
     set_status(&turn, &other, SessionStatus::Active);
     read_only_child_reading_in(&turn, &worktree);
-    launch_command(&turn, &worktree, GATE, EngramCommandExit::NotFinished);
-    assert_dropped_at_launch(&turn, "another command or another writable session");
+    record_overlapping_launch(&turn, &worktree);
     let line = turn
         .record(|record| record.engram.pending_source_root_line.clone())
         .expect("the holder should be told");
@@ -146,17 +163,17 @@ fn a_launch_beside_a_writable_session_in_a_turn_there_names_that_session() {
 #[test]
 fn a_writer_is_told_by_the_place_it_matched() {
     // Each place a session in a turn may write in, as the holder is told it.
-    let (turn, worktree) = named_turn("overlap-writer-places");
+    let (turn, worktree) = ordinary_carried_turn("overlap-writer-places");
     let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
     let elsewhere = sibling_worktree(&turn, "overlap-writer-places-sibling");
     let other = create_test_project_session(&turn.state, Agent::Codex, &project_id, &elsewhere);
     let root = engram_path_key(&worktree);
-    let reason = |turn: &CheckedTurn| {
+    let reason = |turn: &EOCheckedTurn| {
         let inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&other).expect("other session");
         engram_writer_match(&inner, index, &root)
     };
-    let edit = |turn: &CheckedTurn, change: &dyn Fn(&mut SessionRecord)| {
+    let edit = |turn: &EOCheckedTurn, change: &dyn Fn(&mut SessionRecord)| {
         let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&other).expect("other session");
         change(&mut inner.sessions[index]);
@@ -171,23 +188,11 @@ fn a_writer_is_told_by_the_place_it_matched() {
     // Resolved elsewhere, it does not match.
     turn.state.note_engram_session_worktree_off_lock(&other);
     assert_eq!(reason(&turn), None);
-    // Its claim's named source root is this worktree.
-    edit(&turn, &|record| {
-        record.engram.active_grant_id = Some("other-grant".to_owned());
-        record.engram.active_turn_source_root = Some(EngramTurnSourceRoot {
-            root: worktree.to_string_lossy().into_owned(),
-            common_dir_key: String::new(),
-            short_ref: "other-work".to_owned(),
-            claim_id: "other-claim".to_owned(),
-            generation: 1,
-            sealed_revision: None,
-        });
-    });
-    told(
-        reason(&turn),
-        "works in it as its claim's named source root",
-    );
-    edit(&turn, &|record| record.engram.active_grant_id = None);
+    // This is a selector fixture for an actual ordinary opening-root capture,
+    // not a public naming request or an admission/grant.
+    name_other_session_source_root(&turn, &other, &worktree);
+    told(reason(&turn), "works in it as its claim's named source root");
+    edit(&turn, &|record| record.engram.unadmitted_active_turn = None);
     // A command it runs here, or one TermAl could not place.
     edit(&turn, &|record| {
         record.engram.running_command_worktrees =
@@ -202,12 +207,12 @@ fn a_writer_is_told_by_the_place_it_matched() {
 
 #[test]
 fn a_later_writer_a_termal_write_and_a_late_name_are_each_told() {
-    let (turn, worktree) = named_turn("overlap-later-causes");
+    let (turn, worktree) = ordinary_carried_turn("overlap-later-causes");
     let cwd = fs::canonicalize(&worktree)
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    let cause = |turn: &CheckedTurn| {
+    let cause = |turn: &EOCheckedTurn| {
         turn.record(|record| record.engram.active_turn_checks[0].overlap_cause.clone())
             .expect("the check names what overlapped it")
     };
@@ -288,31 +293,16 @@ fn a_later_writer_a_termal_write_and_a_late_name_are_each_told() {
 }
 
 #[test]
-fn a_withheld_check_line_names_what_overlapped_it() {
-    let withheld = |overlap_cause: Option<&str>| EngramWithheldCheck {
-        kind: EngramVerificationKind::Test,
-        declared_reason: None,
-        program: "cargo".to_owned(),
-        fingerprint: "f".repeat(64),
-        reason: EngramWithheldReason::Overlapped,
-        cause: None,
-        overlap_cause: overlap_cause.map(str::to_owned),
-    };
-    let line = engram_withheld_check_line(&withheld(Some(
-        "another command of this session (key k) started",
-    )));
-    assert!(
-        line.contains(
-            "reached its worktree while it ran (another command of this session (key k) started)."
-        ),
-        "{line}"
-    );
-    // A check nothing named keeps the reason alone.
-    let line = engram_withheld_check_line(&withheld(None));
-    assert!(
-        line.contains("reached its worktree while it ran. Run it again"),
-        "{line}"
-    );
+fn a_dropped_launch_line_names_what_overlapped_it_without_exposing_the_command() {
+    let check = engram_check_command(GATE).expect("the actual launcher command is recognized");
+    let cause = "another command of this session (key k) started";
+    let line = engram_dropped_launch_line(&check, cause);
+    assert!(line.contains(cause), "{line}");
+    assert!(line.contains(&engram_check_fingerprint(&check)), "{line}");
+    assert!(!line.contains(GATE), "the raw command is not diagnostic text: {line}");
+    let unnamed = engram_dropped_launch_line(&check, "another writable session");
+    assert!(unnamed.contains("another writable session"), "{unnamed}");
+    assert!(!unnamed.contains(cause), "{unnamed}");
 }
 
 #[test]
@@ -321,7 +311,7 @@ fn a_launch_beside_a_command_of_its_own_still_running_names_that_command() {
     // write under it; the refusal names that command by a digest of its
     // key. A runtime that gives no id keys a command by its whole line,
     // which can carry a secret, so the key itself is never told.
-    let (turn, worktree) = named_turn("overlap-own-command");
+    let (turn, worktree) = ordinary_carried_turn("overlap-own-command");
     let cwd = fs::canonicalize(&worktree)
         .unwrap()
         .to_string_lossy()
@@ -335,8 +325,7 @@ fn a_launch_beside_a_command_of_its_own_still_running_names_that_command() {
             Some(&cwd),
         )
         .expect("the earlier command should record");
-    launch_command(&turn, &worktree, GATE, EngramCommandExit::NotFinished);
-    assert_dropped_at_launch(&turn, "another command or another writable session");
+    record_overlapping_launch(&turn, &worktree);
     let line = turn
         .record(|record| record.engram.pending_source_root_line.clone())
         .expect("the holder should be told");
@@ -354,7 +343,7 @@ fn a_launch_beside_a_command_of_its_own_still_running_names_that_command() {
 fn an_own_command_starting_under_an_open_check_is_named_by_digest_only() {
     // A command of the holder that starts while its check is open is told by
     // the digest of its key too.
-    let (turn, worktree) = named_turn("overlap-own-command-later");
+    let (turn, worktree) = ordinary_carried_turn("overlap-own-command-later");
     let cwd = fs::canonicalize(&worktree)
         .unwrap()
         .to_string_lossy()
@@ -385,27 +374,17 @@ fn an_own_command_starting_under_an_open_check_is_named_by_digest_only() {
     );
 }
 
-/// Starts another command of the holder, `git status` keyed `other`, running
-/// in `worktree` as a runtime that reports its directory says: one that may
-/// write there, since such a runtime's line is not read as Bash. The carried
-/// gate's tests use it for a command that overlaps a launch.
-pub(super) fn start_other_command_in(turn: &CheckedTurn, worktree: &FsPath) {
-    let cwd = reported_directory(worktree);
-    turn.recorder()
-        .command_started_in("other", "git status", Some("git status"), Some(&cwd))
-        .expect("the other command should record");
-}
 
 #[test]
 fn a_launch_beside_an_own_command_running_in_another_worktree_is_carried() {
     // The opposite of the refused launches above: the holder's command runs
     // in the main checkout, where it cannot write under the gate in the named
     // root, so the gate is carried and not overlapped.
-    let (turn, worktree) = named_turn("overlap-own-elsewhere-launch");
+    let (turn, worktree) = ordinary_carried_turn("overlap-own-elsewhere-launch");
     turn.recorder()
         .command_started("other", "git status")
         .expect("the other command should record");
-    launch_command(&turn, &worktree, GATE, EngramCommandExit::NotFinished);
+    ordinary_launch_gate(&turn, &worktree, false);
     assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
     assert_eq!(
         turn.record(|record| {
@@ -423,7 +402,7 @@ fn a_repeated_start_that_first_places_an_own_command_in_the_checks_root_marks_it
     // later one. Placed in the session's workdir at its first start, the
     // command marks nothing; its later start in the check's root marks the
     // check there.
-    let (turn, worktree) = named_turn("own-command-repeated-start");
+    let (turn, worktree) = ordinary_carried_turn("own-command-repeated-start");
     start_check_in(&turn, &worktree);
     let mut recorder = turn.recorder();
     recorder
@@ -448,7 +427,7 @@ fn a_repeated_start_that_first_places_an_own_command_in_the_checks_root_marks_it
 fn a_repeated_start_of_the_checks_own_command_leaves_it_unmarked() {
     // The check's own command, started again in the same place (ACP's
     // pending, then in progress), does not overlap itself.
-    let (turn, worktree) = named_turn("own-command-own-repeat");
+    let (turn, worktree) = ordinary_carried_turn("own-command-own-repeat");
     start_check_in(&turn, &worktree);
     let here = reported_directory(&worktree);
     turn.recorder()
@@ -472,7 +451,7 @@ fn reported_directory(worktree: &FsPath) -> String {
 
 /// Starts the in-turn check `check` in `worktree`, as a runtime that reports
 /// the directory does, and waits for its opening snapshot.
-fn start_check_in(turn: &CheckedTurn, worktree: &FsPath) {
+fn start_check_in(turn: &EOCheckedTurn, worktree: &FsPath) {
     let cwd = reported_directory(worktree);
     turn.recorder()
         .command_started_in("check", SIZE_TEST, Some(SIZE_TEST), Some(&cwd))
@@ -483,7 +462,7 @@ fn start_check_in(turn: &CheckedTurn, worktree: &FsPath) {
 /// Starts the in-turn check `check` in `worktree` in the one-call form a
 /// Claude session uses, its runtime reporting no directory, and waits for
 /// its opening snapshot. Its `pushd` stays pending while it runs.
-fn start_one_call_check_in(turn: &CheckedTurn, worktree: &FsPath) {
+fn start_one_call_check_in(turn: &EOCheckedTurn, worktree: &FsPath) {
     let root = engram_source_root_display(&reported_directory(worktree));
     let line = format!("pushd \"{root}\" && {SIZE_TEST}");
     turn.recorder()
@@ -498,7 +477,7 @@ fn start_one_call_check_in(turn: &CheckedTurn, worktree: &FsPath) {
 }
 
 /// Whether the turn's only check is overlapped, and what it names.
-fn check_overlap(turn: &CheckedTurn) -> (bool, Option<String>) {
+fn check_overlap(turn: &EOCheckedTurn) -> (bool, Option<String>) {
     turn.record(|record| {
         let check = &record.engram.active_turn_checks[0];
         (check.overlapped, check.overlap_cause.clone())
@@ -510,7 +489,7 @@ fn an_own_command_placed_in_another_worktree_leaves_an_open_check_unmarked() {
     // A command of the holder that runs in the main checkout, not the named
     // root the check runs in, cannot write under it: a search or a read of
     // the docs while a focused run goes on.
-    let (turn, worktree) = named_turn("own-command-elsewhere");
+    let (turn, worktree) = ordinary_carried_turn("own-command-elsewhere");
     start_check_in(&turn, &worktree);
     let elsewhere = reported_directory(&turn.root);
     for (key, line) in [("search", "rg overlap src"), ("write", "touch notes.txt")] {
@@ -539,7 +518,7 @@ fn an_own_command_placed_in_another_worktree_leaves_an_open_check_unmarked() {
 fn an_own_command_said_later_to_run_in_the_checks_root_marks_it() {
     // Placed elsewhere at its start, a command later said to run in the
     // check's root may write there from then on.
-    let (turn, worktree) = named_turn("own-command-described-here");
+    let (turn, worktree) = ordinary_carried_turn("own-command-described-here");
     start_check_in(&turn, &worktree);
     let elsewhere = reported_directory(&turn.root);
     let mut recorder = turn.recorder();
@@ -567,7 +546,7 @@ fn an_own_read_only_command_leaves_an_open_check_unmarked() {
     // writes nothing, wherever its shell is. While the check's `pushd` is
     // pending TermAl cannot place the session's next command, so one that
     // may write still marks the check.
-    let (turn, worktree) = named_turn("own-command-reads");
+    let (turn, worktree) = ordinary_carried_turn("own-command-reads");
     turn.record_mut(|record| record.session.agent = Agent::Claude);
     start_one_call_check_in(&turn, &worktree);
     let mut recorder = turn.recorder();
@@ -607,7 +586,7 @@ fn an_own_read_only_command_leaves_an_open_check_unmarked() {
 fn a_check_started_beside_an_own_command_that_cannot_write_there_is_unmarked() {
     // Still running when the check starts, a read of the holder's, or a
     // command of its placed in another worktree, overlaps nothing.
-    let (turn, worktree) = named_turn("own-running-elsewhere");
+    let (turn, worktree) = ordinary_carried_turn("own-running-elsewhere");
     let elsewhere = reported_directory(&turn.root);
     turn.recorder()
         .command_started_in("watch", "npm run watch", Some("npm run watch"), Some(&elsewhere))
@@ -615,7 +594,7 @@ fn a_check_started_beside_an_own_command_that_cannot_write_there_is_unmarked() {
     start_check_in(&turn, &worktree);
     assert_eq!(check_overlap(&turn), (false, None));
 
-    let (turn, worktree) = named_turn("own-running-read");
+    let (turn, worktree) = ordinary_carried_turn("own-running-read");
     turn.record_mut(|record| record.session.agent = Agent::Claude);
     turn.recorder()
         .command_started("follow", "git log --oneline -5")
@@ -631,7 +610,7 @@ fn a_parallel_own_command_that_cds_into_another_worktree_leaves_a_one_call_check
     // one-call test in the named root. Placed where its shell was (the
     // workdir) and where its `cd` leads, the first cannot write under the
     // check.
-    let (turn, worktree) = named_turn("own-parallel-cd-elsewhere");
+    let (turn, worktree) = ordinary_carried_turn("own-parallel-cd-elsewhere");
     turn.record_mut(|record| record.session.agent = Agent::Claude);
     let elsewhere = sibling_worktree(&turn, "own-parallel-cd-elsewhere-sibling");
     let other = engram_source_root_display(&reported_directory(&elsewhere));
@@ -647,7 +626,7 @@ fn a_parallel_own_command_that_cds_into_another_worktree_leaves_a_one_call_check
 fn a_check_started_beside_an_own_command_never_placed_is_marked() {
     // A running command whose places were not kept (past the limit TermAl
     // keeps, say) may write anywhere: it still marks a check that starts.
-    let (turn, worktree) = named_turn("own-running-unplaced");
+    let (turn, worktree) = ordinary_carried_turn("own-running-unplaced");
     turn.record_mut(|record| {
         record
             .engram

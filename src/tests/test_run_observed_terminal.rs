@@ -299,6 +299,37 @@ fn observed_terminal_similar_concurrent_launches_are_never_guessed_from_registra
     assert_no_credit(&fixture);
 }
 
+/// A launch-only launcher row is never among the rows an end reports as
+/// ended: its background acknowledgement ends nothing, and a later exit only
+/// notes the launch as unconfirmed. So no exact-row verdict, such as a
+/// declared test's artifact verdict, can ever reach it.
+#[test]
+fn observed_terminal_launch_only_row_is_never_returned_as_ended() {
+    let fixture = RunFixture::new("observed-terminal-launch-only-end");
+    let session = running_owner(&fixture, "observed-launch-only-runtime");
+    let id = start(&fixture, &session, "launch-only-key", LAUNCH);
+    let launched = fixture.state.observe_test_command_end(
+        &session,
+        &EngramObservationProvenance::Ambient,
+        "launch-only-key",
+        Some(EngramCommandExit::NotFinished),
+    );
+    assert!(launched.is_empty(), "a background launch ends nothing");
+    assert!(fixture.state.inner.lock().unwrap()
+        .test_run_observations.get(&id).unwrap().launch_only);
+    let later = fixture.state.observe_test_command_end(
+        &session,
+        &EngramObservationProvenance::Ambient,
+        "launch-only-key",
+        Some(EngramCommandExit::Code(0)),
+    );
+    assert!(later.is_empty(), "an exit only notes a launch-only row, never ends it");
+    let row = fixture.summary(&id);
+    assert!(row.ended_at.is_none(), "the workload end time stays unknown");
+    assert_ne!(row.state, TestRunState::Passed, "the launcher's exit is not the run's outcome");
+    assert_no_credit(&fixture);
+}
+
 #[test]
 fn observed_terminal_native_exit_records_failure_without_verification_credit() {
     let fixture = RunFixture::new("observed-terminal-native-end");

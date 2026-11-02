@@ -534,15 +534,30 @@ async fn assert_unstarted_followup_handoff(prior_status: &str, canceled: bool) {
     );
 
     install_delegation_codex_runtime(&fixture.state, "unstarted-worker-followup");
-    {
+    let (reset_project, reset_generation) = {
         let mut inner = fixture.state.inner.lock().expect("state lock");
-        if let Some(index) = inner.find_session_index(&child) {
-            inner.sessions[index].engram.project_reset_in_progress = true;
-        }
+        let index = inner.find_session_index(&child).expect("worker child");
+        assert!(matches!(inner.sessions[index].session.status, SessionStatus::Idle | SessionStatus::Error));
+        assert!(matches!(inner.sessions[index].runtime, SessionRuntime::None));
+        let project = inner.create_project(
+            Some("Queued worker reset".to_owned()),
+            fixture.worktree.to_string_lossy().into_owned(),
+            default_local_remote_id(),
+        ).id;
+        inner.sessions[index].session.project_id = Some(project.clone());
+        let generation = inner.engram_project_resets.claim(&project).expect("resource reset owner");
+        assert!(session_resource_reset_in_progress(&inner, &inner.sessions[index]));
         if let Some(index) = inner.find_session_index(&fixture.parent) {
             inner.sessions[index].session.status = SessionStatus::Active;
         }
-    }
+        (project, generation)
+    };
+    let release_reset = || {
+        let mut inner = fixture.state.inner.lock().expect("state lock");
+        assert!(inner.engram_project_resets.release(&reset_project, reset_generation));
+        let index = inner.find_session_index(&child).expect("worker child");
+        assert!(!session_resource_reset_in_progress(&inner, &inner.sessions[index]));
+    };
     let admitted = fixture
         .state
         .followup_delegation(
@@ -591,14 +606,16 @@ async fn assert_unstarted_followup_handoff(prior_status: &str, canceled: bool) {
             .state
             .cancel_delegation(&fixture.parent, &delegation)
             .expect("cancel queued attempt");
+        release_reset();
     } else {
         // Force the same delayed-start failure seam as the existing admission
         // regression: test_app_state forbids spawning a missing runtime.
+        release_reset();
         install_single_wire_codex_fixture(&fixture.state, None);
         {
             let mut inner = fixture.state.inner.lock().expect("state lock");
             if let Some(index) = inner.find_session_index(&child) {
-                inner.sessions[index].engram.project_reset_in_progress = false;
+                inner.sessions[index].session.status = SessionStatus::Idle;
                 inner.sessions[index].runtime = SessionRuntime::None;
             }
         }

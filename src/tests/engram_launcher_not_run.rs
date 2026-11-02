@@ -8,7 +8,7 @@
 // the recognition of launcher commands or their result lines in general
 // (src/tests/engram_one_call_checks.rs, src/tests/engram_turn_checks.rs) or a
 // launcher full gate's carried credit (src/tests/engram_carried_checks.rs).
-// New module, a child of the turn-check tests, whose `CheckedTurn` fixture it
+// New module, a child of the turn-check tests, whose `EOCheckedTurn` fixture it
 // uses.
 use super::*;
 
@@ -249,7 +249,7 @@ fn a_carried_gate_that_ran_no_stage_is_refused_never_recorded_failed() {
 #[test]
 fn a_launcher_run_whose_results_record_every_stage_unrun_ends_unknown() {
     const FULL: &str = "node scripts/test-launcher.mjs full";
-    let turn = CheckedTurn::start("launcher-not-run", true);
+    let turn = EOCheckedTurn::start("launcher-not-run", true);
     turn.recorder()
         .command_started_in("gate", FULL, Some(FULL), Some(&turn.root.to_string_lossy()))
         .expect("the start should record");
@@ -304,21 +304,19 @@ fn a_launcher_run_whose_results_record_every_stage_unrun_ends_unknown() {
         )
         .expect("the end should record");
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
-
-    let outcomes = checkpoint["observations"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|observation| observation["outcome"].as_str().map(str::to_owned))
-        .collect::<Vec<_>>();
-    assert!(
-        !outcomes.iter().any(|outcome| outcome == "failed"),
-        "a run that executed no stage records no failed test: {checkpoint:#}"
-    );
-    assert!(
-        outcomes.iter().any(|outcome| outcome == "unknown"),
-        "its end is recorded as unknown: {checkpoint:#}"
-    );
+    turn.record(|record| {
+        let check = record.engram.active_turn_checks.iter()
+            .find(|check| check.key == "gate").expect("the launcher has a diagnostic check");
+        let end = check.end.as_ref().expect("the launcher invocation ended");
+        assert!(end.launcher_ran_no_stage,
+            "the run's exact terminal artifact, not its FAIL summary, says no stage ran");
+        assert_eq!(engram_check_end_outcome(&check.command, end),
+            Some(EngramExecutionOutcome::Unknown));
+    });
+    let request = turn.finish();
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "{request:#}");
+    assert_eq!(checks[0]["observed_result"], "indeterminate",
+        "a launcher that ran no stage supplies no failed-test fact: {request:#}");
+    assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }

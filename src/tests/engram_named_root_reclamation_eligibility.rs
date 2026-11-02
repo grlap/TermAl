@@ -38,23 +38,22 @@ fn named_root_reclamation_eligibility_scans_build_no_binding_target_or_root_read
     );
 }
 
-type ReaderFacts = Option<(Option<String>, Option<EngramAuthorityStoreKey>)>;
+type ReaderFacts = Option<Option<EngramAuthorityStoreKey>>;
 
 /// (what the full binding target says, what the narrow reader view says).
-fn reader_facts(claimed: &ClaimedRoot, session_id: &str) -> (ReaderFacts, ReaderFacts) {
+fn reader_facts(claimed: &EOCheckedTurn, session_id: &str) -> (ReaderFacts, ReaderFacts) {
     let inner = claimed.state.inner.lock().unwrap();
     let target = AppState::engram_source_root_target_locked(&inner, session_id)
         .ok()
         .flatten()
-        .map(|target| (target.routing_token.clone(), target.settings.authority_store_key.clone()));
+        .map(|target| target.settings.authority_store_key.clone());
     let view = engram_session_reader_view_locked(&inner, session_id)
-        .map(|view| (view.routing_token.map(str::to_owned), view.store.cloned()));
+        .map(|view| view.store.cloned());
     let snapshot = EngramRootReclamationSnapshot::capture(&inner);
     drop(inner);
     let reader = snapshot.readers().into_iter().find(|(session, _)| session.id == session_id)
         .map(|(_, store)| store.clone());
-    assert_eq!(reader, view.as_ref().filter(|(token, _)| token.is_some())
-        .and_then(|(_, store)| store.clone()),
+    assert_eq!(reader, view.clone().flatten(),
         "off-lock metadata must preserve the full target's reader eligibility");
     (target, view)
 }
@@ -62,13 +61,13 @@ fn reader_facts(claimed: &ClaimedRoot, session_id: &str) -> (ReaderFacts, Reader
 /// Asserts the view agrees with the full target for `session_id` and returns
 /// what they agree on, so each case can also pin which outcome it produces.
 #[track_caller]
-fn parity(claimed: &ClaimedRoot, session_id: &str, case: &str) -> ReaderFacts {
+fn parity(claimed: &EOCheckedTurn, session_id: &str, case: &str) -> ReaderFacts {
     let (target, view) = reader_facts(claimed, session_id);
     assert_eq!(view, target, "the reader view disagrees with the full target: {case}");
     view
 }
 
-fn with_project(claimed: &ClaimedRoot, project_id: &str, change: impl FnOnce(&mut Project)) {
+fn with_project(claimed: &EOCheckedTurn, project_id: &str, change: impl FnOnce(&mut Project)) {
     let mut inner = claimed.state.inner.lock().unwrap();
     let project = inner.projects.iter_mut().find(|project| project.id == project_id).unwrap();
     change(project);
@@ -80,34 +79,36 @@ fn named_root_reclamation_reader_view_agrees_with_the_full_binding_target() {
     let root = claimed.session_id.clone();
     let (delegation, child) =
         crate::tests::delegation_support::install_required_review_delegation(&claimed.state, &root);
-    let project_id = claimed.record(|record| record.session.project_id.clone().unwrap());
+    let project_id = claimed.record_mut(|record| record.session.project_id.clone().unwrap());
 
     let reader = parity(&claimed, &root, "root session").expect("the root session is a reader");
-    assert!(reader.0.is_some(), "the root session holds a routing token");
-    assert_eq!(reader.1.as_ref(), Some(&entry.store));
+    assert_eq!(reader.as_ref(), Some(&entry.store));
     let child_facts = parity(&claimed, &child, "delegation child").expect("the child resolves its parent's project");
-    assert_eq!(child_facts.0, None, "a child reads its own routing token, not its parent's");
-    assert_eq!(child_facts.1.as_ref(), Some(&entry.store));
+    assert_eq!(child_facts.as_ref(), Some(&entry.store), "the child resolves its parent's exact store");
 
-    let token = claimed.record(|record| record.engram.routing_token.take());
-    assert_eq!(parity(&claimed, &root, "tokenless root").map(|facts| facts.0), Some(None));
-    claimed.record(|record| record.engram.routing_token = token);
+    claimed.record_mut(|record| {
+        record.engram.historical_control.insert("engramRoutingToken".into(), json!("historical-parity-token"));
+    });
+    assert_eq!(parity(&claimed, &root, "historical token"), Some(reader.clone()));
+    claimed.record_mut(|record| { record.engram.historical_control.remove("engramRoutingToken"); });
+    assert_eq!(parity(&claimed, &root, "no historical token"), Some(reader.clone()));
 
-    claimed.record(|record| record.engram.disabled_reason = Some("disabled for parity".to_owned()));
-    assert_eq!(parity(&claimed, &root, "disabled root"), None);
-    claimed.record(|record| record.engram.disabled_reason = None);
+    claimed.record_mut(|record| { record.engram.historical_control.insert("engramDisabledReason".into(), json!("disabled for parity")); });
+    assert_eq!(parity(&claimed, &root, "historical control refusal"), Some(reader.clone()),
+        "a historical control refusal does not disable the ordinary reader");
+    claimed.record_mut(|record| { record.engram.historical_control.remove("engramDisabledReason"); });
 
-    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().turn_gated_control = false);
-    assert!(parity(&claimed, &root, "control off (root)").is_some());
-    assert!(parity(&claimed, &child, "control off (child)").is_some());
-    claimed.record(|record| record.engram.disabled_reason = Some("Base-only disabled".to_owned()));
-    assert_eq!(parity(&claimed, &root, "Base-only disabled root"), None);
-    claimed.record(|record| record.engram.disabled_reason = None);
+    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().execution_observability = false);
+    assert!(parity(&claimed, &root, "automatic observations off (root)").is_some());
+    assert!(parity(&claimed, &child, "automatic observations off (child)").is_some());
+    claimed.record_mut(|record| { record.engram.historical_control.insert("engramDisabledReason".into(), json!("Base-only disabled")); });
+    assert_eq!(parity(&claimed, &root, "Base reader with historical refusal"), Some(reader.clone()));
+    claimed.record_mut(|record| { record.engram.historical_control.remove("engramDisabledReason"); });
     with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().enabled = false);
     assert_eq!(parity(&claimed, &root, "Base off (root)"), None);
     assert_eq!(parity(&claimed, &child, "Base off (child)"), None);
     with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().enabled = true);
-    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().turn_gated_control = true);
+    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().execution_observability = true);
 
     let remote = claimed.state.inner.lock().unwrap().find_project(&project_id).unwrap().remote_id.clone();
     with_project(&claimed, &project_id, |project| project.remote_id = "remote-for-parity".to_owned());
@@ -118,8 +119,8 @@ fn named_root_reclamation_reader_view_agrees_with_the_full_binding_target() {
     let binary = claimed.state.inner.lock().unwrap().find_project(&project_id).unwrap()
         .engram.as_ref().unwrap().binary_path.clone();
     with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().binary_path = None);
-    assert!(AppState::engram_binding_target_for_session_shape_locked(
-        &claimed.state.inner.lock().unwrap(), &root, true).is_err(),
+    assert!(AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(), &root).is_err(),
         "a missing binary path is a target error, which the reader view reads as no reader");
     assert_eq!(parity(&claimed, &root, "missing binary path"), None);
     with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().binary_path = binary);
@@ -132,7 +133,7 @@ fn named_root_reclamation_reader_view_agrees_with_the_full_binding_target() {
     assert_eq!(parity(&claimed, &child, "child of a missing parent"), None);
     assert!(parity(&claimed, &root, "root beside an orphaned child").is_some());
 
-    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().turn_gated_control = false);
+    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().execution_observability = false);
     assert!(claimed.state.inner.lock().unwrap().engram_project_resets.claim(&project_id).is_some());
     assert_eq!(parity(&claimed, &root, "Base-only project reset in progress"), None);
 }
@@ -140,12 +141,13 @@ fn named_root_reclamation_reader_view_agrees_with_the_full_binding_target() {
 #[test]
 fn named_root_reclamation_base_only_worker_retires_only_with_canonical_lifecycle_proof() {
     let (claimed, entry) = settled_root("reclamation-base-only", "completed");
-    let project_id = claimed.record(|record| record.session.project_id.clone().unwrap());
-    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().turn_gated_control = false);
+    let project_id = claimed.record_mut(|record| record.session.project_id.clone().unwrap());
+    with_project(&claimed, &project_id, |project| project.engram.as_mut().unwrap().execution_observability = false);
     {
         let inner = claimed.state.inner.lock().unwrap();
-        assert!(AppState::engram_binding_target_for_session_shape_locked(
-            &inner, &claimed.session_id, true).unwrap().is_none());
+        assert!(AppState::engram_source_root_target_locked(
+            &inner, &claimed.session_id).unwrap().is_some(),
+            "ordinary work services do not depend on automatic observations");
     }
     // A failed canonical read cannot retire a carried-over Base-only root.
     claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
@@ -190,17 +192,16 @@ fn named_root_reclamation_writes_its_lines_after_releasing_the_global_lock() {
 }
 
 /// The recovery reader as the full-target scan chose it before the view:
-/// a target per session, filtered by store and token, namer first.
+/// a target per session, filtered by the current Base-service store, namer first.
 fn reader_by_full_targets(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     namer: Option<&str>,
 ) -> Option<String> {
     let mut readers = inner.sessions.iter()
-        .filter_map(|record| AppState::engram_binding_target_for_session_shape_locked(
-            inner, &record.session.id, true).ok().flatten())
-        .filter(|target| target.settings.authority_store_key.as_ref() == Some(store)
-            && target.routing_token.is_some())
+        .filter_map(|record| AppState::engram_source_root_target_locked(
+            inner, &record.session.id).ok().flatten())
+        .filter(|target| target.settings.authority_store_key.as_ref() == Some(store))
         .collect::<Vec<_>>();
     readers.sort_by_key(|target| Some(target.connection.session_id.as_str()) != namer);
     readers.into_iter().next().map(|target| target.connection.session_id)
@@ -215,18 +216,17 @@ fn named_root_reclamation_reporter_and_reader_selection_build_only_the_winners_t
     {
         let mut inner = claimed.state.inner.lock().unwrap();
         let index = inner.find_session_index(&child).unwrap();
-        inner.sessions[index].engram.routing_token = Some("child-routing-token".to_owned());
+        inner.sessions[index].engram.historical_control.insert("engramRoutingToken".into(), json!("child-historical-token"));
     }
     let event = {
         let inner = claimed.state.inner.lock().unwrap();
         engram_root_journal(&inner.engram_named_root_journal, &entry.store, &entry.claim_id)
             .unwrap().confirmed.as_ref().unwrap().0.clone()
     };
-    let reporter_by_target = AppState::engram_binding_target_for_session_shape_locked(
-        &claimed.state.inner.lock().unwrap(), &event.reporter, true)
+    let reporter_by_target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(), &event.reporter)
         .ok().flatten()
-        .is_some_and(|target| target.settings.authority_store_key.as_ref() == Some(&event.root.store)
-            && target.routing_token.is_some());
+        .is_some_and(|target| target.settings.authority_store_key.as_ref() == Some(&event.root.store));
 
     reset_engram_authority_build_counts();
     let reporter = AppState::engram_root_reporter_available(&claimed.state.inner.lock().unwrap(), &event);
@@ -257,7 +257,7 @@ fn named_root_reclamation_current_owner_questions_build_no_binding_target_or_roo
     let (claimed, entry) = settled_root("reclamation-current-owner-builds", "completed");
     let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
         &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding.clone());
         record.session.status = SessionStatus::Idle;
     });
@@ -279,7 +279,7 @@ fn named_root_reclamation_current_owner_questions_build_no_binding_target_or_roo
 
 /// An evaluator delegation of `entry`'s work, open and not yet submitted;
 /// returns its id.
-fn open_evaluation_of(claimed: &ClaimedRoot, entry: &EngramWorkSourceRoot) -> String {
+fn open_evaluation_of(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) -> String {
     let workdir = claimed.root.to_string_lossy().into_owned();
     let (delegation, _child) = crate::tests::acceptance_evaluation::install_evaluator_delegation(
         &claimed.state, &claimed.session_id, None, &workdir, 1);
@@ -301,7 +301,7 @@ fn named_root_reclamation_leaves_an_evaluated_works_current_root_alone_until_it_
     let (claimed, entry) = settled_root("reclamation-open-evaluation", "completed");
     let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
         &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
-    claimed.record(|record| {
+    claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding.clone());
         record.session.status = SessionStatus::Idle;
     });

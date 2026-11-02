@@ -10,10 +10,7 @@ is_doctor=0
 is_readiness=0
 is_peek=0
 original_args=$*
-original_arg_lines=$(printf '%s\n' "$@")
-target_session_id=""
 while [ "$#" -gt 0 ]; do
-  case "$1" in --target-session-id=*) target_session_id=${1#--target-session-id=} ;; esac
   if [ "$1" = "--project-file" ]; then
     project_file="$2"
     shift 2
@@ -89,22 +86,6 @@ case "$engram_home" in
 esac
 
 case " $original_args " in
-  *" control-session-inspect "*)
-    printf '%s\n' "$original_args" > "$engram_home/session-inspection-args.txt"
-    printf '%s\n' "$original_arg_lines" > "$engram_home/session-inspection-argv.txt"
-    printf '%s\n' "$target_session_id" >> "$engram_home/session-inspection-targets.txt"
-    receipt_file="$engram_home/session-inspection-$target_session_id.json"
-    if [ ! -f "$receipt_file" ]; then receipt_file="$engram_home/session-inspection.json"; fi
-    cat "$receipt_file"
-    if [ -f "$engram_home/session-inspection-rewrite-marker" ]; then
-      cat "$engram_home/session-inspection-rewrite-marker" > "$project_file"
-    fi
-    if [ -f "$engram_home/session-inspection-exit" ]; then exit 7; fi
-    exit 0
-    ;;
-esac
-
-case " $original_args " in
   *" work "*" next "*)
     [ -n "${ENGRAM_HOME:-}" ] || exit 8
     [ -n "${ENGRAM_ACTOR_ID:-}" ] || exit 8
@@ -139,15 +120,6 @@ case " $original_args " in
     ;;
 esac
 
-case " $original_args " in
-  *" authority revoke "*)
-    # Engram removed `authority revoke` (cut B): journal any call and refuse it as Engram does.
-    printf '%s\n' "$original_args" > "$engram_home/engram-authority-revoke-args.txt"
-    printf '%s\n' "error: unrecognized subcommand 'revoke'" >&2
-    exit 2
-    ;;
-esac
-
 if [ "$is_doctor" -eq 1 ] || [ "$is_readiness" -eq 1 ]; then
   if [ "$is_readiness" -eq 1 ]; then diagnostic=readiness; else diagnostic=doctor; fi
   printf '%s\n' "$diagnostic" >> "$engram_home/diagnostic-commands"
@@ -168,18 +140,6 @@ if [ "$is_doctor" -eq 1 ] || [ "$is_readiness" -eq 1 ]; then
       fixture-readiness-refusal) printf '{"ready":true}\n'; exit 1 ;;
     esac
   fi
-  control='{"required_assurance":"turn_gated"}'
-  case "$mode" in
-    fixture-doctor-advisory)
-      control='{"required_assurance":"advisory"}'
-      ;;
-    fixture-doctor-action-gated)
-      control='{"required_assurance":"action_gated"}'
-      ;;
-    fixture-doctor-missing-required)
-      control=null
-      ;;
-  esac
   if command -v sha256sum >/dev/null 2>&1; then
     hash=$(printf '%s' "$mode" | sha256sum | cut -d ' ' -f 1)
   else
@@ -196,15 +156,15 @@ if [ "$is_doctor" -eq 1 ] || [ "$is_readiness" -eq 1 ]; then
     exit 0
   fi
   if [ "$is_readiness" -eq 1 ]; then
-    printf '{"schema_version":1,"scope":"readiness","ready":true,"full_audit":"not_run","mutation_enabled":false,"work_schema_version":1,"host_path_policy":{"stored":"fixture","resolved":"fixture","status":"matched"},"control":%s,"database":"%s","project_id":"%s"}\n' "$control" "$database" "$mode"
+    printf '{"schema_version":1,"scope":"readiness","ready":true,"full_audit":"not_run","mutation_enabled":false,"work_schema_version":1,"host_path_policy":{"stored":"fixture","resolved":"fixture","status":"matched"},"database":"%s","project_id":"%s"}\n' "$database" "$mode"
     exit 0
   fi
   if [ "$mode" = 'fixture-audit-unhealthy' ]; then
-    printf '{"healthy":false,"control":%s,"database":"%s","project_id":"%s"}\n' "$control" "$database" "$mode"
+    printf '{"healthy":false,"database":"%s","project_id":"%s"}\n' "$database" "$mode"
     printf 'development redactor provides no protection\n' >&2
     exit 1
   fi
-  printf '{"healthy":true,"control":%s,"database":"%s","project_id":"%s"}\n' "$control" "$database" "$mode"
+  printf '{"healthy":true,"database":"%s","project_id":"%s"}\n' "$database" "$mode"
   exit 0
 fi
 
@@ -215,103 +175,12 @@ fi
 [ "${ENGRAM_ACTOR_CONTEXT:-}" = "$actor_context" ] || exit 10
 [ "${ENGRAM_SESSION_ID:-}" = "$session_id" ] || exit 10
 
-routing_token="fixture-token"
-issued_grant=""
-begun_grant=""
-grant_counter=0
-bind_count=0
-seen_begin_pairs=""
-seen_evaluate_rows=""
-seen_evaluate_refusal_rows=""
-seen_bind_rows=""
-seen_checkpoint_rows=""
-known_grants=""
-
 json_field() {
   printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"
 }
 
 write_error() {
   printf '{"status":"error","error":{"code":"%s","message":"%s"}}\n' "$1" "$2"
-}
-
-write_evaluation_refusal() {
-  refusal_code=$1
-  printf '{"status":"ok","result":{"decision":"refuse","directive":{"directive_id":"directive-%s","code":"%s","target":"host","satisfaction":"checkpoint the open turn"}}}\n' "$refusal_code" "$refusal_code"
-}
-
-request_intent() {
-  printf '%s' "$1" | sed 's/"routing_token":"[^"]*",//; s/,"idempotency_key":"[^"]*"}$/}/'
-}
-
-grant_is_known() {
-  lookup_grant=$1
-  while IFS= read -r stored_grant; do
-    [ "$stored_grant" = "$lookup_grant" ] && return 0
-  done <<EOF
-$known_grants
-EOF
-  return 1
-}
-
-lookup_begin_row() {
-  lookup_key=$1
-  while IFS='|' read -r stored_key stored_grant stored_decision stored_code; do
-    if [ "$stored_key" = "$lookup_key" ]; then
-      printf '%s|%s|%s' "$stored_grant" "$stored_decision" "$stored_code"
-      return
-    fi
-  done <<EOF
-$seen_begin_pairs
-EOF
-}
-
-lookup_evaluate_row() {
-  lookup_key=$1
-  while IFS='|' read -r stored_key stored_fingerprint stored_grant; do
-    if [ "$stored_key" = "$lookup_key" ]; then
-      printf '%s|%s' "$stored_fingerprint" "$stored_grant"
-      return
-    fi
-  done <<EOF
-$seen_evaluate_rows
-EOF
-}
-
-lookup_evaluate_refusal() {
-  lookup_key=$1
-  while IFS='|' read -r stored_key stored_fingerprint stored_code; do
-    if [ "$stored_key" = "$lookup_key" ]; then
-      printf '%s|%s' "$stored_fingerprint" "$stored_code"
-      return
-    fi
-  done <<EOF
-$seen_evaluate_refusal_rows
-EOF
-}
-
-lookup_bind_row() {
-  lookup_key=$1
-  while IFS='|' read -r stored_key stored_intent stored_token; do
-    if [ "$stored_key" = "$lookup_key" ]; then
-      printf '%s|%s' "$stored_intent" "$stored_token"
-      return
-    fi
-  done <<EOF
-$seen_bind_rows
-EOF
-}
-
-lookup_checkpoint_row() {
-  lookup_key=$1
-  while IFS='|' read -r stored_key stored_intent stored_decision stored_code stored_grant; do
-    if [ "$stored_key" = "$lookup_key" ]; then
-      printf '%s|%s|%s|%s' "$stored_intent" "$stored_decision" "$stored_code" "$stored_grant"
-      return
-    fi
-  done <<EOF
-$seen_checkpoint_rows
-EOF
 }
 
 # Readiness is a pipe publication, not a delay for the child to start.
@@ -353,7 +222,12 @@ while IFS= read -r line; do
       exit 0
       ;;
     fixture-tree-reply)
-      printf '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready","session_id":"%s"}}}\n' "$session_id"
+      if [ "$(json_field "$line" operation)" = work_session_read ]; then
+        # Framing-only transport response, not an identity or capability proof.
+        printf '%s\n' '{"status":"ok","result":{"binding":null}}'
+      else
+        write_error invalid_request 'unsupported fixture operation'
+      fi
       ;;
     fixture-malformed)
       printf '%s\n' '{"status":'
@@ -375,215 +249,13 @@ while IFS= read -r line; do
     fixture-remote-unknown-code)
       write_error fixture_future_code 'a code this host does not know'
       ;;
-    fixture-stateful*)
-      operation=$(json_field "$line" operation)
-      request_token=$(json_field "$line" routing_token)
-      if [ "$operation" = "session_bind" ] && ! printf '%s' "$line" | grep -q '"assurance":"turn_gated"'; then
-        write_error invalid_assurance 'fixture requires turn_gated assurance'
-        continue
-      fi
-      if [ "$operation" != "session_bind" ] && [ "$request_token" != "$routing_token" ]; then
-        write_error control_session_token_mismatch 'routing token does not match'
-        continue
-      fi
-      case "$operation" in
-        session_bind)
-          key=$(json_field "$line" idempotency_key)
-          intent=$(request_intent "$line")
-          existing_bind=$(lookup_bind_row "$key")
-          if [ -n "$existing_bind" ]; then
-            existing_intent=${existing_bind%%|*}
-            existing_token=${existing_bind#*|}
-            if [ "$existing_intent" != "$intent" ]; then
-              write_error control_session_bind_conflict 'session_bind idempotency key was reused for a different intent'
-            else
-              printf '{"status":"ok","result":{"routing_token":"%s","status":{"phase":"sync_required","session_id":"%s"}}}\n' "$existing_token" "$session_id"
-            fi
-            continue
-          fi
-          if [ -n "$begun_grant" ]; then
-            write_error invalid_control_session 'a begun grant must be checkpointed before bind'
-            continue
-          fi
-          issued_grant=""
-          bind_count=$((bind_count + 1))
-          routing_token="fixture-token-$bind_count"
-          seen_bind_rows="${seen_bind_rows}
-$key|$intent|$routing_token"
-          printf '{"status":"ok","result":{"routing_token":"%s","status":{"phase":"sync_required","session_id":"%s"}}}\n' "$routing_token" "$session_id"
-          ;;
-        session_status)
-          if [ -n "$begun_grant" ]; then
-            open_grant=$begun_grant
-          else
-            open_grant=$issued_grant
-          fi
-          if [ -n "$open_grant" ]; then
-            printf '{"status":"ok","result":{"phase":"turn_open","open_grant_id":"%s"}}\n' "$open_grant"
-          else
-            printf '%s\n' '{"status":"ok","result":{"phase":"ready"}}'
-          fi
-          ;;
-        turn_evaluate)
-          key=$(json_field "$line" idempotency_key)
-          fingerprint=$(json_field "$line" intent_fingerprint)
-          existing_refusal=$(lookup_evaluate_refusal "$key")
-          if [ -n "$existing_refusal" ]; then
-            existing_fingerprint=${existing_refusal%%|*}
-            existing_code=${existing_refusal#*|}
-            if [ "$existing_fingerprint" != "$fingerprint" ]; then
-              write_error turn_idempotency_conflict 'idempotency key was reused with a different intent fingerprint'
-            else
-              write_evaluation_refusal "$existing_code"
-            fi
-            continue
-          fi
-          existing_evaluate=$(lookup_evaluate_row "$key")
-          if [ -n "$existing_evaluate" ]; then
-            existing_fingerprint=${existing_evaluate%%|*}
-            existing_grant=${existing_evaluate#*|}
-            if [ "$existing_fingerprint" != "$fingerprint" ]; then
-              write_error turn_idempotency_conflict 'idempotency key was reused with a different intent fingerprint'
-              continue
-            fi
-            printf '{"status":"ok","result":{"decision":"grant","grant":{"grant_id":"%s"}}}\n' "$existing_grant"
-            continue
-          fi
-          if [ -n "$issued_grant" ] || [ -n "$begun_grant" ]; then
-            seen_evaluate_refusal_rows="${seen_evaluate_refusal_rows}
-$key|$fingerprint|turn_already_open"
-            write_evaluation_refusal turn_already_open
-            continue
-          fi
-          grant_counter=$((grant_counter + 1))
-          issued_grant="fixture-grant-$grant_counter"
-          seen_evaluate_rows="${seen_evaluate_rows}
-$key|$fingerprint|$issued_grant"
-          known_grants="${known_grants}
-$issued_grant"
-          printf '{"status":"ok","result":{"decision":"grant","grant":{"grant_id":"%s"}}}\n' "$issued_grant"
-          ;;
-        turn_begin)
-          key=$(json_field "$line" idempotency_key)
-          grant=$(json_field "$line" grant_id)
-          intent=$(request_intent "$line")
-          existing_row=$(lookup_begin_row "$key")
-          existing_intent=${existing_row%%|*}
-          if [ -n "$existing_intent" ] && [ "$intent" != "$existing_intent" ]; then
-            write_error control_operation_idempotency_conflict 'idempotency key was reused with a different grant'
-            continue
-          fi
-          if [ -n "$existing_intent" ]; then
-            existing_remainder=${existing_row#*|}
-            existing_decision=${existing_remainder%%|*}
-            existing_code=${existing_remainder#*|}
-            if [ "$existing_decision" = "begin" ]; then
-              printf '{"status":"ok","result":{"decision":"begin","receipt":{"grant_id":"%s"}}}\n' "$grant"
-            else
-              printf '{"status":"ok","result":{"decision":"refuse","code":"%s"}}\n' "$existing_code"
-            fi
-            continue
-          fi
-          if ! grant_is_known "$grant"; then
-            write_error turn_grant_not_found 'grant does not exist'
-            continue
-          fi
-          if [ "$grant" != "$issued_grant" ]; then
-            seen_begin_pairs="${seen_begin_pairs}
-$key|$intent|refuse|grant_scope_mismatch"
-            printf '%s\n' '{"status":"ok","result":{"decision":"refuse","code":"grant_scope_mismatch"}}'
-            continue
-          fi
-          if [ "$mode" = "fixture-stateful-stale-begin" ] && [ "$grant_counter" -eq 1 ]; then
-            issued_grant=""
-            seen_begin_pairs="${seen_begin_pairs}
-$key|$intent|refuse|policy_epoch_changed"
-            printf '%s\n' '{"status":"ok","result":{"decision":"refuse","code":"policy_epoch_changed"}}'
-            continue
-          fi
-          if [ "$mode" = "fixture-stateful-lifecycle-hold-begin" ] && [ "$grant_counter" -eq 1 ]; then
-            # lifecycle_hold is non-expiring: retain the issued grant until a
-            # fresh bind explicitly expires it.
-            seen_begin_pairs="${seen_begin_pairs}
-$key|$intent|refuse|lifecycle_hold"
-            printf '%s\n' '{"status":"ok","result":{"decision":"refuse","code":"lifecycle_hold"}}'
-            continue
-          fi
-          if [ "$mode" = "fixture-stateful-delivery-invalid-begin" ] && [ "$grant_counter" -eq 1 ]; then
-            # delivery_invalid is non-expiring in the real control plane too.
-            seen_begin_pairs="${seen_begin_pairs}
-$key|$intent|refuse|delivery_invalid"
-            printf '%s\n' '{"status":"ok","result":{"decision":"refuse","code":"delivery_invalid"}}'
-            continue
-          fi
-          issued_grant=""
-          begun_grant=$grant
-          seen_begin_pairs="${seen_begin_pairs}
-$key|$intent|begin|"
-          printf '{"status":"ok","result":{"decision":"begin","receipt":{"grant_id":"%s"}}}\n' "$grant"
-          ;;
-        turn_checkpoint)
-          grant=$(json_field "$line" grant_id)
-          key=$(json_field "$line" idempotency_key)
-          intent=$(request_intent "$line")
-          existing_checkpoint=$(lookup_checkpoint_row "$key")
-          if [ -n "$existing_checkpoint" ]; then
-            existing_intent=${existing_checkpoint%%|*}
-            existing_remainder=${existing_checkpoint#*|}
-            existing_decision=${existing_remainder%%|*}
-            existing_remainder=${existing_remainder#*|}
-            existing_code=${existing_remainder%%|*}
-            existing_grant=${existing_remainder#*|}
-            if [ "$existing_intent" != "$intent" ]; then
-              write_error control_operation_idempotency_conflict 'turn_checkpoint idempotency key was reused for a different intent'
-            elif [ "$existing_decision" = "refuse" ]; then
-              printf '{"status":"ok","result":{"decision":"refuse","code":"%s"}}\n' "$existing_code"
-            else
-              printf '{"status":"ok","result":{"decision":"checkpointed","receipt":{"grant_id":"%s","cursor":1,"confirmed_cursor":1}}}\n' "$existing_grant"
-            fi
-            continue
-          fi
-          if ! grant_is_known "$grant"; then
-            write_error turn_grant_not_found 'grant does not exist'
-            continue
-          fi
-          if [ -z "$begun_grant" ] || [ "$grant" != "$begun_grant" ]; then
-            # Checkpointing the still-issued grant refuses grant_not_begun;
-            # checkpointing any other grant is a scope mismatch.
-            if [ -n "$issued_grant" ] && [ "$grant" = "$issued_grant" ]; then
-              refusal_code="grant_not_begun"
-            else
-              refusal_code="grant_scope_mismatch"
-            fi
-            seen_checkpoint_rows="${seen_checkpoint_rows}
-$key|$intent|refuse|$refusal_code|$grant"
-            printf '{"status":"ok","result":{"decision":"refuse","code":"%s"}}\n' "$refusal_code"
-            continue
-          fi
-          issued_grant=""
-          begun_grant=""
-          seen_checkpoint_rows="${seen_checkpoint_rows}
-$key|$intent|checkpointed||$grant"
-          printf '{"status":"ok","result":{"decision":"checkpointed","receipt":{"grant_id":"%s","cursor":1,"confirmed_cursor":1}}}\n' "$grant"
-          ;;
-        *)
-          write_error invalid_request 'unsupported fixture operation'
-          ;;
-      esac
-      ;;
     *)
-      case "$line" in
-        *'"operation":"session_bind"'*)
-          if printf '%s' "$line" | grep -q '"assurance":"turn_gated"'; then
-            printf '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready","session_id":"%s"}}}\n' "$session_id"
-          else
-            write_error invalid_assurance 'fixture requires turn_gated assurance'
-          fi
-          ;;
-        *)
-          printf '%s\n' '{"status":"error","error":{"code":"invalid_request","message":"fixture only accepts session_bind"}}'
-          ;;
-      esac
+      if [ "$(json_field "$line" operation)" = work_session_read ]; then
+        # Framing-only transport response, not an identity or capability proof.
+        printf '%s\n' '{"status":"ok","result":{"binding":null}}'
+      else
+        write_error invalid_request 'unsupported fixture operation'
+      fi
       ;;
   esac
 done

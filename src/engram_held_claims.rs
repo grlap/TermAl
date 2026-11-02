@@ -1,17 +1,6 @@
-// The one-shot CLI read of the work binding a session passes to
-// `session_bind`, through `engram work core held`, and the choice among the
-// claims it lists (Engram w-108a13d58018 criterion 3, tm-winf step 3). Owns
-// the reader, the shape of the held-claims output TermAl reads (the claim's
-// id and fence from each row included), the selection of one binding from
-// it, and the full read a work's source root is named against
-// (`read_engram_held_claims_from_cli`, `engram_source_roots.rs`). Does not own when the binding is read
-// (the bind in `engram_host_adapter.rs`, the queued bind preparation in
-// `engram_queued_admission.rs`, the admission refresh in
-// `engram_work_binding_refresh.rs`) or the CLI process plumbing it calls
-// (`run_engram_json_command_with_lock_retry`, which stays in
-// `engram_host_adapter.rs`). `read_engram_work_binding_from_cli` moved here
-// from `engram_host_adapter.rs` when it changed from the focus-based read
-// (`work core next --sections focus`, then `work core focus`) to this one.
+// One-shot ordinary held-claim reads and selection of a current work binding.
+// Naming, native verification and observations use the same claim identity;
+// this read changes no focus and authorizes no model turn.
 
 /// Names the caller in every failure message of a one-shot Engram CLI call.
 const ENGRAM_WORK_BINDING_READER_LABEL: &str = "work-binding reader";
@@ -47,9 +36,9 @@ struct EngramHeldClaim {
     claim_fence: i64,
     #[serde(default)]
     focused: bool,
-    /// The binding `session_bind` would accept for this claim, or null when
-    /// bind would refuse it (a pending handoff offer, a run no longer claimed
-    /// or active). A revision by the holder re-accepts the claim, so it shows
+    /// The current canonical work association, or null for an unavailable
+    /// association (a pending handoff offer or a run no longer claimed or
+    /// active). A revision by the holder re-accepts the claim, so it shows
     /// a fresh binding at the new revision rather than null. Absent reads as
     /// null.
     #[serde(default)]
@@ -63,11 +52,6 @@ struct EngramBindingPreference<'a> {
     /// The binding the session is bound with now, which the selection keeps
     /// while that claim is still bindable.
     current: Option<&'a EngramControlWorkBinding>,
-    /// The bindings Engram refused as stale for the session, while each one's
-    /// retry window lasts (`engram_refused_work_bindings_in_window`): the
-    /// selection leaves them out, so a claim Engram refuses gives way to
-    /// another the session holds rather than unbinding it.
-    refused: &'a [EngramControlWorkBinding],
 }
 
 /// Reads the work binding a session should be bound with, under the agent's
@@ -76,17 +60,16 @@ struct EngramBindingPreference<'a> {
 /// delivery and appends nothing. Unlike the focus-based read it replaced, it
 /// finds a claim wherever the agent's focus is: any agent verb that names
 /// another item moves focus, and a note on another item must not unbind the
-/// session. `preference` names the binding the session is bound with now and
-/// the one Engram refused (`select_engram_held_binding`).
+/// session. `preference` names its current claim association
+/// (`select_engram_held_binding`).
 fn read_engram_work_binding_from_cli(
     connection: &EngramConnectionConfig,
     preference: EngramBindingPreference<'_>,
     timeout: Duration,
-    trace_boot_recovery: bool,
     host_workdir: &FsPath,
 ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
     let held =
-        read_engram_held_claims_from_cli(connection, timeout, trace_boot_recovery, host_workdir)?;
+        read_engram_held_claims_from_cli(connection, timeout, host_workdir)?;
     Ok(select_engram_held_binding(
         held.items,
         held.omitted,
@@ -103,10 +86,8 @@ fn read_engram_work_binding_from_cli(
 fn read_engram_held_claims_from_cli(
     connection: &EngramConnectionConfig,
     timeout: Duration,
-    trace_boot_recovery: bool,
     host_workdir: &FsPath,
 ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
-    let started_at = std::time::Instant::now();
     let mut args = vec![
         "work",
         "--actor-id",
@@ -125,15 +106,6 @@ fn read_engram_held_claims_from_cli(
         ENGRAM_WORK_BINDING_READER_LABEL,
         host_workdir,
     );
-    if trace_boot_recovery {
-        log_engram_boot_recovery_phase(
-            &connection.session_id,
-            "work_core_held",
-            1,
-            started_at.elapsed(),
-            &held,
-        );
-    }
     let held = held.map_err(|mut error| {
         // Every bind reads the held claims, so an Engram build that predates
         // the command fails every bind; say what would fix it.
@@ -152,20 +124,18 @@ fn read_engram_held_claims_from_cli(
 }
 
 /// The binding to bind from the claims a session holds. Only a claim with a
-/// binding is a candidate; bind would refuse the others, and the bindings
-/// Engram refused as stale (`preference.refused`) are left out while their
-/// retry windows last, since Engram validates more than the listing shows.
+/// binding is a candidate. A null canonical association never becomes a
+/// binding merely because its claim row exists.
 /// The focused claim comes first, as the item the agent declared it is
 /// working on; then the claim the session is bound to now
 /// (`preference.current`), with its current revision and fence, so focus
-/// moving to an unclaimed item, or to one Engram refused, does not switch a
+/// moving to an unclaimed item does not switch a
 /// session that holds several claims; then the most recently claimed, which
 /// Engram lists first. When Engram left claims out of the list (`omitted`),
 /// a current claim not listed may be among them, so the current binding is
-/// kept rather than switched, unless it is a refused one; if the claim is
-/// in fact gone, Engram refuses the binding as stale and the refusal heal
-/// reads again. No candidate binds no work. A control session carries one
-/// binding, so a turn's evidence lands on that claim's run only.
+/// kept for the caller's exact canonical revalidation rather than switched.
+/// Without a candidate there is no work association. Each captured report carries its own
+/// original claim and run.
 fn select_engram_held_binding(
     held: Vec<EngramHeldClaim>,
     omitted: u64,
@@ -179,7 +149,6 @@ fn select_engram_held_binding(
         .filter_map(|claim| {
             claim
                 .control_binding
-                .filter(|binding| !preference.refused.contains(binding))
                 .map(|binding| (claim.focused, binding))
         })
         .collect::<Vec<_>>();
@@ -193,7 +162,7 @@ fn select_engram_held_binding(
         {
             return Some(binding.clone());
         }
-        if omitted > 0 && !current_listed && !preference.refused.contains(current) {
+        if omitted > 0 && !current_listed {
             return Some(current.clone());
         }
     }

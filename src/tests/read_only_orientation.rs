@@ -28,14 +28,13 @@ fn tracker_project(state: &AppState) -> (String, PathBuf) {
         .engram = Some(EngramProjectSettings {
         acceptance_evaluation: None,
         enabled: true,
-        turn_gated_control: false,
+        execution_observability: false,
         binary_path: Some(
             real_engram_control_fixture_path()
                 .to_string_lossy()
                 .into_owned(),
         ),
         home: Some(root.to_string_lossy().into_owned()),
-        work_authority_grant: None,
         authority_store_key: None,
         deadline_ms: Some(250),
     });

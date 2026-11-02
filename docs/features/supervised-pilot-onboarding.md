@@ -6,26 +6,23 @@ review at `982e043a`. The commit to install is the one the supervisor names,
 not either of these.** This document is the
 operating guide for that pilot and nothing wider.
 
-**The tier decides what TermAl records.** The pilot runs at tier I1 unless Greg
-chooses tier I2 in writing:
+**What TermAl records.** The pilot runs with the project's Engram integration
+enabled and its Execution Observability on (the default). The agent gets the
+Engram MCP server and work context from TermAl; no turn waits for Engram. The
+agent names its task's worktree, and TermAl reports each turn to Engram after
+it ran, as a host observation: how it ended, whether it changed source, and
+the declared tests it ran, each judged from its TRX file as passed, failed or
+indeterminate ([Execution Observability](execution-observability.md)). Those
+reported checks are not test credit. In TermAl, test credit comes only from a
+TermAl test-launcher run registered with committed input, which a dotnet
+repository does not have, so in this pilot the agent's note of the TRX
+counters on the item is the test evidence. Acceptance evaluation is
+temporarily switched off as a blocker until Execution Observability is
+implemented: completion is self-asserted unless the supervisor set evaluated
+acceptance (section 3).
 
-- **I1 (Base):** the agent gets the Engram MCP server and advisory context from
-  TermAl; no turn is gated by Engram. At I1 TermAl **names no worktree and
-  records no test check**: a declared test runs as an ordinary command, with no
-  card line and no host credit; the agent's own notes on the item are the test
-  evidence, and acceptance is self-asserted unless the coordinator set
-  evaluation (section 3). This is the tier the plan assumes.
-- **I2 (turn-gated control):** Engram authorizes each turn; the agent names its
-  worktree and TermAl records declared tests as host checks with credit. This
-  is the only tier at which sections 4 and 5's credited-test steps apply. It
-  is not in the plan unless Greg chooses it, and its known open defects are
-  the supervisor's to weigh (retained prompts, manual Resume after a mid-turn
-  cut).
-
-Every section below says which tier it applies to.
-
-Related: [Engram host adapter](engram-host-adapter.md) (tiers, settings,
-verification), [Declared test commands](declared-test-commands.md) (the
+Related: [Engram host adapter](engram-host-adapter.md) (settings,
+verification), [Execution Observability](execution-observability.md), [Declared test commands](declared-test-commands.md) (the
 `termal-tests.toml` route), [Test runs](test-runs.md) (the runs TermAl shows),
 [Root coding sessions](root-coding-sessions.md).
 
@@ -38,8 +35,7 @@ The pilot is:
 - one Windows machine;
 - one repository with no Git submodules and no Git LFS;
 - plain agent sessions with Engram tracking: a root session per task, in a
-  worktree used for that task only (named for it at I2; at I1 naming is
-  refused, section 5);
+  worktree used for that task only and named for it (section 5);
 - planned restarts only; the colleague never restarts TermAl or Engram on their
   own;
 - no capacity pauses expected.
@@ -122,10 +118,10 @@ both); start the host. The data files under `~/.termal/` are not touched.
    (Projects), pointing at its root folder.
 2. Connect Engram for that project (section 3): **Settings > Engram** for the
    binary and home; then the project's Engram settings — Enabled on, and the
-   Turn-gated control checkbox per the tier Greg chose (I1 off, I2 on);
-   **Verify**, then **Save & enable**.
+   **Execution Observability** checkbox left on; **Verify**, then
+   **Save & enable**.
 3. Create the colleague's root session IN that project (the new-session
-   dialog: agent, project). The tier belongs to the session's project: a
+   dialog: agent, project). The settings belong to the session's project: a
    session created elsewhere has the other project's binding, or none.
 
 The task's worktree (section 5): in this pilot the clone's main checkout is
@@ -140,7 +136,7 @@ absolute `workdir`, checking `session.workdir` in the response
 ([Root coding sessions](root-coding-sessions.md)). A worktree outside the
 project folder (a sibling folder, for example) cannot be named as a source
 root and a session there is not in the project: it gets no Engram tools and no
-tier.
+host observations.
 
 ## 3. Connect Engram
 
@@ -153,15 +149,12 @@ What the repository and the host each provide
   the Engram home: **Settings > Engram**. The developer name is the
   colleague's short handle (lowercase ASCII letters, digits, `.`, `_`, `-`).
 - Each project is enabled by **Verify** followed by **Save & enable**, and
-  turned off by **Disable Engram**; its only other setting is the
-  **Turn-gated control** checkbox. **Run Full Audit** there is not a setting
-  but a whole-store `doctor` run: it opens the store writable and may perform
-  SQLite recovery, so only the supervisor runs it, and never during a session's
-  work. At I1: enabled, Turn-gated control
-  **off**. Only at I2, by Greg's written choice: enabled with the checkbox on
-  (the checkbox also requires the Engram store to have been initialised with
-  `--required-assurance turn_gated`, not `advisory`; the supervisor sets that
-  up, never the colleague).
+  turned off by **Disable Engram**; its other setting is the
+  **Execution Observability** checkbox, on by default, which the pilot leaves
+  on. **Run Full Audit** there is not a setting but a whole-store `doctor`
+  run: it opens the store writable and may perform SQLite recovery, so only
+  the supervisor runs it, and never during a session's work. TermAl asks the
+  store for no assurance level.
 - **Verify** runs Engram's readiness check without changing anything;
   **Save & enable** repeats it and persists. A readiness refusal names its
   cause; fix the cause rather than retrying. The host refuses a change to
@@ -170,7 +163,7 @@ What the repository and the host each provide
   Save & enable again.
 
 TermAl injects the Engram MCP server into each agent session of an enabled
-project and adds advisory `engram work next --peek` context at session start.
+project and adds `engram work next --peek` context at session start.
 The colleague configures nothing in the agent CLI for this.
 
 Engram-side steps, provided by Engram's coordinator (Engram::Fable, 2026-10-14,
@@ -216,21 +209,16 @@ engram --home <H> --project-file <repo>\.engram-project doctor
 engram --home <H> --project-file <repo>\.engram-project readiness --json
 ```
 
-Why `advisory`: a plain `engram init` makes the store `turn_gated`, which only
-an honest turn-gated host can claim; for plain agent sessions with Engram
-tracking, advisory is the truthful setting and matches tier I1. INFERENCE: a
-writing command run before `init` may create the store with the turn-gated
-default, so `init` comes first. Acceptance evaluation defaults to self-asserted
-completion, and at I1 it stays so unless the supervisor sets evaluated
-acceptance; if set at I1, no criterion may be bound to a test — TermAl records
-no host check at I1, so a test-bound criterion could never pass evaluation;
-the evidence is the TRX counters noted on the item. At I2 evaluated acceptance is a
-PREREQUISITE the supervisor sets once before any I2 work (`engram
-control-policy set-acceptance-evaluation --modes independent_session …`),
-never the colleague: with the default policy the I2 workflow's evaluation
-request is refused ("the project's Engram policy admits no
-acceptance-evaluation mode") and the item could never complete as section 5
-describes.
+These are the commands for the Engram commit named above. An Engram build
+that has removed turn gating no longer takes `--required-assurance` or
+`--authorized-by` on `init`; with such a build, run `init` without them. TermAl
+does not read the store's assurance level either way. INFERENCE: a writing
+command run before `init` may create the store with a default, so `init`
+comes first. Acceptance evaluation defaults to self-asserted completion, and
+stays so unless the supervisor sets evaluated acceptance; if set, no criterion
+may be bound to a test, since nothing in this pilot can earn host test credit,
+so a test-bound criterion could never pass evaluation; the evidence is the TRX
+counters noted on the item.
 
 **MCP wiring.** With the project's Engram integration enabled, TermAl injects
 `engram mcp --actor-id A --session-id S [--actor-context C]` per session with
@@ -252,11 +240,11 @@ repository root and run exactly as declared
 project and target framework; the result is a TRX file in a git-ignored
 directory.
 
-**Tier:** the declaration is committed at both tiers, so a later move to I2
-needs no change. At I1 the declared command runs as an ordinary command: no
-check is recorded, no card line and no credit appear, and the agent notes the
-TRX counters on the item itself. The recognition, the card lines and the
-PASS/FAIL/UNKNOWN judgement described below exist only at I2.
+**What is recorded:** TermAl recognises a declared run and judges it from its
+TRX file as PASS, FAIL or UNKNOWN (below), and reports that judgement in the
+turn's host observation as a check that is `passed`, `failed` or
+`indeterminate`. It is never test credit: the agent notes the TRX counters on
+the item itself.
 
 `termal-tests.toml`:
 
@@ -285,7 +273,7 @@ a runsettings file. A declared command must contain no single quote when
 Codex will run it: Codex reports the command inside a `pwsh` wrapper whose
 script must be one single-quoted word with no `'` inside, so an entry with a
 single-quoted argument is not recognised for Codex (no check, no card line,
-no credit); Claude's `pushd` form is unaffected.
+no judgement); Claude's `pushd` form is unaffected.
 
 The agent runs one entry exactly as declared, in the foreground, with nothing
 piped, redirected or chained, in the form its runtime records. The form
@@ -306,42 +294,22 @@ differs by agent:
   route.
 
 Never wrap the command in a script or another shell, and never retype it with
-other flags to make it match. At I2 TermAl writes the card line at the turn's
-closing checkpoint, not the moment the command returns; a run made in the
-turn that named the worktree earns nothing (section 5). What TermAl then
-shows on the session card:
+other flags to make it match. TermAl judges the run after the command returns,
+and reports it with the turn's host observation when the turn ends; a run made
+in the turn that named the worktree is reported in the workdir the turn began
+with (section 5). The judgement:
 
 - **PASS**: exit 0, the TRX file written by this run, at least one test
-  executed and passed, none failed — eligible for verification credit.
+  executed and passed, none failed.
 - **FAIL**: a failed, errored or aborted run, or a non-zero exit.
 - **UNKNOWN**: everything else, with the observed reason (artifact missing,
   not ignored, unchanged, zero executed, declaration changed). UNKNOWN is not a
-  weak PASS; it earns nothing. Fix the declaration or the ignore rule and run
-  again.
+  weak PASS. Fix the declaration or the ignore rule and run again.
 
 Verify the declaration once, before the first real task, by asking the agent
 in a session to run the declared command (not by typing it in a terminal: only
-the agent's run is observed): at I2, confirm the card shows the TRX counters
-at the turn's end; at I1, confirm the TRX file appears at the declared path
-(there is no card line to check).
-
-The three outcomes, exercised at I2 (the dry run and the invitation checklist
-use them), one per turn so each card line is its own: PASS — the declared
-command on a green test project; FAIL — change one assertion so a test fails,
-run the same declared command, restore the assertion afterwards; UNKNOWN
-(artifact missing) — before the run, in a turn of its own, change the entry's
-`artifact` in `termal-tests.toml` to a file name the command never writes
-(for example `results-missing.trx`), then run the declared command, and
-restore the declaration afterwards. The declaration is matched and hashed and
-the artifact's starting state taken when the command starts, and both are
-checked again after it returns, on TermAl's own thread; so the declaration
-must be stable throughout the run, the artifact must already be absent when
-the command ends (deleting the TRX after the command has returned is too late
-and does not produce UNKNOWN), and every restoration — the assertion, the
-declaration's `artifact` — waits for the NEXT turn, after the run's turn has
-closed, never the same turn as the run (section 5, I2 step 4). Run the PASS
-last, after every drill edit is restored exactly, so the acceptance
-evaluation requested in the following turn judges the tree the PASS ran on.
+the agent's run is observed), and confirm the TRX file appears at the declared
+path with the counters the agent then notes.
 
 ## 5. The daily workflow
 
@@ -350,86 +318,53 @@ uses Engram through its MCP tools; the same words exist on the command line
 (`engram work next --peek`, `claim REF`, `note "…"`, `gate NAME`, `done "…"`,
 `add "title" --accept "criterion"`, `ls`, `show REF`, `remember`, `memories`).
 
-**At I1 (the plan's tier):**
-
 1. `engram work next` — see what is ready, then read the project memories (the
    agent does this at session start; the colleague reads the result on the
    card).
-2. Claim the item before any edit. Do not name a worktree: at I1 TermAl refuses
-   naming ("Engram control is not enabled for this session or its project").
-3. Work in the task's worktree; one item per worktree, never two.
+2. Claim the item and, in the same turn, name the worktree for it once
+   (`termal_name_source_root`); one item per worktree, never two. Then end the
+   turn: naming takes effect at the next turn. Edit nothing and run no test in
+   the naming turn.
+3. In a fresh turn, work in the named worktree. TermAl measures it and
+   reports the turn's source and checks there.
 4. Run the declared test in the agent's run form (section 4), in the
-   foreground, and wait for it to finish. TermAl records nothing for it at I1.
+   foreground, and wait for it to return. An edit or another command in that
+   worktree while the test runs makes the reported check `indeterminate`.
 5. Note findings and the test evidence on the item: the TRX path, the
    executed/passed/failed counters and the exit status, copied from the result
    file.
-6. `done` completes the item. Acceptance is self-asserted at I1 unless the
+6. `done` completes the item. Acceptance is self-asserted unless the
    supervisor set evaluated acceptance (section 3), in which case request the
    evaluation first and keep that turn open until it submits; the item's
    criteria must then not be bound to a test (section 3).
 
-**At I2 (only by Greg's written choice):**
-
-1. `engram work next`, then the project memories, as above.
-2. Claim the item and, in the same turn, name the worktree for it once
-   (`termal_name_source_root`); one item per worktree, never two. Then END THE
-   TURN: naming takes effect at the next turn, and a turn that acquired its
-   claim cannot report evidence under it. Edit nothing and run no test in the
-   naming turn: a test run there earns nothing.
-3. In a fresh turn, work in the named worktree. TermAl measures it and credits
-   only tests run there.
-4. Run the declared test in the agent's run form (section 4), in the
-   foreground, wait for it to return, and make it the LAST command in that
-   worktree for the turn. TermAl reads the declaration, the artifact and the
-   closing snapshot after the command returns, on its own thread, and the
-   check stays open until those reads finish: an edit or another command in
-   that worktree while the test runs, or before the turn's closing checkpoint
-   has settled, marks the check overlapped and voids its credit. Tracker words
-   (`note`) are not worktree commands and are safe. The card line appears at
-   the turn's closing checkpoint.
-5. Note findings and evidence on the item.
-6. Request the acceptance evaluation in the turn after the passing check, and
-   keep that turn open until the evaluator submits; the evaluation is recorded
-   on the item. This step presumes the supervisor set evaluated acceptance in
-   section 3 (an I2 prerequisite); if the request is refused with "admits no
-   acceptance-evaluation mode", stop and tell the supervisor — do not fall
-   back to a self-asserted `done`. If it is refused with "source root changed
-   while it was evaluated", request it once more and do not rename the root.
-7. `done` completes the item once the evaluation is recorded.
-
-The credit rules at I2, verified on the pilot's host build (the rules the agent
-must keep for a test to count):
+The rules the agent keeps so the reported check says what happened:
 
 - Run the declared test in the foreground and wait for it; nothing in this
   pilot runs in the background or detached (TermAl's own background and
   detached full-gate forms belong to its development repository, not to a
   dotnet repository).
 - Never wrap the test command in a script or another shell, and run it
-  exactly as declared: a wrapped or otherwise non-matching command is silently
-  unrecognised — no check, no card line, no credit — because the only
+  exactly as declared: a wrapped or otherwise non-matching command is
+  silently unrecognised and reported as no check, because the only
   non-recognition notice TermAl writes is for its own node test launcher, not
-  for declared commands. A missing card line after a test therefore means the
-  command did not match the declaration; compare it word for word.
-- Lint and format commands are not test records; run them as ordinary
-  commands, not as tests.
+  for declared commands.
+- Lint and format commands are not tests; run them as ordinary commands.
 - Name each worktree for one item only.
 - No local helper agents (for example a Claude Explore or Task subagent) in a
-  session while its tests run; one restricts that session's credit.
-- Ask before any restart: a restart voids a passed but not yet evaluated check
-  (section 7).
+  session while its tests run; their work marks the turn's observation mixed.
 
 Land code through the repository's own rules; TermAl's Merger train is not part
 of the pilot.
 
 ## 6. When something looks stuck
 
-Read the session card first: TermAl writes one line for every hold, refusal or
-unknown result of a command it recognised, with its cause; a command it did not
-recognise as the declared test leaves no line at all (section 5). Then:
+Read the session card first: TermAl writes a line for a refusal or an unknown
+result it can name, with its cause; a command it did not recognise as the
+declared test leaves no line at all (section 5). Then:
 
-- A test shows UNKNOWN: read the reason on the card (section 4); do not rerun
-  blindly.
-- A prompt is retained or a card says a request is waiting: do nothing in that
+- A test reads UNKNOWN: check the reason (section 4); do not rerun blindly.
+- A prompt stays queued or a card says the queue is paused: do nothing in that
   session; tell the supervisor and quote the card line.
 - A session is idle for longer than expected: check the **Test Runs** tab for
   a run still in progress; what it lists for the pilot's build is stated in
@@ -444,15 +379,13 @@ recognise as the declared test leaves no line at all (section 5). Then:
 **Rule: ask your supervisor before restarting TermAl or Engram.** A restart is
 planned, done by the supervisor as stop, replace or rebuild, start. A restart
 lets claims lapse (the agent recovers its claim with `claim REF --recover`, as
-in the Engram refusal line above); at I2 it also voids a credited check that
-was not yet evaluated, and the supervisor re-names the worktree and reruns the
-test.
+in the Engram refusal line above); the supervisor re-names the worktree after
+the claim is recovered.
 
 Do not cancel a delegated child session mid-run. The one delegated session
 the pilot uses is the acceptance evaluator child that
-`termal_evaluate_acceptance` spawns (at I2 for every item, the supervisor
-having set evaluated acceptance in section 3; at I1 only when an evaluation
-is requested); the rule covers it — wait for its fan-in. Any other
+`termal_evaluate_acceptance` spawns, only when an evaluation is requested;
+the rule covers it — wait for its fan-in. Any other
 child: leave it to the supervisor. Do not edit `~/.termal/`, the
 Engram home or the Engram store by hand, and never kill an `engram.exe`
 process. Off-limits Engram commands in the pilot: `migration export/import`,
@@ -471,18 +404,20 @@ process. Off-limits Engram commands in the pilot: `migration export/import`,
   checkout's project); it writes under `<home>\backups\` on
   the same machine and does not protect against losing the machine — off-host
   backup is outside the pilot. Restoring is the coordinator's act. Never
-  delete or replace the data files. A TermAl restart loses no Engram data; it
-  voids in-flight host test credit and unevaluated checks, and running MCP
-  processes switch to the newly installed build.
+  delete or replace the data files. A TermAl restart loses no Engram data,
+  and a turn running across it is not reported. A restart alone does not
+  prove that every Engram process of the old build has exited: before a
+  session's new work-session connection opens, that session's earlier
+  Engram child and its descendants must be confirmed exited, with no overlap
+  between the old and the new. The running build is the one measured after
+  the restart (its hash taken then), since a start script may rebuild or
+  replace the installed binary.
 - Machine: agents create, change and delete files only inside the repository
   folder they work in. Anything outside it — installing software, changing
   user or global configuration — is the supervisor's act, never the agent's.
-- Evidence: at I1 the test evidence is the agent's note of the TRX counters;
-  TermAl records no check. At I2 a PASS counts only when it ran in the named
-  worktree, in the agent's run form, in the foreground, unwrapped, with the
-  declaration unchanged, no other command or edit in that worktree and no
-  helper agent in the session while it ran; a missing result is UNKNOWN, never
-  a pass.
+- Evidence: the test evidence is the agent's note of the TRX counters. TermAl
+  also reports each declared run in the turn's host observation, never as
+  test credit; a missing result is UNKNOWN, never a pass.
 - Excluded, repeated: submodules/LFS repos, the landing train, delegated
   children (except the acceptance evaluator child, section 6), cross-machine
   sync, policy or store changes, unplanned restarts.
@@ -492,12 +427,10 @@ process. Off-limits Engram commands in the pilot: `migration export/import`,
 The supervisor ticks each box with its locator on the pilot's tracker item.
 The decision to invite is Greg's; this list is what the decision rests on.
 
-- [ ] The tier is decided and recorded in writing: I1 (the plan's tier) or I2
-      by Greg's choice. Every box below is read at that tier.
 - [ ] Greg's own run on the colleague's machine, following only this document,
-      completed one task end to end: at I1, a declared test run with its TRX
-      counters noted on the item; at I2, a credited declared test (this run
-      is a checklist box, not a criterion of the plan item).
+      completed one task end to end: a named worktree, a declared test run with
+      its TRX counters noted on the item, and the turn's host observation in
+      Engram (this run is a checklist box, not a criterion of the plan item).
 - [ ] Visible test-run registration is completed and is the running host build
       on the supervising machine.
 - [ ] The pilot validation Greg directed on 2026-10-16, in place of any dry
@@ -507,26 +440,22 @@ The decision to invite is Greg's; this list is what the decision rests on.
       the plan item. Before anything starts, Greg receives the proposed item,
       why it is isolated, the exact session and project route, and the one UI
       action (if any) he must take; nothing starts before his reply. The run
-      is noted on the item: the declared test ran as an ordinary command and
-      the TRX counters were noted (at I1 also: no check record exists, the
-      document's statement verified). At I2 the credited part of this box is
-      BLOCKED on Phoenix: its index holds gitlinks (submodules), and a
-      repository with submodules has no source basis, so no declared run there
-      is ever credited ([Engram host adapter](engram-host-adapter.md), "When
-      there is none"); I2 credited evidence needs a supported repository or a
-      separately approved proof route, recorded on the item as the blocker —
-      it is not supplied by a fixture-clone dry run. A fixture clone may still
-      serve the supervisor to qualify the declaration's form; that
-      qualification does not tick this box.
+      is noted on the item: the declared test ran and the TRX counters were
+      noted. Phoenix's index holds gitlinks (submodules), and a repository with
+      submodules has no source basis ([Engram host adapter](engram-host-adapter.md),
+      "When there is none"), so its turns report no source change there. A
+      fixture clone may still serve the supervisor to qualify the
+      declaration's form; that qualification does not tick this box.
 - [ ] The declared dotnet/TRX live proof after install and restart is
-      completed (I2 evidence; at I1 it shows the declaration is well formed).
+      completed: it shows the declaration is well formed and its judgement
+      reaches the turn's host observation.
 - [ ] The Engram-side steps in section 3 are the ones Engram's coordinator
       provided, quoted with attribution and unchanged in substance, and the
       readiness check passes on the colleague's machine.
 - [ ] The supervisor can name the two open operational workarounds (no
       cancelling delegated children mid-run; binary updates only by stop,
-      replace, start) and the restart effects (claims lapse, unevaluated credit
-      voids).
+      replace, start) and the restart effects (claims lapse, a turn running
+      across the restart is not reported).
 - [ ] The Engram-alone pilot plan and this plan were reported to Greg together.
 - [ ] A rollback for the colleague's machine is written down and the previous
       build is kept: stop the host, restore `termal.exe.previous` and
@@ -542,14 +471,14 @@ rather than repeats.
 
 - E1 — Installation: TermAl built from the named commit with its build hash
   recorded on the tracker item; a root session in the project lists the Engram
-  tools; at I2, turn-gated control enabled and one worktree named.
-- E2 — One real task end to end: add, claim, work, the declared test in the
-  foreground (at I2 a host Test check on the card; at I1 the TRX counts noted
-  on the item), note, done; plus one acceptance evaluation if the policy
-  enables it.
+  tools; Execution Observability on and one worktree named.
+- E2 — One real task end to end: add, claim, name the worktree, work, the
+  declared test in the foreground with its TRX counts noted on the item and
+  its host observation in Engram, note, done; plus one acceptance evaluation
+  if the policy enables it.
 - E3 — A planned-restart drill with one claimed item: the host is stopped and
-  started on the same build ("host back"); at I2, the worktree is re-named and
-  the voided passed-but-unevaluated check is seen, as section 6 documents.
+  started on the same build ("host back"); the claim is recovered and the
+  worktree re-named, as section 6 documents.
 - E4 — Backup: per Engram's sheet.
 - E5 — An incident log, including every TermAl stuck state the colleague met,
   quoted from the UI card.

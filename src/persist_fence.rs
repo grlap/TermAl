@@ -5,6 +5,28 @@ persist.rs. This is a new boundary, not a moved implementation. It does not own
 delegation admission, provider delivery, SQL schema, or HTTP response policy.
 */
 
+/// A captured session-row mutation sequence. Its identity survives clones,
+/// but a reload starts a different sequence even if counters repeat.
+#[derive(Clone)]
+struct PersistSessionWriteStamp {
+    incarnation: Arc<()>,
+    mutation_stamp: u64,
+}
+
+impl PersistSessionWriteStamp {
+    fn capture(record: &SessionRecord) -> Self {
+        Self {
+            incarnation: record.persist_incarnation.clone(),
+            mutation_stamp: record.mutation_stamp,
+        }
+    }
+
+    fn covers(&self, earlier: &Self) -> bool {
+        Arc::ptr_eq(&self.incarnation, &earlier.incarnation)
+            && self.mutation_stamp >= earlier.mutation_stamp
+    }
+}
+
 /// Equality is deliberately about materialized content, not the global
 /// revision or the collector watermark (which can advance past deferred rows).
 #[cfg_attr(not(test), allow(dead_code))]
@@ -16,41 +38,36 @@ enum PersistFenceTarget {
         session_id: String,
         content: Value,
     },
-    EngramCausalCard {
+    /// Exact ordinary queue/receipt content, read back from its owning row.
+    OrdinarySessionRow {
         session_id: String,
-        message_id: String,
         content: Value,
     },
-    EngramRecovery {
+    /// Human intake/promotion needs a committed own row at or after its cut,
+    /// so an unrelated queue edit cannot invalidate its acknowledgement.
+    HumanPromptRow {
         session_id: String,
-        content: Value,
+        minimum: PersistSessionWriteStamp,
     },
     EngramWorkAuthority(Box<EngramAuthorityImage>),
-    EngramProjectContainment(Box<EngramProjectContainmentFence>),
     /// An operator release of a retained named root: its audit record and
     /// the removal of its selection, both in the committed metadata
     /// (`engram_named_root_release.rs`).
     EngramNamedRootRelease(Box<EngramNamedRootReleaseAudit>),
-    EngramAdmission {
+    EngramObservation {
+        session_id: String,
+        content: Value,
+    },
+    EngramObservationRemoval {
         session_id: String,
         content: Value,
     },
     EngramSourceObservation {
         owner: Box<EngramSourceSightingOwner>,
         session_id: String,
-        admission: Value,
+        session_content: Value,
     },
     EngramSourceSightingHistory(Box<EngramSourceSightingOwner>),
-    EngramSourceFinalization {
-        owner: Box<EngramSourceSightingOwner>,
-        session_id: String,
-        content: Value,
-    },
-    EngramSourceRemoval {
-        owners: Vec<EngramSourceSightingOwner>,
-        session_id: String,
-        content: Value,
-    },
     Delegation(Box<DelegationRecord>),
     WaitRegistration(DelegationWaitRecord),
     /// The test-run card epoch, which must be durable before any card is
@@ -92,21 +109,11 @@ enum PersistFenceTarget {
         prompt_id: String,
         write_ahead: String,
     },
-    /// A batch gate's owed bind with exactly this decision, read back from
-    /// the durable session row before the decision is first sent
-    /// (`engram_batch_binds.rs`).
-    EngramOwedBindDecision {
-        session_id: String,
-        original: String,
-        work_id: String,
-        decided: Value,
-    },
 }
 
 impl PersistFenceTarget {
     fn is_in_delta(&self, delta: &PersistDelta) -> bool {
         match self {
-            Self::EngramProjectContainment(_) => false,
             Self::Federation(_) | Self::FederationBindings(_) => false,
             Self::EngramWorkAuthority(image) => {
                 ![
@@ -126,19 +133,17 @@ impl PersistFenceTarget {
             }
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
-            Self::EngramCausalCard { .. }
-            | Self::EngramRecovery { .. }
-            | Self::EngramAdmission { .. }
+            Self::OrdinarySessionRow { .. }
+            | Self::HumanPromptRow { .. }
+            | Self::EngramObservation { .. }
+            | Self::EngramObservationRemoval { .. }
             | Self::EngramSourceObservation { .. }
             | Self::EngramSourceSightingHistory(_)
-            | Self::EngramSourceFinalization { .. }
-            | Self::EngramSourceRemoval { .. }
             | Self::QueuedPromptDurability { .. }
             | Self::FederationExecutorQueue { .. }
             | Self::FederationExecutorHandoff { .. }
             | Self::PromptDeliveryWriteAhead { .. }
-            | Self::ProviderCapacityRecovery { .. }
-            | Self::EngramOwedBindDecision { .. } => false,
+            | Self::ProviderCapacityRecovery { .. } => false,
             Self::Delegation(expected) => delta
                 .changed_delegations
                 .as_deref()
@@ -214,100 +219,30 @@ impl PersistFenceTarget {
             None
         };
         match self {
-            Self::EngramProjectContainment(image) => image.is_already_durable(connection),
+            // Runtime-only writer proof; stored bytes or a delta watermark
+            // cannot certify the captured incarnation and own-row write.
+            Self::HumanPromptRow { .. } => Ok(false),
             Self::Federation(expected) => federation_committed_image_matches(connection, expected),
             Self::FederationBindings(expected) => expected.is_already_durable(connection),
-            Self::EngramCausalCard {
-                session_id,
-                message_id,
-                content,
-            } => {
-                let stored: Option<String> = connection
-                    .query_row(
-                        "SELECT value_json FROM messages WHERE session_id = ?1 AND message_id = ?2",
-                        rusqlite::params![session_id, message_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let Some(stored) = stored else {
-                    return Ok(false);
-                };
-                Ok(serde_json::from_str::<Value>(&stored)? == *content)
-            }
-            Self::EngramRecovery {
-                session_id,
-                content,
-            } => {
-                let stored: Option<String> = connection
-                    .query_row(
-                        "SELECT value_json FROM sessions WHERE id = ?1",
-                        [session_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let Some(stored) = stored else {
-                    return Ok(false);
-                };
-                let actual: Value = serde_json::from_str(&stored)?;
-                let mut statement = connection.prepare(
-                    "SELECT value_json FROM messages WHERE session_id = ?1 ORDER BY position",
-                )?;
-                let encoded = statement
-                    .query_map([session_id], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                let messages = encoded
-                    .iter()
-                    .map(|text| serde_json::from_str::<Value>(text))
-                    .collect::<serde_json::Result<Vec<_>>>()?;
-                Ok(engram_recovery_image_from_row(&actual, json!(messages)) == *content)
-            }
-            Self::EngramSourceRemoval {
-                owners,
-                session_id,
-                content,
-            } => {
-                for owner in owners {
-                    if !Self::EngramSourceSightingHistory(Box::new(owner.clone()))
-                        .is_already_durable(connection)?
-                    {
-                        return Ok(false);
-                    }
-                }
-                let stored: Option<String> = connection
-                    .query_row(
-                        "SELECT value_json FROM sessions WHERE id = ?1",
-                        [session_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let Some(stored) = stored else {
-                    return Ok(false);
-                };
+            Self::OrdinarySessionRow { session_id, content } => {
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
+                    |row| row.get(0),
+                ).optional()?;
+                let Some(stored) = stored else { return Ok(false) };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                Ok(source_observation_removal_content(&actual) == *content)
+                Ok(actual.session.id == *session_id
+                    && ordinary_session_row_persisted_content(&actual) == *content)
             }
-            Self::EngramSourceFinalization {
-                owner,
-                session_id,
-                content,
-            } => {
-                if !Self::EngramSourceSightingHistory(owner.clone())
-                    .is_already_durable(connection)?
-                {
-                    return Ok(false);
-                }
-                let stored: Option<String> = connection
-                    .query_row(
-                        "SELECT value_json FROM sessions WHERE id = ?1",
-                        [session_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let Some(stored) = stored else {
-                    return Ok(false);
-                };
+            Self::EngramObservationRemoval { session_id, content } => {
+                let stored: Option<String> = connection.query_row(
+                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
+                    |row| row.get(0),
+                ).optional()?;
+                let Some(stored) = stored else { return Ok(false) };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                Ok(source_observation_finalization_content(&actual) == *content)
+                Ok(actual.session.id == *session_id
+                    && source_observation_removal_content(&actual) == *content)
             }
             Self::EngramSourceSightingHistory(owner) => {
                 let Some(metadata) =
@@ -320,7 +255,7 @@ impl PersistFenceTarget {
             Self::EngramSourceObservation {
                 owner,
                 session_id,
-                admission,
+                session_content,
             } => {
                 let Some(metadata) =
                     read_metadata_for_fence(connection, &["engramSourceSightings"])?
@@ -330,11 +265,11 @@ impl PersistFenceTarget {
                 if !owner.matches_metadata(&metadata) {
                     return Ok(false);
                 }
-                // Metadata and the admission row must both have committed on
+                // Metadata and the observation row must both have committed on
                 // this same writer connection; a quarantined row cannot ACK.
-                Self::EngramAdmission {
+                Self::EngramObservation {
                     session_id: session_id.clone(),
-                    content: admission.clone(),
+                    content: session_content.clone(),
                 }
                 .is_already_durable(connection)
             }
@@ -380,7 +315,7 @@ impl PersistFenceTarget {
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(serde_json::to_value(&actual.provider_capacity_retry)? == *content)
             }
-            Self::EngramAdmission {
+            Self::EngramObservation {
                 session_id,
                 content,
             } => {
@@ -395,7 +330,8 @@ impl PersistFenceTarget {
                     return Ok(false);
                 };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                Ok(engram_admission_persisted_content(&actual) == *content)
+                Ok(actual.session.id == *session_id
+                    && engram_observation_persisted_content(&actual) == *content)
             }
             Self::Delegation(expected) => {
                 let stored: Option<String> = connection
@@ -549,36 +485,6 @@ impl PersistFenceTarget {
                         delivery.disposition == PromptDeliveryDisposition::HandingOff
                             && delivery.write_ahead == *write_ahead
                     }))
-            }
-            // The committed row must hold this owed bind with exactly this
-            // decision; a settled or redecided entry never matches.
-            Self::EngramOwedBindDecision {
-                session_id,
-                original,
-                work_id,
-                decided,
-            } => {
-                let stored: Option<String> = connection
-                    .query_row(
-                        "SELECT value_json FROM sessions WHERE id = ?1",
-                        [session_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let Some(stored) = stored else {
-                    return Ok(false);
-                };
-                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
-                for owed in actual
-                    .engram_owed_binds
-                    .iter()
-                    .filter(|owed| owed.original == *original && owed.target.work_id == *work_id)
-                {
-                    if serde_json::to_value(&owed.decided)? == *decided {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
             }
         }
     }
@@ -768,6 +674,7 @@ impl PersistFence {
     /// A completion hook for a caller that does not wait. It adds no timer or
     /// retry: the fence still resolves only by the writer, its deadline or
     /// its drop, and the hook runs only for the writer's exact ACK.
+    #[cfg(test)]
     fn on_acknowledged(self, hook: impl FnOnce() + Send + 'static) -> Self {
         if let Ok(mut slot) = self.on_acknowledged.lock() {
             *slot = Some(Box::new(hook));
@@ -1020,11 +927,22 @@ impl PersistFenceBatch {
         !self.pending.is_empty()
     }
 
+    #[cfg(test)]
     fn finish_write(
         &mut self,
         delta: &PersistDelta,
         result: &Result<Vec<String>>,
         connection: Option<&rusqlite::Connection>,
+    ) {
+        self.finish_write_with_rows(delta, result, connection, None);
+    }
+
+    fn finish_write_with_rows(
+        &mut self,
+        delta: &PersistDelta,
+        result: &Result<Vec<String>>,
+        connection: Option<&rusqlite::Connection>,
+        committed_rows: Option<&HashMap<String, PersistTranscriptBaseline>>,
     ) {
         if let Err(error) = result {
             if error.is::<PersistTranscriptPredecessorChanged>()
@@ -1050,7 +968,11 @@ impl PersistFenceBatch {
             {
                 return false;
             }
-            let proof = if fence.target.is_in_delta(delta) {
+            let proof = if let PersistFenceTarget::HumanPromptRow { session_id, minimum } = &fence.target {
+                Ok(committed_rows.and_then(|rows| rows.get(session_id))
+                    .and_then(|row| row.row_stamp.as_ref())
+                    .is_some_and(|written| written.covers(minimum)))
+            } else if fence.target.is_in_delta(delta) {
                 Ok(true)
             } else if let Some(connection) = connection {
                 fence.target.is_already_durable(connection)
@@ -1124,7 +1046,7 @@ fn persist_delta_with_fences_timed(
     // post-commit integrity checks. No StateInner guard is held here.
     persist_observe_phase("acknowledge");
     let acknowledge_started = std::time::Instant::now();
-    fences.finish_write(delta, &result, cache.connection.as_ref());
+    fences.finish_write_with_rows(delta, &result, cache.connection.as_ref(), Some(&cache.transcripts));
     timings.acknowledge = acknowledge_started.elapsed();
     fences.record_tick(timings);
     result
@@ -1139,4 +1061,24 @@ fn persist_delta_with_fences_using(
     let result = write();
     fences.finish_write(delta, &result, None);
     result
+}
+
+// Shared capture/readback selectors. Neither a revision nor row existence is a
+// receipt: the writer must contain the exact content selected by the owner.
+fn ordinary_session_row_persisted_content(record: &PersistedSessionRecord) -> Value {
+    json!({
+        "queue": record.queued_prompts,
+        "deliveries": record.prompt_deliveries,
+        "holds": record.queued_prompt_durability_holds,
+        "choices": record.human_queue_choices,
+    })
+}
+
+fn engram_observation_persisted_content(record: &PersistedSessionRecord) -> Value {
+    json!({
+        "runtimeCheckpoint": record.engram_runtime_checkpoint,
+        "activeTurn": record.engram_unadmitted_active_turn,
+        "closingJobs": record.engram_unadmitted_closing_jobs,
+        "reports": record.engram_unadmitted_reports,
+    })
 }

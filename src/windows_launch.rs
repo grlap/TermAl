@@ -651,6 +651,20 @@ fn package(handle: HANDLE) -> io::Result<Option<String>> {
 pub(crate) fn prepare(spec: &LaunchSpec) -> io::Result<PreparedLaunch> {
     prepare_inner(spec, false, false)
 }
+
+/// Observe contention without changing the caller's deadline or launch policy.
+pub(crate) fn prepare_with_lock_timing(
+    spec: &LaunchSpec,
+    lock_wait: &mut Duration,
+) -> io::Result<PreparedLaunch> {
+    prepare_with_hook_and_lock_timing(spec, false, false, |_| {}, lock_wait)
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_BEFORE_INHERITANCE_LOCK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
 fn membership_failure(job: &mut Option<OwnedHandle>, process: HANDLE) -> Option<String> {
     let lease = job.as_ref()?;
     let mut member = 0;
@@ -682,6 +696,19 @@ fn prepare_with_hook(
     force_unavailable: bool,
     force_atomic_refusal: bool,
     before_create: impl FnOnce(&[HANDLE]),
+) -> io::Result<PreparedLaunch> {
+    let mut lock_wait = Duration::ZERO;
+    prepare_with_hook_and_lock_timing(
+        spec, force_unavailable, force_atomic_refusal, before_create, &mut lock_wait,
+    )
+}
+
+fn prepare_with_hook_and_lock_timing(
+    spec: &LaunchSpec,
+    force_unavailable: bool,
+    force_atomic_refusal: bool,
+    before_create: impl FnOnce(&[HANDLE]),
+    lock_wait: &mut Duration,
 ) -> io::Result<PreparedLaunch> {
     let mut before_create = Some(before_create);
     let application = resolve_program(spec)?;
@@ -741,7 +768,20 @@ fn prepare_with_hook(
             if atomic {
                 attributes.add(PROC_THREAD_ATTRIBUTE_JOB_LIST as usize, job_list.unwrap())?;
             }
+            let waiting = std::time::Instant::now();
+            #[cfg(test)]
+            TEST_BEFORE_INHERITANCE_LOCK.with(|hook| {
+                if let Some(hook) = hook.borrow_mut().take() {
+                    hook();
+                }
+            });
+            #[cfg(not(test))]
             let inheritance_guard = crate::host_command::inheritance_lock();
+            #[cfg(test)]
+            let mut inheritance_guard = crate::host_command::telemetry::acquire("native_create");
+            *lock_wait += waiting.elapsed();
+            #[cfg(test)]
+            inheritance_guard.phase("duplicate_handles");
             // Originals are never inheritable. Temporary child duplicates live
             // only inside the same window used by every standard host spawn.
             let mut child_handles = Vec::with_capacity(handles.len());
@@ -768,9 +808,13 @@ fn prepare_with_hook(
                 .map(AsRawHandle::as_raw_handle)
                 .collect();
             attributes.add(PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize, &handles)?;
+            #[cfg(test)]
+            inheritance_guard.phase("before_create");
             if let Some(hook) = before_create.take() {
                 hook(&handles);
             }
+            #[cfg(test)]
+            inheritance_guard.phase("startup");
             let mut startup = STARTUPINFOEXW::default();
             startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
@@ -780,6 +824,8 @@ fn prepare_with_hook(
             startup.lpAttributeList = attributes.ptr();
             let mut line = line.clone();
             let mut information = PROCESS_INFORMATION::default();
+            #[cfg(test)]
+            inheritance_guard.phase("CreateProcessW");
             let result = unsafe {
                 CreateProcessW(
                     application.as_ptr(),
@@ -800,6 +846,8 @@ fn prepare_with_hook(
                 )
             };
             let error = (result == 0).then(io::Error::last_os_error);
+            #[cfg(test)]
+            inheritance_guard.phase("close_duplicates");
             drop(child_handles);
             drop(inheritance_guard);
             if let Some(error) = error {

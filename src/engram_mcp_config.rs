@@ -3,8 +3,8 @@
 // Owns descriptor selection, application or explicit removal of TermAl-owned
 // environment on per-session agent processes, plus the base-tier context
 // refresh lifecycle and its bounded `engram work next` child process.
-// Runtime-specific JSON composition remains in `delegation_mcp.rs`; premium
-// turn-gated control and project settings validation remain in
+// Runtime-specific JSON composition remains in `delegation_mcp.rs`; ordinary
+// work-session transport and project settings validation remain in
 // `engram_host_adapter.rs`.
 
 const ENGRAM_MCP_SERVER_NAME: &str = "engram";
@@ -1009,7 +1009,6 @@ fn engram_mcp_runtime_config_for_session_locked(
         actor_id,
         actor_context,
         store_key: settings.authority_store_key.clone(),
-        work_authority_grant: settings.work_authority_grant.clone(),
     };
     Some(EngramMcpRuntimeConfig {
         stdio: TermalDelegationMcpStdioConfig { command, args, env },

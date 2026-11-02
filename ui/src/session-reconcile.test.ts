@@ -28,34 +28,6 @@ describe("body sequence observations", () => {
   });
 });
 
-// The queue hold is derived from retry state that can change without a new
-// mutation stamp, so an equal stamp must not hide its arrival, change or
-// removal, in a full snapshot or in a summary.
-describe("queue hold under an unchanged mutation stamp", () => {
-  const hold: NonNullable<Session["queueHold"]> = { kind: "automaticRetry", cause: "dispatch_budget_exhausted", retryAt: "2026-10-25T04:00:00Z" };
-  const cases: Array<[string, Session["queueHold"], Session["queueHold"]]> = [
-    ["added", undefined, hold],
-    ["changed", hold, { ...hold, retryAt: "2026-10-25T04:00:02Z" }],
-    ["removed", hold, undefined],
-  ];
-  for (const [label, before, after] of cases) {
-    for (const messagesLoaded of [true, false]) {
-      it(`adopts a hold ${label} under the same stamp (messagesLoaded=${messagesLoaded})`, () => {
-        const previous = makeSession("a", { messagesLoaded, queuePaused: true, sessionMutationStamp: 42, queueHold: before });
-        const next = makeSession("a", { messagesLoaded, queuePaused: true, sessionMutationStamp: 42, queueHold: after });
-        const merged = reconcileSingleSession(previous, next);
-        expect(merged).not.toBe(previous);
-        expect(merged.queueHold).toEqual(after);
-      });
-    }
-  }
-  it("keeps the session object when the stamp and the hold are unchanged", () => {
-    const previous = makeSession("a", { queuePaused: true, sessionMutationStamp: 42, queueHold: hold });
-    const next = makeSession("a", { queuePaused: true, sessionMutationStamp: 42, queueHold: { ...hold } });
-    expect(reconcileSingleSession(previous, next)).toBe(previous);
-  });
-});
-
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
     id,
@@ -1176,7 +1148,7 @@ describe("reconcileSessions", () => {
     expect(merged.pendingPrompts).toBeUndefined();
   });
 
-  it("preserves paused authorization on transcript hydration until the server clears the queue", () => {
+  it("keeps a historical prompt body without duplicating it as queued authorization", () => {
     const pendingPrompts = [{ id: "held", timestamp: "10:00", text: "Exact prompt", isEngramRetained: true }];
     const previous = makeSession("session-a", { messagesLoaded: false, queuePaused: true, pendingPrompts });
     const hydrated = makeSession("session-a", {
@@ -1186,41 +1158,35 @@ describe("reconcileSessions", () => {
     });
     const merged = reconcileSingleSession(previous, hydrated, { disableMutationStampFastPath: true });
     expect(merged.messages).toEqual(hydrated.messages);
-    expect(merged.pendingPrompts).toEqual(pendingPrompts);
+    expect(merged.pendingPrompts).toBeUndefined();
     const cleared = reconcileSingleSession(merged, { ...hydrated, pendingPrompts: [] }, {
       adoptPartialMessages: true, disableMutationStampFastPath: true,
     });
     expect(cleared.pendingPrompts).toBeUndefined();
   });
 
-  it("adopts authoritative retained and interrupted disposition changes for a same-content prompt", () => {
-    const previousPrompt = {
-      id: "held",
-      timestamp: "10:00",
-      text: "Exact prompt",
-    };
-    const previous = makeSession("session-a", {
-      sessionMutationStamp: 20,
-      pendingPrompts: [previousPrompt],
-    });
-    const next = makeSession("session-a", {
-      sessionMutationStamp: 21,
-      pendingPrompts: [
-        {
-          ...previousPrompt,
-          isEngramRetained: true,
-          engramInterrupted: true,
-        },
-      ],
-    });
+  it("keeps targeted delivery evidence across a metadata-only summary", () => {
+    const receipts = [{ promptId: "p", disposition: "ambiguous" as const, attempt: 1 }];
+    const previous = makeSession("session-a", { sessionMutationStamp: 20, messagesLoaded: true, promptDeliveries: receipts });
+    const summary = { ...previous, sessionMutationStamp: 21, messagesLoaded: false, promptDeliveries: undefined };
+    expect(reconcileSingleSession(previous, summary).promptDeliveries).toBe(receipts);
+  });
 
+  it("lets targeted tail evidence replace receipts under an unchanged stamp", () => {
+    const previous = makeSession("session-a", { sessionMutationStamp: 20, messagesLoaded: false,
+      promptDeliveries: [{ promptId: "p", disposition: "pending", attempt: 1 }] });
+    const next = { ...previous, promptDeliveries: [{ promptId: "p", disposition: "ambiguous" as const, attempt: 1 }] };
+    const merged = reconcileSingleSession(previous, next, { adoptPartialMessages: true });
+    expect(merged.promptDeliveries?.[0].disposition).toBe("ambiguous");
+  });
+
+  it("adopts canonical delivery disposition changes under an unchanged stamp", () => {
+    const previous = makeSession("session-a", { sessionMutationStamp: 20,
+      promptDeliveries: [{ promptId: "p", disposition: "pending", attempt: 1 }] });
+    const next = { ...previous, promptDeliveries: [{ promptId: "p", disposition: "ambiguous" as const, attempt: 1 }] };
     const merged = reconcileSingleSession(previous, next);
-
-    expect(merged.pendingPrompts?.[0]).not.toBe(previousPrompt);
-    expect(merged.pendingPrompts?.[0]).toMatchObject({
-      isEngramRetained: true,
-      engramInterrupted: true,
-    });
+    expect(merged).not.toBe(previous);
+    expect(merged.promptDeliveries?.[0].disposition).toBe("ambiguous");
   });
 
   it("reuses marker state when only valid color casing changed", () => {

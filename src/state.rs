@@ -858,7 +858,6 @@ mod state_broadcast_mailbox_tests {
 
     fn snapshot(revision: u64) -> StateResponse {
         StateResponse {
-            engram_control_recovery: Vec::new(),
             revision,
             server_instance_id: "test-instance".to_owned(),
             codex: CodexState::default(),
@@ -1245,7 +1244,7 @@ struct AppState {
     engram_carried_poll_lock: Arc<Mutex<()>>,
     /// The automatic Engram admission retries in flight host-wide, under
     /// their cap (`engram_retry_schedule.rs`).
-    engram_retry_slots: EngramRetrySlots,
+    runtime_retry_slots: RuntimeRetrySlots,
     /// Where published snapshots and deltas go: the ordered stream
     /// `/api/events` reads, plus per-kind observer channels in test builds.
     state_broadcast_senders: StateBroadcastSenders,
@@ -1656,9 +1655,7 @@ fn collect_workspace_layout_summaries<'a>(
 struct EngramProjectResetFences {
     next_generation: u64,
     owners: HashMap<String, u64>,
-    /// When each held fence was claimed, for the waiting reason a fenced
-    /// session shows (`engram_project_reset_wait.rs`). In memory only, one
-    /// entry per held fence.
+    /// Exact live connection-transition claim, never restored from history.
     claimed_at: HashMap<String, EngramProjectResetClaim>,
 }
 
@@ -1669,21 +1666,22 @@ impl EngramProjectResetFences {
 
     #[cfg(test)]
     fn claim(&mut self, project_id: &str) -> Option<u64> {
-        self.claim_with_clock(project_id, EngramBudgetClock::default(), false)
+        self.claim_with_clock(project_id, EngramBudgetClock::default())
     }
 
-    fn claim_with_clock(&mut self, project_id: &str, clock: EngramBudgetClock, bounded: bool) -> Option<u64> {
+    fn claim_with_clock(&mut self, project_id: &str, clock: EngramBudgetClock) -> Option<u64> {
         if self.contains(project_id) {
             return None;
         }
         self.next_generation = self.next_generation.wrapping_add(1).max(1);
         let generation = self.next_generation;
         self.owners.insert(project_id.to_owned(), generation);
-        self.claimed_at.insert(project_id.to_owned(), EngramProjectResetClaim::new(generation, clock, bounded));
+        self.claimed_at.insert(project_id.to_owned(), EngramProjectResetClaim::new(generation, clock));
         Some(generation)
     }
 
     /// When the fence held for `project_id` was claimed, if one is held.
+    #[cfg(test)]
     fn claimed_at(&self, project_id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         self.claimed_at.get(project_id).map(|claim| claim.claimed_at)
     }
@@ -1740,10 +1738,6 @@ struct StateInner {
     /// scheduler delay a test can apply on purpose.
     #[cfg(test)]
     test_delegation_child_admission_stall: Option<Duration>,
-    /// Ordering fixtures use scheduling headroom without changing budget tests
-    /// in other states or the production dispatch deadline.
-    #[cfg(test)]
-    test_engram_dispatch_budget: Option<Duration>,
     /// Runtime-only cache of projects whose non-empty `.engram-project`
     /// marker was confirmed off the global state mutex. Hot locked paths may
     /// consult this set but must never touch the filesystem themselves.
@@ -1784,10 +1778,6 @@ struct StateInner {
     // first enrollment or hold intent (persist_import_reconciliation.rs).
     // Tracked so an unchanged journal is omitted from delta captures.
     engram_import_reconciliation: PersistTracked<EngramImportReconciliationState>,
-    // Runtime receipts only. Boot reconstructs matching committed confirmations.
-    engram_confirmed_containment_ids: BTreeSet<String>,
-    // Volatile custody; deliberately absent from PersistedState.
-    engram_pending_checkpoint_receipts: EngramPendingCheckpointReceipts,
     /// The source roots agents named for claimed Engram work
     /// (`engram_source_roots.rs`), persisted so a restart keeps them.
     engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
@@ -1949,8 +1939,6 @@ impl StateInner {
             test_engram_authority_ack_boundary: None,
             #[cfg(test)]
             test_delegation_child_admission_stall: None,
-            #[cfg(test)]
-            test_engram_dispatch_budget: None,
             engram_declared_project_ids: HashSet::new(),
             engram_declaration_checked_project_ids: HashSet::new(),
             engram_project_resets: EngramProjectResetFences::default(),
@@ -1970,8 +1958,6 @@ impl StateInner {
             engram_source_sightings: PersistTracked::default(),
             engram_session_obligations: EngramSessionObligationLedger::empty(),
             engram_import_reconciliation: PersistTracked::default(),
-            engram_confirmed_containment_ids: BTreeSet::new(),
-            engram_pending_checkpoint_receipts: EngramPendingCheckpointReceipts::default(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
             engram_root_reclamation: EngramRootReclamationSchedule::default(),
@@ -2121,29 +2107,6 @@ struct EngramMcpInstalledDescriptor {
     actor_id: String,
     actor_context: Option<String>,
     store_key: Option<EngramAuthorityStoreKey>,
-    work_authority_grant: Option<String>,
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct EngramAuthorityRevocationTarget {
-    binary_path: String,
-    home: String,
-    project_root: String,
-    store_key: Option<EngramAuthorityStoreKey>,
-    work_authority_grant: String,
-}
-
-impl std::fmt::Debug for EngramAuthorityRevocationTarget {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("EngramAuthorityRevocationTarget")
-            .field("binary_path", &self.binary_path)
-            .field("home", &self.home)
-            .field("project_root", &self.project_root)
-            .field("store_key", &self.store_key)
-            .field("work_authority_grant", &"[REDACTED]")
-            .finish()
-    }
 }
 
 impl std::fmt::Debug for EngramMcpInstalledDescriptor {
@@ -2155,10 +2118,6 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
             .field("actor_id", &self.actor_id)
             .field("actor_context", &self.actor_context)
             .field("store_key", &self.store_key)
-            .field(
-                "work_authority_grant",
-                &self.work_authority_grant.as_ref().map(|_| "[REDACTED]"),
-            )
             .finish()
     }
 }
@@ -2166,9 +2125,6 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
 /// Represents a session record.
 #[derive(Clone)]
 struct SessionRecord {
-    // Process-local identity of an ordinary turn opened with gated control OFF.
-    // Terminal callbacks of that turn do not own historical control dispatches.
-    unmediated_turn_generation: Option<u64>,
     /// Explicit domain participation; never inferred from a name or local id.
     federation_mailbox_binding: Option<FederationMailboxBinding>,
     /// Routing only. Older receivers ignore this field and retain no grant.
@@ -2206,17 +2162,14 @@ struct SessionRecord {
     /// reported to Engram. It closes with its segment's result or runtime.
     unmediated_claude_turn: Option<UnmediatedClaudeTurn>,
     /// Process-local: the turn generation the host adopted for a turn Claude
-    /// Code started by itself. That generation was granted nothing, so no
-    /// terminal path of it reports execution on a grant
-    /// (`EngramCheckpointPurpose::TurnTerminal`). The one authoritative record
-    /// of that fact: no result, Stop, runtime exit or deferred callback
-    /// clears it, and it goes inert when a successor generation begins.
+    /// Code started by itself. It keeps adopted execution separate from a
+    /// host prompt and goes inert when a successor generation begins.
     adopted_claude_turn_generation: Option<u64>,
     /// Process-local: the Claude work that may still run and write without
     /// a later frame saying so (`claude_outstanding_work.rs`): subagent tool
     /// calls and background launches, by the runtime and turn that started
-    /// them. While any of it is foreign to the session's grant, that grant is
-    /// mixed and its checks are fenced.
+    /// them. It prevents checks from claiming an isolated execution while
+    /// unrelated work may still write the same sources.
     claude_outstanding: ClaudeOutstandingWork,
     /// Process-local: what the recorder saw in turns no prompt owned, kept as
     /// unassigned and never credited, bounded and newest last.
@@ -2257,7 +2210,7 @@ struct SessionRecord {
     prompt_deliveries: BTreeMap<String, PromptDelivery>,
     /// Exact human choices beside the existing queue/receipt owners. A choice
     /// is provenance for a new decision, never proof of an earlier delivery.
-    human_queue_choices: BTreeMap<String, HumanQueuedChoice>,
+    human_queue_choices: BTreeMap<String, Value>,
     /// Process-local observations only; no receipt or dispatch authority.
     provider_handoff_observations: ProviderHandoffObservations,
     /// Global transcript position represented by `session.messages[0]`.
@@ -2297,9 +2250,7 @@ struct SessionRecord {
     /// prevents a stale Stop/revocation completion from releasing a newer
     /// owner's fence after the runtime has been replaced.
     runtime_stop_owner: Option<RuntimeStopOwner>,
-    /// Live pending/in-flight original provider interruption after tier OFF.
-    /// Its persisted containment obligation remains the crash-recovery owner.
-    engram_containment_stop: Option<EngramDeferredStop>,
+    /// Monotonic generation of actual runtime Stop ownership.
     runtime_stop_generation: u64,
     /// In memory: advanced by every pause of the queue, from any source, so a
     /// Resume's continuation bound to the pause it crossed is ended by a later
@@ -2320,20 +2271,6 @@ struct SessionRecord {
     /// Host-private Engram binding and open-turn state. It is persisted in the
     /// session row but never copied onto the wire-level `Session`.
     engram: EngramSessionState,
-    /// Process-local readiness fence while boot restores this session's
-    /// host-private Engram routing authority. The wire projection exposes the
-    /// fence, but it is deliberately absent from persisted `Session` state so
-    /// every process recomputes recovery work from durable authority records.
-    engram_boot_recovery_pending: bool,
-    /// A queue-drain activation that arrived while the boot-recovery fence was
-    /// raised. Recovery completion consumes this bit and re-kicks the queue;
-    /// persisted user queues with no current-process activation stay dormant.
-    engram_boot_recovery_dispatch_pending: bool,
-    /// Suppresses duplicate first-use retry workers after eager boot recovery
-    /// exhausts its wall-clock budget. Process-local and never persisted.
-    engram_boot_recovery_retry_in_progress: bool,
-    /// Runtime scheduling of the existing queue head; never command custody.
-    engram_queue_schedule: EngramQueueSchedule,
     hidden: bool,
     session: Session,
     /// Monotonic mutation stamp assigned by [`StateInner::next_mutation_stamp`]
@@ -2344,6 +2281,9 @@ struct SessionRecord {
     /// means this record has in-memory changes that have not yet reached
     /// SQLite.
     mutation_stamp: u64,
+    /// Process-local identity of this record's mutation-stamp sequence.
+    /// Clones retain it; loading or creating a record starts a new sequence.
+    persist_incarnation: Arc<()>,
     /// Last global mutation stamp at which the bounded composer history
     /// changed. The persist delta uses this independent watermark to keep the
     /// potentially large history out of hot session-metadata rewrites.
@@ -2355,7 +2295,7 @@ struct SessionRecord {
 /// where it was instead of leaving a half-started turn in memory: head gone,
 /// latch cleared, status Active, and nothing delivered to the runtime.
 struct QueuePromotionSnapshot {
-    unmediated_turn_generation: Option<u64>,
+    unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
     queue_order: Vec<String>,
     body_sequence: SessionBodySequence,
     active_turn_generation: u64,
@@ -2364,6 +2304,8 @@ struct QueuePromotionSnapshot {
     preview: String,
     live_activity: Option<SessionLiveActivity>,
     auto_dispatch_blocked: bool,
+    operator_paused: bool,
+    pause_epoch: u64,
     active_turn_mailbox_notification: Option<MailboxNotificationDelivery>,
     active_turn_start_message_count: Option<usize>,
     // Appending the prompt message also appends composer history and resyncs
@@ -2425,7 +2367,7 @@ impl SessionRecord {
 
     fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {
         QueuePromotionSnapshot {
-            unmediated_turn_generation: self.unmediated_turn_generation,
+            unadmitted_active_turn: self.engram.unadmitted_active_turn.clone(),
             queue_order: self.queued_prompts.iter().map(|queued| queued.pending_prompt.id.clone()).collect(),
             body_sequence: self.body_sequence.clone(),
             active_turn_generation: self.active_turn_generation,
@@ -2434,6 +2376,8 @@ impl SessionRecord {
             preview: self.session.preview.clone(),
             live_activity: self.session.live_activity.clone(),
             auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
+            operator_paused: self.engram.operator_paused,
+            pause_epoch: self.auto_dispatch_pause_epoch,
             active_turn_mailbox_notification: self.active_turn_mailbox_notification.clone(),
             active_turn_start_message_count: self.active_turn_start_message_count,
             prompt_history: self.session.prompt_history.clone(),
@@ -2448,8 +2392,7 @@ impl SessionRecord {
     /// Undoes a promotion whose persist commit failed: drops the prompt
     /// message the promotion appended, returns the queue head to the front,
     /// and restores the captured fields including the explicit-resume latch.
-    /// A durable prepared Engram bind/evaluate is preserved for exact replay;
-    /// an ordinary pending dispatch is abandoned. A runtime spawned for the
+    /// All stored history stays passive. A runtime spawned for the
     /// attempt is left attached; an idle session with a live runtime is an
     /// ordinary state and the next promotion reuses it.
     fn restore_queue_promotion(
@@ -2478,19 +2421,6 @@ impl SessionRecord {
         self.session.messages_loaded = snapshot.messages_loaded;
         self.session.prompt_history = snapshot.prompt_history;
         self.prompt_history_mutation_stamp = snapshot.prompt_history_mutation_stamp;
-        let preserve_prepared_engram_operation = queued.has_engram_intent();
-        if self.unmediated_turn_generation == Some(self.active_turn_generation) {
-            // This failed ordinary promotion never owned the historical
-            // pending control dispatch, prepared request or grant.
-        } else if preserve_prepared_engram_operation {
-            // The bind/evaluate request was committed before promotion. The
-            // failed promotion commit did not make a provider handoff real,
-            // so detach only its runtime pending marker without retiring the
-            // prepared request or advancing the operation generation.
-            detach_engram_pending_dispatch_keeping_uncertain_begin(self);
-        } else {
-            take_and_abandon_engram_pending_dispatch(self);
-        }
         if let Some(current) = self
             .queued_prompts
             .iter_mut()
@@ -2510,19 +2440,17 @@ impl SessionRecord {
         sync_pending_prompts(self);
         self.session.status = snapshot.status;
         self.active_turn_generation = snapshot.active_turn_generation;
-        self.unmediated_turn_generation = snapshot.unmediated_turn_generation;
+        self.engram.unadmitted_active_turn = snapshot.unadmitted_active_turn;
         self.human_prompt_turn = snapshot.human_prompt_turn;
         self.file_change_tracking = None;
         self.session.preview = snapshot.preview;
         self.session.live_activity = snapshot.live_activity;
         self.active_turn_mailbox_notification = snapshot.active_turn_mailbox_notification;
         self.active_turn_start_message_count = snapshot.active_turn_start_message_count;
-        if preserve_prepared_engram_operation {
-            self.set_auto_dispatch_blocked(true);
-            self.session.preview = "Engram authorization is prepared, but prompt promotion was not persisted. Prompt retained; resume to retry or cancel.".to_owned();
-        } else {
-            self.set_auto_dispatch_blocked(snapshot.auto_dispatch_blocked);
-        }
+        self.orchestrator_auto_dispatch_blocked = snapshot.auto_dispatch_blocked;
+        self.session.queue_paused = snapshot.auto_dispatch_blocked;
+        self.engram.operator_paused = snapshot.operator_paused;
+        self.auto_dispatch_pause_epoch = snapshot.pause_epoch;
     }
 
     /// Sets the explicit-resume latch and mirrors it onto the embedded
@@ -2542,7 +2470,6 @@ impl SessionRecord {
             // Lifting the pause lifts an operator's pause with it, and the
             // source-observation hold that only an explicit Resume lifts.
             self.engram.operator_paused = false;
-            self.engram.source_observation_admission_held = false;
         }
     }
 

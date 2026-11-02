@@ -1,6 +1,6 @@
 /* Process-local proofs that an accepted mailbox continuation is fulfilled.
 Receipt durability is owned by MailboxStore. Coverage never authorizes a
-provider handoff or changes retained authorization, Stop, or boot recovery. */
+provider handoff, rewrites stored prompt history, or changes Stop/boot recovery. */
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MailboxCoverageTurn {
@@ -78,7 +78,7 @@ fn mailbox_continuation_can_be_covered(
     queued: &QueuedPromptRecord,
 ) -> bool {
     queued.source == QueuedPromptSource::Mailbox
-        && !queued.is_engram_retained()
+        && !queued.has_stored_history()
         && !queued_prompt_kept_standalone(record, queued)
         && queued.promoted_message_index.is_none()
         && queued.promotion_disposition_known

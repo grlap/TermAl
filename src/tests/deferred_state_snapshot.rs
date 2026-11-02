@@ -284,10 +284,9 @@ fn unstamped_metadata_writers_cannot_reuse_stale_cached_summaries() {
         ("remote owner", |r| {
             r.remote_id = Some("other-host".to_owned())
         }),
-        ("readiness", |r| r.engram_boot_recovery_pending = true),
         ("capacity", |r| r.session.provider_capacity_waiting = true),
         ("source tracking", |r| {
-            r.engram.source_observation_delete_requested = true
+            r.engram.observation_delete_requested = true
         }),
         ("pause", |r| r.set_auto_dispatch_blocked(true)),
         ("queue identity", |r| {

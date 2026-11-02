@@ -1,13 +1,12 @@
-//! Runtime-loss isolation with live records, attached routes and Engram tokens.
-//! Runs under the host-adapter suite to reuse its scripted control boundary.
+//! Runtime-loss isolation with real profile slots and attached session routes.
+//! Passive historical data never causes a control recovery on process exit.
 
 use super::*;
 
 #[test]
-fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
+fn two_profiles_runtime_exit_ends_only_its_own_sessions_without_control_recovery() {
     let state = test_app_state();
-    // The rebinds run on the scripted budget clock; no budget expires here.
-    select_scripted_engram_budget_clock_before_enable(&state);
+    state.select_test_scripted_engram_budget_clock();
     let root = state
         .test_temp_root
         .as_ref()
@@ -16,7 +15,12 @@ fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
         .join("two-profile-project");
     fs::create_dir_all(&root).unwrap();
     let project = create_test_project(&state, &root, "Two-profile exit");
-    enable_test_project_engram(&state, &project, &root);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.projects.iter_mut().find(|entry| entry.id == project).unwrap().engram =
+            Some(EngramProjectSettings { enabled: true, execution_observability: false,
+                ..EngramProjectSettings::default() });
+    }
     let default_owner = phase_sync::ParkedProcess::spawn();
     let read_only_owner = phase_sync::ParkedProcess::spawn();
     let (default, _, _) =
@@ -31,12 +35,7 @@ fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
         .shared_codex_runtime_slot(SharedCodexProfile::ReadOnlySandbox)
         .lock()
         .unwrap() = Some(read_only.clone());
-    let transport = ScriptedEngramControlTransport::new([
-        status_reply("ready"),
-        bind_reply("read-only-attached-rebound"),
-        status_reply("ready"),
-        bind_reply("read-only-detached-rebound"),
-    ]);
+    let transport = ScriptedEngramControlTransport::new([]);
     state.install_control_test_transport(transport.clone());
     let mut sessions = Vec::new();
     for (profile, runtime) in [
@@ -51,7 +50,9 @@ fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
                 let record = &mut inner.sessions[index];
                 record.codex_thread_profile = Some(profile);
                 set_record_external_session_id(record, Some(format!("thread-{id}")));
-                record.engram.routing_token = Some(format!("before-{id}"));
+                record.engram.historical_control.insert("profileExitHistory".into(),
+                    json!({"routing_token":format!("before-{id}"),
+                        "grant_id":"unsettled-original", "future":{"untouched":true}}));
                 if attached {
                     record.session.status = SessionStatus::Active;
                     record.runtime = SessionRuntime::Codex(
@@ -84,29 +85,12 @@ fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
         .handle_shared_codex_runtime_exit("exit-read-only", None)
         .unwrap();
     let calls = transport.requests();
-    assert_eq!(
-        calls.len(),
-        4,
-        "only two read-only sessions should status/read and bind"
-    );
+    assert!(calls.is_empty(), "an ordinary process exit performs no status read or control bind");
     for (id, profile, attached) in &sessions {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(id).unwrap()];
         if *profile == SharedCodexProfile::ReadOnlySandbox {
             assert!(matches!(record.runtime, SessionRuntime::None));
-            assert!(!record.engram.rebind_required);
-            assert_ne!(
-                record.engram.routing_token.as_deref(),
-                Some(format!("before-{id}").as_str())
-            );
-            assert_eq!(
-                calls
-                    .iter()
-                    .filter(|call| call.connection.session_id == *id
-                        && call.request["operation"] == "session_bind")
-                    .count(),
-                1
-            );
             assert_eq!(
                 record.session.status,
                 if *attached {
@@ -120,8 +104,6 @@ fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
                 matches!(record.runtime, SessionRuntime::Codex(_)),
                 *attached
             );
-            assert_eq!(record.engram.routing_token, Some(format!("before-{id}")));
-            assert!(!record.engram.rebind_required);
             assert!(!calls.iter().any(|call| call.connection.session_id == *id));
             if *attached {
                 assert_eq!(record.session.status, SessionStatus::Active);
@@ -136,6 +118,9 @@ fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
                 );
             }
         }
+        assert_eq!(record.engram.historical_control.get("profileExitHistory"),
+            Some(&json!({"routing_token":format!("before-{id}"),
+                "grant_id":"unsettled-original", "future":{"untouched":true}})));
     }
     assert!(
         state
@@ -157,6 +142,6 @@ fn two_profiles_runtime_exit_ends_and_rebinds_only_its_own_sessions() {
     assert_eq!(
         transport.requests().len(),
         calls.len(),
-        "duplicate exit must not rebind"
+        "duplicate exit must not create control work"
     );
 }

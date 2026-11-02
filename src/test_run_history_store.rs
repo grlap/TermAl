@@ -187,6 +187,7 @@ mod test_run_history_store {
             Some(result)
         }
 
+        #[cfg(test)]
         pub(super) fn retain(&mut self, mut keep: impl FnMut(&str, &V) -> bool) {
             // Stamp even when nothing is dropped, as the map's own retain did.
             self.rows_mut();
@@ -201,6 +202,7 @@ mod test_run_history_store {
             }
         }
 
+        #[cfg(test)]
         pub(super) fn clear(&mut self) {
             self.rows_mut().clear();
             self.index = I::default();
@@ -426,6 +428,7 @@ mod test_run_history_store {
         pub(super) fn producer(&self, observation_id: &str) -> impl Iterator<Item = &String> {
             members(&self.producer, observation_id)
         }
+        #[cfg(test)]
         pub(super) fn check(&self, bucket: &TestRunCheckBucket) -> impl Iterator<Item = &String> {
             members(&self.check, bucket)
         }

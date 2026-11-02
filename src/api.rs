@@ -35,73 +35,25 @@ fn record_rejected_turn_dispatch(
     session_id: &str,
     error_message: &str,
     mailbox_notification: Option<&MailboxNotificationDelivery>,
-    engram_dispatch_generation: Option<u64>,
     runtime_token: &RuntimeToken,
     active_turn_generation: u64,
 ) -> bool {
     record_rejected_turn_dispatch_with_federation(state, session_id, error_message,
-        mailbox_notification, engram_dispatch_generation, runtime_token, active_turn_generation, None)
+        mailbox_notification, runtime_token, active_turn_generation, None)
 }
 
 fn record_rejected_turn_dispatch_with_federation(
     state: &AppState, session_id: &str, error_message: &str,
-    mailbox_notification: Option<&MailboxNotificationDelivery>, engram_dispatch_generation: Option<u64>,
+    mailbox_notification: Option<&MailboxNotificationDelivery>,
     runtime_token: &RuntimeToken, active_turn_generation: u64,
     federation_identity: Option<&FederationExecutorHandoffIdentity>,
 ) -> bool {
-    let rejected_by_engram_generation = if let Some(dispatch_generation) =
-        engram_dispatch_generation.filter(|_| federation_identity.is_none())
-    {
-        match state.reject_engram_turn_delivery_if_current(
-            session_id,
-            dispatch_generation,
-            error_message,
-        ) {
-            Ok(rejected) => rejected,
-            Err(err) => {
-                eprintln!(
-                    "turn dispatch> failed recording guarded Engram rejection for `{session_id}`: {err:#}"
-                );
-                false
-            }
-        }
-    } else {
-        false
-    };
-    if !rejected_by_engram_generation {
-        // A policy refusal/defer/degradation persists its Engram card and
-        // consumes the pending-dispatch marker before returning Rejected. The
-        // Engram-generation cleanup is therefore expected to no-op. A held
-        // Defer has also advanced its operation identity and left Active, so
-        // the runtime-token cleanup intentionally no-ops too; other refusals
-        // finish the exact turn by runtime token + active generation.
-        // If this callback is stale, the atomic helper returns false without
-        // touching the successor.
-        let failure = if federation_identity.is_some() {
-            state.fail_rejected_turn_delivery_with_federation(session_id, runtime_token,
-                active_turn_generation, engram_dispatch_generation, error_message, federation_identity)
-        } else {
-            state.fail_rejected_turn_delivery(session_id, runtime_token,
-                active_turn_generation, engram_dispatch_generation, error_message)
-        };
-        match failure {
-            Ok(true) => {}
-            // A false guard means a newer runtime/turn or an already-claimed
-            // terminalization owns the record. That owner still holds the
-            // record's exact active mailbox boundary and is responsible for
-            // restoring it; requeueing this stale dispatch here could
-            // duplicate the successor wake.
-            Ok(false) => return false,
-            Err(err) => {
-                eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {err:#}");
-                // The terminal transaction may have mutated the in-memory
-                // record before persistence failed, including taking the
-                // active mailbox boundary. The dispatch still owns its exact
-                // boundary, so restore it below just as the pre-atomic path
-                // did; boot recovery remains the durable fallback if this
-                // requeue cannot persist either.
-            }
-        }
+    let failure = state.fail_rejected_turn_delivery_with_federation(
+        session_id, runtime_token, active_turn_generation, error_message, federation_identity);
+    match failure {
+        Ok(true) => {},
+        Ok(false) => return false,
+        Err(error) => eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {error:#}"),
     }
     if let Some(notification) = mailbox_notification {
         if let Err(err) = state.requeue_mailbox_notification_with_rejection(notification, true) {
@@ -190,12 +142,6 @@ impl TurnDispatchDeliveryOutcome {
     }
 }
 
-fn engram_persistence_unknown_error() -> ApiError {
-    ApiError::internal(
-        "Engram authorization persistence is unknown. Provider delivery was withheld and the prompt remains retained for recovery.",
-    )
-}
-
 /// Keeps transport readers free to route replies needed by Fast discovery.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> TurnDispatchDeliveryOutcome {
     deliver_turn_dispatch_holding(state, dispatch, None)
@@ -203,12 +149,12 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> TurnDispat
 
 /// `deliver_turn_dispatch` for an automatic retry attempt: `held`, the
 /// attempt's place under the host-wide retry cap, stays taken until the
-/// delivery's Engram admission settles, on the Fast discovery worker when
+/// delivery's provider handoff settles, on the Fast discovery worker when
 /// delivery moves there, so no later attempt takes it while this one runs.
 fn deliver_turn_dispatch_holding(
     state: &AppState,
     dispatch: TurnDispatch,
-    held: Option<EngramRetrySlot>,
+    held: Option<RuntimeRetrySlot>,
 ) -> TurnDispatchDeliveryOutcome {
     if state.host_is_shutting_down() {
         return deliver_turn_dispatch_now(state, dispatch);
@@ -224,7 +170,6 @@ fn deliver_turn_dispatch_holding(
         let session_id = dispatch.session_id().to_owned();
         let runtime_token = dispatch.runtime_token().clone();
         let generation = dispatch.active_turn_generation();
-        let engram_generation = dispatch.engram_dispatch_generation();
         let notification = dispatch.mailbox_notification().cloned();
         let federation = dispatch.federation_handoff().cloned();
         // Completion callbacks run on the shared stdout reader. Waiting there
@@ -256,7 +201,6 @@ fn deliver_turn_dispatch_holding(
                 &session_id,
                 &detail,
                 notification.as_ref(),
-                engram_generation,
                 &runtime_token,
                 generation,
                 federation.as_ref(),
@@ -347,127 +291,6 @@ fn deliver_prepared_turn_dispatch_now(
     state: &AppState,
     dispatch: TurnDispatch,
 ) -> TurnDispatchDeliveryOutcome {
-    let active_turn_generation = dispatch.active_turn_generation();
-    let federation = dispatch.federation_handoff().cloned();
-    let runtime_token = dispatch.runtime_token().clone();
-    if let Some(dispatch_generation) = dispatch.engram_dispatch_generation() {
-        match state
-            .prepare_engram_turn_delivery_off_lock(dispatch.session_id(), dispatch_generation)
-        {
-            EngramTurnDeliveryPreparation::Ready => {}
-            EngramTurnDeliveryPreparation::ControlRecovery => {
-                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
-                return TurnDispatchDeliveryOutcome::Held { error: None };
-            }
-            EngramTurnDeliveryPreparation::ObservationRecovery => {
-                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
-                return TurnDispatchDeliveryOutcome::Held { error: None };
-            }
-            EngramTurnDeliveryPreparation::ObservationPending => {
-                return if state.park_source_observation_dispatch(dispatch) {
-                    TurnDispatchDeliveryOutcome::Held { error: None }
-                } else { TurnDispatchDeliveryOutcome::Superseded };
-            }
-            EngramTurnDeliveryPreparation::Superseded => {
-                return TurnDispatchDeliveryOutcome::Superseded;
-            }
-            EngramTurnDeliveryPreparation::PersistenceUnknown => {
-                note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
-                return TurnDispatchDeliveryOutcome::Held {
-                    error: Some(engram_persistence_unknown_error()),
-                };
-            }
-            EngramTurnDeliveryPreparation::RetainedBindRetry(proof) => {
-                #[cfg(test)]
-                wait_at_bind_disposition_gate(
-                    state, dispatch.session_id(), "caller",
-                );
-                return match state.park_engram_bind_retry(
-                    dispatch.session_id(),
-                    proof,
-                    &runtime_token,
-                    active_turn_generation,
-                ) {
-                    EngramAuthorizationParkOutcome::Parked => {
-                        note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
-                        TurnDispatchDeliveryOutcome::Held { error: None }
-                    }
-                    EngramAuthorizationParkOutcome::Withdrawn => {
-                        // Exactly one ordinary activation, off lock, with fresh
-                        // mailbox/head/owner checks and the existing backoff.
-                        match state.dispatch_next_queued_turn(dispatch.session_id(), false) {
-                            Ok(Some(next)) => deliver_turn_dispatch(state, next),
-                            Ok(None) => TurnDispatchDeliveryOutcome::Superseded,
-                            Err(error) => TurnDispatchDeliveryOutcome::Held {
-                                error: Some(ApiError::internal(format!("Failed to admit current queue after withdrawal: {error:#}"))),
-                            },
-                        }
-                    }
-                    EngramAuthorizationParkOutcome::PersistenceUnknown => {
-                        note_held_before_hand_off(state, dispatch.session_id(), active_turn_generation, federation.as_ref());
-                        TurnDispatchDeliveryOutcome::Held {
-                            error: Some(engram_persistence_unknown_error()),
-                        }
-                    }
-                    EngramAuthorizationParkOutcome::Superseded => {
-                        let error_message = "Engram admission invalidated before runtime delivery";
-                        if record_rejected_turn_dispatch_with_federation(
-                            state,
-                            dispatch.session_id(),
-                            error_message,
-                            None,
-                            Some(dispatch_generation),
-                            &runtime_token,
-                            active_turn_generation,
-                            federation.as_ref(),
-                        ) {
-                            TurnDispatchDeliveryOutcome::Rejected(ApiError::conflict(error_message))
-                        } else {
-                            TurnDispatchDeliveryOutcome::Superseded
-                        }
-                    }
-                };
-            }
-            EngramTurnDeliveryPreparation::Rejected => {
-                let session_id = dispatch.session_id().to_owned();
-                let mailbox_notification = dispatch.mailbox_notification().cloned();
-                let error_message = "Engram did not authorize this turn for runtime delivery";
-                match state.park_unknown_engram_authorization(
-                    &session_id,
-                    dispatch_generation,
-                    &runtime_token,
-                    active_turn_generation,
-                ) {
-                    EngramAuthorizationParkOutcome::Parked => {
-                        note_held_before_hand_off(state, &session_id, active_turn_generation, federation.as_ref());
-                        return TurnDispatchDeliveryOutcome::Held { error: None };
-                    }
-                    EngramAuthorizationParkOutcome::PersistenceUnknown => {
-                        note_held_before_hand_off(state, &session_id, active_turn_generation, federation.as_ref());
-                        return TurnDispatchDeliveryOutcome::Held {
-                            error: Some(engram_persistence_unknown_error()),
-                        };
-                    }
-                    EngramAuthorizationParkOutcome::Superseded | EngramAuthorizationParkOutcome::Withdrawn => {}
-                }
-                let rejected = record_rejected_turn_dispatch_with_federation(
-                    state,
-                    &session_id,
-                    error_message,
-                    mailbox_notification.as_ref(),
-                    Some(dispatch_generation),
-                    &runtime_token,
-                    active_turn_generation,
-                    federation.as_ref(),
-                );
-                return if rejected {
-                    TurnDispatchDeliveryOutcome::Rejected(ApiError::conflict(error_message))
-                } else {
-                    TurnDispatchDeliveryOutcome::Superseded
-                };
-            }
-        }
-    }
     match handoff_prepared_turn_dispatch(state, dispatch) {
         Ok(HandoffPreparedTurnDispatchOutcome::Delivered) => TurnDispatchDeliveryOutcome::Delivered,
         Ok(HandoffPreparedTurnDispatchOutcome::Scheduled) => TurnDispatchDeliveryOutcome::Scheduled,
@@ -497,7 +320,6 @@ fn handoff_prepared_turn_dispatch(
         state.hold_unsent_dispatch_for_shutdown(&dispatch);
         return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
     }
-    let engram_generation = dispatch.engram_dispatch_generation();
     let active_turn_generation = dispatch.active_turn_generation();
     let human_prompt_id = dispatch.human_prompt_id().map(str::to_owned);
     let runtime_token = dispatch.runtime_token().clone();
@@ -550,26 +372,21 @@ fn handoff_prepared_turn_dispatch(
                 let record = &mut inner.sessions[index];
                 if !record.runtime.matches_runtime_token(&runtime_token)
                     || record.active_turn_generation != active_turn_generation
-                    || engram_generation.is_some_and(|generation| {
-                        record.engram.dispatch_generation != generation
-                            || !engram_provider_handoff_allowed(record)
-                    })
                 {
                     return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
                 }
                 if record.runtime_stop_in_progress {
-                    if engram_generation.is_some() {
+                    {
                         record
                             .deferred_stop_callbacks
-                            .push(DeferredStopCallback::EngramHandoff {
+                            .push(DeferredStopCallback::TurnHandoff {
                                 active_turn_generation,
-                                dispatch: DeferredEngramHandoff(Arc::new(Mutex::new(Some(
+                                dispatch: DeferredTurnHandoff(Arc::new(Mutex::new(Some(
                                     dispatch,
                                 )))),
                             });
                         return Ok(HandoffPreparedTurnDispatchOutcome::Scheduled);
                     }
-                    return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
                 }
                 if record.session.status != SessionStatus::Active {
                     return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
@@ -589,8 +406,7 @@ fn handoff_prepared_turn_dispatch(
                     &session_id,
                     &detail,
                     mailbox_notification.as_ref(),
-                    engram_generation,
-                    &runtime_token,
+                        &runtime_token,
                     active_turn_generation,
                     federation_identity.as_ref(),
                 ) {
@@ -602,9 +418,12 @@ fn handoff_prepared_turn_dispatch(
         }
     }
 
+    state.prepare_ordinary_opening_root_before_handoff(
+        &session_id, &runtime_token, active_turn_generation,
+    );
     let reject_federation = |error: ApiError| {
         if record_rejected_turn_dispatch_with_federation(state, &session_id, &error.message,
-            mailbox_notification.as_ref(), engram_generation, &runtime_token, active_turn_generation,
+            mailbox_notification.as_ref(), &runtime_token, active_turn_generation,
             federation_identity.as_ref())
         { Err(error) } else { Ok(HandoffPreparedTurnDispatchOutcome::Superseded) }
     };
@@ -636,45 +455,37 @@ fn handoff_prepared_turn_dispatch(
             return reject_federation(error);
         }
     }
-    if engram_generation.is_some() && ordinary_off_execution_applies(&inner, &session_id) {
-        return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
-    }
-    let human_handoff = human_prompt_id.is_some() && engram_generation.is_none()
+    let human_handoff = human_prompt_id.is_some()
         && inner.find_session_index(&session_id).is_some_and(|index| {
             let record = &inner.sessions[index];
             human_prompt_handoff_allowed(record, active_turn_generation)
                 && record.human_prompt_turn.as_ref().is_some_and(|owner|
                     Some(owner.prompt_id.as_str()) == human_prompt_id.as_deref())
-                && !record.engram.project_reset_in_progress
-                && !engram_project_for_session_locked(&inner, &session_id)
-                    .is_some_and(|project| inner.engram_project_resets.contains(&project.id))
+                && !session_resource_reset_in_progress(&inner, record)
         });
     if human_prompt_id.is_some() && !human_handoff {
         drop(inner);
         drop(relay_link);
         let detail = "human prompt ownership or reset fence changed before provider handoff";
         return match state.fail_rejected_turn_delivery(&session_id, &runtime_token,
-            active_turn_generation, None, detail)
+            active_turn_generation, detail)
         {
             Ok(true) => Err(ApiError::conflict(detail)),
             Ok(false) => Ok(HandoffPreparedTurnDispatchOutcome::Superseded),
             Err(error) => Err(ApiError::internal(format!("{detail}; failed to retain unsent turn: {error:#}"))),
         };
     }
-    if !ordinary_off_execution_applies(&inner, &session_id)
-        && engram_session_obligation_locked(&inner, &session_id).is_some()
-        && !human_handoff
-        && !(engram_generation.is_none()
-            && engram_unmediated_checkpoint_dispatch_allowed(
-                &inner, &session_id, Some(active_turn_generation),
-            )) {
+    let index = inner.find_session_index(&session_id);
+    if index.is_some_and(|index| {
+        let record = &inner.sessions[index];
+        record.engram.observation_delete_requested || session_resource_reset_in_progress(&inner, record)
+    }) {
         drop(inner);
+        drop(relay_link);
         note_held_before_hand_off(state, &session_id, active_turn_generation, federation_identity.as_ref());
         return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
     }
-    let index = inner.find_session_index(&session_id);
-    let mut opening_diagnostic_delivery = None;
-    let mut source_root_notice_delivery = Vec::new();
+    let source_root_notice_delivery;
     {
         let Some(index) = index else {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
@@ -682,36 +493,36 @@ fn handoff_prepared_turn_dispatch(
         let record = &mut inner.sessions[index];
         if !record.runtime.matches_runtime_token(&runtime_token)
             || record.active_turn_generation != active_turn_generation
-            || engram_generation.is_some_and(|generation| {
-                record.engram.dispatch_generation != generation
-                    || !engram_provider_handoff_allowed(record)
-            })
         {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
         }
         if record.runtime_stop_in_progress {
-            if engram_generation.is_some() {
+            {
                 record
                     .deferred_stop_callbacks
-                    .push(DeferredStopCallback::EngramHandoff {
+                    .push(DeferredStopCallback::TurnHandoff {
                         active_turn_generation,
-                        dispatch: DeferredEngramHandoff(Arc::new(Mutex::new(Some(dispatch)))),
+                        dispatch: DeferredTurnHandoff(Arc::new(Mutex::new(Some(dispatch)))),
                     });
                 return Ok(HandoffPreparedTurnDispatchOutcome::Scheduled);
             }
-            return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
         }
         if record.session.status != SessionStatus::Active {
             return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
         }
-        if engram_generation.is_some() && record.engram.active_grant_id.is_some() {
+        {
             source_root_notice_delivery =
                 refresh_engram_source_root_notices_locked(&mut inner, index);
+            let opening_unconfirmed = inner.sessions[index].engram.unadmitted_active_turn.as_ref()
+                .is_some_and(|trace| trace.generation == active_turn_generation && trace.opening_prepared)
+                && engram_turn_root_capture_locked(&inner, &session_id) == EngramRootCapture::Unconfirmed;
             let record = &mut inner.sessions[index];
-            opening_diagnostic_delivery = refresh_engram_source_root_prompt_locked(
+            if opening_unconfirmed { mark_runtime_observation_source_uncertain(record); }
+            refresh_engram_source_root_prompt_locked(
                 record,
                 &mut dispatch,
                 &source_root_notice_delivery,
+                opening_unconfirmed,
             );
         }
     }
@@ -794,7 +605,6 @@ fn handoff_prepared_turn_dispatch(
             &session_id,
             &detail,
             mailbox_notification.as_ref(),
-            engram_generation,
             &runtime_token,
             active_turn_generation,
             federation_identity.as_ref(),
@@ -804,10 +614,6 @@ fn handoff_prepared_turn_dispatch(
         } else {
             Ok(HandoffPreparedTurnDispatchOutcome::Superseded)
         };
-    }
-    if let Some(delivered) = &opening_diagnostic_delivery {
-        let index = index.expect("opening diagnostic handoff owns session");
-        acknowledge_engram_opening_diagnostic_locked(&mut inner.sessions[index], delivered);
     }
     if !source_root_notice_delivery.is_empty() {
         let index = index.expect("current notice handoff owns session");
@@ -832,25 +638,6 @@ fn handoff_prepared_turn_dispatch(
             inner.stamp_session_at_index(index);
             if let Err(error) = state.commit_locked(&mut inner) {
                 eprintln!("human prompt> failed persisting provider handoff: {error:#}");
-            }
-        }
-    }
-    if engram_generation.is_some() {
-        let index = index.expect("guarded handoff owns session");
-        inner.sessions[index].engram.ordinary_handoff = None;
-        finish_source_observation_handoff_locked(&mut inner, index);
-        if inner.sessions[index]
-            .queued_prompts
-            .front()
-            .is_some_and(QueuedPromptRecord::has_engram_intent)
-        {
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("guarded handoff session should be valid");
-            record.queued_prompts.pop_front();
-            sync_pending_prompts(record);
-            if let Err(error) = state.commit_locked(&mut inner) {
-                eprintln!("engram> failed persisting provider handoff: {error:#}");
             }
         }
     }
@@ -880,6 +667,7 @@ impl Drop for RemoteLifecycleActionGuard {
     }
 }
 
+#[cfg(test)]
 fn dispatch_turn_and_snapshot(
     state: &AppState,
     session_id: &str,
@@ -1910,13 +1698,7 @@ async fn update_project_engram_settings(
 ) -> Result<Json<StateResponse>, ApiError> {
     let Json(request) =
         request.map_err(|rejection| api_json_rejection("Engram project settings", rejection))?;
-    if let Some(progress) = state.engram_project_reset_progress(&project_id)? {
-        let mut error = ApiError::conflict("Engram project settings are already being reset");
-        error.project_reset = Some(progress);
-        return Err(error);
-    }
-    // Disable skips readiness admission; retained control duties still fence
-    // connection changes in the settings transaction.
+    // Connection changes arbitrate their real resource reset in the transaction.
     let permit = if request.enabled {
         Some(acquire_engram_readiness(limiter)?)
     } else {

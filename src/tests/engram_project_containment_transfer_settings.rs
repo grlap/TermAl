@@ -1,198 +1,73 @@
-// Owns current-settings fences around an unacknowledged admission transfer.
-// Does not settle independent duties or infer delivery from local persistence.
+//! Observation settings do not grant or withdraw ordinary queue permissions.
 use super::*;
 
-struct LoseFinalTransferAcknowledgement {
-    inner: Arc<LostContainmentAdmissionReply>,
-    armed: AtomicBool,
-}
-
-impl EngramControlTransport for LoseFinalTransferAcknowledgement {
-    fn request(
-        &self,
-        connection: &EngramConnectionConfig,
-        request: &EngramControlRequest,
-        timeout: Duration,
-    ) -> Result<Value, EngramTransportError> {
-        let result = self.inner.request(connection, request, timeout);
-        if result.is_ok()
-            && matches!(request, EngramControlRequest::TurnEvaluate { .. })
-            && self.armed.swap(false, Ordering::SeqCst)
-        {
-            // The public Resume's original owner ACK has already completed.
-            // Lose only the following final-transfer writer acknowledgement.
-            TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(false));
-        }
-        result
-    }
-
-    fn shutdown_session(&self, session_id: &str) {
-        self.inner.shutdown_session(session_id);
-    }
-}
-
-fn unacknowledged_transfer() -> (
-    AppState,
-    String,
-    String,
-    mpsc::Receiver<CodexRuntimeCommand>,
-    Arc<LostContainmentAdmissionReply>,
-) {
-    let (state, project, session, _root, receiver, transport) =
-        retained_admission(&["turn_evaluate"]);
-    state
-        .update_project_engram_settings(&project, settings(&state, &project, true))
-        .unwrap();
-    state.install_control_test_transport(Arc::new(LoseFinalTransferAcknowledgement {
-        inner: transport.clone(),
-        armed: AtomicBool::new(true),
-    }));
-    let _ = state.resume_session_queue(&session);
-    TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(true));
-    {
-        let inner = state.inner.lock().unwrap();
-        let entry = engram_session_obligation_locked(&inner, &session)
-            .expect("lost final acknowledgement retains the exclusion");
-        assert_eq!(entry.phase, EngramSessionObligationPhase::Confirmed);
-        assert!(containment_admission_transfer_matches(entry));
-        assert!(!inner.engram_confirmed_containment_ids.contains(&entry.id));
-        assert!(
-            inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts[0]
-                .engram_evaluate
-                .as_ref()
-                .unwrap()
-                .prepared_begin
-                .is_some()
-        );
-    }
-    assert!(
-        !transport
-            .inner
-            .requests()
-            .iter()
-            .any(|request| { request.request["operation"] == "turn_begin" })
-    );
-    assert!(receiver.try_recv().is_err());
-    (state, project, session, receiver, transport)
-}
-
-fn off_after_lost_transfer_ack_stays_excluded(reload: bool) {
-    let (state, project, session, receiver, transport) = unacknowledged_transfer();
-    let before = transport.inner.requests().len();
-    let response = state
-        .update_project_engram_settings(&project, settings(&state, &project, false))
-        .unwrap();
-    assert_eq!(response.engram_control_recovery.len(), 1);
-    if reload {
-        state.shutdown_persist_blocking();
-        let loaded = load_state(state.persistence_path.as_path())
-            .unwrap()
-            .unwrap();
-        assert!(
-            engram_session_obligation_locked(&loaded, &session).is_some(),
-            "boot cannot acknowledge an issued successor under gating OFF"
-        );
-        assert!(loaded.engram_confirmed_containment_ids.is_empty());
-    } else {
-        let _ = state.resume_session_queue(&session);
-        let inner = state.inner.lock().unwrap();
-        assert!(
-            engram_session_obligation_locked(&inner, &session).is_some(),
-            "Resume cannot acknowledge an issued successor under gating OFF"
-        );
-        assert!(inner.engram_confirmed_containment_ids.is_empty());
-        drop(inner);
-        assert_eq!(state.snapshot().engram_control_recovery.len(), 1);
-        assert!(state.kill_session(&session).is_err());
-    }
-    assert_eq!(
-        transport.inner.requests().len(),
-        before,
-        "OFF recovery sends no RPC"
-    );
-    assert!(receiver.try_recv().is_err());
-}
-
 #[test]
-fn project_containment_lost_transfer_ack_then_off_resume_keeps_exclusion() {
-    off_after_lost_transfer_ack_stays_excluded(false);
-}
-
-#[test]
-fn project_containment_lost_transfer_ack_then_off_restart_keeps_exclusion() {
-    off_after_lost_transfer_ack_stays_excluded(true);
-}
-
-#[test]
-fn project_containment_lost_transfer_ack_exact_reenable_allows_local_confirmation() {
-    let (state, project, session, receiver, transport) = unacknowledged_transfer();
-    let before = transport.inner.requests().len();
-    state
-        .update_project_engram_settings(&project, settings(&state, &project, false))
-        .unwrap();
-    state
-        .update_project_engram_settings(&project, settings(&state, &project, true))
-        .unwrap();
-    state
-        .retry_containment_admission_transfer(&session)
-        .unwrap();
-    let inner = state.inner.lock().unwrap();
-    assert!(engram_session_obligation_locked(&inner, &session).is_none());
-    let entry = &inner.engram_session_obligations.entries[0];
-    assert!(inner.engram_confirmed_containment_ids.contains(&entry.id));
-    assert!(containment_admission_transfer_matches(entry));
-    assert_eq!(
-        transport.inner.requests().len(),
-        before,
-        "local ACK sends no RPC"
-    );
-    assert!(receiver.try_recv().is_err());
-}
-
-#[test]
-fn project_containment_transfer_settings_changed_during_ack_cannot_release_permission() {
-    let (state, project, session, receiver, transport) = unacknowledged_transfer();
-    let before = transport.inner.requests().len();
-    let off_state = state.clone();
-    let off_project = project.clone();
-    TEST_CONTAINMENT_BEFORE_ACK_RETURN.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            off_state
-                .update_project_engram_settings(
-                    &off_project,
-                    settings(&off_state, &off_project, false),
-                )
-                .unwrap();
-        }));
+fn observation_off_does_not_turn_an_unknown_handoff_into_a_replay_permission() {
+    let (turn, history) = ordinary_with_history("ordinary-off-unknown-handoff");
+    turn.enqueue("unknown provider write", QueuedPromptSource::User);
+    turn.edit(|record| {
+        record.queued_prompts[0].engram_ordinary_handoff = true;
+        record.queued_prompts[0].promotion_disposition_known = false;
+        record.set_auto_dispatch_blocked(true);
     });
-    assert!(
-        state
-            .retry_containment_admission_transfer(&session)
-            .is_err()
-    );
-    let inner = state.inner.lock().unwrap();
-    let entry = engram_session_obligation_locked(&inner, &session).unwrap();
-    assert!(!inner.engram_confirmed_containment_ids.contains(&entry.id));
-    assert!(
-        !inner
-            .find_project(&project)
-            .unwrap()
-            .engram
-            .as_ref()
-            .unwrap()
-            .turn_gated_control
-    );
-    assert!(
-        inner.sessions[inner.find_session_index(&session).unwrap()]
-            .queued_prompts
-            .front()
-            .unwrap()
-            .engram_evaluate
-            .as_ref()
-            .unwrap()
-            .prepared_begin
-            .is_some()
-    );
-    assert_eq!(transport.inner.requests().len(), before);
-    assert!(receiver.try_recv().is_err());
+    let queued = turn.saved()["queuedPrompts"].clone();
+    let mut settings = observation_settings(&turn);
+    settings.execution_observability = false;
+    turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    assert_eq!(turn.saved()["queuedPrompts"], queued);
+    turn.assert_no_prompt();
+    assert_history(&turn, &history);
+}
+
+#[test]
+fn observation_off_reload_keeps_ambiguous_receipts_without_reconstructing_a_gate() {
+    let (turn, history) = ordinary_with_history("ordinary-off-reload-receipt");
+    let (id, _) = fixture_handoff_receipt(&turn, "ambiguous original input");
+    let mut settings = observation_settings(&turn);
+    settings.execution_observability = false;
+    turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
+    reload_fixture(&turn);
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    turn.record(|record| {
+        assert_eq!(record.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Ambiguous);
+        assert!(!record.prompt_deliveries[&id].write_ahead_acknowledged);
+        assert!(record.prompt_deliveries[&id].resume.is_none());
+    });
+    turn.assert_no_prompt();
+    assert_history(&turn, &history);
+}
+
+#[test]
+fn observation_reenable_never_requires_history_confirmation_before_ordinary_delivery() {
+    let (turn, history) = ordinary_with_history("ordinary-observation-reenable");
+    turn.edit(|record| record.set_auto_dispatch_blocked(true));
+    turn.enqueue("ordinary queued input", QueuedPromptSource::User);
+    for observing in [true, false, true] {
+        let mut settings = observation_settings(&turn);
+        settings.execution_observability = observing;
+        turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
+        turn.assert_no_prompt();
+        assert_history(&turn, &history);
+    }
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    assert!(turn.prompt().prompt.contains("ordinary queued input"));
+    turn.assert_no_prompt();
+    assert_history(&turn, &history);
+}
+
+#[test]
+fn observation_setting_change_does_not_replace_the_current_ordinary_queue_owner() {
+    let (turn, history) = ordinary_with_history("ordinary-setting-owner-cut");
+    turn.enqueue("owned ordinary input", QueuedPromptSource::User);
+    let owner = turn.record(|record| QueuedTurnOwner::capture(record).unwrap());
+    let mut settings = observation_settings(&turn);
+    settings.execution_observability = true;
+    turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
+    turn.record(|record| assert!(owner.matches(record), "an observation toggle is not a new queue/Stop owner"));
+    let outcome = turn.state.resume_local_session_queue(&turn.session, Some(owner)).unwrap();
+    assert!(matches!(outcome, Some(TurnDispatchDeliveryOutcome::Delivered)));
+    assert!(turn.prompt().prompt.contains("owned ordinary input"));
+    turn.assert_no_prompt();
+    assert_history(&turn, &history);
 }

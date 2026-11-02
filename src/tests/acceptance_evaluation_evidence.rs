@@ -464,9 +464,7 @@ fn criterion_evidence_request_refuses_crossed_core_brackets() {
                     "run_association" => receipt["run"]["work_id"] = json!(replacement),
                     "malformed" => receipt["status"]["work"]["active_run_id"] = json!(17),
                     "authority" if closing => {
-                        let mut inner = state.inner.lock().unwrap();
-                        let index = inner.find_session_index(&parent).unwrap();
-                        inner.sessions[index].engram.routing_token = Some("replacement-token".to_owned());
+                        state.install_test_engram_transport(ScriptedEngramControlTransport::new([]));
                     }
                     _ => {}
                 }
@@ -1003,6 +1001,14 @@ impl EngramControlTransport for BindingEvidenceTransport {
         request: &EngramControlRequest,
         _: Duration,
     ) -> Result<Value, EngramTransportError> {
+        if matches!(request, EngramControlRequest::WorkSessionRead { .. }) {
+            return Ok(json!({
+                "project_id": "established-project",
+                "session_id": connection.session_id,
+                "work_session": true,
+                "capabilities": ["host_work_v1", "verification_record_v1"],
+            }));
+        }
         // Every request reads the named-root sighting first: no root here.
         if let EngramControlRequest::NamedRootSightingRead {
             work_ref,
@@ -1045,7 +1051,7 @@ impl EngramControlTransport for BindingEvidenceTransport {
 
 pub(super) fn install_binding_evidence_transport(
     state: &AppState,
-    parent: &str,
+    _parent: &str,
     pages: Vec<Value>,
 ) -> Arc<BindingEvidenceTransport> {
     let transport = Arc::new(BindingEvidenceTransport {
@@ -1053,19 +1059,6 @@ pub(super) fn install_binding_evidence_transport(
         requests: Mutex::new(Vec::new()),
     });
     state.install_test_engram_transport(transport.clone());
-    let mut inner = state.inner.lock().unwrap();
-    let index = inner.find_session_index(parent).unwrap();
-    let project = inner.sessions[index].session.project_id.clone().unwrap();
-    inner
-        .projects
-        .iter_mut()
-        .find(|row| row.id == project)
-        .unwrap()
-        .engram
-        .as_mut()
-        .unwrap()
-        .turn_gated_control = true;
-    inner.sessions[index].engram.routing_token = Some("criterion-read-token".to_owned());
     transport
 }
 
@@ -1166,7 +1159,12 @@ fn criterion_evidence_request_discovers_original_bound_check_outside_the_window(
     let requests = transport.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0]["operation"], "acceptance_binding_read");
-    assert_eq!(requests[0]["routing_token"], "criterion-read-token");
+    assert_eq!(requests[0], json!({
+        "operation": "acceptance_binding_read",
+        "work_id": "01a0b6c5-4b4f-7b41-9e32-edc597077acf",
+        "expected_work_revision": 7,
+        "run_id": "01a0b6c5-4b4f-7b41-9e32-edd7dea8b369"
+    }), "ordinary discovery carries only its exact work/run/revision and cursor contract");
     assert_eq!(requests[0]["expected_work_revision"], 7);
     assert!(
         requests[0].get("run_cut").is_none(),
@@ -1395,63 +1393,28 @@ fn criterion_evidence_and_carried_failure_survive_the_same_brief() {
 }
 
 #[test]
-fn criterion_evidence_request_keeps_base_enabled_evaluation_without_control_discovery() {
-    for missing in ["control_disabled", "routing_token"] {
-        let (state, project, parent, root) = fixture();
-        install_store(&state, &project, &root);
-        let (show, full, page) = canonical_binding_receipts();
-        let transport = install_binding_evidence_transport(&state, &parent, vec![page]);
-        {
-            let mut inner = state.inner.lock().unwrap();
-            if missing == "control_disabled" {
-                inner
-                    .projects
-                    .iter_mut()
-                    .find(|row| row.id == project)
-                    .unwrap()
-                    .engram
-                    .as_mut()
-                    .unwrap()
-                    .turn_gated_control = false;
-            } else {
-                let index = inner.find_session_index(&parent).unwrap();
-                inner.sessions[index].engram.routing_token = None;
-            }
-        }
-        let response = state
-            .request_acceptance_evaluation_with_runner(
-                &parent,
-                evaluation_request(None),
-                |_, args, _| {
-                    if args.iter().any(|arg| arg == "inspect") {
-                        Ok(canonical_core_receipt())
-                    } else if args.iter().any(|arg| arg == "--full") {
-                        Ok(full.clone())
-                    } else if args.iter().any(|arg| arg == "held") {
-                        Ok(json!({"items": [], "omitted": 0}))
-                    } else if args.first().map(String::as_str) == Some("control-policy") {
-                        Ok(policy_receipt(Some(&["same_session"])))
-                    } else {
-                        Ok(show.clone())
-                    }
-                },
-            )
-            .unwrap_or_else(|error| panic!("{missing}: {error:?}"));
-        let wire = serde_json::to_value(response).unwrap();
-        assert!(
-            wire["brief"]
-                .as_str()
-                .unwrap()
-                .contains("canonical index unavailable")
-        );
-        assert!(
-            wire["criterionEvidence"][0]["association"]
-                .as_str()
-                .unwrap()
-                .contains("unavailable")
-        );
-        assert!(transport.requests.lock().unwrap().is_empty());
-    }
+fn criterion_evidence_request_discloses_unsupported_ordinary_closure_discovery() {
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    let (show, full, _) = canonical_binding_receipts();
+    let transport = install_binding_evidence_transport(
+        &state,
+        &parent,
+        vec![json!({"fixture_error": {
+            "code": "unsupported_operation",
+            "message": "canonical closure discovery is not supported"
+        }})],
+    );
+    let response = request_canonical_fixture(&state, &parent, &show, &full).unwrap();
+    let wire = serde_json::to_value(response).unwrap();
+    assert!(wire["brief"].as_str().unwrap().contains("canonical index unavailable"));
+    assert!(wire["criterionEvidence"][0]["association"]
+        .as_str().unwrap().contains("does not support canonical closure discovery"));
+    assert!(wire["criterionEvidence"][0]["locators"].as_array().unwrap().is_empty(),
+        "an unavailable index must not borrow a verification");
+    assert!(!wire["brief"].as_str().unwrap().contains("git:older"));
+    assert_eq!(transport.requests.lock().unwrap().len(), 1,
+        "ordinary discovery is attempted before its unavailability is disclosed");
 }
 
 #[test]
@@ -1612,17 +1575,13 @@ fn criterion_evidence_remote_refusals_distinguish_unsupported_movement_and_proto
         "acceptance_binding_read_wrong_revision",
         "acceptance_binding_read_wrong_run",
         "acceptance_binding_read_stale_cut",
-        "control_session_not_bound",
-        "control_session_token_mismatch",
-        "control_connection_superseded",
-        "invalid_control_session",
         "storage_integrity",
     ] {
         let (state, project, parent, root) = fixture();
         install_store(&state, &project, &root);
         let (show, full, _) = canonical_binding_receipts();
         let message = if code == "invalid_request" {
-            "unknown variant `acceptance_binding_read`, expected session_bind or turn_begin"
+            "unknown variant `acceptance_binding_read`, expected work_session_read"
         } else {
             "scripted refusal"
         };
@@ -1653,10 +1612,6 @@ fn criterion_evidence_remote_refusals_distinguish_unsupported_movement_and_proto
                 "acceptance_binding_read_wrong_revision"
                     | "acceptance_binding_read_wrong_run"
                     | "acceptance_binding_read_stale_cut"
-                    | "control_session_not_bound"
-                    | "control_session_token_mismatch"
-                    | "control_connection_superseded"
-                    | "invalid_control_session"
             );
             assert_eq!(
                 error.status,

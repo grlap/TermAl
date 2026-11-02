@@ -67,8 +67,9 @@ fn acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused() 
             );
             if with_continuation {
                 show["notes_omitted"] = json!(7);
-                show["notes_window"] = json!({"older": 7, "after": token,
-                    "read_cut": {"project_position": 42}});
+                show["notes_window"] = canonical_notes_window(117, 0, 110, 42, Some(&token));
+            } else {
+                show["notes_window"] = canonical_notes_window(110, 0, 110, 42, None);
             }
             // One request on a fresh fixture, with the omission inventory.
             let request = |criterion: &str| {
@@ -173,8 +174,7 @@ fn acceptance_omissions_entry_limit_exposes_older_only_proof_to_the_requester() 
             .collect::<Vec<_>>()
     );
     show["notes_omitted"] = json!(7);
-    show["notes_window"] = json!({"after": "older-cut-token", "older": 7,
-        "read_cut": {"project_position": 42, "observed_at": "2026-09-30T22:00:00Z"}});
+    show["notes_window"] = canonical_notes_window(117, 0, 110, 42, Some("older-cut-token"));
     let response = state
         .request_acceptance_evaluation_with_runner(
             &parent,
@@ -270,7 +270,7 @@ fn acceptance_omissions_page_limit_and_time_budget_keep_the_last_read_cut() {
             .unwrap();
         let wire = serde_json::to_value(response).unwrap();
         let unread = &wire["evidenceOmissions"]["unread"];
-        assert_eq!(unread["count"], 99);
+        assert_eq!(unread["count"], if timed { 97 } else { 92 });
         assert_eq!(unread["locatorsKnown"], false);
         assert_eq!(
             unread["reason"],
@@ -290,8 +290,7 @@ fn acceptance_omissions_failed_second_page_preserves_the_unread_locator_boundary
     install_store(&state, &project, &root);
     let mut first = show_receipt(None);
     first["notes_omitted"] = json!(5);
-    first["notes_window"] = json!({"after": "first-token", "older": 5,
-        "read_cut": {"project_position": 42, "observed_at": "2026-09-30T22:00:00Z"}});
+    first["notes_window"] = canonical_notes_window(7, 0, 2, 42, Some("first-token"));
     let pages = Arc::new(AtomicUsize::new(0));
     let reads = pages.clone();
     let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
@@ -305,9 +304,9 @@ fn acceptance_omissions_failed_second_page_preserves_the_unread_locator_boundary
             Ok(full_receipt())
         } else if args.iter().any(|arg| arg == "--after") {
             if reads.fetch_add(1, Ordering::SeqCst) == 0 {
-                Ok(json!({"notes": [evidence_note(1, "scattered older proof")],
-                    "notes_window": {"after": "second-token", "older": 4,
-                        "read_cut": {"project_position": 42, "observed_at": "2026-09-30T22:00:00Z"}}}))
+                Ok(json!({"work":{"short_ref":"w-task", "title":"Ship the route"},
+                    "notes": [evidence_note(1, "scattered older proof")],
+                    "notes_window": canonical_notes_window(7, 2, 1, 43, Some("second-token"))}))
             } else {
                 Err(EngramTransportError::transport("cut expired"))
             }
@@ -330,7 +329,7 @@ fn acceptance_omissions_failed_second_page_preserves_the_unread_locator_boundary
 }
 
 #[test]
-fn acceptance_omissions_missing_or_oversized_continuation_is_explicit() {
+fn acceptance_omissions_missing_or_oversized_canonical_continuation_is_refused() {
     for oversized in [false, true] {
         let (state, project, parent, root) = fixture();
         install_store(&state, &project, &root);
@@ -341,57 +340,31 @@ fn acceptance_omissions_missing_or_oversized_continuation_is_explicit() {
                 .collect::<Vec<_>>()
         );
         show["notes_omitted"] = json!(1);
-        show["notes_window"] = json!({"older": 1, "after": if oversized {
-            Some("x".repeat(MAX_ACCEPTANCE_CONTINUATION_BYTES + 1)) } else { None }});
-        let wire = serde_json::to_value(
-            state
-                .request_acceptance_evaluation_with_runner(
-                    &parent,
-                    evaluation_request(Some(Agent::Codex)),
-                    fixture_reader(
-                        Arc::default(),
-                        show,
-                        Ok(policy_receipt(Some(&["independent_session"]))),
-                    ),
-                )
-                .unwrap(),
-        )
-        .unwrap();
-        let unread = &wire["evidenceOmissions"]["unread"];
-        assert_eq!(unread["count"], 1);
-        assert!(unread["continuation"].is_null());
-        assert_eq!(unread["continuationOmitted"], oversized);
-        assert_eq!(
-            unread["reason"],
-            if oversized {
-                "entry_limit"
-            } else {
-                "missing_continuation"
-            }
-        );
-        assert_eq!(
-            unread["continuationBytes"],
-            if oversized {
-                MAX_ACCEPTANCE_CONTINUATION_BYTES + 1
-            } else {
-                0
-            }
-        );
-        let prompt = wire["delegation"]["prompt"].as_str().unwrap();
-        assert!(prompt.contains("individual unread locators are unknown"));
-        assert!(!prompt.contains(&"x".repeat(MAX_ACCEPTANCE_CONTINUATION_BYTES)));
+        let token = oversized.then(|| "x".repeat(MAX_ACCEPTANCE_CONTINUATION_BYTES + 1));
+        show["notes_window"] = canonical_notes_window(41, 0, 40, 42, token.as_deref());
+        let calls: RecordedEngramCalls = Arc::default();
+        let error = state.request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(Some(Agent::Codex)),
+            fixture_reader(calls.clone(), show, Ok(policy_receipt(Some(&["independent_session"])))),
+        ).err().expect("an invalid canonical cursor must not admit an evaluator");
+        assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+        assert!(error.message.contains("notes continuation: malformed catalog window"));
+        assert!(!calls.lock().unwrap().iter().any(|(_, args)| args.iter().any(|arg| arg == "--after")));
+        assert!(state.inner.lock().unwrap().delegations.is_empty());
     }
 }
 
 #[test]
-fn acceptance_omissions_final_page_without_window_drops_the_consumed_boundary() {
+fn acceptance_omissions_final_page_without_canonical_window_is_refused() {
     for remaining in [0, 1] {
         let (state, project, parent, root) = fixture();
         install_store(&state, &project, &root);
         let mut first = show_receipt(None);
-        first["notes_window"] = json!({"after": "consumed-token", "older": 5,
-            "read_cut": {"project_position": 42}});
+        first["notes_window"] = canonical_notes_window(7, 0, 2, 42, Some("consumed-token"));
         first["notes_omitted"] = json!(5);
+        let pages = Arc::new(AtomicUsize::new(0));
+        let observed = pages.clone();
         let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
             if args.iter().any(|arg| arg == "inspect") {
                 Ok(evidence_selection::canonical_core_receipt())
@@ -402,37 +375,59 @@ fn acceptance_omissions_final_page_without_window_drops_the_consumed_boundary() 
             } else if args.iter().any(|arg| arg == "--full") {
                 Ok(full_receipt())
             } else if args.iter().any(|arg| arg == "--after") {
-                Ok(
-                    json!({"notes": [evidence_note(3, "final older proof")], "notes_omitted": remaining}),
-                )
+                observed.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({"work":{"short_ref":"w-task", "title":"Ship the route"},
+                    "notes": (0..5 - remaining).map(|index| evidence_note(index, "final older proof")).collect::<Vec<_>>(),
+                    "notes_omitted": remaining}))
             } else {
                 Ok(first.clone())
             }
         };
-        let wire = serde_json::to_value(
-            state
-                .request_acceptance_evaluation_with_runner(
-                    &parent,
-                    evaluation_request(Some(Agent::Codex)),
-                    reader,
-                )
-                .unwrap(),
-        )
-        .unwrap();
-        let unread = &wire["evidenceOmissions"]["unread"];
-        assert_eq!(unread["count"], remaining);
-        assert!(unread["continuation"].is_null());
-        assert!(unread["readCut"].is_null());
-        assert_eq!(
-            unread["reason"],
-            if remaining == 0 {
-                Value::Null
-            } else {
-                json!("missing_continuation")
-            }
-        );
-        let prompt = wire["delegation"]["prompt"].as_str().unwrap();
-        assert!(prompt.contains("final older proof"));
-        assert!(!prompt.contains("consumed-token"));
+        let error = state.request_acceptance_evaluation_with_runner(
+            &parent, evaluation_request(Some(Agent::Codex)), reader,
+        ).err().expect("a header without its canonical window cannot close the capture");
+        assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+        assert!(error.message.contains("notes continuation: malformed catalog window"));
+        assert_eq!(pages.load(Ordering::SeqCst), 1);
+        assert!(state.inner.lock().unwrap().delegations.is_empty());
     }
+}
+
+#[test]
+fn acceptance_omissions_valid_terminal_page_drops_the_consumed_boundary() {
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    let mut first = show_receipt(None);
+    first["notes_window"] = canonical_notes_window(7, 0, 2, 42, Some("consumed-token"));
+    first["notes_omitted"] = json!(5);
+    let base = fixture_reader(
+        Arc::default(), first, Ok(policy_receipt(Some(&["independent_session"]))),
+    );
+    let pages = AtomicUsize::new(0);
+    let response = state.request_acceptance_evaluation_with_runner(
+        &parent,
+        evaluation_request(Some(Agent::Codex)),
+        |connection, args, timeout| {
+            if args.iter().any(|arg| arg == "--after") {
+                pages.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({"work":{"short_ref":"w-task", "title":"Ship the route"},
+                    "notes":(0..5).map(|index| evidence_note(index, "final older proof")).collect::<Vec<_>>(),
+                    "notes_omitted":0,
+                    "notes_window":canonical_notes_window(7, 2, 5, 43, None)}))
+            } else {
+                base(connection, args, timeout)
+            }
+        },
+    ).expect("a complete terminal catalog page closes the ordinary capture");
+    assert_eq!(pages.load(Ordering::SeqCst), 1);
+    let wire = serde_json::to_value(response).unwrap();
+    let unread = &wire["evidenceOmissions"]["unread"];
+    assert_eq!(unread["count"], 0);
+    assert!(unread["continuation"].is_null());
+    assert_eq!(unread["continuationBytes"], 0);
+    assert_eq!(unread["readCut"]["project_position"], 43);
+    assert!(unread["reason"].is_null());
+    let prompt = wire["delegation"]["prompt"].as_str().unwrap();
+    assert!(prompt.contains("final older proof"));
+    assert!(!prompt.contains("consumed-token"));
 }

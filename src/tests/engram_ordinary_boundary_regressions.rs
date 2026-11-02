@@ -1,431 +1,130 @@
-//! Local preparation failures and Stop arbitration before an ordinary ACK.
+//! Ordinary content/WAL cancellation, stale owners and real Stop arbitration.
 use super::*;
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 
-/// Hands one exact admission fence to the test; serves all other ACKs.
-/// These tests inspect local control flow, not physical SQLite durability.
-struct BoundaryWriter {
-    tx: mpsc::Sender<PersistRequest>,
-    worker: Option<std::thread::JoinHandle<()>>,
-}
-
-impl BoundaryWriter {
-    fn install(
-        state: &mut AppState,
-        select: fn(&Value) -> bool,
-    ) -> (Self, mpsc::Receiver<Box<PersistFence>>) {
-        state.shutdown_persist_blocking();
-        let (tx, rx) = mpsc::channel();
-        let (selected_tx, selected_rx) = mpsc::channel();
-        state.persist_tx = tx.clone();
-        let worker = std::thread::spawn(move || {
-            let mut selected = false;
-            while let Ok(request) = rx.recv() {
-                match request {
-                    PersistRequest::Fence(fence) => {
-                        let matches = !selected
-                            && !fence.retry_acknowledgement
-                            && matches!(&fence.target,
-                                PersistFenceTarget::EngramAdmission { content, .. } if select(content));
-                        if matches {
-                            selected = true;
-                            selected_tx.send(fence).unwrap();
-                        } else {
-                            fence.finish(Ok(()));
-                        }
-                    }
-                    PersistRequest::Shutdown => break,
-                    _ => {}
-                }
+// Drive ordinary content/WAL requests through the existing SQLite writer.
+// The real worker is joined before its sender is replaced; no parallel
+// writer or acknowledgement without an exact durable read-back is created.
+fn take_real_ordinary_write_ahead(
+    turn: &OrdinaryRoot,
+    rx: &mpsc::Receiver<PersistRequest>,
+    cache: &mut SqlitePersistConnectionCache,
+) -> (Box<PersistFence>, bool) {
+    let mut batch = PersistFenceBatch::default();
+    loop {
+        let request = phase_sync::receive(rx, "ordinary content or WAL persistence request");
+        match request {
+            PersistRequest::Fence(fence) if matches!(&fence.target,
+                PersistFenceTarget::PromptDeliveryWriteAhead { .. }) =>
+            {
+                let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
+                persist_delta_via_cache(cache, turn.state.persistence_path.as_path(), &delta).unwrap();
+                let connection = cache.connection_for(turn.state.persistence_path.as_path()).unwrap();
+                let durable = fence.target.is_already_durable(connection).unwrap();
+                return (fence, durable);
             }
-        });
-        (
-            Self {
-                tx,
-                worker: Some(worker),
-            },
-            selected_rx,
-        )
-    }
-}
-
-impl Drop for BoundaryWriter {
-    fn drop(&mut self) {
-        let _ = self.tx.send(PersistRequest::Shutdown);
-        self.worker.take().unwrap().join().unwrap();
+            request => batch.accept(request),
+        };
+        let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
+        persist_delta_with_fences(cache, turn.state.persistence_path.as_path(), &delta, &mut batch).unwrap();
     }
 }
 
 #[test]
-fn admission_review_cancel_during_marker_ack_allows_replacement_under_same_outage() {
-    let unavailable = || {
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::spawn_failed(
-            "optional control remains unavailable",
-        )))
-    };
-    let (mut state, session, receiver, transport) = root_fixture([unavailable(), unavailable()]);
-    let (_writer, selected) = BoundaryWriter::install(&mut state, |content| {
-        content["queue"]["engram_ordinary_handoff"] == true
+fn cancel_during_real_write_ahead_ack_cannot_send_or_block_the_replacement() {
+    let mut turn = OrdinaryRoot::new("cancel-real-wal");
+    turn.state.shutdown_persist_blocking();
+    let (tx, rx) = mpsc::channel();
+    turn.state.persist_tx = tx;
+    let id = turn.enqueue_durable("cancel this exact ordinary content", true);
+    assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+    let mut cache = SqlitePersistConnectionCache::new();
+    let (fence, durable) = take_real_ordinary_write_ahead(&turn, &rx, &mut cache);
+    let nonce = turn.record(|record| record.prompt_deliveries[&id].write_ahead.clone());
+    let empty_before_ack = !turn.receiver.try_iter().any(|command|
+        matches!(command, CodexRuntimeCommand::Prompt { .. }));
+    let canceled = turn.state.cancel_queued_prompt(&turn.session, &id);
+    // Always release the real boundary before asserting either outcome.
+    fence.finish(if durable { Ok(()) } else {
+        Err(PersistFenceError::WriteFailed("exact WAL read-back was absent".into()))
     });
-    let canceled = root_dispatch(&state, &session, false);
-    std::thread::scope(|scope| {
-        let worker = scope.spawn(|| deliver_turn_dispatch(&state, canceled));
-        let fence = selected.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
-        let prompt_id = inspect(&state, &session, |record| {
-            record
-                .queued_prompts
-                .front()
-                .unwrap()
-                .pending_prompt
-                .id
-                .clone()
-        });
-        state.cancel_queued_prompt(&session, &prompt_id).unwrap();
-        fence.finish(Ok(()));
-        let _ = worker.join().unwrap();
-    });
-    assert!(
-        receiver.try_recv().is_err(),
-        "the canceled prompt is never delivered"
-    );
-    // Exercise a second actual spawn failure, rather than a locally delayed
-    // bind whose separate retry policy could mask the stale-slot defect.
-    elapse_bind_backoff(&state, &session);
-    let replacement = state
-        .dispatch_turn(
-            &session,
-            SendMessageRequest {
-                text: "replacement after cancellation".into(),
-                expanded_text: None,
-                attachments: Vec::new(),
-                source_session_id: None,
-                source_mailbox: None,
-            },
-        )
-        .unwrap();
-    let dispatch = match replacement {
-        DispatchTurnResult::Dispatched(dispatch)
-        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-        DispatchTurnResult::Queued => panic!("the canceled head must release admission"),
-    };
-    let _ = deliver_turn_dispatch(&state, dispatch);
-    let prompts = receiver
-        .try_iter()
-        .filter_map(|command| match command {
-            CodexRuntimeCommand::Prompt { command, .. } => Some(command.prompt),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        prompts.len(),
-        1,
-        "a stale canceled slot cannot block its replacement"
-    );
-    assert!(prompts[0].contains("replacement after cancellation"));
-    assert_eq!(operations(&transport), ["session_bind", "session_bind"]);
-    assert!(inspect(&state, &session, |record| record
-        .queued_prompts
-        .is_empty()));
+    canceled.unwrap();
+    turn.state.settle_prompt_delivery_write_ahead(&turn.session, &id, &nonce, Ok(()));
+    assert!(durable && empty_before_ack);
+    turn.assert_no_prompt();
+    let dispatch = turn.prepare("replacement after cancellation");
+    deliver_turn_dispatch(&turn.state, dispatch).into_public_result().unwrap();
+    assert!(turn.prompt().prompt.contains("replacement after cancellation"));
+    turn.record(|record| assert!(record.queued_prompts.is_empty()));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }
 
 #[test]
-fn admission_review_preparation_cleanup_retires_only_its_stored_owner() {
-    for (successor, durable) in [(false, false), (true, false), (false, true), (true, true)] {
-        let (state, session, _receiver, _transport) = root_fixture([]);
-        let _dispatch = root_dispatch(&state, &session, false);
-        let owner = inspect(&state, &session, |record| {
-            EngramQueuedAdmissionOwner::capture(record).unwrap()
-        });
-        {
-            let mut inner = state.inner.lock().unwrap();
-            let record = inner.session_mut(&session).unwrap();
-            record.engram.dispatch_generation += 1;
-            let stored_owner = if successor {
-                EngramQueuedAdmissionOwner::capture(record).unwrap()
-            } else {
-                owner.clone()
-            };
-            record.engram.ordinary_handoff = Some(EngramOrdinaryHandoff {
-                owner: stored_owner,
-                durable,
-            });
+fn a_canceled_ordinary_owner_never_mutates_or_delivers_its_replacement() {
+    let turn = OrdinaryRoot::new("exact-ordinary-successor");
+    let id = turn.enqueue("old ordinary prompt", QueuedPromptSource::User);
+    let owner = turn.record(|record| QueuedTurnOwner::capture(record).unwrap());
+    turn.state.cancel_queued_prompt(&turn.session, &id).unwrap();
+    let replacement = turn.enqueue("new ordinary prompt", QueuedPromptSource::Mailbox);
+    let before = turn.saved();
+    assert!(turn.state.dispatch_next_queued_turn_for_activation(&turn.session, owner).unwrap().is_none());
+    assert_eq!(turn.saved(), before, "an old continuation cannot change the successor");
+    turn.assert_no_prompt();
+    let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap();
+    deliver_turn_dispatch(&turn.state, started.dispatch).into_public_result().unwrap();
+    assert!(turn.prompt().prompt.contains("new ordinary prompt"));
+    turn.record(|record| {
+        assert!(record.queued_prompts.is_empty());
+        assert_ne!(replacement, id);
+    });
+    turn.assert_no_prompt();
+    turn.assert_no_control();
+}
+
+#[test]
+fn ordinary_write_ahead_failures_keep_exact_pending_content_without_a_handoff() {
+    for fault in [PersistFenceError::Deadline, PersistFenceError::WorkerStopped,
+        PersistFenceError::WriteFailed("controlled ordinary WAL failure".into())] {
+        let mut turn = OrdinaryRoot::new("strict-ordinary-wal-failure");
+        turn.state.shutdown_persist_blocking();
+        let (tx, rx) = mpsc::channel();
+        turn.state.persist_tx = tx;
+        let id = turn.enqueue_durable("exact ordinary content — źródło 🦀", true);
+        assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+        let mut cache = SqlitePersistConnectionCache::new();
+        let (fence, durable) = take_real_ordinary_write_ahead(&turn, &rx, &mut cache);
+        let nonce = turn.record(|record| record.prompt_deliveries[&id].write_ahead.clone());
+        let empty_before_ack = !turn.receiver.try_iter().any(|command|
+            matches!(command, CodexRuntimeCommand::Prompt { .. }));
+        fence.finish(Err(fault));
+        let settled = phase_sync::PollGuard::new();
+        while !turn.record(|record| record.prompt_deliveries[&id].disposition == PromptDeliveryDisposition::Pending) {
+            settled.wait("ordinary WAL failure returns to pending");
         }
-        drop(EngramOrdinaryPreparation {
-            state: &state,
-            session_id: &session,
-            owner: &owner,
-        });
-        assert_eq!(
-            inspect(&state, &session, |record| {
-                record.engram.ordinary_handoff.is_some()
-            }),
-            successor || durable,
-            "an old guard retires its stale slot but preserves its successor"
-        );
-    }
-}
-
-#[test]
-fn admission_review_cancel_after_marker_ack_retires_ready_permission() {
-    let unavailable = || {
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::spawn_failed(
-            "optional control remains unavailable",
-        )))
-    };
-    let (state, session, receiver, transport) = root_fixture([unavailable(), unavailable()]);
-    let canceled = root_dispatch(&state, &session, false);
-    assert_eq!(
-        state.prepare_engram_turn_delivery_off_lock(
-            &session,
-            canceled.engram_dispatch_generation().unwrap(),
-        ),
-        EngramTurnDeliveryPreparation::Ready
-    );
-    let prompt_id = inspect(&state, &session, |record| {
-        assert!(engram_ordinary_handoff_allowed(record));
-        record
-            .queued_prompts
-            .front()
-            .unwrap()
-            .pending_prompt
-            .id
-            .clone()
-    });
-    state.cancel_queued_prompt(&session, &prompt_id).unwrap();
-    assert!(inspect(&state, &session, |record| record
-        .engram
-        .ordinary_handoff
-        .is_none()));
-    assert!(matches!(
-        handoff_prepared_turn_dispatch(&state, canceled).unwrap(),
-        HandoffPreparedTurnDispatchOutcome::Superseded
-    ));
-    assert!(receiver.try_recv().is_err());
-    elapse_bind_backoff(&state, &session);
-    let replacement = root_dispatch(&state, &session, false);
-    deliver_turn_dispatch(&state, replacement).unwrap();
-    assert!(matches!(
-        receiver.try_recv().unwrap(),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
-    assert!(receiver.try_recv().is_err());
-    assert_eq!(operations(&transport), ["session_bind", "session_bind"]);
-}
-
-#[test]
-fn admission_review_local_evaluate_fence_never_opens_ordinary_delivery() {
-    for source in [QueuedPromptSource::User, QueuedPromptSource::Mailbox] {
-        for fault in ["deadline", "late", "write_failed"] {
-            let (mut state, session, receiver, transport) = root_fixture([
-                bind_reply("local-fence-token"),
-                ScriptedEngramControlResponse::Reply(Err(EngramTransportError::spawn_failed(
-                    "must not reach the remote evaluate after a local fence failure",
-                ))),
-            ]);
-            let (_writer, selected) = BoundaryWriter::install(&mut state, |content| {
-                content["queue"]["engram_evaluate"].is_object()
-                    && content["queue"]["engram_evaluate"]["prepared_begin"].is_null()
-                    && content["queue"]["engram_ordinary_handoff"] != true
-            });
-            queue_test_engram_prompt(
-                &state,
-                &session,
-                "local write must remain strict",
-                source,
-                None,
-            );
-            std::thread::scope(|scope| {
-                let worker = scope.spawn(|| {
-                    if let Some(started) = state
-                        .start_next_queued_turn_off_lock(&session, false, false)
-                        .unwrap()
-                    {
-                        let _ = deliver_turn_dispatch(&state, started.dispatch);
-                    }
-                });
-                let fence = selected.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
-                if fault == "late" {
-                    let clock = state.engram_budget_clock();
-                    clock.wait_for_scripted_waiter();
-                    assert!(fence.completion.resolve_at(Ok(()), clock.now()));
-                    clock.advance(
-                        fence
-                            .completion
-                            .deadline
-                            .saturating_duration_since(clock.now()),
-                    );
-                } else if fault == "deadline" {
-                    fence.finish(Err(PersistFenceError::Deadline));
-                } else {
-                    fence.finish(Err(PersistFenceError::WriteFailed(
-                        "local evaluation write rejected".into(),
-                    )));
-                }
-                worker.join().unwrap();
-            });
-            assert!(
-                receiver.try_recv().is_err(),
-                "local evaluate fence failure cannot permit an ungranted prompt"
-            );
-            assert_eq!(operations(&transport), ["session_bind"]);
-            let held = inspect(&state, &session, |record| record.clone());
-            assert_eq!(held.queued_prompts.len(), 1);
-            assert!(!held.queued_prompts[0].engram_ordinary_handoff);
-            assert!(held.engram.ordinary_handoff.is_none());
-            assert!(held.engram.active_grant_id.is_none());
-        }
+        // The superseded successful callback must not rescue this failed nonce.
+        turn.state.settle_prompt_delivery_write_ahead(&turn.session, &id, &nonce, Ok(()));
+        let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
+        persist_delta_with_fences(&mut cache, turn.state.persistence_path.as_path(), &delta,
+            &mut PersistFenceBatch::default()).unwrap();
+        assert!(durable && empty_before_ack);
+        let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+        let record = &loaded.sessions[loaded.find_session_index(&turn.session).unwrap()];
+        assert_eq!(record.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Pending);
+        assert_ne!(record.prompt_deliveries[&id].write_ahead, nonce);
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(record.queued_prompts[0].pending_prompt.id, id);
+        assert_eq!(record.queued_prompts[0].pending_prompt.text, "exact ordinary content — źródło 🦀");
+        assert!(record.queued_prompts[0].promoted_message_index.is_none());
+        assert!(record.session.prompt_history.is_empty());
+        turn.assert_no_prompt();
+        turn.assert_no_control();
     }
 }
 
 #[tokio::test]
-async fn admission_review_stop_during_marker_fence_keeps_unsent_owner() {
+async fn ordinary_unsent_handoff_keeps_the_real_stop_owner_until_its_outcome() {
     for failed_stop in [true, false] {
-        let (mut state, session, root_rx, transport) =
-            root_fixture([ScriptedEngramControlResponse::Reply(Err(
-                EngramTransportError::spawn_failed("optional control unavailable"),
-            ))]);
-        let dispatch = root_dispatch(&state, &session, false);
-        let generation = dispatch.engram_dispatch_generation().unwrap();
-        let active_turn_generation = dispatch.active_turn_generation();
-        let (runtime, receiver) =
-            test_acp_runtime_handle(AcpAgent::OpenCode, "ordinary-pending-fence-stop");
-        let token = RuntimeToken::Acp(runtime.runtime_id.clone());
-        let process = runtime.process.clone();
-        let sender = runtime.input_tx.clone();
-        let lifecycle = runtime.turn_lifecycle.clone();
-        {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
-        }
-        drop(dispatch);
-        let (_writer, selected) = BoundaryWriter::install(&mut state, |content| {
-            content["queue"]["engram_ordinary_handoff"] == true
-        });
-        let _failure =
-            failed_stop.then(|| force_test_kill_child_process_failure(&process, "OpenCode"));
-        let stop_gate = install_test_stop_fence_gate(&state, &session);
-        let worker_state = state.clone();
-        let worker_session = session.clone();
-        let worker_token = token.clone();
-        let worker = std::thread::spawn(move || {
-            let preparation =
-                worker_state.prepare_engram_turn_delivery_off_lock(&worker_session, generation);
-            if preparation == EngramTurnDeliveryPreparation::Ready {
-                handoff_prepared_turn_dispatch(
-                    &worker_state,
-                    TurnDispatch::PersistentAcp {
-                        human_prompt_id: None,
-                        federation_handoff: None,
-                        opening_prompt: None,
-                        active_turn_generation,
-                        engram_dispatch_generation: Some(generation),
-                        runtime_token: worker_token,
-                        session_id: worker_session,
-                        mailbox_notification: None,
-                        sender,
-                        turn_lifecycle: lifecycle,
-                        command: AcpPromptCommand {
-                            cwd: String::new(),
-                            cursor_mode: None,
-                            model: String::new(),
-                            opencode_effort: None,
-                            opencode_mode: None,
-                            prompt: "exact pending ordinary prompt".into(),
-                            resume_session_id: None,
-                        },
-                    },
-                )
-                .unwrap();
-            }
-            preparation
-        });
-        let fence = selected.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
-        let no_permission_before_ack = inspect(&state, &session, |record| {
-            !engram_provider_handoff_allowed(record)
-        });
-        let mut events = state.subscribe_events();
-        state.request_stop_session(&session).unwrap();
-        stop_gate.wait_until_claimed();
-        let no_prompt_before_ack = !receiver
-            .try_iter()
-            .any(|command| matches!(command, AcpRuntimeCommand::Prompt(_)));
-        fence.finish(Ok(()));
-        stop_gate.release();
-        tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
-            while inspect(&state, &session, |record| record.runtime_stop_in_progress) {
-                events.recv().await.unwrap();
-            }
-        })
-        .await
-        .expect("public Stop must settle");
-        let preparation = tokio::task::spawn_blocking(move || worker.join().unwrap())
-            .await
-            .unwrap();
-        let prompts = receiver
-            .try_iter()
-            .filter_map(|command| match command {
-                AcpRuntimeCommand::Prompt(command) => Some(command.prompt),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(no_permission_before_ack && no_prompt_before_ack);
-        assert_eq!(
-            prompts,
-            if failed_stop {
-                vec!["exact pending ordinary prompt".to_owned()]
-            } else {
-                vec![]
-            },
-            "a failed Stop must preserve the unsent owner through its pending marker acknowledgement: {preparation:?}"
-        );
-        assert!(root_rx.try_recv().is_err());
-        assert!(
-            !operations(&transport)
-                .iter()
-                .any(|op| op == "turn_begin" || op == "turn_checkpoint")
-        );
+        super::ordinary_regressions::ordinary_stop_case(failed_stop, true).await;
     }
-}
-
-/// A panic elsewhere while the state lock was held leaves it poisoned. The
-/// preparation guard's Drop runs during that unwinding, so it must recover
-/// the lock instead of panicking, and still retire its own unsent slot.
-#[test]
-fn admission_review_preparation_cleanup_survives_a_poisoned_state_lock() {
-    let (state, session, _receiver, _transport) = root_fixture([]);
-    let _dispatch = root_dispatch(&state, &session, false);
-    let owner = inspect(&state, &session, |record| {
-        EngramQueuedAdmissionOwner::capture(record).unwrap()
-    });
-    {
-        let mut inner = state.inner.lock().unwrap();
-        inner.session_mut(&session).unwrap().engram.ordinary_handoff =
-            Some(EngramOrdinaryHandoff { owner: owner.clone(), durable: false });
-    }
-    let poisoner = std::thread::scope(|scope| {
-        scope
-            .spawn(|| {
-                let _held = state.inner.lock().unwrap();
-                panic!("deliberate panic while holding the state lock");
-            })
-            .join()
-    });
-    assert!(poisoner.is_err());
-    assert!(state.inner.lock().is_err(), "the fixture must leave the state lock poisoned");
-    drop(EngramOrdinaryPreparation {
-        state: &state,
-        session_id: &session,
-        owner: &owner,
-    });
-    let inner = state
-        .inner
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let index = inner.find_session_index(&session).unwrap();
-    assert!(
-        inner.sessions[index].engram.ordinary_handoff.is_none(),
-        "the guard still retires its own unsent preparation"
-    );
-    drop(inner);
-    state.inner.inner.clear_poison();
 }

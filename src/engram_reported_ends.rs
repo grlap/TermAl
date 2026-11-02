@@ -38,6 +38,7 @@ struct EngramEndReading {
         bool,
         Option<EngramBuildDiagnostic>,
     )>,
+    #[cfg(test)]
     launcher_test_stages: Vec<String>,
     /// A launcher test's own terminal record says its run ran no stage
     /// (`engram_launcher_output_ran_no_stage`).
@@ -51,7 +52,7 @@ fn engram_check_start_matches(
     starting_check: Option<&EngramTurnCheck>,
 ) -> bool {
     starting_check.is_some_and(|start| {
-        start.grant_id == check.grant_id && start.sequence == check.sequence
+        start.host_turn_ref == check.host_turn_ref && start.sequence == check.sequence
             && start.command == check.command && start.target == check.target
     })
 }
@@ -142,6 +143,7 @@ fn engram_read_check_end(
     EngramEndReading {
         build_completion,
         node_completion,
+        #[cfg(test)]
         launcher_test_stages,
         launcher_ran_no_stage,
         parsed,
@@ -156,6 +158,7 @@ fn engram_record_check_end(
     check: &mut EngramTurnCheck,
     reading: EngramEndReading,
     starting_check: Option<&EngramTurnCheck>,
+    #[cfg(test)]
     output: &str,
     exit: Option<EngramCommandExit>,
     runtime_output_cut: bool,
@@ -166,10 +169,16 @@ fn engram_record_check_end(
     let EngramEndReading {
         build_completion,
         node_completion,
+        ..
+    } = reading;
+    #[cfg(test)]
+    let EngramEndReading {
         launcher_test_stages,
         launcher_ran_no_stage,
         parsed,
+        ..
     } = reading;
+    #[cfg(test)]
     let (mut result_lines, mut showed_passing_tests) = match parsed {
         Some((finished, result_lines, showed_passing_tests)) if finished == check.command => {
             (result_lines, showed_passing_tests)
@@ -187,32 +196,37 @@ fn engram_record_check_end(
         }
     };
     let same_start = starting_check.is_some_and(|start| {
-        start.grant_id == check.grant_id
+        start.host_turn_ref == check.host_turn_ref
             && start.sequence == check.sequence
             && start.command == check.command
             && start.target == check.target
     });
+    #[cfg(test)]
     let mut build_diagnostic = None;
     let check_exit = if check.command.literal_pipe && !qualified_command_matches {
-        result_lines.clear();
-        showed_passing_tests = false;
-        let observed = exit.unwrap_or(EngramCommandExit::Unknown);
-        build_diagnostic = Some(match check.command.kind {
-            EngramVerificationKind::Test => EngramBuildDiagnostic::test_rejected(
-                observed, EngramBuildRejection::Association,
-            ),
-            EngramVerificationKind::Build => EngramBuildDiagnostic::rejected(
-                observed, EngramBuildRejection::Association,
-            ),
-        });
+        #[cfg(test)]
+        {
+            result_lines.clear();
+            showed_passing_tests = false;
+            let observed = exit.unwrap_or(EngramCommandExit::Unknown);
+            build_diagnostic = Some(match check.command.kind {
+                EngramVerificationKind::Test => EngramBuildDiagnostic::test_rejected(
+                    observed, EngramBuildRejection::Association,
+                ),
+                EngramVerificationKind::Build => EngramBuildDiagnostic::rejected(
+                    observed, EngramBuildRejection::Association,
+                ),
+            });
+        }
         EngramCommandExit::Unknown
-    } else if let Some((node_exit, node_lines, node_passed, node_diagnostic)) =
-        node_completion.filter(|_| same_start)
-    {
-        result_lines = node_lines;
-        showed_passing_tests = node_passed;
-        build_diagnostic = node_diagnostic;
-        node_exit
+    } else if let Some(completion) = node_completion.filter(|_| same_start) {
+        #[cfg(test)]
+        {
+            result_lines = completion.1;
+            showed_passing_tests = completion.2;
+            build_diagnostic = completion.3;
+        }
+        completion.0
     } else if engram_is_focused_node_check(&check.command)
         || (check.command.literal_pipe
             && check.command.kind == EngramVerificationKind::Test
@@ -221,35 +235,45 @@ fn engram_record_check_end(
         // A qualified launcher line must take the focused validator. No
         // generic stage/count record can substitute for a rejected argv or
         // missing focused completion.
-        result_lines.clear();
-        showed_passing_tests = false;
-        if check.command.literal_pipe {
-            build_diagnostic = Some(EngramBuildDiagnostic::test_rejected(
-                exit.unwrap_or(EngramCommandExit::Unknown), EngramBuildRejection::Argv,
-            ));
+        #[cfg(test)]
+        {
+            result_lines.clear();
+            showed_passing_tests = false;
+            if check.command.literal_pipe {
+                build_diagnostic = Some(EngramBuildDiagnostic::test_rejected(
+                    exit.unwrap_or(EngramCommandExit::Unknown), EngramBuildRejection::Argv,
+                ));
+            }
         }
         EngramCommandExit::Unknown
-    } else if let Some((build_exit, build_lines, diagnostic)) =
-        build_completion.filter(|_| same_start)
-    {
-        result_lines = build_lines;
-        build_diagnostic = diagnostic;
-        build_exit
+    } else if let Some(completion) = build_completion.filter(|_| same_start) {
+        #[cfg(test)]
+        {
+            result_lines = completion.1;
+            build_diagnostic = completion.2;
+        }
+        completion.0
     } else if check.command.kind == EngramVerificationKind::Build {
-        result_lines.clear();
-        build_diagnostic = Some(EngramBuildDiagnostic::rejected(
-            exit.unwrap_or(EngramCommandExit::Unknown),
-            EngramBuildRejection::Association,
-        ));
+        #[cfg(test)]
+        {
+            result_lines.clear();
+            build_diagnostic = Some(EngramBuildDiagnostic::rejected(
+                exit.unwrap_or(EngramCommandExit::Unknown),
+                EngramBuildRejection::Association,
+            ));
+        }
         EngramCommandExit::Unknown
     } else if !check.command.simple && check.command.normalized.contains('|') {
         // Keep the observed command exit diagnostic, without lending a
         // pipeline/wrapper's status to the test or generic passing text.
-        result_lines.clear();
-        showed_passing_tests = false;
-        build_diagnostic = Some(EngramBuildDiagnostic::test_rejected(
-            exit.unwrap_or(EngramCommandExit::Unknown), engram_pipe_rejection(&check.command),
-        ));
+        #[cfg(test)]
+        {
+            result_lines.clear();
+            showed_passing_tests = false;
+            build_diagnostic = Some(EngramBuildDiagnostic::test_rejected(
+                exit.unwrap_or(EngramCommandExit::Unknown), engram_pipe_rejection(&check.command),
+            ));
+        }
         EngramCommandExit::Unknown
     } else {
         exit.unwrap_or(EngramCommandExit::Unknown)
@@ -275,6 +299,7 @@ fn engram_record_check_end(
             })
         });
     // Read from the lines this end keeps, so it names only what they show.
+    #[cfg(test)]
     let focused_stage_line_missing = !showed_passing_tests
         && engram_focused_stage_line_missing(
             &check.command,
@@ -284,14 +309,19 @@ fn engram_record_check_end(
     check.ended_at = Some(engram_interference_tick());
     check.runtime_output_cut = runtime_output_cut;
     check.end = Some(EngramTurnCheckEnd {
-        completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        #[cfg(test)]
         exit: check_exit,
+        #[cfg(test)]
         build_diagnostic,
+        #[cfg(test)]
         result_lines,
+        #[cfg(test)]
         showed_passing_tests,
+        #[cfg(test)]
         focused_stage_line_missing,
         // Read for the check its key started; it holds for this one only
         // when this one is a launcher test too.
+        #[cfg(test)]
         launcher_ran_no_stage: launcher_ran_no_stage
             && check.command.kind == EngramVerificationKind::Test
             && engram_launcher_words(&check.command).is_some(),
@@ -313,11 +343,11 @@ fn engram_check_key_is_its_line(check: &EngramTurnCheck) -> bool {
 /// process exits, which may be after the turn that started it closed. The
 /// check then ends by that reported end (`note_engram_reported_end`) and is
 /// settled at a later checkpoint on the same claim. Returns the lines for its
-/// holder. Only a check of `grant_id`, the grant whose turn closes, is
+/// holder. Only a check of `host_turn_ref`, the grant whose turn closes, is
 /// carried, as only its ends are taken in its turn; every check left behind
 /// is closed with outcome Unknown by the caller (`engram_close_unended_checks`).
 /// No other runtime's check is carried here.
-fn engram_carry_running_codex_checks(record: &mut SessionRecord, grant_id: &str) -> Vec<String> {
+fn engram_carry_running_codex_checks(record: &mut SessionRecord, host_turn_ref: &str) -> Vec<String> {
     let mut lines = Vec::new();
     if record.session.agent != Agent::Codex {
         return lines;
@@ -330,7 +360,7 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, grant_id: &str)
             .active_turn_checks
             .iter()
             .filter(|check| {
-                check.grant_id == grant_id
+                check.host_turn_ref == host_turn_ref
                     && check.end.is_none()
                     && !engram_check_key_is_its_line(check)
             })
@@ -347,7 +377,7 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, grant_id: &str)
     let mut position = 0;
     while position < record.engram.active_turn_checks.len() {
         let check = &record.engram.active_turn_checks[position];
-        if check.grant_id != grant_id
+        if check.host_turn_ref != host_turn_ref
             || check.end.is_some()
             || engram_check_key_is_its_line(check)
             || engram_carry_refusal(record, check).is_some()
@@ -357,18 +387,26 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, grant_id: &str)
         }
         // The runtime it runs under, whose exit closes it: without one, no
         // exit could, so it is not carried.
-        let (Some(binding), Some(turn_root), Some(runtime)) = (
-            record.engram.work_binding.clone(),
-            record
-                .engram
-                .active_turn_source_root
-                .as_ref()
-                .map(|root| root.generation),
-            record.runtime.runtime_token(),
-        ) else {
+        if record.engram.work_binding.is_none() || record.engram.observed_source_root().is_none() {
+            position += 1;
+            continue;
+        }
+        let Some(runtime) = record.runtime.runtime_token() else {
             position += 1;
             continue;
         };
+        #[cfg(test)]
+        let binding = record
+            .engram
+            .work_binding
+            .clone()
+            .expect("running check has its original binding");
+        #[cfg(test)]
+        let root_generation = record
+            .engram
+            .observed_source_root()
+            .expect("running check has its original root")
+            .generation;
         let running = record.engram.active_turn_checks.remove(position);
         lines.push(engram_carried_running_line(&running.command));
         // A change the watcher saw in its worktree while it ran in its turn
@@ -380,7 +418,14 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, grant_id: &str)
             .map(|cause| format!("{cause} (while it was running)"));
         let carried = EngramCarriedCheck {
             fence,
-            ..engram_new_carried_check(&binding, turn_root, running, Some(runtime))
+            ..engram_new_carried_check(
+                #[cfg(test)]
+                &binding,
+                #[cfg(test)]
+                root_generation,
+                running,
+                Some(runtime),
+            )
         };
         lines.extend(engram_push_carried_check(record, carried));
     }
@@ -395,11 +440,10 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, grant_id: &str)
 fn engram_carried_running_line(command: &EngramCheckCommand) -> String {
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a Codex test still running when its turn closed, \
-         a {} {} (check {}), is carried: it is recorded at a later checkpoint on this claim \
-         once its end is reported, if nothing writes in its worktree before then. Until \
-         then it is still running, and later checks in its worktree are overlapped until \
-         it ends; ending its process, or Stopping the session (whose runtime exit closes \
-         it), ends the wait.",
+         a {} {} (check {}), remains owned by its original turn until its end is reported. \
+         It receives no credit from a successor turn. Later checks in its worktree remain \
+         overlapped while it runs; stopping the session closes this observation with an \
+         unknown outcome. Registered native verification uses its own immutable run record.",
         command.program,
         command.kind.label(),
         engram_check_fingerprint(command)
@@ -643,71 +687,6 @@ fn engram_carried_start_provenance(check: &EngramTurnCheck) -> EngramRootCapture
     }
 }
 
-/// Settles `carried`, a Codex test carried until its end was reported, from
-/// that end, as a check ending in its turn is resolved
-/// (`engram_resolve_turn_checks_with_notices`): its snapshots, waited for
-/// until `deadline`, must show one unchanged source, and its outcome comes
-/// from its exit and result lines, or a declared check's artifact. `Ok(None)`
-/// when a snapshot or the artifact reading is not ready in time, so the next
-/// checkpoint tries again.
-fn engram_settle_reported_end(
-    carried: &EngramCarriedCheck,
-    deadline: std::time::Instant,
-) -> Result<Option<EngramResolvedCheck>, String> {
-    let check = &carried.check;
-    let Some(mut end) = check.end.clone() else {
-        return Ok(None);
-    };
-    if let Some(capture) = &end.declared {
-        if capture.wait_until(deadline).is_none() {
-            return Ok(None);
-        }
-        end.declared = engram_declared_result_of(&end).map(EngramCapture::settled);
-    }
-    let start = match check.start_basis.wait_until(deadline) {
-        Some(Some(start)) => start,
-        Some(None) => return Err("its start source snapshot could not be captured".to_owned()),
-        None => return Ok(None),
-    };
-    let finish = match end.end_basis.wait_until(deadline) {
-        Some(Some(finish)) => finish,
-        Some(None) => return Err("its finish source snapshot could not be captured".to_owned()),
-        None => return Ok(None),
-    };
-    if start != finish {
-        return Err(
-            "its source snapshots differ, so the result belongs to no single revision".to_owned(),
-        );
-    }
-    let outcome = match engram_declared_result_of(&end) {
-        Some(result) => engram_declared_outcome(end.exit, &result),
-        None => engram_check_end_outcome(&check.command, &end),
-    }
-    .ok_or_else(|| "its reported end marks no result the host can judge".to_owned())?;
-    // As for a check in its turn: success needs positive evidence that tests
-    // ran and passed, and an overlapped check's outcome is unknown.
-    let ran_successfully = outcome == EngramExecutionOutcome::Succeeded
-        || engram_declared_unknown_reason(&end).is_some();
-    let outcome = if check.overlapped
-        || (check.command.kind == EngramVerificationKind::Test
-            && outcome == EngramExecutionOutcome::Succeeded
-            && end.declared.is_none()
-            && !end.showed_passing_tests)
-    {
-        EngramExecutionOutcome::Unknown
-    } else {
-        outcome
-    };
-    Ok(Some(EngramResolvedCheck {
-        toolchain: check.toolchain.wait_until(deadline).flatten(),
-        check: check.clone(),
-        end,
-        outcome,
-        basis: start,
-        ran_successfully,
-    }))
-}
-
 impl AppState {
     /// Codex reported, for `session_id`'s thread, the end of the command its
     /// item `key` names, `command` with `output` and `exit`, whichever turn
@@ -767,7 +746,7 @@ impl AppState {
         let engram = &mut record.engram;
         let Some(carried) = engram.carried_checks.iter_mut().find(|carried| {
             engram_carried_awaits_report(carried, key)
-                && carried.check.grant_id == started.grant_id
+                && carried.check.host_turn_ref == started.host_turn_ref
                 && carried.check.sequence == started.sequence
         }) else {
             return false;
@@ -777,6 +756,7 @@ impl AppState {
             &mut carried.check,
             reading,
             Some(&started),
+            #[cfg(test)]
             output,
             Some(exit),
             false,

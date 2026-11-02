@@ -24,11 +24,11 @@ fn orphan_of(entry: &EngramWorkSourceRoot, label: &str, named_by: &str, offset: 
     orphan
 }
 
-fn retain(claimed: &ClaimedRoot, root: &EngramWorkSourceRoot) {
+fn retain(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) {
     claimed.state.inner.lock().unwrap().engram_work_source_roots.push(root.clone());
 }
 
-fn retained(claimed: &ClaimedRoot, root: &EngramWorkSourceRoot) -> bool {
+fn retained(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) -> bool {
     claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(root)
 }
 
@@ -45,25 +45,26 @@ fn release_request(root: &EngramWorkSourceRoot, reason: &str) -> EngramNamedRoot
     }
 }
 
-/// Puts the claimed root's session into a quiet state: idle, no grant, no
-/// checkpoint. `busy` sets one way it is not.
-fn set_naming_session(claimed: &ClaimedRoot, busy: Option<&str>) {
-    claimed.record(|record| {
+/// Exercise the current quiet predicate's ordinary lifecycle owners.
+fn set_naming_session(claimed: &EOCheckedTurn, busy: Option<&str>) {
+    if busy == Some("turn") {
+        claimed.begin("An ordinary provider turn is active.");
+        return;
+    }
+    claimed.record_mut(|record| {
         record.session.status = SessionStatus::Idle;
-        record.engram.active_grant_id = None;
-        record.engram.uncertain_grant_id = None;
-        record.engram.checkpoint_in_progress = false;
+        record.runtime_stop_in_progress = false;
+        record.engram.source_root_bind_owner = None;
         match busy {
-            Some("turn") => record.session.status = SessionStatus::Active,
-            Some("grant") => record.engram.active_grant_id = Some("grant-held".to_owned()),
-            Some("checkpoint") => record.engram.checkpoint_in_progress = true,
-            Some(other) => panic!("unknown busy state {other}"),
+            Some("stop") => record.runtime_stop_in_progress = true,
+            Some("naming") => record.engram.source_root_bind_owner = Some(Uuid::new_v4()),
+            Some(other) => panic!("unknown ordinary owner {other}"),
             None => {}
         }
     });
 }
 
-fn audit(claimed: &ClaimedRoot) -> Vec<EngramNamedRootReleaseAudit> {
+fn audit(claimed: &EOCheckedTurn) -> Vec<EngramNamedRootReleaseAudit> {
     engram_named_root_release_audit(&claimed.state.inner.lock().unwrap())
 }
 
@@ -131,9 +132,8 @@ fn the_capacity_refusal_lists_each_roots_status_row() {
 #[test]
 fn a_release_never_touches_a_root_whose_claim_is_live() {
     let label = "release-live-claim";
-    let claimed = ClaimedRoot::new_scripted(label, Vec::new());
-    let tree = add_claimed_root_worktree(&claimed.root);
-    name_root(&claimed, label, Some(&tree), vec![claimed_root_held(label)]).unwrap();
+    let (claimed, tree) = root_fixture(label);
+    request_fixture_name(&claimed, Some(&tree)).unwrap();
     let entry = claimed.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
     let error = claimed
         .state
@@ -325,7 +325,7 @@ fn an_unassociated_root_of_a_quiet_naming_session_is_released() {
 
 #[test]
 fn an_unassociated_root_of_a_busy_naming_session_is_refused() {
-    for busy in ["turn", "grant", "checkpoint"] {
+    for busy in ["turn", "stop", "naming"] {
         let (claimed, entry) = settled_root(&format!("release-orphan-busy-{busy}"), "live");
         let orphan = orphan_of(&entry, busy, &claimed.session_id, 100);
         retain(&claimed, &orphan);
@@ -565,7 +565,7 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
         assert_eq!(engram_named_root_unacknowledged_releases(&restored), 0);
     }
 
-    let unpublished = |claimed: &ClaimedRoot| {
+    let unpublished = |claimed: &EOCheckedTurn| {
         let inner = claimed.state.inner.lock().unwrap();
         let unpublished = inner
             .engram_work_naming_history

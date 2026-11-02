@@ -15,6 +15,7 @@ fn second_observation(row: &TestRunCommandObservation, suffix: &str) -> TestRunC
 }
 
 fn queued_persistence(fixture: &mut RunFixture) -> mpsc::Receiver<PersistRequest> {
+    fixture.state.shutdown_persist_blocking();
     let (sender, receiver) = mpsc::channel();
     fixture.state.persist_tx = sender;
     // This fixture observes the real dispatch queue without a worker. Keeping
@@ -49,7 +50,9 @@ fn assert_one_save_and_exact_fences(
 
 #[test]
 fn lifecycle_batch_shares_one_response_across_live_and_compacted_exact_fences() {
-    let (mut fixture, id, store, binding, _) = evidence_fixture("lifecycle-batch-shared");
+    let (mut fixture, _, store, binding, native) = native_evidence_fixture("lifecycle-batch-shared");
+    record_native_evidence(&fixture, &native);
+    let id = native.execution_id;
     let (second_id, compact_id, foreign_id, generation_id) = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let original = inner.test_run_observations[&id].clone();
@@ -114,69 +117,72 @@ fn lifecycle_batch_shares_one_response_across_live_and_compacted_exact_fences() 
 
 #[test]
 fn lifecycle_batch_synchronous_save_survives_reload_without_reusing_live_markers() {
-    let (fixture, id, store, binding, report) = evidence_fixture("lifecycle-batch-reload");
-    fixture.state.settle_test_run_verification_receipt(&report, &exact_receipt(), &store, &binding);
+    let (fixture, run_id, store, binding, native) = native_evidence_fixture("lifecycle-batch-reload");
+    record_native_evidence(&fixture, &native);
+    let id = native.execution_id;
     let read: EngramNamedRootReadResponse =
         serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
     fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(false));
+    assert_eq!(fixture.summary(&run_id).registration.restart_would_void_evidence, Some(false));
     let restored = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
     assert_eq!(restored.test_run_observations[&id].evidence[0].lifecycle_read.as_deref(), Some(&read));
     assert!(restored.test_runs.lifecycle_revalidated.is_empty());
     *fixture.state.inner.lock().unwrap() = restored;
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, None);
+    assert_eq!(fixture.summary(&run_id).registration.restart_would_void_evidence, None);
     fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(false));
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        let row = &inner.test_run_observations[&id];
+        assert_eq!(row.evidence[0].lifecycle_read.as_deref(), Some(&read));
+        assert!(inner.test_runs.lifecycle_revalidated.contains(&(
+            id.clone(), row.evidence[0].producer_observation_id.clone(),
+        )));
+        assert_eq!(test_run_evidence_impact(&*inner, row), Some(false));
+    }
+    fixture.refresh(&[]);
+    assert_eq!(fixture.summary(&run_id).registration.restart_would_void_evidence, Some(false));
 }
 
 #[test]
-fn receipt_batch_preserves_ordered_references_and_first_producer_with_one_save() {
-    let (mut fixture, id, store, binding, mut report) = evidence_fixture("lifecycle-batch-receipt");
+fn native_receipt_batch_preserves_the_first_record_and_saves_only_changed_rows() {
+    let (mut fixture, _, _, _, native) = native_evidence_fixture("lifecycle-batch-receipt");
+    record_native_evidence(&fixture, &native);
+    let id = native.execution_id.clone();
     let second_id = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let original = inner.test_run_observations[&id].clone();
         let mut second = second_observation(&original, "second");
-        second.evidence[0].producer_observation_id = "1".repeat(64);
+        second.evidence[0].verification_record_id = None;
         let second_id = second.execution_id.clone();
         inner.test_run_observations.insert(second_id.clone(), second);
-        // An earlier exact receipt for the later repeated reference must win.
+        // An earlier recorded ID for this producer cannot be replaced by a
+        // later different ID, even while another matching row can be filled.
         inner.test_run_observations.get_mut(&id).unwrap().evidence[0].verification_record_id = Some("a".repeat(64));
         second_id
     };
-    let mut second_producer = report.observations[0].clone();
-    second_producer.observation_id = "1".repeat(64);
-    report.observations.push(second_producer);
-    let mut shadow_producer = report.observations[0].clone();
-    shadow_producer.action_fingerprint = "9".repeat(64);
-    report.observations.push(shadow_producer);
-    let mut second_input = report.verification_evidence[0].clone();
-    second_input.producer_observation = EngramObservationReference::ObservationId { observation_id: "1".repeat(64) };
-    report.verification_evidence.push(second_input);
-    report.verification_evidence.push(report.verification_evidence[0].clone());
-    let mut receipt = exact_receipt();
-    receipt.verification_evidence = vec!["e".repeat(64), "f".repeat(64), "a".repeat(64)];
+    engram_verification_record_receipt_check(&native.body, &native.receipt).unwrap();
     let receiver = queued_persistence(&mut fixture);
-    fixture.state.settle_test_run_verification_receipt(&report, &receipt, &store, &binding);
+    fixture.state.settle_engram_verification_record(&native.registration, &native.body, &native.receipt);
     let queued: Vec<_> = receiver.try_iter().collect();
     let inner = fixture.state.inner.lock().unwrap();
     let first = &inner.test_run_observations[&id];
     let second = &inner.test_run_observations[&second_id];
     assert_eq!(first.evidence[0].verification_record_id, Some("a".repeat(64)));
-    assert_eq!(second.evidence[0].verification_record_id, Some("f".repeat(64)));
+    assert_eq!(second.evidence[0].verification_record_id, Some("e".repeat(64)));
     for row in [first, second] {
-        assert_eq!(row.evidence[0].checkpoint_id, receipt.checkpoint);
-        assert_eq!(row.evidence[0].confirmed_cursor, Some(receipt._confirmed_cursor));
-        assert!(!inner.test_runs.observations_durable.contains(&row.execution_id));
+        assert!(row.evidence[0].checkpoint_id.is_none());
+        assert!(row.evidence[0].confirmed_cursor.is_none());
     }
-    assert_one_save_and_exact_fences(&queued, &BTreeMap::from([
-        (id, first.clone()), (second_id, second.clone()),
-    ]), None);
+    assert!(!inner.test_runs.observations_durable.contains(&second_id));
+    assert_one_save_and_exact_fences(&queued,
+        &BTreeMap::from([(second_id, second.clone())]), None);
 }
 
 #[test]
 fn lifecycle_batch_failed_persistence_exposes_failure_without_losing_response() {
-    let (mut fixture, id, store, binding, report) = evidence_fixture("lifecycle-batch-failure");
-    fixture.state.settle_test_run_verification_receipt(&report, &exact_receipt(), &store, &binding);
+    let (mut fixture, _, store, binding, native) = native_evidence_fixture("lifecycle-batch-failure");
+    record_native_evidence(&fixture, &native);
+    let id = native.execution_id;
     let second_id = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let second = second_observation(&inner.test_run_observations[&id], "second");
@@ -186,6 +192,7 @@ fn lifecycle_batch_failed_persistence_exposes_failure_without_losing_response() 
     };
     let invalid = fixture.root.join("state-is-a-directory");
     fs::create_dir(&invalid).unwrap();
+    fixture.state.shutdown_persist_blocking();
     fixture.state.persistence_path = Arc::new(invalid);
     let read: EngramNamedRootReadResponse =
         serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
@@ -201,8 +208,9 @@ fn lifecycle_batch_failed_persistence_exposes_failure_without_losing_response() 
 
 #[test]
 fn lifecycle_batch_failed_mixed_save_keeps_compacted_proof_revalidating_and_never_safe() {
-    let (mut fixture, id, store, binding, report) = evidence_fixture("lifecycle-batch-mixed-failure");
-    fixture.state.settle_test_run_verification_receipt(&report, &exact_receipt(), &store, &binding);
+    let (mut fixture, _, store, binding, native) = native_evidence_fixture("lifecycle-batch-mixed-failure");
+    record_native_evidence(&fixture, &native);
+    let id = native.execution_id;
     let compact_id = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let proof = second_observation(&inner.test_run_observations[&id], "compacted");
@@ -222,6 +230,7 @@ fn lifecycle_batch_failed_mixed_save_keeps_compacted_proof_revalidating_and_neve
     let durable_path = fixture.state.persistence_path.clone();
     let invalid = fixture.root.join("state-is-a-directory");
     fs::create_dir(&invalid).unwrap();
+    fixture.state.shutdown_persist_blocking();
     fixture.state.persistence_path = Arc::new(invalid);
     fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
     {
@@ -255,123 +264,11 @@ fn lifecycle_batch_failed_mixed_save_keeps_compacted_proof_revalidating_and_neve
     );
 }
 
-/// A finished test check at `sequence` that keys itself as `key`, the way a
-/// runtime that reuses one key for repeated runs reports it.
-fn reported_check(sequence: usize, key: &str) -> EngramResolvedCheck {
-    let basis = EngramExecutionSourceBasis {
-        source_root_generation: Some(1),
-        source_root_state: None,
-        workspace_id: "C:/w".to_owned(),
-        source_revision: "a".repeat(64),
-    };
-    let capture = Arc::new(EngramBasisCapture::default());
-    capture.finish(Some(basis.clone()));
-    let end = EngramTurnCheckEnd {
-        declared: None,
-        completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
-        exit: EngramCommandExit::Code(0),
-        build_diagnostic: None,
-        result_lines: Vec::new(),
-        showed_passing_tests: true,
-        focused_stage_line_missing: false,
-        launcher_ran_no_stage: false,
-        end_basis: Arc::clone(&capture),
-    };
-    let check = EngramTurnCheck {
-        declared: None,
-        grant_id: "duplicate-check-grant".to_owned(),
-        key: key.to_owned(),
-        sequence,
-        command: engram_check_command("cargo test").expect("a test"),
-        target: EngramCheckTarget {
-            root: PathBuf::from("C:/w"),
-            directory: PathBuf::from("C:/w"),
-            common_dir_key: None,
-        },
-        toolchain: EngramToolchainCapture::settled(None),
-        started_at: "2026-09-24T00:00:00.000Z".to_owned(),
-        started_order: None,
-        sandbox: None,
-        start_basis: capture,
-        overlapped: false,
-        overlap_cause: None,
-        fenced_by_outstanding: None,
-        watcher_fence: None,
-        watcher_provenance: None,
-        watcher_cargo_candidates: Vec::new(),
-        watcher_exempted: None,
-        runtime_output_cut: false,
-        ended_at: None,
-        keyed_by_line: false,
-        end: Some(end.clone()),
-    };
-    EngramResolvedCheck {
-        check,
-        end,
-        outcome: EngramExecutionOutcome::Succeeded,
-        basis,
-        toolchain: None,
-        ran_successfully: true,
-    }
-}
-
-#[test]
-fn duplicate_check_associations_on_one_live_row_queue_one_final_image_fence() {
-    let (mut fixture, id, store, binding, _) = evidence_fixture("lifecycle-batch-duplicate-association");
-    let checks = [reported_check(0, "repeated-key"), reported_check(1, "repeated-key")];
-    let index = {
-        let mut inner = fixture.state.inner.lock().unwrap();
-        let session = inner.test_run_observations[&id].summary.owner_session_id.clone().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        inner.sessions[index].engram.work_binding = Some(binding.clone());
-        let project_id = inner.sessions[index].session.project_id.clone().unwrap();
-        let project = inner.projects.iter_mut().find(|project| project.id == project_id).unwrap();
-        project.engram = Some(EngramProjectSettings {
-            enabled: true,
-            authority_store_key: Some(store.clone()),
-            ..EngramProjectSettings::default()
-        });
-        // Both checks resolve to this one execution: same grant, key, command,
-        // start and worktree, only their places in the turn differ.
-        let check = &checks[0].check;
-        let mut row = inner.test_run_observations.get_mut(&id).unwrap();
-        row.grant_identity = Some(sha256_hex(check.grant_id.as_bytes()));
-        row.tool_identity = sha256_hex(check.key.as_bytes());
-        row.command_fingerprint = EngramHost::check_fingerprint(&check.command);
-        row.summary.started_at = Some(check.started_at.clone());
-        row.summary.worktree = test_run_display_path(&check.target.root);
-        index
-    };
-    let receiver = queued_persistence(&mut fixture);
-    {
-        let mut inner = fixture.state.inner.lock().unwrap();
-        fixture.state.associate_reported_test_checks_locked(&mut inner, index, &checks);
-    }
-    let queued: Vec<_> = receiver.try_iter().collect();
-    let inner = fixture.state.inner.lock().unwrap();
-    let row = &inner.test_run_observations[&id];
-    let session = row.summary.owner_session_id.clone().unwrap();
-    for check in &checks {
-        let producer = sha256_hex(
-            format!("termal-turn-check:{session}:{}:{}:{}", check.check.grant_id, check.check.sequence, check.check.key)
-                .as_bytes(),
-        );
-        assert_eq!(
-            row.evidence.iter().filter(|association| association.producer_observation_id == producer).count(),
-            1,
-            "each check adds its own association to the shared row",
-        );
-    }
-    // One save and one exact fence, holding the row after both associations.
-    assert_one_save_and_exact_fences(&queued, &BTreeMap::from([(id.clone(), row.clone())]), None);
-    let pending = inner.test_runs.observation_persistence.0.lock().unwrap();
-    assert_eq!(pending.len(), 1);
-    assert_eq!(&pending[&id].0, row);
-}
-
 #[test]
 fn lifecycle_batch_wrong_authority_or_generation_has_no_dispatch_or_revision() {
-    let (mut fixture, id, store, binding, _) = evidence_fixture("lifecycle-batch-noop");
+    let (mut fixture, _, store, binding, native) = native_evidence_fixture("lifecycle-batch-noop");
+    record_native_evidence(&fixture, &native);
+    let id = native.execution_id;
     let mut wrong_store = store.clone();
     wrong_store.project_id = "wrong-authority".to_owned();
     let read: EngramNamedRootReadResponse =

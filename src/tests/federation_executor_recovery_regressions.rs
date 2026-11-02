@@ -91,7 +91,7 @@ fn channel_dispatch(fixture: &Fixture, token: &RuntimeToken,
         active_turn_generation: turn, opening_prompt: None,
         command: ClaudePromptCommand { attachments: Vec::new(), replay_generation: format!("attempt-{turn}"),
             text: "ordinary mailbox wake".into(), turn_generation: turn },
-        engram_dispatch_generation: None, mailbox_notification: None, runtime_token: token.clone(),
+        mailbox_notification: None, runtime_token: token.clone(),
         sender: sender.clone(), session_id: fixture.native.clone(),
     }
 }

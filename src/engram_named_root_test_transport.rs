@@ -1,5 +1,5 @@
-// Opt-in named-root wire model for scripted host tests. Grant replies remain
-// scripted; this model independently checks generation and retry semantics.
+// Opt-in ordinary work-service model for scripted host tests. It independently
+// checks named-root generation, immutable retries and observation receipts.
 #[derive(Default)]
 struct TestEngramNamedRoots {
     bindings: BTreeMap<String, String>,
@@ -13,28 +13,21 @@ struct TestEngramNamedRoots {
     seen: BTreeMap<(String, String), (Value, Value)>,
     lose_next_reply: bool,
     refuse_next: bool,
-    // Sessions whose Engram control session is not active (exited): their
-    // named-root binds are refused with Engram's inactive-session reason
-    // until a session_bind for the session makes it active again.
-    inactive_sessions: BTreeSet<String>,
-    // Runs once, inside the model, as an inactive-session refusal is made:
-    // what changes in the host between a bind's send and its refusal.
-    on_inactive_refusal: Option<Box<dyn FnOnce() + Send>>,
-    fail_next_status: bool,
+    // Ordinary children are independent of historical control-session phase.
+    // Populated only by an explicit, identity-checked work-session reply.
+    work_sessions: BTreeSet<String>,
+    // Opt-in ordinary service response, independent of legacy RPC scripts.
+    work_session_read_reply: Option<Result<Value, EngramTransportError>>,
+    // Mutates the test host at an actual ordinary naming refusal boundary.
+    on_bind_refusal: Option<Box<dyn FnOnce() + Send>>,
     root_reads: BTreeMap<String, Value>,
     root_read_failures: BTreeSet<String>,
-    // Model an immutable pre-field receipt without changing current bind/status.
-    omitted_begin_projections: BTreeSet<String>,
-    scripted_status: bool,
-    // Readiness for observation accounting owns one status read. It must not
-    // consume the independent scripted closing/rebind responses.
-    observation_status_pending: bool,
-    open_grants: BTreeMap<String, String>,
+    // First producer recording of a request, including a lost reply. This
+    // notice is not local durability acknowledgement or verification credit.
+    observation_notices: Option<mpsc::Sender<Value>>,
     observations: BTreeMap<(String, String), (Value, Value)>,
     lose_next_observation_reply: bool,
     refuse_next_observation_policy: bool,
-    checkpoint_receipts: BTreeMap<(String, String), (Value, Value)>,
-    lose_next_checkpoint_reply: bool,
 }
 
 impl TestEngramNamedRoots {
@@ -94,11 +87,13 @@ impl TestEngramNamedRoots {
         request: &EngramControlRequest,
     ) -> Option<Result<Value, EngramTransportError>> {
         let mut wire = serde_json::to_value(request).unwrap();
-        if let EngramControlRequest::TurnCheckpoint { idempotency_key, .. } = request
-            && let Some((original, receipt)) = self.checkpoint_receipts.get(&(session.to_owned(), idempotency_key.clone())) {
-            return Some(if original == &wire { Ok(receipt.clone()) } else {
-                Err(EngramTransportError::protocol("fixture checkpoint retry changed its original request"))
-            });
+        assert!(wire.get("routing_token").is_none(),
+            "a current work-service request must not carry a removed credential");
+        if matches!(request, EngramControlRequest::WorkSessionRead { .. }) {
+            if let Some(mut reply) = self.work_session_read_reply.clone() {
+                if let Ok(value) = &mut reply { self.annotate(session, request, value); }
+                return Some(reply);
+            }
         }
         if let EngramControlRequest::ExecutionObserve { observation, .. } = request {
             if std::mem::take(&mut self.refuse_next_observation_policy) {
@@ -143,16 +138,36 @@ impl TestEngramNamedRoots {
             let next = self.run_cuts.entry(observation.binding.run_id.clone()).or_insert(1);
             *next += 1;
             let id = format!("{:032x}", 1000 + self.observations.len());
+            let checks: Vec<&EngramObservedCheck> = match &observation.occurrence {
+                EngramInterTurnOccurrence::UnadmittedTurn { observed_checks, .. } =>
+                    observed_checks.iter().collect(),
+                EngramInterTurnOccurrence::ObservedCheck { check, .. } => vec![check],
+                _ => Vec::new(),
+            };
+            let observed_checks: Vec<_> = checks.into_iter().map(|check|
+                json!({"host_check_id":check.host_check_id, "credit":"uncredited"}))
+                .collect();
+            let accounting = if root_moved {
+                json!({"kind":"audit_only", "reason":"root_basis_moved"})
+            } else {
+                match &observation.occurrence {
+                    EngramInterTurnOccurrence::SourceSighting { .. } => json!({"kind":"sighting"}),
+                    EngramInterTurnOccurrence::UnadmittedTurn { source_change: None, .. }
+                    | EngramInterTurnOccurrence::ObservedCheck { .. } => json!({"kind":"no_source_change"}),
+                    _ => json!({"kind":"source_change", "source_change":id}),
+                }
+            };
             let receipt = json!({ "decision": "recorded", "observation": id,
                 "position": {"feed": {"kind": "run_execution", "id": observation.binding.run_id}, "position": *next},
                 "observing_session": session, "binding": observation.binding, "admission": "unadmitted",
                 "causality": observation.causality, "policy_basis": observation.policy_basis,
-                "accounting": if root_moved {
-                    json!({ "kind": "audit_only", "reason": "root_basis_moved" })
-                } else { json!({"kind": "source_change", "source_change": id}) },
-                "opened_obligations": [], "observed_checks": [],
+                "accounting": accounting,
+                "opened_obligations": [], "observed_checks": observed_checks,
                 "recorded_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true) });
-            self.observations.insert(key, (wire, receipt.clone()));
+            self.observations.insert(key, (wire.clone(), receipt.clone()));
+            if let Some(notices) = &self.observation_notices {
+                let _ = notices.send(wire);
+            }
             return Some(if std::mem::take(&mut self.lose_next_observation_reply) {
                 Err(EngramTransportError::transport("fixture lost accounted observation reply"))
             } else { Ok(receipt) });
@@ -211,42 +226,9 @@ impl TestEngramNamedRoots {
                 }),
             ));
         }
-        if wire["operation"] == "session_status"
-            && (!self.scripted_status || std::mem::take(&mut self.observation_status_pending)) {
-            if std::mem::take(&mut self.fail_next_status) {
-                return Some(Err(EngramTransportError::transport(
-                    "status reply unavailable",
-                )));
-            }
-            return Some(Ok(
-                json!({"session_id":session,
-                    "phase":if self.open_grants.contains_key(session) { "turn_open" } else { "ready" },
-                    "open_grant_id":self.open_grants.get(session),
-                    "named_root":self.state(session)}),
-            ));
-        }
-        if wire["operation"] == "session_bind" {
-            self.inactive_sessions.remove(session);
-            if let Some(claim) = wire["work_binding"]["claim_id"].as_str() {
-                self.bindings.insert(session.to_owned(), claim.to_owned());
-                self.register(&serde_json::from_value(wire["work_binding"].clone()).unwrap());
-            } else {
-                self.bindings.remove(session);
-            }
-        }
         if wire["operation"] != "named_root_bind" {
             return None;
         }
-        if self.inactive_sessions.contains(session) {
-            if let Some(meanwhile) = self.on_inactive_refusal.take() {
-                meanwhile();
-            }
-            return Some(Err(EngramTransportError::remote(EngramControlErrorBody {
-                code: "named_root_binding_refused".to_owned(),
-                message: "named-root binding requires an active host session".to_owned(),
-            })));
-        }
-        wire.as_object_mut().unwrap().remove("routing_token");
         let key = (
             session.to_owned(),
             wire["idempotency_key"].as_str().unwrap().to_owned(),
@@ -284,6 +266,9 @@ impl TestEngramNamedRoots {
                 })
             };
         if !valid || std::mem::take(&mut self.refuse_next) {
+            if let Some(meanwhile) = self.on_bind_refusal.take() {
+                meanwhile();
+            }
             return Some(Err(EngramTransportError::remote(EngramControlErrorBody {
                 code: "named_root_binding_refused".to_owned(),
                 message: "invalid root transition".to_owned(),
@@ -318,35 +303,14 @@ impl TestEngramNamedRoots {
     }
 
     fn annotate(&mut self, session: &str, request: &EngramControlRequest, reply: &mut Value) {
-        match request {
-            EngramControlRequest::TurnBegin { grant_id, .. }
-                if reply["decision"] == "begin" && reply["receipt"]["grant_id"] == *grant_id => {
-                self.open_grants.insert(session.to_owned(), grant_id.clone());
-            }
-            EngramControlRequest::TurnCheckpoint { grant_id, .. }
-                if reply["decision"] == "checkpointed" && reply["receipt"]["grant_id"] == *grant_id => {
-                if self.open_grants.get(session) == Some(grant_id) { self.open_grants.remove(session); }
-                if let EngramControlRequest::TurnCheckpoint { idempotency_key, .. } = request {
-                    self.checkpoint_receipts.insert((session.to_owned(), idempotency_key.clone()),
-                        (serde_json::to_value(request).unwrap(), reply.clone()));
-                }
-            }
-            _ => {}
-        }
-        if !self.bindings.contains_key(session) {
-            return; // Real unbound receipts omit the claimed-root projection.
-        }
-        match request {
-            EngramControlRequest::SessionBind { .. } => {
-                reply["status"]["named_root"] = self.state(session)
-            }
-            EngramControlRequest::TurnBegin { grant_id, .. }
-                if !self.omitted_begin_projections.contains(grant_id) =>
-            {
-                reply["receipt"]["named_root"] = self.state(session)
-            }
-            EngramControlRequest::SessionStatus { .. } => reply["named_root"] = self.state(session),
-            _ => {}
+        if matches!(request, EngramControlRequest::WorkSessionRead { .. })
+            && reply["work_session"] == true
+            && reply["session_id"] == session
+            && reply["project_id"] == self.project_id.as_deref()
+                .unwrap_or("github.com/example/source-root")
+            && engram_reply_supports_host_work(reply)
+        {
+            self.work_sessions.insert(session.to_owned());
         }
     }
 }

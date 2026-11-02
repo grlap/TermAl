@@ -1,23 +1,9 @@
-// Owns the tests that a turn Claude Code started by itself, adopted by the
-// host, keeps its "granted nothing" provenance until it actually
-// terminalizes, on every lifecycle path that can end it: an immediate or a
-// deferred completion or error and its replay after a stop, a runtime exit,
-// a reader failure, the atomic failure in each of its modes, a user Stop,
-// session deletion and revocation teardown, each through the host's own
-// entry point. With a leftover grant on the session, no terminal path of
-// the adopted turn reports execution on that grant, an independent
-// settlement closes it with no adopted report (repeating an earlier
-// attempt's report rather than replacing it), a successor generation is not
-// excluded, and a change of context between a checkpoint's plan and claim
-// closes nothing. Each test drives the host's real lifecycle functions and
-// reads the checkpoint requests Engram receives.
-// Does not own the frame-ownership rules (src/tests/claude_turn_ownership.rs),
-// the frame application (src/tests/claude_frame_router.rs) or the adoption
-// and attribution tests (src/tests/engram_claude_runtime_turns.rs, whose
-// frame helpers this module repeats). New module.
+// Adopted Claude lifecycle ownership through actual terminalization, Stop,
+// reader failure, deferred callback and revocation paths. Old grant fields
+// are passive history; ordinary observations never settle or execute them.
 use super::*;
 
-pub(super) const LEFTOVER: &str = "leftover-grant";
+pub(super) const HISTORICAL_GRANT: &str = "leftover-grant";
 
 fn task_notification() -> Value {
     json!({"type": "system", "subtype": "task_notification", "task_id": "b1",
@@ -37,51 +23,35 @@ fn result(is_error: bool) -> Value {
         "is_error": is_error, "result": "done"})
 }
 
-pub(super) fn checkpoint_requests(turn: &CheckedTurn) -> Vec<Value> {
-    turn.transport
-        .requests()
-        .into_iter()
-        .filter(|request| request.request["operation"] == "turn_checkpoint")
-        .map(|request| request.request)
-        .collect()
+fn forbidden_requests(turn: &EOCheckedTurn) -> Vec<Value> {
+    turn.transport.requests().into_iter().filter(|sent| matches!(sent.request["operation"].as_str(),
+        Some("session_bind" | "session_status" | "turn_grant_read" | "turn_evaluate"
+            | "turn_begin" | "turn_checkpoint" | "verification_record" | "verification_bind")))
+        .map(|sent| sent.request).collect()
 }
 
-/// A granted turn that completed, a grant left open on the session after it,
-/// and a turn Claude Code then started by itself, adopted by the idle
-/// session. Returns its runtime token, its turn generation and the runtime's
-/// turn ownership.
-fn adopted_with_leftover_grant(
-    label: &str,
-    extra_checkpoints: Vec<ScriptedEngramControlResponse>,
-) -> (CheckedTurn, RuntimeToken, u64, ClaudeTurnOwnership) {
-    let turn = CheckedTurn::start_with(
-        label,
-        true,
-        None,
-        std::iter::once(checkpoint_reply(CHECK_GRANT))
-            .chain(extra_checkpoints)
-            .collect(),
-    );
+// The old grant is opaque history, not a current execution/settlement owner.
+fn adopted_with_historical_grant(label: &str) -> (EOCheckedTurn, RuntimeToken, u64, ClaudeTurnOwnership) {
+    let turn = EOCheckedTurn::start(label, true);
     turn.finish();
-    turn.record_mut(|record| record.engram.active_grant_id = Some(LEFTOVER.to_owned()));
-    let token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
+    turn.record_mut(|record| {
+        record.engram.historical_control.insert("engramOpenGrantId".into(), json!(HISTORICAL_GRANT));
+    });
+    let token = turn.record(|record| record.runtime.runtime_token().unwrap());
     let ownership = new_claude_turn_ownership();
     for frame in [task_notification(), init(), assistant_text("noticed")] {
         feed(&turn, &token, &ownership, frame);
     }
     let generation = turn.record(|record| {
-        assert!(
-            unmediated_claude_turn_is_current(record),
-            "the turn is adopted"
-        );
+        assert!(unmediated_claude_turn_is_current(record));
+        assert!(record.engram.unadmitted_active_turn.is_some(), "the adopted interval has its own EO trace");
         record.active_turn_generation
     });
     (turn, token, generation, ownership)
 }
-
 /// Feeds one frame as the Claude stdout reader's ownership and finalization
 /// steps do.
-fn feed(turn: &CheckedTurn, token: &RuntimeToken, ownership: &ClaudeTurnOwnership, frame: Value) {
+fn feed(turn: &EOCheckedTurn, token: &RuntimeToken, ownership: &ClaudeTurnOwnership, frame: Value) {
     if frame.get("type").and_then(Value::as_str) == Some("result") {
         let owner = lock_claude_turn_ownership(ownership).close_for_result(&frame);
         let error = frame.get("is_error").and_then(Value::as_bool) == Some(true);
@@ -94,26 +64,20 @@ fn feed(turn: &CheckedTurn, token: &RuntimeToken, ownership: &ClaudeTurnOwnershi
     }
 }
 
-pub(super) fn assert_leftover_untouched(turn: &CheckedTurn, checkpoints_before: usize, path: &str) {
-    assert_eq!(
-        checkpoint_requests(turn).len(),
-        checkpoints_before,
-        "{path}: no checkpoint reports the adopted turn on the leftover grant"
-    );
-    assert_eq!(
-        turn.record(|record| record.engram.active_grant_id.clone())
-            .as_deref(),
-        Some(LEFTOVER),
-        "{path}: the leftover grant stays for its own settlement"
-    );
+fn assert_historical_grant_untouched(turn: &EOCheckedTurn, before: usize, path: &str) {
+    assert_eq!(before, 0, "the ordinary fixture starts with no gated/native request");
+    assert!(forbidden_requests(turn).is_empty(), "{path}: no current request consumes old grant history");
+    turn.record(|record| {
+        assert_eq!(record.engram.historical_control.get("engramOpenGrantId"), Some(&json!(HISTORICAL_GRANT)),
+            "{path}: old grant history is unchanged");
+    });
 }
-
 #[test]
-fn an_adopted_turns_immediate_success_or_error_checkpoints_no_leftover_grant() {
+fn an_adopted_turns_immediate_success_or_error_preserves_historical_grant_without_control_calls() {
     for is_error in [false, true] {
         let (turn, token, generation, ownership) =
-            adopted_with_leftover_grant(&format!("adopted-immediate-{is_error}"), Vec::new());
-        let before = checkpoint_requests(&turn).len();
+            adopted_with_historical_grant(&format!("adopted-immediate-{is_error}"));
+        let before = forbidden_requests(&turn).len();
         feed(&turn, &token, &ownership, result(is_error));
         turn.record(|record| {
             assert_eq!(
@@ -130,16 +94,16 @@ fn an_adopted_turns_immediate_success_or_error_checkpoints_no_leftover_grant() {
                 "the provenance outlives the turn's closed segment"
             );
         });
-        assert_leftover_untouched(&turn, before, &format!("immediate (error: {is_error})"));
+        assert_historical_grant_untouched(&turn, before, &format!("immediate (error: {is_error})"));
     }
 }
 
 #[test]
-fn a_deferred_adopted_finish_replayed_after_a_stop_still_checkpoints_no_leftover_grant() {
+fn a_deferred_adopted_finish_replayed_after_a_stop_still_preserves_historical_grant_without_control_calls() {
     for is_error in [false, true] {
         let (turn, token, generation, ownership) =
-            adopted_with_leftover_grant(&format!("adopted-deferred-{is_error}"), Vec::new());
-        let before = checkpoint_requests(&turn).len();
+            adopted_with_historical_grant(&format!("adopted-deferred-{is_error}"));
+        let before = forbidden_requests(&turn).len();
         // The result arrives while a stop owns the runtime: the finish is
         // deferred, and the turn's segment closes with the result.
         turn.record_mut(|record| record.runtime_stop_in_progress = true);
@@ -158,7 +122,7 @@ fn a_deferred_adopted_finish_replayed_after_a_stop_still_checkpoints_no_leftover
             record.deferred_stop_callbacks.clone()
         });
         assert_eq!(callbacks.len(), 1, "the finish is deferred");
-        assert_leftover_untouched(&turn, before, "deferred");
+        assert_historical_grant_untouched(&turn, before, "deferred");
 
         // The stop fails and releases its fence; the deferred finish replays
         // on the same generation.
@@ -179,15 +143,15 @@ fn a_deferred_adopted_finish_replayed_after_a_stop_still_checkpoints_no_leftover
             );
             assert_eq!(record.active_turn_generation, generation);
         });
-        assert_leftover_untouched(&turn, before, &format!("replayed (error: {is_error})"));
+        assert_historical_grant_untouched(&turn, before, &format!("replayed (error: {is_error})"));
     }
 }
 
 #[test]
-fn a_runtime_exit_or_missing_runtime_failure_of_an_adopted_turn_checkpoints_no_leftover_grant() {
+fn a_runtime_exit_or_missing_runtime_failure_of_an_adopted_turn_preserves_historical_grant_without_control_calls() {
     let (turn, token, generation, _ownership) =
-        adopted_with_leftover_grant("adopted-exit", Vec::new());
-    let before = checkpoint_requests(&turn).len();
+        adopted_with_historical_grant("adopted-exit");
+    let before = forbidden_requests(&turn).len();
     turn.state
         .handle_runtime_exit_if_matches(&turn.session_id, &token, Some("the runtime exited"))
         .expect("the exit should be handled");
@@ -195,84 +159,29 @@ fn a_runtime_exit_or_missing_runtime_failure_of_an_adopted_turn_checkpoints_no_l
         assert_ne!(record.session.status, SessionStatus::Active);
         assert_eq!(record.active_turn_generation, generation);
     });
-    assert_leftover_untouched(&turn, before, "runtime exit");
+    assert_historical_grant_untouched(&turn, before, "runtime exit");
 
     let (turn, _token, generation, _ownership) =
-        adopted_with_leftover_grant("adopted-missing-runtime", Vec::new());
-    let before = checkpoint_requests(&turn).len();
+        adopted_with_historical_grant("adopted-missing-runtime");
+    let before = forbidden_requests(&turn).len();
     turn.record_mut(|record| record.clear_runtime());
     turn.state
         .fail_active_turn_if_runtime_missing(&turn.session_id, generation, "the runtime is gone")
         .expect("the missing-runtime failure should be handled");
-    assert_leftover_untouched(&turn, before, "missing-runtime atomic failure");
+    assert_historical_grant_untouched(&turn, before, "missing-runtime atomic failure");
 
     let (turn, token, _generation, _ownership) =
-        adopted_with_leftover_grant("adopted-reader-failure", Vec::new());
-    let before = checkpoint_requests(&turn).len();
+        adopted_with_historical_grant("adopted-reader-failure");
+    let before = forbidden_requests(&turn).len();
     turn.state
         .fail_turn_if_runtime_matches(&turn.session_id, &token, "the reader failed")
         .expect("the reader failure should be handled");
-    assert_leftover_untouched(&turn, before, "reader failure");
-}
-
-#[test]
-fn a_settlement_repeats_an_earlier_attempts_report_instead_of_an_empty_one() {
-    let (turn, _token, _generation, _ownership) =
-        adopted_with_leftover_grant("adopted-cached", vec![checkpoint_reply(LEFTOVER)]);
-    // An earlier, uncertain attempt for the leftover grant built its report.
-    let cached = turn.record(|record| {
-        record
-            .engram
-            .active_turn_report
-            .clone()
-            .map(|(_, report)| report)
-            .expect("the first turn's report is cached")
-    });
-    assert!(
-        !cached.observations.is_empty(),
-        "the fixture report carries an observation"
-    );
-    turn.record_mut(|record| {
-        record.engram.active_turn_report = Some((LEFTOVER.to_owned(), cached.clone()));
-    });
-    let before = checkpoint_requests(&turn).len();
-    turn.state.checkpoint_engram_turn_off_lock(
-        &turn.session_id,
-        EngramCheckpointPurpose::Teardown,
-        None,
-        None,
-        EngramNextIntent::Exit,
-        Some(EngramExecutionOutcome::Unknown),
-        None,
-    );
-    let checkpoints = checkpoint_requests(&turn);
-    assert_eq!(checkpoints.len(), before + 1);
-    let first_report = checkpoint_requests(&turn)[0]["observations"].clone();
-    assert_eq!(
-        checkpoints[before]["observations"], first_report,
-        "the settlement repeats the earlier attempt's report verbatim"
-    );
-}
-
-/// The settlement checkpoint a teardown sent for the leftover grant, asserted
-/// to carry no execution of the adopted turn.
-pub(super) fn assert_settled_without_adopted_report(turn: &CheckedTurn, before: usize, path: &str) {
-    let checkpoints = checkpoint_requests(turn);
-    assert_eq!(checkpoints.len(), before + 1, "{path}: one settlement");
-    let settlement = &checkpoints[before];
-    assert_eq!(settlement["grant_id"], LEFTOVER, "{path}");
-    assert!(
-        settlement
-            .get("observations")
-            .and_then(Value::as_array)
-            .is_none_or(|observations| observations.is_empty()),
-        "{path}: a settlement reports no execution of the adopted turn: {settlement:#}"
-    );
+    assert_historical_grant_untouched(&turn, before, "reader failure");
 }
 
 /// The failed-Stop handover that gives revocation teardown its fence, as the
 /// host performs it, for the session's current runtime.
-fn revocation_target(turn: &CheckedTurn) -> EngramMcpRuntimeRevocationTarget {
+fn revocation_target(turn: &EOCheckedTurn) -> EngramMcpRuntimeRevocationTarget {
     let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
     let index = inner
         .find_session_index(&turn.session_id)
@@ -292,7 +201,7 @@ fn revocation_target(turn: &CheckedTurn) -> EngramMcpRuntimeRevocationTarget {
     .expect("the failed Stop hands its fence to revocation")
 }
 
-fn revoke(turn: &CheckedTurn, context: &str) {
+fn revoke(turn: &EOCheckedTurn, context: &str) {
     let target = revocation_target(turn);
     turn.state
         .teardown_revoked_engram_mcp_runtimes(
@@ -307,56 +216,68 @@ fn revoke(turn: &CheckedTurn, context: &str) {
 }
 
 #[test]
-fn revocation_teardown_settles_a_leftover_grant_without_the_adopted_report() {
-    // Revocation teardown, after a failed Stop handed it the fence.
-    let (turn, _token, generation, _ownership) =
-        adopted_with_leftover_grant("adopted-revocation", vec![checkpoint_reply(LEFTOVER)]);
-    let before = checkpoint_requests(&turn).len();
+fn revocation_teardown_ends_the_adopted_runtime_without_consuming_historical_grant_data() {
+    let (turn, _token, generation, _ownership) = adopted_with_historical_grant("adopted-revocation");
+    let turn_ref = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
+        .unwrap().host_turn_ref.clone());
     revoke(&turn, "test revocation of an adopted turn");
-    assert_settled_without_adopted_report(&turn, before, "revocation teardown");
+    let report = turn.observation_for(&turn_ref);
+    assert_eq!(report["occurrence"]["outcome"], "unknown");
+    assert_ordinary_observation_has_no_native_credit(&turn, &report);
+    assert_historical_grant_untouched(&turn, 0, "revocation teardown");
     turn.record(|record| {
-        assert_eq!(
-            record.engram.active_grant_id, None,
-            "the leftover grant is settled"
-        );
         assert_eq!(record.active_turn_generation, generation);
         assert!(!record.runtime_stop_in_progress);
+        assert!(record.runtime.runtime_token().is_none());
+        assert_ne!(record.session.status, SessionStatus::Active);
     });
 }
 
 #[test]
-fn a_mediated_turns_deletion_and_revocation_still_report_its_own_execution() {
+fn ordinary_deletion_waits_for_its_observed_turn_and_revocation_reports_its_own_execution() {
     for path in ["deletion", "revocation"] {
-        let turn = CheckedTurn::start_with(
-            &format!("mediated-{path}"),
-            true,
-            None,
-            vec![checkpoint_reply(CHECK_GRANT)],
-        );
+        let turn = EOCheckedTurn::start(&format!("ordinary-{path}"), true);
+        let (turn_ref, token, generation) = turn.record(|record| (
+            record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref.clone(),
+            record.runtime.runtime_token().unwrap(), record.active_turn_generation,
+        ));
         if path == "deletion" {
-            turn.state
-                .kill_session(&turn.session_id)
-                .expect("the session should be deleted");
+            let error = turn.state.kill_session(&turn.session_id).err()
+                .expect("captured active facts cannot be deleted before their turn ends");
+            assert_eq!(error.status, StatusCode::CONFLICT);
+            turn.record(|record| {
+                assert_eq!(record.session.status, SessionStatus::Active);
+                assert_eq!(record.active_turn_generation, generation);
+                assert!(record.runtime.matches_runtime_token(&token));
+                assert_eq!(record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref, turn_ref);
+            });
+            turn.state.stop_session(&turn.session_id).unwrap();
         } else {
-            revoke(&turn, "test revocation of a mediated turn");
+            revoke(&turn, "test revocation of an ordinary turn");
         }
-        let checkpoints = checkpoint_requests(&turn);
-        assert_eq!(checkpoints.len(), 1, "{path}");
-        assert_eq!(checkpoints[0]["grant_id"], CHECK_GRANT, "{path}");
-        let observations = checkpoints[0]["observations"]
-            .as_array()
-            .unwrap_or_else(|| panic!("{path}: the mediated turn reports its execution"));
-        assert_eq!(observations.len(), 1, "{path}");
-        assert_eq!(observations[0]["outcome"], "unknown", "{path}");
+        let report = turn.observation_for(&turn_ref);
+        assert_eq!(report["occurrence"]["outcome"],
+            if path == "deletion" { "cancelled" } else { "unknown" });
+        assert_ordinary_observation_has_no_native_credit(&turn, &report);
+        assert!(forbidden_requests(&turn).is_empty());
+        if path == "deletion" {
+            let guard = phase_sync::PollGuard::new();
+            loop {
+                let pending = turn.record(runtime_observation_has_removal_duty);
+                if !pending { break; }
+                guard.wait(format_args!("the exact ordinary report must settle before Delete"));
+            }
+            turn.state.kill_session(&turn.session_id).unwrap();
+            assert!(turn.state.inner.lock().unwrap().find_session_index(&turn.session_id).is_none());
+        }
     }
 }
-
 #[test]
-fn the_atomic_failure_of_an_adopted_turn_checkpoints_no_leftover_grant_in_any_mode() {
+fn the_atomic_failure_of_an_adopted_turn_preserves_historical_grant_without_control_calls_in_any_mode() {
     // A matching runtime's confirmed failure, under its terminalization claim.
     let (turn, token, generation, _ownership) =
-        adopted_with_leftover_grant("adopted-atomic-matching", Vec::new());
-    let before = checkpoint_requests(&turn).len();
+        adopted_with_historical_grant("adopted-atomic-matching");
+    let before = forbidden_requests(&turn).len();
     let owner_generation = turn
         .state
         .claim_turn_terminalization_if_runtime_matches(&turn.session_id, &token, generation)
@@ -374,91 +295,49 @@ fn the_atomic_failure_of_an_adopted_turn_checkpoints_no_leftover_grant_in_any_mo
             .expect("the atomic failure should apply"),
         "the owned failure terminalizes the adopted turn"
     );
-    assert_leftover_untouched(&turn, before, "atomic MatchingRuntime failure");
+    assert_historical_grant_untouched(&turn, before, "atomic MatchingRuntime failure");
     turn.record(|record| assert_eq!(record.session.status, SessionStatus::Error));
 
     // A rejected runtime-command delivery.
     let (turn, token, generation, _ownership) =
-        adopted_with_leftover_grant("adopted-atomic-rejected", Vec::new());
-    let before = checkpoint_requests(&turn).len();
+        adopted_with_historical_grant("adopted-atomic-rejected");
+    let before = forbidden_requests(&turn).len();
     assert!(
         turn.state
             .fail_rejected_turn_delivery(
                 &turn.session_id,
                 &token,
                 generation,
-                None,
                 "the delivery was rejected",
             )
             .expect("the rejected delivery should be recorded"),
         "the rejected delivery terminalizes the adopted turn"
     );
-    assert_leftover_untouched(&turn, before, "atomic RejectedDelivery failure");
+    assert_historical_grant_untouched(&turn, before, "atomic RejectedDelivery failure");
     turn.record(|record| assert_eq!(record.session.status, SessionStatus::Error));
 }
 
 #[test]
-fn a_successor_generation_is_not_excluded_and_a_changed_context_closes_nothing() {
-    // A successor generation begins: the adopted provenance is inert, and the
-    // successor's own terminal path reports on its grant.
-    let (turn, _token, generation, _ownership) =
-        adopted_with_leftover_grant("adopted-successor", Vec::new());
+fn a_stale_adopted_generation_cannot_terminalize_a_successor() {
+    let (turn, token, generation, _ownership) = adopted_with_historical_grant("adopted-successor");
     turn.record_mut(|record| {
         record.active_turn_generation = generation + 1;
         assert!(!unmediated_claude_turn_is_current(record));
     });
-    {
-        let inner = turn.state.inner.lock().expect("state mutex poisoned");
-        assert!(
-            AppState::engram_checkpoint_grant_locked(
-                &inner,
-                &turn.session_id,
-                EngramCheckpointPurpose::TurnTerminal,
-                None,
-                Some(generation + 1),
-                None,
-            )
-            .is_some_and(|(_, _, _, resolved)| resolved == EngramCheckpointPurpose::TurnTerminal),
-            "the successor generation is not the adopted turn"
-        );
-    }
-
-    // Between a teardown's plan (a settlement of the leftover grant while the
-    // adopted turn is current) and its claim, a successor generation begins:
-    // the claim resolves differently and closes nothing.
-    let (turn, _token, generation, _ownership) =
-        adopted_with_leftover_grant("adopted-race", Vec::new());
-    let before = checkpoint_requests(&turn).len();
-    let gate = install_test_engram_turn_report_gate(&turn.state, &turn.session_id);
-    let teardown = {
-        let state = turn.state.clone();
-        let session_id = turn.session_id.clone();
-        std::thread::spawn(move || {
-            state.checkpoint_engram_turn_off_lock(
-                &session_id,
-                EngramCheckpointPurpose::Teardown,
-                None,
-                None,
-                EngramNextIntent::Exit,
-                Some(EngramExecutionOutcome::Unknown),
-                None,
-            )
-        })
-    };
-    gate.wait_until_claimed();
-    turn.record_mut(|record| record.active_turn_generation = generation + 1);
-    gate.release();
-    let outcome = teardown.join().expect("the teardown should not panic");
-    assert!(
-        matches!(outcome, EngramCheckpointOutcome::Skipped),
-        "{outcome:?}"
-    );
-    assert_leftover_untouched(&turn, before, "plan/claim race");
+    assert!(turn.state.claim_turn_terminalization_if_runtime_matches(
+        &turn.session_id, &token, generation).unwrap().is_none());
+    assert!(!turn.state.fail_rejected_turn_delivery(&turn.session_id, &token, generation,
+        "a stale predecessor failure").unwrap());
+    turn.record(|record| {
+        assert_eq!(record.active_turn_generation, generation + 1);
+        assert_eq!(record.session.status, SessionStatus::Active);
+        assert!(record.runtime.matches_runtime_token(&token));
+    });
+    assert_historical_grant_untouched(&turn, 0, "successor generation");
 }
-
 #[test]
 fn an_error_session_adopts_a_runtime_started_turn_and_its_result_ends_it() {
-    let turn = CheckedTurn::start("adopted-from-error", true);
+    let turn = EOCheckedTurn::start("adopted-from-error", true);
     turn.finish();
     turn.record_mut(|record| record.session.status = SessionStatus::Error);
     let token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
@@ -477,25 +356,27 @@ fn an_error_session_adopts_a_runtime_started_turn_and_its_result_ends_it() {
 }
 
 #[test]
-fn a_user_stop_of_an_adopted_turn_checkpoints_no_leftover_grant() {
+fn a_user_stop_of_an_adopted_turn_preserves_historical_grant_without_control_calls() {
     let (turn, _token, _generation, _ownership) =
-        adopted_with_leftover_grant("adopted-stop", Vec::new());
-    let before = checkpoint_requests(&turn).len();
+        adopted_with_historical_grant("adopted-stop");
+    let before = forbidden_requests(&turn).len();
     turn.state
         .stop_session(&turn.session_id)
         .expect("the stop should be accepted");
     turn.record(|record| assert_ne!(record.session.status, SessionStatus::Active));
-    assert_leftover_untouched(&turn, before, "user Stop");
+    assert_historical_grant_untouched(&turn, before, "user Stop");
 }
 
 #[test]
-fn an_adopted_interval_ended_by_an_unresolved_result_checkpoints_no_leftover_grant() {
-    // A granted turn completed, a grant was left open, and the session is
-    // idle. Every frame then goes through the reader's own application
+fn an_adopted_interval_ended_by_an_unresolved_result_preserves_historical_grant_without_control_calls() {
+    // An ordinary turn completed and the idle session retains opaque grant
+    // history. Every frame then goes through the reader's own application
     // function, which adopts the turn Claude Code starts by itself.
-    let turn = CheckedTurn::start("adopted-unresolved", true);
+    let turn = EOCheckedTurn::start("adopted-unresolved", true);
     turn.finish();
-    turn.record_mut(|record| record.engram.active_grant_id = Some(LEFTOVER.to_owned()));
+    turn.record_mut(|record| {
+        record.engram.historical_control.insert("engramOpenGrantId".into(), json!(HISTORICAL_GRANT));
+    });
     let token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
     let context = ClaudeRuntimeContext::new(
@@ -504,7 +385,7 @@ fn an_adopted_interval_ended_by_an_unresolved_result_checkpoints_no_leftover_gra
         token,
         new_claude_turn_ownership(),
         Arc::new(Mutex::new(None)),
-        "/tmp".to_owned(),
+        turn.root.to_string_lossy().into_owned(),
     );
     let mut frames = ClaudeReaderFrames::new(&context, input_tx, None);
     let mut recorder = SessionRecorder::new(turn.state.clone(), turn.session_id.clone());
@@ -523,7 +404,7 @@ fn an_adopted_interval_ended_by_an_unresolved_result_checkpoints_no_leftover_gra
         assert_eq!(record.session.status, SessionStatus::Active, "adopted");
         record.active_turn_generation
     });
-    let before = checkpoint_requests(&turn).len();
+    let before = forbidden_requests(&turn).len();
     apply(
         json!({"type": "result", "subtype": "success", "is_error": false,
         "result": "done", "user_message_uuid": "99999999-0000-4000-8000-000000000009"}),
@@ -540,7 +421,7 @@ fn an_adopted_interval_ended_by_an_unresolved_result_checkpoints_no_leftover_gra
             "the provenance holds"
         );
     });
-    assert_leftover_untouched(
+    assert_historical_grant_untouched(
         &turn,
         before,
         "adopted interval ended by an unresolved result",

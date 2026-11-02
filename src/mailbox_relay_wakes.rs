@@ -517,7 +517,7 @@ impl AppState {
             root.queued_prompts
                 .iter()
                 .filter(|queued| {
-                    !queued.is_engram_retained() && !queued_prompt_kept_standalone(root, queued)
+                    !queued.has_stored_history() && !queued_prompt_kept_standalone(root, queued)
                 })
                 .filter_map(|queued| {
                     let source = queued.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
@@ -558,7 +558,7 @@ impl AppState {
             let holds = &root.queued_prompt_durability_holds;
             let Some(queued) = root.queued_prompts.iter_mut().find(|queued| {
                 queued.pending_prompt.id == prompt
-                    && !queued.is_engram_retained()
+                    && !queued.has_stored_history()
                     && !holds.contains_key(&prompt)
                     && queued
                         .pending_prompt

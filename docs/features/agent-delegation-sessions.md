@@ -84,9 +84,8 @@ receipt, two eleven-second inventory response budgets and ten seconds of detach/
 headroom (68 seconds). It bounds waiting, not a blocked mutex or SQL commit.
 The MCP follow-up HTTP request has a separate derived allowance: release (68 s),
 two reconciliation responses (22 s), durability retry (5 s), unarchive response
-(31 s), the delivery of the child's turn (a gated admission of 20 s and, for a
-child holding a claim, its begin-time source capture of 40 s), and ordinary
-request overhead (30 s): 216 seconds. It is single-attempt,
+(31 s), ordinary provider preparation and the review-freeze fence (40 s), and
+ordinary request overhead (30 s): 196 seconds. It is single-attempt,
 not automatically replayed on timeout; a network failure still has an unknown
 outcome and must be checked before retrying. Concurrent recovery returns a conflict
 instead of waiting indefinitely on another follow-up's recovery lock.
@@ -722,51 +721,49 @@ not started, and tells the caller to list delegations before spawning again.
 
 ### Held attempts
 
-A delegation's current attempt is `held` when its child is not executing and the
-child's queue is paused behind a prompt Engram retained
-(`engram-host-adapter.md`, "Retained prompt recovery"). A held attempt has not
+A delegation's current attempt is `held` when its child is not executing and
+the child's queue is paused with a prompt still queued. A held attempt has not
 reached provider execution and has not completed. It is non-terminal: it never
 sets `completedAt` or a result, and it never counts as a finished review or
 acceptance evaluation. The stored record keeps `running` while it holds; every
 client projection (status, list, spawn and follow-up responses,
-`delegationUpdated`, the MCP tools, the UI) reports `held`, with a `hold`:
+`delegationUpdated`, the MCP tools, the UI) reports `held`, with a `hold`. The
+hold is read from the child's queue head, its pause and its delivery and
+durability records; stored control history from earlier builds supplies no
+hold, retry or admission:
 
 - `reason`:
-  - `admissionDeferred`: Engram deferred the admission, or its outcome was
-    parked before any handoff; resuming retries it. An unknown outcome with
-    no grant begun is also replayed automatically at `nextRetryAt`
-    (`engram-host-adapter.md`, "Automatic re-admission of a parked
-    admission");
-  - `persistenceUnknown`: a delivery was withheld and proven unsent, but the
-    host has not yet confirmed its own record of that; or a prepared
-    authorization's promotion was not confirmed durable;
-  - `retryScheduled`: proven unsent and durably recorded, with an automatic
-    retry due at `nextRetryAt`;
-  - `deliveryUnknown`: the authorization was interrupted and the host cannot
-    prove the prompt was not delivered; it will not resend it;
-  - `stopped`: the user stopped the authorization.
-- `heldSince` and `lastActivityAt`. The latter moves only when the hold changes
-  or a retry is attempted, never on a status read.
+  - `persistenceUnknown`: the queued prompt still waits for the host to
+    confirm its own record of it as durable;
+  - `deliveryUnknown`: the host cannot prove the queued prompt was not
+    delivered, so it will not send it again;
+  - `stopped`: the queue is paused, by a Stop or an operator's pause, with a
+    prompt that can run.
+
+  `admissionDeferred` and `retryScheduled` are kept only so a hold an earlier
+  build stored still reads; no hold takes them now.
+- `heldSince` and `lastActivityAt`. The latter moves only when the hold changes,
+  never on a status read.
 - `generation`: it increases with each hold the delegation enters, or each
   change of a hold, so a notification names the exact hold it reported.
-- `retryEligible`, `nextRetryAt` and `actions`: `resume` only when a retry is
-  safe, `cancel` always.
-- `detail` (the child's guidance line) and `promptId` (the retained prompt).
+- `retryEligible`, `nextRetryAt` and `actions`: `resume` only when the prompt
+  is durable and can run, `cancel` always. No automatic retry is scheduled.
+- `detail` (the child's guidance line) and `promptId` (the queued prompt).
 
 Every `delegationUpdated` event carries `hold`: the hold while the status is
 `held`, `null` otherwise, so a live client sees a hold's reason, generation and
-actions change, and sees it clear. An admission running for the retained prompt
-(a resume, or an automatic retry) takes precedence over the earlier hold: the
-attempt reports `queued` while it admits, and a wait judged meanwhile is not
-woken for attention. The UI's own polling wait ends the same way, with outcome
+actions change, and sees it clear. A prompt being handed to the provider (a
+resume) takes precedence over the earlier hold: the attempt reports `queued`
+while it is handed over, and a wait judged meanwhile is not woken for
+attention. The UI's own polling wait ends the same way, with outcome
 `attentionRequired` and the held children listed apart from the completed ones;
 until it ends it keeps refreshing held children, because a hold can clear while a
 sibling still runs. A resume's `turn` reports the resumed turn's own delivery
 outcome: `scheduled` while Codex Fast discovery still resolves before handing it
-over, `superseded` when nothing was promoted, `held` when the admission held it
+over, `superseded` when nothing was promoted, `held` when the prompt was held
 again; never one inferred from the child's status. A resume is bound to the
-exact retained prompt it checked, so a successor that a concurrent cancellation
-exposes is never admitted in its place. A wait counts a hold only while the
+exact queued prompt it checked, so a successor that a concurrent cancellation
+exposes is never sent in its place. A wait counts a hold only while the
 child still holds that same prompt, read from the child when the wait is
 judged, never from the stored hold alone. A refresh that announces a hold
 commits it together with the waits it satisfies and their parents' wakes. If
@@ -775,18 +772,15 @@ memory as the child's truth; every later refresh judges the delegation's waits
 again even when its hold did not change, so the wake is retried and delivered
 once.
 
-A `running` attempt whose child is admitting its prompt (an Engram admission is
-under way) reports `queued` until the provider receives it, and so does a
-follow-up still queued behind the child. A status read in that window never
-settles the delegation: a queued head admits before its promotion, while its
-child can read idle with no result, and that is not a finished turn. A safe resume
-(`POST /api/sessions/{parent}/delegations/{id}/resume`, MCP
+A `running` attempt whose child is handing its prompt to the provider reports
+`queued` until the provider receives it, and so does a follow-up still queued
+behind the child. A status read in that window never settles the delegation:
+its child can read idle with no result, and that is not a finished turn. A
+safe resume (`POST /api/sessions/{parent}/delegations/{id}/resume`, MCP
 `termal_resume_session`) is refused unless the hold offers `resume`. It resumes
-exactly the retained prompt through a fresh admission, and the delegation
-reports `queued`, then `running` once the provider runs, or `held` again. A hold
-whose delivery is unknown or that was stopped offers only cancellation, which
-is a real cancellation of the delegation. Automatic retry of a deferred
-admission belongs to the common recovery contract, not to this status.
+exactly the queued prompt, and the delegation reports `queued`, then `running`
+once the provider runs, or `held` again. A hold whose delivery is unknown
+offers only cancellation, which is a real cancellation of the delegation.
 
 ### 2. Run
 
@@ -1371,8 +1365,7 @@ Receipt `notificationDisposition` is the immutable original dispatch outcome:
 `deliveredToIdleSession`, `queuedBehindActiveTurn`, `heldBehindPausedQueue`
 (no turn runs and the target's queue is paused, see
 [agent mailboxes](agent-mailboxes.md#dispatch-outcome-versus-notification-state)),
-`waitingForAutomaticRetry` (the pause is a due automatic Engram retry that
-clears by itself), `waitingForProviderCapacity`, or `durableButNotWoken`;
+`waitingForProviderCapacity`, or `durableButNotWoken`;
 durability does not depend on successful wake delivery.
 Mailbox reads expose the evolving wake lifecycle separately as
 `notificationState`, which can additionally be `recoveredWake` and can advance

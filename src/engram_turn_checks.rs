@@ -1,22 +1,6 @@
-// Checks a mediated turn ran, as TermAl saw them, and the verification and
-// environment evidence the checkpoint that closes the turn reports for them
-// (Engram w-108a13d58018 criterion 2, tm-winf step 2). Owns the evidence
-// wire types, the turn report that carries them beside the observations, the
-// check lifecycle the recorder hooks drive (start, description, end,
-// abandonment), the per-check source snapshots and their capture workers,
-// the overlap marks kept on the record and the worktrees writers may write
-// in, the environment fingerprint, and the assembly of a turn's report in
-// feed order. Does not own command recognition and what an end may claim
-// (`engram_check_recognition.rs`), where a command ran and which worktree a
-// check tested (`engram_check_paths.rs`), the toolchain label
-// (`engram_check_toolchain.rs`), the checkpoint request and its lifecycle
-// (`engram_host_adapter.rs`), the turn's own observation and the report
-// cache (`engram_turn_observations.rs`), or the runtimes' event parsing
-// (`claude.rs`, `codex_app_requests.rs`, `codex_events.rs`, `acp.rs`), which
-// only hand over what a command's end said. New fragment beside
-// `engram_host_adapter.rs`, created instead of growing it.
-
-include!("engram_launch_diagnostics.rs");
+// Ordinary command start/end facts, source snapshots, overlap fences and
+// runtime provenance. Generic observations remain uncredited; explicit native
+// registration owns verification evidence and its producer receipts.
 
 #[cfg(test)]
 thread_local! {
@@ -37,50 +21,6 @@ fn engram_command_started_at() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-/// Everything one checkpoint reports about the turn it closes: the turn's
-/// observations in feed order, and the verification and environment evidence
-/// minted from them. Sent as the request's own three lists, each left out
-/// when empty, and cached per grant so every retry repeats it verbatim.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramTurnReport {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    observations: Vec<EngramExecutionObservationInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    verification_evidence: Vec<EngramVerificationEvidenceInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    environment_evidence: Vec<EngramEnvironmentEvidenceInput>,
-}
-
-impl EngramTurnReport {
-    fn is_empty(&self) -> bool {
-        self.observations.is_empty()
-            && self.verification_evidence.is_empty()
-            && self.environment_evidence.is_empty()
-    }
-}
-
-/// Engram mints one typed verification record from a producer observation in
-/// the same request. It derives the result from that observation's outcome,
-/// the check fingerprint from its action fingerprint, and the source basis
-/// and time from it too; the host adds only the classification and text.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramVerificationEvidenceInput {
-    producer_observation: EngramObservationReference,
-    check_kind: EngramVerificationKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    environment: Option<EngramEnvironmentReference>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    refs: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum EngramObservationReference {
-    ObservationId { observation_id: String },
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EngramVerificationKind {
@@ -97,96 +37,11 @@ impl EngramVerificationKind {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum EngramEnvironmentReference {
-    Index { index: usize },
-}
-
-/// The environment one check ran in, on the check's own run and source
-/// revision. Engram recomputes the fingerprint from the components and
-/// refuses a mismatch.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramEnvironmentEvidenceInput {
-    source_basis: EngramExecutionSourceBasis,
-    environment_fingerprint: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    components: Option<EngramEnvironmentComponents>,
-    observed_at: String,
-}
-
-/// Asserted labels, never credentials: the toolchain that ran the check, the
-/// workspace, and the capability map revision the session was bound with.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramEnvironmentComponents {
-    toolchain: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    sandbox: Option<String>,
-    workspace_id: String,
-    capability_map_revision: i64,
-}
-
-/// At most this many checks are reported per turn, the latest kept: Engram
-/// takes at most sixteen verification records per checkpoint, and a check
-/// adds up to two observations to its limit of sixty-four.
+// Bounds shared by actual command facts and explicit registered verification.
 const ENGRAM_TURN_CHECK_LIMIT: usize = 16;
-/// Engram takes at most four environment records per checkpoint; a check
-/// past them is reported without one, which an unpinned requirement allows.
-const ENGRAM_TURN_ENVIRONMENT_LIMIT: usize = 4;
-/// Engram's bound on a verification summary.
+#[cfg(test)]
 const ENGRAM_CHECK_SUMMARY_MAX_BYTES: usize = 4096;
-/// Engram's bound on one verification reference.
 const ENGRAM_CHECK_REF_MAX_BYTES: usize = 1024;
-/// Engram's bound on one environment component label.
-const ENGRAM_ENVIRONMENT_LABEL_MAX_BYTES: usize = 256;
-/// The environment components of one check, or `None` when a label would
-/// break Engram's bounds: each is trimmed, non-empty and at most 256 bytes,
-/// and `workspace_id` must equal the basis root, so a longer root leaves the
-/// check without environment evidence, which an unpinned requirement allows.
-fn engram_environment_components(
-    toolchain: &str,
-    sandbox: Option<&str>,
-    workspace_id: &str,
-) -> Option<EngramEnvironmentComponents> {
-    let label = |value: &str| {
-        let value = value.trim();
-        (!value.is_empty() && value.len() <= ENGRAM_ENVIRONMENT_LABEL_MAX_BYTES)
-            .then(|| value.to_owned())
-    };
-    if workspace_id.trim() != workspace_id {
-        return None;
-    }
-    Some(EngramEnvironmentComponents {
-        toolchain: label(toolchain)?,
-        sandbox: match sandbox {
-            Some(sandbox) => Some(label(sandbox)?),
-            None => None,
-        },
-        workspace_id: label(workspace_id)?,
-        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-    })
-}
-
-/// The environment fingerprint Engram recomputes: the SHA-256 of the RFC 8785
-/// canonical JSON of the components, members in key order with no
-/// whitespace. The members are strings and one integer, whose canonical
-/// forms are serde_json's.
-fn engram_environment_fingerprint(components: &EngramEnvironmentComponents) -> String {
-    let string = |value: &str| serde_json::to_string(value).expect("a string serializes");
-    let mut canonical = format!(
-        "{{\"capability_map_revision\":{}",
-        components.capability_map_revision
-    );
-    if let Some(sandbox) = &components.sandbox {
-        canonical.push_str(&format!(",\"sandbox\":{}", string(sandbox)));
-    }
-    canonical.push_str(&format!(
-        ",\"toolchain\":{},\"workspace_id\":{}}}",
-        string(&components.toolchain),
-        string(&components.workspace_id)
-    ));
-    sha256_hex(canonical.as_bytes())
-}
 
 /// Something a check captures on its own thread, so a runtime's event reader
 /// is never held up by the processes it spawns: a source snapshot
@@ -208,6 +63,7 @@ type EngramBasisCapture = EngramCapture<Option<EngramExecutionSourceBasis>>;
 
 /// A toolchain label (`engram_toolchain_label`), or `None` when TermAl
 /// cannot name the toolchain.
+#[cfg(test)]
 type EngramToolchainCapture = EngramCapture<Option<String>>;
 
 /// At most this many capture workers of one session run at once
@@ -241,12 +97,12 @@ thread_local! {
 
 /// The toolchain label of the check `command` run in `directory`, taken on
 /// its own thread counted in `workers`.
+#[cfg(test)]
 fn engram_spawn_toolchain_capture(
     command: EngramCheckCommand,
     directory: PathBuf,
     workers: &Arc<std::sync::atomic::AtomicUsize>,
 ) -> Arc<EngramToolchainCapture> {
-    #[cfg(test)]
     if let Some(label) = TEST_ENGRAM_TOOLCHAIN_LABEL.with(|label| label.borrow().clone()) {
         return EngramToolchainCapture::settled(label);
     }
@@ -356,11 +212,11 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
     }
 }
 
-/// A test the agent ran during the turn `grant_id` mediates, as TermAl saw it
+/// A test the agent ran during the turn `host_turn_ref` mediates, as TermAl saw it
 /// start and end.
 #[derive(Clone, Debug)]
 struct EngramTurnCheck {
-    grant_id: String,
+    host_turn_ref: String,
     key: String,
     /// The check's place in the turn, which keeps its observation ids unique
     /// even when a runtime reuses a key (Codex falls back to the command).
@@ -377,6 +233,7 @@ struct EngramTurnCheck {
     /// the command ran in, whose toolchain overrides chose what it ran with
     /// (`engram_toolchain_label`), so a toolchain file edited after the check
     /// cannot relabel it.
+    #[cfg(test)]
     toolchain: Arc<EngramToolchainCapture>,
     started_at: String,
     /// Its start's point in the watcher order (`engram_watcher_order_tick`),
@@ -386,6 +243,7 @@ struct EngramTurnCheck {
     started_order: Option<u64>,
     /// The Codex sandbox mode the turn ran under, when known. Other
     /// runtimes' approval modes are not sandboxes, so they have none.
+    #[cfg(test)]
     sandbox: Option<String>,
     start_basis: Arc<EngramBasisCapture>,
     /// Another command of the same agent that may write in the check's
@@ -442,23 +300,28 @@ struct EngramTurnCheck {
 
 #[derive(Clone, Debug)]
 struct EngramTurnCheckEnd {
-    completed_at: String,
+    #[cfg(test)]
     exit: EngramCommandExit,
     /// Build, or focused Node Test, ingress/rejection facts, never used as
     /// eligible exit references.
+    #[cfg(test)]
     build_diagnostic: Option<EngramBuildDiagnostic>,
     /// The runner's result lines (`engram_check_result_lines`).
+    #[cfg(test)]
     result_lines: Vec<String>,
     /// The result lines show at least one test passed
     /// (`engram_check_showed_passing_tests`); without that a check cannot
     /// claim success.
+    #[cfg(test)]
     showed_passing_tests: bool,
     /// A focused launcher run whose records back a pass but whose summary
     /// has no `focused:` stage line (`engram_focused_stage_line_missing`).
+    #[cfg(test)]
     focused_stage_line_missing: bool,
     /// A launcher run whose own terminal record says it ran no stage
     /// (`engram_launcher_output_ran_no_stage`): its failed exit is no test's
     /// failure, so the check ends unknown (`engram_check_end_outcome`).
+    #[cfg(test)]
     launcher_ran_no_stage: bool,
     end_basis: Arc<EngramBasisCapture>,
     /// A declared check's result, judged from its artifact on its own thread
@@ -467,63 +330,9 @@ struct EngramTurnCheckEnd {
     declared: Option<Arc<EngramCapture<EngramDeclaredResult>>>,
 }
 
-/// A finished check with its snapshots resolved, ready for the report.
-struct EngramResolvedCheck {
-    check: EngramTurnCheck,
-    end: EngramTurnCheckEnd,
-    outcome: EngramExecutionOutcome,
-    basis: EngramExecutionSourceBasis,
-    /// The toolchain that ran the check, or `None` when TermAl cannot say
-    /// (`engram_toolchain_label`); the check then has no environment
-    /// evidence.
-    toolchain: Option<String>,
-    /// The check's own command ended successfully, whatever `outcome` became
-    /// after an overlap or missing passing-test evidence downgraded it
-    /// (`engram_withhold_unjudged_successes`); also set for a declared check
-    /// whose result is UNKNOWN, which is withheld whatever its exit.
-    ran_successfully: bool,
-}
-
-/// Why a check whose command ended successfully is withheld from the report
-/// (`engram_withhold_unjudged_successes`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramWithheldReason {
-    /// Another command, an edit or another writable session reached its
-    /// worktree while it was open to writes.
-    Overlapped,
-    /// Its output showed no passing test.
-    NoPassingTest,
-    /// A focused launcher run whose records back a pass, but whose summary
-    /// has no `focused:` stage line to credit it by.
-    FocusedStageLineMissing,
-    /// The runtime omitted output and the supplied part showed no pass.
-    RuntimeOutputCut,
-    /// Claude work with no verified completion restricted it.
-    OutstandingClaudeWork,
-    /// A declared check whose result is UNKNOWN, for its observed reason.
-    Declared,
-}
-
-/// A check the report leaves out, with why, for the log and for the line its
-/// holder gets before the next prompt (`engram_withheld_check_line`).
-#[derive(Clone, Debug)]
-struct EngramWithheldCheck {
-    kind: EngramVerificationKind,
-    program: String,
-    fingerprint: String,
-    reason: EngramWithheldReason,
-    /// What restricted it, for `OutstandingClaudeWork`.
-    cause: Option<ClaudeHazardCause>,
-    /// What overlapped it, for `Overlapped` (`EngramTurnCheck::overlap_cause`).
-    overlap_cause: Option<String>,
-    /// Why a declared check is UNKNOWN, for `Declared`.
-    declared_reason: Option<String>,
-}
-
 /// A declared check's result as its end captured it, or `None` for a
-/// built-in check. One still being read is UNKNOWN: resolution waits for it
-/// first (`engram_resolve_turn_checks`), so only one that missed that wait
-/// reads so.
+/// built-in check. A capture still in progress is UNKNOWN at this read.
+#[cfg(test)]
 fn engram_declared_result_of(end: &EngramTurnCheckEnd) -> Option<EngramDeclaredResult> {
     end.declared.as_ref().map(|capture| {
         capture
@@ -541,6 +350,7 @@ fn engram_declared_result_of(end: &EngramTurnCheckEnd) -> Option<EngramDeclaredR
 
 /// Why a declared check ended UNKNOWN, or `None` for a built-in check or a
 /// declared one that passed or failed.
+#[cfg(test)]
 fn engram_declared_unknown_reason(end: &EngramTurnCheckEnd) -> Option<String> {
     match engram_declared_result_of(end).map(|result| result.verdict) {
         Some(EngramTrxVerdict::Unknown(reason)) => Some(reason),
@@ -548,121 +358,7 @@ fn engram_declared_unknown_reason(end: &EngramTurnCheckEnd) -> Option<String> {
     }
 }
 
-/// Takes out of `resolved` every check whose command ended successfully but
-/// which the report could only send as unknown: it overlapped a write, or its
-/// output showed no passing test. Engram judges an item's bound criterion by
-/// the newest verification of its kind, and counts an indeterminate one as
-/// not passed, so sending it would hide an earlier pass at the same revision
-/// without saying anything the host can judge. A check whose command failed
-/// stays, overlapped or not: withheld, it would leave an older pass the
-/// newest record. A pass still counts only at the root's newest revision, so
-/// a withheld record cannot keep a stale one alive.
-fn engram_withhold_unjudged_successes(
-    resolved: &mut Vec<EngramResolvedCheck>,
-) -> Vec<EngramWithheldCheck> {
-    let mut withheld = Vec::new();
-    resolved.retain(|kept| {
-        if !kept.ran_successfully || kept.outcome != EngramExecutionOutcome::Unknown {
-            return true;
-        }
-        withheld.push(EngramWithheldCheck {
-            kind: kept.check.command.kind,
-            program: kept.check.command.program.clone(),
-            fingerprint: engram_check_fingerprint(&kept.check.command),
-            reason: if kept.check.fenced_by_outstanding.is_some() {
-                EngramWithheldReason::OutstandingClaudeWork
-            } else if kept.check.overlapped {
-                EngramWithheldReason::Overlapped
-            } else if engram_declared_unknown_reason(&kept.end).is_some() {
-                EngramWithheldReason::Declared
-            } else if kept.check.command.kind == EngramVerificationKind::Test
-                && kept.check.runtime_output_cut {
-                EngramWithheldReason::RuntimeOutputCut
-            } else if kept.end.focused_stage_line_missing {
-                EngramWithheldReason::FocusedStageLineMissing
-            } else {
-                EngramWithheldReason::NoPassingTest
-            },
-            cause: kept.check.fenced_by_outstanding.clone(),
-            overlap_cause: kept.check.overlap_cause.clone(),
-            declared_reason: engram_declared_unknown_reason(&kept.end),
-        });
-        false
-    });
-    withheld
-}
-
-/// The line the holder of a withheld check gets before its next prompt,
-/// naming the test by program and fingerprint as the log does: the command
-/// line itself can carry a secret.
-fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
-    if withheld.reason == EngramWithheldReason::RuntimeOutputCut {
-        return format!(
-            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned \
-             no credit and was not recorded: the runtime cut the output before any passing \
-             summary was available. For cargo tests, use cargo test -q to keep the output \
-             small enough to retain the summary.",
-            withheld.program, withheld.kind.label(), withheld.fingerprint
-        );
-    }
-    if withheld.reason == EngramWithheldReason::OutstandingClaudeWork {
-        let cause = withheld
-            .cause
-            .as_ref()
-            .unwrap_or(&ClaudeHazardCause::OwnSession)
-            .describe();
-        return format!(
-            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned \
-             no credit and was not recorded: {cause}. Running it again there, stopping or \
-             deleting a session, or starting a fresh one in the same workspace does not change \
-             that; it can earn credit once Claude reports that work ended.",
-            withheld.program, withheld.kind.label(), withheld.fingerprint
-        );
-    }
-    if withheld.reason == EngramWithheldReason::FocusedStageLineMissing {
-        return format!(
-            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned \
-             no credit and was not recorded: its launcher's run records back a pass, but its \
-             summary has no `focused: passed` stage line, which TermAl reads before it credits a \
-             focused launcher run. Running it again does not change that; the launcher must \
-             print that line.",
-            withheld.program, withheld.kind.label(), withheld.fingerprint
-        );
-    }
-    if withheld.reason == EngramWithheldReason::Declared {
-        return format!(
-            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} Declared test command earned no credit and was \
-             not recorded: UNKNOWN, {}: a {} test (check {}). Check the declaration or the \
-             artifact and run it again.",
-            withheld.declared_reason.as_deref().unwrap_or("no result"),
-            withheld.program,
-            withheld.fingerprint
-        );
-    }
-    let why = match withheld.reason {
-        EngramWithheldReason::Overlapped => format!(
-            "another command, an edit or another writable session reached its worktree while it \
-             ran{}",
-            engram_overlap_cause_suffix(withheld.overlap_cause.as_deref())
-        ),
-        EngramWithheldReason::NoPassingTest => "its output shows no passing test".to_owned(),
-        EngramWithheldReason::OutstandingClaudeWork => unreachable!("told above"),
-        EngramWithheldReason::RuntimeOutputCut => unreachable!("told above"),
-        EngramWithheldReason::Declared => unreachable!("told above"),
-        EngramWithheldReason::FocusedStageLineMissing => unreachable!("told above"),
-    };
-    format!(
-        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) ended successfully but earned no \
-         credit and was not recorded: {why}. Run it again on its own to record it.",
-        withheld.program, withheld.kind.label(), withheld.fingerprint
-    )
-}
-
-/// Another command `key` of the check's session, as a cause names it: never
-/// the check's own command, which cannot overlap itself, and by a digest of
-/// the key, never the key itself, since a runtime that gives no id keys a
-/// command by its whole line (`codex_app_requests.rs`), which can carry a
-/// secret.
+/// A bounded identity for another command, without exposing its raw tool key.
 fn engram_session_command_label(key: &str) -> String {
     format!(
         "another command of this session (key {})",
@@ -763,7 +459,7 @@ struct EngramUnendedClosure {
 /// At most this many closures are kept for late ends, newest last.
 const ENGRAM_UNENDED_CLOSURE_LIMIT: usize = ENGRAM_TURN_CHECK_LIMIT;
 
-/// Closes, with outcome Unknown, each live check of `grant_id` (of any grant
+/// Closes, with outcome Unknown, each live check of `host_turn_ref` (of any grant
 /// when `None`) whose start the host saw but whose end was never reported
 /// (a runtime that lost the command's completion), as `boundary` drops the
 /// live checks, and returns the holder lines that say so. A background run's
@@ -772,12 +468,12 @@ const ENGRAM_UNENDED_CLOSURE_LIMIT: usize = ENGRAM_TURN_CHECK_LIMIT;
 /// (`engram_late_end_line`). Runs only at a turn boundary: no timer.
 fn engram_close_unended_checks(
     engram: &mut EngramSessionState,
-    grant_id: Option<&str>,
+    host_turn_ref: Option<&str>,
     boundary: &str,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     for check in &engram.active_turn_checks {
-        if check.end.is_some() || grant_id.is_some_and(|grant| grant != check.grant_id) {
+        if check.end.is_some() || host_turn_ref.is_some_and(|grant| grant != check.host_turn_ref) {
             continue;
         }
         lines.push(engram_unrecorded_check_line(
@@ -853,151 +549,6 @@ fn engram_check_label(command: &EngramCheckCommand) -> String {
     )
 }
 
-/// The checks of `grant_id` that can be reported, with their snapshots
-/// waited for until `deadline`: finished, ending in a result that marks the
-/// end, and taken on one unchanged source revision. A check whose snapshots
-/// are missing or differ is withheld, and logged: the source moved while it
-/// ran, so its result belongs to no one revision. Each kept check carries
-/// the toolchain label it captured as it started, waited for until
-/// `deadline` too.
-#[cfg(test)]
-fn engram_resolve_turn_checks(
-    session_id: &str,
-    grant_id: &str,
-    checks: Vec<EngramTurnCheck>,
-    deadline: std::time::Instant,
-) -> Vec<EngramResolvedCheck> {
-    engram_resolve_turn_checks_with_notices(session_id, grant_id, checks, deadline).0
-}
-
-/// Resolves checks off-lock and retains the source-capture refusal lines
-/// for publication only after the caller revalidates the owning grant.
-/// A late capture never changes the refused check into passing evidence.
-fn engram_resolve_turn_checks_with_notices(
-    session_id: &str,
-    grant_id: &str,
-    checks: Vec<EngramTurnCheck>,
-    deadline: std::time::Instant,
-) -> (Vec<EngramResolvedCheck>, Vec<String>) {
-    let mut resolved = Vec::new();
-    let mut notices = Vec::new();
-    for check in checks {
-        if check.grant_id != grant_id {
-            continue;
-        }
-        let Some(mut end) = check.end.clone() else {
-            continue;
-        };
-        // A declared check is judged from its artifact
-        // (`engram_declared_result`), never from its output; its reading is
-        // waited for until `deadline`, as the snapshots are, and settled.
-        if let Some(capture) = &end.declared {
-            capture.wait_until(deadline);
-            end.declared = engram_declared_result_of(&end).map(EngramCapture::settled);
-        }
-        let Some(outcome) = (match engram_declared_result_of(&end) {
-            Some(result) => engram_declared_outcome(end.exit, &result),
-            None => engram_check_end_outcome(&check.command, &end),
-        }) else {
-            continue;
-        };
-        let start = check.start_basis.wait_until(deadline);
-        let finish = end.end_basis.wait_until(deadline);
-        let basis = match (start, finish) {
-            (Some(Some(start)), Some(Some(finish))) if start == finish => start,
-            (start, finish) => {
-                let cause = match (start, finish) {
-                    (None, _) => {
-                        "its start source snapshot was still pending at the settlement deadline"
-                    }
-                    (Some(None), _) => "its start source snapshot could not be captured",
-                    (_, None) => {
-                        "its finish source snapshot was still pending at the settlement deadline"
-                    }
-                    (_, Some(None)) => "its finish source snapshot could not be captured",
-                    _ => "its source snapshots differ, so the result belongs to no single revision",
-                };
-                notices.push(engram_unrecorded_check_line(
-                    &check.command,
-                    &format!(
-                        "{cause}; run it again on an unchanged source once capture work has finished"
-                    ),
-                ));
-                // Named by program and fingerprint: the command line itself can
-                // carry a secret, and it goes to Engram only in the report.
-                eprintln!(
-                    "engram> session={session_id} {} check {} is not reported: its source \
-                     snapshots are missing or changed while it ran",
-                    check.command.program,
-                    engram_check_fingerprint(&check.command)
-                );
-                continue;
-            }
-        };
-        // Success needs positive evidence that tests ran and passed; an
-        // overlapped check may have run on content no snapshot saw. A
-        // declared check's UNKNOWN is withheld with its reason whatever its
-        // exit, and its PASS rests on its artifact, not its output.
-        let ran_successfully = outcome == EngramExecutionOutcome::Succeeded
-            || engram_declared_unknown_reason(&end).is_some();
-        let outcome = if check.overlapped
-            || (check.command.kind == EngramVerificationKind::Test
-                && outcome == EngramExecutionOutcome::Succeeded
-                && end.declared.is_none()
-                && !end.showed_passing_tests)
-        {
-            EngramExecutionOutcome::Unknown
-        } else {
-            outcome
-        };
-        resolved.push(EngramResolvedCheck {
-            check,
-            end,
-            outcome,
-            basis,
-            toolchain: None,
-            ran_successfully,
-        });
-    }
-    let excess = resolved.len().saturating_sub(ENGRAM_TURN_CHECK_LIMIT);
-    resolved.drain(..excess);
-    for kept in &mut resolved {
-        kept.toolchain = kept.check.toolchain.wait_until(deadline).flatten();
-    }
-    (resolved, notices)
-}
-
-/// Finished commands that arrived after the off-lock copy cannot be judged
-/// from that copy. Account them before the live checks are cleared, without
-/// waiting for captures under the state lock or changing the report on retry.
-/// The caller publishes these lines only under a fresh checkpoint claim for
-/// the same grant; key and sequence together distinguish reused runtime keys.
-fn engram_check_settlement_notices(
-    grant_id: &str,
-    captured_ends: &[(String, usize)],
-    live: &[EngramTurnCheck],
-) -> Vec<String> {
-    live.iter()
-        .filter(|check| {
-            check.grant_id == grant_id
-                && check
-                    .end
-                    .as_ref()
-                    .is_some_and(|end| end.exit != EngramCommandExit::NotFinished)
-                && !captured_ends
-                    .iter()
-                    .any(|(key, sequence)| key == &check.key && *sequence == check.sequence)
-        })
-        .map(|check| {
-            engram_unrecorded_check_line(
-                &check.command,
-                "its completion arrived during closing settlement after the checks were \
-                 copied; run it again on its own in a new turn to record it",
-            )
-        })
-        .collect()
-}
-
 /// Publish only after the caller accepts this notice for the live owner.
 /// The bounded prompt line can discard older notices; its host-log fallback
 /// must retain each complete redacted identity and cause before that merge.
@@ -1009,32 +560,6 @@ fn engram_publish_check_notice(
 ) {
     let _ = writeln!(log, "engram> session={session_id} {line}");
     engram.set_pending_source_root_line(line);
-}
-
-/// Carries into `resolved` the overlap marks the live records of its checks
-/// gained after they were copied for resolution: the snapshots were waited
-/// for off the lock, and a write another session reported meanwhile marked
-/// the live record, not the copy.
-fn engram_merge_live_overlaps(live: &[EngramTurnCheck], resolved: &mut [EngramResolvedCheck]) {
-    for resolved in resolved {
-        let Some(check) = live.iter().find(|check| {
-            check.grant_id == resolved.check.grant_id && check.sequence == resolved.check.sequence
-        }) else {
-            continue;
-        };
-        if check.overlapped {
-            resolved.check.overlapped = true;
-            if resolved.check.overlap_cause.is_none() {
-                resolved.check.overlap_cause = check.overlap_cause.clone();
-            }
-            resolved.outcome = EngramExecutionOutcome::Unknown;
-        }
-        // A cause Claude work stored meanwhile goes with it, so the report
-        // published now names why (`claude_outstanding_work.rs`).
-        if resolved.check.fenced_by_outstanding.is_none() {
-            resolved.check.fenced_by_outstanding = check.fenced_by_outstanding.clone();
-        }
-    }
 }
 
 /// Whether the session at `index` may write: a read-only delegation child
@@ -1152,9 +677,8 @@ fn engram_command_worktrees(
 fn engram_turn_named_root_key(record: &SessionRecord) -> Option<String> {
     record
         .engram
-        .active_turn_source_root
-        .as_ref()
-        .filter(|_| record.engram.active_grant_id.is_some())
+        .observed_source_root()
+        .filter(|_| runtime_observation_check_owner(record).is_some())
         .map(|turn_root| engram_path_key(FsPath::new(&turn_root.root)))
 }
 
@@ -1240,6 +764,13 @@ fn engram_note_turn_started(inner: &mut StateInner, index: usize) {
         .engram
         .running_command_worktrees
         .retain(|(key, _)| outstanding.holds(key));
+    // Every running command known now belongs to an earlier turn: this one
+    // has sent none yet. Its start forgets them, as a turn's start always
+    // did. Work that may outlive its turn keeps its own owner and end:
+    // outstanding Claude work, carried checks and running Codex tests.
+    record.engram.running_command_keys.clear();
+    record.engram.withheld_command_keys.clear();
+    record.engram.uncredited_command_notice_keys.clear();
     engram_mark_checks_overlapped_by(inner, index, EngramWriterAct::Presence);
 }
 
@@ -1599,23 +1130,150 @@ impl EngramTurnCheck {
 fn engram_has_open_check(record: &SessionRecord) -> bool {
     let engram = &record.engram;
     engram.active_turn_checks.iter().any(|check| {
-        engram.active_grant_id.as_deref() == Some(check.grant_id.as_str()) && check.open_to_writes()
+        runtime_observation_check_owner(record) == Some(check.host_turn_ref.as_str()) && check.open_to_writes()
     }) || engram
         .carried_checks
         .iter()
         .any(|carried| carried.fence.is_none())
 }
 
+// Other claims are read only to explain command placement. This snapshot
+// owns no turn admission or evidence and cannot delay provider delivery.
+struct EngramOtherRootNoticeRead {
+    target: EngramBindingTarget,
+    roots: Vec<EngramWorkSourceRoot>,
+    host_turn_ref: String,
+    turn_generation: u64,
+    runtime: Option<RuntimeToken>,
+}
+
+impl EngramOtherRootNoticeRead {
+    fn capture(inner: &StateInner, index: usize) -> Option<Self> {
+        let record = &inner.sessions[index];
+        let session_id = &record.session.id;
+        if AppState::engram_session_has_child_binding_shape_locked(inner, session_id) {
+            return None;
+        }
+        let host_turn_ref = runtime_observation_check_owner(record)?.to_owned();
+        let target = AppState::engram_source_root_target_locked(inner, session_id).ok()??;
+        let store = target.settings.authority_store_key.as_ref()?;
+        let binding = target.work_binding.as_ref()?;
+        let roots: Vec<_> = inner.engram_work_source_roots.iter().filter(|entry| {
+            entry.store == *store && entry.named_by_session == *session_id
+                && (entry.work_id != binding.work_id || entry.claim_id != binding.claim_id)
+        }).cloned().collect();
+        if roots.is_empty() { return None; }
+        Some(Self { target, roots, host_turn_ref,
+            turn_generation: record.active_turn_generation,
+            runtime: record.runtime.runtime_token() })
+    }
+
+    fn read(&self) -> Vec<EngramWorkSourceRoot> {
+        let held = self.target.adapter.read_held_claims(&self.target.connection,
+            self.target.settings.call_timeout().min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT));
+        let Ok(held) = held else { return Vec::new(); };
+        self.roots.iter().filter(|entry| held.items.iter().any(|claim| {
+            claim.work_id == entry.work_id && claim.claim_id == entry.claim_id
+        })).cloned().collect()
+    }
+
+    fn is_current(&self, inner: &StateInner, index: usize) -> bool {
+        let record = &inner.sessions[index];
+        record.active_turn_generation == self.turn_generation
+            && record.runtime.runtime_token() == self.runtime
+            && runtime_observation_check_owner(record) == Some(self.host_turn_ref.as_str())
+            && AppState::engram_source_root_target_locked(inner, &record.session.id)
+                .ok().flatten().is_some_and(|current| {
+                    current.connection == self.target.connection
+                        && current.project_id == self.target.project_id
+                        && current.work_binding == self.target.work_binding
+                        && current.settings.same_work_service_settings(&self.target.settings)
+                })
+    }
+}
+
+// A command's reported location is a fact, separate from whether its arguments
+// and claimed source make it eligible for a check. Every reported candidate
+// must identify the same exact Git worktree; no claim or later named root is
+// a substitute for missing location information. This read runs off the lock.
+fn engram_observed_command_worktree(
+    command: &EngramCheckCommand,
+    workdir: &str,
+    directories: Option<&[Option<String>]>,
+) -> Option<PathBuf> {
+    let one_call;
+    let candidates = if let Some(directory) = command.directory.as_ref() {
+        one_call = [Some(engram_resolve_shell_move(None, directory)?)];
+        &one_call[..]
+    } else {
+        directories?
+    };
+    let mut observed: Option<PathBuf> = None;
+    for directory in candidates {
+        let resolved =
+            engram_resolve_shell_move(Some(workdir), directory.as_deref().unwrap_or(workdir))?;
+        let root = engram_worktree_root_path(FsPath::new(&resolved));
+        if !root.join(".git").exists()
+            || observed.as_ref().is_some_and(|prior| {
+                engram_exact_path_key(prior) != engram_exact_path_key(&root)
+            })
+        {
+            return None;
+        }
+        observed = Some(root);
+    }
+    observed
+}
+
 impl AppState {
+    // Recover only this invocation's original facts, before a first delayed
+    // description consumes its saved start. A description without a start
+    // creates nothing. An existing EO row's empty credit worktree must never
+    // be filled from a later claim, session location or named root.
+    fn observed_full_launch_location(
+        &self,
+        origin: &TestRunCommandOrigin,
+        command: Option<&EngramCheckCommand>,
+        cwd: Option<&str>,
+        fresh: Option<(&str, Option<&[Option<String>]>, &str)>,
+    ) -> Option<(PathBuf, String)> {
+        let command = command.filter(|command| engram_check_is_launcher_full(command))?;
+        let id = origin.execution_id();
+        let (workdir, directories, started_at) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(pending) = inner.test_runs.unclassified_commands.get(&id) {
+                (
+                    pending.workdir.clone(),
+                    cwd.map(|directory| vec![Some(directory.to_owned())])
+                        .or_else(|| pending.directories.clone()),
+                    pending.started_at.clone(),
+                )
+            } else if let Some(row) = inner.test_run_observations.get(&id) {
+                if row.command_fingerprint != EngramHost::check_fingerprint(command)
+                    || row.summary.ended_at.is_some() || row.summary.worktree.is_empty()
+                {
+                    return None;
+                }
+                return Some((PathBuf::from(&row.summary.worktree), row.summary.started_at.clone()?));
+            } else {
+                let (workdir, directories, at) = fresh?;
+                (workdir.to_owned(), directories.map(|places| places.to_vec()), at.to_owned())
+            }
+        };
+        engram_observed_command_worktree(command, &workdir, directories.as_deref())
+            .map(|root| (root, started_at))
+    }
+
     /// A command started in `session_id`: `ran` is the command line the
     /// runtime says runs, when it says, and `cwd` where, when it says. While
-    /// a mediated turn runs on claimed work, a recognised test of the
-    /// session's own worktree (`engram_check_worktree`) starts a check, with
-    /// its source snapshot taken at once on its own thread, and a command
-    /// that may write in a check's worktree marks that check, while still
+    /// an ordinary observation owns the turn and its claimed source, a
+    /// recognised test of the session's worktree (`engram_check_worktree`)
+    /// starts a check, with its source snapshot taken at once on its own
+    /// thread, and a command that may write in a check's worktree marks that check, while still
     /// open to writes, as overlapped (`engram_mark_own_checks_for_command`):
     /// one that only reads, or runs in another worktree, does not. Outside
-    /// such a turn there is nothing to report and nothing is kept.
+    /// that source owner the execution still has its ordinary factual record,
+    /// but no source snapshots or verification authority are invented.
     ///
     /// A runtime may start the same command more than once (ACP reports
     /// pending, then in progress), giving what it runs or where only in one
@@ -1646,7 +1304,8 @@ impl AppState {
         // readers supply Ambient provenance, which establishes no dialect.
         let dialect = match provenance {
             EngramObservationProvenance::Claude(_) => EngramShellDialect::Bash,
-            EngramObservationProvenance::Ambient => EngramShellDialect::Unknown,
+            EngramObservationProvenance::Ambient
+            | EngramObservationProvenance::Runtime { .. } => EngramShellDialect::Unknown,
         };
         let recognised = ran.and_then(|ran| engram_check_command_in(ran, dialect));
         let unsupported_focused = recognised
@@ -1666,7 +1325,7 @@ impl AppState {
             workdir,
             credit_root,
             bound_work,
-            other_roots,
+            other_roots_read,
             runtime,
             reported,
             places,
@@ -1689,13 +1348,13 @@ impl AppState {
             // one (`claude_outstanding_work.rs`). Read here to resolve the
             // target off the lock; decided again under it below.
             let mediated = engram.work_binding.is_some()
-                && engram.active_grant_id.is_some()
+                && runtime_observation_check_owner(record).is_some()
                 && claude_observation_disposition(record, provenance)
                     == ClaudeObservationDisposition::Current;
             (
                 record.session.workdir.clone(),
                 // A turn whose claim names a source root credits tests there.
-                engram.active_turn_source_root.as_ref().map(|turn_root| {
+                engram.observed_source_root().map(|turn_root| {
                     (
                         PathBuf::from(&turn_root.root),
                         turn_root.common_dir_key.clone(),
@@ -1703,11 +1362,11 @@ impl AppState {
                 }),
                 engram.work_binding.as_ref().map(|binding| {
                     engram
-                        .active_turn_source_root
-                        .as_ref()
+                        .observed_source_root()
                         .map_or_else(|| binding.work_id.clone(), |root| root.short_ref.clone())
                 }),
-                engram.active_turn_other_source_roots.clone(),
+                (mediated && recognised.is_some())
+                    .then(|| EngramOtherRootNoticeRead::capture(&inner, index)).flatten(),
                 record.runtime.runtime_token(),
                 cwd.map(str::to_owned)
                     .or_else(|| engram.running_command_keys.get(key).cloned().flatten()),
@@ -1733,6 +1392,10 @@ impl AppState {
                 TestRunCommandOrigin::capture(&inner, index, provenance, key),
             )
         };
+        // This ordinary read belongs to command observation, after the
+        // command started. Failure only omits the optional placement notice.
+        let other_roots = other_roots_read.as_ref()
+            .map(EngramOtherRootNoticeRead::read).unwrap_or_default();
         if ran.is_none() {
             self.remember_unclassified_test_command(test_run_origin.clone(), workdir.clone(), started_at.clone(), places.clone());
         }
@@ -1750,13 +1413,6 @@ impl AppState {
         let worktrees = engram_command_worktrees(&workdir, &write_places, ran, loss.as_ref());
         let resolved_writers = engram_resolve_writer_worktrees(unresolved_writers);
         let mediated = started.is_some();
-        // This location is observation only, resolved without a claim's root
-        // authority. It cannot create a source snapshot or verification.
-        let diagnostic_root = recognised.as_ref()
-            .filter(|command| !mediated && engram_check_is_launcher_full(command))
-            .and_then(|command| {
-                engram_launch_diagnostic_root(command, &workdir, places.as_deref())
-            });
         // A line no built-in recognises may be a declared test command of the
         // worktree it runs in (`engram_declared_tests.rs`), bound here at its
         // start, off the lock. Only a worktree holding a declaration is read
@@ -1803,9 +1459,22 @@ impl AppState {
         // ACP may repeat a start when it first supplies command text. Consume
         // any saved original observation before considering a new start; this
         // does not create a retroactive check or borrow the current grant.
-        let has_original_start = self.observe_test_command_description(
+        let original_launch_location = self.observed_full_launch_location(
+            &test_run_origin, recognised.as_ref(), cwd, None,
+        );
+        let original_start = self.observe_test_command_description(
             session_id, provenance, key, ran, cwd,
         );
+        let has_original_start = original_start != TestCommandOriginalStart::None;
+        // An Ambient description may select an older or ambiguous original
+        // start. If the exact original was not recoverable above, do not
+        // substitute this frame's timestamp or current turn identity.
+        let launch_location = original_launch_location.or_else(|| {
+            (!has_original_start).then(|| self.observed_full_launch_location(
+                &test_run_origin, recognised.as_ref(), cwd,
+                Some((&workdir, places.as_deref(), &started_at)),
+            )).flatten()
+        });
         if let Some(command) = recognised.as_ref()
             .or_else(|| declared.as_ref().map(|(command, _, _)| command))
             .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command))
@@ -1878,6 +1547,7 @@ impl AppState {
                         )
                     })
                 });
+        let other_claim_notice = other_claim_line.is_some();
         let withheld_line = other_claim_line.map(EngramUncreditedLine::Placement).or_else(|| {
             if !mediated {
                 None
@@ -1920,7 +1590,11 @@ impl AppState {
         // Whether the session's grant may take this command, decided in the
         // section that applies it.
         let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
-        let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
+        let diagnostics_enabled = ordinary_runtime_observation_enabled(&inner, session_id);
+        let other_roots_current = other_roots_read.as_ref().is_some_and(|read| {
+            read.is_current(&inner, index)
+                && other_roots.iter().all(|entry| inner.engram_work_source_roots.contains(entry))
+        });
         // Any session's command may write, under a check another session
         // still has open in a worktree the command runs in.
         let record = inner
@@ -1964,6 +1638,7 @@ impl AppState {
             );
         }
         if disposition == ClaudeObservationDisposition::Current
+            && (!other_claim_notice || other_roots_current)
             && let Some(EngramUncreditedLine::Placement(line)) = withheld_line.as_ref()
         {
             record.engram.set_pending_source_root_line(line.clone());
@@ -1994,33 +1669,35 @@ impl AppState {
                 unplaced,
             },
         );
-        // A command the session's grant may not take has fenced and marked
-        // above like any other; it may also write under the session's own
-        // open checks, but it is attributed to no grant: no check starts, no
-        // running key is kept for it, and the live grant is excluded from it
+        // A foreign or unattributed command may write under the session's
+        // open checks, so it still marks overlap. It cannot start a check or
+        // claim a running key for the current ordinary observation owner
         // (`claude_outstanding_work.rs`).
+        // Recognition belongs to this existing start owner for every harness.
+        // An ordinary trace records the same facts without requiring a grant.
+        // A built-in recognition wins; otherwise the declaration bound at
+        // this start (with or without a claimed work binding) names the
+        // check, so its end finds the same entry.
+        let observed_command = recognised.as_ref()
+            .or_else(|| declared.as_ref().map(|(command, _, _)| command))
+            .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command));
+        let observed_declaration = declared.as_ref().map(|(_, _, binding)| binding)
+            .or_else(|| visibility_declared.as_ref().map(|(_, _, binding)| binding));
+        observe_runtime_unadmitted_recognized_command(
+            &mut inner.sessions[index], provenance,
+            &EngramRecorderObservation::CommandStarted { key, ran, cwd }, observed_command,
+            observed_declaration,
+        );
         if disposition != ClaudeObservationDisposition::Current {
             for check in &mut inner.sessions[index].engram.active_turn_checks {
                 if check.open_to_writes() {
                     check.note_overlap(|| {
                         format!(
-                            "{}, which its grant does not take, started",
+                            "{}, which its ordinary observation does not own, started",
                             engram_session_command_label(key)
                         )
                     });
                 }
-            }
-            if disposition == ClaudeObservationDisposition::Unowned {
-                // Recognition (including a declared-only test) has already
-                // happened off-lock at this command's actual start. Pass its
-                // facts to the adopted trace; do not introduce another parser.
-                let command = recognised.as_ref()
-                    .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command));
-                observe_runtime_unadmitted_recognized_command(
-                    &mut inner.sessions[index], provenance,
-                    &EngramRecorderObservation::CommandStarted { key, ran, cwd }, command,
-                    visibility_declared.as_ref().map(|(_, _, binding)| binding),
-                );
             }
             claude_exclude_observation(
                 &mut inner.sessions[index],
@@ -2031,38 +1708,37 @@ impl AppState {
             return;
         }
         let record = &mut inner.sessions[index];
-        if diagnostics_enabled {
-            engram_prune_launch_diagnostics(record);
+        if diagnostics_enabled
+            && record.runtime.runtime_token() == runtime
+            && record.active_turn_generation == turn_generation
+            && record.session.workdir == workdir
+            && (target.is_none() || record.engram.work_binding.is_none()
+                || runtime_observation_check_owner(record).is_none())
+            && let Some((root, original_start)) = launch_location
+        {
+            // Location uncertainty excludes a later invocation from taking
+            // this run. It never supplies source snapshots or test credit.
+            engram_note_observed_launch_location(record, &root, &original_start);
         }
-        if record.engram.pending_launch_diagnostics.iter().any(|mark| {
-            mark.key == key
-                && mark.runtime == record.runtime.runtime_token()
-                && mark.turn_generation == record.active_turn_generation
-        }) {
-            // A duplicate start, including one after binding recovery, must
-            // not refresh its original identity or begin a late check.
+        // The ordinary execution record above keeps the original start even
+        // without a claimed source. That absence is not a provider gate, and
+        // a later binding cannot manufacture its missing source snapshots.
+        if record.engram.work_binding.is_none()
+            || runtime_observation_check_owner(record).is_none()
+        {
             return;
         }
-        let missing_authority = if record.engram.work_binding.is_none() {
-            Some(EngramLaunchMissingAuthority::Binding)
-        } else if record.engram.active_grant_id.is_none() {
-            Some(EngramLaunchMissingAuthority::Grant)
-        } else {
-            None
-        };
-        if let Some(reason) = missing_authority {
-            if diagnostics_enabled
-                && record.runtime.runtime_token() == runtime
-                && record.active_turn_generation == turn_generation
-                && record.session.workdir == workdir
-                && let Some(command) = recognised
-            {
-                engram_note_launch_diagnostic(record, key, command, diagnostic_root, reason);
-            }
+        if original_start == TestCommandOriginalStart::ThisTurn
+            && !record.engram.running_command_keys.contains_key(key)
+        {
+            // A repeated description of an already observed invocation can
+            // refine its facts, but cannot become a new measured start. An
+            // earlier turn's unended start does not count: this turn's start
+            // forgot that turn's running commands, so a start of this key now
+            // is measured as this turn's own.
             return;
         }
-        let engram = &record.engram;
-        let grant_id = engram.active_grant_id.clone().expect("authority checked above");
+        let host_turn_ref = runtime_observation_check_owner(record).map(str::to_owned).expect("observation owner checked above");
         let other_writer = target.as_ref().and_then(|(_, _, target)| {
             engram_other_writer_cause(&inner, index, &engram_path_key(&target.root))
         });
@@ -2232,12 +1908,15 @@ impl AppState {
             engram_spawn_basis_capture(target.basis_place(), &workers, provenance);
         // The toolchain is named as the check starts, from the overrides it
         // ran under, not from whatever they say when the turn closes.
+        #[cfg(test)]
         let toolchain_command = engram_build_toolchain_command(&command);
+        #[cfg(test)]
         let toolchain = if engram_cargo_toolchain_selector(&toolchain_command).is_some() {
             engram_spawn_toolchain_capture(toolchain_command, target.directory.clone(), &workers)
         } else {
             EngramToolchainCapture::settled(None)
         };
+        #[cfg(test)]
         let sandbox = record
             .active_codex_sandbox_mode
             .map(|mode| mode.as_cli_value().to_owned());
@@ -2260,15 +1939,17 @@ impl AppState {
             .unended_check_closures
             .retain(|closed| closed.key != key);
         record.engram.active_turn_checks.push(EngramTurnCheck {
-            grant_id,
+            host_turn_ref,
             key: key.to_owned(),
             sequence,
             command,
             declared: declared.map(|(_, _, binding)| Box::new(binding)),
             target,
+            #[cfg(test)]
             toolchain,
             started_at,
             started_order: Some(started_order),
+            #[cfg(test)]
             sandbox,
             start_basis,
             overlapped,
@@ -2301,6 +1982,23 @@ impl AppState {
         ran: Option<&str>,
         cwd: Option<&str>,
     ) {
+        let (location_origin, location_workdir) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else { return; };
+            (TestRunCommandOrigin::capture(&inner, index, provenance, key),
+                inner.sessions[index].session.workdir.clone())
+        };
+        let dialect = match provenance {
+            EngramObservationProvenance::Claude(_) => EngramShellDialect::Bash,
+            EngramObservationProvenance::Ambient
+            | EngramObservationProvenance::Runtime { .. } => EngramShellDialect::Unknown,
+        };
+        let described_command = ran.and_then(|line| engram_check_command_in(line, dialect));
+        // Read the original placeholder before the ordinary description
+        // owner consumes it. A description alone cannot invent a start.
+        let launch_location = self.observed_full_launch_location(
+            &location_origin, described_command.as_ref(), cwd, None,
+        );
         self.observe_test_command_description(session_id, provenance, key, ran, cwd);
         if ran.is_none() && cwd.is_none() {
             return;
@@ -2323,15 +2021,14 @@ impl AppState {
                 record.runtime.runtime_token(),
                 record.active_turn_generation,
                 (engram.work_binding.is_some()
-                    && engram.active_grant_id.is_some()
+                    && runtime_observation_check_owner(record).is_some()
                     && engram.running_command_keys.contains_key(key))
                 .then(|| {
                     (
                         record.session.workdir.clone(),
                         engram_command_directories(record, key, cwd),
                         engram
-                            .active_turn_source_root
-                            .as_ref()
+                            .observed_source_root()
                             .map(|root| (PathBuf::from(&root.root), root.common_dir_key.clone())),
                         Self::engram_session_has_child_binding_shape_locked(&inner, session_id),
                         cwd.is_some()
@@ -2368,7 +2065,7 @@ impl AppState {
                                     check.target.clone(),
                                     record.session.workdir.clone(),
                                     engram_command_directories(record, key, cwd),
-                                    engram.active_turn_source_root.as_ref().map(|turn_root| {
+                                    engram.observed_source_root().map(|turn_root| {
                                         (
                                             PathBuf::from(&turn_root.root),
                                             turn_root.common_dir_key.clone(),
@@ -2452,7 +2149,11 @@ impl AppState {
             return;
         };
         let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
-        let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
+        let diagnostics_enabled = ordinary_runtime_observation_enabled(&inner, session_id);
+        let location_current = location_origin.runtime_identity
+            == test_run_runtime_identity(&inner.sessions[index], provenance)
+            && location_origin.turn_generation == inner.sessions[index].active_turn_generation
+            && location_workdir == inner.sessions[index].session.workdir;
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -2465,6 +2166,13 @@ impl AppState {
                 provenance,
                 &EngramRecorderObservation::CommandDescribed { key, ran, cwd },
             );
+        }
+        if disposition == ClaudeObservationDisposition::Current
+            && diagnostics_enabled && location_current
+            && !record.engram.active_turn_checks.iter().any(|check| check.key == key)
+            && let Some((root, original_start)) = launch_location
+        {
+            engram_note_observed_launch_location(record, &root, &original_start);
         }
         // A replaced runtime's shell is not the session's.
         if disposition != ClaudeObservationDisposition::Replaced {
@@ -2490,7 +2198,7 @@ impl AppState {
                 .as_ref()
                 .is_some_and(|(workdir, ..)| *workdir == record.session.workdir)
             && record.engram.work_binding.is_some()
-            && record.engram.active_grant_id.is_some()
+            && runtime_observation_check_owner(record).is_some()
             && record.engram.running_command_keys.contains_key(key)
         {
             record.engram.set_pending_uncredited_command_line(
@@ -2548,6 +2256,42 @@ impl AppState {
         }
     }
 
+    /// A declared test's artifact verdict is its run's outcome in the Test
+    /// Runs list, as the declared-artifact adapter owns that verdict
+    /// (docs/features/test-runs.md). It applies only to the one row this
+    /// exit itself ended (`ended`, from `observe_test_command_end`): with
+    /// none or several, or once that row is gone, the native state stands.
+    /// A failure may override a native exit 0, and the native exit code
+    /// stays beside it; an unreadable or mismatched result is unknown.
+    fn apply_declared_verdict_to_test_run(
+        &self,
+        ended: &[String],
+        outcome: Option<EngramExecutionOutcome>,
+    ) {
+        let [id] = ended else {
+            return;
+        };
+        let state = match outcome {
+            Some(EngramExecutionOutcome::Succeeded) => TestRunState::Passed,
+            Some(EngramExecutionOutcome::Failed) => TestRunState::Failed,
+            _ => TestRunState::Unknown,
+        };
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let persist = inner.test_run_observations.update(id, |row| {
+            let eligible = row.declared_artifact.is_some()
+                && !row.launch_only
+                && row.summary.ended_at.is_some()
+                && row.summary.state != state;
+            eligible.then(|| {
+                row.summary.state = state;
+                row.clone()
+            })
+        });
+        if let Some(Some(observation)) = persist {
+            self.persist_test_command_observation_locked(&mut inner, observation);
+        }
+    }
+
     /// `command` finished in `session_id`. A running check ends with what the
     /// runtime said about its end, and its closing snapshot is taken on its
     /// own thread. `exit` is `None` from a runtime that says nothing usable.
@@ -2600,12 +2344,15 @@ impl AppState {
         self.observe_test_command_description(session_id, provenance, key, reported_command, None);
         // Record the provider boundary before artifact capture can retain a
         // terminal result. Only this boundary may finalize native host proof.
-        self.observe_test_command_end(session_id, provenance, key, exit);
+        // The rows this exit ended, exactly: a declared verdict below applies
+        // only to one of them, never to a row an earlier end closed.
+        let ended_test_runs = self.observe_test_command_end(session_id, provenance, key, exit);
         self.observe_test_command_artifact(session_id, provenance, key, command, output, runtime_output_cut);
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
-        let (starting_check, workdir, unresolved_writers, launch_held_target, observed_declared) = {
+        let (starting_check, workdir, unresolved_writers, launch_held_target,
+            observed_declared, observed_launcher, observed_completion) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -2640,16 +2387,32 @@ impl AppState {
                 },
                 launch_held_target,
                 runtime_unadmitted_trace(record, provenance).and_then(|trace| {
-                    trace.commands.iter().find(|entry| entry.tool_key == key)
-                        .and_then(|entry| entry.declared.clone())
-                        .map(|binding| (trace.host_turn_ref.clone(), binding))
+                    let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
+                    entry.declared.clone().map(|binding|
+                        (trace.host_turn_ref.clone(), entry.check.host_check_id.clone(), binding))
+                }),
+                runtime_unadmitted_trace(record, provenance).and_then(|trace| {
+                    let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
+                    let command = entry.recognized_command.as_ref()?;
+                    (entry.declared.is_none() && !entry.launch_only
+                        && command.kind == EngramVerificationKind::Test
+                        && !runtime_observed_command_needs_completion(command)
+                        && engram_launcher_words(command).is_some())
+                        .then(|| (trace.host_turn_ref.clone(), entry.check.host_check_id.clone(),
+                            starting_check.as_ref().is_some_and(|check| check.command == *command)))
+                }),
+                runtime_unadmitted_trace(record, provenance).and_then(|trace| {
+                    let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
+                    let command = entry.recognized_command.as_ref()?;
+                    (entry.declared.is_none() && runtime_observed_command_needs_completion(command))
+                        .then(|| (trace.host_turn_ref.clone(), entry.check.host_check_id.clone(), command.clone()))
                 }),
             )
         };
         // Reuse the declared owner's start binding and artifact verdict,
         // off the state lock. Shell success alone cannot prove a declared
         // test passed; a stale/mismatched completion remains indeterminate.
-        let observed_declared = observed_declared.map(|(turn, binding)| {
+        let observed_declared = observed_declared.map(|(turn, check_id, binding)| {
             let matches = reported_command.and_then(engram_declared_candidate)
                 .is_some_and(|(_, words)| engram_declared_words(&binding.entry.command)
                     .is_ok_and(|expected| expected == words));
@@ -2657,8 +2420,11 @@ impl AppState {
                 let exit = exit.unwrap_or(EngramCommandExit::Unknown);
                 engram_declared_outcome(exit, &engram_declared_result(&binding, exit))
             } else { Some(EngramExecutionOutcome::Unknown) };
-            (turn, binding, outcome)
+            (turn, check_id, binding, outcome)
         });
+        if let Some((_, _, _, outcome)) = &observed_declared {
+            self.apply_declared_verdict_to_test_run(&ended_test_runs, *outcome);
+        }
         // On the recorder's path, so bounded as the turn path's own held read.
         let launch_held = launch_held_target.map(|target| {
             target.adapter.read_held_claims(
@@ -2668,6 +2434,27 @@ impl AppState {
         });
         let reading =
             engram_read_check_end(starting_check.as_ref(), session_id, reported_command, output, exit);
+        // Share only the existing owner's validated completion. A
+        // missing diagnostic start cannot be rebuilt from stdout or a title.
+        let observed_completion = observed_completion.map(|(turn, check_id, command)| {
+            let completion = starting_check.as_ref()
+                .filter(|check| check.host_turn_ref == turn && check.command == command)
+                .and_then(|_| {
+                    reading.node_completion.as_ref().map(|(exit, lines, _, _)| (*exit, lines))
+                        .or_else(|| reading.build_completion.as_ref()
+                            .map(|(exit, lines, _)| (*exit, lines)))
+                });
+            let outcome = completion.map_or(Some(EngramExecutionOutcome::Unknown), |(exit, lines)|
+                engram_check_command_outcome(&command, exit, lines));
+            (turn, check_id, outcome)
+        });
+        // Reuse the launcher's own no-stage record, off the state lock, even
+        // when its diagnostic check has left the bounded local collection.
+        let observed_launcher = observed_launcher.filter(|(_, _, use_reading)| {
+            exit != Some(EngramCommandExit::NotFinished)
+                && if *use_reading { reading.launcher_ran_no_stage }
+                    else { engram_launcher_output_ran_no_stage(output) }
+        });
         // The session's worktree, resolved off the lock for overlap marking,
         // and those of the writers not resolved yet.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
@@ -2708,11 +2495,11 @@ impl AppState {
         );
         // Only a check of the grant the session runs under can be reported;
         // one a grant left behind as it ended takes no closing snapshot.
-        let grant_id = inner.sessions[index].engram.active_grant_id.clone();
+        let host_turn_ref = runtime_observation_check_owner(&inner.sessions[index]).map(str::to_owned);
         let running_check = |check: &EngramTurnCheck| {
             check.key == key
                 && check.end.is_none()
-                && grant_id.as_deref() == Some(check.grant_id.as_str())
+                && host_turn_ref.as_deref() == Some(check.host_turn_ref.as_str())
         };
         let root_provenance = engram_turn_root_capture_locked(&inner, session_id);
         // A session in a turn now was in one while the check ran. Its turn
@@ -2730,7 +2517,6 @@ impl AppState {
         // by what fenced it: reconciled first with every retained hazard
         // (`engram_claude_interference.rs`).
         engram_reconcile_claude_consumer(&mut inner, index);
-        let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
         // A launcher full gate's batch members, read from the root table
         // before the session is borrowed, with the fences their claims had at
         // the launch; used only if it is carried below
@@ -2769,12 +2555,33 @@ impl AppState {
         // is excluded from it (`claude_outstanding_work.rs`). One a turn no
         // prompt owns hides is kept as unassigned, and still ends a check its
         // own key started.
-        if let Some((turn, binding, outcome)) = &observed_declared {
+        if let Some((turn, check_id, outcome)) = &observed_completion {
+            observe_runtime_unadmitted_captured_end(record, provenance,
+                &EngramRecorderObservation::CommandFinished {
+                    key, command, reported_command, output, exit, runtime_output_cut,
+                }, turn, check_id, None, *outcome);
+        }
+        if let Some((turn, check_id, _)) = &observed_launcher
+            && runtime_unadmitted_trace(record, provenance).is_some_and(|trace| {
+                trace.host_turn_ref == *turn && trace.commands.iter().rev()
+                    .find(|entry| entry.tool_key == key)
+                    .is_some_and(|entry| entry.check.host_check_id == *check_id)
+            })
+        {
+            // Only EO receives the no-test outcome. Native diagnostics retain
+            // the actual process exit and their independently read artifacts.
+            observe_runtime_unadmitted_command(record, provenance,
+                &EngramRecorderObservation::CommandFinished {
+                    key, command, reported_command, output,
+                    exit: Some(EngramCommandExit::Unknown), runtime_output_cut,
+                });
+        }
+        if let Some((turn, check_id, binding, outcome)) = &observed_declared {
             observe_runtime_unadmitted_declared_end(
                 record, provenance,
                 &EngramRecorderObservation::CommandFinished {
                     key, command, reported_command, output, exit, runtime_output_cut,
-                }, turn, binding, *outcome,
+                }, turn, check_id, binding, *outcome,
             );
         }
         claude_exclude_observation(
@@ -2821,7 +2628,6 @@ impl AppState {
         if disposition.excludes_live_grant() {
             return;
         }
-        engram_finish_launch_diagnostic(record, key, command, exit, disposition, diagnostics_enabled);
         let workers = record.engram.capture_workers.clone();
         let Some(position) = record
             .engram
@@ -2889,6 +2695,7 @@ impl AppState {
             check,
             reading,
             starting_check.as_ref(),
+            #[cfg(test)]
             output,
             exit,
             runtime_output_cut,
@@ -2900,9 +2707,9 @@ impl AppState {
     /// A command in `session_id` will never report its end (Claude's Bash call
     /// was denied): it no longer counts as running beside later checks, a
     /// check it started is dropped, since it never ran and would otherwise
-    /// stay open to writes until the next grant, and a `cd` it would have made
-    /// moves nothing. A missing-authority full-launch diagnostic cannot prove
-    /// that no run started, so its known root/start window is retained.
+    /// stay open to writes until the turn ends, and a `cd` it would have made
+    /// moves nothing. Its existing execution observation retains the original
+    /// start and the unknown terminal boundary without claiming verification.
     fn note_engram_command_abandoned(
         &self,
         session_id: &str,
@@ -2920,34 +2727,14 @@ impl AppState {
                 &EngramRecorderObservation::CommandAbandoned { key },
             );
             if disposition == ClaudeObservationDisposition::Unowned {
-                // An unowned observation edits the adopted turn's durable
-                // trace, and nothing below commits: stamp the session and wake
-                // the delta persist so the dropped command does not come back.
+                // The adopted trace is durable even when this path only
+                // wakes the delta writer.
                 inner.stamp_session_at_index(index);
                 if let Err(error) = self.persist_internal_locked(&inner) {
                     eprintln!("[termal] failed to persist an abandoned unowned command: {error:#}");
                 }
             }
-            let diagnostics_enabled = Self::engram_session_is_enabled_locked(&inner, session_id);
             let record = &mut inner.sessions[index];
-            let runtime = record.runtime.runtime_token();
-            let turn_generation = record.active_turn_generation;
-            if disposition == ClaudeObservationDisposition::Current {
-                let mut position = 0;
-                while position < record.engram.pending_launch_diagnostics.len() {
-                    let mark = &record.engram.pending_launch_diagnostics[position];
-                    if mark.key == key && mark.runtime == runtime
-                        && mark.turn_generation == turn_generation
-                    {
-                        let mark = record.engram.pending_launch_diagnostics.remove(position);
-                        if diagnostics_enabled {
-                            engram_keep_launch_diagnostic_window(record, &mark);
-                        }
-                    } else {
-                        position += 1;
-                    }
-                }
-            }
             let engram = &mut record.engram;
             engram.running_command_keys.remove(key);
             engram.withheld_command_keys.remove(key);
@@ -3074,234 +2861,4 @@ impl AppState {
         // going.
         engram_fence_carried_checks_for_edit(&mut inner.sessions[index], target);
     }
-}
-
-/// The turn's report in the order Engram's timing rules need. For each
-/// reported check, in the order the checks started:
-/// 1. when its revision differs from the last one reported (the turn's
-///    begin-time basis at first), a change observation at that revision,
-///    timed at the check's start, so the evidence that follows is at or
-///    after the change it answers (only when the grant mediates local
-///    mutation, which a change needs);
-/// 2. its producer observation, `observe`, timed at its completion;
-/// 3. its environment evidence, shared by checks on the same revision and
-///    toolchain, at most four;
-/// 4. its verification evidence, citing both.
-///
-/// Then the turn's own observation (`engram_turn_execution_observation`),
-/// which after reported checks under a mutating grant reports a change only
-/// if the source moved again after the last of them, so a change is never
-/// recorded after the evidence that answers it unless it really came later.
-/// Under a grant that mediates no local mutation it is judged against the
-/// turn's begin-time basis, as without checks, and withheld when the source
-/// changed.
-///
-/// Also returns, when the report carries checks, the report the turn would
-/// make without them: its own observation alone, judged against its
-/// begin-time basis as before evidence existed. Engram refuses a report
-/// whole, and evidence adds ways to be refused (a redacted summary, a bounds
-/// or basis mismatch), so a refused report falls back to that one rather
-/// than to nothing, and the turn's change still opens its obligation.
-fn engram_turn_report(
-    record: &SessionRecord,
-    session_id: &str,
-    grant_id: &str,
-    outcome: EngramExecutionOutcome,
-    mutation_granted: bool,
-    end_basis: Option<EngramExecutionSourceBasis>,
-    checks: Vec<EngramResolvedCheck>,
-) -> (EngramTurnReport, Option<EngramTurnReport>) {
-    let mut report = EngramTurnReport::default();
-    let intent_fingerprint = record
-        .engram
-        .active_turn_intent_fingerprint
-        .clone()
-        .unwrap_or_else(|| sha256_hex(format!("termal-turn-grant:{grant_id}").as_bytes()));
-    // A Claude turn no prompt owned overlapped this grant's measurement
-    // interval (`claude_runtime_turns.rs`): what changed since the begin
-    // basis may be that turn's or the grant's. No change is reported against
-    // the begin basis then, and the turn's own observation is withheld unless
-    // a reported check gives it a base of its own; each check keeps its own
-    // proof.
-    let mixed = record.engram.active_turn_mixed_attribution.as_deref() == Some(grant_id);
-    let mut last_reported = record
-        .engram
-        .active_turn_start_basis
-        .as_ref()
-        .filter(|_| !mixed)
-        .map(|basis| basis.source_revision.clone());
-    let mut reported_check = false;
-    // Environment records before this index were observed before the last
-    // change reported, so a later check may not cite them: its evidence
-    // must come at or after the change it answers.
-    let mut environment_floor = 0;
-    for resolved in checks {
-        let EngramResolvedCheck {
-            check,
-            end,
-            outcome: check_outcome,
-            basis,
-            toolchain,
-            ..
-        } = resolved;
-        // The grant the check ran under, which is the report's own grant
-        // except for a gate carried from an earlier turn, whose sequence and
-        // key are unique only within the grant it launched under.
-        let check_id = format!(
-            "{session_id}:{}:{}:{}",
-            check.grant_id, check.sequence, check.key
-        );
-        if mutation_granted
-            && !(mixed && !reported_check)
-            && last_reported.as_deref() != Some(basis.source_revision.as_str())
-        {
-            report.observations.push(EngramExecutionObservationInput {
-                observation_id: sha256_hex(format!("termal-turn-change:{check_id}").as_bytes()),
-                action_fingerprint: intent_fingerprint.clone(),
-                effect: EngramEffect::MutateLocal,
-                outcome: EngramExecutionOutcome::Succeeded,
-                source_changed: true,
-                source_basis: Some(basis.clone()),
-                observed_at: Some(check.started_at.clone()),
-            });
-            environment_floor = report.environment_evidence.len();
-        }
-        last_reported = Some(basis.source_revision.clone());
-        reported_check = true;
-        let producer_id = sha256_hex(format!("termal-turn-check:{check_id}").as_bytes());
-        report.observations.push(EngramExecutionObservationInput {
-            observation_id: producer_id.clone(),
-            action_fingerprint: engram_check_fingerprint(&check.command),
-            effect: EngramEffect::Observe,
-            outcome: check_outcome,
-            source_changed: false,
-            source_basis: Some(basis.clone()),
-            observed_at: Some(end.completed_at.clone()),
-        });
-        let environment = toolchain
-            .and_then(|toolchain| {
-                engram_environment_components(
-                    &toolchain,
-                    check.sandbox.as_deref(),
-                    &basis.workspace_id,
-                )
-            })
-            .and_then(|components| {
-                let environment_fingerprint = engram_environment_fingerprint(&components);
-                report
-                    .environment_evidence
-                    .iter()
-                    .enumerate()
-                    .skip(environment_floor)
-                    .find(|(_, existing)| {
-                        existing.environment_fingerprint == environment_fingerprint
-                            && existing.source_basis == basis
-                    })
-                    .map(|(index, _)| index)
-                    .or_else(|| {
-                        (report.environment_evidence.len() < ENGRAM_TURN_ENVIRONMENT_LIMIT).then(
-                            || {
-                                report
-                                    .environment_evidence
-                                    .push(EngramEnvironmentEvidenceInput {
-                                        source_basis: basis.clone(),
-                                        environment_fingerprint,
-                                        components: Some(components),
-                                        observed_at: end.completed_at.clone(),
-                                    });
-                                report.environment_evidence.len() - 1
-                            },
-                        )
-                    })
-            });
-        report
-            .verification_evidence
-            .push(EngramVerificationEvidenceInput {
-                producer_observation: EngramObservationReference::ObservationId {
-                    observation_id: producer_id,
-                },
-            check_kind: check.command.kind,
-                environment: environment.map(|index| EngramEnvironmentReference::Index { index }),
-                summary: Some(match engram_declared_result_of(&end) {
-                    Some(result) => engram_declared_summary(
-                        &check.command,
-                        check.declared.as_deref(),
-                        end.exit,
-                        &result,
-                    ),
-                    None => end.build_diagnostic.as_ref().map_or_else(
-                        || engram_check_summary(&check.command, end.exit, &end.result_lines),
-                        |diagnostic| diagnostic.summary(&check.command),
-                    ),
-                }),
-                refs: {
-                    let mut refs = match engram_declared_result_of(&end) {
-                        Some(result) => engram_declared_refs(
-                            &check.command,
-                            check.declared.as_deref(),
-                            end.exit,
-                            &result,
-                        ),
-                        None => engram_check_refs(&check.command, end.exit, &end.result_lines),
-                    };
-                    // A gate carried from an earlier turn is recorded under
-                    // this turn's grant; the grant it launched under is kept
-                    // as provenance (`engram_carried_checks.rs`).
-                    if check.grant_id != grant_id {
-                        refs.push(format!("launched-under-grant:{}", check.grant_id));
-                    }
-                    refs
-                },
-            });
-    }
-    let own_observation = |reported_revision: Option<String>| {
-        engram_turn_execution_observation(
-            record,
-            session_id,
-            grant_id,
-            outcome,
-            mutation_granted,
-            end_basis.clone(),
-            reported_revision,
-        )
-    };
-    // Only under a grant that mediates local mutation did the checks report
-    // the changes before them; otherwise the turn's own observation is
-    // judged against its begin-time basis, which withholds it when the
-    // source changed, as without checks.
-    let reported_revision = (mutation_granted && reported_check)
-        .then_some(last_reported)
-        .flatten();
-    let judged_alone = reported_revision.is_none();
-    if mixed && judged_alone {
-        // Judged against the begin basis alone, the turn's observation would
-        // either call the overlap a clean no-change turn or give the whole
-        // difference to the grant: neither is known, so none is reported.
-        eprintln!(
-            "engram> session={session_id} grant={grant_id} a turn no prompt owned overlapped \
-             this grant's measurement interval; its own source observation is withheld as \
-             uncertain"
-        );
-        return (report, None);
-    }
-    let own = own_observation(reported_revision);
-    report.observations.extend(own.clone());
-    // Without its own observation (withheld), the turn has nothing to fall
-    // back to. One judged against the begin-time basis already is the
-    // fallback's, judged (and any withholding logged) once.
-    // A mixed grant's fallback would be judged against the begin basis
-    // alone, which is what its uncertainty withholds.
-    let fallback = (reported_check && !mixed)
-        .then(|| EngramTurnReport {
-            observations: if judged_alone {
-                own
-            } else {
-                own_observation(None)
-            }
-            .into_iter()
-            .collect(),
-            ..EngramTurnReport::default()
-        })
-        .filter(|fallback| !fallback.is_empty());
-    (report, fallback)
 }

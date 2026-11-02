@@ -1,7 +1,7 @@
 //! Real-process coverage of `ProcessEngramControlTransport`: the control
 //! fixture's spawn/EOF/timeout/kill/respawn lifecycle, whole-process-tree
 //! termination on timeout, EOF, explicit shutdown and idle reap, and the
-//! stateful fixture's idempotency and stale-grant semantics over a live child.
+//! ordinary work-service requests over a live child.
 //!
 //! Owns the descendant readiness/probe fixture that proves tree termination.
 //! The doctor deadline tests in `engram_host_adapter.rs` borrow
@@ -22,7 +22,7 @@ use super::*;
 fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
     let temp_root = TestTempRoot::create("engram-control-startup-budget");
     let project_file = temp_root.path().join(".engram-project");
-    fs::write(&project_file, "fixture-stateful-idempotency\n").unwrap();
+    fs::write(&project_file, "fixture-ok\n").unwrap();
     let connection = EngramConnectionConfig {
         binary_path: real_engram_control_fixture_path(),
         project_file,
@@ -33,15 +33,7 @@ fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
         session_id: "engram-fixture-startup-budget".to_owned(),
     };
     let transport = real_process_fixture_transport(temp_root.path());
-    let expired = EngramControlRequest::SessionBind {
-        external_ref: format!("termal:{}", connection.session_id),
-        title: "Unsent expired intent".to_owned(),
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: vec![EngramEffect::Observe],
-        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-        work_binding: None,
-        idempotency_key: "startup-budget-bind".to_owned(),
-    };
+    let expired = EngramControlRequest::WorkSessionRead {};
     // Zero remaining time deterministically selects the post-startup,
     // pre-dispatch deadline branch, independently of process startup speed.
     let error = transport.request(&connection, &expired, Duration::ZERO).unwrap_err();
@@ -49,23 +41,19 @@ fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
     assert!(error.message.contains("budget exhausted during process startup"));
     // The request was never handed to the worker: it is proven unsent, not
     // an unknown outcome, and keeps its deadline kind for circuit accounting.
-    // An exhausted budget is no proof that control is unavailable, so the
-    // cause withholds availability and the turn stays a hold.
     assert!(error.request_never_sent);
     assert!(!error.process_never_started);
     assert!(error.counts_for_circuit_breaker());
     let cause = EngramCausalFailure::request(&error, &expired);
     assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
-    assert!(!cause.control_availability);
-    assert!(!engram_ordinary_availability_cause(&cause));
     let prepared = transport.processes.lock().unwrap()
         .get(&connection.session_id).cloned().flatten()
         .expect("an unsent request must leave the prepared process available to a later pass");
     assert_control_deadline_child_state(&transport, &connection, &error, &prepared);
-    // A changed intent under the same key would conflict if the expired
-    // request had reached Engram. A fresh budget sends only this later intent.
-    let (token, _) = process_fixture_bind(&transport, &connection, "startup-budget-bind");
-    assert!(!token.is_empty());
+    // A fresh budget reuses the prepared process and completes an ordinary read.
+    let read = transport.request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
+        .expect("the retained prepared process must serve the later read");
+    assert_eq!(read, json!({"binding": null}));
     assert!(Arc::ptr_eq(&prepared, &transport.process_for(&connection).unwrap()));
     transport.shutdown_session(&connection.session_id);
 }
@@ -87,15 +75,12 @@ fn unsent_boundary_connection(
     }
 }
 
-fn unsent_boundary_bind(title: String, key: &str) -> EngramControlRequest {
-    EngramControlRequest::SessionBind {
-        external_ref: "termal:unsent-boundary".to_owned(),
-        title,
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: vec![EngramEffect::Observe],
-        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-        work_binding: None,
-        idempotency_key: key.to_owned(),
+fn unsent_boundary_request(work_id: String, run_id: &str) -> EngramControlRequest {
+    EngramControlRequest::AcceptanceBindingRead {
+        work_id,
+        expected_work_revision: 1,
+        run_id: run_id.to_owned(),
+        after: None,
     }
 }
 
@@ -111,9 +96,9 @@ fn an_oversize_request_frame_is_proven_unsent_and_starts_no_process() {
         "engram-fixture-oversize",
     );
     let transport = real_process_fixture_transport(temp_root.path());
-    let oversize = unsent_boundary_bind(
+    let oversize = unsent_boundary_request(
         "x".repeat(ENGRAM_CONTROL_MAX_FRAME_BYTES + 1),
-        "oversize-bind",
+        "oversize-read",
     );
 
     let error = transport
@@ -153,7 +138,7 @@ fn a_startup_handshake_failure_is_proven_unsent() {
         "a-ready-line-the-fixture-never-prints",
         DEADLOCK_GUARD,
     );
-    let request = unsent_boundary_bind("Handshake failure".to_owned(), "handshake-unsent-bind");
+    let request = EngramControlRequest::WorkSessionRead {};
 
     let error = transport
         .request(&connection, &request, DEADLOCK_GUARD)
@@ -163,72 +148,40 @@ fn a_startup_handshake_failure_is_proven_unsent() {
     assert!(!error.process_never_started, "the process did start: {error}");
     let cause = EngramCausalFailure::request(&error, &request);
     assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
-    assert!(!cause.control_availability);
     assert!(transport.processes.lock().unwrap().is_empty());
 }
 
-/// The Begin consumer keeps a fresh begin pending, with no transport
-/// accounting, only when the host stopped it before the transport. A begin
-/// the transport proved unsent is still the transport's failure: it counts
-/// for the circuit and a protocol failure disables the session. Only a
-/// process that never started marks control unavailable.
+/// Host-local cancellation is distinct from a failed transport invocation.
+/// Proven-unsent transport errors retain circuit/protocol accounting and the
+/// serialized diagnostic preserves that fact for ordinary work services.
 #[test]
 fn only_a_host_stopped_request_skips_transport_accounting() {
-    let with_cause = |mut error: EngramTransportError, not_started: bool| {
-        let mut cause = EngramCausalFailure::error(&error, "turn_begin", None, &[]);
-        if not_started {
-            cause.remote_application = EngramRemoteApplication::NotStarted;
-        }
-        error.causal_failure = Some(cause);
-        error
-    };
-
-    // The adapter's own pre-transmission stop (a guard or budget): its own
-    // hold, never the possibly-begun replay.
-    let host_stopped = with_cause(EngramTransportError::deadline("Begin budget ran out"), true);
+    let mut host_stopped = EngramTransportError::deadline("read preparation expired");
+    host_stopped.causal_failure = Some(EngramCausalFailure::local(
+        &host_stopped, "work_session_read", "before transport"));
     assert!(host_stopped.stopped_before_transport());
-    assert!(!engram_cause_allows_begin_replay(
-        host_stopped.causal_failure.as_ref().unwrap()
-    ));
-
-    // The transport proved these unsent; they stay transport failures, and
-    // the saved cause carries the distinction.
-    for (transport_unsent, replays) in [
-        (EngramTransportError::transport("worker gone").request_never_sent(), true),
-        (
-            EngramTransportError::deadline("budget exhausted during process startup")
-                .request_never_sent(),
-            true,
-        ),
-        // A protocol failure disables the session; it is never replayed.
-        (EngramTransportError::protocol("oversize frame").request_never_sent(), false),
+    for transport_unsent in [
+        EngramTransportError::transport("worker gone").request_never_sent(),
+        EngramTransportError::deadline("budget exhausted during process startup").request_never_sent(),
+        EngramTransportError::protocol("oversize frame").request_never_sent(),
     ] {
-        let cause = EngramCausalFailure::error(&transport_unsent, "turn_begin", None, &[]);
+        let cause = EngramCausalFailure::error(&transport_unsent, "work_session_read", None, &[]);
         assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
         assert!(cause.transport_unsent);
-        assert!(!cause.control_availability, "{transport_unsent}");
-        assert_eq!(engram_cause_allows_begin_replay(&cause), replays, "{transport_unsent}");
         let restored: EngramCausalFailure =
             serde_json::from_value(serde_json::to_value(&cause).unwrap()).unwrap();
-        assert!(restored.transport_unsent, "a restored card keeps the distinction");
-        let error = with_cause(transport_unsent, false);
-        assert!(!error.stopped_before_transport(), "{error}");
-        assert!(
-            error.counts_for_circuit_breaker() || error.disables_session(),
-            "the transport's failure still takes its accounting: {error}"
-        );
+        assert_eq!(restored, cause);
+        let mut error = transport_unsent;
+        error.causal_failure = Some(cause);
+        assert!(!error.stopped_before_transport());
+        assert!(error.counts_for_circuit_breaker() || error.disables_session());
     }
-
-    // A possibly sent failure is neither.
-    let possibly_sent = with_cause(EngramTransportError::deadline("call exceeded"), false);
+    let possibly_sent = EngramTransportError::deadline("call exceeded");
     assert!(!possibly_sent.stopped_before_transport());
-
-    // A process that never started keeps its availability meaning, and is
-    // not marked as the transport's unsent request.
     let spawn = EngramTransportError::spawn_failed("missing binary");
-    let cause = EngramCausalFailure::error(&spawn, "session_bind", None, &[]);
+    let cause = EngramCausalFailure::error(&spawn, "work_session_read", None, &[]);
     assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
-    assert!(cause.control_availability);
+    assert!(spawn.process_never_started);
     assert!(!cause.transport_unsent);
 }
 
@@ -245,7 +198,7 @@ fn a_failure_after_the_request_frame_is_handed_to_the_worker_stays_possibly_sent
         "engram-fixture-sent-boundary",
     );
     let transport = real_process_fixture_transport(temp_root.path());
-    let request = unsent_boundary_bind("Sent boundary".to_owned(), "sent-boundary-bind");
+    let request = EngramControlRequest::WorkSessionRead {};
 
     // The hang fixture reads the frame and never replies. The process is
     // started first, and the budget is long enough that encoding and the
@@ -332,21 +285,13 @@ fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
         actor_context: None,
         session_id: "engram-fixture-session".to_owned(),
     };
-    let request = EngramControlRequest::SessionBind {
-        external_ref: "termal:fixture".to_owned(),
-        title: "Fixture".to_owned(),
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: vec![EngramEffect::Observe],
-        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-        work_binding: None,
-        idempotency_key: "fixture-bind".to_owned(),
-    };
+    let request = EngramControlRequest::WorkSessionRead {};
     let transport = real_process_fixture_transport(temp_root.path());
 
     let first = transport
         .request(&connection, &request, DEADLOCK_GUARD)
         .expect("fixture process should spawn and reply");
-    assert_eq!(first["routing_token"], "fixture-token");
+    assert_eq!(first, json!({"binding": null}));
     transport.shutdown_session(&connection.session_id);
 
     fs::write(&project_file, "fixture-eof\n").expect("EOF mode should write");
@@ -391,7 +336,7 @@ fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
     let respawned = transport
         .request(&connection, &request, DEADLOCK_GUARD)
         .expect("retiring the old process must allow a clean respawn");
-    assert_eq!(respawned["routing_token"], "fixture-token");
+    assert_eq!(respawned, json!({"binding": null}));
     // Retirement only requests termination. Successor admission waits for the
     // existing worker to reap the exact old child and confirm cleanup.
     assert!(
@@ -445,7 +390,7 @@ fn real_process_eof_reports_the_control_process_identity_and_exit_state() {
         .expect_err("fixture EOF should be a transport error");
     assert_eq!(eof.kind, EngramTransportErrorKind::Transport);
     let cause =
-        serde_json::to_value(EngramCausalFailure::error(&eof, "session_bind", None, &[])).unwrap();
+        serde_json::to_value(EngramCausalFailure::error(&eof, "work_session_read", None, &[])).unwrap();
     assert_eq!(cause["controlProcess"]["identity"], format!("pid {pid}"));
     let exit = cause["controlProcess"]["exitState"]
         .as_str()
@@ -488,7 +433,7 @@ fn real_process_deadline_reports_the_running_control_process() {
     assert_eq!(timeout.kind, EngramTransportErrorKind::Deadline);
     let cause = serde_json::to_value(EngramCausalFailure::error(
         &timeout,
-        "session_bind",
+        "work_session_read",
         None,
         &[],
     ))
@@ -514,15 +459,7 @@ fn real_process_timeout_kills_the_entire_control_process_tree() {
         actor_context: None,
         session_id: "engram-fixture-process-tree".to_owned(),
     };
-    let request = EngramControlRequest::SessionBind {
-        external_ref: "termal:fixture-tree".to_owned(),
-        title: "Fixture tree".to_owned(),
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: vec![EngramEffect::Observe],
-        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-        work_binding: None,
-        idempotency_key: "fixture-tree-bind".to_owned(),
-    };
+    let request = EngramControlRequest::WorkSessionRead {};
     let transport = Arc::new(real_process_fixture_transport(temp_root.path()));
     transport
         .process_for(&connection)
@@ -656,7 +593,7 @@ fn real_process_reset_cleanup_deadline_retains_the_exact_child_and_refuses_a_suc
     fs::write(temp_root.path().join(".engram-project"), "fixture-ok\n").unwrap();
     let connection = unsent_boundary_connection(&temp_root, real_engram_control_fixture_path(), "retained-shutdown");
     let transport = real_process_fixture_transport(temp_root.path());
-    let request = unsent_boundary_bind("Retained shutdown".to_owned(), "retained-shutdown-bind");
+    let request = EngramControlRequest::WorkSessionRead {};
     transport.request(&connection, &request, DEADLOCK_GUARD).unwrap();
     let original = transport.processes.lock().unwrap()[&connection.session_id].clone().unwrap();
     // Delay only the worker's cleanup publication. The real existing worker
@@ -682,12 +619,63 @@ fn real_process_reset_cleanup_deadline_retains_the_exact_child_and_refuses_a_suc
         !refused.process_never_started,
         "the retained original child was already started"
     );
-    assert!(!EngramCausalFailure::request(&refused, &request).control_availability,
-        "unknown cleanup is not an ordinary availability fallback");
+    assert_eq!(EngramCausalFailure::request(&refused, &request).remote_application,
+        EngramRemoteApplication::NotStarted);
     assert!(Arc::ptr_eq(transport.processes.lock().unwrap()[&connection.session_id].as_ref().unwrap(), &retained));
     assert_eq!(retained.process.id(), original.process.id());
     transport.shutdown_session(&connection.session_id);
     assert!(original.process.try_wait().unwrap().is_some(), "explicit cleanup reaped the fixture");
+}
+
+#[test]
+fn real_process_work_session_waits_for_same_session_predecessor_cleanup() {
+    let temp_root = TestTempRoot::create("engram-work-predecessor-fence");
+    fs::write(temp_root.path().join(".engram-project"), "fixture-ok\n").unwrap();
+    let connection = unsent_boundary_connection(
+        &temp_root, real_engram_control_fixture_path(), "work-predecessor-fence",
+    );
+    let transport = real_process_fixture_transport(temp_root.path());
+    let original = transport.process_for(&connection).unwrap();
+    let original_pid = original.process.id();
+    assert!(original.process.try_wait().unwrap().is_none());
+
+    // Keep the exact predecessor registered while delaying only its cleanup
+    // acknowledgement. Its real worker still owns termination and reap.
+    let retained = Arc::new(EngramControlProcess {
+        config: original.config.clone(),
+        process: original.process.clone(),
+        process_tree: original.process_tree.clone(),
+        requests: original.requests.clone(),
+        worker_finished: original.worker_finished.clone(),
+        retiring: AtomicBool::new(true),
+        cleanup_finished: Arc::new(AtomicBool::new(false)),
+        cleanup_failure: Arc::new(Mutex::new(None)),
+    });
+    transport.processes.lock().unwrap().insert(connection.session_id.clone(), Some(retained.clone()));
+    let refused = transport.request(&connection, &EngramControlRequest::WorkSessionRead {}, Duration::ZERO)
+        .expect_err("an ordinary read must not start a successor while cleanup is unconfirmed");
+    assert_eq!(refused.code.as_deref(), Some("control_cleanup_pending"));
+    assert!(refused.request_never_sent);
+    assert!(!refused.process_never_started);
+    assert_eq!(transport.generations.lock().unwrap()[&connection.session_id], 1);
+    assert!(Arc::ptr_eq(transport.processes.lock().unwrap()[&connection.session_id].as_ref().unwrap(), &retained));
+
+    let deadline = std::time::Instant::now() + DEADLOCK_GUARD;
+    while !original.cleanup_finished.load(Ordering::Acquire) {
+        assert!(std::time::Instant::now() < deadline, "the real predecessor worker must finish cleanup");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(original.process.try_wait().unwrap().is_some());
+    assert!(original.process_tree.confirmed_after_reap());
+    // Only now publish the delayed acknowledgement to the retained owner.
+    retained.cleanup_finished.store(true, Ordering::Release);
+    let successor = transport.process_for(&connection).unwrap();
+    assert_ne!(successor.process.id(), original_pid);
+    assert!(original.process.try_wait().unwrap().is_some(), "the predecessor is reaped before the successor exists");
+    assert_eq!(transport.generations.lock().unwrap()[&connection.session_id], 2);
+    assert_eq!(transport.processes.lock().unwrap().len(), 1);
+    transport.shutdown_session(&connection.session_id);
+    assert!(successor.process.try_wait().unwrap().is_some());
 }
 
 #[test]
@@ -721,7 +709,7 @@ fn real_process_idle_reap_kills_the_entire_control_process_tree() {
             DEADLOCK_GUARD,
         )
         .expect("the first request after an idle reap should respawn immediately");
-    assert_eq!(respawned["routing_token"], "fixture-token");
+    assert_eq!(respawned, json!({"binding": null}));
     transport.shutdown_session(&connection.session_id);
 }
 
@@ -765,16 +753,8 @@ fn engram_control_process_tree_connection(
     }
 }
 
-fn engram_control_process_tree_request(suffix: &str) -> EngramControlRequest {
-    EngramControlRequest::SessionBind {
-        external_ref: format!("termal:fixture-tree-{suffix}"),
-        title: "Fixture tree".to_owned(),
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: vec![EngramEffect::Observe],
-        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-        work_binding: None,
-        idempotency_key: format!("fixture-tree-bind-{suffix}"),
-    }
+fn engram_control_process_tree_request(_suffix: &str) -> EngramControlRequest {
+    EngramControlRequest::WorkSessionRead {}
 }
 
 pub(super) struct EngramReadyProcess {
@@ -1108,594 +1088,46 @@ impl EngramDescendantProbe {
     }
 }
 
-/// Budget for every call in the two stateful fixture tests below. They check
-/// idempotency and stale-grant semantics, not latency, and a call's budget also
-/// covers starting the PowerShell fixture when no process is running yet. A
-/// two-second budget made their outcome depend on how fast the machine starts a
-/// process: under load both failed at once with "admission budget exhausted
-/// during process startup". So this is a guard against a hang, as in the
-/// lifecycle test above; that test covers a deliberate deadline, and applies it
-/// only after the startup handshake has been acquired.
-const STATEFUL_FIXTURE_CALL_BUDGET: Duration = DEADLOCK_GUARD;
-
-fn process_fixture_bind(
-    transport: &ProcessEngramControlTransport,
-    connection: &EngramConnectionConfig,
-    idempotency_key: &str,
-) -> (String, String) {
-    let result = transport
-        .request(
-            connection,
-            &EngramControlRequest::SessionBind {
-                external_ref: format!("termal:{}", connection.session_id),
-                title: "Stateful process fixture".to_owned(),
-                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-                mediated_effects: vec![EngramEffect::Observe],
-                capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-                work_binding: None,
-                idempotency_key: idempotency_key.to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("stateful process fixture bind should succeed");
-    (
-        result["routing_token"]
-            .as_str()
-            .expect("fixture bind should return a token")
-            .to_owned(),
-        result["status"]["phase"]
-            .as_str()
-            .expect("fixture bind should return a phase")
-            .to_owned(),
-    )
-}
-
-fn process_fixture_evaluate(
-    transport: &ProcessEngramControlTransport,
-    connection: &EngramConnectionConfig,
-    routing_token: &str,
-    idempotency_key: &str,
-    intent_fingerprint: &str,
-) -> String {
-    transport
-        .request(
-            connection,
-            &EngramControlRequest::TurnEvaluate {
-                routing_token: routing_token.to_owned(),
-                idempotency_key: idempotency_key.to_owned(),
-                intent_fingerprint: intent_fingerprint.to_owned(),
-                purpose: "Exercise process fixture protocol fidelity".to_owned(),
-                requested_effects: vec![EngramEffect::Observe],
-                resource_intents: Vec::new(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("stateful process fixture evaluation should succeed")["grant"]["grant_id"]
-        .as_str()
-        .expect("fixture evaluation should issue a grant")
-        .to_owned()
-}
-
-#[test]
-fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
-    let temp_root = TestTempRoot::create("engram-control-idempotency-fixture");
-    let project_file = temp_root.path().join(".engram-project");
-    fs::write(&project_file, "fixture-stateful-idempotency\n")
-        .expect("stateful fixture mode should write");
-    let connection = EngramConnectionConfig {
-        binary_path: real_engram_control_fixture_path(),
-        project_file,
-        home: temp_root.path().to_path_buf(),
-        project_root: temp_root.path().to_path_buf(),
-        actor_id: "termal-fixture".to_owned(),
-        actor_context: None,
-        session_id: "engram-fixture-idempotency".to_owned(),
-    };
-    let transport = real_process_fixture_transport(temp_root.path());
-
-    let (routing_token, _) = process_fixture_bind(&transport, &connection, "durable-bind");
-    assert_eq!(
-        process_fixture_bind(&transport, &connection, "durable-bind").0,
-        routing_token
-    );
-    let bind_conflict = transport
-        .request(
-            &connection,
-            &EngramControlRequest::SessionBind {
-                external_ref: format!("termal:{}", connection.session_id),
-                title: "Changed fixture bind intent".to_owned(),
-                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-                mediated_effects: vec![EngramEffect::Observe],
-                capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-                work_binding: None,
-                idempotency_key: "durable-bind".to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect_err("a changed same-key bind intent should conflict");
-    assert_eq!(
-        bind_conflict.code.as_deref(),
-        Some("control_session_bind_conflict")
-    );
-    let grant_id = process_fixture_evaluate(
-        &transport,
-        &connection,
-        &routing_token,
-        "open-evaluate",
-        "open-intent",
-    );
-    let refusal_request = EngramControlRequest::TurnEvaluate {
-        routing_token: routing_token.clone(),
-        idempotency_key: "persisted-open-refusal".to_owned(),
-        intent_fingerprint: "blocked-intent".to_owned(),
-        purpose: "Persist the open-turn refusal".to_owned(),
-        requested_effects: vec![EngramEffect::Observe],
-        resource_intents: Vec::new(),
-    };
-    let refusal = transport
-        .request(&connection, &refusal_request, STATEFUL_FIXTURE_CALL_BUDGET)
-        .expect("open turn should refuse");
-    assert_eq!(refusal["directive"]["code"], "turn_already_open");
-    let (fresh_token, _) = process_fixture_bind(&transport, &connection, "expire-open-grant");
-    let refusal_replay_request = match refusal_request {
-        EngramControlRequest::TurnEvaluate {
-            idempotency_key,
-            intent_fingerprint,
-            purpose,
-            requested_effects,
-            resource_intents,
-            ..
-        } => EngramControlRequest::TurnEvaluate {
-            routing_token: fresh_token.clone(),
-            idempotency_key,
-            intent_fingerprint,
-            purpose,
-            requested_effects,
-            resource_intents,
-        },
-        _ => unreachable!(),
-    };
-    let refusal_replay = transport
-        .request(
-            &connection,
-            &refusal_replay_request,
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("persisted refusal should replay");
-    assert_eq!(refusal_replay, refusal);
-
-    let superseded_begin = EngramControlRequest::TurnBegin {
-        routing_token: fresh_token.clone(),
-        grant_id: grant_id.clone(),
-        delivery_tokens: Vec::new(),
-        idempotency_key: "superseded-known-begin".to_owned(),
-    };
-    let scope_refusal = transport
-        .request(&connection, &superseded_begin, STATEFUL_FIXTURE_CALL_BUDGET)
-        .expect("a known superseded fixture grant should return a refusal decision");
-    assert_eq!(scope_refusal["decision"], "refuse");
-    assert_eq!(scope_refusal["code"], "grant_scope_mismatch");
-    assert_eq!(
-        transport
-            .request(&connection, &superseded_begin, STATEFUL_FIXTURE_CALL_BUDGET)
-            .expect("fixture scope refusal should replay"),
-        scope_refusal
-    );
-    let superseded_checkpoint = EngramControlRequest::TurnCheckpoint {
-        routing_token: fresh_token.clone(),
-        grant_id: grant_id.clone(),
-        next_intent: EngramNextIntent::Wait,
-        report: EngramTurnReport::default(),
-        idempotency_key: "superseded-known-checkpoint".to_owned(),
-    };
-    let checkpoint_scope_refusal = transport
-        .request(
-            &connection,
-            &superseded_checkpoint,
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("a known superseded fixture grant should return a checkpoint refusal decision");
-    assert_eq!(checkpoint_scope_refusal["decision"], "refuse");
-    assert_eq!(checkpoint_scope_refusal["code"], "grant_scope_mismatch");
-    assert_eq!(
-        transport
-            .request(
-                &connection,
-                &superseded_checkpoint,
-                STATEFUL_FIXTURE_CALL_BUDGET,
-            )
-            .expect("fixture checkpoint scope refusal should replay"),
-        checkpoint_scope_refusal
-    );
-
-    for request in [
-        EngramControlRequest::TurnBegin {
-            routing_token: fresh_token.clone(),
-            grant_id: "never-issued".to_owned(),
-            delivery_tokens: Vec::new(),
-            idempotency_key: "unknown-begin".to_owned(),
-        },
-        EngramControlRequest::TurnCheckpoint {
-            routing_token: fresh_token.clone(),
-            grant_id: "never-issued".to_owned(),
-            next_intent: EngramNextIntent::Wait,
-            report: EngramTurnReport::default(),
-            idempotency_key: "unknown-checkpoint".to_owned(),
-        },
-    ] {
-        let error = transport
-            .request(&connection, &request, STATEFUL_FIXTURE_CALL_BUDGET)
-            .expect_err("unknown grant should fail");
-        assert_eq!(error.code.as_deref(), Some("turn_grant_not_found"));
-    }
-
-    let replacement_grant = process_fixture_evaluate(
-        &transport,
-        &connection,
-        &fresh_token,
-        "replacement-evaluate",
-        "replacement-intent",
-    );
-    transport
-        .request(
-            &connection,
-            &EngramControlRequest::TurnBegin {
-                routing_token: fresh_token.clone(),
-                grant_id: replacement_grant.clone(),
-                delivery_tokens: vec!["delivery-a".to_owned()],
-                idempotency_key: "delivery-scoped-begin".to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("replacement grant should begin");
-    let conflict = transport
-        .request(
-            &connection,
-            &EngramControlRequest::TurnBegin {
-                routing_token: fresh_token.clone(),
-                grant_id: replacement_grant.clone(),
-                delivery_tokens: vec!["delivery-b".to_owned()],
-                idempotency_key: "delivery-scoped-begin".to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect_err("delivery-token change must conflict");
-    assert_eq!(
-        conflict.code.as_deref(),
-        Some("control_operation_idempotency_conflict")
-    );
-    let checkpoint = EngramControlRequest::TurnCheckpoint {
-        routing_token: fresh_token,
-        grant_id: replacement_grant,
-        next_intent: EngramNextIntent::Wait,
-        report: EngramTurnReport::default(),
-        idempotency_key: "durable-checkpoint".to_owned(),
-    };
-    let first = transport
-        .request(&connection, &checkpoint, STATEFUL_FIXTURE_CALL_BUDGET)
-        .expect("checkpoint should succeed");
-    assert_eq!(
-        transport
-            .request(&connection, &checkpoint, STATEFUL_FIXTURE_CALL_BUDGET)
-            .expect("checkpoint replay should succeed"),
-        first
-    );
-    assert!(grant_id.starts_with("fixture-grant-"));
-    transport.shutdown_session(&connection.session_id);
-}
-
-#[test]
-fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
-    let temp_root = TestTempRoot::create("engram-control-stateful-fixture");
-    let project_file = temp_root.path().join(".engram-project");
-    fs::write(&project_file, "fixture-stateful-stale-begin\n")
-        .expect("stale-begin fixture mode should write");
-    let base_connection = EngramConnectionConfig {
-        binary_path: real_engram_control_fixture_path(),
-        project_file: project_file.clone(),
-        home: temp_root.path().to_path_buf(),
-        project_root: temp_root.path().to_path_buf(),
-        actor_id: "termal-fixture".to_owned(),
-        actor_context: None,
-        session_id: "engram-fixture-stale-begin".to_owned(),
-    };
-    let transport = real_process_fixture_transport(temp_root.path());
-
-    let (stale_token, stale_phase) =
-        process_fixture_bind(&transport, &base_connection, "stale-bind");
-    assert_eq!(stale_phase, "sync_required");
-    let stale_grant = process_fixture_evaluate(
-        &transport,
-        &base_connection,
-        &stale_token,
-        "stale-evaluate",
-        "stable-intent-fingerprint",
-    );
-    let stale_begin_key = format!("fixture-begin:{stale_grant}");
-    let stale_begin = transport
-        .request(
-            &base_connection,
-            &EngramControlRequest::TurnBegin {
-                routing_token: stale_token.clone(),
-                grant_id: stale_grant,
-                delivery_tokens: Vec::new(),
-                idempotency_key: stale_begin_key.clone(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("the fixture should return the configured stale-begin refusal");
-    assert_eq!(stale_begin["decision"], "refuse");
-    assert_eq!(stale_begin["code"], "policy_epoch_changed");
-
-    let fresh_grant = process_fixture_evaluate(
-        &transport,
-        &base_connection,
-        &stale_token,
-        "fresh-reevaluate",
-        "stable-intent-fingerprint",
-    );
-    transport
-        .request(
-            &base_connection,
-            &EngramControlRequest::TurnBegin {
-                routing_token: stale_token.clone(),
-                grant_id: fresh_grant.clone(),
-                delivery_tokens: Vec::new(),
-                idempotency_key: format!("fixture-begin:{fresh_grant}"),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("the replacement grant should begin with its own key");
-    transport
-        .request(
-            &base_connection,
-            &EngramControlRequest::TurnCheckpoint {
-                routing_token: stale_token.clone(),
-                grant_id: fresh_grant.clone(),
-                next_intent: EngramNextIntent::Exit,
-                report: EngramTurnReport::default(),
-                idempotency_key: "stale-fixture-cleanup".to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("the replacement grant should checkpoint");
-    let reused_key_error = transport
-        .request(
-            &base_connection,
-            &EngramControlRequest::TurnBegin {
-                routing_token: stale_token,
-                grant_id: fresh_grant,
-                delivery_tokens: Vec::new(),
-                idempotency_key: stale_begin_key,
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect_err("a stale grant's begin key must not be reused");
-    assert_eq!(reused_key_error.kind, EngramTransportErrorKind::Remote);
-    assert_eq!(
-        reused_key_error.code.as_deref(),
-        Some("control_operation_idempotency_conflict")
-    );
-    transport.shutdown_session(&base_connection.session_id);
-
-    fs::write(&project_file, "fixture-stateful-orphan\n")
-        .expect("orphaned-grant fixture mode should write");
-    let orphan_connection = EngramConnectionConfig {
-        session_id: "engram-fixture-orphaned-grant".to_owned(),
-        ..base_connection
-    };
-    let (orphan_token, orphan_phase) =
-        process_fixture_bind(&transport, &orphan_connection, "orphan-bind");
-    assert_eq!(orphan_phase, "sync_required");
-    let orphan_grant = process_fixture_evaluate(
-        &transport,
-        &orphan_connection,
-        &orphan_token,
-        "orphan-evaluate",
-        "orphaned-intent",
-    );
-    let status = transport
-        .request(
-            &orphan_connection,
-            &EngramControlRequest::SessionStatus {
-                routing_token: orphan_token.clone(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("status should expose the issued grant");
-    assert_eq!(status["open_grant_id"], orphan_grant);
-    let unbegun_checkpoint = transport
-        .request(
-            &orphan_connection,
-            &EngramControlRequest::TurnCheckpoint {
-                routing_token: orphan_token.clone(),
-                grant_id: orphan_grant.clone(),
-                next_intent: EngramNextIntent::Wait,
-                report: EngramTurnReport::default(),
-                idempotency_key: "orphan-checkpoint".to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("an issued but unbegun grant should return a refusal decision");
-    assert_eq!(unbegun_checkpoint["decision"], "refuse");
-    assert_eq!(unbegun_checkpoint["code"], "grant_not_begun");
-    let status_after_refusal = transport
-        .request(
-            &orphan_connection,
-            &EngramControlRequest::SessionStatus {
-                routing_token: orphan_token.clone(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("a checkpoint refusal decision must keep the control connection alive");
-    assert_eq!(
-        status_after_refusal["open_grant_id"], orphan_grant,
-        "the checkpoint refusal decision must not rotate or reset the control session"
-    );
-
-    let (fresh_token, fresh_phase) =
-        process_fixture_bind(&transport, &orphan_connection, "orphan-rebind");
-    assert_ne!(fresh_token, orphan_token);
-    assert_eq!(fresh_phase, "sync_required");
-    let recovered_grant = process_fixture_evaluate(
-        &transport,
-        &orphan_connection,
-        &fresh_token,
-        "recovered-evaluate",
-        "recovered-intent",
-    );
-    transport
-        .request(
-            &orphan_connection,
-            &EngramControlRequest::TurnBegin {
-                routing_token: fresh_token,
-                grant_id: recovered_grant.clone(),
-                delivery_tokens: Vec::new(),
-                idempotency_key: format!("fixture-begin:{recovered_grant}"),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("evaluation should resume after the fresh bind");
-    transport.shutdown_session(&orphan_connection.session_id);
-
-    fs::write(&project_file, "fixture-stateful-delivery-invalid-begin\n")
-        .expect("non-expiring refusal fixture mode should write");
-    let refusal_connection = EngramConnectionConfig {
-        session_id: "engram-fixture-non-expiring-refusal".to_owned(),
-        ..orphan_connection
-    };
-    let (refusal_token, refusal_phase) =
-        process_fixture_bind(&transport, &refusal_connection, "refusal-bind");
-    assert_eq!(refusal_phase, "sync_required");
-    let refused_grant = process_fixture_evaluate(
-        &transport,
-        &refusal_connection,
-        &refusal_token,
-        "refusal-evaluate",
-        "non-expiring-refusal-intent",
-    );
-    let begin_refusal = transport
-        .request(
-            &refusal_connection,
-            &EngramControlRequest::TurnBegin {
-                routing_token: refusal_token.clone(),
-                grant_id: refused_grant.clone(),
-                delivery_tokens: Vec::new(),
-                idempotency_key: format!("fixture-begin:{refused_grant}"),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("delivery_invalid should be a normal begin refusal");
-    assert_eq!(begin_refusal["decision"], "refuse");
-    assert_eq!(begin_refusal["code"], "delivery_invalid");
-
-    let open_turn_refusal = transport
-        .request(
-            &refusal_connection,
-            &EngramControlRequest::TurnEvaluate {
-                routing_token: refusal_token.clone(),
-                idempotency_key: "evaluate-while-refused-grant-open".to_owned(),
-                intent_fingerprint: "next-intent".to_owned(),
-                purpose: "Verify the real open-turn response shape".to_owned(),
-                requested_effects: vec![EngramEffect::Observe],
-                resource_intents: Vec::new(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("turn_already_open should be a refusal decision, not an error envelope");
-    assert_eq!(open_turn_refusal["decision"], "refuse");
-    assert_eq!(open_turn_refusal["directive"]["code"], "turn_already_open");
-    let refusal_status = transport
-        .request(
-            &refusal_connection,
-            &EngramControlRequest::SessionStatus {
-                routing_token: refusal_token.clone(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("status should preserve the non-expiring issued grant");
-    assert_eq!(refusal_status["phase"], "turn_open");
-    assert_eq!(refusal_status["open_grant_id"], refused_grant);
-    let refused_checkpoint = transport
-        .request(
-            &refusal_connection,
-            &EngramControlRequest::TurnCheckpoint {
-                routing_token: refusal_token.clone(),
-                grant_id: refused_grant,
-                next_intent: EngramNextIntent::Wait,
-                report: EngramTurnReport::default(),
-                idempotency_key: "non-expiring-refusal-checkpoint".to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("an issued grant should return a checkpoint refusal decision");
-    assert_eq!(refused_checkpoint["decision"], "refuse");
-    assert_eq!(refused_checkpoint["code"], "grant_not_begun");
-
-    let (replacement_token, replacement_phase) =
-        process_fixture_bind(&transport, &refusal_connection, "refusal-rebind");
-    assert_ne!(replacement_token, refusal_token);
-    assert_eq!(replacement_phase, "sync_required");
-    let replacement_grant = process_fixture_evaluate(
-        &transport,
-        &refusal_connection,
-        &replacement_token,
-        "replacement-evaluate",
-        "replacement-intent",
-    );
-    transport
-        .request(
-            &refusal_connection,
-            &EngramControlRequest::TurnBegin {
-                routing_token: replacement_token.clone(),
-                grant_id: replacement_grant.clone(),
-                delivery_tokens: Vec::new(),
-                idempotency_key: format!("fixture-begin:{replacement_grant}"),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("the replacement grant should begin");
-    let begun_bind_error = transport
-        .request(
-            &refusal_connection,
-            &EngramControlRequest::SessionBind {
-                external_ref: "termal:engram-fixture-non-expiring-refusal".to_owned(),
-                title: "Reject bind over begun grant".to_owned(),
-                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-                mediated_effects: vec![EngramEffect::Observe],
-                capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-                work_binding: None,
-                idempotency_key: "bind-over-begun".to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect_err("bind over a begun grant must be rejected");
-    assert_eq!(
-        begun_bind_error.code.as_deref(),
-        Some("invalid_control_session")
-    );
-    transport
-        .request(
-            &refusal_connection,
-            &EngramControlRequest::TurnCheckpoint {
-                routing_token: replacement_token,
-                grant_id: replacement_grant,
-                next_intent: EngramNextIntent::Exit,
-                report: EngramTurnReport::default(),
-                idempotency_key: "replacement-checkpoint".to_owned(),
-            },
-            STATEFUL_FIXTURE_CALL_BUDGET,
-        )
-        .expect("the begun replacement grant should checkpoint");
-    transport.shutdown_session(&refusal_connection.session_id);
-}
-
 fn real_process_fixture_transport(host_workdir: &FsPath) -> ProcessEngramControlTransport {
     ProcessEngramControlTransport::with_startup_handshake(
         host_workdir.to_path_buf(),
         "termal-engram-control-fixture-ready",
         DEADLOCK_GUARD,
     )
+}
+
+#[test]
+fn kill_session_reaps_a_live_control_child_without_project_configuration() {
+    let root = TestTempRoot::create("engram-kill-live-child");
+    let state = test_app_state();
+    fs::write(root.path().join(".engram-project"), "fixture-ok\n").unwrap();
+    let project = create_test_project(&state, root.path(), "Live control child");
+    let session = create_test_project_session(&state, Agent::Codex, &project, root.path());
+    let connection = unsent_boundary_connection(&root, real_engram_control_fixture_path(), &session);
+    let transport = Arc::new(real_process_fixture_transport(root.path()));
+    state.install_control_test_transport(transport.clone());
+    transport.request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
+        .expect("the actual published child must serve a request before Kill");
+    let child = transport.process_for(&connection).unwrap();
+    assert!(transport.has_live_child(&session));
+    assert!(child.process.try_wait().unwrap().is_none());
+    let unconfigured = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        inner.find_project(&project).unwrap().engram.is_none()
+            && record.engram_mcp_installed.is_none()
+            && !record.engram_mcp_runtime_quarantined
+    };
+    assert!(unconfigured, "only the actual live child can cause this Kill cleanup");
+    let killed = state.kill_session(&session);
+    // Keep both the transport and exact child alive: Drop cannot provide the
+    // cleanup this assertion attributes to the product's Kill path.
+    let reaped = child.process.try_wait().unwrap().is_some();
+    let registered = transport.processes.lock().unwrap().contains_key(&session);
+    transport.shutdown_session(&session); // failure teardown
+    killed.expect("Kill must succeed for the session with its owned control child");
+    assert!(reaped, "Kill must reap the exact child before returning");
+    assert!(!registered, "Kill must remove its existing process-registry entry");
 }
 
 /// Every spawn or respawn of a session's control child starts a new
@@ -1715,15 +1147,7 @@ fn real_process_respawn_starts_a_new_connection_generation() {
         actor_context: None,
         session_id: "engram-generation-session".to_owned(),
     };
-    let request = EngramControlRequest::SessionBind {
-        external_ref: "termal:fixture".to_owned(),
-        title: "Fixture".to_owned(),
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: vec![EngramEffect::Observe],
-        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-        work_binding: None,
-        idempotency_key: "fixture-bind".to_owned(),
-    };
+    let request = EngramControlRequest::WorkSessionRead {};
     let transport = real_process_fixture_transport(temp_root.path());
     assert_eq!(transport.connection_generation(&connection.session_id), None);
 

@@ -9,7 +9,7 @@
 // (`engram_check_toolchain.rs`). Split out of `engram_turn_checks.rs`.
 
 /// A command TermAl recognises as a test run.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct EngramCheckCommand {
     /// One command has one verification kind; output cannot relabel it.
     kind: EngramVerificationKind,
@@ -42,7 +42,7 @@ struct EngramCheckCommand {
 /// The shell a recognised line runs under, as its wrapper names it: bash
 /// takes a backslash as an escape, PowerShell and cmd keep it (a Windows
 /// path). A line with no wrapper may run under either.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 enum EngramShellDialect {
     Bash,
     PowerShell,
@@ -585,7 +585,7 @@ fn engram_focused_launcher_words<'a>(
             }
             if !matches!(
                 flag.as_str(),
-                "--notify" | "--item" | "--next-owner" | "--next-action" | "--require-binary-env"
+                "--input" | "--notify" | "--item" | "--next-owner" | "--next-action" | "--require-binary-env"
             ) {
                 return Err(format!("unsupported focused launcher option {flag:?}"));
             }
@@ -610,6 +610,8 @@ fn engram_focused_launcher_words<'a>(
                 }
                 let max_bytes = if flag == "--next-action" { 2000 } else { 256 };
                 let valid = match flag.as_str() {
+                    // Committed-input runs must retain their actual launcher argv.
+                    "--input" => value == "commit",
                     "--notify" => !value.trim().starts_with('-'),
                     _ => {
                         !value.contains(['\r', '\n'])
@@ -892,6 +894,7 @@ fn engram_truncate_utf8(text: &str, max: usize) -> &str {
 /// `text` within `max` bytes, keeping its end: a longer one loses its start
 /// to an ellipsis (`ENGRAM_KEEP_END_ELLIPSIS`), cut at a character boundary;
 /// with no room for the ellipsis, nothing is kept.
+#[cfg(test)]
 fn engram_keep_end_utf8(text: &str, max: usize) -> String {
     if text.len() <= max {
         return text.to_owned();
@@ -907,6 +910,7 @@ fn engram_keep_end_utf8(text: &str, max: usize) -> String {
 }
 
 /// What `engram_keep_end_utf8` puts where it cut a text's start.
+#[cfg(test)]
 const ENGRAM_KEEP_END_ELLIPSIS: &str = "…";
 
 /// At most this many result lines are kept from a check's output.
@@ -1127,6 +1131,7 @@ fn engram_check_showed_passing_tests(
 /// that is not known to be its test's own is said so: its `pushd`, or the
 /// shell's reading of the line, may have failed first
 /// (`engram_check_exit_is_the_tests`).
+#[cfg(test)]
 fn engram_check_summary(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
@@ -1205,6 +1210,7 @@ fn engram_check_summary(
 /// its test's exit status: a one-call line's non-zero exit that is not known
 /// to be its test's own (`engram_check_exit_is_the_tests`, from the runner's
 /// `result_lines`) is left out.
+#[cfg(test)]
 fn engram_check_refs(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,

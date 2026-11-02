@@ -5,8 +5,9 @@
 // Owns: the end-to-end tests of that carry. The late end arrives through the
 // shared Codex app-server path (`handle_shared_codex_app_server_message`) as
 // the dropped `item/completed` of a finished turn, or as one the next turn's
-// routing would take, and is credited at the next checkpoint on the claim; a command that ends within its turn is
-// recorded once, as before; only the exact item key is taken; a command of
+// routing would take. Its result stays with the original local owner and is
+// never injected into a successor trace or granted native credit. A command
+// that ends within its turn is observed once; only the exact item key is taken; a command of
 // the holder in the worktree before the late end refuses it; a check started
 // in the worktree before the late end is overlapped by it, even once its
 // evidence was refused, and one started after is not; its runtime's exit
@@ -31,27 +32,12 @@ const ITEM: &str = "exec-late-item";
 const SECOND_ITEM: &str = "exec-second-item";
 /// The thread the shared runtime knows the session by.
 const THREAD: &str = "thread-late-end";
-/// The second turn's grant.
-const NEXT_GRANT: &str = "turn-check-grant-next";
 /// What a passing size test prints.
 const PASSING: &str = "running 3 tests\ntest result: ok. 3 passed";
 
-/// A claimed Codex turn measured in its named worktree, with Engram answering
-/// a second turn too.
-fn two_turns(label: &str) -> (CheckedTurn, PathBuf) {
-    let turn = CheckedTurn::start_with_opening(
-        label,
-        true,
-        None,
-        vec![
-            checkpoint_reply(CHECK_GRANT),
-            grant_reply(NEXT_GRANT),
-            begin_reply(NEXT_GRANT),
-            checkpoint_reply(NEXT_GRANT),
-        ],
-        2,
-        true,
-    );
+/// An ordinary Codex turn associated with claimed work and a named worktree.
+fn two_turns(label: &str) -> (EOCheckedTurn, PathBuf) {
+    let turn = EOCheckedTurn::start_named(label);
     let worktree = turn.root.join(".worktrees").join("wt");
     (turn, worktree)
 }
@@ -66,7 +52,7 @@ fn cwd(worktree: &FsPath) -> String {
 
 /// Starts the size test under the Codex item `key` in `worktree`, as Codex's
 /// `item/started` does, and waits for its opening snapshot.
-fn start_test(turn: &CheckedTurn, worktree: &FsPath, key: &str) {
+fn start_test(turn: &EOCheckedTurn, worktree: &FsPath, key: &str) {
     turn.recorder()
         .command_started_in(key, SIZE_TEST, Some(SIZE_TEST), Some(&cwd(worktree)))
         .expect("the start should record");
@@ -75,7 +61,7 @@ fn start_test(turn: &CheckedTurn, worktree: &FsPath, key: &str) {
 
 /// The shared Codex runtime the session runs on, with the session known by
 /// `THREAD`.
-fn shared_runtime(turn: &CheckedTurn) -> SharedCodexRuntime {
+fn shared_runtime(turn: &EOCheckedTurn) -> SharedCodexRuntime {
     let runtime = turn.record(|record| match &record.runtime {
         SessionRuntime::Codex(handle) => handle
             .shared_session
@@ -102,7 +88,7 @@ fn shared_runtime(turn: &CheckedTurn) -> SharedCodexRuntime {
 
 /// Codex reports, on `thread`, that the command of item `key` ended `exit`
 /// in the turn `gone`, which is no longer running.
-fn report_late_end(turn: &CheckedTurn, thread: &str, key: &str, exit: i64) {
+fn report_late_end(turn: &EOCheckedTurn, thread: &str, key: &str, exit: i64) {
     let runtime = shared_runtime(turn);
     report_late_end_on(turn, &runtime, thread, key, SIZE_TEST, exit);
 }
@@ -110,7 +96,7 @@ fn report_late_end(turn: &CheckedTurn, thread: &str, key: &str, exit: i64) {
 /// `report_late_end` through `runtime`, which may no longer be the session's,
 /// for the item running `command`.
 fn report_late_end_on(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     runtime: &SharedCodexRuntime,
     thread: &str,
     key: &str,
@@ -145,7 +131,7 @@ fn report_late_end_on(
 
 /// Waits until the closing snapshot a carried test's late end started is
 /// taken.
-fn wait_for_carried_snapshots(turn: &CheckedTurn) {
+fn wait_for_carried_snapshots(turn: &EOCheckedTurn) {
     let captures = turn.record(|record| {
         record
             .engram
@@ -159,33 +145,81 @@ fn wait_for_carried_snapshots(turn: &CheckedTurn) {
     }
 }
 
-/// Runs the session's next turn to its close and returns its checkpoint.
-fn next_turn_checkpoint(turn: &CheckedTurn) -> Value {
+fn dispatch_next_turn(turn: &EOCheckedTurn) {
+    turn.begin("Continue ordinary work.");
+}
+
+/// Runs the next ordinary turn and returns its actual observation envelope.
+fn next_turn_observation(turn: &EOCheckedTurn) -> Value {
     dispatch_next_turn(turn);
-    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
-    turn.state
-        .finish_turn_ok_if_runtime_matches(&turn.session_id, &runtime_token)
-        .expect("the next turn should complete");
-    turn.transport
-        .requests()
-        .into_iter()
-        .filter(|request| request.request["operation"] == "turn_checkpoint")
-        .last()
-        .expect("the next turn is checkpointed")
-        .request
+    turn.finish()
+}
+
+fn observed_checks(request: &Value) -> &[Value] {
+    assert_eq!(request["operation"], "execution_observe", "{request:#}");
+    assert_eq!(request["occurrence"]["kind"], "unadmitted_turn", "{request:#}");
+    assert!(request.get("verification_evidence").is_none(), "{request:#}");
+    request["occurrence"]["observed_checks"].as_array().unwrap()
+}
+
+fn assert_no_automatic_credit(turn: &EOCheckedTurn) {
+    for request in turn.transport.requests() {
+        let operation = request.request["operation"].as_str().unwrap_or_default();
+        assert!(!matches!(operation, "session_bind" | "session_status" | "turn_grant_read"
+            | "turn_evaluate" | "turn_begin" | "turn_checkpoint"
+            | "verification_record" | "verification_bind"), "{}", request.request);
+    }
 }
 
 /// The holder line pending now.
-fn holder_line(turn: &CheckedTurn) -> String {
+fn holder_line(turn: &EOCheckedTurn) -> String {
     turn.record(|record| record.engram.pending_source_root_line.clone())
         .unwrap_or_default()
 }
 
+/// The overlap facts the host recorded on the latest check of `turn` started
+/// under the runtime key `key`: whether it was overlapped, and by what.
+fn overlap_of(turn: &EOCheckedTurn, key: &str) -> (bool, Option<String>) {
+    turn.record(|record| {
+        let check = record
+            .engram
+            .active_turn_checks
+            .iter()
+            .rev()
+            .find(|check| check.key == key)
+            .unwrap_or_else(|| panic!("the check under {key} is kept after its turn"));
+        (check.overlapped, check.overlap_cause.clone())
+    })
+}
+
+/// The overlap cause a check records when this session's command under the
+/// runtime key `running` was still running in its worktree as it started.
+fn still_running_cause(running: &str) -> String {
+    format!(
+        "another command of this session (key {}) was still running",
+        &sha256_hex(running.as_bytes())[..12]
+    )
+}
+
+/// Asserts that the latest check under `key` was overlapped by this
+/// session's still-running command under `running`.
+fn assert_overlapped_by(turn: &EOCheckedTurn, key: &str, running: &str) {
+    let (overlapped, cause) = overlap_of(turn, key);
+    assert!(
+        overlapped && cause.as_deref() == Some(still_running_cause(running).as_str()),
+        "{key} is overlapped by {running}: {overlapped} {cause:?}"
+    );
+}
+
 /// The first turn's close carries the test it left running, records nothing
 /// for it, and tells the holder.
-fn assert_carried_at_close(turn: &CheckedTurn) {
+fn assert_carried_at_close(turn: &EOCheckedTurn) {
     let first = turn.finish();
-    assert!(first.get("verification_evidence").is_none(), "{first:#}");
+    let checks = observed_checks(&first);
+    assert_eq!(checks.len(), 1, "{first:#}");
+    assert_eq!(checks[0]["observed_result"], "indeterminate");
+    assert!(checks[0].get("finished_at").is_none());
+    assert_no_automatic_credit(turn);
     turn.record(|record| {
         assert_eq!(
             record.engram.carried_checks.len(),
@@ -247,8 +281,7 @@ fn a_legacy_carried_terminal_requires_its_exact_item_thread_and_terminal_state()
 /// A Codex test that outlives its turn (its exec session polled after the
 /// tool's initial yield) ends after that turn closed; Codex reports the end
 /// tagged with the closed turn, which the turn's events drop. The test is
-/// carried at the close, takes that end, and is credited with its real
-/// outcome at the next checkpoint on the claim.
+/// carried at the close and takes that end under its original owner.
 #[test]
 fn a_legacy_terminal_across_turns_closes_the_original_check_before_a_later_edit() {
     let (turn, worktree) = two_turns("reported-end-legacy-next-turn-edit");
@@ -314,13 +347,10 @@ fn a_legacy_terminal_across_turns_closes_the_original_check_before_a_later_edit(
         ChangeType::Edit,
     ).unwrap();
     turn.record(|record| assert!(record.engram.carried_checks[0].fence.is_none()));
-    let token = turn.record(|record| record.runtime.runtime_token().unwrap());
-    turn.state.finish_turn_ok_if_runtime_matches(&turn.session_id, &token).unwrap();
-    let checkpoint = turn.transport.requests().into_iter()
-        .filter(|request| request.request["operation"] == "turn_checkpoint")
-        .last().unwrap().request;
-    assert_eq!(checkpoint["verification_evidence"].as_array().map(Vec::len), Some(1));
-    assert!(observations(&checkpoint).iter().any(|row| row["outcome"] == "succeeded"));
+    let successor = turn.finish();
+    assert!(observed_checks(&successor).is_empty(),
+        "a late terminal is not the successor's command: {successor:#}");
+    assert_no_automatic_credit(&turn);
 }
 
 #[test]
@@ -328,36 +358,31 @@ fn a_codex_test_that_outlives_its_turn_is_recorded_from_its_late_end() {
     let (turn, worktree) = two_turns("reported-end-credited");
     start_test(&turn, &worktree, ITEM);
     assert_carried_at_close(&turn);
-
+    let owner = turn.record(|record| {
+        let carried = &record.engram.carried_checks[0];
+        (carried.work_id.clone(), carried.claim_id.clone(), carried.claim_fence,
+            carried.check.key.clone())
+    });
     report_late_end(&turn, THREAD, ITEM, 0);
     turn.record(|record| {
+        let carried = &record.engram.carried_checks[0];
         assert!(
-            record.engram.carried_checks[0].check.end.is_some(),
+            carried.check.end.is_some(),
             "the late end is taken"
-        )
+        );
+        assert_eq!((carried.work_id.clone(), carried.claim_id.clone(),
+            carried.claim_fence, carried.check.key.clone()), owner,
+            "the late end retains its exact original claim and command");
     });
     wait_for_carried_snapshots(&turn);
-    let settling = next_turn_checkpoint(&turn);
-
-    assert_eq!(settling["grant_id"], NEXT_GRANT, "{settling:#}");
-    let evidence = settling["verification_evidence"]
-        .as_array()
-        .unwrap_or_else(|| panic!("the carried test is recorded: {settling:#}"));
-    assert_eq!(evidence.len(), 1, "{settling:#}");
-    assert_eq!(evidence[0]["check_kind"], "test", "{settling:#}");
-    assert!(
-        observations(&settling)
-            .iter()
-            .any(|observation| observation["effect"] == "observe"
-                && observation["outcome"] == "succeeded"),
-        "its real outcome: {settling:#}"
-    );
-    assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
+    let successor = next_turn_observation(&turn);
+    assert!(observed_checks(&successor).is_empty(),
+        "no late fact is reassigned to the successor: {successor:#}");
+    assert_no_automatic_credit(&turn);
 }
 
 /// A Codex test that ends within its turn (inside the exec tool's initial
-/// yield) is recorded at that turn's checkpoint exactly once, and nothing is
-/// carried.
+/// yield) is observed in that turn exactly once, and nothing is carried.
 #[test]
 fn a_codex_test_ending_within_its_turn_is_recorded_once() {
     let (turn, worktree) = two_turns("reported-end-within-turn");
@@ -372,18 +397,18 @@ fn a_codex_test_ending_within_its_turn_is_recorded_once() {
         )
         .expect("the end should record");
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
-
-    assert_eq!(
-        checkpoint["verification_evidence"].as_array().map(Vec::len),
-        Some(1),
-        "{checkpoint:#}"
-    );
+    let observation = turn.finish();
+    let checks = observed_checks(&observation);
+    assert_eq!(checks.len(), 1, "{observation:#}");
+    assert_eq!(checks[0]["check_kind"], "test");
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert!(checks[0]["finished_at"].is_string());
     assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
     // The same end reported again after the close is no second record.
     report_late_end(&turn, THREAD, ITEM, 0);
-    let next = next_turn_checkpoint(&turn);
-    assert!(next.get("verification_evidence").is_none(), "{next:#}");
+    let next = next_turn_observation(&turn);
+    assert!(observed_checks(&next).is_empty(), "{next:#}");
+    assert_no_automatic_credit(&turn);
 }
 
 /// A late end is taken only for the carried test whose Codex item it names,
@@ -413,8 +438,9 @@ fn a_late_end_of_another_item_or_thread_is_not_taken() {
         .insert(OTHER_THREAD.to_owned(), turn.session_id.clone());
     report_late_end(&turn, OTHER_THREAD, ITEM, 0);
     still_waiting("an end on another thread is not taken");
-    let next = next_turn_checkpoint(&turn);
-    assert!(next.get("verification_evidence").is_none(), "{next:#}");
+    let next = next_turn_observation(&turn);
+    assert!(observed_checks(&next).is_empty(), "{next:#}");
+    assert_no_automatic_credit(&turn);
     assert_eq!(
         turn.record(|record| record.engram.carried_checks.len()),
         1,
@@ -442,31 +468,14 @@ fn a_command_in_the_worktree_before_the_late_end_refuses_the_carried_test() {
         .expect("the writer starts");
     report_late_end(&turn, THREAD, ITEM, 0);
     wait_for_carried_snapshots(&turn);
-    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
-    turn.state
-        .finish_turn_ok_if_runtime_matches(&turn.session_id, &runtime_token)
-        .expect("the next turn should complete");
-    let settling = turn
-        .transport
-        .requests()
-        .into_iter()
-        .filter(|request| request.request["operation"] == "turn_checkpoint")
-        .last()
-        .expect("the next turn is checkpointed")
-        .request;
-
-    assert!(
-        settling.get("verification_evidence").is_none(),
-        "{settling:#}"
-    );
-    let line = holder_line(&turn);
-    assert!(
-        line.contains("the Codex test launched at")
-            && line.contains("earned no credit")
-            && line.contains("this session ran a `git` command there"),
-        "{line}"
-    );
-    assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
+    turn.record(|record| {
+        let carried = &record.engram.carried_checks[0];
+        assert!(carried.fence.as_deref().is_some_and(|cause|
+            cause.contains("this session ran a `git` command there")));
+    });
+    let settling = turn.finish();
+    assert!(observed_checks(&settling).is_empty(), "{settling:#}");
+    assert_no_automatic_credit(&turn);
 }
 
 /// A host restart while a Codex test is carried closes it with outcome
@@ -530,22 +539,15 @@ fn a_runtime_exit_before_the_late_end_closes_the_carried_test_unknown() {
         turn.record(|record| record.engram.carried_checks.is_empty()),
         "the dead runtime's end is taken by nothing"
     );
-    assert!(
-        turn.transport
-            .requests()
-            .into_iter()
-            .filter(|request| request.request["operation"] == "turn_checkpoint")
-            .all(|request| request.request.get("verification_evidence").is_none()),
-        "no credit"
-    );
+    assert_no_automatic_credit(&turn);
 }
 
 /// A full gate Codex runs in the foreground, still running when its turn
 /// closes, is carried until its end is reported; a file change the watcher
 /// saw in its worktree while it ran in its turn fences it once carried, as it
-/// fences a launched gate. A fenced carry can never earn credit, so the same
-/// close refuses it at once and tells its holder; its late passing end is
-/// then taken by nothing and earns no credit.
+/// fences a launched gate. The carry keeps that fence; nothing settles it at
+/// a later turn, and its late passing end is recorded on the fenced carry and
+/// earns no credit.
 #[test]
 fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
     let (turn, worktree) = two_turns("reported-end-watched-gate");
@@ -580,10 +582,21 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
     });
     let first = turn.finish();
     assert!(first.get("verification_evidence").is_none(), "{first:#}");
-    assert!(
-        turn.record(|record| record.engram.carried_checks.is_empty()),
-        "the fenced carry is refused at the close"
-    );
+    // The close carries it with the watcher's change as its fence; no
+    // settlement refuses it there.
+    turn.record(|record| {
+        assert_eq!(record.engram.carried_checks.len(), 1, "the fenced test is carried");
+        let carried = &record.engram.carried_checks[0];
+        assert_eq!(carried.check.key, ITEM);
+        assert!(carried.check.end.is_none());
+        assert_eq!(engram_check_fingerprint(&carried.check.command), fingerprint);
+        let fence = carried.fence.as_deref().unwrap_or_default();
+        assert!(
+            fence.contains("a file in its worktree changed")
+                && fence.contains("(while it was running)"),
+            "the change while it ran is its fence: {fence}"
+        );
+    });
     let notices = turn.record_mut(|record| {
         record
             .engram
@@ -598,23 +611,11 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
         }),
         "the initial carry is announced: {notices:#?}"
     );
-    let refusals = notices
-        .iter()
-        .filter(|line| line.contains("earned no credit"))
-        .collect::<Vec<_>>();
-    assert_eq!(refusals.len(), 1, "one refusal for this check: {notices:#?}");
-    let refused = refusals[0];
     assert!(
-        refused.contains("the Codex test launched at")
-            && refused.contains(&fingerprint)
-            && refused.contains("earned no credit")
-            && refused.contains("a file in its worktree changed")
-            && refused.contains("(while it was running)"),
-        "{refused}"
+        notices.iter().all(|line| !line.contains("earned no credit")),
+        "the close issues no refusal for the fenced carry: {notices:#?}"
     );
-    // Refusing its evidence did not end its process: it still runs, and its
-    // holder is told so.
-    assert!(refused.contains(STILL_RUNNING_AFTER_REFUSAL), "{refused}");
+    // The fence does not end its process: it still runs.
     assert!(
         turn.record(|record| record
             .engram
@@ -631,12 +632,17 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
         "its reported end ends it"
     );
     wait_for_carried_snapshots(&turn);
-    let settling = next_turn_checkpoint(&turn);
+    let settling = next_turn_observation(&turn);
     assert!(
         settling.get("verification_evidence").is_none(),
         "{settling:#}"
     );
-    assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
+    turn.record(|record| {
+        assert_eq!(record.engram.carried_checks.len(), 1, "no later turn settles it");
+        let carried = &record.engram.carried_checks[0];
+        assert!(carried.check.end.is_some(), "its reported end is recorded on it");
+        assert!(carried.fence.is_some(), "its end keeps its fence");
+    });
 }
 
 /// A carried Codex test whose late end was reported stays fenced until that
@@ -681,18 +687,7 @@ fn a_write_while_the_late_ends_snapshot_is_taken_refuses_the_carried_test() {
         );
     });
     pending.finish(None);
-    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
-    turn.state
-        .finish_turn_ok_if_runtime_matches(&turn.session_id, &runtime_token)
-        .expect("the next turn should complete");
-    let settling = turn
-        .transport
-        .requests()
-        .into_iter()
-        .filter(|request| request.request["operation"] == "turn_checkpoint")
-        .last()
-        .expect("the next turn is checkpointed")
-        .request;
+    let settling = turn.finish();
     assert!(
         settling.get("verification_evidence").is_none(),
         "{settling:#}"
@@ -727,14 +722,11 @@ fn a_runtime_exit_after_the_late_end_keeps_the_reported_result() {
         "{}",
         holder_line(&turn)
     );
-    let settling = next_turn_checkpoint(&turn);
+    let settling = next_turn_observation(&turn);
 
-    assert_eq!(
-        settling["verification_evidence"].as_array().map(Vec::len),
-        Some(1),
-        "the reported result is recorded: {settling:#}"
-    );
-    assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
+    assert!(observed_checks(&settling).is_empty(),
+        "the original terminal is not a command of the new runtime: {settling:#}");
+    assert_no_automatic_credit(&turn);
 }
 
 /// Stop while a Codex test is still running: Stop's own close carries the
@@ -759,20 +751,14 @@ fn a_stop_closes_a_carried_test_whose_end_cannot_arrive() {
             && line.contains(&runtime_gone_caveat("cleared")),
         "{line}"
     );
-    assert!(
-        turn.transport
-            .requests()
-            .into_iter()
-            .filter(|request| request.request["operation"] == "turn_checkpoint")
-            .all(|request| request.request.get("verification_evidence").is_none()),
-        "no credit"
-    );
+    assert_no_automatic_credit(&turn);
 }
 
 /// A test carried under a runtime the session no longer runs on, its runtime
-/// replaced without being cleared, is closed with outcome Unknown at the next
-/// checkpoint: its end can never reach the host. A test carried under the
-/// session's current runtime keeps waiting for its own end.
+/// replaced without being cleared, stays carried through the next turn and is
+/// closed with outcome Unknown by the runtime clear's rule: its end can never
+/// reach the host. A test carried under the session's current runtime keeps
+/// waiting for its own end.
 #[test]
 fn a_test_carried_under_a_replaced_runtime_is_closed_at_the_next_checkpoint() {
     let (turn, worktree) = two_turns("reported-end-replaced-runtime");
@@ -788,14 +774,31 @@ fn a_test_carried_under_a_replaced_runtime_is_closed_at_the_next_checkpoint() {
         record.engram.carried_checks.insert(0, earlier);
     });
 
-    let next = next_turn_checkpoint(&turn);
+    let next = next_turn_observation(&turn);
     assert!(next.get("verification_evidence").is_none(), "{next:#}");
+    // No turn settles a carry: both stay carried until a runtime clear.
+    turn.record(|record| {
+        let keys = record
+            .engram
+            .carried_checks
+            .iter()
+            .map(|carried| (carried.check.key.as_str(), carried.check.end.is_none()))
+            .collect::<Vec<_>>();
+        assert_eq!(keys, [("exec-earlier-item", true), (ITEM, true)]);
+    });
+    assert!(
+        !holder_line(&turn).contains("since its runtime was stopped or replaced"),
+        "{}",
+        holder_line(&turn)
+    );
+    // The runtime clear's rule closes the replaced runtime's carry alone.
+    let lines = turn.record_mut(|record| engram_take_stranded_reported_ends(record));
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
         assert_eq!(record.engram.carried_checks[0].check.key, ITEM);
         assert!(record.engram.carried_checks[0].check.end.is_none());
     });
-    let line = holder_line(&turn);
+    let line = lines.join(" ");
     assert_eq!(
         line.matches("since its runtime was stopped or replaced")
             .count(),
@@ -867,38 +870,24 @@ fn a_late_end_routed_to_the_running_turn_settles_the_carried_test() {
             )
         });
         wait_for_carried_snapshots(&turn);
-        let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
-        turn.state
-            .finish_turn_ok_if_runtime_matches(&turn.session_id, &runtime_token)
-            .expect("the next turn should complete");
-        let settling = turn
-            .transport
-            .requests()
-            .into_iter()
-            .filter(|request| request.request["operation"] == "turn_checkpoint")
-            .last()
-            .expect("the next turn is checkpointed")
-            .request;
-        assert_eq!(
-            settling["verification_evidence"].as_array().map(Vec::len),
-            Some(1),
-            "{label}: the carried test is recorded: {settling:#}"
-        );
-        assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
+        let settling = turn.finish();
+        assert!(observed_checks(&settling).is_empty(),
+            "{label}: a routed late terminal cannot become successor evidence: {settling:#}");
+        assert_no_automatic_credit(&turn);
     }
 }
 
 /// Runs, in the session's next turn, a second size test in `worktree` under the
 /// Codex item `SECOND_ITEM` that passes within that turn, and returns the
-/// turn's checkpoint.
-fn second_test_checkpoint(turn: &CheckedTurn, worktree: &FsPath) -> Value {
-    passing_test_checkpoint(turn, worktree, SECOND_ITEM)
+/// turn's ordinary observation.
+fn second_test_observation(turn: &EOCheckedTurn, worktree: &FsPath) -> Value {
+    passing_test_observation(turn, worktree, SECOND_ITEM)
 }
 
 /// Runs, in the session's next turn, a size test in `worktree` under the
 /// Codex item `key` that passes within that turn, and returns the turn's
-/// checkpoint.
-fn passing_test_checkpoint(turn: &CheckedTurn, worktree: &FsPath, key: &str) -> Value {
+/// ordinary observation.
+fn passing_test_observation(turn: &EOCheckedTurn, worktree: &FsPath, key: &str) -> Value {
     dispatch_next_turn(turn);
     start_test(turn, worktree, key);
     turn.recorder()
@@ -911,49 +900,32 @@ fn passing_test_checkpoint(turn: &CheckedTurn, worktree: &FsPath, key: &str) -> 
         )
         .expect("the second test's end should record");
     turn.wait_for_snapshots();
-    let runtime_token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
-    turn.state
-        .finish_turn_ok_if_runtime_matches(&turn.session_id, &runtime_token)
-        .expect("the next turn should complete");
-    turn.transport
-        .requests()
-        .into_iter()
-        .filter(|request| request.request["operation"] == "turn_checkpoint")
-        .last()
-        .expect("the next turn is checkpointed")
-        .request
+    turn.finish()
 }
 
 /// A check that starts in the worktree while a carried Codex test of the
 /// session still runs there runs beside it, as beside a command still running
 /// in its turn: it is overlapped, with the carried test named as still
 /// running, and earns no credit, even when it ends before the carried test.
+/// The overlap is recorded on the check itself.
 #[test]
 fn a_check_started_while_a_carried_test_still_runs_is_overlapped_by_it() {
     let (turn, worktree) = two_turns("reported-end-overlaps-next-check");
     start_test(&turn, &worktree, ITEM);
     assert_carried_at_close(&turn);
 
-    let checkpoint = second_test_checkpoint(&turn, &worktree);
+    let checkpoint = second_test_observation(&turn, &worktree);
 
     assert!(
         checkpoint.get("verification_evidence").is_none(),
         "the second test is not credited: {checkpoint:#}"
     );
-    let line = holder_line(&turn);
-    let carried = &sha256_hex(ITEM.as_bytes())[..12];
-    assert!(
-        line.contains(&format!(
-            "reached its worktree while it ran (another command of this session (key \
-             {carried}) was still running)"
-        )),
-        "{line}"
-    );
+    assert_overlapped_by(&turn, SECOND_ITEM, ITEM);
 }
 
 /// A carried Codex test whose end was reported runs no more: a check that
-/// starts in its worktree after that is not overlapped by it, and both are
-/// recorded at the next checkpoint on the claim.
+/// starts in its worktree after that is not overlapped by it. The new trace
+/// reports only its own check, while the original result stays local.
 #[test]
 fn a_check_started_after_the_carried_tests_end_is_not_overlapped_by_it() {
     let (turn, worktree) = two_turns("reported-end-ended-before-next-check");
@@ -962,13 +934,12 @@ fn a_check_started_after_the_carried_tests_end_is_not_overlapped_by_it() {
     report_late_end(&turn, THREAD, ITEM, 0);
     wait_for_carried_snapshots(&turn);
 
-    let checkpoint = second_test_checkpoint(&turn, &worktree);
+    let checkpoint = second_test_observation(&turn, &worktree);
 
-    assert_eq!(
-        checkpoint["verification_evidence"].as_array().map(Vec::len),
-        Some(2),
-        "the carried test and the second test are both recorded: {checkpoint:#}"
-    );
+    let checks = observed_checks(&checkpoint);
+    assert_eq!(checks.len(), 1, "only the successor's check: {checkpoint:#}");
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert_no_automatic_credit(&turn);
     let line = holder_line(&turn);
     assert!(
         !line.contains("was still running") && !line.contains("earned no credit"),
@@ -978,7 +949,7 @@ fn a_check_started_after_the_carried_tests_end_is_not_overlapped_by_it() {
 
 /// A second claimed session in the same AppState, with its own runtime and
 /// control replies. Its checks run in the original session's named worktree.
-fn another_checking_session(owner: &CheckedTurn, worktree: &FsPath) -> CheckedTurn {
+fn another_checking_session(owner: &EOCheckedTurn, worktree: &FsPath) -> EOCheckedTurn {
     let project = owner.record(|record| record.session.project_id.clone().unwrap());
     let session_id = create_test_project_session(&owner.state, Agent::Codex, &project, worktree);
     {
@@ -987,43 +958,40 @@ fn another_checking_session(owner: &CheckedTurn, worktree: &FsPath) -> CheckedTu
         inner.sessions[index].engram.context_nudge_pending = false;
     }
     let binding = test_control_work_binding("other-running-test", 1);
-    let transport = ScriptedEngramControlTransport::new_with_work_bindings(
-        vec![
-            bind_reply("other-check-token"),
-            grant_reply("other-check-grant"),
-            begin_reply("other-check-grant"),
-            checkpoint_reply("other-check-grant"),
-            grant_reply("other-check-grant-after-end"),
-            begin_reply("other-check-grant-after-end"),
-            checkpoint_reply("other-check-grant-after-end"),
-        ],
-        vec![Ok(Some(binding.clone())), Ok(Some(binding.clone()))],
-    );
+    let transport = ScriptedEngramControlTransport::new([]);
+    transport.set_current_work_binding(Some(binding.clone()));
     transport.enable_named_roots(&session_id, &binding);
-    install_control_only_transport(&owner.state, transport.clone());
-    // This fixture never consumes the second session's prompt channel: the
-    // original state's test runtime supplies it, as for later_turns above.
-    let (_, receiver) = std::sync::mpsc::channel();
-    let other = CheckedTurn {
-        state: owner.state.clone(),
-        session_id,
-        root: owner.root.clone(),
-        transport,
-        _runtime_rx: receiver,
-    };
+    // The ordinary work service answers for S2, as the main fixture's does
+    // for its session, so naming can associate S2 with its held claim.
+    transport.named_roots.lock().unwrap().as_mut().unwrap().work_session_read_reply =
+        Some(Ok(json!({
+            "project_id": "github.com/example/source-root", "session_id": session_id,
+            "work_session": true, "capabilities": ["host_work_v1"],
+        })));
+    transport.replace_held_claims([Ok(claim_deferral::held_snapshot(&[&binding], &binding))]);
+    owner.state.install_control_test_transport(transport.clone());
+    let mut other = EOCheckedTurn::from_session(owner.state.clone(), session_id,
+        owner.root.clone(), transport, owner._runtime_rx.clone());
+    other.host = owner.host.clone();
+    // Naming the shared worktree is what associates S2 with its claim.
+    other.state.name_engram_source_root(&other.session_id, EngramSourceRootRequest {
+        work: binding.work_id.clone(),
+        path: Some(Some(worktree.to_string_lossy().into_owned())),
+    }).expect("ordinary work services name S2's root without admitting a turn");
+    assert_eq!(
+        other.record(|record| record.engram.work_binding.clone()),
+        Some(binding),
+        "naming established S2's claim association"
+    );
     dispatch_next_turn(&other);
     other.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Active);
         assert!(
-            record.engram.active_grant_id.is_some(),
-            "S2 has begun its own turn"
+            record.engram.unadmitted_active_turn.is_some(),
+            "S2 owns its distinct ordinary trace"
         );
     });
-    assert!(other
-        .transport
-        .requests()
-        .iter()
-        .any(|request| { request.request["operation"] == "turn_begin" }));
+    assert_no_automatic_credit(&other);
     other
 }
 
@@ -1058,23 +1026,24 @@ fn another_sessions_carried_codex_test_overlaps_until_its_reported_end() {
         checkpoint.get("verification_evidence").is_none(),
         "S1's still-running test prevents S2's credit: {checkpoint:#}"
     );
-    let line = holder_line(&other);
+    let (overlapped, cause) = overlap_of(&other, ITEM);
+    let cause = cause.unwrap_or_default();
     assert!(
-        line.contains(&owner.session_id)
-            && line.contains("another session's still-running test")
-            && line.contains(&sha256_hex(ITEM.as_bytes())[..12]),
-        "the original owner and test are identified: {line}"
+        overlapped
+            && cause.contains(&owner.session_id)
+            && cause.contains("another session's still-running test")
+            && cause.contains(&sha256_hex(ITEM.as_bytes())[..12]),
+        "the original owner and test are identified on S2's check: {cause}"
     );
     assert!(owner.record(|record| !record.engram.running_codex_tests.is_empty()));
 
     report_late_end(&owner, THREAD, ITEM, 0);
     assert!(owner.record(|record| record.engram.running_codex_tests.is_empty()));
-    let checkpoint = passing_test_checkpoint(&other, &worktree, ITEM);
-    assert_eq!(
-        checkpoint["verification_evidence"].as_array().map(Vec::len),
-        Some(1),
-        "S2's new check after S1's end is credited: {checkpoint:#}"
-    );
+    let checkpoint = passing_test_observation(&other, &worktree, ITEM);
+    let checks = observed_checks(&checkpoint);
+    assert_eq!(checks.len(), 1, "only S2's own check: {checkpoint:#}");
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert_no_automatic_credit(&other);
 }
 
 /// The cross-session hazard is scoped to its owner's current runtime, its
@@ -1162,74 +1131,58 @@ fn another_sessions_carried_codex_test_respects_owner_scope() {
     );
 }
 
-/// A claimed Codex turn measured in its named worktree, with Engram answering
-/// one later turn under each grant of `later`.
-fn later_turns(label: &str, later: &[&str]) -> (CheckedTurn, PathBuf) {
-    let mut replies = vec![checkpoint_reply(CHECK_GRANT)];
-    for grant in later {
-        replies.extend([grant_reply(grant), begin_reply(grant), checkpoint_reply(grant)]);
-    }
-    let turn =
-        CheckedTurn::start_with_opening(label, true, None, replies, 1 + later.len(), true);
-    let worktree = turn.root.join(".worktrees").join("wt");
-    (turn, worktree)
-}
-
-/// Refusing a carried Codex test's evidence does not end its process: a
-/// check B started in its worktree fences it and its evidence is refused at
-/// that turn's checkpoint, yet a check C a turn later is still overlapped
-/// with it named as still running. Once its end is reported, a check D
-/// started after it is not overlapped by it and is credited.
+/// Fencing a carried Codex test does not end its process: a check B started
+/// in its worktree fences it, and it stays carried, yet a check C a turn
+/// later is still overlapped with it named as still running. Once its end is
+/// reported, a check D started after it is not overlapped by it and is
+/// observed as passed.
 #[test]
 fn a_refused_carried_test_still_overlaps_later_checks_until_its_end() {
-    let (turn, worktree) = later_turns(
-        "reported-end-refused-still-running",
-        &[
-            "turn-check-grant-later-b",
-            "turn-check-grant-later-c",
-            "turn-check-grant-later-d",
-        ],
-    );
+    let (turn, worktree) = two_turns("reported-end-refused-still-running");
     start_test(&turn, &worktree, ITEM);
     assert_carried_at_close(&turn);
-    let running = &sha256_hex(ITEM.as_bytes())[..12];
-    let overlapped_by_it = format!(
-        "reached its worktree while it ran (another command of this session (key {running}) \
-         was still running)"
-    );
-
-    let checkpoint = passing_test_checkpoint(&turn, &worktree, "exec-b");
+    let checkpoint = passing_test_observation(&turn, &worktree, "exec-b");
     assert!(checkpoint.get("verification_evidence").is_none(), "{checkpoint:#}");
-    assert!(
-        turn.record(|record| record.engram.carried_checks.is_empty()),
-        "B's command fenced it, so its evidence is refused"
-    );
+    assert_overlapped_by(&turn, "exec-b", ITEM);
+    // B's command fenced the carry; no turn settles or refuses it, and its
+    // process still counts as running.
+    turn.record(|record| {
+        assert_eq!(record.engram.carried_checks.len(), 1, "still carried");
+        let carried = &record.engram.carried_checks[0];
+        assert_eq!(carried.check.key, ITEM);
+        assert!(carried.check.end.is_none());
+        assert!(
+            carried.fence.as_deref().is_some_and(|cause|
+                cause.contains("this session ran a `cargo` command there")),
+            "B's command fenced it: {:?}",
+            carried.fence
+        );
+        assert!(record.engram.running_codex_tests.iter().any(|running| running.key == ITEM));
+    });
     let refused = holder_line(&turn);
     assert!(
-        refused.contains("earned no credit")
-            && refused.contains(STILL_RUNNING_AFTER_REFUSAL),
-        "the refusal says it still runs: {refused}"
+        !refused.contains("earned no credit")
+            && !refused.contains(STILL_RUNNING_AFTER_REFUSAL),
+        "no refusal is issued for the fenced carry: {refused}"
     );
 
-    let checkpoint = passing_test_checkpoint(&turn, &worktree, "exec-c");
+    let checkpoint = passing_test_observation(&turn, &worktree, "exec-c");
     assert!(
         checkpoint.get("verification_evidence").is_none(),
         "C runs beside it and earns no credit: {checkpoint:#}"
     );
-    let line = holder_line(&turn);
-    assert!(line.contains(&overlapped_by_it), "{line}");
+    assert_overlapped_by(&turn, "exec-c", ITEM);
 
     report_late_end(&turn, THREAD, ITEM, 0);
     assert!(
         turn.record(|record| record.engram.running_codex_tests.is_empty()),
         "its reported end ends it, carried or not"
     );
-    let checkpoint = passing_test_checkpoint(&turn, &worktree, "exec-d");
-    assert_eq!(
-        checkpoint["verification_evidence"].as_array().map(Vec::len),
-        Some(1),
-        "D, started after its end, is credited: {checkpoint:#}"
-    );
+    let checkpoint = passing_test_observation(&turn, &worktree, "exec-d");
+    let checks = observed_checks(&checkpoint);
+    assert_eq!(checks.len(), 1, "only D's own check: {checkpoint:#}");
+    assert_eq!(checks[0]["observed_result"], "passed");
+    assert_no_automatic_credit(&turn);
 }
 
 /// What a line closing a carried Codex test still waiting for its end says
@@ -1247,15 +1200,12 @@ const STILL_RUNNING_AFTER_REFUSAL: &str = "It is still running, and later checks
      worktree are overlapped until it ends; ending its process, or Stopping the session \
      (whose runtime exit closes it), ends the wait.";
 
-/// Six hours after its launch a carried Codex test's evidence expires, but
-/// its process may still run: a check started in its worktree after that is
-/// still overlapped with it named.
+/// Six hours after its launch a carried Codex test is past its age bound,
+/// but its process may still run: it stays carried, and a check started in
+/// its worktree after that is still overlapped with it named.
 #[test]
 fn an_expired_carried_test_still_overlaps_later_checks() {
-    let (turn, worktree) = later_turns(
-        "reported-end-expired-still-running",
-        &["turn-check-grant-expiry", "turn-check-grant-after-expiry"],
-    );
+    let (turn, worktree) = two_turns("reported-end-expired-still-running");
     start_test(&turn, &worktree, ITEM);
     assert_carried_at_close(&turn);
     turn.record_mut(|record| {
@@ -1263,29 +1213,31 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
             (chrono::Utc::now() - chrono::Duration::hours(7)).to_rfc3339();
     });
 
-    let expiring = next_turn_checkpoint(&turn);
+    let expiring = next_turn_observation(&turn);
     assert!(expiring.get("verification_evidence").is_none(), "{expiring:#}");
-    assert!(
-        turn.record(|record| record.engram.carried_checks.is_empty()),
-        "its evidence expired"
-    );
+    // Past its age bound it is still carried: only its reported end or its
+    // runtime's going removes it, and its process still counts as running.
+    turn.record(|record| {
+        assert_eq!(record.engram.carried_checks.len(), 1, "still carried");
+        let carried = &record.engram.carried_checks[0];
+        assert_eq!(carried.check.key, ITEM);
+        assert!(carried.check.end.is_none());
+        assert!(
+            engram_carried_check_expired(carried, chrono::Utc::now()),
+            "its launch is past the carried-check age bound"
+        );
+        assert!(record.engram.running_codex_tests.iter().any(|running| running.key == ITEM));
+    });
     let expired = holder_line(&turn);
     assert!(
-        expired.contains("within six hours of its launch")
-            && expired.contains(STILL_RUNNING_AFTER_REFUSAL),
-        "{expired}"
+        !expired.contains("within six hours of its launch")
+            && !expired.contains(STILL_RUNNING_AFTER_REFUSAL),
+        "no expiry refusal is issued: {expired}"
     );
 
-    let checkpoint = passing_test_checkpoint(&turn, &worktree, "exec-after-expiry");
+    let checkpoint = passing_test_observation(&turn, &worktree, "exec-after-expiry");
     assert!(checkpoint.get("verification_evidence").is_none(), "{checkpoint:#}");
-    let running = &sha256_hex(ITEM.as_bytes())[..12];
-    let line = holder_line(&turn);
-    assert!(
-        line.contains(&format!(
-            "another command of this session (key {running}) was still running"
-        )),
-        "{line}"
-    );
+    assert_overlapped_by(&turn, "exec-after-expiry", ITEM);
 }
 
 /// A carried Codex test whose end never comes, its runtime alive, is never
@@ -1296,32 +1248,14 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
 /// turns later is overlapped with it named as still running.
 #[test]
 fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
-    const LATER: [&str; 3] = [
-        "turn-check-grant-later-1",
-        "turn-check-grant-later-2",
-        "turn-check-grant-later-3",
-    ];
-    let mut replies = vec![checkpoint_reply(CHECK_GRANT)];
-    for grant in LATER {
-        replies.extend([grant_reply(grant), begin_reply(grant), checkpoint_reply(grant)]);
-    }
-    let turn = CheckedTurn::start_with_opening(
-        "reported-end-never-comes",
-        true,
-        None,
-        replies,
-        1 + LATER.len(),
-        true,
-    );
-    let worktree = turn.root.join(".worktrees").join("wt");
+    let (turn, worktree) = two_turns("reported-end-never-comes");
     start_test(&turn, &worktree, ITEM);
     let carried = holder_line_after_carry(&turn);
     assert!(
-        carried.contains("Until then it is still running")
-            && carried.contains("later checks in its worktree are overlapped until it ends")
+        carried.contains("remains owned by its original turn until its end is reported")
+            && carried.contains("Later checks in its worktree remain overlapped while it runs")
             && carried.contains(
-                "ending its process, or Stopping the session (whose runtime exit closes it), \
-                 ends the wait"
+                "stopping the session closes this observation with an unknown outcome"
             ),
         "{carried}"
     );
@@ -1334,7 +1268,7 @@ fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
         })
     };
     for later in 1..=2 {
-        let checkpoint = next_turn_checkpoint(&turn);
+        let checkpoint = next_turn_observation(&turn);
         assert!(
             checkpoint.get("verification_evidence").is_none(),
             "turn {later}: {checkpoint:#}"
@@ -1342,19 +1276,12 @@ fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
         still_carried(&format!("still carried after later turn {later}"));
     }
 
-    let checkpoint = second_test_checkpoint(&turn, &worktree);
+    let checkpoint = second_test_observation(&turn, &worktree);
     assert!(
         checkpoint.get("verification_evidence").is_none(),
         "a check beside it earns no credit: {checkpoint:#}"
     );
-    let line = holder_line(&turn);
-    let named = &sha256_hex(ITEM.as_bytes())[..12];
-    assert!(
-        line.contains(&format!(
-            "another command of this session (key {named}) was still running"
-        )),
-        "{line}"
-    );
+    assert_overlapped_by(&turn, SECOND_ITEM, ITEM);
 }
 
 /// A runtime of the session replaced without being cleared: its tests run no
@@ -1424,7 +1351,7 @@ fn a_runtime_exit_ends_a_still_running_tests_overlap() {
 
 /// The first turn's close carries the test it left running, as
 /// `assert_carried_at_close` checks, and returns the holder's line.
-fn holder_line_after_carry(turn: &CheckedTurn) -> String {
+fn holder_line_after_carry(turn: &EOCheckedTurn) -> String {
     assert_carried_at_close(turn);
     holder_line(turn)
 }
@@ -1459,7 +1386,7 @@ fn only_a_codex_test_keyed_by_its_item_is_carried() {
         );
         let line = holder_line(&turn);
         assert!(
-            line.contains("no end was reported for it by the turn's close")
+            line.contains("no end was reported for it by the ordinary turn's end")
                 && line.contains("closed with outcome Unknown"),
             "{label}: {line}"
         );

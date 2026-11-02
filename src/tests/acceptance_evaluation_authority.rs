@@ -267,7 +267,7 @@ fn fixture_budget_drivers_wake_on_clock_advance_and_real_completion() {
 #[test]
 fn fixture_authority_acknowledgement_excludes_stalled_manual_persistence() {
     let (state, project, _, root) = fixture();
-    super::super::engram_host_adapter::select_scripted_engram_budget_clock_before_enable(&state);
+    state.select_test_scripted_engram_budget_clock();
     super::super::work_visualizer::install_store(&state, &project, &root);
     let store = established_store(&state, &project).unwrap();
     let writer = sqlite_state_write_lock(state.persistence_path.as_path());

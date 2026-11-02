@@ -1,75 +1,83 @@
-//! Policy healing and real Stop arbitration after an ordinary marker fence.
-//! Mounted by engram_admission_availability_contract.rs.
+//! Real Stop arbitration and ordinary delivery without an admission marker.
 use super::*;
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
+use crate::tests::prompt_delivery::{DeliveryWriter, HeldFence};
 
 #[test]
-fn ordinary_admission_regression_refusal_healing_never_falls_open() {
+fn ordinary_user_and_mailbox_delivery_never_consults_retired_healing_responses() {
     for code in ["stale_fence", "control_assurance_insufficient"] {
         for source in [QueuedPromptSource::User, QueuedPromptSource::Mailbox] {
-            let refusal = ScriptedEngramControlResponse::Reply(Ok(json!({
-                "decision": "refuse",
-                "directive": {
-                    "directive_id": "healing-refusal",
-                    "code": code,
-                    "target": "host",
-                    "satisfaction": "rebind",
-                    "effect": "mutate_local",
-                    "declared_mediated_effects": ["observe"],
-                    "required_assurance": "turn_gated"
-                }
-            })));
-            let (state, session, receiver, transport) = root_fixture([
-                bind_reply("refused-token"),
-                refusal,
-                status_reply("ready"),
-                ScriptedEngramControlResponse::Reply(Err(EngramTransportError::spawn_failed(
-                    "healing sidecar did not start",
-                ))),
-            ]);
-            queue_test_engram_prompt(&state, &session, "policy must be settled", source, None);
-            let started = state
-                .start_next_queued_turn_off_lock(&session, false, false)
-                .unwrap()
-                .unwrap();
-            let _ = deliver_turn_dispatch(&state, started.dispatch);
-            assert_eq!(
-                operations(&transport),
-                [
-                    "session_bind",
-                    "turn_evaluate",
-                    "session_status",
-                    "session_bind"
-                ]
-            );
-            assert!(
-                receiver.try_recv().is_err(),
-                "a prior refusal excludes ungranted fallback: {code}"
-            );
-            let held = inspect(&state, &session, |record| record.clone());
-            assert_eq!(held.queued_prompts.len(), 1);
-            assert!(!held.queued_prompts[0].engram_ordinary_handoff);
-            assert!(held.engram.ordinary_handoff.is_none());
-            assert!(held.engram.active_grant_id.is_none());
+            let turn = OrdinaryRoot::new("ordinary-unused-healing");
+            turn.transport.responses.lock().unwrap().push_back(ScriptedEngramControlResponse::Reply(
+                Ok(json!({"decision":"refuse","code":code}))));
+            turn.enqueue("ordinary payload with original source", source);
+            let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap();
+            deliver_turn_dispatch(&turn.state, started.dispatch).into_public_result().unwrap();
+            assert!(turn.prompt().prompt.contains("ordinary payload with original source"));
+            turn.record(|record| {
+                assert!(record.queued_prompts.is_empty());
+                assert!(record.prompt_deliveries.is_empty());
+            });
+            assert_eq!(turn.transport.responses.lock().unwrap().len(), 1);
+            turn.assert_no_prompt();
+            turn.assert_no_control();
         }
     }
 }
 
-async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
-    let (state, session, root_rx, transport) =
-        root_fixture([ScriptedEngramControlResponse::Reply(Err(
-            EngramTransportError::spawn_failed("optional control unavailable"),
-        ))]);
-    let dispatch = root_dispatch(&state, &session, false);
-    let generation = dispatch.engram_dispatch_generation();
-    let active_turn_generation = dispatch.active_turn_generation();
-    assert_eq!(
-        state.prepare_engram_turn_delivery_off_lock(&session, generation.unwrap()),
-        EngramTurnDeliveryPreparation::Ready
-    );
-    let prepared = inspect(&state, &session, |record| record.clone());
-    assert!(prepared.queued_prompts[0].engram_ordinary_handoff);
-    assert!(prepared.engram.ordinary_handoff.is_some());
-    assert!(prepared.engram.active_grant_id.is_none());
+pub(super) async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
+    ordinary_stop_receipt_case(failed_stop, callback_first, true, None).await;
+}
+
+async fn ordinary_stop_receipt_case(
+    failed_stop: bool,
+    callback_first: bool,
+    receipted: bool,
+    changed_receipt: Option<&str>,
+) {
+    let mut turn = OrdinaryRoot::new("ordinary-stop-arbitration");
+    let writer = DeliveryWriter::attach(&mut turn.state);
+    let (prepared, receipt_id, _write_ahead_fence) = if receipted {
+        let id = turn.enqueue_durable("exact ordinary prompt", true);
+        assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+        writer.take(HeldFence::Durability).finish(Ok(()));
+        let fence = writer.take(HeldFence::WriteAhead);
+        turn.record(|record| {
+            let receipt = &record.prompt_deliveries[&id];
+            assert_eq!(receipt.disposition, PromptDeliveryDisposition::HandingOff);
+            assert!(!receipt.write_ahead_acknowledged);
+            assert!(receipt.turn_generation.is_none() && receipt.entry.is_none());
+        });
+        // DeliveryWriter is a no-write acknowledgement double. Set only its
+        // ACK latch here so production queue promotion returns the prepared
+        // dispatch before settlement's automatic provider enqueue. Promotion,
+        // receipt identity and removal of the queue row remain production code.
+        turn.edit(|record| {
+            record.prompt_deliveries.get_mut(&id).unwrap().write_ahead_acknowledged = true;
+        });
+        let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false)
+            .unwrap().expect("acknowledged ordinary receipt promotes");
+        turn.record(|record| {
+            assert!(record.queued_prompts.is_empty(), "ordinary promotion removes its queue row");
+            let receipt = &record.prompt_deliveries[&id];
+            assert_eq!(receipt.disposition, PromptDeliveryDisposition::HandingOff);
+            assert_eq!(receipt.turn_generation, Some(started.dispatch.active_turn_generation()));
+            assert_eq!(receipt.entry.as_ref().unwrap().pending_prompt.id, id);
+            assert!(receipt.message_id.is_some() && receipt.attempt_key.is_some());
+        });
+        (started.dispatch, Some(id), Some(fence))
+    } else {
+        (turn.prepare("exact ordinary prompt"), None, None)
+    };
+    turn.assert_no_prompt();
+    let promoted_receipt = receipt_id.as_ref().map(|id| turn.record(|record| {
+        serde_json::to_value(&record.prompt_deliveries[id]).unwrap()
+    }));
+    let state = &turn.state;
+    let session = &turn.session;
+    let root_rx = &turn.receiver;
+    let active_turn_generation = prepared.active_turn_generation();
+    drop(prepared);
 
     // Use the same real kill-failure and Stop fence as post-receipt tests.
     // Only the provider channel is adapted to an ACP fixture at this seam.
@@ -89,12 +97,23 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
     let mut events = state.subscribe_events();
     state.request_stop_session(&session).unwrap();
     gate.wait_until_claimed();
+    if let Some(change) = changed_receipt {
+        turn.edit(|record| {
+            let receipt = record.prompt_deliveries.get_mut(receipt_id.as_ref().unwrap()).unwrap();
+            match change {
+                "nonce" => receipt.write_ahead = Uuid::new_v4().to_string(),
+                "attempt" => receipt.attempt += 1,
+                "settled" => receipt.disposition = PromptDeliveryDisposition::Accepted,
+                _ => panic!("unknown receipt mutation"),
+            }
+        });
+    }
+    let restores_handoff = failed_stop && receipted && changed_receipt.is_none();
     let mut dispatch = Some(TurnDispatch::PersistentAcp {
         human_prompt_id: None,
         federation_handoff: None,
         opening_prompt: None,
         active_turn_generation,
-        engram_dispatch_generation: generation,
         runtime_token: token.clone(),
         session_id: session.clone(),
         mailbox_notification: None,
@@ -112,19 +131,19 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
     });
     let early =
         callback_first.then(|| handoff_prepared_turn_dispatch(&state, dispatch.take().unwrap()));
-    let callbacks = inspect(&state, &session, |record| {
+    let callbacks = turn.record(|record| {
         record.deferred_stop_callbacks.clone()
     });
     let delivered_during_stop = receiver
         .try_iter()
         .any(|command| matches!(command, AcpRuntimeCommand::Prompt(_)));
     let replay_carrier = callbacks.iter().find_map(|callback| match callback {
-        DeferredStopCallback::EngramHandoff { dispatch, .. } => Some(dispatch.clone()),
+        DeferredStopCallback::TurnHandoff { dispatch, .. } => Some(dispatch.clone()),
         _ => None,
     });
     // Force the exact observation gap: Stop clears its runtime fence before
     // the background replay takes this one-shot carrier and enqueues it.
-    let replay_blocker = (failed_stop && callback_first).then(|| {
+    let replay_blocker = (restores_handoff && callback_first).then(|| {
         replay_carrier
             .as_ref()
             .expect("deferred handoff carrier")
@@ -136,7 +155,7 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
     gate.release();
     tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
         loop {
-            if inspect(&state, &session, |record| !record.runtime_stop_in_progress) {
+            if turn.record(|record| !record.runtime_stop_in_progress) {
                 break;
             }
             events.recv().await.unwrap();
@@ -144,6 +163,21 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
     })
     .await
     .expect("real Stop must settle its runtime fence");
+    if failed_stop {
+        turn.record(|record| {
+            assert_eq!(record.session.status,
+                if restores_handoff { SessionStatus::Active } else { SessionStatus::Error });
+            assert!(record.queued_prompts.is_empty(), "Stop cannot recreate a queue owner");
+            if restores_handoff {
+                let receipt = &record.prompt_deliveries[receipt_id.as_ref().unwrap()];
+                assert!(receipt.write_ahead_acknowledged);
+                assert_eq!(Some(serde_json::to_value(receipt).unwrap()), promoted_receipt,
+                    "failed Stop restores the same receipt without replacing it");
+            } else if !receipted {
+                assert!(record.prompt_deliveries.is_empty(), "direct dispatch has no receipt owner");
+            }
+        });
+    }
     let empty_before_replay = replay_blocker.as_ref().map(|_| {
         !receiver
             .try_iter()
@@ -154,7 +188,7 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
         .unwrap_or_else(|| handoff_prepared_turn_dispatch(&state, dispatch.take().unwrap()))
         .unwrap();
     let mut prompts = Vec::new();
-    if failed_stop {
+    if restores_handoff {
         loop {
             let command = phase_sync::receive(
                 &receiver,
@@ -178,7 +212,7 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
             })
             .collect::<Vec<_>>(),
     );
-    let after = inspect(&state, &session, |record| record.clone());
+    turn.record(|record| assert!(!record.runtime_stop_in_progress));
     assert!(
         !delivered_during_stop,
         "Stop arbitration forbids provider enqueue"
@@ -194,7 +228,7 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
             matches!(outcome, HandoffPreparedTurnDispatchOutcome::Scheduled),
             "a prepared ordinary handoff must be retained by Stop arbitration"
         );
-    } else if failed_stop {
+    } else if restores_handoff {
         assert!(
             matches!(outcome, HandoffPreparedTurnDispatchOutcome::Delivered),
             "failed Stop must restore the still-owned ordinary dispatch"
@@ -207,19 +241,14 @@ async fn ordinary_stop_case(failed_stop: bool, callback_first: bool) {
     }
     assert_eq!(
         prompts,
-        if failed_stop {
+        if restores_handoff {
             vec!["exact ordinary prompt".to_owned()]
         } else {
             vec![]
         }
     );
     assert!(root_rx.try_recv().is_err());
-    assert!(after.engram.ordinary_handoff.is_none());
-    assert!(
-        !operations(&transport)
-            .iter()
-            .any(|op| op == "turn_begin" || op == "turn_checkpoint")
-    );
+    turn.assert_no_control();
 }
 
 #[tokio::test]
@@ -233,5 +262,21 @@ async fn ordinary_admission_regression_handoff_waits_for_public_stop_outcome() {
 async fn ordinary_admission_regression_failed_stop_restores_late_handoff() {
     for failed_stop in [true, false] {
         ordinary_stop_case(failed_stop, false).await;
+    }
+}
+
+#[tokio::test]
+async fn ordinary_failed_stop_does_not_restore_ownerless_direct_dispatch() {
+    for callback_first in [true, false] {
+        ordinary_stop_receipt_case(true, callback_first, false, None).await;
+    }
+}
+
+#[tokio::test]
+async fn ordinary_failed_stop_does_not_restore_a_changed_receipt() {
+    for change in ["nonce", "attempt", "settled"] {
+        for callback_first in [true, false] {
+            ordinary_stop_receipt_case(true, callback_first, true, Some(change)).await;
+        }
     }
 }

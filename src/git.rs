@@ -1039,10 +1039,6 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             | ApiErrorKind::FederationMailboxReadConflict
             | ApiErrorKind::RemoteConnectionUnavailable
             | ApiErrorKind::FederationSshCleanupUnknown
-            | ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown
-            | ApiErrorKind::EngramProjectResetRuntimeHeld
-            | ApiErrorKind::EngramProjectResetDeadline
-            | ApiErrorKind::EngramProjectResetRefused
             | ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged
             | ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending
             | ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable

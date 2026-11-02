@@ -1,40 +1,17 @@
-// Test-only child of src/tests/test_runs.rs. Owns the witnesses of the
-// `verification_record` sender (src/engram_verification_record.rs) and of the
-// capability gate it obeys (src/engram_capabilities.rs): the capability read
-// from bind and status answers (present, field absent, entry absent, wrong
-// type, old answers still parsing), kept per connection, per routing token and
-// per transport child, and never taken from a reader's connection or another
-// reply; the refusal to send without it; the record against the producer's own
-// request, receipt and refusal shapes (fixtures transcribed from Engram's
-// tree, cited at each), frozen and resent byte for byte after a reload or a
-// reconnect under a new routing token; stage kinds by each stage's actual argv
-// under TermAl's existing test and build rules, with no stage ever left out;
-// runs the producer would refuse, held pending with their reasons; runs that
-// never emit; routing by the initiating session only, over the Base binding
-// owner's connection and the token the session already holds: no Engram bind
-// of any kind from the sender, whether the session holds no token or one
-// marked for rebinding after a reload, the record kept frozen and pending
-// until naming binds the session and then sent unchanged; delivery under the
-// token ordinary naming leaves; an existing or control binding never
-// replaced, and a resend on recovered credentials; a receipt settling the
-// run's own launch observation before the record is marked settled, held
-// (never resent) while no row carries the run's artifact or the association
-// is not read back durable; a refused routing token that leaves the session's
-// binding as it is and sends nothing under it; definite refusals against
-// transient and unknown codes; the tick's own budget, shutdown stop and
-// round-robin order across passes; a frozen body or held receipt that is not
-// the host's own rebuilt record, never sent nor settled; a receipt,
-// settlement or rejection written beside the run that the host never
-// observed, which neither holds nor stops the send; and an answer read across
-// a respawn, never recorded for the new child. Does not own the
-// committed-input record itself
-// (src/tests/test_run_committed_input.rs), the turn checkpoint's receipt
-// settlement (its own tests), or the process transport's own child lifecycle
-// (src/tests/engram_control_transport.rs). New module.
+// Native verification sender and its ordinary work-session capability proof.
+// Owns exact initiating connection/current-child isolation, explicit run
+// registration, immutable record/key retries, producer receipt/refusal shapes,
+// own-row durable settlement, reload, backoff and fair iteration. Automatic
+// Execution Observability neither grants this credit nor disables explicit
+// verification. Historical control metadata remains passive and unchanged.
+// Does not own ordinary dispatch, runtime lifecycle or producer-side recording.
 use super::*;
 
 #[path = "engram_verification_record_rebind.rs"]
 mod naming_rebind;
+
+#[path = "test_run_receipt_record_ids.rs"]
+mod receipt_record_ids;
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const SESSION: &str = "session-record";
@@ -43,20 +20,30 @@ const ENDED: &str = "2026-10-30T10:05:00.000Z";
 /// A `registered_host_run` object id as the producer mints it (32 hex).
 const PRODUCER: &str = "5f0c2b6e8d4a4e1f9a3b7c6d5e4f3a2b";
 
-/// The producer's own wire, byte for byte as Engram's real host test wrote
-/// it through its host transport (Engram tree b2c8906a, its registered
-/// verification tests passing 8/0; file SHA-256 1a0a2cb2c270529d…): an
-/// accepted request (`request`) and its answer (`response`), a failed run
-/// with an unrun check (`failed_request`) and its answer, which names only
-/// the completed check (`failed_response`), and a typed refusal of a
-/// non-clean input (`refused_request`, `refusal`). If the producer's wire
-/// changes, this file is replaced from its new tree, never edited by hand.
-const PRODUCER_WIRE: &str = include_str!("fixtures/engram-registered-verification-wire.json");
+/// Exact mailed producer-authored frames from source 7a812915/tree 88d3c539.
+/// The registered check is asserted data, not an execution attestation. This
+/// is the mailed JSON, not an independently fetched producer raw artifact.
+const PRODUCER_WIRE: &str = include_str!("fixtures/engram-execution-observability-wire.json");
+
+/// Current six-shape native fixture from producer d5bc14da/tree edb30f0e,
+/// mailed unchanged. Its emitter passed within the registered-test subset;
+/// the enclosing run failed later, so this artifact is no overall gate proof.
+/// The older routing-token archive remains a separate, unchanged file.
+const REGISTERED_PRODUCER_WIRE: &str =
+    include_str!("fixtures/engram-registered-verification-current-wire.json");
 
 /// One named part of the producer's wire.
 fn producer_wire(part: &str) -> Value {
-    let wire: Value = serde_json::from_str(PRODUCER_WIRE).expect("the producer's wire reads");
+    let wire: Value = serde_json::from_str(REGISTERED_PRODUCER_WIRE).expect("the producer wire reads");
     wire.get(part).cloned().unwrap_or_else(|| panic!("the producer's wire has `{part}`"))
+}
+
+fn producer_frame(operation: &str) -> Value {
+    let wire: Value = serde_json::from_str(PRODUCER_WIRE).expect("the producer's wire reads");
+    wire["frames"].as_array().unwrap().iter()
+        .find(|frame| frame["request"]["operation"] == operation)
+        .unwrap_or_else(|| panic!("the producer captured {operation}"))
+        .clone()
 }
 
 /// The producer's request as a host sends it.
@@ -334,41 +321,40 @@ fn adapter(transport: &Arc<RecordingTransport>) -> EngramHostAdapter {
     }
 }
 
-fn status_request(token: &str) -> EngramControlRequest {
-    EngramControlRequest::SessionStatus { routing_token: token.to_owned() }
-}
-
-fn status_with(capabilities: Value) -> Value {
-    json!({ "session_id": SESSION, "phase": "ready", "capabilities": capabilities })
+fn work_session_with(capabilities: Value) -> Value {
+    json!({ "project_id": store().project_id, "session_id": SESSION,
+        "work_session": true, "capabilities": capabilities })
 }
 
 fn supported() -> Value {
-    status_with(json!(["verification_record_v1"]))
+    work_session_with(json!(["host_work_v1", "verification_record_v1"]))
 }
 
-/// The connection's own status read under `token`, answering `answer`.
-fn read_status(
+fn work_supported(session: &str) -> Value {
+    json!({"project_id": store().project_id, "session_id": session,
+        "work_session": true, "capabilities": ["host_work_v1", "verification_record_v1"]})
+}
+
+/// The connection's ordinary work-session read, answering `answer`.
+fn read_work_session(
     transport: &RecordingTransport,
     adapter: &EngramHostAdapter,
     connection: &EngramConnectionConfig,
-    token: &str,
     answer: Value,
 ) {
     transport.script(Ok(answer));
     adapter
-        .request(connection, &status_request(token), Duration::from_secs(1))
-        .expect("the status read answers");
+        .request(connection, &EngramControlRequest::WorkSessionRead {}, Duration::from_secs(1))
+        .expect("the work-session read answers");
 }
 
 fn link<'a>(
     adapter: &'a EngramHostAdapter,
     connection: &'a EngramConnectionConfig,
-    routing_token: &'a str,
 ) -> std::result::Result<EngramVerificationRecordLink<'a>, EngramVerificationRecordPending> {
     Ok(EngramVerificationRecordLink {
         adapter,
         connection,
-        routing_token,
         timeout: Duration::from_secs(5),
     })
 }
@@ -392,12 +378,10 @@ fn receipt_for(run_outcome: &str) -> Value {
     })
 }
 
-/// A request's own fields without its routing token, serialized: the frozen
-/// body and operation key a resend must repeat exactly.
-fn without_token(request: &Value) -> Vec<u8> {
-    let mut request = request.clone();
-    request.as_object_mut().unwrap().remove("routing_token");
-    serde_json::to_vec(&request).unwrap()
+/// Every current request byte, including its operation key, repeats exactly.
+fn record_wire_bytes(request: &Value) -> Vec<u8> {
+    assert!(request.get("routing_token").is_none());
+    serde_json::to_vec(request).unwrap()
 }
 
 fn launch_row(run: &RecordRun) -> (String, TestRunCommandObservation) {
@@ -459,32 +443,34 @@ fn row_records(fixture: &RunFixture, execution_id: &str) -> Vec<Option<String>> 
         .collect()
 }
 
-/// A persistence worker on the state's real background channel whose
-/// every write fails: each queued Delta and fence is taken off the channel
-/// and every fence resolves as a failed write. It runs until the channel is
-/// replaced (`synchronous_persistence`).
+/// Join any existing writer before installing a rejecting writer under the
+/// AppState worker handle. Normal shutdown joins this writer as well.
 fn failing_persist_worker(fixture: &mut RunFixture) {
+    fixture.state.shutdown_persist_blocking();
     let (tx, rx) = std::sync::mpsc::channel::<PersistRequest>();
     fixture.state.persist_tx = tx;
-    std::thread::spawn(move || {
+    let worker = std::thread::spawn(move || {
         let mut batch = PersistFenceBatch::default();
         while let Ok(request) = rx.recv() {
+            let shutdown = matches!(&request, PersistRequest::Shutdown);
             batch.accept(request);
             batch.fail(PersistFenceError::WriteFailed("disk full".to_owned()));
+            if shutdown {
+                break;
+            }
         }
     });
+    assert!(fixture.state.persist_thread_handle.lock().unwrap().replace(worker).is_none());
+    fixture.state.persist_worker_alive.store(true, Ordering::Release);
 }
 
-/// No worker: the channel is closed, so every save is the synchronous,
-/// durable write a host without its worker makes.
+/// Join the writer before exercising the host's synchronous persistence path.
 fn synchronous_persistence(fixture: &mut RunFixture) {
-    fixture.state.persist_tx = std::sync::mpsc::channel::<PersistRequest>().0;
+    fixture.state.shutdown_persist_blocking();
 }
 
-/// A session of the fixture's project with Engram on, turn-gated control
-/// `control`, and `token` as its own current binding, answered by a recording
-/// transport.
-fn engram_session(fixture: &RunFixture, control: bool, token: Option<&str>) -> (String, Arc<RecordingTransport>) {
+/// An ordinary work session; automatic EO and explicit verification are separate.
+fn engram_session(fixture: &RunFixture, observability: bool) -> (String, Arc<RecordingTransport>) {
     let session = create_test_project_session(&fixture.state, Agent::Codex, &fixture.project_id, &fixture.root);
     let transport = Arc::new(RecordingTransport::default());
     fixture.state.install_test_engram_transport(transport.clone());
@@ -497,15 +483,12 @@ fn engram_session(fixture: &RunFixture, control: bool, token: Option<&str>) -> (
         .engram = Some(EngramProjectSettings {
         acceptance_evaluation: None,
         enabled: true,
-        turn_gated_control: control,
+        execution_observability: observability,
         binary_path: Some("engram".to_owned()),
         home: Some(fixture.root.to_string_lossy().into_owned()),
-        work_authority_grant: None,
         authority_store_key: Some(store()),
         deadline_ms: Some(1000),
     });
-    let index = inner.find_session_index(&session).expect("the session");
-    inner.sessions[index].engram.routing_token = token.map(str::to_owned);
     drop(inner);
     (session, transport)
 }
@@ -561,26 +544,20 @@ fn current(fixture: &RunFixture, run: &RecordRun) -> TestRunRegistration {
 fn naming_state(
     fixture: &RunFixture,
     session: &str,
-) -> (Option<String>, bool, Option<EngramControlWorkBinding>, bool, Option<Uuid>, bool) {
+) -> (Option<EngramControlWorkBinding>, Option<Uuid>, BTreeMap<String, Value>) {
     session_engram(fixture, session, |engram| {
         (
-            engram.routing_token.clone(),
-            engram.rebind_required,
             engram.work_binding.clone(),
-            engram.bind_in_progress,
             engram.source_root_bind_owner,
-            engram.retained_bind.is_some(),
+            engram.historical_control.clone(),
         )
     })
 }
 
-/// The session as an ordinary source-root naming bind leaves it: the Base
-/// token it adopted, the claim's work binding, nothing marked for rebinding.
-fn bound_by_naming(fixture: &RunFixture, session: &str, token: &str) {
+/// The work association retained by the ordinary source-root naming owner.
+fn bound_by_naming(fixture: &RunFixture, session: &str) {
     with_session_engram(fixture, session, |engram| {
-        engram.routing_token = Some(token.to_owned());
         engram.work_binding = Some(binding());
-        engram.rebind_required = false;
     });
 }
 
@@ -611,99 +588,69 @@ fn the_capability_is_read_from_an_answer_only_when_listed_as_a_name() {
 }
 
 #[test]
-fn old_and_new_bind_and_status_answers_both_parse() {
-    let old_status = json!({ "session_id": SESSION, "phase": "ready", "open_grant_id": null });
-    let new_status = supported();
-    for answer in [&old_status, &new_status] {
-        let status: EngramSessionStatusResponse =
-            parse_engram_result(answer.clone()).expect("a status answer parses");
-        assert_eq!(status.phase, "ready");
-    }
-    let old_bind = json!({ "routing_token": "token", "status": old_status });
-    let new_bind = json!({
-        "routing_token": "token", "status": { "phase": "ready" },
-        "capabilities": ["verification_record_v1"],
-    });
-    for answer in [&old_bind, &new_bind] {
-        let bound: EngramSessionBindingResponse =
-            parse_engram_result(answer.clone()).expect("a bind answer parses");
-        assert_eq!(bound.routing_token, "token");
-    }
-    assert_eq!(
-        engram_reply_verification_record_support(&old_bind),
-        EngramVerificationRecordSupport::FieldMissing
-    );
-    assert_eq!(
-        engram_reply_verification_record_support(&new_bind),
-        EngramVerificationRecordSupport::Supported
-    );
-}
-
-#[test]
-fn each_connection_keeps_its_own_last_answer_under_its_token_and_child() {
+fn ordinary_work_session_support_requires_the_exact_session_and_host_capability() {
     use crate::EngramVerificationRecordSupport as Support;
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
-    assert_eq!(adapter.verification_record_support(&own, "token"), Support::NotRead);
+    for (answer, expected) in [
+        (supported(), Support::Supported),
+        ({ let mut answer = supported(); answer["session_id"] = json!("another-session"); answer }, Support::NotRead),
+        ({ let mut answer = supported(); answer["work_session"] = json!(false); answer }, Support::NotRead),
+        (work_session_with(json!(["verification_record_v1"])), Support::NotRead),
+        (work_session_with(json!(["host_work_v1"])), Support::EntryMissing),
+        (work_session_with(json!(["host_work_v1", "verification_record_v1", false])), Support::NotRead),
+    ] {
+        read_work_session(&transport, &adapter, &own, answer.clone());
+        assert_eq!(adapter.verification_record_route_support(&own), expected, "{answer}");
+    }
+    assert!(transport.sent().iter().all(|request|
+        request["operation"] == "work_session_read" && request.get("routing_token").is_none()));
+}
 
-    read_status(&transport, &adapter, &own, "token", supported());
-    assert_eq!(adapter.verification_record_support(&own, "token"), Support::Supported);
-    assert_eq!(adapter.current_routing_token(&own).as_deref(), Some("token"));
-    // Another binding of the same connection is not the one that answered.
-    assert_eq!(adapter.verification_record_support(&own, "token-2"), Support::NotRead);
-    // Another session, or another actor behind the same session, is another
-    // connection.
-    assert_eq!(adapter.verification_record_support(&connection("other", "actor"), "token"), Support::NotRead);
-    assert_eq!(adapter.verification_record_support(&connection(SESSION, "reader"), "token"), Support::NotRead);
+#[test]
+fn each_connection_keeps_only_its_current_childs_ordinary_work_session_answer() {
+    use crate::EngramVerificationRecordSupport as Support;
+    let transport = Arc::new(RecordingTransport::default());
+    let adapter = adapter(&transport);
+    let own = connection(SESSION, "actor");
+    assert_eq!(adapter.verification_record_route_support(&own), Support::NotRead);
+    read_work_session(&transport, &adapter, &own, supported());
+    assert_eq!(adapter.verification_record_route_support(&own), Support::Supported);
+    assert_eq!(adapter.verification_record_route_support(&connection("other", "actor")), Support::NotRead);
+    assert_eq!(adapter.verification_record_route_support(&connection(SESSION, "reader")), Support::NotRead);
+    let mut another_home = own.clone();
+    another_home.home = PathBuf::from("a-different-connection-home");
+    assert_eq!(adapter.verification_record_route_support(&another_home), Support::NotRead);
 
-    // Any other operation leaves the answer as it is, even one whose reply
-    // happens to carry a capability list.
+    // A root read carrying a capability-looking extension cannot change proof.
     transport.script(Ok(json!({ "capabilities": [] })));
-    let _ = adapter.request(
-        &own,
-        &EngramControlRequest::TurnGrantRead { routing_token: "token".to_owned(), grant_id: "g".to_owned() },
-        Duration::from_secs(1),
-    );
-    assert_eq!(adapter.verification_record_support(&own, "token"), Support::Supported);
+    adapter.request(&own, &EngramControlRequest::NamedRootRead {
+        run_id: "run-record".to_owned(), claim_id: "claim-record".to_owned(),
+    }, Duration::from_secs(1)).unwrap();
+    assert_eq!(adapter.verification_record_route_support(&own), Support::Supported);
 
-    // A respawned child is a new connection: unknown until its own answer.
     transport.respawn();
-    assert_eq!(adapter.verification_record_support(&own, "token"), Support::NotRead);
-    assert_eq!(adapter.current_routing_token(&own), None);
-    read_status(&transport, &adapter, &own, "token", supported());
-    assert_eq!(adapter.verification_record_support(&own, "token"), Support::Supported);
+    assert_eq!(adapter.verification_record_route_support(&own), Support::NotRead);
+    read_work_session(&transport, &adapter, &own, supported());
+    assert_eq!(adapter.verification_record_route_support(&own), Support::Supported);
+    read_work_session(&transport, &adapter, &own, work_session_with(json!(["host_work_v1"])));
+    assert_eq!(adapter.verification_record_route_support(&own), Support::EntryMissing,
+        "a fresh answer replaces the old capability");
 
-    // A reconnect's bind is read afresh under the token it gives: an older
-    // Engram's answer drops the capability.
-    transport.script(Ok(json!({ "routing_token": "token-3", "status": { "phase": "ready" } })));
-    let bind = EngramControlRequest::SessionBind {
-        external_ref: "ref".to_owned(),
-        title: "title".to_owned(),
-        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-        mediated_effects: vec![EngramEffect::Observe],
-        capability_map_revision: 1,
-        work_binding: None,
-        idempotency_key: "bind".to_owned(),
-    };
-    adapter.request(&own, &bind, Duration::from_secs(1)).unwrap();
-    assert_eq!(adapter.current_routing_token(&own).as_deref(), Some("token-3"));
-    assert_eq!(adapter.verification_record_support(&own, "token-3"), Support::FieldMissing);
-
-    read_status(&transport, &adapter, &own, "token-3", supported());
-    transport.script(Err(EngramTransportError::transport("lost")));
-    assert!(adapter.request(&own, &status_request("token-3"), Duration::from_secs(1)).is_err());
-    assert_eq!(adapter.verification_record_support(&own, "token-3"), Support::NotRead, "a failed read forgets");
-    assert_eq!(adapter.current_routing_token(&own), None);
-
-    read_status(&transport, &adapter, &own, "token-3", supported());
+    read_work_session(&transport, &adapter, &own, supported());
+    transport.script(Err(EngramTransportError::transport("lost work-session reply")));
+    assert!(adapter.request(&own, &EngramControlRequest::WorkSessionRead {}, Duration::from_secs(1)).is_err());
+    assert_eq!(adapter.verification_record_route_support(&own), Support::NotRead);
+    read_work_session(&transport, &adapter, &own, supported());
     adapter.shutdown_session(SESSION);
-    assert_eq!(adapter.verification_record_support(&own, "token-3"), Support::NotRead, "a shutdown forgets");
+    assert_eq!(adapter.verification_record_route_support(&own), Support::NotRead);
+    assert!(transport.sent().iter().all(|request| request.get("routing_token").is_none()));
 }
 
 /// The run the producer's fixture request describes, as TermAl records it:
-/// a focused `cargo test --lib` on a clean commit, registered with the
-/// fixture's identity, claim and root.
+/// an asserted focused check on a clean commit, registered with the
+/// fixture's identity, claim and root. This constructs input data only.
 fn producer_fixture_run(fixture: &RunFixture, producer: &Value) -> (TestRunRegistration, Value, Value) {
     let registration = &producer["registration"];
     let run_part = &producer["run"];
@@ -712,12 +659,18 @@ fn producer_fixture_run(fixture: &RunFixture, producer: &Value) -> (TestRunRegis
     let commit = text(&producer["input"]["commit"]);
     // The launcher's own stage counts: the producer's numbers plus the
     // runner label the sender must leave out.
-    let mut tests = check["counts"].clone();
+    let mut tests = Value::Object(check["counts"].as_object().cloned().unwrap_or_default());
     tests["runner"] = json!("cargo-libtest");
+    let argv = match check["command"].as_str().unwrap() {
+        "fixture registered check" => ["fixture", "registered", "check"],
+        "cargo test --lib" => ["cargo", "test", "--lib"],
+        other => panic!("a new producer command needs an explicit argv fixture: {other}"),
+    };
+    assert_eq!(check["command"], json!(argv.join(" ")));
     let request = json!({
         "root": fixture.root.to_string_lossy(),
         "input": "commit",
-        "stages": [{ "name": text(&check["stage"]), "command": "cargo", "args": ["test", "--lib"] }],
+        "stages": [{ "name": text(&check["stage"]), "kind": "test", "command": argv[0], "args": &argv[1..] }],
         "started": text(&run_part["started_at"]),
     });
     let results = json!({
@@ -725,11 +678,11 @@ fn producer_fixture_run(fixture: &RunFixture, producer: &Value) -> (TestRunRegis
         "exitCode": 0,
         "started": text(&run_part["started_at"]),
         "ended": text(&run_part["finished_at"]),
-        "command": ["cargo", "test", "--lib"],
+        "command": argv,
         "stages": [{
             "name": text(&check["stage"]), "state": text(&check["outcome"]), "code": 0,
             "started": text(&check["started_at"]), "ended": text(&check["completed_at"]),
-            "command": ["cargo", "test", "--lib"],
+            "command": argv,
             "tests": tests,
         }],
         "input": {
@@ -743,6 +696,8 @@ fn producer_fixture_run(fixture: &RunFixture, producer: &Value) -> (TestRunRegis
         request_identity: registration["request_identity"].as_str().unwrap().to_owned(),
         registered_at: registration["registered_at"].as_str().unwrap().to_owned(),
         initiating_session_id: registration["initiating_session_id"].as_str().unwrap().to_owned(),
+        owning_session_id: registration["owning_session_id"].as_str()
+            .or_else(|| registration["initiating_session_id"].as_str()).unwrap().to_owned(),
         work_binding: Some(serde_json::from_value(registration["binding"].clone()).unwrap()),
         named_root: Some(TestRunNamedRoot {
             workspace_id: registration["root"]["workspace_id"].as_str().unwrap().to_owned(),
@@ -753,8 +708,8 @@ fn producer_fixture_run(fixture: &RunFixture, producer: &Value) -> (TestRunRegis
     (registration, request, results)
 }
 
-/// The host's own descriptive text (each check's summary and references) and
-/// the optional owning session the producer's fixture leaves out.
+/// Optional host audit text: owning session, check summaries and references.
+/// An empty optional dirty-path list is equivalent to its omitted wire form.
 fn without_host_text(mut request: Value) -> Value {
     request["registration"].as_object_mut().unwrap().remove("owning_session_id");
     for check in request["checks"].as_array_mut().unwrap() {
@@ -762,15 +717,22 @@ fn without_host_text(mut request: Value) -> Value {
         check.remove("summary");
         check.remove("refs");
     }
+    if let Some(post_run) = request.get_mut("post_run").and_then(Value::as_object_mut)
+        && post_run.get("dirty_paths").is_some_and(|paths|
+            paths.as_array().is_some_and(|paths| paths.is_empty()))
+    {
+        post_run.remove("dirty_paths");
+    }
     request
 }
 
 #[test]
 fn the_record_matches_the_producers_own_request_fixture() {
-    let producer = producer_request();
+    for producer in [producer_request(), producer_frame("verification_record")["request"].clone()] {
     // The sender's types read the producer's shape as it stands.
     let mut body = producer.as_object().unwrap().clone();
-    for framing in ["operation", "routing_token", "operation_key"] {
+    assert!(producer.get("routing_token").is_none());
+    for framing in ["operation", "operation_key"] {
         body.remove(framing);
     }
     let read: EngramVerificationRecordBody =
@@ -782,14 +744,81 @@ fn the_record_matches_the_producers_own_request_fixture() {
     let (registration, request, results) = producer_fixture_run(&fixture, &producer);
     let built = engram_verification_record_body(&registration, &request, &results).expect("the run builds");
     let wire = serde_json::to_value(EngramControlRequest::VerificationRecord {
-        routing_token: producer["routing_token"].as_str().unwrap().to_owned(),
-        operation_key: engram_verification_record_key("test-native"),
+        operation_key: engram_verification_record_key(&registration.run_id),
         record: serde_json::to_value(&built).unwrap(),
     })
     .unwrap();
-    assert_eq!(without_host_text(wire), without_host_text(producer));
+    assert_eq!(without_host_text(wire), without_host_text(producer.clone()));
     // The check fingerprint is the producer's own over the command text.
-    assert_eq!(built.checks[0].check_fingerprint, fingerprint("cargo test --lib"));
+    assert_eq!(built.checks[0].check_fingerprint, fingerprint(producer["checks"][0]["command"].as_str().unwrap()));
+    assert_eq!(built.registration.owning_session_id.as_deref(), Some(registration.owning_session_id.as_str()));
+    }
+}
+
+#[test]
+fn the_producers_quiet_sighting_is_neither_a_turn_nor_verification_credit() {
+    let frame = producer_frame("execution_observe");
+    let mut body = frame["request"].as_object().unwrap().clone();
+    body.remove("operation");
+    let observation: EngramInterTurnObservation =
+        serde_json::from_value(Value::Object(body)).unwrap();
+    let sighting = EngramMeasuredSighting {
+        source_basis: serde_json::from_value(frame["request"]["occurrence"]["source_basis"].clone()).unwrap(),
+        observed_at: frame["request"]["occurrence"]["observed_at"].as_str().unwrap().to_owned(),
+    };
+    let built_at = chrono::DateTime::parse_from_rfc3339(&sighting.observed_at)
+        .unwrap().with_timezone(&chrono::Utc);
+    let request = engram_source_sighting_request(EngramUnadmittedObservationBasis {
+        idempotency_key: observation.idempotency_key.clone(),
+        binding: observation.binding.clone(),
+        root_basis: observation.root_basis.clone(),
+        observed_interval: observation.observed_interval.clone(),
+        policy_basis: observation.policy_basis.clone(),
+    }, sighting, built_at).unwrap();
+    assert_eq!(serde_json::to_value(&request).unwrap(), frame["request"]);
+    assert!(frame["request"].get("routing_token").is_none());
+    assert!(frame["request"]["occurrence"].get("host_turn_ref").is_none());
+    let session = frame["response"]["result"]["observing_session"].as_str().unwrap();
+    let check = |receipt| EngramSourceObservationReceipt::from_sighting_result(
+        receipt, &observation, session,
+    );
+    let receipt = frame["response"]["result"].clone();
+    assert_eq!(receipt["accounting"], json!({"kind": "sighting"}));
+    assert_eq!(receipt["observed_checks"], json!([]));
+    assert_eq!(receipt["opened_obligations"], json!([]));
+    assert!(check(receipt.clone()).is_ok());
+    for accounting in [
+        json!({"kind": "source_change", "source_change": receipt["observation"]}),
+        json!({"kind": "no_source_change"}),
+    ] {
+        let mut wrong = receipt.clone();
+        wrong["accounting"] = accounting;
+        assert!(check(wrong).is_err(), "a sighting cannot become source-change accounting");
+    }
+
+    // The shared scripted producer must make the same distinction and replay
+    // the exact saved receipt, rather than treating an unknown occurrence as
+    // an inter-turn source change.
+    let wire: Value = serde_json::from_str(PRODUCER_WIRE).unwrap();
+    let root_read = wire["frames"].as_array().unwrap().iter().find(|frame| {
+        frame["request"]["operation"] == "named_root_read"
+            && frame["response"]["result"]["named_root"]["state"] == "bound"
+    }).unwrap()["response"]["result"].clone();
+    let mut model = TestEngramNamedRoots::default();
+    model.register(&observation.binding);
+    model.bindings.insert(session.to_owned(), observation.binding.claim_id.clone());
+    model.root_reads.insert(observation.binding.claim_id.clone(), root_read);
+    model.run_cuts.insert(observation.binding.run_id.clone(), 3);
+    let modeled = model.request(session, &request).unwrap().unwrap();
+    assert_eq!(modeled["accounting"], receipt["accounting"]);
+    assert_eq!(modeled["observed_checks"], json!([]));
+    assert!(check(modeled.clone()).is_ok());
+    assert_eq!(model.request(session, &request).unwrap().unwrap(), modeled);
+    let mut changed = request.clone();
+    let EngramControlRequest::ExecutionObserve { observation, .. } = &mut changed else { unreachable!() };
+    let EngramInterTurnOccurrence::SourceSighting { source_basis, .. } = &mut observation.occurrence else { unreachable!() };
+    source_basis.source_revision.push_str("-changed");
+    assert!(model.request(session, &changed).unwrap().is_err());
 }
 
 #[test]
@@ -802,10 +831,12 @@ fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
         serde_json::from_value(producer_receipt()).expect("the producer's receipt reads");
     assert_eq!(engram_verification_record_receipt_check(&body, &receipt), Ok(()));
 
-    // The producer's failed run names only its completed check: the receipt
-    // for a body with an unrun check still validates.
-    let mut failed = producer_wire("failed_request").as_object().unwrap().clone();
-    for framing in ["operation", "routing_token", "operation_key"] {
+    // The current producer's failed payload names only its completed check;
+    // no token normalization is needed to read this exact request body.
+    let failed_wire = producer_wire("failed_request");
+    assert!(failed_wire.get("routing_token").is_none());
+    let mut failed = failed_wire.as_object().unwrap().clone();
+    for framing in ["operation", "operation_key"] {
         failed.remove(framing);
     }
     let failed_body: EngramVerificationRecordBody =
@@ -818,8 +849,10 @@ fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
     assert_eq!(engram_verification_record_receipt_check(&failed_body, &failed_receipt), Ok(()));
 
     // The producer's refused request reads as a record too.
-    let mut refused = producer_wire("refused_request").as_object().unwrap().clone();
-    for framing in ["operation", "routing_token", "operation_key"] {
+    let refused_wire = producer_wire("refused_request");
+    assert!(refused_wire.get("routing_token").is_none());
+    let mut refused = refused_wire.as_object().unwrap().clone();
+    for framing in ["operation", "operation_key"] {
         refused.remove(framing);
     }
     serde_json::from_value::<EngramVerificationRecordBody>(Value::Object(refused))
@@ -835,9 +868,9 @@ fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
-    read_status(&transport, &adapter, &own, "token", supported());
+    read_work_session(&transport, &adapter, &own, supported());
     transport.script(Ok(producer_receipt()));
-    let step = engram_verification_record_send(frozen.clone(), link(&adapter, &own, "token"));
+    let step = engram_verification_record_send(frozen.clone(), link(&adapter, &own));
     assert!(matches!(step, EngramVerificationRecordStep::Received { .. }), "{step:?}");
     assert_eq!(transport.sent_records()[0]["operation_key"], "termal-run:test-native");
     assert!(transport.sent_records()[0].get("idempotency_key").is_none());
@@ -849,7 +882,7 @@ fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
         panic!("the refusal is an error envelope");
     };
     transport.script(Err(EngramTransportError::remote(error.into_body())));
-    let step = engram_verification_record_send(frozen, link(&adapter, &own, "token"));
+    let step = engram_verification_record_send(frozen, link(&adapter, &own));
     assert!(
         matches!(&step, EngramVerificationRecordStep::Rejected(detail) if detail.contains("verification_record_refused")),
         "{step:?}"
@@ -898,11 +931,10 @@ fn a_committed_input_full_gate_records_every_stage_in_the_producers_shape() {
     assert_eq!(checks[4]["outcome"], "failed");
     assert_ne!(checks[4]["check_fingerprint"], fingerprint("node node_modules/vitest/vitest.mjs run"));
 
-    // The routing token is the request's own, outside the frozen body and
-    // the operation key.
-    let wire = serde_json::to_value(engram_verification_record_request(&frozen, "token-1")).unwrap();
+    // The complete tokenless envelope uses the frozen record and stable key.
+    let wire = serde_json::to_value(engram_verification_record_request(&frozen)).unwrap();
     assert_eq!(wire["operation"], "verification_record");
-    assert_eq!(wire["routing_token"], "token-1");
+    assert!(wire.get("routing_token").is_none());
     assert_eq!(wire["operation_key"], "termal-run:test-record-full-gate");
     assert!(frozen.record.get("routing_token").is_none());
     let persisted = fs::read_to_string(run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)).unwrap();
@@ -1039,8 +1071,8 @@ fn the_frozen_body_is_byte_identical_when_rebuilt_and_after_a_reload() {
     fs::write(run.run_dir.join("results.json"), commit_results().to_string()).unwrap();
     let reloaded = ready(&run.registration);
     assert_eq!(
-        serde_json::to_vec(&engram_verification_record_request(&first, "token")).unwrap(),
-        serde_json::to_vec(&engram_verification_record_request(&reloaded, "token")).unwrap()
+        serde_json::to_vec(&engram_verification_record_request(&first)).unwrap(),
+        serde_json::to_vec(&engram_verification_record_request(&reloaded)).unwrap()
     );
 
     // A body that no longer reads back exactly is never sent or rebuilt.
@@ -1276,24 +1308,29 @@ fn the_initiating_session_routes_the_record_never_the_owning_one() {
 }
 
 #[test]
-fn a_control_sessions_binding_is_used_as_it_is_and_never_replaced() {
+fn historical_control_metadata_is_unchanged_by_native_verification() {
     let fixture = RunFixture::new("verification-record-control");
-    let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+    let (session, transport) = engram_session(&fixture, true);
+    with_session_engram(&fixture, &session, |engram| {
+        engram.historical_control.insert("engramRoutingToken".to_owned(), json!("historical-token"));
+        engram.historical_control.insert("engramOpenGrantId".to_owned(), json!("historical-grant"));
+    });
+    let history = session_engram(&fixture, &session, |engram| engram.historical_control.clone());
     let mut run = record_run(&fixture, "test-record-control", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
     attach_launch_row(&fixture, &run);
 
-    // The session's own status read under its own token, then the record
-    // under that same token: no bind of any kind.
-    transport.script(Ok(supported()));
+    // A saved token stays inert history; current verification uses the
+    // ordinary work session and creates no bind or control intent.
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     fixture.state.engram_verification_records_tick();
-    assert_eq!(transport.sent_operations(), ["session_status", "verification_record"]);
-    assert_eq!(transport.sent_records()[0]["routing_token"], "control-token");
+    assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"]);
+    assert!(transport.sent_records()[0].get("routing_token").is_none());
     assert_eq!(
-        session_engram(&fixture, &session, |engram| (engram.routing_token.clone(), engram.bind_in_progress)),
-        (Some("control-token".to_owned()), false)
+        session_engram(&fixture, &session, |engram| engram.historical_control.clone()),
+        history
     );
     assert!(matches!(
         engram_verification_record_prepare(&current(&fixture, &run)),
@@ -1302,47 +1339,51 @@ fn a_control_sessions_binding_is_used_as_it_is_and_never_replaced() {
 }
 
 #[test]
-fn an_unbound_control_session_is_never_bound_by_the_sender() {
+fn an_unassociated_ordinary_session_is_never_bound_by_the_sender() {
     let fixture = RunFixture::new("verification-record-control-unbound");
-    let (session, transport) = engram_session(&fixture, true, None);
+    let (session, transport) = engram_session(&fixture, true);
     let mut run = record_run(&fixture, "test-record-control-unbound", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
-    assert!(matches!(
-        fixture.state.engram_verification_record_route(&run.registration),
-        Err(EngramVerificationRecordPending::AwaitingNamingBinding)
-    ));
-    assert!(transport.sent().is_empty());
-    assert_eq!(session_engram(&fixture, &session, |engram| engram.routing_token.clone()), None);
+    transport.script(Ok(work_supported(&session)));
+    let route = fixture.state.engram_verification_record_route(&run.registration)
+        .expect("ordinary verification does not need a control binding");
+    assert_eq!(route.connection.session_id, session);
+    assert_eq!(transport.sent_operations(), ["work_session_read"]);
+    assert!(sent_binds(&transport).is_empty());
+    assert!(session_engram(&fixture, &session, |engram| engram.work_binding.is_none()));
 }
 
 #[test]
 fn an_existing_binding_is_reused_and_never_replaced() {
     let fixture = RunFixture::new("verification-record-existing");
-    let (session, transport) = engram_session(&fixture, false, Some("base-token"));
+    let (session, transport) = engram_session(&fixture, false);
+    bound_by_naming(&fixture, &session);
+    let before = naming_state(&fixture, &session);
     let mut run = record_run(&fixture, "test-record-existing", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     let route = match fixture.state.engram_verification_record_route(&run.registration) {
         Ok(route) => route,
         Err(reason) => panic!("the existing binding routes: {reason:?}"),
     };
-    assert_eq!(route.routing_token, "base-token");
-    assert_eq!(transport.sent_operations(), ["session_status"]);
+    assert_eq!(route.connection.session_id, session);
+    assert_eq!(transport.sent_operations(), ["work_session_read"]);
     assert_eq!(
-        session_engram(&fixture, &session, |engram| engram.routing_token.clone()),
-        Some("base-token".to_owned())
+        naming_state(&fixture, &session), before
     );
 }
 
 #[test]
 fn the_sender_never_creates_an_engram_bind_or_intent_on_any_path() {
-    // Turn-gated control off: a session with no token, and one whose naming
-    // token a reload marked for rebinding.
+    // EO off: a fresh session and a reloaded session with passive history.
     for (case, reloaded) in [("unbound", false), ("reloaded", true)] {
         let fixture = RunFixture::new(&format!("verification-record-no-bind-{case}"));
-        let (session, transport) = engram_session(&fixture, false, None);
+        let (session, transport) = engram_session(&fixture, false);
         if reloaded {
-            bound_by_naming(&fixture, &session, "naming-token");
+            bound_by_naming(&fixture, &session);
+            with_session_engram(&fixture, &session, |engram| {
+                engram.historical_control.insert("engramRoutingToken".to_owned(), json!("historical-token"));
+            });
             reload_session(&fixture, &session, &transport);
         }
         let mut run = record_run(&fixture, &format!("test-record-no-bind-{case}"), commit_request(&fixture.root), commit_results());
@@ -1350,45 +1391,42 @@ fn the_sender_never_creates_an_engram_bind_or_intent_on_any_path() {
         register(&fixture, &[&run]);
         attach_launch_row(&fixture, &run);
         let before = naming_state(&fixture, &session);
-        assert_eq!(before.0.is_some(), reloaded, "{case}");
-        assert_eq!(before.1, reloaded, "{case}: a reload marks the token for rebinding");
+        assert!(before.0.is_none(), "runtime work association is read afresh: {case}");
+        assert!(before.1.is_none(), "no root-naming operation was restored: {case}");
+        assert_eq!(before.2.contains_key("engramRoutingToken"), reloaded, "{case}");
 
+        transport.script(Ok(work_supported(&session)));
+        transport.script(Ok(receipt_for("failed")));
         fixture.state.engram_verification_records_tick();
         assert!(sent_binds(&transport).is_empty(), "{case}: no session_bind");
-        assert!(transport.sent().is_empty(), "{case}: nothing goes out at all");
+        assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"]);
+        assert!(transport.sent_records()[0].get("routing_token").is_none());
         assert!(run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE).exists(), "{case}: frozen");
-        assert_eq!(
-            engram_verification_record_progress(&run.run_dir),
-            Some(EngramVerificationRecordProgress::Pending {
-                reason: EngramVerificationRecordPending::AwaitingNamingBinding,
-            }),
-            "{case}"
-        );
-        assert_eq!(current(&fixture, &run).verification_record, None, "{case}");
+        assert!(matches!(engram_verification_record_prepare(&current(&fixture, &run)),
+            EngramVerificationRecordPrepared::Finished), "{case}");
         assert_eq!(naming_state(&fixture, &session), before, "{case}: naming state untouched");
     }
 }
 
 #[test]
-fn a_control_off_session_bound_by_naming_gets_its_record_delivered() {
+fn an_observability_off_session_bound_by_naming_gets_its_explicit_record_delivered() {
     let fixture = RunFixture::new("verification-record-naming-delivered");
-    let (session, transport) = engram_session(&fixture, false, None);
-    bound_by_naming(&fixture, &session, "naming-token");
+    let (session, transport) = engram_session(&fixture, false);
+    bound_by_naming(&fixture, &session);
     let mut run = record_run(&fixture, "test-record-naming-delivered", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
     attach_launch_row(&fixture, &run);
     let before = naming_state(&fixture, &session);
 
-    // The session's own status read under the naming token, then the record
-    // under that same token: no bind of any kind.
-    transport.script(Ok(supported()));
+    // Explicit verification neither depends on EO nor changes naming state.
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     fixture.state.engram_verification_records_tick();
-    assert_eq!(transport.sent_operations(), ["session_status", "verification_record"]);
-    assert_eq!(transport.sent()[0]["routing_token"], "naming-token");
+    assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"]);
+    assert!(transport.sent()[0].get("routing_token").is_none());
     let record = &transport.sent_records()[0];
-    assert_eq!(record["routing_token"], "naming-token");
+    assert!(record.get("routing_token").is_none());
     assert_eq!(record["operation_key"], "termal-run:test-record-naming-delivered");
     assert!(matches!(
         engram_verification_record_prepare(&current(&fixture, &run)),
@@ -1398,37 +1436,36 @@ fn a_control_off_session_bound_by_naming_gets_its_record_delivered() {
 }
 
 #[test]
-fn a_run_without_valid_credentials_stays_pending_and_goes_once_naming_binds() {
+fn an_unavailable_work_session_keeps_the_frozen_record_until_its_own_read_recovers() {
     let fixture = RunFixture::new("verification-record-naming-later");
-    let (session, transport) = engram_session(&fixture, false, None);
+    let (session, transport) = engram_session(&fixture, false);
     let mut run = record_run(&fixture, "test-record-naming-later", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
     attach_launch_row(&fixture, &run);
 
+    transport.script(Err(EngramTransportError::transport("work session unavailable")));
     fixture.state.engram_verification_records_tick();
-    assert!(transport.sent().is_empty());
-    assert_eq!(
+    assert_eq!(transport.sent_operations(), ["work_session_read"]);
+    assert!(matches!(
         engram_verification_record_progress(&run.run_dir),
         Some(EngramVerificationRecordProgress::Pending {
-            reason: EngramVerificationRecordPending::AwaitingNamingBinding,
+            reason: EngramVerificationRecordPending::TransportFailed { .. },
         })
-    );
+    ));
     let body_path = run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
     let frozen_text = fs::read_to_string(&body_path).expect("the body is frozen");
 
-    // The ordinary naming bind adopts its token; the next look sends the
-    // same frozen body under the same key, with that token.
-    bound_by_naming(&fixture, &session, "naming-token");
+    // Recovery reads the same child's ordinary capability and sends the same
+    // frozen body/key. No naming operation or control credential is needed.
     let expected = serde_json::to_value(engram_verification_record_request(
         &ready(&current(&fixture, &run)),
-        "naming-token",
     ))
     .expect("the request serializes");
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     fixture.state.engram_verification_records_tick();
-    assert_eq!(transport.sent_operations(), ["session_status", "verification_record"]);
+    assert_eq!(transport.sent_operations(), ["work_session_read", "work_session_read", "verification_record"]);
     let sent = transport.sent_records();
     assert_eq!(sent[0], expected, "the same frozen body and key");
     assert_eq!(sent[0]["operation_key"], "termal-run:test-record-naming-later");
@@ -1450,7 +1487,7 @@ fn without_the_capability_nothing_is_sent_and_the_run_stays_pending() {
     let own = connection(SESSION, "actor");
 
     let unsupported = |expected: Support| {
-        let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token"));
+        let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
         let reason = EngramVerificationRecordPending::CapabilityUnsupported { support: expected };
         assert!(matches!(&step, EngramVerificationRecordStep::Pending(pending) if *pending == reason), "{step:?}");
         assert_eq!(
@@ -1460,15 +1497,15 @@ fn without_the_capability_nothing_is_sent_and_the_run_stays_pending() {
     };
     unsupported(Support::NotRead);
     for (answer, expected) in [
-        (json!({ "session_id": SESSION, "phase": "ready" }), Support::FieldMissing),
-        (status_with(json!(["something_else_v1"])), Support::EntryMissing),
-        (status_with(json!("verification_record_v1")), Support::Unparseable),
+        (json!({ "session_id": SESSION, "work_session": true }), Support::NotRead),
+        (work_session_with(json!(["host_work_v1", "something_else_v1"])), Support::EntryMissing),
+        (work_session_with(json!("verification_record_v1")), Support::NotRead),
     ] {
-        read_status(&transport, &adapter, &own, "token", answer);
+        read_work_session(&transport, &adapter, &own, answer);
         unsupported(expected);
     }
     assert!(transport.sent_records().is_empty(), "no record is sent without the capability");
-    assert_eq!(transport.sent_operations(), ["session_status"; 3]);
+    assert_eq!(transport.sent_operations(), ["work_session_read"; 3]);
 }
 
 #[test]
@@ -1478,11 +1515,11 @@ fn a_capability_read_off_a_reader_connection_does_not_enable_emission() {
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
-    // The host's reader connection answers a status read listing the
+    // The host's reader connection answers a work-session read listing the
     // capability; the session's own connection has answered nothing.
     let reader = connection("termal-reader", "reader");
-    read_status(&transport, &adapter, &reader, "token", supported());
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token"));
+    read_work_session(&transport, &adapter, &reader, work_supported("termal-reader"));
+    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
     assert!(matches!(
         step,
         EngramVerificationRecordStep::Pending(EngramVerificationRecordPending::CapabilityUnsupported {
@@ -1493,72 +1530,69 @@ fn a_capability_read_off_a_reader_connection_does_not_enable_emission() {
 }
 
 #[test]
-fn a_resend_after_a_reconnect_repeats_the_body_bytes_under_the_new_token() {
+fn a_resend_after_a_child_reconnect_repeats_every_request_byte() {
     let fixture = RunFixture::new("verification-record-reconnect");
     let run = record_run(&fixture, "test-record-reconnect", commit_request(&fixture.root), commit_results());
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
 
-    read_status(&transport, &adapter, &own, "token-1", supported());
+    read_work_session(&transport, &adapter, &own, supported());
     transport.script(Err(EngramTransportError::transport("lost")));
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token-1"));
+    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
     assert!(matches!(
         step,
         EngramVerificationRecordStep::Pending(EngramVerificationRecordPending::TransportFailed { .. })
     ));
 
-    // The child is respawned and the session bound again under a new token:
-    // nothing goes out until that connection's own answer is read.
+    // A new child needs its own ordinary capability proof before any resend.
     transport.respawn();
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token-2"));
+    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
     assert!(matches!(step, EngramVerificationRecordStep::Pending(_)));
     assert_eq!(transport.sent_records().len(), 1);
-    read_status(&transport, &adapter, &own, "token-2", supported());
+    read_work_session(&transport, &adapter, &own, supported());
     transport.script(Ok(receipt_for("failed")));
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token-2"));
+    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
     assert!(matches!(step, EngramVerificationRecordStep::Received { .. }), "{step:?}");
 
     let sent = transport.sent_records();
     assert_eq!(sent.len(), 2);
-    assert_eq!(sent[0]["routing_token"], "token-1");
-    assert_eq!(sent[1]["routing_token"], "token-2");
-    assert_eq!(without_token(&sent[0]), without_token(&sent[1]), "the same body and operation key");
+    assert!(sent.iter().all(|request| request.get("routing_token").is_none()));
+    assert_eq!(record_wire_bytes(&sent[0]), record_wire_bytes(&sent[1]), "the same body and operation key");
     assert_eq!(sent[1]["operation_key"], "termal-run:test-record-reconnect");
 }
 
 #[test]
-fn a_resend_after_credential_recovery_uses_the_current_token_whatever_the_focus() {
+fn an_ordinary_resend_keeps_its_registration_despite_focus_or_historical_metadata_changes() {
     let fixture = RunFixture::new("verification-record-recovery");
-    let (session, transport) = engram_session(&fixture, true, Some("control-1"));
+    let (session, transport) = engram_session(&fixture, true);
     let mut run = record_run(&fixture, "test-record-recovery", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
 
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     transport.script(Err(EngramTransportError::transport("lost")));
     fixture.state.engram_verification_records_tick();
 
-    // The session's own owner recovers its credentials, and its focus moves
-    // to other work meanwhile.
+    // Its live focus and passive history change; the registration does not.
     let focus = EngramControlWorkBinding {
         work_id: "work-focus".to_owned(),
         claim_id: "claim-focus".to_owned(),
         ..binding()
     };
     with_session_engram(&fixture, &session, |engram| {
-        engram.routing_token = Some("control-2".to_owned());
+        engram.historical_control.insert("engramRoutingToken".to_owned(), json!("changed-historical-token"));
         engram.work_binding = Some(focus);
     });
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     fixture.state.engram_verification_records_tick();
 
     let sent = transport.sent_records();
     assert_eq!(sent.len(), 2);
-    assert_eq!(sent[0]["routing_token"], "control-1");
-    assert_eq!(sent[1]["routing_token"], "control-2");
-    assert_eq!(without_token(&sent[0]), without_token(&sent[1]), "the same body and operation key");
+    assert!(sent[0].get("routing_token").is_none());
+    assert!(sent[1].get("routing_token").is_none());
+    assert_eq!(record_wire_bytes(&sent[0]), record_wire_bytes(&sent[1]), "the same body and operation key");
     assert_eq!(sent[1]["operation_key"], "termal-run:test-record-recovery");
     assert_eq!(sent[1]["registration"]["binding"], serde_json::to_value(binding()).unwrap());
     assert!(!transport.sent_operations().iter().any(|operation| operation == "session_bind"));
@@ -1612,9 +1646,9 @@ fn a_receipt_that_does_not_answer_the_record_is_rejected_and_not_resent() {
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
-    read_status(&transport, &adapter, &own, "token", supported());
+    read_work_session(&transport, &adapter, &own, supported());
     transport.script(Ok(receipt_for("passed")));
-    let step = engram_verification_record_send(frozen, link(&adapter, &own, "token"));
+    let step = engram_verification_record_send(frozen, link(&adapter, &own));
     assert!(matches!(step, EngramVerificationRecordStep::Rejected(_)));
     // The host keeps what it observed on the registration, as the tick does.
     register(&fixture, &[&run]);
@@ -1704,13 +1738,13 @@ fn a_crash_after_the_receipt_settles_from_the_held_receipt_without_a_resend() {
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
-    read_status(&transport, &adapter, &own, "token-1", supported());
+    read_work_session(&transport, &adapter, &own, supported());
 
     // A valid receipt is held at once, on the registration as the host
     // observed it and mirrored beside the run; it is not yet the record's
     // settlement.
     transport.script(Ok(receipt_for("failed")));
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token-1"));
+    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
     fixture.state.note_engram_verification_record_step(&run.registration, &step);
     let EngramVerificationRecordStep::Received { body, receipt } = step else {
         panic!("a valid receipt is received");
@@ -1762,12 +1796,12 @@ fn a_held_receipt_never_settles_a_body_rewritten_with_its_results_to_another_com
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
-    read_status(&transport, &adapter, &own, "token-1", supported());
+    read_work_session(&transport, &adapter, &own, supported());
 
     // Engram genuinely answers the record of the run on COMMIT; the host
     // holds the receipt, bound to that body, but has not settled it yet.
     transport.script(Ok(receipt_for("failed")));
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token-1"));
+    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
     fixture.state.note_engram_verification_record_step(&run.registration, &step);
     let EngramVerificationRecordStep::Received { body: answered, receipt } = step else {
         panic!("a valid receipt is received");
@@ -1828,18 +1862,10 @@ fn set_call_deadline(fixture: &RunFixture, deadline_ms: u64) {
         .deadline_ms = Some(deadline_ms);
 }
 
-/// Engram's refusal of the routing token a call was made under.
-fn token_refusal() -> std::result::Result<Value, EngramTransportError> {
-    Err(EngramTransportError::remote(EngramControlErrorBody {
-        code: "control_session_token_mismatch".to_owned(),
-        message: "the routing token no longer names a bound session".to_owned(),
-    }))
-}
-
 #[test]
 fn a_receipt_is_held_until_the_launch_row_appears_then_settles_without_a_resend() {
     let fixture = RunFixture::new("verification-record-held");
-    let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+    let (session, transport) = engram_session(&fixture, true);
     let mut run = record_run(&fixture, "test-record-held", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
@@ -1848,7 +1874,7 @@ fn a_receipt_is_held_until_the_launch_row_appears_then_settles_without_a_resend(
 
     // Answered before the launcher's row carries the run's artifact: held,
     // not settled.
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     fixture.state.engram_verification_records_tick();
     assert_eq!(
@@ -1857,7 +1883,7 @@ fn a_receipt_is_held_until_the_launch_row_appears_then_settles_without_a_resend(
     );
     // A later look with still no row neither sends nor settles.
     fixture.state.engram_verification_records_tick();
-    assert_eq!(transport.sent_operations(), ["session_status", "verification_record"]);
+    assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"]);
     assert!(matches!(
         engram_verification_record_prepare(&current(&fixture, &run)),
         EngramVerificationRecordPrepared::ReceiptHeld { .. }
@@ -1868,7 +1894,7 @@ fn a_receipt_is_held_until_the_launch_row_appears_then_settles_without_a_resend(
     fixture.state.engram_verification_records_tick();
     assert_eq!(
         transport.sent_operations(),
-        ["session_status", "verification_record"],
+        ["work_session_read", "verification_record"],
         "never sent again"
     );
     assert_eq!(row_records(&fixture, &execution_id), settled_records());
@@ -1881,7 +1907,7 @@ fn a_receipt_is_held_until_the_launch_row_appears_then_settles_without_a_resend(
 #[test]
 fn a_held_receipt_whose_association_is_not_durable_stays_held_and_retries() {
     let mut fixture = RunFixture::new("verification-record-not-durable");
-    let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+    let (session, transport) = engram_session(&fixture, true);
     let mut run = record_run(&fixture, "test-record-not-durable", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
@@ -1893,7 +1919,7 @@ fn a_held_receipt_whose_association_is_not_durable_stays_held_and_retries() {
     // associations are queued, never read back durable, so the receipt
     // stays held.
     failing_persist_worker(&mut fixture);
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     fixture.state.engram_verification_records_tick();
     assert_eq!(
@@ -1905,7 +1931,7 @@ fn a_held_receipt_whose_association_is_not_durable_stays_held_and_retries() {
     // no resend.
     synchronous_persistence(&mut fixture);
     fixture.state.engram_verification_records_tick();
-    assert_eq!(transport.sent_operations(), ["session_status", "verification_record"]);
+    assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"]);
     assert_eq!(row_records(&fixture, &execution_id), settled_records());
     assert_eq!(
         engram_verification_record_progress(&run.run_dir),
@@ -1914,38 +1940,38 @@ fn a_held_receipt_whose_association_is_not_durable_stays_held_and_retries() {
 }
 
 #[test]
-fn a_refused_token_is_left_to_its_owner_and_nothing_goes_out_under_it() {
-    // A turn-gated binding, and a control-off binding naming left.
-    for (case, control) in [("control", true), ("naming", false)] {
+fn a_refused_work_session_never_sends_a_record_or_changes_historical_binding() {
+    // Passive historical data cannot replace a current ordinary-child proof.
+    for (case, observability) in [("eo-on", true), ("eo-off", false)] {
         let fixture = RunFixture::new(&format!("verification-record-{case}-refused"));
-        let (session, transport) = engram_session(&fixture, control, None);
-        bound_by_naming(&fixture, &session, "bound-token");
+        let (session, transport) = engram_session(&fixture, observability);
+        bound_by_naming(&fixture, &session);
+        with_session_engram(&fixture, &session, |engram| {
+            engram.historical_control.insert("engramRoutingToken".to_owned(), json!("historical-token"));
+        });
         let mut run = record_run(&fixture, &format!("test-record-{case}-refused"), commit_request(&fixture.root), commit_results());
         initiated_by(&mut run, &session);
         register(&fixture, &[&run]);
         let before = naming_state(&fixture, &session);
 
-        transport.script(Ok(supported()));
-        transport.script(token_refusal());
+        transport.script(Err(EngramTransportError::transport("work read refused")));
         fixture.state.engram_verification_records_tick();
-        // The next look reads the session's status afresh; refused again, no
-        // record goes out under that token, and no bind goes out at all.
-        transport.script(token_refusal());
+        // Each failed ordinary read leaves the record pending, without ever
+        // falling back to control status, a bind or the saved token.
+        transport.script(Err(EngramTransportError::transport("work read refused again")));
         fixture.state.engram_verification_records_tick();
         assert_eq!(
             transport.sent_operations(),
-            ["session_status", "verification_record", "session_status"],
+            ["work_session_read", "work_session_read"],
             "{case}"
         );
-        assert_eq!(
+        assert!(matches!(
             engram_verification_record_progress(&run.run_dir),
             Some(EngramVerificationRecordProgress::Pending {
-                reason: EngramVerificationRecordPending::RoutingTokenRefused,
-            }),
-            "{case}"
-        );
-        // The binding is its own owner's: untouched, never marked for
-        // rebinding by the sender.
+                reason: EngramVerificationRecordPending::TransportFailed { .. },
+            })
+        ), "{case}");
+        // The binding and historical data stay with their existing owners.
         assert_eq!(naming_state(&fixture, &session), before, "{case}");
     }
 }
@@ -1957,7 +1983,7 @@ fn only_a_definite_refusal_rejects_the_record_and_any_other_answer_resends_it_un
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
-    read_status(&transport, &adapter, &own, "token", supported());
+    read_work_session(&transport, &adapter, &own, supported());
     let remote = |code: &str| -> std::result::Result<Value, EngramTransportError> {
         Err(EngramTransportError::remote(EngramControlErrorBody {
             code: code.to_owned(),
@@ -1978,7 +2004,7 @@ fn only_a_definite_refusal_rejects_the_record_and_any_other_answer_resends_it_un
     register(&fixture, &[&run]);
     for code in deferred {
         transport.script(remote(code));
-        let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token"));
+        let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
         let reason = EngramVerificationRecordPending::RemoteDeferred { code: code.to_owned() };
         assert!(
             matches!(&step, EngramVerificationRecordStep::Pending(pending) if *pending == reason),
@@ -1995,7 +2021,7 @@ fn only_a_definite_refusal_rejects_the_record_and_any_other_answer_resends_it_un
 
     // A definite refusal of the record is final: rejected, never sent again.
     transport.script(remote("invalid_request"));
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own, "token"));
+    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
     assert!(
         matches!(&step, EngramVerificationRecordStep::Rejected(detail) if detail.contains("invalid_request")),
         "{step:?}"
@@ -2011,7 +2037,7 @@ fn only_a_definite_refusal_rejects_the_record_and_any_other_answer_resends_it_un
     let sent = transport.sent_records();
     assert_eq!(sent.len(), deferred.len() + 1);
     for request in &sent[1..] {
-        assert_eq!(without_token(request), without_token(&sent[0]), "the same body and operation key");
+        assert_eq!(record_wire_bytes(request), record_wire_bytes(&sent[0]), "the same body and operation key");
     }
     assert_eq!(sent[0]["operation_key"], "termal-run:test-record-deferred");
 }
@@ -2019,7 +2045,7 @@ fn only_a_definite_refusal_rejects_the_record_and_any_other_answer_resends_it_un
 #[test]
 fn a_tick_keeps_to_its_own_budget_and_stops_between_runs_on_shutdown() {
     let fixture = RunFixture::new("verification-record-tick-budget");
-    let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+    let (session, transport) = engram_session(&fixture, true);
     set_call_deadline(&fixture, 600_000);
     let mut first = record_run(&fixture, "test-record-budget-a", commit_request(&fixture.root), commit_results());
     initiated_by(&mut first, &session);
@@ -2036,7 +2062,7 @@ fn a_tick_keeps_to_its_own_budget_and_stops_between_runs_on_shutdown() {
     // Shutdown signalled once the first run was looked at: the pass stops
     // before the next.
     let looks = std::sync::atomic::AtomicUsize::new(0);
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     let looked = fixture.state.engram_verification_records_tick_within(
         ENGRAM_VERIFICATION_RECORD_TICK_BUDGET,
@@ -2050,6 +2076,7 @@ fn a_tick_keeps_to_its_own_budget_and_stops_between_runs_on_shutdown() {
     // the connection's longer per-call deadline.
     let budget = Duration::from_secs(30);
     let before = transport.timeouts.lock().unwrap().len();
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     fixture.state.engram_verification_records_tick_within(budget, &|| false);
     let timeouts = transport.timeouts.lock().unwrap()[before..].to_vec();
@@ -2062,7 +2089,7 @@ fn a_tick_keeps_to_its_own_budget_and_stops_between_runs_on_shutdown() {
 fn a_run_whose_calls_spend_the_pass_never_starves_the_runs_after_it() {
     let fixture = RunFixture::new("verification-record-round-robin");
     let clock = fixture.state.select_test_scripted_engram_budget_clock();
-    let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+    let (session, transport) = engram_session(&fixture, true);
     let mut early = record_run(&fixture, "test-record-rr-a", commit_request(&fixture.root), commit_results());
     initiated_by(&mut early, &session);
     let mut later = record_run(&fixture, "test-record-rr-b", commit_request(&fixture.root), commit_results());
@@ -2085,14 +2112,17 @@ fn a_run_whose_calls_spend_the_pass_never_starves_the_runs_after_it() {
             .state
             .engram_verification_records_tick_from(ENGRAM_VERIFICATION_RECORD_TICK_BUDGET, &|| false, cursor)
     };
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     transport.script(Err(EngramTransportError::deadline("the call spent the pass")));
     assert_eq!(pass(&mut cursor), 1, "the early run spent the first pass");
     // The next pass, once the early run's first backoff ran out, starts
     // after it: the later run goes first and is sent, and the early run
     // follows behind it.
     clock.advance(ENGRAM_VERIFICATION_RECORD_BACKOFF_START);
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
+    transport.script(Ok(work_supported(&session)));
+    transport.script(Err(EngramTransportError::deadline("the early call spends its next pass")));
     assert_eq!(pass(&mut cursor), 2);
     let keys: Vec<String> = transport
         .sent_records()
@@ -2142,7 +2172,7 @@ fn a_body_written_before_the_host_froze_it_is_never_sent() {
     assert_eq!(fs::read_to_string(&body_path).unwrap(), planted, "never rewritten");
 
     // Through the tick, nothing goes out for it.
-    let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+    let (session, transport) = engram_session(&fixture, true);
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
     fixture.state.engram_verification_records_tick();
@@ -2166,6 +2196,64 @@ fn a_body_tampered_after_freezing_is_never_sent() {
             reason: EngramVerificationRecordPending::BodyMismatch,
         })
     );
+}
+
+#[test]
+fn unknown_frozen_body_fields_are_rejected_without_sending_or_settling() {
+    for field in ["routing_token", "operation", "nested_extension"] {
+        let fixture = RunFixture::new(&format!("verification-record-extra-{field}"));
+        let (session, transport) = engram_session(&fixture, false);
+        let (runtime, provider) = test_codex_runtime_handle(&format!("native-extra-{field}"));
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+            inner.sessions[index].session.status = SessionStatus::Idle;
+        }
+        let mut run = record_run(&fixture, &format!("test-native-extra-{field}"),
+            commit_request(&fixture.root), commit_results());
+        initiated_by(&mut run, &session);
+        register(&fixture, &[&run]);
+        let execution_id = attach_launch_row(&fixture, &run);
+        ready(&current(&fixture, &run));
+        let path = run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
+        let original = fs::read_to_string(&path).unwrap();
+        assert!(engram_verification_record_parse(&original).is_some(), "generated body control");
+        let mut raw: Value = serde_json::from_str(&original).unwrap();
+        match field {
+            "routing_token" => raw["routing_token"] = json!("planted-control-route"),
+            "operation" => raw["operation"] = json!("planted-operation"),
+            "nested_extension" => raw["checks"][0]["unrecognized"] = json!({"opaque": true}),
+            _ => unreachable!(),
+        }
+        let planted = serde_json::to_string(&raw).unwrap();
+        assert!(engram_verification_record_parse(&planted).is_none(), "{field}");
+        fs::write(&path, &planted).unwrap();
+        assert_eq!(pending_of(&current(&fixture, &run)), EngramVerificationRecordPending::BodyUnreadable);
+        fixture.state.engram_verification_records_tick();
+        assert!(transport.sent_operations().is_empty(), "{field}: rejected before capability/RPC send");
+        assert!(matches!(provider.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(current(&fixture, &run).verification_record.is_none(), "no held receipt");
+        assert!(row_records(&fixture, &execution_id).is_empty(), "no native association");
+        assert_eq!(fs::read_to_string(&path).unwrap(), planted, "no silent normalization");
+
+        // Correcting the input to the exact host-generated body makes the
+        // normal native sender eligible; no new key or registration is made.
+        fs::write(&path, &original).unwrap();
+        transport.script(Ok(work_supported(&session)));
+        transport.script(Ok(receipt_for("failed")));
+        fixture.state.engram_verification_records_tick();
+        assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"]);
+        assert_eq!(transport.sent_records()[0]["operation_key"],
+            engram_verification_record_key(&run.registration.run_id));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert!(matches!(engram_verification_record_prepare(&current(&fixture, &run)),
+            EngramVerificationRecordPrepared::Finished));
+        let records = row_records(&fixture, &execution_id);
+        assert_eq!(records.len(), 3);
+        assert!(records.iter().all(Option::is_some));
+        assert!(matches!(provider.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
 }
 
 #[test]
@@ -2233,7 +2321,7 @@ fn a_valid_receipt_settlement_or_rejection_forged_beside_the_run_never_stops_the
         ("rejected", EngramVerificationRecordProgress::Rejected { detail: "written beside the run".to_owned() }),
     ] {
         let fixture = RunFixture::new(&format!("verification-record-forged-{case}"));
-        let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+        let (session, transport) = engram_session(&fixture, true);
         let mut run = record_run(&fixture, &format!("test-record-forged-{case}"), commit_request(&fixture.root), commit_results());
         initiated_by(&mut run, &session);
         register(&fixture, &[&run]);
@@ -2243,10 +2331,10 @@ fn a_valid_receipt_settlement_or_rejection_forged_beside_the_run_never_stops_the
         engram_verification_record_set_progress(&run.run_dir, &run.registration.run_id, progress);
 
         // The record goes out, and only Engram's own answer settles.
-        transport.script(Ok(supported()));
+        transport.script(Ok(work_supported(&session)));
         transport.script(Ok(receipt_for("failed")));
         fixture.state.engram_verification_records_tick();
-        assert_eq!(transport.sent_operations(), ["session_status", "verification_record"], "{case}");
+        assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"], "{case}");
         assert_eq!(row_records(&fixture, &execution_id), settled_records(), "{case}: never the forged ids");
         let receipt: EngramVerificationRecordReceipt =
             serde_json::from_value(receipt_for("failed")).expect("the receipt reads");
@@ -2267,15 +2355,14 @@ fn an_answer_read_across_a_respawn_is_never_recorded_as_the_new_childs() {
     let transport = Arc::new(RecordingTransport::default());
     let adapter = adapter(&transport);
     let own = connection(SESSION, "actor");
-    // The child is replaced while the status read is in flight: its answer
+    // The child is replaced while the work-session read is in flight: its answer
     // belongs to the old child, so nothing is recorded for the new one.
     transport.respawn_during_call.store(true, Ordering::SeqCst);
-    read_status(&transport, &adapter, &own, "token", supported());
-    assert_eq!(adapter.verification_record_support(&own, "token"), Support::NotRead);
-    assert_eq!(adapter.current_routing_token(&own), None);
+    read_work_session(&transport, &adapter, &own, supported());
+    assert_eq!(adapter.verification_record_route_support(&own), Support::NotRead);
     // A read the same child answers is recorded.
-    read_status(&transport, &adapter, &own, "token", supported());
-    assert_eq!(adapter.verification_record_support(&own, "token"), Support::Supported);
+    read_work_session(&transport, &adapter, &own, supported());
+    assert_eq!(adapter.verification_record_route_support(&own), Support::Supported);
 }
 
 /// One pass of the tick over the fixture's runs, carrying `cursor` across
@@ -2290,7 +2377,7 @@ fn pass_with(fixture: &RunFixture, cursor: &mut EngramVerificationRecordCursor) 
 fn a_deferred_record_is_sent_again_only_once_its_backoff_runs_out() {
     let fixture = RunFixture::new("verification-record-backoff");
     let clock = fixture.state.select_test_scripted_engram_budget_clock();
-    let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+    let (session, transport) = engram_session(&fixture, true);
     let mut run = record_run(&fixture, "test-record-backoff", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
@@ -2302,7 +2389,7 @@ fn a_deferred_record_is_sent_again_only_once_its_backoff_runs_out() {
     };
     let mut cursor = EngramVerificationRecordCursor::default();
 
-    transport.script(Ok(supported()));
+    transport.script(Ok(work_supported(&session)));
     transport.script(busy());
     assert_eq!(pass_with(&fixture, &mut cursor), 1);
     assert_eq!(transport.sent_records().len(), 1);
@@ -2314,10 +2401,11 @@ fn a_deferred_record_is_sent_again_only_once_its_backoff_runs_out() {
     );
     // The very next tick neither sends it again nor looks at it.
     assert_eq!(pass_with(&fixture, &mut cursor), 0);
-    assert_eq!(transport.sent_operations(), ["session_status", "verification_record"]);
+    assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"]);
 
     // Once its first backoff ran out, the same body goes again.
     clock.advance(ENGRAM_VERIFICATION_RECORD_BACKOFF_START);
+    transport.script(Ok(work_supported(&session)));
     transport.script(busy());
     assert_eq!(pass_with(&fixture, &mut cursor), 1);
     let sent = transport.sent_records();
@@ -2329,47 +2417,45 @@ fn a_deferred_record_is_sent_again_only_once_its_backoff_runs_out() {
     assert_eq!(pass_with(&fixture, &mut cursor), 0);
     assert_eq!(transport.sent_records().len(), 2);
     clock.advance(ENGRAM_VERIFICATION_RECORD_BACKOFF_START);
+    transport.script(Ok(work_supported(&session)));
     transport.script(busy());
     assert_eq!(pass_with(&fixture, &mut cursor), 1);
     assert_eq!(transport.sent_records().len(), 3);
 }
 
 #[test]
-fn a_refused_token_gets_no_further_status_read_until_the_session_holds_another() {
+fn an_unavailable_work_child_backs_off_then_recovers_without_rebinding() {
     let fixture = RunFixture::new("verification-record-refused-backoff");
     let clock = fixture.state.select_test_scripted_engram_budget_clock();
-    let (session, transport) = engram_session(&fixture, true, None);
-    bound_by_naming(&fixture, &session, "bound-token");
+    let (session, transport) = engram_session(&fixture, true);
+    bound_by_naming(&fixture, &session);
+    let naming_before = naming_state(&fixture, &session);
     let mut run = record_run(&fixture, "test-record-refused-backoff", commit_request(&fixture.root), commit_results());
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
     let mut cursor = EngramVerificationRecordCursor::default();
 
-    transport.script(Ok(supported()));
-    transport.script(token_refusal());
+    transport.script(Err(EngramTransportError::transport("ordinary child unavailable")));
     assert_eq!(pass_with(&fixture, &mut cursor), 1);
-    assert_eq!(transport.sent_operations(), ["session_status", "verification_record"]);
+    assert_eq!(transport.sent_operations(), ["work_session_read"]);
 
-    // However long it waits, nothing is read or sent while the session still
-    // holds the refused token.
-    for _ in 0..3 {
-        clock.advance(ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX);
-        assert_eq!(pass_with(&fixture, &mut cursor), 0);
-    }
-    assert_eq!(transport.sent_operations(), ["session_status", "verification_record"]);
+    // A failed ordinary read still obeys sender backoff. A repeated tick
+    // cannot supply the missing current child proof.
+    assert_eq!(pass_with(&fixture, &mut cursor), 0);
+    assert_eq!(transport.sent_operations(), ["work_session_read"]);
 
-    // Its owner binds the session anew: the next pass reads its status under
-    // the new token and sends the record.
-    bound_by_naming(&fixture, &session, "renewed-token");
-    transport.script(Ok(supported()));
+    clock.advance(ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX);
+    transport.script(Ok(work_supported(&session)));
     transport.script(Ok(receipt_for("failed")));
     assert_eq!(pass_with(&fixture, &mut cursor), 1);
     assert_eq!(
         transport.sent_operations(),
-        ["session_status", "verification_record", "session_status", "verification_record"]
+        ["work_session_read", "work_session_read", "verification_record"]
     );
     let sent = transport.sent();
-    assert_eq!(sent[2]["routing_token"], "renewed-token", "{sent:?}");
+    assert!(sent[2].get("routing_token").is_none(), "{sent:?}");
+    assert_eq!(naming_state(&fixture, &session), naming_before,
+        "unavailable transport and retry do not mutate naming state");
 }
 
 #[test]
@@ -2385,7 +2471,7 @@ fn a_settled_or_rejected_run_is_not_looked_at_again() {
         ("rejected", TestRunVerificationAck::Rejected { detail: "refused".to_owned() }),
     ] {
         let fixture = RunFixture::new(&format!("verification-record-finished-{case}"));
-        let (session, transport) = engram_session(&fixture, true, Some("control-token"));
+        let (session, transport) = engram_session(&fixture, true);
         let mut run = record_run(&fixture, &format!("test-record-finished-{case}"), commit_request(&fixture.root), commit_results());
         initiated_by(&mut run, &session);
         register(&fixture, &[&run]);

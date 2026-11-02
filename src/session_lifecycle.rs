@@ -145,7 +145,8 @@ struct RequestedStopClaim {
     owner_generation: u64,
     active_turn_generation: u64,
     was_active: bool,
-    admission_owner: Option<EngramQueuedAdmissionOwner>,
+    delivery_owner: Option<QueuedTurnOwner>,
+    receipt_owner: Option<PromotedPromptReceiptOwner>,
 }
 
 impl RequestedStopClaim {
@@ -165,44 +166,6 @@ impl RequestedStopClaim {
     }
 }
 
-/// Original interruption identity captured by containment, before deferral.
-/// The durable obligation keeps crash custody; this is only live scheduling.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramContainmentStopOwner {
-    obligation_id: String,
-    project_id: String,
-    reset_generation: u64,
-    runtime_token: Option<RuntimeToken>,
-    active_turn_generation: u64,
-}
-
-impl EngramContainmentStopOwner {
-    fn matches_runtime(&self, record: &SessionRecord) -> bool {
-        record.runtime.runtime_token() == self.runtime_token
-            && record.active_turn_generation == self.active_turn_generation
-    }
-
-    /// Only the acknowledged containment's own fence permits interruption.
-    /// A remaining session hold without that fence has no proved owner.
-    fn reset_allows_stop(&self, inner: &StateInner, record: &SessionRecord) -> bool {
-        let project = engram_project_for_session_locked(inner, &record.session.id);
-        let held = record.engram.project_reset_in_progress
-            || inner.engram_project_resets.contains(&self.project_id)
-            || project.is_some_and(|project| inner.engram_project_resets.contains(&project.id));
-        !held || (project.is_some_and(|project| project.id == self.project_id)
-            && inner.engram_project_resets.is_owned_by(&self.project_id, self.reset_generation))
-    }
-}
-
-#[derive(Clone)]
-struct EngramDeferredStop {
-    owner: EngramContainmentStopOwner,
-    claim: Option<RequestedStopClaim>,
-    due_at: String,
-    attempts: u32,
-    in_flight: bool,
-}
-
 impl AppState {
     /// Destructively removes a session: tears down its runtime (kill
     /// child process for Claude/ACP, `turn/interrupt` + detach for shared
@@ -212,12 +175,6 @@ impl AppState {
     /// from the UI trash icon. Proxied to the remote backend when
     /// `session.remote_target` is set.
     fn kill_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
-        {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            require_no_engram_removal_obligation(
-                &inner, &source_observation_removal_set(&inner, session_id), &BTreeMap::new(),
-            )?;
-        }
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
@@ -228,30 +185,25 @@ impl AppState {
                 .map(|record| record.federation_native_creation_id.clone())
         };
         let engram_session_ids_to_terminate = self.prepare_source_observation_delete(session_id, true)?;
-        let mut teardown_checkpoints = BTreeMap::new();
         for terminating_session_id in &engram_session_ids_to_terminate {
-            let mut published_checkpoint = None;
-            self.checkpoint_engram_turn_with_retry_owner_off_lock(
-                terminating_session_id,
-                EngramCheckpointPurpose::Teardown,
-                None,
-                None,
-                EngramNextIntent::Exit,
-                Some(EngramExecutionOutcome::Unknown),
-                None,
-                None,
-                false,
-                None,
-                None,
-                Some(&mut published_checkpoint),
-                None,
-                None,
-            );
-            if let Some(key) = published_checkpoint {
-                teardown_checkpoints.insert(terminating_session_id.clone(), key);
+            let has_engram_resource = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                engram_project_for_session_locked(&inner, terminating_session_id)
+                    .and_then(|project| project.engram.as_ref())
+                    .is_some_and(|settings| {
+                        settings.binary_path.is_some() && settings.home.is_some()
+                    })
+                    || inner.find_session_index(terminating_session_id).is_some_and(|index| {
+                        let record = &inner.sessions[index];
+                        record.engram_mcp_installed.is_some()
+                            || record.engram_mcp_runtime_quarantined
+                    })
+                    || inner.engram_host_adapter.transport
+                        .has_live_child(terminating_session_id)
+            };
+            if has_engram_resource {
+                self.shutdown_engram_session_process(terminating_session_id);
             }
-            self.wait_for_engram_checkpoint_completion(terminating_session_id);
-            self.shutdown_engram_session_process_if_bound(terminating_session_id);
         }
         let (
             runtime_to_kill,
@@ -267,7 +219,6 @@ impl AppState {
             // Recompute the subtree under the final lock: a concurrent child
             // or capture must not turn a whole-set refusal into partial removal.
             let sessions = source_observation_removal_set(&inner, session_id);
-            require_no_engram_removal_obligation(&inner, &sessions, &teardown_checkpoints)?;
             if let Some(blocker) = source_observation_removal_blocker(&inner, &sessions) {
                 retain_source_observation_removal_locked(&mut inner, &sessions);
                 self.commit_locked(&mut inner).map_err(|error| {
@@ -392,28 +343,10 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let standard_dispatch = !ordinary_off_execution_applies(&inner, session_id);
-        if inner.sessions[index].engram.source_observation_gate.as_ref()
-            .is_some_and(|gate| gate.prompt_id == prompt_id && !gate.retired) {
-            retire_source_observation_locked(&mut inner, index);
-        }
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
         let original_len = record.queued_prompts.len();
-        let cancel_admission = record.queued_prompts.front().is_some_and(|queued| {
-            queued.pending_prompt.id == prompt_id
-                && (queued.is_engram_retained() || record.engram.admission_in_progress.is_some())
-        });
-        // The runtime marker names the exact grant in flight; the durable
-        // intent alone, as after a restart, only says a begin may exist.
-        let dropped_begin = dropped_engram_intent_grant(
-            record,
-            record
-                .queued_prompts
-                .iter()
-                .filter(|queued| queued.pending_prompt.id == prompt_id),
-        );
         let removed_head = handing_off_head(record);
         record
             .queued_prompts
@@ -421,39 +354,11 @@ impl AppState {
         if record.queued_prompts.len() == original_len {
             return Err(ApiError::not_found("queued prompt not found"));
         }
-        if record.engram.ordinary_handoff.as_ref()
-            .is_some_and(|handoff| handoff.owner.prompt_id == prompt_id)
-        {
-            record.engram.ordinary_handoff = None;
-        }
         clear_provider_capacity_retry(record);
         // A canceled head promoted for its hand-off was never sent: its
         // receipt turns terminal in the cancel's own write.
         settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
-        if standard_dispatch && cancel_admission {
-            record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
-            record.engram.recovered_admission = false;
-            detach_engram_pending_dispatch_keeping_uncertain_begin(record);
-            record.engram.rebind_required = true;
-            record.set_auto_dispatch_blocked(true);
-            record.session.status = SessionStatus::Idle;
-            record.session.live_activity = None;
-            // The retained head is canceled under the same lock that fences
-            // its late delivery. It must no longer own mailbox or file-change
-            // tracking, even when promotion happened before the control reply.
-            clear_active_turn_file_change_tracking(record);
-            record.session.preview = "Engram authorization canceled.".to_owned();
-        }
-        // Wherever the canceled prompt sat, the begin its intent may own is
-        // recorded; a head canceled under admission had its marker's exact
-        // begin found first, so that one wins.
-        record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
-        // An emptied queue has nothing a project settings change holds; the
-        // commit below carries the restored preview (`engram_project_reset_wait.rs`).
-        if record.queued_prompts.is_empty() {
-            clear_engram_project_reset_wait(record);
-        }
 
         let lifecycle = reconcile_removed_followup_prompt_locked(&mut inner, session_id, prompt_id);
         let detached = if lifecycle.is_some() {
@@ -541,12 +446,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_resume_session_queue(session_id);
         }
-        if self.ordinary_off_execution_applies(session_id) {
-            return self.resume_queue_without_gated_control(session_id, None);
-        }
-        if self.resume_off_checkpoint_receipt(session_id)? {
-            return Ok(self.snapshot());
-        }
+        self.cancel_observation_delete_for_resume(session_id)?;
         self.cancel_provider_capacity_retry(session_id);
         match self.start_human_queued_turn(session_id, true)
             .map_err(|error| ApiError::internal(format!("failed to resume human prompt: {error:#}")))?
@@ -567,7 +467,7 @@ impl AppState {
                 }
                 let reason = inner.find_visible_session_index(session_id)
                     .and_then(|index| queued_head_durability_resume_refusal(&inner.sessions[index]))
-                    .unwrap_or_else(|| "the human prompt is held by its runtime, reset, Stop or admission owner; Resume did not start a turn".to_owned());
+                    .unwrap_or_else(|| "the human prompt is held by its runtime, reset, Stop or delivery owner; Resume did not start a turn".to_owned());
                 return Err(ApiError::conflict(reason));
             }
             HumanPromptDrain::Absent => {}
@@ -594,7 +494,7 @@ impl AppState {
     fn resume_local_session_queue(
         &self,
         session_id: &str,
-        owner: Option<EngramQueuedAdmissionOwner>,
+        owner: Option<QueuedTurnOwner>,
     ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
         self.cancel_provider_capacity_retry(session_id);
         self.resume_local_session_queue_inner(session_id, owner, None)
@@ -603,215 +503,108 @@ impl AppState {
     fn resume_local_session_queue_inner(
         &self,
         session_id: &str,
-        owner: Option<EngramQueuedAdmissionOwner>,
+        owner: Option<QueuedTurnOwner>,
         capacity_nonce: Option<&str>,
     ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
         self.resume_local_session_queue_inner_with_selection(session_id, owner, capacity_nonce, None)
     }
 
     fn resume_local_session_queue_inner_with_selection(
-        &self, session_id: &str, mut owner: Option<EngramQueuedAdmissionOwner>, capacity_nonce: Option<&str>,
+        &self,
+        session_id: &str,
+        mut owner: Option<QueuedTurnOwner>,
+        capacity_nonce: Option<&str>,
         ordinary_selection: Option<&HumanPromptSelection>,
-    ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
-        if self.ordinary_off_execution_applies(session_id) {
-            let delivery = self.resume_local_queue_without_gated_control(
-                session_id, ordinary_selection, owner.as_ref(),
-            )?;
-            return Ok(match delivery {
-                Some(TurnDispatchDeliveryOutcome::Superseded) if capacity_nonce.is_none() => None,
-                delivery => delivery,
-            });
-        }
-        if let Some(selection) = ordinary_selection {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            if !inner.find_visible_session_index(session_id).is_some_and(|index|
-                inner.sessions[index].mutation_stamp == selection.session_mutation_stamp
-                    && owner.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]))
-                    && selected_ordinary_resume_matches(&inner, &inner.sessions[index], selection))
-            { return Err(ApiError::conflict("the selected ordinary queue owner changed before Resume")); }
-        }
-        if ordinary_selection.is_some() {
-            if self.resume_off_checkpoint_receipt(session_id)? {
-                return Ok(None);
+    ) -> Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
+        let (checked_head, receipted) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_visible_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = &inner.sessions[index];
+            if ordinary_selection.is_some_and(|selection| {
+                record.mutation_stamp != selection.session_mutation_stamp
+                    || !selected_ordinary_resume_matches(&inner, record, selection)
+                    || owner.as_ref().is_some_and(|owner| !owner.matches(record))
+            }) {
+                return Err(ApiError::conflict("the selected queued prompt changed; refresh before resuming"));
             }
-            self.cancel_provider_capacity_retry(session_id);
-        }
-        if let Some(owner) = owner.as_ref() {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.find_visible_session_index(session_id)
-                .is_some_and(|index| !owner.matches(&inner.sessions[index])) {
+            if owner.as_ref().is_some_and(|owner| !owner.matches(record)) {
                 return Ok(capacity_nonce.map(|_| TurnDispatchDeliveryOutcome::Superseded));
             }
-        }
-        let _checkpoint_budget = self.begin_checkpoint_preflight_budget(session_id);
-        if capacity_nonce.is_none() {
-            self.settle_certified_checkpoint_before_admission(session_id, owner.as_ref())?;
-        }
-        let _containment_recovery = if capacity_nonce.is_none() {
-            self.begin_contained_admission_resume(session_id)?
-        } else { None };
-        let _contained_begin_replay = if capacity_nonce.is_none() && _containment_recovery.is_none() {
-            self.begin_contained_begin_replay_resume(session_id)?
-        } else { None };
-        {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            require_no_engram_admission_obligation(&inner, session_id)?;
-        }
-        if let Some(nonce) = capacity_nonce {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            if !inner.find_visible_session_index(session_id).is_some_and(|index|
-                provider_capacity_resume_owned(&inner.sessions[index], nonce)) {
-                return Ok(Some(TurnDispatchDeliveryOutcome::Superseded));
+            // A validated explicit choice cancels automatic capacity recovery
+            // under the same lock, just as the selected Human path does.
+            if ordinary_selection.is_some()
+                && clear_provider_capacity_retry(&mut inner.sessions[index])
+            {
+                inner.stamp_session_at_index(index);
+                self.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!(
+                    "failed persisting selected Resume capacity cancellation: {error:#}"
+                )))?;
             }
-        }
-        if self.resume_source_observation_delete(session_id)? { return Ok(None); }
-        let retained_observation = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            inner
-                .find_visible_session_index(session_id)
-                .is_some_and(|index| {
-                    inner.sessions[index]
-                        .engram
-                        .source_observation_gate
-                        .is_some()
-                })
-        };
-        if retained_observation {
-            let live_continuation = {
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
-                let index = inner.find_visible_session_index(session_id)
-                    .ok_or_else(|| ApiError::not_found("session not found"))?;
-                let record = &mut inner.sessions[index];
-                if owner.as_ref().is_some_and(|owner| !owner.matches(record)) {
-                    return Ok(Some(TurnDispatchDeliveryOutcome::Superseded));
+            if capacity_nonce.is_none() && inner.sessions[index].engram.observation_delete_requested {
+                inner.sessions[index].engram.observation_delete_requested = false;
+                if let Err(error) = self.persist_session_internal_locked(&inner, session_id) {
+                    inner.sessions[index].engram.observation_delete_requested = true;
+                    return Err(ApiError::internal(format!("failed to cancel pending Delete: {error:#}")));
                 }
-                let live = record.engram.source_observation_gate.as_ref().is_some_and(|gate| gate.owns(record))
-                    && record.engram.source_observation_continuation.is_some();
-                if live {
-                    if let Some(gate) = &mut record.engram.source_observation_gate {
-                        gate.retry_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-                    }
-                    // The gate is durable; the tick below may skip this session.
-                    inner.stamp_session_at_index(index);
-                }
-                live
-            };
-            if live_continuation {
-                self.source_observation_retry_tick(chrono::Utc::now());
-                return Ok(Some(TurnDispatchDeliveryOutcome::Held { error: None }));
             }
-        }
-        self.reconcile_retired_source_observations(session_id)
-            .map_err(|error| {
-                ApiError::conflict(format!(
-                    "Engram source observation recovery remains withheld: {error}"
-                ))
-            })?;
-        let checked_head = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner
-                .find_visible_session_index(session_id)
-                .ok_or_else(|| ApiError::not_found("session not found"))?;
-            if ordinary_selection.is_some_and(|selection|
-                !owner.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]))
-                    || !selected_ordinary_resume_matches(&inner, &inner.sessions[index], selection))
-            { return Err(ApiError::conflict("the selected ordinary queue disposition changed during Resume")); }
-            let record = inner.session_mut_by_index(index).expect("session index should be valid");
+            let record = &inner.sessions[index];
             if capacity_nonce.is_some_and(|nonce| !provider_capacity_resume_owned(record, nonce)) {
                 return Ok(Some(TurnDispatchDeliveryOutcome::Superseded));
             }
-            if record.codex_terminal_identity_unresolved {
-                return Err(ApiError::conflict(
-                    "Codex terminal identity is unresolved; Stop before resuming",
-                ));
+            let engram_queue = record.is_local_session()
+                && engram_project_for_session_locked(&inner, session_id).is_some_and(|project| {
+                    project.remote_id == LOCAL_REMOTE_ID
+                        && project.engram.as_ref().is_some_and(EngramProjectSettings::is_base_enabled)
+                });
+            // Engram queues keep their busy-first Resume contract. Plain
+            // sessions retain the unpaused local no-op after identity checks.
+            if engram_queue
+                && (record.runtime_stop_in_progress || session_resource_reset_in_progress(&inner, record)
+                    || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping))
+            {
+                return Err(ApiError::conflict("session is busy, resetting or stopping"));
             }
-            if !record.orchestrator_auto_dispatch_blocked {
+            if record.codex_terminal_identity_unresolved || record_has_archived_codex_thread(record) {
+                return Err(ApiError::conflict("session runtime identity is unavailable"));
+            }
+            if !engram_queue && !record.orchestrator_auto_dispatch_blocked {
                 return Ok(None);
             }
-            // A head still waiting for its durability acknowledgement cannot
-            // start: the Resume is refused with the reason and the pause stays.
-            // A bound Resume whose head is gone is superseded by the drain.
-            if owner.as_ref().is_none_or(|owner| owner.matches(record))
-                && let Some(refusal) = queued_head_durability_resume_refusal(record)
+            if let Some(position) = ordinary_queue_position(record)
+                && let Some(reason) = queued_prompt_durability_resume_refusal(record, &record.queued_prompts[position])
             {
-                return Err(ApiError::conflict(refusal));
+                return Err(ApiError::conflict(reason));
             }
-            if record.queued_prompts.is_empty() {
-                record.set_auto_dispatch_blocked(false);
-                inner.stamp_session_at_index(index);
-                self.commit_locked(&mut inner).map_err(|err| {
-                    ApiError::internal(format!("failed to persist session state: {err:#}"))
-                })?;
-                return Ok(None);
-            }
-            // The tick may have observed an empty queue before a peer arrived.
-            // Bind the head this Resume accepts under the same lock as its
-            // capacity check, so receipt and ordinary drains retain the fence.
-            if let Some(nonce) = capacity_nonce
-                && owner.is_none()
-            {
-                owner = EngramQueuedAdmissionOwner::capture(record);
-                if let Some(owner) = &mut owner {
-                    owner.capacity_nonce = Some(nonce.to_owned());
+            if ordinary_queue_position(record).is_none() {
+                if record.orchestrator_auto_dispatch_blocked {
+                    let before = record.clone();
+                    inner.sessions[index].set_auto_dispatch_blocked(false);
+                    if let Err(error) = self.commit_session_locked(&mut inner, session_id) {
+                        inner.sessions[index] = before;
+                        return Err(ApiError::internal(format!("failed persisting Resume: {error:#}")));
+                    }
                 }
+                return Ok(None);
             }
-            // A receipted head: what this Resume accepts, exactly, for the
-            // write-ahead it begins after the release below (prompt_delivery.rs).
+            // Capture the exact head under the original selection lock. A
+            // cancellation cannot lend this Resume to the exposed successor.
+            if owner.is_none() { owner = QueuedTurnOwner::capture(record); }
+            if let Some(owner) = &mut owner { owner.capacity_nonce = capacity_nonce.map(str::to_owned); }
+            let record = &inner.sessions[index];
             let receipted = receipted_resume_identity(record, owner.as_ref());
-            (
-                record
-                    .queued_prompts
-                    .front()
-                    .map(|head| head.pending_prompt.id.clone()),
-                receipted,
-            )
+            (owner.as_ref().map(|owner| owner.prompt_id.clone()), receipted)
         };
-        let (checked_head, receipted) = checked_head;
-        // A begin-preparation hold, where nothing was sent, is admitted afresh
-        // rather than refused as interrupted (`engram_begin_preparation_retry.rs`).
-        // The release moves the head to a new dispatch generation, so the
-        // owner is re-captured for that same head, and the drain is bound to
-        // it even when the caller named none: a successor a cancellation
-        // exposes meanwhile is never admitted in the released head's place.
-        let released = self.release_engram_begin_preparation_hold_for_resume(session_id, owner.as_ref())?;
-        let mut owner = released.or(owner);
-        if let Some(owner) = &mut owner {
-            owner.capacity_nonce = capacity_nonce.map(str::to_owned);
-        }
-        // A durable receipted head's hand-off record must be saved before it
-        // is sent: this Resume begins that write-ahead, after the release and
-        // only for exactly the head it accepted, and carries the attempt across
-        // the pause it crossed once saved, while nothing ends it; the pause
-        // stays until the turn starts (prompt_delivery.rs).
         if let Some(receipted) = receipted {
             match self.resume_receipted_head(session_id, owner.as_ref(), &receipted) {
-                ReceiptedResume::NotReceipted => {}
-                ReceiptedResume::Preparing => {
-                    return Ok(Some(TurnDispatchDeliveryOutcome::Scheduled));
-                }
-                ReceiptedResume::Refused(refusal) => return Err(ApiError::conflict(refusal)),
+                ReceiptedResume::NotReceipted => {},
+                ReceiptedResume::Preparing => return Ok(Some(TurnDispatchDeliveryOutcome::Scheduled)),
+                ReceiptedResume::Refused(reason) => return Err(ApiError::conflict(reason)),
             }
         }
         let dispatch = self.drain_resumed_queue(session_id, owner.clone())?;
-        let dispatch =
-            self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
-        Ok(dispatch.map(|started| {
-            let prompt_id = started.queued.pending_prompt.id;
-            let delivery = deliver_turn_dispatch(self, started.dispatch);
-            // Delivery may restore an interrupted hold after promotion. The
-            // original checked head can have been removed by revalidation or
-            // Cancel; only the prompt this drain actually admitted is ours.
-            // Scheduled and Superseded retain their delivery semantics.
-            if matches!(delivery, TurnDispatchDeliveryOutcome::Held { error: None })
-                && let UnstartedResumeStep::Refuse(refusal) =
-                    self.unstarted_resume_step(session_id, None, Some(&prompt_id))
-            {
-                return TurnDispatchDeliveryOutcome::Held {
-                    error: Some(ApiError::conflict(refusal)),
-                };
-            }
-            delivery
-        }))
+        let dispatch = self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
+        Ok(dispatch.map(|started| deliver_turn_dispatch(self, started.dispatch)))
     }
 
     /// One drain of a resumed queue: bound to `owner` when given, otherwise
@@ -819,7 +612,7 @@ impl AppState {
     fn drain_resumed_queue(
         &self,
         session_id: &str,
-        owner: Option<EngramQueuedAdmissionOwner>,
+        owner: Option<QueuedTurnOwner>,
     ) -> std::result::Result<Option<StartedQueuedTurn>, ApiError> {
         match owner {
             Some(owner) => self.dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner),
@@ -841,8 +634,7 @@ impl AppState {
     }
 
     /// Starts the user-facing Stop operation and returns the persisted
-    /// `Stopping` snapshot without waiting for the agent interrupt or Engram
-    /// checkpoint. The runtime-stop ownership claim is established before the
+    /// `Stopping` snapshot without waiting for the agent interrupt. The runtime-stop ownership claim is established before the
     /// state becomes visible, so runtime callbacks are deferred throughout the
     /// handoff to the background worker. Repeated requests while that claim is
     /// active are idempotent.
@@ -854,26 +646,6 @@ impl AppState {
             return self.proxy_remote_stop_session(session_id);
         }
         self.retry_retained_dedicated_cleanup(session_id).map_err(|error| ApiError::conflict(format!("{error:#}")))?;
-        // A prompt waiting for its automatic retry after a withheld delivery
-        // (`engram_abort_retry.rs`): Stop cancels the retry and keeps it.
-        let admission_stopped = self.stop_waiting_engram_admission(session_id)?
-            || self.stop_engram_abort_retry(session_id)?;
-        let cleanup_pending = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            inner.find_session_index(session_id).is_some_and(|index| {
-                inner.sessions[index]
-                    .runtime
-                    .dedicated_cleanup_failure()
-                    .is_some()
-            })
-        };
-        if admission_stopped && !cleanup_pending {
-            // The same Stop also brakes the session's pending waits.
-            let waits_stopped = self.stop_pending_waits_after_admission_stop(session_id);
-            self.sync_delegation_attempt_for_child_session(session_id);
-            waits_stopped?;
-            return Ok(self.snapshot());
-        }
         // An Idle session waiting for delegations or test runs has no turn
         // to interrupt, but Stop still has to keep that work from resuming it.
         if let Some(response) = self.stop_idle_waiting_session(session_id)? {
@@ -889,71 +661,8 @@ impl AppState {
         Ok(response)
     }
 
-    /// Containment already retained exact original authority. Its Stop enters
-    /// the existing owner directly on the scheduler's worker, with the shared
-    /// slot held until the whole interruption and cleanup complete.
-    /// Returns false when a newer reset defers admission, without an attempt.
-    fn run_project_reset_stop(&self, session_id: &str, owner: &EngramContainmentStopOwner)
-        -> Result<bool, ApiError> {
-        let options = StopSessionOptions {
-            pause_automatic_resumes_on_success: false,
-            ..StopSessionOptions::default()
-        };
-        let retained_claim = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.find_session_index(session_id).is_some_and(|index|
-                !owner.reset_allows_stop(&inner, &inner.sessions[index])) {
-                return Ok(false);
-            }
-            inner.find_session_index(session_id).and_then(|index| {
-                let record = &inner.sessions[index];
-                record.engram_containment_stop.as_ref()
-                    .filter(|pending| pending.owner == *owner)
-                    .and_then(|pending| pending.claim.as_ref())
-                    .filter(|claim| claim.owns_stop(record))
-                    .cloned()
-            })
-        };
-        let claim = match retained_claim {
-            Some(claim) => claim,
-            None => {
-                let (_, claim) = self.begin_requested_stop_session_for_owner(
-                    session_id, &options, Some(owner),
-                )?;
-                let Some(claim) = claim else { return Ok(false) };
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
-                let index = inner.find_session_index(session_id)
-                    .ok_or_else(|| ApiError::not_found("session not found"))?;
-                let pending = inner.sessions[index].engram_containment_stop.as_mut()
-                    .filter(|pending| pending.owner == *owner)
-                    .ok_or_else(|| ApiError::conflict("original interruption was superseded"))?;
-                pending.claim = Some(claim.clone());
-                if let Some(entry) = inner.engram_session_obligations.entries.iter_mut()
-                    .find(|entry| entry.id == owner.obligation_id)
-                {
-                    entry.reason_code = "provider_interruption_unconfirmed".to_owned();
-                }
-                self.commit_locked(&mut inner).map_err(|_| ApiError::internal(
-                    "original provider Stop claim persistence is unconfirmed",
-                ))?;
-                claim
-            }
-        };
-        // The scheduler owns the slot through this entire existing Stop
-        // lifecycle, including interruption, acknowledgement and cleanup.
-        self.stop_local_session_with_options(session_id, options, Some(claim))?;
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if let Some(index) = inner.find_session_index(session_id)
-            && inner.sessions[index].engram_containment_stop.as_ref()
-                .is_some_and(|pending| pending.owner == *owner)
-        {
-            inner.sessions[index].engram_containment_stop = None;
-        }
-        Ok(true)
-    }
-
     fn spawn_requested_stop_session(&self, session_id: &str, options: StopSessionOptions,
-        claim: RequestedStopClaim, slot: Option<EngramRetrySlot>) -> Result<(), ApiError> {
+        claim: RequestedStopClaim, slot: Option<RuntimeRetrySlot>) -> Result<(), ApiError> {
         let state = self.clone();
         let worker_session_id = session_id.to_owned();
         let worker_claim = claim.clone();
@@ -988,30 +697,10 @@ impl AppState {
         session_id: &str,
         options: &StopSessionOptions,
     ) -> std::result::Result<(StateResponse, Option<RequestedStopClaim>), ApiError> {
-        self.begin_requested_stop_session_for_owner(session_id, options, None)
-    }
-
-    fn begin_requested_stop_session_for_owner(
-        &self,
-        session_id: &str,
-        options: &StopSessionOptions,
-        owner: Option<&EngramContainmentStopOwner>,
-    ) -> std::result::Result<(StateResponse, Option<RequestedStopClaim>), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-
-        if owner.is_some_and(|owner| !owner.reset_allows_stop(&inner, &inner.sessions[index])) {
-            return Ok((self.snapshot_from_inner(&inner), None));
-        }
-        if owner.is_some_and(|owner| {
-            !owner.matches_runtime(&inner.sessions[index])
-                || inner.sessions[index].engram_containment_stop.as_ref()
-                    .is_none_or(|pending| pending.owner != *owner || !pending.in_flight)
-        }) {
-            return Err(ApiError::conflict("original interruption was superseded"));
-        }
 
         if inner.sessions[index].provider_capacity_retry.is_some()
             && !matches!(inner.sessions[index].session.status,
@@ -1020,9 +709,7 @@ impl AppState {
             let record = &mut inner.sessions[index];
             clear_provider_capacity_retry(record);
             record.set_auto_dispatch_blocked(true);
-            if options.pause_automatic_resumes_on_success {
-                record.engram.operator_paused = true;
-            }
+            record.engram.operator_paused = true;
             record.session.status = SessionStatus::Idle;
             record.session.preview = "Provider capacity recovery stopped; queue paused.".to_owned();
             inner.stamp_session_at_index(index);
@@ -1035,18 +722,12 @@ impl AppState {
         }
 
         if inner.sessions[index].session.status == SessionStatus::Stopping {
-            // A public Stop can arrive while a control-owned Stop is already
-            // retiring the runtime. Record its pause without taking that owner.
-            if owner.is_none() && options.pause_automatic_resumes_on_success
-                && !inner.sessions[index].engram.operator_paused
-            {
+            if options.pause_automatic_resumes_on_success {
                 let record = &mut inner.sessions[index];
                 record.set_auto_dispatch_blocked(true);
                 record.engram.operator_paused = true;
                 inner.stamp_session_at_index(index);
-                self.commit_locked(&mut inner).map_err(|error| {
-                    ApiError::internal(format!("failed to persist Stop pause: {error:#}"))
-                })?;
+                self.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!("failed to persist operator pause: {error:#}")))?;
             }
             return Ok((self.snapshot_from_inner(&inner), None));
         }
@@ -1058,29 +739,14 @@ impl AppState {
             SessionStatus::Active | SessionStatus::Approval
         ) && !(inner.sessions[index].session.status == SessionStatus::Error
             && (inner.sessions[index].runtime.dedicated_cleanup_failure().is_some()
-                // Only the exact containment owner checked above may retry
-                // its retained live runtime after Stop released a failed claim.
-                || (owner.is_some() && inner.sessions[index].runtime.runtime_token().is_some()))) {
+)) {
             return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
         }
 
         clear_provider_capacity_retry(&mut inner.sessions[index]);
         let original = inner.sessions[index].clone();
-        let admission_owner =
-            EngramQueuedAdmissionOwner::capture_promoted(&original).filter(|_| {
-                // Only cleanup recovery preserves an unbegun parked admission.
-                original.session.status != SessionStatus::Error
-                    || original.runtime.dedicated_cleanup_failure().is_none()
-                    || original.queued_prompts.front().is_none_or(|head| {
-                        !(head.engram_interrupted || head.engram_waiting)
-                            || head
-                                .engram_evaluate
-                                .as_ref()
-                                .is_some_and(|intent| intent.begun_grant_id.is_some())
-                    })
-                    || original.engram.active_grant_id.is_some()
-                    || original.engram.uncertain_grant_id.is_some()
-            });
+        let mut delivery_owner = QueuedTurnOwner::capture_promoted(&original);
+        let mut receipt_owner = PromotedPromptReceiptOwner::capture(&original);
         let runtime_token = inner.sessions[index].runtime.runtime_token();
         let owner_generation = {
             let record = inner
@@ -1097,24 +763,34 @@ impl AppState {
             if options.pause_automatic_resumes_on_success {
                 record.set_auto_dispatch_blocked(true);
                 record.engram.operator_paused = true;
-                // The promoted head may already have a durable Engram begin
-                // receipt while its provider callback is racing this Stop.
+                // A promoted delivery may still be racing this Stop.
                 // Keep that exact owner until shutdown commits or rolls back;
                 // ordinary Orchestrator successors retain Stop's drop policy.
-                clear_queued_prompts_by_source_except_admission_owner(
+                if let Some(owner) = delivery_owner.as_mut() {
+                    owner.stop_generation = record.runtime_stop_generation;
+                    owner.pause_epoch = record.auto_dispatch_pause_epoch;
+                }
+                clear_queued_prompts_by_source_except_delivery_owner(
                     record,
                     QueuedPromptSource::Orchestrator,
-                    admission_owner.as_ref(),
+                    delivery_owner.as_ref(),
                 );
             }
             owner_generation
         };
 
+        if let Some(owner) = delivery_owner.as_mut() {
+            owner.stop_generation = inner.sessions[index].runtime_stop_generation;
+            owner.pause_epoch = inner.sessions[index].auto_dispatch_pause_epoch;
+        }
+        if let Some(owner) = receipt_owner.as_mut() {
+            owner.stop_generation = inner.sessions[index].runtime_stop_generation;
+            owner.pause_epoch = inner.sessions[index].auto_dispatch_pause_epoch;
+        }
         if let Err(error) = self.commit_locked(&mut inner) {
             inner.sessions[index] = original;
-            // The restored record keeps the provider-capacity clear made before
-            // it was copied, under a stamp the delta persist may already have
-            // passed: restamp it so memory and storage agree.
+            // The capacity clear predates this rollback image and must
+            // remain visible to a delta writer past its old stamp.
             inner.stamp_session_at_index(index);
             return Err(ApiError::internal(format!(
                 "failed to persist stopping session state: {error:#}"
@@ -1128,7 +804,8 @@ impl AppState {
                 owner_generation,
                 active_turn_generation: original.active_turn_generation,
                 was_active: original.session.status == SessionStatus::Active,
-                admission_owner,
+                delivery_owner,
+                receipt_owner,
             }),
         ))
     }
@@ -1187,31 +864,17 @@ impl AppState {
                     .runtime_token
                     .as_ref()
                     .is_some_and(|token| record.runtime.matches_runtime_token(token))
-                && claim
-                    .admission_owner
-                    .as_ref()
-                    .is_some_and(|owner| owner.matches(record))
-                && (record
-                    .queued_prompts
-                    .front()
-                    .and_then(|queued| queued.engram_evaluate.as_ref())
-                    .and_then(|prepared| prepared.begun_grant_id.as_ref())
-                    .is_some_and(|grant| record.engram.active_grant_id.as_ref() == Some(grant))
-                    || engram_ordinary_handoff_owned(record));
+                && (claim.receipt_owner.as_ref().is_some_and(|owner| owner.matches(record))
+                    || claim.delivery_owner.as_ref().is_some_and(|owner| {
+                        owner.matches(record)
+                            && handing_off_head(record).is_some_and(|(prompt_id, generation)| {
+                                prompt_id == owner.prompt_id
+                                    && generation == owner.active_turn_generation
+                            })
+                    }));
             let replay = owns_stop.then(|| {
                 let runtime_token = record.runtime.runtime_token();
                 record.clear_runtime_stop();
-                if let Some(pending) = record.engram_containment_stop.as_mut()
-                    && pending.claim.as_ref().is_some_and(|retained| {
-                        retained.owner_generation == claim.owner_generation
-                            && retained.runtime_token == claim.runtime_token
-                            && retained.active_turn_generation == claim.active_turn_generation
-                    })
-                {
-                    // Release only this failed claim. The immutable pending
-                    // identity and durable exclusion still own the retry duty.
-                    pending.claim = None;
-                }
                 let callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
                 (runtime_token, callbacks)
             });
@@ -1297,7 +960,7 @@ impl AppState {
             stop_failure_is_best_effort,
             stop_token,
             stop_owner_generation,
-            admission_owner,
+            delivery_owner,
         ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -1359,8 +1022,8 @@ impl AppState {
                 stop_token,
                 stop_owner_generation,
                 requested_claim.as_ref().map_or_else(
-                    || EngramQueuedAdmissionOwner::capture_promoted(record),
-                    |claim| claim.admission_owner.clone(),
+                    || QueuedTurnOwner::capture_promoted(record),
+                    |claim| claim.delivery_owner.clone(),
                 ),
             )
         };
@@ -1510,9 +1173,7 @@ impl AppState {
         } else {
             false
         };
-        // A durable admission receipt consumes pending_dispatch before provider
-        // handoff. Retire the Stop-owned promoted head and ordinary permission
-        // before preparing any successor or closing the remote grant.
+        // Retire only the Stop-owned promoted delivery before any successor.
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -1533,55 +1194,34 @@ impl AppState {
             if !owns_stop {
                 return Ok(self.snapshot_from_inner(&inner));
             }
-            if admission_owner
+            if delivery_owner
                 .as_ref()
                 .is_some_and(|owner| owner.matches(record))
             {
-                // The head's durable intent may be the only evidence of a
-                // begin an earlier process lost; a begin the marker names
-                // wins, and the abandon below records that same grant.
-                let retired_head_begin =
-                    dropped_engram_intent_grant(record, record.queued_prompts.front());
-                // A head promoted for its hand-off and retired here was never
-                // sent: its receipt turns terminal in this same write.
-                let removed_head = handing_off_head(record);
-                record.engram.ordinary_handoff = None;
-                record.queued_prompts.pop_front();
-                settle_removed_handing_off_head(record, removed_head, QUEUE_REMOVAL_UNSENT_REASON);
-                record_dropped_engram_intent(record, retired_head_begin);
+                let owner = delivery_owner.as_ref().expect("matched delivery owner");
+                let position = record.queued_prompts.iter().position(|queued| queued.pending_prompt.id == owner.prompt_id)
+                    .expect("owned prompt exists");
+                let removed = record.queued_prompts.remove(position).expect("owned prompt exists");
+                let removed_delivery = record.prompt_deliveries.get(&removed.pending_prompt.id)
+                    .and_then(|delivery| delivery.turn_generation)
+                    .map(|generation| (removed.pending_prompt.id, generation));
+                settle_removed_handing_off_head(record, removed_delivery, QUEUE_REMOVAL_UNSENT_REASON);
                 sync_pending_prompts(record);
-                // Include the retirement in this delta wake without relying
-                // on a later checkpoint-preparation stamp. The wake itself
-                // does not fence physical SQLite durability.
+                // This retirement has its own delta wake after off-lock
+                // shutdown; a preceding or later stamp cannot cover its cut.
                 inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner).map_err(|error| {
                     ApiError::internal(format!(
-                        "failed to persist stopped admission retirement: {error:#}"
+                        "failed to persist stopped delivery retirement: {error:#}"
                     ))
                 })?;
             }
         }
-        let checkpoint_failure = match self.checkpoint_engram_turn_off_lock(
-            session_id,
-            EngramCheckpointPurpose::TurnTerminal,
-            None,
-            None,
-            EngramNextIntent::Wait,
-            Some(EngramExecutionOutcome::Unknown),
-            None,
-        ) {
-            EngramCheckpointOutcome::Failed(detail) => Some(detail),
-            EngramCheckpointOutcome::Skipped | EngramCheckpointOutcome::Succeeded => None,
-        };
         // Where the session writes, for the overlap marks the drained turn's
         // start makes under the lock.
         if options.dispatch_queued_prompts_on_success {
             self.engram_host().turn_starting(session_id);
         }
-        let prepared_queued_turn = options
-            .dispatch_queued_prompts_on_success
-            .then(|| self.prepare_next_queued_turn_engram_off_lock(session_id))
-            .flatten();
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
         let suppress_automatic_resume = options.pause_automatic_resumes_on_success;
         let mut queued_followup_start_error = None;
@@ -1610,30 +1250,10 @@ impl AppState {
                 ),
             };
             if !owns_stop {
-                let pending_engram = prepared_queued_turn
-                    .as_ref()
-                    .and_then(|prepared| prepared.pending_engram.clone());
-                if abandon_engram_pending_dispatch(
-                    inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid"),
-                    pending_engram,
-                ) {
-                    if let Err(error) = self.commit_locked(&mut inner) {
-                        inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid")
-                            .set_auto_dispatch_blocked(true);
-                        self.publish_state_locked(&inner);
-                        return Err(ApiError::internal(format!(
-                            "failed to persist abandoned queued dispatch after Stop ownership changed: {error:#}"
-                        )));
-                    }
-                }
                 drop(inner);
                 return Ok(self.snapshot());
             }
-            self.queue_runtime_observation_close_locked(&mut inner, index);
+            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Cancelled);
             let message_id = inner.next_message_id();
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
@@ -1648,7 +1268,6 @@ impl AppState {
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
                 let stopped_mailbox_notification = record.active_turn_mailbox_notification.take();
-                abandon_ending_turn_engram_dispatch(record);
                 // The stopped runtime's turn, captured before it is retired.
                 let ending_turn = record.active_turn_generation;
                 record.clear_runtime();
@@ -1683,16 +1302,8 @@ impl AppState {
                     }
                     set_record_external_session_id(record, None);
                 }
-                let (terminal_status, terminal_text) = match checkpoint_failure.as_deref() {
-                    Some(detail) => (
-                        SessionStatus::Error,
-                        format!("Stop completed, but the Engram checkpoint failed: {detail}"),
-                    ),
-                    None => (
-                        SessionStatus::Idle,
-                        SESSION_STOPPED_BY_USER_MESSAGE.to_owned(),
-                    ),
-                };
+                let terminal_status = SessionStatus::Idle;
+                let terminal_text = SESSION_STOPPED_BY_USER_MESSAGE.to_owned();
                 record.session.status = terminal_status;
                 record.session.preview = make_preview(&terminal_text);
                 let stopped_message_index = record.session.messages.len();
@@ -1772,33 +1383,11 @@ impl AppState {
                     }
                 }
             }
-            let should_dispatch_next = options.dispatch_queued_prompts_on_success
-                && prepared_queued_turn.as_ref().is_some_and(|prepared| {
-                    inner.sessions[index].engram.dispatch_generation == prepared.dispatch_generation
-                        && inner.sessions[index]
-                            .queued_prompts
-                            .front()
-                            .is_some_and(|queued| {
-                                queued.pending_prompt.id == prepared.prompt_id
-                                    && prepared.pending_engram.as_ref().is_none_or(|pending| {
-                                        engram_turn_intent_fingerprint(
-                                            &queued.pending_prompt.text,
-                                            queued.pending_prompt.expanded_text.as_deref(),
-                                            &queued.attachments,
-                                            queued.pending_prompt.source.as_ref(),
-                                            queued.source,
-                                        ) == pending.intent_fingerprint
-                                    })
-                            })
-                });
+            let should_dispatch_next = options.dispatch_queued_prompts_on_success;
             let post_stop_record = should_dispatch_next.then(|| inner.sessions[index].clone());
             let queued_turn_result = if should_dispatch_next {
-                let pending_engram = prepared_queued_turn
-                    .as_ref()
-                    .and_then(|prepared| prepared.pending_engram.clone());
-                let pending_engram_for_abandon = pending_engram.clone();
                 let result = self
-                    .start_next_queued_turn_locked(&mut inner, index, false, pending_engram)
+                    .start_next_queued_turn_locked(&mut inner, index, false)
                     .map_err(|err| {
                         let api_error = ApiError::internal(format!("{err:#}"));
                         queued_followup_start_error = Some(err);
@@ -1834,27 +1423,8 @@ impl AppState {
                             .clone();
                     }
                 }
-                if !matches!(result, Ok(Some(_))) {
-                    abandon_engram_pending_dispatch(
-                        inner
-                            .session_mut_by_index(index)
-                            .expect("session index should remain valid"),
-                        pending_engram_for_abandon,
-                    );
-                }
                 result
             } else {
-                if let Some(pending_engram) = prepared_queued_turn
-                    .as_ref()
-                    .and_then(|prepared| prepared.pending_engram.clone())
-                {
-                    abandon_engram_pending_dispatch(
-                        inner
-                            .session_mut_by_index(index)
-                            .expect("session index should remain valid"),
-                        Some(pending_engram),
-                    );
-                }
                 Ok(None)
             };
 
@@ -1935,14 +1505,6 @@ impl AppState {
 
                     if let Some(post_stop_record) = post_stop_record {
                         inner.sessions[index] = post_stop_record;
-                        abandon_engram_pending_dispatch(
-                            inner
-                                .session_mut_by_index(index)
-                                .expect("session index should remain valid"),
-                            prepared_queued_turn
-                                .as_ref()
-                                .and_then(|prepared| prepared.pending_engram.clone()),
-                        );
                     }
 
                     let record = inner
@@ -2030,5 +1592,21 @@ impl AppState {
         }
 
         Ok(self.snapshot())
+    }
+}
+
+impl AppState {
+    fn cancel_observation_delete_for_resume(&self, session_id: &str) -> Result<(), ApiError> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_visible_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if inner.sessions[index].engram.observation_delete_requested {
+            inner.sessions[index].engram.observation_delete_requested = false;
+            if let Err(error) = self.persist_session_internal_locked(&inner, session_id) {
+                inner.sessions[index].engram.observation_delete_requested = true;
+                return Err(ApiError::internal(format!("failed to cancel pending Delete: {error:#}")));
+            }
+        }
+        Ok(())
     }
 }

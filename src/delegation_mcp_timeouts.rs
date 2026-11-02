@@ -30,11 +30,10 @@ fn termal_delegation_followup_recovery_allowance() -> Duration {
 }
 
 /// What delivering a turn inline may spend: a spawn, a follow-up and a mailbox
-/// send that wakes an idle target deliver a turn before they answer, so a
-/// gated admission and, for a session holding a claim, the turn's begin-time
-/// source capture run within them.
+/// send that wakes an idle target deliver a turn before they answer. The
+/// allowance covers actual provider preparation and the review-freeze fence.
 fn termal_delegation_turn_delivery_budget() -> Duration {
-    Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS) + REVIEW_FREEZE_TIMEOUT
+    REVIEW_FREEZE_TIMEOUT
 }
 
 /// Defines `DelegationLongCall` and its `ALL` from one list of variants, so
@@ -57,10 +56,7 @@ macro_rules! delegation_long_calls {
 }
 
 delegation_long_calls! {
-    /// Binds the parent to Engram, recovering its binding first when that
-    /// needs a rebind, and then the new child, off the admission path
-    /// (`engram_unqueued_bind_worst_case`), and delivers the child's first
-    /// turn.
+    /// Creates the child and delivers its first ordinary turn.
     Spawn,
     /// Reads the tracker within its budget, then spawns the evaluator.
     EvaluationRequest,
@@ -85,13 +81,10 @@ impl DelegationLongCall {
     /// What the call may spend beyond an ordinary request, where delivering a
     /// turn inline may spend `turn_delivery`.
     fn budget(self, turn_delivery: Duration) -> Duration {
-        // A spawn binds the parent, which may recover a binding, then the new
-        // child, which has none to recover.
-        let binds = engram_unqueued_bind_worst_case(true) + engram_unqueued_bind_worst_case(false);
         match self {
-            Self::Spawn => binds + turn_delivery,
+            Self::Spawn => turn_delivery,
             Self::EvaluationRequest => {
-                acceptance_evaluation_request_tracker_budget() + binds + turn_delivery
+                acceptance_evaluation_request_tracker_budget() + turn_delivery
             }
             Self::EvaluationSubmit => acceptance_evaluation_submit_budget(),
             Self::SourceRootNaming => ENGRAM_SOURCE_ROOT_NAMING_BUDGET,

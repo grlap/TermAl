@@ -420,318 +420,74 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
   });
 
-  it.each(["Waiting/Unknown", "interrupted/unknown", "Defer", "store_corrupt"])(
-    "keeps recovery actions without duplicating a retained transcript prompt after %s",
-    (preview) => {
-      const interrupted = preview === "interrupted/unknown" || preview === "store_corrupt";
-      const onCancelQueuedPrompt = vi.fn();
-      const onResumeSessionQueue = vi.fn();
-      const activeSession = makeSession("session-held", {
-        status: "idle",
-        queuePaused: true,
-        preview,
-        messages: [{ id: "held", type: "text", author: "you", timestamp: "10:00", text: "Original exact prompt" }],
-        pendingPrompts: [{
-          id: "held",
-          timestamp: "10:00",
-          text: "Original exact prompt",
-          isEngramRetained: true,
-          engramInterrupted: interrupted,
-        }],
+  it.each(["ambiguous", "accepted", "handingOff"] as const)(
+    "shows canonical %s delivery without a replay or cancellation action",
+    disposition => {
+      const activeSession = makeSession("session-history", {
+        status: "idle", queuePaused: true,
+        messages: [{ id: "history", type: "text", author: "you", timestamp: "10:00", text: "Original exact prompt" }],
+        pendingPrompts: [{ id: "history", timestamp: "10:00", text: "Original exact prompt", isEngramRetained: true, engramInterrupted: true }],
+        promptDeliveries: [{ promptId: "history", disposition, attempt: 1, reason: "Retained delivery evidence" }],
       });
-      renderSessionPanelWithDefaults({
-        activeSession: preview === "Waiting/Unknown"
-          ? { ...activeSession, status: "active", queuePaused: false, pendingPrompts: [] }
-          : activeSession,
-        onCancelQueuedPrompt,
-        onResumeSessionQueue,
-        renderMessageCard: (message) => <article>{message.type === "text" ? message.text : message.id}</article>,
+      renderSessionPanelWithDefaults({ activeSession,
+        renderMessageCard: message => <article>{message.type === "text" ? message.text : message.id}</article>,
+        onResumeSessionQueue: vi.fn(), onCancelQueuedPrompt: vi.fn(),
       });
-      if (preview === "Waiting/Unknown") {
-        expect(screen.queryByRole("button", { name: "Cancel retained prompt" })).not.toBeInTheDocument();
-        act(() => syncComposerSessionsStore({
-          sessions: [activeSession], draftsBySessionId: {}, draftAttachmentsBySessionId: {},
-        }));
-      }
       expect(screen.getAllByText("Original exact prompt")).toHaveLength(1);
-      expect(screen.getByText("Prompt retained")).toBeInTheDocument();
-      if (interrupted) {
-        expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
-        expect(screen.getByText(/Cancel this retained prompt or reconcile/)).toBeInTheDocument();
-        expect(onResumeSessionQueue).not.toHaveBeenCalled();
-      } else {
-        fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
-        expect(onResumeSessionQueue).toHaveBeenCalledWith("session-held");
-      }
-      fireEvent.click(screen.getByRole("button", { name: "Cancel retained prompt" }));
-      expect(onCancelQueuedPrompt).toHaveBeenCalledWith("session-held", "held");
-
-      // The next server snapshot after cancellation removes only the actions.
-      act(() => syncComposerSessionsStore({
-        sessions: [{ ...activeSession, pendingPrompts: [] }],
-        draftsBySessionId: {},
-        draftAttachmentsBySessionId: {},
-      }));
-      expect(screen.queryByRole("button", { name: "Cancel retained prompt" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
-      expect(screen.getAllByText("Original exact prompt")).toHaveLength(1);
+      expect(screen.getByLabelText("Prompt delivery status")).toHaveTextContent("Retained delivery evidence");
+      expect(screen.queryByRole("button", { name: /Resume queued prompts|Cancel retained prompt|Cancel queued prompt/ })).not.toBeInTheDocument();
     },
   );
 
-  it("shows one retained prompt, one Defer card, and actionable Resume after the atomic SSE delta", () => {
-    const preDefer = makeSession("session-held", {
-      status: "active",
-      preview: "Authorize exact prompt",
-      queuePaused: false,
-      messageCount: 1,
-      sessionMutationStamp: 100,
-      messages: [{
-        id: "held",
-        type: "text",
-        author: "you",
-        timestamp: "10:00",
-        text: "Original exact prompt",
-      }],
-    });
-    const delta: DeltaEvent = {
-      type: "messageCreated",
-      revision: 7,
-      sessionId: "session-held",
-      messageId: "defer-card",
-      messageIndex: 1,
-      messageCount: 2,
-      message: {
-        id: "defer-card",
-        type: "engramControl",
-        author: "assistant",
-        timestamp: "10:01",
-        schemaVersion: 1,
-        stage: "dispatch",
-        assurance: "authoritative",
-        decision: "defer",
-        dispatch: "queued",
-        deferCode: "busy",
-        latencyMs: { total: 5 },
-        failMode: "enforced",
-      },
-      preview: "Engram deferred this prompt (busy). Prompt retained; resume to retry or cancel.",
-      status: "idle",
-      sessionQueue: {
-        queuePaused: true,
-        pendingPrompts: [{
-          id: "held",
-          timestamp: "10:00",
-          text: "Original exact prompt",
-          isEngramRetained: true,
-          engramInterrupted: false,
-        }],
-      },
-      sessionMutationStamp: 101,
-    };
-    const applied = applyDeltaToSessions([preDefer], delta);
-    if (applied.kind !== "applied") {
-      throw new Error(`expected applied Defer delta, received ${applied.kind}`);
-    }
+  it("keeps an unknown original passive while generic Resume targets the ordinary queue", () => {
     const onResumeSessionQueue = vi.fn();
-
+    const onCancelQueuedPrompt = vi.fn();
     renderSessionPanelWithDefaults({
-      activeSession: applied.sessions[0],
-      onResumeSessionQueue,
-      renderMessageCard: (message) => (
-        <article>{message.type === "text" ? message.text : message.id}</article>
-      ),
+      activeSession: makeSession("session-mixed", {
+        status: "idle", queuePaused: true, messages: [],
+        pendingPrompts: [
+          { id: "unknown-a", timestamp: "10:00", text: "Original unknown A", isEngramRetained: true, engramInterrupted: true },
+          { id: "unsent-b", timestamp: "10:01", text: "Proven unsent B" },
+        ],
+        promptDeliveries: [
+          { promptId: "unknown-a", disposition: "ambiguous", attempt: 1 },
+          { promptId: "unsent-b", disposition: "pending", attempt: 1 },
+        ],
+      }), onResumeSessionQueue, onCancelQueuedPrompt,
     });
-
-    expect(screen.getAllByText("Original exact prompt")).toHaveLength(1);
-    expect(screen.getAllByText("defer-card")).toHaveLength(1);
-    expect(screen.getByText("Prompt retained")).toBeInTheDocument();
+    expect(screen.getByText("Original unknown A")).toBeInTheDocument();
+    expect(screen.getByLabelText("Prompt delivery status").querySelector("button")).toBeNull();
+    expect(screen.getByText("1 prompt waiting. Send a new prompt or resume the queue to continue.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
-    expect(onResumeSessionQueue).toHaveBeenCalledOnce();
-    expect(onResumeSessionQueue).toHaveBeenCalledWith("session-held");
-  });
-
-  it("keeps an unpromoted retained head before its optimistic successor", () => {
-    const onCancelQueuedPrompt = vi.fn();
-    renderSessionPanelWithDefaults({
-      activeSession: makeSession("session-unpromoted-retained", {
-        status: "idle",
-        queuePaused: true,
-        messages: [],
-        pendingPrompts: [
-          {
-            id: "unpromoted-retained",
-            timestamp: "10:00",
-            text: "Exact retained prompt without a transcript row",
-            isEngramRetained: true,
-            engramInterrupted: true,
-          },
-          {
-            id: "optimistic-successor",
-            timestamp: "10:01",
-            text: "Optimistic successor behind retained head",
-            localOnly: true,
-          },
-        ],
-      }),
-      onCancelQueuedPrompt,
-      onResumeSessionQueue: vi.fn(),
-    });
-
-    expect(screen.getByText("Prompt retained")).toBeInTheDocument();
-    expect(screen.getByText(/Cancel this retained prompt or reconcile/)).toBeInTheDocument();
-    const retainedHead = screen.getByText("Exact retained prompt without a transcript row");
-    const optimisticSuccessor = screen.getByText("Optimistic successor behind retained head");
-    expect(
-      retainedHead.compareDocumentPosition(optimisticSuccessor) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
+    expect(onResumeSessionQueue).toHaveBeenCalledWith("session-mixed");
     fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt" }));
-    expect(onCancelQueuedPrompt).toHaveBeenCalledWith(
-      "session-unpromoted-retained",
-      "optimistic-successor",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Cancel retained prompt" }));
-    expect(onCancelQueuedPrompt).toHaveBeenCalledWith(
-      "session-unpromoted-retained",
-      "unpromoted-retained",
-    );
+    expect(onCancelQueuedPrompt).toHaveBeenCalledWith("session-mixed", "unsent-b");
   });
 
-  it("registers and highlights an unpromoted retained prompt for conversation search", () => {
-    const onConversationSearchItemMount = vi.fn();
-    renderSessionPanelWithDefaults({
-      activeSession: makeSession("session-search-retained", {
-        status: "idle",
-        queuePaused: true,
-        messages: [],
-        pendingPrompts: [{
-          id: "retained-search-target",
-          timestamp: "10:00",
-          text: "Searchable retained prompt",
-          isEngramRetained: true,
-          engramInterrupted: true,
-        }],
-      }),
-      conversationSearchQuery: "retained",
-      conversationSearchMatchedItemKeys: new Set([
-        "pendingPrompt:retained-search-target",
-      ]),
-      conversationSearchActiveItemKey: "pendingPrompt:retained-search-target",
-      onConversationSearchItemMount,
-    });
+  it("keeps old retained flags diagnostic while a proven-unsent prompt uses ordinary controls", () => {
+    renderSessionPanelWithDefaults({ activeSession: makeSession("session-pending", {
+      status: "idle", queuePaused: true, messages: [],
+      pendingPrompts: [{ id: "pending", timestamp: "10:00", text: "Ordinary pending content", isEngramRetained: true, engramInterrupted: true }],
+      promptDeliveries: [{ promptId: "pending", disposition: "pending", attempt: 1 }],
+    }), onResumeSessionQueue: vi.fn() });
+    expect(screen.queryByText("Prompt retained")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume queued prompts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancel queued prompt" })).toBeEnabled();
+  });
 
-    expect(onConversationSearchItemMount).toHaveBeenCalledWith(
-      "pendingPrompt:retained-search-target",
-      expect.any(HTMLElement),
-    );
-    const slot = document.querySelector(
-      '[data-session-search-item-key="pendingPrompt:retained-search-target"]',
-    );
+  it("registers and highlights a canonical unknown prompt without a resident body", () => {
+    const onConversationSearchItemMount = vi.fn();
+    renderSessionPanelWithDefaults({ activeSession: makeSession("session-search", {
+      status: "idle", messages: [],
+      pendingPrompts: [{ id: "search-target", timestamp: "10:00", text: "Searchable original prompt" }],
+      promptDeliveries: [{ promptId: "search-target", disposition: "ambiguous", attempt: 1 }],
+    }), conversationSearchQuery: "original",
+      conversationSearchMatchedItemKeys: new Set(["pendingPrompt:search-target"]),
+      conversationSearchActiveItemKey: "pendingPrompt:search-target", onConversationSearchItemMount });
+    expect(onConversationSearchItemMount).toHaveBeenCalledWith("pendingPrompt:search-target", expect.any(HTMLElement));
+    const slot = document.querySelector('[data-session-search-item-key="pendingPrompt:search-target"]');
     expect(slot).toHaveClass("session-search-hit", "session-search-hit-active");
-    expect(slot?.querySelector("mark.search-highlight.is-active")).toHaveTextContent(
-      "retained",
-    );
-  });
-
-  it("suppresses a duplicate pending search slot when the retained body is in the transcript", () => {
-    const onConversationSearchItemMount = vi.fn();
-    renderSessionPanelWithDefaults({
-      activeSession: makeSession("session-search-retained-visible", {
-        status: "idle",
-        queuePaused: true,
-        messages: [{
-          id: "retained-search-target",
-          type: "text",
-          author: "you",
-          timestamp: "10:00",
-          text: "Searchable retained prompt",
-        }],
-        pendingPrompts: [{
-          id: "retained-search-target",
-          timestamp: "10:00",
-          text: "Searchable retained prompt",
-          isEngramRetained: true,
-        }],
-      }),
-      conversationSearchQuery: "retained",
-      conversationSearchMatchedItemKeys: new Set([
-        "message:retained-search-target",
-        "pendingPrompt:retained-search-target",
-      ]),
-      conversationSearchActiveItemKey: "message:retained-search-target",
-      onConversationSearchItemMount,
-      renderMessageCard: (message) => (
-        <article>{message.type === "text" ? message.text : message.id}</article>
-      ),
-    });
-
-    expect(
-      document.querySelector(
-        '[data-session-search-item-key="pendingPrompt:retained-search-target"]',
-      ),
-    ).not.toBeInTheDocument();
-    expect(onConversationSearchItemMount).not.toHaveBeenCalledWith(
-      "pendingPrompt:retained-search-target",
-      expect.anything(),
-    );
-    expect(screen.getAllByText("Searchable retained prompt")).toHaveLength(1);
-  });
-
-  it("keeps an evicted interrupted retained head before its queued successor", () => {
-    const onCancelQueuedPrompt = vi.fn();
-    renderSessionPanelWithDefaults({
-      activeSession: makeSession("session-evicted-retained", {
-        status: "idle",
-        queuePaused: true,
-        messages: [{
-          id: "resident-tail",
-          type: "text",
-          author: "assistant",
-          timestamp: "10:01",
-          text: "Resident transcript tail",
-        }],
-        pendingPrompts: [
-          {
-            id: "evicted-retained-head",
-            timestamp: "10:00",
-            text: "Evicted retained head",
-            isEngramRetained: true,
-            engramInterrupted: true,
-          },
-          {
-            id: "queued-successor",
-            timestamp: "10:02",
-            text: "Queued successor behind retained head",
-          },
-        ],
-      }),
-      onCancelQueuedPrompt,
-      onResumeSessionQueue: vi.fn(),
-    });
-
-    expect(screen.getByText("Prompt retained")).toBeInTheDocument();
-    const retainedHead = screen.getByText("Evicted retained head");
-    const queuedSuccessor = screen.getByText("Queued successor behind retained head");
-    expect(
-      retainedHead.compareDocumentPosition(queuedSuccessor) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Cancel retained prompt" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Cancel queued prompt" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel retained prompt" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt" }));
-    expect(onCancelQueuedPrompt).toHaveBeenNthCalledWith(
-      1,
-      "session-evicted-retained",
-      "evicted-retained-head",
-    );
-    expect(onCancelQueuedPrompt).toHaveBeenNthCalledWith(
-      2,
-      "session-evicted-retained",
-      "queued-successor",
-    );
+    expect(slot?.querySelector("mark.search-highlight.is-active")).toHaveTextContent("original");
   });
 
   it("does not carry deferred transcript cards into an empty active session", async () => {
@@ -909,9 +665,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
     expect(screen.getByRole("button", { name: "Recover tracking" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
-    if (retained) {
-      expect(screen.getByText("Prompt retained during source tracking recovery. Recovery does not send this prompt.")).toBeInTheDocument();
-    }
+    expect(screen.getByText("Original queued work")).toBeInTheDocument();
+    expect(screen.getByText("Queued successor")).toBeInTheDocument();
+    expect(screen.queryByText("Prompt retained")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Recover tracking" }));
     expect(onResumeSessionQueue).toHaveBeenCalledWith("session-a");
   });
@@ -1331,162 +1087,39 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toBe(liveTail);
   });
 
-  describe("queue pause cause", () => {
-    const RETRY_DUE_AT = "2026-10-05T07:40:00Z";
-    const RETRY_PREVIEW = `Engram: waiting for admission; retrying automatically, attempt 2, next at ${RETRY_DUE_AT}.`;
-    const RETRY_LOCAL_TIME = new Date(RETRY_DUE_AT).toLocaleTimeString();
-    const HELD_PREVIEW = "Engram: Waiting/Unknown. Original prompt retained; resume to retry or cancel.";
-
-    function renderPausedQueue(preview: string, retained: boolean) {
+  describe("ordinary queue pause cause", () => {
+    function renderPausedQueue(preview: string) {
       renderSessionPanelWithDefaults({
         activeSession: makeSession("session-paused", {
-          status: "idle",
-          queuePaused: true,
-          preview,
-          pendingPrompts: [{
-            id: "paused-head",
-            timestamp: "10:00",
-            text: "Paused head prompt",
-            isEngramRetained: retained,
-          }],
+          status: "idle", queuePaused: true, preview,
+          pendingPrompts: [{ id: "paused-head", timestamp: "10:00", text: "Paused head prompt" }],
         }),
-        onResumeSessionQueue: vi.fn(),
-        onCancelQueuedPrompt: vi.fn(),
+        onResumeSessionQueue: vi.fn(), onCancelQueuedPrompt: vi.fn(),
       });
     }
 
-    function pausedCardCopy() {
-      const card = screen.getByText("Queue paused").closest(".activity-card-queue-paused");
-      expect(card).not.toBeNull();
-      return card?.querySelector(".activity-card-copy")?.textContent ?? "";
-    }
-
-    it("says an automatic Engram re-admission is retrying, with its attempt and time, and asks for nothing", () => {
-      renderPausedQueue(RETRY_PREVIEW, false);
-
-      expect(screen.getByText("Waiting for Engram admission; retrying automatically")).toBeInTheDocument();
-      expect(screen.getByText(`Attempt 2, next at ${RETRY_LOCAL_TIME}. No action is needed.`)).toBeInTheDocument();
-      expect(screen.getByText("1 prompt waiting.")).toBeInTheDocument();
-      const copy = pausedCardCopy();
-      expect(copy).not.toMatch(/stopped/i);
-      expect(copy).not.toMatch(/resume/i);
-    });
-
-    it("names a typed automatic-retry hold by its cause and next time, whatever the preview says", () => {
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("session-retry-hold", {
-          status: "idle",
-          queuePaused: true,
-          queueHold: { kind: "automaticRetry", cause: "dispatch_budget_exhausted", retryAt: RETRY_DUE_AT },
-          preview: HELD_PREVIEW,
-          pendingPrompts: [{ id: "held-head", timestamp: "10:00", text: "Held head prompt" }],
-        }),
-        onResumeSessionQueue: vi.fn(),
-        onCancelQueuedPrompt: vi.fn(),
-      });
-
-      expect(screen.getByText("Retrying automatically; no action is needed")).toBeInTheDocument();
-      expect(
-        screen.getByText(`Cause: dispatch_budget_exhausted. Next attempt at ${RETRY_LOCAL_TIME}.`),
-      ).toBeInTheDocument();
-      expect(pausedCardCopy()).not.toMatch(/stopped|holding the queue/i);
-    });
-
-    it("tells an interrupted retained head that an automatic retry owns it, instead of asking to cancel or reconcile", () => {
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("session-abort-retry", {
-          status: "idle",
-          queuePaused: true,
-          queueHold: { kind: "automaticRetry", cause: "beginPreparation", retryAt: RETRY_DUE_AT },
-          preview: "Engram: delivery not attempted; retrying automatically.",
-          pendingPrompts: [{
-            id: "abort-head",
-            timestamp: "10:00",
-            text: "Abort retry head",
-            isEngramRetained: true,
-            engramInterrupted: true,
-          }],
-        }),
-        onResumeSessionQueue: vi.fn(),
-        onCancelQueuedPrompt: vi.fn(),
-      });
-
-      expect(
-        screen.getByText(
-          `Engram admission is retrying automatically (beginPreparation, next at ${RETRY_LOCAL_TIME}). Cancel drops the retained prompt.`,
-        ),
-      ).toBeInTheDocument();
-      expect(screen.queryByText(/Delivery is interrupted or unknown/)).toBeNull();
-    });
-
-    it("shows an automatic retry preview it cannot parse as it is, still asking for nothing", () => {
-      const preview = "Engram: waiting for admission; retrying automatically soon.";
-      renderPausedQueue(preview, false);
-
-      expect(screen.getByText("Waiting for Engram admission; retrying automatically")).toBeInTheDocument();
-      expect(screen.getByText(`${preview} No action is needed.`)).toBeInTheDocument();
-      const copy = pausedCardCopy();
-      expect(copy).not.toMatch(/stopped/i);
-      expect(copy.replace(preview, "")).not.toMatch(/resume/i);
-    });
-
-    it("names an Engram hold by the backend's own words", () => {
-      renderPausedQueue(HELD_PREVIEW, false);
-
-      expect(screen.getByText("Engram is holding the queue")).toBeInTheDocument();
-      expect(screen.getByText(HELD_PREVIEW)).toBeInTheDocument();
-      expect(screen.getByText("1 prompt waiting.")).toBeInTheDocument();
-      expect(pausedCardCopy()).not.toMatch(/stopped/i);
-    });
-
-    it("says the agent was stopped only after a real Stop", () => {
-      renderPausedQueue("Turn stopped by user.", false);
-
+    it("keeps a real Stop actionable without an Engram retry owner", () => {
+      renderPausedQueue("Turn stopped by user.");
       expect(screen.getByText("Codex was stopped; the queue is paused")).toBeInTheDocument();
-      expect(
-        screen.getByText("1 prompt waiting. Send a new prompt or resume the queue to continue."),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Resume queued prompts" })).toBeEnabled();
+      expect(screen.getByText("Paused head prompt")).toBeInTheDocument();
     });
 
-    it("names any other cause from the preview without saying the agent was stopped", () => {
+    it("keeps an ordinary provider failure visible", () => {
       const preview = "Codex reported an error: the provider is overloaded.";
-      renderPausedQueue(preview, false);
-
+      renderPausedQueue(preview);
       expect(screen.getByText("The queue is paused")).toBeInTheDocument();
       expect(screen.getByText(preview)).toBeInTheDocument();
-      expect(
-        screen.getByText("1 prompt waiting. Send a new prompt or resume the queue to continue."),
-      ).toBeInTheDocument();
-      expect(pausedCardCopy()).not.toMatch(/was stopped/i);
+      expect(screen.getByRole("button", { name: "Resume queued prompts" })).toBeEnabled();
     });
 
-    it("tells a retained prompt under automatic retry that Cancel drops it, without asking for Resume", () => {
-      renderPausedQueue(RETRY_PREVIEW, true);
-
-      expect(screen.getByText("Prompt retained")).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          `Engram admission is retrying automatically (attempt 2, next at ${RETRY_LOCAL_TIME}). Cancel drops the retained prompt.`,
-        ),
-      ).toBeInTheDocument();
-      expect(screen.queryByText(/Authorization is paused/)).not.toBeInTheDocument();
-    });
-
-    it("gives a retained prompt held by Engram the backend's own words", () => {
-      renderPausedQueue(HELD_PREVIEW, true);
-
-      expect(screen.getByText("Prompt retained")).toBeInTheDocument();
-      expect(screen.getAllByText(HELD_PREVIEW).length).toBeGreaterThan(0);
-      expect(screen.queryByText(/Authorization is paused/)).not.toBeInTheDocument();
-    });
-
-    it("calls a retained prompt with no Engram cause held, not paused", () => {
-      renderPausedQueue("Turn stopped by user.", true);
-
-      expect(
-        screen.getByText("Authorization is held. Resume to retry, or cancel the retained prompt."),
-      ).toBeInTheDocument();
-      expect(screen.queryByText(/Authorization is paused/)).not.toBeInTheDocument();
+    it("shows old retry prose only as text, without promising an automatic retry", () => {
+      const preview = "Engram: Waiting/Unknown. Original prompt retained; resume to retry or cancel.";
+      renderPausedQueue(preview);
+      expect(screen.getByText("The queue is paused")).toBeInTheDocument();
+      expect(screen.getByText(preview)).toBeInTheDocument();
+      expect(screen.queryByText("Retrying automatically; no action is needed")).not.toBeInTheDocument();
+      expect(screen.getByText("1 prompt waiting. Send a new prompt or resume the queue to continue.")).toBeInTheDocument();
     });
   });
 });

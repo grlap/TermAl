@@ -1,11 +1,9 @@
-//! Tests the work binding a session binds with, read from
-//! `engram work core held` (Engram w-108a13d58018 criterion 3, tm-winf
-//! step 3): the one-shot reader against a real process fixture and the
+//! Tests an ordinary session's work association read from
+//! `engram work core held`: the one-shot reader against a real process fixture and the
 //! choice of one binding among the claims it lists.
 //!
 //! Owns the reader and selection tests of `engram_held_claims.rs`. Does not
-//! own when the binding is read or refreshed (`engram_work_binding_refresh.rs`
-//! and the adapter tests). Split out of `engram_host_adapter.rs`, where both
+//! own naming or native sender connection ownership. Split out of the adapter, where both
 //! tests lived before, to sit beside the module they test.
 
 use super::*;
@@ -39,7 +37,6 @@ fn real_process_work_binding_reader_reads_the_held_claims() {
             &connection,
             EngramBindingPreference::default(),
             DEADLOCK_GUARD,
-            false,
             temp.path(),
         );
         assert!(
@@ -85,7 +82,7 @@ fn real_process_work_binding_reader_reads_the_held_claims() {
     // The full read a work's source root is named against decodes each row's
     // own claim fields, which naming depends on: with them missing, every
     // name would be refused.
-    let held = read_engram_held_claims_from_cli(&connection, DEADLOCK_GUARD, false, temp.path())
+    let held = read_engram_held_claims_from_cli(&connection, DEADLOCK_GUARD, temp.path())
         .expect("the held claims should be read");
     assert_eq!(held.omitted, 0);
     assert_eq!(
@@ -164,132 +161,11 @@ fn real_process_work_binding_reader_reads_the_held_claims() {
     );
 }
 
-/// A read's preference for a session bound with `binding`, with no refusal.
+/// A read's current ordinary association.
 fn bound(binding: &EngramControlWorkBinding) -> EngramBindingPreference<'_> {
     EngramBindingPreference {
         current: Some(binding),
-        refused: &[],
     }
-}
-
-#[test]
-fn a_binding_engram_refused_gives_way_to_another_held_claim() {
-    // Focus moved to a claim Engram refused as stale (a pending handoff, an
-    // ancestor it no longer accepts): the session keeps the claim it is bound
-    // to rather than binding no work, since a note on another item must not
-    // unbind it.
-    let current = test_control_work_binding("refused-current", 1);
-    let refused = test_control_work_binding("refused-focused", 1);
-    let newest = test_control_work_binding("refused-newest", 1);
-    let claim = |binding: &EngramControlWorkBinding, focused: bool| EngramHeldClaim {
-        work_id: binding.work_id.clone(),
-        focused,
-        control_binding: Some(binding.clone()),
-        ..Default::default()
-    };
-
-    assert_eq!(
-        select_engram_held_binding(
-            vec![
-                claim(&newest, false),
-                claim(&current, false),
-                claim(&refused, true)
-            ],
-            0,
-            EngramBindingPreference {
-                current: Some(&current),
-                refused: std::slice::from_ref(&refused),
-            },
-        ),
-        Some(current.clone()),
-        "the bound claim, not the refused focused one"
-    );
-    let revised = EngramControlWorkBinding {
-        work_revision: 2,
-        claim_fence: refused.claim_fence + 1,
-        ..refused.clone()
-    };
-    assert_eq!(
-        select_engram_held_binding(
-            vec![claim(&current, false), claim(&revised, true)],
-            0,
-            EngramBindingPreference {
-                current: Some(&current),
-                refused: std::slice::from_ref(&refused),
-            },
-        ),
-        Some(revised),
-        "a refused claim that moved on is another binding"
-    );
-    for omitted in [0, 3] {
-        assert_eq!(
-            select_engram_held_binding(
-                vec![claim(&newest, false), claim(&current, false)],
-                omitted,
-                EngramBindingPreference {
-                    current: Some(&current),
-                    refused: std::slice::from_ref(&current),
-                },
-            ),
-            Some(newest.clone()),
-            "a refused bound claim gives way to the newest other (omitted={omitted})"
-        );
-    }
-    assert_eq!(
-        select_engram_held_binding(
-            vec![claim(&newest, false)],
-            3,
-            EngramBindingPreference {
-                current: Some(&current),
-                refused: std::slice::from_ref(&current),
-            },
-        ),
-        Some(newest.clone()),
-        "a refused bound claim is not kept for being left out of a capped list"
-    );
-    assert_eq!(
-        select_engram_held_binding(
-            vec![claim(&refused, true)],
-            0,
-            EngramBindingPreference {
-                current: None,
-                refused: std::slice::from_ref(&refused),
-            },
-        ),
-        None,
-        "with nothing else held, no work"
-    );
-    // Two claims Engram refused are both left out: neither takes the other's
-    // turn, and a valid claim, or no work, binds instead.
-    let both = [current.clone(), refused.clone()];
-    assert_eq!(
-        select_engram_held_binding(
-            vec![
-                claim(&newest, false),
-                claim(&current, false),
-                claim(&refused, true)
-            ],
-            0,
-            EngramBindingPreference {
-                current: Some(&current),
-                refused: &both,
-            },
-        ),
-        Some(newest.clone()),
-        "both refused claims give way to the valid one"
-    );
-    assert_eq!(
-        select_engram_held_binding(
-            vec![claim(&current, false), claim(&refused, true)],
-            3,
-            EngramBindingPreference {
-                current: Some(&current),
-                refused: &both,
-            },
-        ),
-        None,
-        "with only refused claims held, no work"
-    );
 }
 
 #[test]

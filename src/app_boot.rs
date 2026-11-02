@@ -853,7 +853,7 @@ impl AppState {
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
             engram_carried_poll_lock: Arc::new(Mutex::new(())),
-            engram_retry_slots: EngramRetrySlots::default(),
+            runtime_retry_slots: RuntimeRetrySlots::default(),
             state_broadcast_senders,
             file_events: broadcast::channel(256).0,
             file_events_revision: Arc::new(AtomicU64::new(0)),
@@ -931,16 +931,10 @@ impl AppState {
             }
         }
         state.restore_remote_event_bridges();
-        // The retry tick's thread starts below, before post-listen boot
-        // prepares the Engram readiness fences: hold automatic retries until
-        // then (`prepare_engram_sessions_for_boot_recovery` releases them).
-        state.engram_retry_slots.hold_until_boot_preparation();
         #[cfg(not(test))]
         state.spawn_workspace_file_watcher();
         #[cfg(not(test))]
         state.spawn_test_run_index();
-        #[cfg(not(test))]
-        state.spawn_engram_retry_tick();
         // Full delegation inventory and runtime recovery start only after the
         // listener binds and publishes the base URL. The returned state carries
         // the completeness fence even in tests of the production entry point.
@@ -954,11 +948,8 @@ impl AppState {
     /// deferring this work past the boot persist above is safe.
     #[cfg(test)]
     fn run_post_listen_boot(&self) -> Result<()> {
-        let engram_plan = match self.load_delegation_inventory_observed(|_| {})? {
-            Some(plan) => plan,
-            None => self.prepare_engram_sessions_for_boot_recovery()?,
-        };
-        self.run_post_listen_boot_after_readiness(engram_plan);
+        self.load_delegation_inventory_observed(|_| {})?;
+        self.run_post_listen_boot_after_inventory();
         Ok(())
     }
 
@@ -977,11 +968,8 @@ impl AppState {
             .name("termal-post-listen-boot".to_owned())
             .spawn(move || {
                 let result = (|| -> Result<()> {
-                    let engram_plan = match state.load_delegation_inventory_observed(observe)? {
-                        Some(plan) => plan,
-                        None => state.prepare_engram_sessions_for_boot_recovery()?,
-                    };
-                    state.run_post_listen_boot_after_readiness(engram_plan);
+                    state.load_delegation_inventory_observed(observe)?;
+                    state.run_post_listen_boot_after_inventory();
                     Ok(())
                 })();
                 if let Err(error) = result {
@@ -991,22 +979,17 @@ impl AppState {
             .context("failed spawning post-listen boot recovery worker")
     }
 
-    fn run_post_listen_boot_after_readiness(&self, engram_plan: EngramBootRecoveryPlan) {
-        // Retired work-authority grants no Engram build can revoke any more
-        // are settled once, visibly. A settings change that reaches one first
-        // settles it through the revoke step instead; either way none is sent.
-        self.settle_retired_engram_work_authority_grants_after_boot();
+    fn run_post_listen_boot_after_inventory(&self) {
+        #[cfg(not(test))]
+        {
+            self.spawn_runtime_retry_tick();
+            self.spawn_engram_verification_ticks();
+        }
         // Structured reviewer envelopes live in coordination.sqlite. Recover
         // them before wait reconciliation so a restart between mailbox append
         // and primary-state recording cannot resume a parent with a false
         // unavailable result.
         self.reconcile_durable_delegation_review_submissions_after_boot();
-        // Engram routing tokens and open grants are host-private session
-        // state. Recover them before any mailbox/workflow pass can dispatch a
-        // prompt. Recovery runs in bounded batches while HTTP remains live;
-        // the per-session readiness fence blocks only affected sessions until
-        // their own recovery result is committed.
-        self.recover_prepared_engram_sessions_after_boot(engram_plan);
         self.resume_runtime_observation_reports();
         self.recover_federation_executor_after_boot();
         // Materialize unread mailbox wakes before either workflow reconciler can

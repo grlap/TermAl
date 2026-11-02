@@ -1,41 +1,27 @@
 // Owns Build terminal correlation and rejection diagnostics through the real
-// recorder/checkpoint path. Synthetic launcher records are not live evidence.
+// recorder/ordinary-observation path. Synthetic launcher records are not live evidence.
 // Does not own Build grammar, live-store admission, or carried-gate settlement.
 // Child of engram_build_checks.rs; reuses its complete owned fixture lifecycle.
 use super::*;
 
-fn summary(checkpoint: &Value) -> &str {
-    checkpoint["verification_evidence"][0]["summary"]
-        .as_str()
-        .expect("one Build summary")
+fn summary(turn: &EOCheckedTurn) -> String {
+    diagnostic_summary(turn)
 }
 
-fn rejected_terminal(checkpoint: &Value, revision: &str, code: i64, reason: &str) {
-    one_build(checkpoint, revision, "unknown");
-    let text = summary(checkpoint);
-    assert!(
-        text.contains(&format!("observed native exit {code}")),
-        "must retain the observed runtime terminal independently of credit: {text}"
-    );
-    assert!(
-        text.contains(reason),
-        "must name rejection {reason}: {text}"
-    );
+fn rejected_terminal(turn: &EOCheckedTurn, request: &Value, revision: &str, code: i64, reason: &str) {
+    one_build(request, revision, "indeterminate");
+    let text = summary(turn);
+    assert!(text.contains(&format!("observed native exit {code}")),
+        "the runtime terminal remains diagnostic, independent of credit: {text}");
+    assert!(text.contains(reason), "must name rejection {reason}: {text}");
     assert!(!text.contains("without an exit status"), "{text}");
     assert!(text.len() <= ENGRAM_CHECK_SUMMARY_MAX_BYTES, "{text}");
-    assert!(
-        checkpoint["verification_evidence"][0]
-            .get("refs")
-            .is_none_or(|refs| !refs
-                .as_array()
-                .expect("present refs must be an array")
-                .contains(&json!(format!("exit:{code}")))),
-        "observed rejected exit is not eligible native evidence: {checkpoint:#}"
-    );
+    assert!(!diagnostic_refs(turn).contains(&format!("exit:{code}")),
+        "a rejected observed exit supplies no eligible native reference");
 }
 
 fn typed_item(
-    turn: &CheckedTurn,
+    turn: &EOCheckedTurn,
     key: &str,
     command: &str,
     status: &str,
@@ -51,7 +37,7 @@ fn typed_item(
     item
 }
 
-fn complete_typed(turn: &CheckedTurn, recorder: &mut SessionRecorder, item: &Value) {
+fn complete_typed(turn: &EOCheckedTurn, recorder: &mut SessionRecorder, item: &Value) {
     handle_codex_app_server_item_completed(
         item,
         &turn.state,
@@ -63,10 +49,10 @@ fn complete_typed(turn: &CheckedTurn, recorder: &mut SessionRecorder, item: &Val
 }
 
 #[test]
-fn engram_build_outcome_typed_native_pass_and_failure_reach_the_checkpoint() {
+fn engram_build_outcome_typed_native_pass_and_failure_reach_the_request() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     for code in [0, 101] {
-        let turn = CheckedTurn::start(&format!("build-outcome-typed-{code}"), true);
+        let turn = EOCheckedTurn::start(&format!("build-outcome-typed-{code}"), true);
         let revision = turn.revision();
         let mut recorder = turn.recorder();
         handle_codex_app_server_item_started(
@@ -82,9 +68,9 @@ fn engram_build_outcome_typed_native_pass_and_failure_reach_the_checkpoint() {
         );
         turn.wait_for_snapshots();
         one_build(
-            &turn.finish(),
+            &finish_observation(&turn),
             &revision,
-            if code == 0 { "succeeded" } else { "failed" },
+            if code == 0 { "passed" } else { "failed" },
         );
     }
 }
@@ -92,7 +78,7 @@ fn engram_build_outcome_typed_native_pass_and_failure_reach_the_checkpoint() {
 #[test]
 fn engram_build_outcome_typed_yield_and_foreign_key_do_not_end_the_owned_attempt() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start("build-outcome-yield", true);
+    let turn = EOCheckedTurn::start("build-outcome-yield", true);
     let revision = turn.revision();
     let mut recorder = turn.recorder();
     handle_codex_app_server_item_started(
@@ -115,6 +101,11 @@ fn engram_build_outcome_typed_yield_and_foreign_key_do_not_end_the_owned_attempt
         turn.record(|record| record.engram.active_turn_checks[0].end.is_none()),
         "yield or another command key cannot become this attempt's terminal"
     );
+    turn.record(|record| {
+        let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        let owned = trace.commands.iter().find(|entry| entry.tool_key == "owned").unwrap();
+        assert!(owned.check.finished_at.is_none(), "yield cannot terminalize the owned EO fact");
+    });
     complete_typed(
         &turn,
         &mut recorder,
@@ -123,14 +114,17 @@ fn engram_build_outcome_typed_yield_and_foreign_key_do_not_end_the_owned_attempt
     turn.wait_for_snapshots();
     // The foreign event cannot lend its pass or consume the owned attempt.
     // The later owned terminal is the command's failed native result.
-    let checkpoint = turn.finish();
-    one_build(&checkpoint, &revision, "failed");
-    assert!(summary(&checkpoint).contains("exited 101"));
+    let request = finish_observation(&turn);
+    let turn_ref = request["occurrence"]["host_turn_ref"].as_str().unwrap();
+    let id = unadmitted_host_check_id(turn_ref, "owned");
+    let owned = request["occurrence"]["observed_checks"].as_array().unwrap().iter()
+        .filter(|check| check["host_check_id"] == id).collect::<Vec<_>>();
+    assert_eq!(owned.len(), 1, "one exact owned occurrence: {request:#}");
+    assert_eq!(owned[0]["observed_result"], "failed");
+    assert_eq!(request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], revision);
+    assert!(summary(&turn).contains("exited 101"));
     assert!(
-        checkpoint["verification_evidence"][0]["refs"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("exit:101"))
+        diagnostic_refs(&turn).contains(&"exit:101".to_owned())
     );
 }
 
@@ -143,7 +137,7 @@ fn engram_build_outcome_focused_valid_terminal_is_not_inferred_from_test_counts(
         one_build(
             &fixture.finish(EngramCommandExit::Code(code)),
             &revision,
-            if code == 0 { "succeeded" } else { "failed" },
+            if code == 0 { "passed" } else { "failed" },
         );
     }
 }
@@ -176,6 +170,7 @@ fn focused_rejection(reason: &str, mutate: fn(&mut FocusedBuildFixture)) {
     );
     let revision = fixture.turn.revision();
     rejected_terminal(
+        &fixture.turn,
         &fixture.finish(EngramCommandExit::Code(0)),
         &revision,
         0,
@@ -291,7 +286,7 @@ fn engram_build_outcome_delayed_bookkeeping_keeps_the_observed_start_boundary() 
     one_build(
         &fixture.finish(EngramCommandExit::Code(0)),
         &revision,
-        "succeeded",
+        "passed",
     );
 }
 
@@ -318,7 +313,7 @@ fn engram_build_outcome_pre_start_replay_still_cannot_supply_a_terminal() {
     one_build(
         &fixture.finish(EngramCommandExit::Code(0)),
         &revision,
-        "unknown",
+        "indeterminate",
     );
 }
 
@@ -327,9 +322,9 @@ fn engram_build_outcome_missing_ingress_is_not_a_present_rejected_terminal() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let fixture = FocusedBuildFixture::new("build-outcome-no-ingress-exit", 0);
     let revision = fixture.turn.revision();
-    let checkpoint = fixture.finish(EngramCommandExit::Unknown);
-    one_build(&checkpoint, &revision, "unknown");
-    let text = summary(&checkpoint);
+    let request = fixture.finish(EngramCommandExit::Unknown);
+    one_build(&request, &revision, "indeterminate");
+    let text = summary(&fixture.turn);
     assert!(text.contains("no native terminal exit observed"), "{text}");
     assert!(
         !text.contains("observed native exit 0"),
@@ -355,13 +350,13 @@ fn engram_build_outcome_mismatched_command_has_association_reason_and_no_pass() 
         )
         .unwrap();
     fixture.turn.wait_for_snapshots();
-    rejected_terminal(&fixture.turn.finish(), &revision, 0, "association");
+    rejected_terminal(&fixture.turn, &finish_observation(&fixture.turn), &revision, 0, "association");
 }
 
 #[test]
 fn engram_build_outcome_rejection_facts_survive_long_unicode_command_summary_bounds() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = CheckedTurn::start("build-outcome-bounded", true);
+    let turn = EOCheckedTurn::start("build-outcome-bounded", true);
     let revision = turn.revision();
     let command = format!(
         "cargo build --features {}",
@@ -380,14 +375,14 @@ fn engram_build_outcome_rejection_facts_survive_long_unicode_command_summary_bou
         )
         .unwrap();
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
-    rejected_terminal(&checkpoint, &revision, 101, "association");
+    let request = finish_observation(&turn);
+    rejected_terminal(&turn, &request, &revision, 101, "association");
     assert!(
-        checkpoint["verification_evidence"][0].get("refs").is_none(),
+        diagnostic_refs(&turn).is_empty(),
         "overlong command and rejected exit leave no eligible references"
     );
-    assert!(summary(&checkpoint).contains("command: cargo build --features é"));
-    assert!(summary(&checkpoint).len() > ENGRAM_CHECK_SUMMARY_MAX_BYTES - 4);
+    assert!(summary(&turn).contains("command: cargo build --features é"));
+    assert!(summary(&turn).len() > ENGRAM_CHECK_SUMMARY_MAX_BYTES - 4);
 }
 
 #[test]
@@ -397,18 +392,16 @@ fn engram_build_outcome_plain_missing_native_is_not_generic_success() {
         EngramCommandExit::Unknown,
         EngramCommandExit::ReportedSuccess,
     ] {
-        let turn = CheckedTurn::start("build-outcome-plain-no-native", true);
+        let turn = EOCheckedTurn::start("build-outcome-plain-no-native", true);
         let revision = turn.revision();
         complete_command(&turn, "build", "cargo build", exit, "Finished successfully");
-        let checkpoint = turn.finish();
-        one_build(&checkpoint, &revision, "unknown");
-        assert!(summary(&checkpoint).contains("no native terminal exit observed"));
+        let request = finish_observation(&turn);
+        one_build(&request, &revision, "indeterminate");
+        assert!(summary(&turn).contains("no native terminal exit observed"));
         assert!(
-            !checkpoint["verification_evidence"][0]["refs"]
-                .as_array()
-                .unwrap()
+            !diagnostic_refs(&turn)
                 .iter()
-                .any(|reference| reference.as_str().unwrap().starts_with("exit:"))
+                .any(|reference| reference.starts_with("exit:"))
         );
     }
 }

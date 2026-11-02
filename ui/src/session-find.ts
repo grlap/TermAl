@@ -160,7 +160,7 @@ function buildSearchableSessionItems(session: Session): SearchableSessionItem[] 
       ),
     ),
     ...(session.pendingPrompts ?? []).flatMap((prompt) =>
-      prompt.isEngramRetained === true && visibleMessageIds.has(prompt.id)
+      visibleMessageIds.has(prompt.id)
         ? []
         : createSearchableSessionItems(
             "pendingPrompt",

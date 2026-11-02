@@ -1,593 +1,182 @@
-//! Measured admission exhaustion must not keep repeating the same budget.
-//! All elapsed time is injected through the existing operation clock; no load
-//! or real-time sleep supplies the failure. Writer receipts below are scripted
-//! fence outcomes, not a live Engram or SQLite claim.
+//! Historical admission measurements stay readable without a scheduling executor.
+//! Synthetic cards are passive specimens. SQLite cases below use the real store;
+//! ordinary Resume, pause and FIFO assertions use the existing runtime owners.
 use super::*;
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 
-fn measured_exhausted_head() -> (SessionRecord, String, EngramBudgetClock) {
-    let (state, session, _receiver, _transport) = parked_after_deadline([]);
-    let clock = state.engram_budget_clock();
-    clock.advance(Duration::from_millis(25_315));
-    let mut record = with_record(&state, &session, Clone::clone);
-    let prompt_id = record
-        .queued_prompts
-        .front()
-        .unwrap()
-        .pending_prompt
-        .id
-        .clone();
-    let active_turn_generation = record.active_turn_generation;
-    let authority = record
-        .engram
-        .admission_retry
-        .as_ref()
-        .unwrap()
-        .authority
-        .clone();
-    record.engram.admission_retry = None;
-    let card = record
-        .session
-        .messages
-        .matching_mut(|message| matches!(message, Message::EngramControl { .. }))
-        .rev()
-        .find_map(|(_, message)| match message {
-            Message::EngramControl { card, .. } => Some(card),
+fn historical_latency_card(measured: bool) -> EngramControlCard {
+    let error = EngramTransportError::transport("historical response unavailable");
+    let mut cause = EngramCausalFailure::error(&error, "turn_evaluate", Some("original-attempt"), &[]);
+    cause.failure_class = EngramCausalFailureClass::LocalState;
+    cause.original_code = Some("dispatch_budget_exhausted".into());
+    cause.continuation_id = Some("original-head".into());
+    cause.turn_generation = Some(17);
+    cause.authority_fingerprint = Some("original-authority".into());
+    cause.continuation_reason = "Historical measured admission; no automatic re-evaluation.".into();
+    EngramControlCard {
+        causal_failure: Some(cause), schema_version: 1, stage: EngramControlStage::Dispatch,
+        assurance: "turn_gated".into(), decision: EngramControlCardDecision::Refuse,
+        dispatch: EngramControlCardDispatch::Withheld,
+        refusal_code: Some("dispatch_budget_exhausted".into()), defer_code: None,
+        grant_id: None, directives: Vec::new(), delivered_range: None,
+        latency_ms: EngramControlLatencyCard {
+            evaluate: measured.then_some(18_248), admission_fence: measured.then_some(12_248),
+            total: 25_315, ..EngramControlLatencyCard::default()
+        },
+        fail_mode: EngramControlFailMode::Enforced, repair_armed: false,
+        next_intent: None, source_root: None,
+    }
+}
+
+fn store_historical_card(turn: &OrdinaryRoot, card: EngramControlCard) -> String {
+    let mut inner = turn.state.inner.lock().unwrap();
+    let id = inner.next_message_id();
+    inner.session_mut(&turn.session).unwrap().session.messages.push(Message::EngramControl {
+        id: id.clone(), timestamp: stamp_now(), author: Author::Assistant, card,
+    });
+    turn.state.commit_locked(&mut inner).unwrap();
+    // The fixture's real SQLite store supplies this image, not DeliveryWriter.
+    persist_locked_state_to_sqlite(&turn.state.persistence_path, &inner).unwrap();
+    id
+}
+
+fn stored_historical_card(turn: &OrdinaryRoot, id: &str) -> EngramControlCard {
+    let count = turn.record(|record| record.session.messages.len());
+    load_persisted_message_range(&turn.state.persistence_path, &turn.session, 0, count).unwrap()
+        .into_iter().find_map(|(_, message)| match message {
+            Message::EngramControl { id: actual, card, .. } if actual == id => Some(card),
             _ => None,
-        })
-        .unwrap();
-    card.refusal_code = Some("dispatch_budget_exhausted".to_owned());
-    // The fence is already inside evaluate, not an additional 12,248 ms.
-    card.latency_ms.evaluate = Some(18_248);
-    card.latency_ms.admission_fence = Some(12_248);
-    card.latency_ms.total = 25_315;
-    let cause = card.causal_failure.as_mut().unwrap();
-    cause.continuation_id = Some(prompt_id);
-    cause.turn_generation = Some(active_turn_generation);
-    cause.authority_fingerprint = Some(authority.clone());
-    (record, authority, clock)
+        }).expect("the original latency card read from SQLite")
 }
 
 #[test]
-fn admission_latency_hold_exhaustion_does_not_schedule_the_same_attempt() {
-    let (mut record, authority, clock) = measured_exhausted_head();
-    let head = record
-        .queued_prompts
-        .front()
-        .unwrap()
-        .pending_prompt
-        .id
-        .clone();
-    let decision = decide_engram_admission_retry_locked(
-        &mut record,
-        Some("dispatch_budget_exhausted"),
-        Some(&authority),
-        clock.wall_now(),
-        clock.now(),
-    );
-    let EngramAdmissionRetryDecision::LatencyHold(explanation) = decision else {
-        panic!("a measured over-budget admission needs an explicit latency hold");
-    };
-    assert_eq!(explanation, record.session.preview);
-    assert!(record.engram.admission_retry.is_none());
-    assert_eq!(
-        record.queued_prompts.front().unwrap().pending_prompt.id,
-        head
-    );
-    assert!(record.queued_prompts.front().unwrap().engram_waiting);
+fn historical_latency_spans_and_missing_measurements_round_trip_without_double_counting() {
+    for measured in [false, true] {
+        let turn = OrdinaryRoot::new("historical-latency-sqlite");
+        let original = historical_latency_card(measured);
+        let id = store_historical_card(&turn, original.clone());
+        let loaded = stored_historical_card(&turn, &id);
+        assert_eq!(loaded, original);
+        assert_eq!(loaded.latency_ms.total, 25_315);
+        assert_eq!(loaded.latency_ms.evaluate, measured.then_some(18_248));
+        assert_eq!(loaded.latency_ms.admission_fence, measured.then_some(12_248));
+        let value = serde_json::to_value(&loaded).unwrap();
+        assert_eq!(value["latencyMs"]["total"], 25_315);
+        assert_eq!(value["latencyMs"].get("evaluate").is_some(), measured);
+        assert_eq!(value["latencyMs"].get("admissionFence").is_some(), measured);
+        assert_eq!(value["causalFailure"]["controlProcess"],
+            json!({"identity":"unavailable", "exitState":"unavailable"}));
+        // No removed latency-hold formatter is recreated, and no new elapsed
+        // cost is attributed to this synthetic saved specimen.
+        let restored = turn.record(|record| PersistedSessionRecord::from_record(record).into_record().unwrap());
+        let card = restored.session.messages.iter().find_map(|message| match message {
+            Message::EngramControl { id: actual, card, .. } if actual == &id => Some(card),
+            _ => None,
+        }).unwrap();
+        assert_eq!(card, &original);
+        turn.assert_no_prompt();
+        turn.assert_no_control();
+    }
 }
 
 #[test]
-fn admission_latency_hold_does_not_label_a_failed_begin_reconstruction_schedule() {
-    let (mut record, authority, clock) = measured_exhausted_head();
-    record.engram.active_grant_id = None;
-    record.engram.uncertain_grant_id = Some("reconstruction-grant".to_owned());
-    assert!(engram_begin_reconstruction_shape(&record).is_some());
-    assert!(schedule_engram_admission_retry_locked(
-        &mut record,
-        Some(ENGRAM_BEGIN_RECONSTRUCT_CODE),
-        Some(&authority),
-        clock.wall_now(),
-        clock.now(),
-    ));
-    record.runtime_stop_in_progress = true;
-    let decision = decide_engram_admission_retry_locked(
-        &mut record,
-        Some("dispatch_budget_exhausted"),
-        Some(&authority),
-        clock.wall_now(),
-        clock.now(),
-    );
-    assert!(matches!(decision, EngramAdmissionRetryDecision::NotScheduled));
-    assert!(record.engram.admission_retry.is_none());
-    assert!(!record.session.preview.contains("admission latency hold"));
-}
-
-#[test]
-fn admission_latency_hold_does_not_reclassify_success_or_other_failures() {
-    let (record, authority, _) = measured_exhausted_head();
-    for case in [
-        "grant",
-        "grantless",
-        "transport",
-        "other_code",
-        "within_budget",
-        "interrupted",
-        "not_waiting",
-    ] {
-        let mut candidate = record.clone();
-        let card = candidate
-            .session
-            .messages
-            .matching_mut(|message| matches!(message, Message::EngramControl { .. }))
-            .rev()
-            .find_map(|(_, message)| match message {
-                Message::EngramControl { card, .. } => Some(card),
-                _ => None,
-            })
-            .unwrap();
-        match case {
-            "grant" => {
-                card.decision = EngramControlCardDecision::Grant;
-                card.latency_ms.total = ENGRAM_DISPATCH_BUDGET_MS;
-            }
+fn historical_latency_or_stale_attribution_never_decides_the_current_fifo() {
+    for variant in ["exhausted", "grant", "grantless", "transport", "other_code", "within_budget",
+        "other_prompt", "other_generation", "other_authority", "unattributed", "checkpoint"] {
+        let turn = OrdinaryRoot::new("historical-latency-ordinary-fifo");
+        let mut card = historical_latency_card(true);
+        match variant {
+            "exhausted" => {},
+            "grant" => card.decision = EngramControlCardDecision::Grant,
             "grantless" => card.dispatch = EngramControlCardDispatch::SentWithoutGrant,
-            "transport" => {
-                card.causal_failure.as_mut().unwrap().failure_class =
-                    EngramCausalFailureClass::Transport
-            }
-            "other_code" => card.refusal_code = Some("control_unavailable".to_owned()),
-            "within_budget" => card.latency_ms.total = ENGRAM_DISPATCH_BUDGET_MS - 1,
-            "interrupted" => {
-                candidate
-                    .queued_prompts
-                    .front_mut()
-                    .unwrap()
-                    .engram_interrupted = true
-            }
-            "not_waiting" => candidate.queued_prompts.front_mut().unwrap().engram_waiting = false,
-            _ => unreachable!(),
-        }
-        assert!(
-            engram_admission_latency_hold(
-                &candidate,
-                Some("dispatch_budget_exhausted"),
-                Some(&authority)
-            )
-            .is_none(),
-            "{case}: elapsed time alone is not permission to hold"
-        );
-    }
-}
-
-#[test]
-fn admission_latency_hold_preserves_the_original_head_and_window() {
-    let (mut record, authority, clock) = measured_exhausted_head();
-    let head_before = serde_json::to_value(record.queued_prompts.front().unwrap()).unwrap();
-    let lineage_before = serde_json::to_value(&record.engram.begin_preparation_lineage).unwrap();
-    let generation_before = record.engram.dispatch_generation;
-    assert!(!schedule_engram_admission_retry_locked(
-        &mut record,
-        Some("dispatch_budget_exhausted"),
-        Some(&authority),
-        clock.wall_now(),
-        clock.now(),
-    ));
-    assert_eq!(
-        serde_json::to_value(record.queued_prompts.front().unwrap()).unwrap(),
-        head_before
-    );
-    assert_eq!(
-        serde_json::to_value(&record.engram.begin_preparation_lineage).unwrap(),
-        lineage_before
-    );
-    assert_eq!(record.engram.dispatch_generation, generation_before);
-}
-
-#[test]
-fn admission_latency_hold_names_the_observed_cost_without_double_counting() {
-    let (mut record, authority, clock) = measured_exhausted_head();
-    schedule_engram_admission_retry_locked(
-        &mut record,
-        Some("dispatch_budget_exhausted"),
-        Some(&authority),
-        clock.wall_now(),
-        clock.now(),
-    );
-    let explanation = &record.session.preview;
-    for number in ["25315", "18248", "12248", "20000"] {
-        assert!(
-            explanation.contains(number),
-            "latency hold must name measured total/evaluate/included fence and budget: {explanation}"
-        );
-    }
-    assert!(
-        !explanation.contains("retrying automatically"),
-        "the operator must not be promised a doomed retry"
-    );
-}
-
-#[test]
-fn admission_latency_hold_renders_missing_measurements_without_units() {
-    let (mut record, authority, clock) = measured_exhausted_head();
-    let card = record
-        .session
-        .messages
-        .matching_mut(|message| matches!(message, Message::EngramControl { .. }))
-        .rev()
-        .find_map(|(_, message)| match message {
-            Message::EngramControl { card, .. } => Some(card),
-            _ => None,
-        })
-        .unwrap();
-    card.latency_ms.evaluate = None;
-    card.latency_ms.admission_fence = None;
-    assert!(!schedule_engram_admission_retry_locked(
-        &mut record,
-        Some("dispatch_budget_exhausted"),
-        Some(&authority),
-        clock.wall_now(),
-        clock.now(),
-    ));
-    assert!(record.session.preview.contains(
-        "admission/evaluate span unavailable (includes admission fence unavailable)"
-    ));
-    assert!(!record.session.preview.contains("unavailable ms"));
-    assert!(record.session.preview.contains("total 25315 ms"));
-    assert!(record.session.preview.contains("budget 20000 ms"));
-}
-
-/// The producer completes Evaluate after the attempt budget, on the same
-/// operation clock used by admission. No measured card is fabricated here.
-struct LateEvaluateProducer {
-    producer: Arc<StatefulEngramControlTransport>,
-    clock: EngramBudgetClock,
-    late_once: AtomicBool,
-    late_bind: bool,
-}
-
-impl EngramControlTransport for LateEvaluateProducer {
-    fn request(
-        &self,
-        connection: &EngramConnectionConfig,
-        request: &EngramControlRequest,
-        timeout: Duration,
-    ) -> std::result::Result<Value, EngramTransportError> {
-        let response = self.producer.request(connection, request, timeout);
-        let late_operation = if self.late_bind {
-            matches!(request, EngramControlRequest::SessionBind { .. })
-        } else {
-            matches!(request, EngramControlRequest::TurnEvaluate { .. })
-        };
-        if late_operation && self.late_once.swap(false, Ordering::SeqCst) {
-            self.clock.advance(Duration::from_secs(21));
-        }
-        response
-    }
-
-    fn shutdown_session(&self, session_id: &str) {
-        self.producer.shutdown_session(session_id);
-    }
-}
-
-fn last_dispatch_card(record: &SessionRecord) -> &EngramControlCard {
-    record
-        .session
-        .messages
-        .iter()
-        .rev()
-        .find_map(|message| match message {
-            Message::EngramControl { card, .. } if card.stage == EngramControlStage::Dispatch => {
-                Some(card)
-            }
-            _ => None,
-        })
-        .expect("actual dispatch card")
-}
-
-#[test]
-fn admission_latency_hold_actual_admission_uses_one_clock_and_survives_ticks() {
-    let (state, session, receiver, _) = root_fixture([]);
-    let clock = state.engram_budget_clock();
-    clock.pin_wall();
-    let producer = Arc::new(LateEvaluateProducer {
-        producer: StatefulEngramControlTransport::new(),
-        clock: clock.clone(),
-        late_once: AtomicBool::new(true),
-        late_bind: false,
-    });
-    state.install_control_test_transport(producer.clone());
-    // The shared control-ordering fixture supplies a much larger deadlock
-    // guard. This test opts back into the production 20 s dispatch bound.
-    state.inner.lock().unwrap().test_engram_dispatch_budget = None;
-    let dispatch = root_dispatch(&state, &session, false);
-    let before = with_record(&state, &session, |record| {
-        (
-            record
-                .queued_prompts
-                .front()
-                .unwrap()
-                .pending_prompt
-                .id
-                .clone(),
-            record.engram.dispatch_generation,
-            serde_json::to_value(&record.engram.begin_preparation_lineage).unwrap(),
-        )
-    });
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    let parked = with_record(&state, &session, Clone::clone);
-    let calls = producer.producer.requests().len();
-    let card = last_dispatch_card(&parked);
-    assert!(
-        !producer.producer.requests().iter().any(|request| matches!(
-            request.request["operation"].as_str(),
-            Some("turn_begin" | "turn_checkpoint")
-        )),
-        "the exhausted pre-Begin path sends neither Begin nor checkpoint"
-    );
-    assert_eq!(card.latency_ms.evaluate, Some(21_000));
-    assert_eq!(
-        card.latency_ms.total, 21_000,
-        "the card measures the same clock as the budget, not real time beside scripted time"
-    );
-    assert_eq!(
-        card.refusal_code.as_deref(),
-        Some("dispatch_budget_exhausted")
-    );
-    assert!(parked.session.preview.contains("admission latency hold"));
-    assert!(parked.engram.admission_retry.is_none());
-    assert!(parked.engram.bind_retry.is_none());
-    assert!(receiver.try_recv().is_err());
-    for offset in [1, 5, 30] {
-        state.engram_abort_retry_tick(clock.wall_now() + chrono::Duration::seconds(offset));
-    }
-    let after = with_record(&state, &session, Clone::clone);
-    assert_eq!(
-        producer.producer.requests().len(),
-        calls,
-        "ordinary recovery ticks never re-evaluate an unchanged latency hold"
-    );
-    assert_eq!(
-        after.queued_prompts.front().unwrap().pending_prompt.id,
-        before.0
-    );
-    assert_eq!(after.engram.dispatch_generation, before.1);
-    assert_eq!(
-        serde_json::to_value(&after.engram.begin_preparation_lineage).unwrap(),
-        before.2
-    );
-    let cause = card.causal_failure.as_ref().unwrap();
-    assert!(
-        cause
-            .continuation_reason
-            .contains("No automatic re-evaluation")
-    );
-    assert!(
-        !cause
-            .continuation_reason
-            .contains("Automatic retry scheduled")
-    );
-}
-
-#[test]
-fn admission_latency_hold_real_clock_park_names_the_exact_current_attempt() {
-    let (state, session, receiver, _) =
-        root_fixture_on_real_clock([bind_reply("real-token"), grant_reply("real-grant")]);
-    state.inner.lock().unwrap().test_engram_dispatch_budget = None;
-    let dispatch = root_dispatch(&state, &session, false);
-    let (prompt, generation, authority) = {
-        let mut inner = state.inner.lock().unwrap();
-        let index = inner.find_session_index(&session).unwrap();
-        let authority =
-            AppState::engram_binding_target_for_session_shape_locked(&inner, &session, true)
-                .unwrap()
-                .map(|target| engram_abort_authority(&target))
-                .unwrap();
-        let record = &mut inner.sessions[index];
-        // Model a dispatch descheduled after Evaluate without sleeping or
-        // creating load. The production Real clock still measures this span.
-        record.engram.pending_dispatch.as_mut().unwrap().started_at =
-            std::time::Instant::now()
-                .checked_sub(Duration::from_secs(21))
-                .expect("the test host monotonic clock has at least 21 seconds of history");
-        (
-            record
-                .queued_prompts
-                .front()
-                .unwrap()
-                .pending_prompt
-                .id
-                .clone(),
-            record.active_turn_generation,
-            authority,
-        )
-    };
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    let record = with_record(&state, &session, Clone::clone);
-    let card = last_dispatch_card(&record);
-    let cause = card.causal_failure.as_ref().unwrap();
-    assert!(card.latency_ms.total >= 21_000);
-    assert_eq!(cause.continuation_id.as_deref(), Some(prompt.as_str()));
-    assert_eq!(cause.turn_generation, Some(generation));
-    assert_eq!(
-        cause.authority_fingerprint.as_deref(),
-        Some(authority.as_str())
-    );
-    assert!(record.session.preview.contains("admission latency hold"));
-    assert!(record.engram.admission_retry.is_none());
-    assert!(receiver.try_recv().is_err());
-}
-
-#[test]
-fn admission_latency_hold_rejects_a_stale_or_unattributed_dispatch_card() {
-    let (record, authority, _) = measured_exhausted_head();
-    for mismatch in [
-        "prompt",
-        "generation",
-        "authority",
-        "unattributed",
-        "checkpoint",
-    ] {
-        let mut candidate = record.clone();
-        let card = candidate
-            .session
-            .messages
-            .matching_mut(|message| matches!(message, Message::EngramControl { .. }))
-            .rev()
-            .find_map(|(_, message)| match message {
-                Message::EngramControl { card, .. } => Some(card),
-                _ => None,
-            })
-            .unwrap();
-        let cause = card.causal_failure.as_mut().unwrap();
-        match mismatch {
-            "prompt" => cause.continuation_id = Some("a-different-head".to_owned()),
-            "generation" => cause.turn_generation = Some(u64::MAX),
-            "authority" => cause.authority_fingerprint = Some("a-different-authority".to_owned()),
+            "transport" => card.causal_failure.as_mut().unwrap().failure_class = EngramCausalFailureClass::Transport,
+            "other_code" => card.refusal_code = Some("control_unavailable".into()),
+            "within_budget" => card.latency_ms.total = 1,
+            "other_prompt" => card.causal_failure.as_mut().unwrap().continuation_id = Some("another-head".into()),
+            "other_generation" => card.causal_failure.as_mut().unwrap().turn_generation = Some(u64::MAX),
+            "other_authority" => card.causal_failure.as_mut().unwrap().authority_fingerprint = Some("another-authority".into()),
             "unattributed" => {
+                let cause = card.causal_failure.as_mut().unwrap();
                 cause.continuation_id = None;
                 cause.turn_generation = None;
                 cause.authority_fingerprint = None;
-            }
+            },
             "checkpoint" => card.stage = EngramControlStage::Checkpoint,
             _ => unreachable!(),
         }
-        assert!(
-            engram_admission_latency_hold(
-                &candidate,
-                Some("dispatch_budget_exhausted"),
-                Some(&authority)
-            )
-            .is_none(),
-            "{mismatch}: a stale card cannot decide the current head's retry policy"
-        );
-    }
-}
-
-#[test]
-fn admission_latency_hold_explicit_resume_retries_the_same_prompt_after_recovery() {
-    let (state, session, receiver, _) = root_fixture([]);
-    let clock = state.engram_budget_clock();
-    clock.pin_wall();
-    let producer = Arc::new(LateEvaluateProducer {
-        producer: StatefulEngramControlTransport::new(),
-        clock: clock.clone(),
-        late_once: AtomicBool::new(true),
-        late_bind: true,
-    });
-    state.install_control_test_transport(producer.clone());
-    state.inner.lock().unwrap().test_engram_dispatch_budget = None;
-    let dispatch = root_dispatch(&state, &session, false);
-    let original = with_record(&state, &session, |record| {
-        record
-            .queued_prompts
-            .front()
-            .unwrap()
-            .pending_prompt
-            .clone()
-    });
-    deliver_turn_dispatch(&state, dispatch).unwrap();
-    with_record(&state, &session, |record| {
-        assert!(record.session.preview.contains("admission latency hold"));
-        assert!(record.engram.admission_retry.is_none());
-        assert_eq!(
-            record.queued_prompts.front().unwrap().pending_prompt.id,
-            original.id
-        );
-    });
-    assert!(receiver.try_recv().is_err());
-    let calls = producer.producer.requests().len();
-    state.engram_abort_retry_tick(clock.wall_now() + chrono::Duration::seconds(10));
-    assert_eq!(producer.producer.requests().len(), calls);
-    // The producer is responsive now. Only explicit operator Resume is
-    // allowed to start another attempt, preserving the original payload.
-    state.resume_session_queue(&session).unwrap();
-    assert!(
-        matches!(receiver.try_recv(), Ok(CodexRuntimeCommand::Prompt { command, .. }) if command.prompt.contains(&original.text))
-    );
-    assert!(
-        receiver.try_recv().is_err(),
-        "one provider handoff after explicit Resume"
-    );
-    with_record(&state, &session, |record| {
-        assert!(record.engram.admission_retry.is_none());
-        assert!(!record.orchestrator_auto_dispatch_blocked);
-    });
-}
-
-#[test]
-fn admission_latency_hold_window_spent_precedes_the_per_attempt_hold() {
-    for at_deadline in [false, true] {
-        let (state, session, receiver, _) = root_fixture([]);
-        let clock = state.engram_budget_clock();
-        clock.pin_wall();
-        let producer = StatefulEngramControlTransport::new();
-        state.install_control_test_transport(producer.clone());
-        state.inner.lock().unwrap().test_engram_dispatch_budget = None;
-        let dispatch = root_dispatch(&state, &session, false);
-        let before = with_record(&state, &session, |record| {
-            record.engram.begin_preparation_lineage.clone().unwrap()
+        let id = store_historical_card(&turn, card.clone());
+        turn.edit(|record| record.set_auto_dispatch_blocked(true));
+        let first = turn.enqueue("first ordinary input", QueuedPromptSource::User);
+        let second = turn.enqueue("second ordinary input", QueuedPromptSource::User);
+        let held = turn.saved();
+        assert!(turn.state.dispatch_next_queued_turn(&turn.session, false).unwrap().is_none());
+        assert_eq!(turn.saved(), held, "{variant}: history cannot lend a pause bypass");
+        turn.assert_no_prompt();
+        turn.state.resume_local_session_queue(&turn.session, None).unwrap();
+        let command = turn.prompt();
+        assert!(command.prompt.contains("first ordinary input"));
+        assert!(!command.prompt.contains("second ordinary input"));
+        let token = turn.record(|record| {
+            assert_eq!(record.queued_prompts.front().unwrap().pending_prompt.id, second);
+            assert!(!record.queued_prompts.iter().any(|row| row.pending_prompt.id == first));
+            record.runtime.runtime_token().unwrap()
         });
-        let deadline = chrono::DateTime::parse_from_rfc3339(&before.deadline)
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        let remaining = (deadline - clock.wall_now()).to_std().unwrap();
-        clock.advance(if at_deadline {
-            remaining
-        } else {
-            remaining - Duration::from_millis(1)
+        turn.assert_no_prompt();
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        assert!(turn.prompt().prompt.contains("second ordinary input"));
+        turn.assert_no_prompt();
+        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        turn.record(|record| {
+            assert_eq!(record.session.status, SessionStatus::Idle);
+            assert!(record.queued_prompts.is_empty());
         });
-        deliver_turn_dispatch(&state, dispatch).unwrap();
-        let parked = with_record(&state, &session, Clone::clone);
-        let after = parked.engram.begin_preparation_lineage.as_ref().unwrap();
-        assert_eq!(after.prompt_id, before.prompt_id);
-        assert_eq!(after.admitted_at, before.admitted_at);
-        assert_eq!(
-            after.deadline, before.deadline,
-            "neither branch grants another window"
-        );
-        assert!(parked.engram.admission_retry.is_none());
-        assert!(parked.engram.bind_retry.is_none());
-        assert!(receiver.try_recv().is_err());
-        assert!(!producer.requests().iter().any(|request| matches!(
-            request.request["operation"].as_str(),
-            Some("turn_begin" | "turn_checkpoint")
-        )));
-        let cause = last_dispatch_card(&parked).causal_failure.as_ref().unwrap();
-        assert!(
-            !cause
-                .continuation_reason
-                .contains("Automatic retry scheduled")
-        );
-        if at_deadline {
-            assert!(
-                after.ended,
-                "overall-window exhaustion wins at its exact deadline"
-            );
-            assert!(
-                parked
-                    .session
-                    .preview
-                    .contains("automatic re-admission exhausted")
-            );
-            assert!(
-                cause
-                    .continuation_reason
-                    .contains("Automatic recovery ended")
-            );
-            assert!(
-                !cause
-                    .continuation_reason
-                    .contains("committed no changes"),
-                "a budget expiration is not a non-application certificate"
-            );
-        } else {
-            assert!(!after.ended);
-            assert!(parked.session.preview.contains("admission latency hold"));
-            assert!(
-                cause
-                    .continuation_reason
-                    .contains("No automatic re-evaluation")
-            );
+        {
+            let inner = turn.state.inner.lock().unwrap();
+            persist_locked_state_to_sqlite(&turn.state.persistence_path, &inner).unwrap();
         }
+        assert_eq!(stored_historical_card(&turn, &id), card,
+            "{variant}: ordinary completion does not rewrite historical diagnostics");
+        turn.assert_no_prompt();
+        turn.assert_no_control();
     }
+}
+
+#[test]
+fn historical_admission_window_bytes_never_schedule_or_renew_a_paused_ordinary_head() {
+    let turn = OrdinaryRoot::new("historical-admission-window");
+    turn.edit(|record| record.set_auto_dispatch_blocked(true));
+    let id = turn.enqueue("exact ordinary input after operator Resume", QueuedPromptSource::User);
+    let history = json!({
+        "engramAdmissionRetry":{"code":"dispatch_budget_exhausted", "promptId":id,
+            "dueAt":"2026-10-01T01:02:03Z", "future":[null,"żółw"]},
+        "engramBeginPreparationLineage":{"promptId":id, "admittedAt":"2026-10-01T01:00:00Z",
+            "deadline":"2026-10-01T01:02:00Z", "ended":true},
+        "engramDispatchGeneration":17
+    });
+    turn.edit(|record| {
+        for (key, value) in history.as_object().unwrap() {
+            record.engram.historical_control.insert(key.clone(), value.clone());
+        }
+    });
+    let head = turn.record(|record| serde_json::to_value(&record.queued_prompts[0]).unwrap());
+    for _ in 0..3 {
+        // Service the actual ordinary queue. There is no admission retry tick,
+        // reconstructed Begin, or old budget whose deadline grants release.
+        assert!(turn.state.dispatch_next_queued_turn(&turn.session, false).unwrap().is_none());
+        turn.record(|record| {
+            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), head);
+            assert_eq!(serde_json::to_value(&record.engram.historical_control).unwrap(), history);
+            assert!(record.orchestrator_auto_dispatch_blocked);
+        });
+        turn.assert_no_prompt();
+    }
+    let loaded = turn.record(|record| PersistedSessionRecord::from_record(record).into_record().unwrap());
+    assert!(loaded.orchestrator_auto_dispatch_blocked,
+        "unproven/operator pause is not released merely because old window bytes exist");
+    assert_eq!(serde_json::to_value(&loaded.engram.historical_control).unwrap(), history);
+    turn.state.resume_local_session_queue(&turn.session, None).unwrap();
+    assert!(turn.prompt().prompt.contains("exact ordinary input after operator Resume"));
+    turn.record(|record| assert_eq!(serde_json::to_value(&record.engram.historical_control).unwrap(), history));
+    turn.assert_no_prompt();
+    turn.assert_no_control();
 }

@@ -1,4 +1,4 @@
-//! Kimi's ACP shell-call output and exit recognition: the host's credit path
+//! Kimi's ACP shell-call output and exit recognition: the host's ordinary observation path
 //! for Kimi sessions. Kimi 2.1.1 sends a shell call's terminal
 //! `tool_call_update` with the command's combined output as a bare-string
 //! `rawOutput` (and again as the first text content block) and never an exit
@@ -14,6 +14,16 @@
 //! (`acp_tool_status.rs`).
 
 use super::*;
+
+fn finish_observed(turn: &EOCheckedTurn, expected: &str) -> Value {
+    let request = turn.finish();
+    let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "{request:#}");
+    assert_eq!(checks[0]["check_kind"], "test");
+    assert_eq!(checks[0]["observed_result"], expected, "{request:#}");
+    assert_ordinary_observation_has_no_native_credit(turn, &request);
+    request
+}
 
 const KIMI_ACP_BASH_PASS: &str = include_str!("fixtures/kimi-acp-bash-pass.json");
 const KIMI_ACP_BASH_FAIL: &str = include_str!("fixtures/kimi-acp-bash-fail.json");
@@ -353,7 +363,7 @@ fn a_kimi_acp_shell_check_ends_with_the_exit_its_completion_states() {
     // The full captured shape: a pending create and argument-streaming
     // updates precede the frame that carries the call's input, so the check
     // starts at the dispatch frame, not at the placeholder.
-    let turn = CheckedTurn::start("kimi-acp-exit", true);
+    let turn = EOCheckedTurn::start("kimi-acp-exit", true);
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
@@ -405,8 +415,7 @@ fn a_kimi_acp_shell_check_ends_with_the_exit_its_completion_states() {
         "the dispatch frame names the test before it runs: no overlap"
     );
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
-    assert_eq!(observations(&checkpoint)[0]["outcome"], "succeeded");
+    finish_observed(&turn, "passed");
 }
 
 #[test]
@@ -429,7 +438,7 @@ fn a_captured_kimi_test_run_is_recorded_as_passed_with_its_result_line() {
     );
 
     // The whole captured call through the host's ACP update path.
-    let turn = CheckedTurn::start("kimi-acp-test-capture", true);
+    let turn = EOCheckedTurn::start("kimi-acp-test-capture", true);
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
@@ -458,11 +467,9 @@ fn a_captured_kimi_test_run_is_recorded_as_passed_with_its_result_line() {
         "one test check, ended by Kimi's `completed` report as exit 0"
     );
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
-    assert_eq!(observations(&checkpoint)[0]["outcome"], "succeeded");
-    let evidence = &checkpoint["verification_evidence"][0];
-    assert_eq!(evidence["check_kind"], "test");
-    let summary = evidence["summary"].as_str().expect("a summary");
+    let check = turn.record(|record| record.engram.active_turn_checks[0].clone());
+    let end = check.end.as_ref().expect("Kimi's terminal update ended the diagnostic");
+    let summary = engram_check_summary(&check.command, end.exit, &end.result_lines);
     assert!(
         summary.starts_with("`cargo test --bin termal live_proof` exited 0\n"),
         "{summary}"
@@ -471,11 +478,12 @@ fn a_captured_kimi_test_run_is_recorded_as_passed_with_its_result_line() {
         summary.contains("test result: ok. 1 passed;"),
         "the result line reaches the check summary: {summary}"
     );
+    finish_observed(&turn, "passed");
 }
 
 #[test]
 fn a_kimi_acp_shell_check_failure_ends_with_the_suffix_exit_code() {
-    let turn = CheckedTurn::start("kimi-acp-exit-fail", true);
+    let turn = EOCheckedTurn::start("kimi-acp-exit-fail", true);
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
@@ -524,8 +532,7 @@ fn a_kimi_acp_shell_check_failure_ends_with_the_suffix_exit_code() {
         [(Some(EngramCommandExit::Code(101)), false)]
     );
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
-    assert_eq!(observations(&checkpoint)[0]["outcome"], "failed");
+    finish_observed(&turn, "failed");
 }
 
 #[test]
@@ -533,7 +540,7 @@ fn a_check_named_late_stays_overlapped_for_other_acp_agents() {
     // The streaming prelude is Kimi's alone: another adapter whose first
     // frame names the call only by its title still marks the check the later
     // frame names (`named_late` in the turn's checks).
-    let turn = CheckedTurn::start("acp-exit-late", true);
+    let turn = EOCheckedTurn::start("acp-exit-late", true);
     let (input_tx, _input_rx) = std::sync::mpsc::channel();
     let mut turn_state = AcpTurnState::default();
     let mut recorder = turn.recorder();
@@ -579,13 +586,9 @@ fn a_check_named_late_stays_overlapped_for_other_acp_agents() {
         )]
     );
     turn.wait_for_snapshots();
-    let checkpoint = turn.finish();
-    // A success the report could only call unknown is withheld, so an earlier
-    // pass at the same revision stays the newest record.
-    assert!(
-        checkpoint["verification_evidence"]
-            .as_array()
-            .is_none_or(Vec::is_empty),
-        "{checkpoint:#}"
-    );
+    // The actual terminal exit can be an uncredited ordinary fact even
+    // though diagnostic overlap prevents any verification claim. The late
+    // description must not fabricate an observed start time.
+    let request = finish_observed(&turn, "passed");
+    assert!(request["occurrence"]["observed_checks"][0].get("started_at").is_none());
 }

@@ -15,9 +15,11 @@ async fn wait_for_fence(lease: &FederationLinkLease) {
 
 #[tokio::test]
 async fn federation_security_owned_stream_eof_records_reason_before_withdrawing_runtime_link() {
-    let (satellite, control) = established().await;
+    let (satellite, mut control) = established().await;
     let lease = satellite.handle.channel.current_lease().unwrap();
-    drop(control);
+    // Supply a graceful EOF while retaining the read half. Dropping the
+    // socket here can instead make the peer observe a connection reset.
+    control.io.shutdown().await.expect("control write half closes");
     let fenced = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
         while lease.with_incarnation(|| Ok(())).is_ok() {
             tokio::task::yield_now().await;
@@ -32,6 +34,7 @@ async fn federation_security_owned_stream_eof_records_reason_before_withdrawing_
             inner.federation_attestation[&satellite.handle.channel.snapshot.peer.host_id].project(),
         )
     };
+    drop(control);
     satellite.finish().await;
     assert!(
         fenced && available == 0,

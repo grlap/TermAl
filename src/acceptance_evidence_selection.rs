@@ -661,6 +661,7 @@ fn read_acceptance_selected_evidence(
                         EngramTransportErrorKind::Remote => {
                             "producer refused the exact record read"
                         }
+                        #[cfg(test)]
                         EngramTransportErrorKind::Backoff => "exact record reader is in backoff",
                     };
                     return Err(merge_acceptance_selected_refusal(
@@ -1094,12 +1095,12 @@ impl AppState {
         store: &EngramAuthorityStoreKey,
     ) -> Result<AcceptanceEvidenceDiscovery, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let target = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+        let target = Self::engram_source_root_target_locked(&inner, session_id)
             .map_err(ApiError::conflict)?;
         let mut discovery = AcceptanceEvidenceDiscovery {
             target: None,
             identity: None,
-            unavailable: "no existing turn-gated host authority",
+            unavailable: "no existing host work-session association",
         };
         let Some(target) = target else {
             return Ok(discovery);
@@ -1109,14 +1110,8 @@ impl AppState {
                 "criterion binding evidence authority belongs to another tracker store",
             ));
         }
-        if target.routing_token.is_none() {
-            discovery.unavailable = "no current host routing token";
-        } else if target.circuit_open || target.rebind_required {
-            discovery.unavailable = "current control authority requires recovery";
-        } else {
-            discovery.target = Some(target);
-            discovery.unavailable = "core receipt has no work/run identity";
-        }
+        discovery.target = Some(target);
+        discovery.unavailable = "core receipt has no work/run identity";
         Ok(discovery)
     }
 
@@ -1136,17 +1131,14 @@ impl AppState {
         }
         if let Some(opening) = &discovery.target {
             let current =
-                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                Self::engram_source_root_target_locked(&inner, session_id)
                     .map_err(ApiError::conflict)?;
             if current.is_none_or(|current| {
                 current.settings.authority_store_key.as_ref() != Some(store)
                     || current.connection != opening.connection
-                    || current.routing_token != opening.routing_token
                     || current.project_reset_owner_generation
                         != opening.project_reset_owner_generation
                     || !Arc::ptr_eq(&current.adapter, &opening.adapter)
-                    || current.circuit_open
-                    || current.rebind_required
             }) {
                 return Err(ApiError::conflict(
                     "canonical criterion evidence authority changed during discovery; request a new evaluation",
@@ -1175,10 +1167,11 @@ impl AppState {
             acceptance_canonical_index_unavailable(task, "work has no active run");
             return Ok(());
         };
-        let token = target
-            .routing_token
-            .as_ref()
-            .expect("discovery captured a routing token");
+        target.adapter.read_work_session(
+            &target.connection,
+            store,
+            acceptance_criterion_evidence_read_timeout(deadline, now)?,
+        ).map_err(acceptance_binding_read_error)?;
         let expected = AcceptanceBindingEvidenceBasis {
             project_id: store.project_id.clone(),
             work_id: identity.work_id.clone(),
@@ -1193,7 +1186,6 @@ impl AppState {
         // A task with more than 128 criteria is refused, never silently partial.
         for _ in 0..MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES {
             let request = EngramControlRequest::AcceptanceBindingRead {
-                routing_token: token.clone(),
                 work_id: expected.work_id.clone(),
                 expected_work_revision: expected.work_revision,
                 run_id: expected.run_id.clone(),

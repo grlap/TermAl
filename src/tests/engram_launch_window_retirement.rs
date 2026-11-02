@@ -1,40 +1,61 @@
-// Diagnostic retirement must preserve a possibly launched full gate's
-// original ambiguity window. Real recorder events and synthetic run records
-// exercise correlation and settlement without launching a shell or provider.
+// Ordinary launch retirement preserves the actual invocation's known root
+// and original start, independently of source-credit eligibility. Real recorder
+// events and synthetic run records exercise ordinary correlation without
+// launching a shell or test process.
 use super::*;
 
 #[path = "engram_delayed_retirement_order.rs"]
 mod delayed_retirement_order;
 
-fn begin_diagnostic(
-    turn: &CheckedTurn,
-    worktree: &FsPath,
-    recorder: &mut SessionRecorder,
-    key: &str,
-) -> EngramLaunchDiagnostic {
+fn begin_unmeasured_launch(
+    turn: &EOCheckedTurn, worktree: &FsPath, recorder: &mut SessionRecorder, key: &str,
+) -> TestRunCommandObservation {
     let cwd = fs::canonicalize(worktree).unwrap().to_string_lossy().into_owned();
+    let (provenance, id) = {
+        let inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&turn.session_id).unwrap();
+        let record = &inner.sessions[index];
+        let provenance = EngramObservationProvenance::Runtime {
+            token: record.runtime.runtime_token().unwrap(),
+            turn_generation: record.active_turn_generation,
+        };
+        let id = TestRunCommandOrigin::capture(&inner, index, &provenance, key).execution_id();
+        (provenance, id)
+    };
+    recorder.set_observation_provenance(provenance);
     recorder.command_started_in(key, DETACHED_GATE, Some(DETACHED_GATE), Some(&cwd)).unwrap();
-    turn.record(|record| {
-        assert!(record.engram.active_turn_checks.is_empty(),
-            "missing authority must create a diagnostic, not an eligible check");
-        let mark = record.engram.pending_launch_diagnostics.iter()
-            .find(|mark| mark.key == key).expect("the recorder retained this start").clone();
-        assert_eq!(mark.root.as_deref().map(engram_exact_path_key),
-            Some(engram_exact_path_key(&fs::canonicalize(worktree).unwrap())));
-        mark
-    })
+    let row = turn.state.inner.lock().unwrap().test_run_observations.get(&id).unwrap().clone();
+    assert_original_window(turn, worktree, &row);
+    row
 }
 
-fn assert_original_window(turn: &CheckedTurn, mark: &EngramLaunchDiagnostic) {
-    let expected = (engram_path_key(mark.root.as_ref().unwrap()), mark.started_at.clone());
+fn launch_start(row: &TestRunCommandObservation) -> &str {
+    row.summary.started_at.as_deref().expect("the original execution start")
+}
+
+fn assert_original_window(turn: &EOCheckedTurn, root: &FsPath, row: &TestRunCommandObservation) {
+    let expected = (engram_path_key(root), launch_start(row).to_owned());
     turn.record(|record| {
         assert!(record.engram.carried_unmatched_launches.contains(&expected),
-            "retirement lost the original known root/start: {:?}",
-            record.engram.carried_unmatched_launches);
+            "the independently observed root/start remains an exclusion");
         assert!(record.engram.active_turn_checks.is_empty());
-        assert!(record.engram.carried_checks.is_empty(),
-            "an ambiguity marker grants no carried verification");
+        assert!(record.engram.carried_checks.is_empty(), "a location fact creates no carried proof");
     });
+    assert_launch_identity(turn, row);
+}
+
+fn assert_launch_identity(turn: &EOCheckedTurn, row: &TestRunCommandObservation) {
+    let inner = turn.state.inner.lock().unwrap();
+    let now = inner.test_run_observations.get(&row.execution_id).unwrap();
+    assert_eq!((&now.execution_id, &now.runtime_identity, &now.tool_identity, now.turn_generation,
+        &now.grant_identity, &now.command_fingerprint, &now.work_binding,
+        &now.source_root, &now.summary.started_at, &now.summary.worktree),
+        (&row.execution_id, &row.runtime_identity, &row.tool_identity, row.turn_generation,
+        &row.grant_identity, &row.command_fingerprint, &row.work_binding,
+        &row.source_root, &row.summary.started_at, &row.summary.worktree));
+    assert!(now.artifact.is_none() && now.evidence.is_empty() && now.final_unbound_proof.is_none());
+    drop(inner);
+    assert_ordinary_turn_has_no_native_requests(turn);
 }
 
 fn publish_running_run(runs: &FsPath, root: &FsPath, started: &str) -> PathBuf {
@@ -60,33 +81,32 @@ fn publish_running_run(runs: &FsPath, root: &FsPath, started: &str) -> PathBuf {
     directory
 }
 
-fn retired_mismatch_cannot_lend_run(missing_grant: bool, late_publication: bool) {
+fn retired_mismatch_cannot_lend_run(missing_trace: bool, late_publication: bool) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn(if missing_grant {
-        "diagnostic-grantless-late-run"
+    let (turn, worktree) = ordinary_carried_turn(if missing_trace {
+        "unmeasured-unowned-late-run"
     } else {
-        "diagnostic-unbound-running-run"
+        "unmeasured-unbound-running-run"
     });
-    let (binding, grant) = turn.record(|record| (
-        record.engram.work_binding.clone(), record.engram.active_grant_id.clone(),
+    let (binding, trace) = turn.record(|record| (
+        record.engram.work_binding.clone(), record.engram.unadmitted_active_turn.clone(),
     ));
     turn.record_mut(|record| {
-        if missing_grant { record.engram.active_grant_id = None; }
+        if missing_trace { record.engram.unadmitted_active_turn = None; }
         else { record.engram.work_binding = None; }
     });
     let mut recorder = turn.recorder();
-    let mark = begin_diagnostic(&turn, &worktree, &mut recorder, "uncredited");
+    let mark = begin_unmeasured_launch(&turn, &worktree, &mut recorder, "uncredited");
     recorder.command_completed_with_exit("uncredited",
         &format!("{DETACHED_GATE} --notify session-other"), "STARTED",
         CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
-    let expected = (engram_path_key(mark.root.as_ref().unwrap()), mark.started_at.clone());
+    let expected = (engram_path_key(&worktree), launch_start(&mark).to_owned());
     let window_retained = turn.record(|record| {
-        assert!(record.engram.pending_launch_diagnostics.is_empty());
         record.engram.carried_unmatched_launches.contains(&expected)
     });
     turn.record_mut(|record| {
         record.engram.work_binding = binding;
-        record.engram.active_grant_id = grant;
+        record.engram.unadmitted_active_turn = trace;
     });
 
     let cwd = fs::canonicalize(&worktree).unwrap();
@@ -98,10 +118,10 @@ fn retired_mismatch_cannot_lend_run(missing_grant: bool, late_publication: bool)
     turn.record_mut(|record| {
         let check = record.engram.active_turn_checks.iter_mut()
             .find(|check| check.key == "gate" && check.end.is_none())
-            .expect("restored authority starts the later check");
-        check.started_at = mark.started_at.clone();
+            .expect("the restored original ordinary owner starts the later check");
+        check.started_at = launch_start(&mark).to_owned();
     });
-    let earlier_at = (engram_parse_time(&mark.started_at).unwrap()
+    let earlier_at = (engram_parse_time(launch_start(&mark)).unwrap()
         - chrono::Duration::seconds(1)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let runs = review_runs(&worktree);
     if !late_publication { publish_running_run(&runs, &cwd, &earlier_at); }
@@ -123,10 +143,11 @@ fn retired_mismatch_cannot_lend_run(missing_grant: bool, late_publication: bool)
     });
     let run = write_run(&runs, "test-earlier-uncredited", &cwd,
         &earlier_at, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert!(checkpoint.get("verification_evidence").is_none(),
-        "a later launch borrowed the retired launch's run {run:?} (matched {borrowed:?}): {checkpoint:#}");
-    assert_refused(&turn, &checkpoint, "another background gate launched");
+    assert!(run.exists(), "the artifact really exists, previously matched {borrowed:?}");
+    assert_carried_ambiguity(&turn);
+    let observation = turn.finish();
+    assert_ordinary_observation_has_no_native_credit(&turn, &observation);
+    assert_carried_ambiguity(&turn);
     assert!(window_retained, "the original root/start must be retained at retirement");
 }
 
@@ -136,106 +157,127 @@ fn mismatched_unbound_launch_cannot_lend_its_running_run() {
 }
 
 #[test]
-fn mismatched_grantless_launch_cannot_lend_a_late_published_run() {
+fn mismatched_unowned_launch_cannot_lend_a_late_published_run() {
     retired_mismatch_cannot_lend_run(true, true);
 }
 
-fn pruned_diagnostic_keeps_window(runtime_changed: bool) {
+fn replaced_owner_keeps_window(runtime_changed: bool) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("diagnostic-pruned-window");
+    let (turn, worktree) = ordinary_carried_turn("retained-original-window");
     turn.record_mut(|record| record.engram.work_binding = None);
     let mut recorder = turn.recorder();
-    let mark = begin_diagnostic(&turn, &worktree, &mut recorder, "old");
+    let original = begin_unmeasured_launch(&turn, &worktree, &mut recorder, "old");
+    // These are existing runtime-selector unit inputs, not fabricated grants.
     turn.record_mut(|record| {
         if runtime_changed {
-            let SessionRuntime::Codex(runtime) = &mut record.runtime else {
-                panic!("the fixture owns a Codex runtime");
-            };
+            let SessionRuntime::Codex(runtime) = &mut record.runtime else { panic!("Codex fixture"); };
             runtime.runtime_id.push_str("-replacement");
-        } else {
-            record.active_turn_generation += 1;
-        }
+        } else { record.active_turn_generation += 1; }
     });
-    // This Current observation drives production pruning; it cannot finish
-    // the previous runtime/turn's diagnostic under the reused key.
     recorder.command_completed_with_exit("old", DETACHED_GATE, "STARTED",
         CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
-    turn.record(|record| assert!(record.engram.pending_launch_diagnostics.is_empty()));
-    assert_original_window(&turn, &mark);
+    assert_original_window(&turn, &worktree, &original);
 }
 
 #[test]
-fn runtime_pruning_retains_the_original_launch_window() {
-    pruned_diagnostic_keeps_window(true);
+fn runtime_replacement_retains_the_original_launch_window() {
+    replaced_owner_keeps_window(true);
 }
 
 #[test]
-fn turn_pruning_retains_the_original_launch_window() {
-    pruned_diagnostic_keeps_window(false);
+fn later_turn_retains_the_original_launch_window() {
+    replaced_owner_keeps_window(false);
 }
 
 #[test]
-fn pending_cap_eviction_retains_the_oldest_launch_window() {
+fn bounded_window_eviction_keeps_newest_locations_and_old_execution_identity() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("diagnostic-cap-window");
+    let (turn, worktree) = ordinary_carried_turn("bounded-location-window");
+    let binding = turn.record(|record| record.engram.work_binding.clone());
     turn.record_mut(|record| record.engram.work_binding = None);
+    let now = chrono::Utc::now();
+    let at = |i| (now + chrono::Duration::milliseconds(i))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let clock = LaunchCustodyClock::at(&at(0));
     let mut recorder = turn.recorder();
-    let mark = begin_diagnostic(&turn, &worktree, &mut recorder, "oldest");
-    for index in 0..ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT {
-        begin_diagnostic(&turn, &worktree, &mut recorder, &format!("pending-{index}"));
+    let oldest = begin_unmeasured_launch(&turn, &worktree, &mut recorder, "oldest");
+    let mut retained = Vec::new();
+    for index in 1..=ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT {
+        clock.advance_to(&at(index as i64));
+        let row = begin_unmeasured_launch(&turn, &worktree, &mut recorder, &format!("next-{index}"));
+        retained.push((engram_path_key(&worktree), launch_start(&row).to_owned()));
     }
+    turn.record(|record| assert_eq!(record.engram.carried_unmatched_launches, retained));
+    let inner = turn.state.inner.lock().unwrap();
+    assert_eq!(inner.test_run_observations.get(&oldest.execution_id), Some(&oldest),
+        "bounded location retention never rewrites the old original execution");
+    drop(inner);
+    // The obsolete pending queue kept the evicted entry itself. The current
+    // bounded owner keeps newer same-root starts: they must still exclude
+    // this oldest run, even though its individual window is no longer kept.
+    let cwd = fs::canonicalize(&worktree).unwrap();
+    let run = publish_running_run(&review_runs(&worktree), &cwd, launch_start(&oldest));
+    turn.record_mut(|record| record.engram.work_binding = binding);
+    let later = at((ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT + 1) as i64);
+    clock.advance_to(&later);
+    recorder.command_started_in("after-cap", DETACHED_GATE, Some(DETACHED_GATE),
+        Some(&cwd.to_string_lossy())).unwrap();
+    turn.wait_for_snapshots();
+    recorder.command_completed_with_exit("after-cap", DETACHED_GATE, "STARTED",
+        CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    assert_eq!(engram_find_carried_run(&turn.session_id, &cwd, &later, &[],
+        &std::collections::BTreeSet::new()).0, Some(run));
+    turn.state.poll_engram_carried_runs();
     turn.record(|record| {
-        assert_eq!(record.engram.pending_launch_diagnostics.len(), ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT);
-        assert!(record.engram.pending_launch_diagnostics.iter().all(|mark| mark.key != "oldest"));
+        assert_eq!(record.engram.carried_checks.len(), 1);
+        let carried = &record.engram.carried_checks[0];
+        assert!(carried.fence.is_none(), "no unrelated fence masks the overflow witness");
+        assert!(carried.ambiguous && carried.run_directory.is_none(),
+            "newer same-root windows still prevent borrowing the oldest running artifact");
     });
-    assert_original_window(&turn, &mark);
+    assert_launch_identity(&turn, &oldest);
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
 #[test]
 fn own_abandonment_retains_the_original_launch_window() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("diagnostic-abandoned-window");
+    let (turn, worktree) = ordinary_carried_turn("abandoned-original-window");
     turn.record_mut(|record| record.engram.work_binding = None);
     let mut recorder = turn.recorder();
-    let mark = begin_diagnostic(&turn, &worktree, &mut recorder, "abandoned");
+    let original = begin_unmeasured_launch(&turn, &worktree, &mut recorder, "abandoned");
     recorder.command_abandoned("abandoned").unwrap();
-    turn.record(|record| assert!(record.engram.pending_launch_diagnostics.is_empty()));
-    assert_original_window(&turn, &mark);
+    assert_original_window(&turn, &worktree, &original);
+    let inner = turn.state.inner.lock().unwrap();
+    assert_eq!(inner.test_run_observations.get(&original.execution_id).unwrap().summary.state,
+        TestRunState::Unknown);
 }
 
 #[test]
-fn disabled_abandonment_discards_only_its_own_diagnostic_silently() {
+fn disabled_abandonment_keeps_only_the_original_location_without_a_notice() {
     for project_disabled in [false, true] {
         let _placement = TestTempRootDirectoryScope::repository_local();
-        let (turn, worktree) = named_turn("diagnostic-disabled-abandonment");
+        let (turn, worktree) = ordinary_carried_turn("disabled-abandoned-window");
         turn.record_mut(|record| record.engram.work_binding = None);
         let mut recorder = turn.recorder();
-        begin_diagnostic(&turn, &worktree, &mut recorder, "disabled");
+        let original = begin_unmeasured_launch(&turn, &worktree, &mut recorder, "disabled");
         if project_disabled {
             let mut inner = turn.state.inner.lock().unwrap();
             let index = inner.find_session_index(&turn.session_id).unwrap();
             let project_id = inner.sessions[index].session.project_id.clone().unwrap();
             inner.projects.iter_mut().find(|project| project.id == project_id).unwrap().engram = None;
-        } else {
-            turn.record_mut(|record| record.engram.disabled_reason = Some("fixture disabled".to_owned()));
-        }
+        } else { turn.set_observability(false); }
         recorder.command_abandoned("disabled").unwrap();
-        turn.record(|record| {
-            assert!(record.engram.pending_launch_diagnostics.is_empty());
-            assert!(record.engram.pending_source_root_line.is_none());
-            assert!(record.engram.carried_unmatched_launches.is_empty());
-            assert!(record.engram.active_turn_checks.is_empty());
-            assert!(record.engram.carried_checks.is_empty());
-        });
+        assert_original_window(&turn, &worktree, &original);
+        turn.record(|record| assert!(record.engram.pending_source_root_line.is_none()));
     }
 }
 
 #[test]
-fn a_matched_authorized_launch_still_credits_its_own_run() {
+fn a_matched_ordinary_launch_keeps_its_own_artifact_without_native_verification() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = named_turn("diagnostic-window-clean-control");
-    launch_gate(&turn, &worktree, true);
+    let (turn, worktree) = ordinary_carried_turn("ordinary-window-clean-control");
+    ordinary_launch_gate(&turn, &worktree, true);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    let checkpoint = turn.finish();
-    assert_credited(&turn, &checkpoint, &run, "succeeded");
+    assert_carried_artifact_custody(&turn, &run, true);
 }

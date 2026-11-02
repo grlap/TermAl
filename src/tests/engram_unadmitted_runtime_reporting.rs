@@ -5,6 +5,12 @@
 
 use super::*;
 
+#[path = "engram_adopted_turn_attribution.rs"]
+mod adopted_turn_attribution;
+
+#[path = "engram_all_harness_ordinary_turns.rs"]
+mod all_harness_ordinary_turns;
+
 #[path = "engram_unadmitted_reporting_repairs.rs"]
 mod repairs;
 
@@ -31,7 +37,7 @@ enum ReplyMode {
 /// A producer, rather than a host-side reporting implementation. Its replay
 /// map accounts each immutable idempotency key once. Report requests must be
 /// in the real sessions table before reaching this boundary. Other protocol
-/// calls keep the existing fixture's canonical root and grant behavior.
+/// calls keep the existing fixture's ordinary work and canonical root behavior.
 struct ObservationProducer {
     base: Arc<ScriptedEngramControlTransport>,
     binding: RwLock<Option<EngramControlWorkBinding>>,
@@ -103,6 +109,7 @@ impl EngramControlTransport for ObservationProducer {
         };
         engram_validate_unadmitted_observation(observation, chrono::Utc::now()).unwrap();
         let wire = serde_json::to_value(request).unwrap();
+        assert!(wire.get("routing_token").is_none());
         assert_eq!(
             Some(&observation.binding),
             self.binding.read().unwrap().as_ref()
@@ -115,9 +122,9 @@ impl EngramControlTransport for ObservationProducer {
         assert!(
             matches!(
                 occurrence["kind"].as_str(),
-                Some("unadmitted_turn" | "observed_check")
+                Some("unadmitted_turn" | "observed_check" | "source_sighting")
             ),
-            "this producer boundary is only for runtime-turn observations"
+            "this producer boundary is only for ordinary execution observations"
         );
         let key = observation.idempotency_key.clone();
         let durable = {
@@ -129,7 +136,11 @@ impl EngramControlTransport for ObservationProducer {
                     |row| row.get(0),
                 )
                 .unwrap();
-            raw.contains(&key) && raw.contains(occurrence["host_turn_ref"].as_str().unwrap())
+            raw.contains(&key) && match occurrence["kind"].as_str() {
+                Some("source_sighting") => raw.contains(
+                    occurrence["source_basis"]["source_revision"].as_str().unwrap()),
+                _ => raw.contains(occurrence["host_turn_ref"].as_str().unwrap()),
+            }
         };
         let attempt = {
             let mut requests = self.attempts.lock().unwrap();
@@ -146,10 +157,10 @@ impl EngramControlTransport for ObservationProducer {
                 receipt.clone()
             } else {
                 let id = format!("{:032x}", records.len() + 1000);
-                let checks: Vec<Value> = if occurrence["kind"] == "observed_check" {
-                    vec![occurrence["check"].clone()]
-                } else {
-                    occurrence["observed_checks"].as_array().unwrap().clone()
+                let checks: Vec<Value> = match occurrence["kind"].as_str() {
+                    Some("observed_check") => vec![occurrence["check"].clone()],
+                    Some("source_sighting") => Vec::new(),
+                    _ => occurrence["observed_checks"].as_array().unwrap().clone(),
                 };
                 let receipt = json!({
                     "decision": "recorded", "observation": id,
@@ -160,6 +171,8 @@ impl EngramControlTransport for ObservationProducer {
                     "policy_basis": observation.policy_basis,
                     "accounting": if occurrence["kind"] == "unadmitted_turn" && !occurrence["source_change"].is_null() {
                         json!({"kind": "source_change", "source_change": id})
+                    } else if occurrence["kind"] == "source_sighting" {
+                        json!({"kind": "sighting"})
                     } else {json!({"kind": "no_source_change"})},
                     "observed_checks": checks.iter().map(|check| json!({
                         "host_check_id": check["host_check_id"], "credit": "uncredited"
@@ -167,12 +180,21 @@ impl EngramControlTransport for ObservationProducer {
                     "opened_obligations": [],
                     "recorded_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
                 });
-                EngramSourceObservationReceipt::from_unadmitted_result(
-                    receipt.clone(),
-                    observation,
-                    &connection.session_id,
-                )
-                .unwrap();
+                if occurrence["kind"] == "source_sighting" {
+                    EngramSourceObservationReceipt::from_sighting_result(
+                        receipt.clone(),
+                        observation,
+                        &connection.session_id,
+                    )
+                    .unwrap();
+                } else {
+                    EngramSourceObservationReceipt::from_unadmitted_result(
+                        receipt.clone(),
+                        observation,
+                        &connection.session_id,
+                    )
+                    .unwrap();
+                }
                 if self.mode != ReplyMode::Refuse
                     && self.mode != ReplyMode::Conflict
                     && !(matches!(self.mode, ReplyMode::TransientFirst(_)) && attempt == 1)
@@ -231,11 +253,13 @@ impl Drop for ReleaseResponse {
 }
 
 struct ReportingTurn {
-    turn: CheckedTurn,
+    turn: EOCheckedTurn,
     reader: ClaudeReaderOn,
     producer: Arc<ObservationProducer>,
     sent: mpsc::Receiver<SentObservation>,
     adoption_floor_ms: i64,
+    /// The setup turn's own settled reports, present before the adopted turn.
+    setup_reports: Vec<EngramRuntimeObservationReport>,
     _release: ReleaseResponse,
 }
 
@@ -251,23 +275,67 @@ fn install_reporting_source_capture(state: &AppState) {
 /// Restarts a reporting fixture's host from its persisted state, as a new
 /// process would: a fresh `AppState` booted over the old one's SQLite file and
 /// templates, answering Engram through `transport`. Like the fixture's first
-/// state (`CheckedTurn::start_with`), it runs on a scripted Engram budget
+/// state (`EOCheckedTurn::start`), it runs on a scripted Engram budget
 /// clock, chosen before boot takes its first snapshot. On real time, the real
 /// Git and filesystem work the source capture hook does would spend the
 /// fixture's short RPC cap, and a loaded machine would fail the capture.
+/// The restarted host holds the old host's guarded root, as every one of its
+/// clones then does: it opens its stores inside that root, so the root is
+/// removed only after the last clone of either host is gone.
+/// It is built before listening, the fixture's inline source capture is
+/// installed, and only then does its post-listen recovery run: that recovery
+/// resumes a retained closing job at once, and a capture started before the
+/// hook would measure through the bounded production capture, whose thread
+/// can outlive the host. A test may still replace the hook afterwards; a
+/// capture reads it when it measures.
 fn restart_reporting_state(
     root: &FsPath,
     old: &AppState,
     transport: Arc<dyn EngramControlTransport>,
 ) -> AppState {
-    AppState::new_with_paths_engram_transport_and_clock_for_test(
-        root.to_string_lossy().into_owned(),
-        old.persistence_path.as_ref().clone(),
-        old.orchestrator_templates_path.as_ref().clone(),
-        transport,
-        EngramBudgetClock::scripted(),
-    )
-    .unwrap()
+    let construct = move || {
+        let previous_transport =
+            TEST_ENGRAM_BOOT_TRANSPORT.with(|slot| slot.replace(Some(transport)));
+        let previous_clock = TEST_ENGRAM_BOOT_BUDGET_CLOCK
+            .with(|slot| slot.replace(Some(EngramBudgetClock::scripted())));
+        let state = AppState::new_before_listen_with_paths(
+            root.to_string_lossy().into_owned(),
+            old.persistence_path.as_ref().clone(),
+            old.orchestrator_templates_path.as_ref().clone(),
+        );
+        TEST_ENGRAM_BOOT_BUDGET_CLOCK.with(|slot| slot.replace(previous_clock));
+        TEST_ENGRAM_BOOT_TRANSPORT.with(|slot| slot.replace(previous_transport));
+        state.unwrap()
+    };
+    let state = match old.test_temp_root.clone() {
+        Some(shared) => boot_on_test_temp_root(&shared, construct),
+        None => construct(),
+    };
+    install_reporting_source_capture(&state);
+    state.run_post_listen_boot().unwrap();
+    state
+}
+
+/// Ends a reporting test that restarted its host: signals the shutdown of
+/// the fixture's host and of every host in `hosts` (the restarted hosts and
+/// the test's own clones of them), joins their writers, drops them all, and
+/// waits until the last of them has removed the fixture's root.
+fn retire_reporting_hosts(fixture: ReportingTurn, hosts: Vec<AppState>) {
+    let cleaned = fixture
+        .turn
+        .state
+        .test_temp_root
+        .as_ref()
+        .expect("the reporting fixture owns a guarded root")
+        .observe_cleanup();
+    for host in hosts.iter().chain(std::iter::once(&fixture.turn.state)) {
+        host.trigger_shutdown_signal();
+        host.shutdown_persist_blocking();
+    }
+    drop(hosts);
+    drop(fixture);
+    crate::tests::phase_sync::receive(&cleaned, "the last reporting host removes the fixture root")
+        .expect("the fixture root is removed");
 }
 
 impl ReportingTurn {
@@ -280,40 +348,64 @@ impl ReportingTurn {
         claimed: bool,
         mode: ReplyMode,
         blocked: bool,
-        previous_checkpoint: bool,
+        historical_baseline: bool,
     ) -> Self {
-        Self::start_with_leftover(label, claimed, mode, blocked, previous_checkpoint, None)
+        Self::start_with_history(label, claimed, mode, blocked, historical_baseline, None)
     }
 
-    fn start_with_leftover(
+    fn start_with_history(
         label: &str,
         claimed: bool,
         mode: ReplyMode,
         blocked: bool,
-        previous_checkpoint: bool,
-        leftover_grant: Option<&str>,
+        historical_baseline: bool,
+        historical_grant: Option<&str>,
     ) -> Self {
-        let turn = CheckedTurn::start_with(
-            label,
-            claimed,
-            None,
-            std::iter::once(checkpoint_reply(CHECK_GRANT))
-                .chain(leftover_grant.map(checkpoint_reply))
-                .collect(),
-        );
-        turn.finish();
-        if let Some(grant) = leftover_grant {
-            turn.record_mut(|record| record.engram.active_grant_id = Some(grant.to_owned()));
+        let turn = EOCheckedTurn::start(label, claimed);
+        if claimed {
+            turn.finish();
+        } else {
+            turn.end();
         }
-        if !previous_checkpoint {
-            turn.record_mut(|record| record.engram.runtime_checkpoint = None);
-            turn.state
-                .inner
-                .lock()
-                .unwrap()
-                .engram_source_sightings
-                .clear();
+        // The setup turn is an ordinary observed turn: it closes into its own
+        // report, measured sighting included. Let that reporting settle before
+        // the producer under test is installed, and keep its report, so each
+        // test compares the adopted turn's state beyond it.
+        let settled = crate::tests::phase_sync::PollGuard::new();
+        let setup_reports = loop {
+            let done = turn.record(|record| {
+                (!record.engram.unadmitted_worker_running
+                    && record.engram.unadmitted_closing_jobs.is_empty()
+                    && record.engram.unadmitted_reports.iter()
+                        .all(EngramRuntimeObservationReport::is_settled))
+                    .then(|| record.engram.unadmitted_reports.clone())
+            });
+            if let Some(reports) = done {
+                break reports;
+            }
+            settled.wait("setup turn reporting settles");
+        };
+        if let Some(grant) = historical_grant {
+            turn.record_mut(|record| {
+                record.engram.historical_control.insert("engramOpenGrantId".into(), json!(grant));
+            });
         }
+        // A previously stored endpoint is historical measurement data. The
+        // fixture measures it directly and never obtains or acknowledges a
+        // turn grant to manufacture a baseline.
+        let prior = historical_baseline.then(|| {
+            let basis = engram_place_source_basis(&EngramBasisPlace::Workdir(
+                turn.record(|record| record.session.workdir.clone()),
+            )).unwrap();
+            turn.record(|record| record.engram.work_binding.clone()).map(|binding| {
+                EngramRuntimeCheckpointBasis { binding, endpoint: EngramMeasuredBaseline {
+                    workspace_id: basis.workspace_id,
+                    source_revision: basis.source_revision,
+                    observed_at: unadmitted_observation_timestamp(),
+                } }
+            })
+        }).flatten();
+        turn.record_mut(|record| record.engram.runtime_checkpoint = prior);
         let (sent, received) = mpsc::channel();
         let producer = Arc::new(ObservationProducer {
             base: turn.transport.clone(),
@@ -344,6 +436,7 @@ impl ReportingTurn {
             producer: producer.clone(),
             sent: received,
             adoption_floor_ms,
+            setup_reports,
             _release: ReleaseResponse(producer),
         }
     }
@@ -396,19 +489,16 @@ impl ReportingTurn {
 
     fn assert_no_granted_reporting(&self) {
         let requests = self.turn.transport.requests();
-        for operation in ["turn_evaluate", "turn_begin", "turn_checkpoint"] {
+        for operation in ["session_bind", "session_status", "turn_grant_read", "turn_evaluate", "turn_begin", "turn_checkpoint", "verification_record", "verification_bind"] {
             assert_eq!(
                 requests
                     .iter()
                     .filter(|request| request.request["operation"] == operation)
                     .count(),
-                1,
-                "only the original mediated turn may use {operation}"
+                0,
+                "ordinary and adopted turns must not use {operation}"
             );
         }
-        self.turn.record(|record| {
-            assert!(record.engram.active_turn_checks.is_empty());
-        });
     }
 }
 
@@ -421,7 +511,7 @@ fn adopted_edit_reaches_accounted_observation_with_exact_end_binding_and_basis()
     let mut fixture = ReportingTurn::new("unadmitted-edit", true, ReplyMode::Recorded, false);
     let before = fixture
         .turn
-        .record(|record| record.engram.continuity_anchor.clone().unwrap());
+        .record(|record| record.engram.runtime_checkpoint.as_ref().unwrap().endpoint.clone());
     fixture
         .turn
         .change_readme("changed by the runtime-started turn\n");
@@ -462,7 +552,7 @@ fn adopted_edit_reaches_accounted_observation_with_exact_end_binding_and_basis()
     );
     assert_eq!(
         change["baseline"]["observed_at"],
-        before.observed_at.unwrap(),
+        before.observed_at,
         "do not invent a fresh timestamp for the earlier checkpoint measurement"
     );
     let interval = &observed.request["observed_interval"];
@@ -506,7 +596,7 @@ fn equal_source_reports_null_change_without_manufacturing_an_edit() {
 }
 
 #[test]
-fn absent_previous_checkpoint_is_reported_as_missing_baseline() {
+fn absent_stored_endpoint_is_reported_as_missing_baseline() {
     let mut fixture = ReportingTurn::start(
         "unadmitted-no-baseline",
         true,
@@ -660,9 +750,16 @@ fn restart_before_reply_replays_the_same_report_from_real_session_storage() {
     assert_eq!(first.request, replay.request);
     assert_eq!(first.receipt, replay.receipt);
     assert!(replay.durable_before_send);
-    assert_eq!(producer.records.lock().unwrap().len(), 1);
+    // The report's measured sighting follows its replayed turn request; the
+    // replay recorded nothing new under the turn's key.
+    let sighting = fixture.observation();
+    assert_eq!(occurrence(&sighting)["kind"], "source_sighting");
+    let keys: Vec<String> = producer.records.lock().unwrap().keys().cloned().collect();
+    assert_eq!(keys.len(), 2, "{keys:?}");
+    assert!(keys.contains(&first.request["idempotency_key"].as_str().unwrap().to_owned()), "{keys:?}");
+    assert!(keys.contains(&sighting.request["idempotency_key"].as_str().unwrap().to_owned()), "{keys:?}");
     boot.join().unwrap().unwrap();
-    restarted.shutdown_persist_blocking();
+    retire_reporting_hosts(fixture, vec![restarted, state]);
 }
 
 #[tokio::test]
@@ -695,7 +792,12 @@ async fn definitive_refusal_names_its_code_without_holding_or_retrying_the_turn(
     .expect("a definitive refusal must become a visible diagnostic");
     assert!(reason.contains("execution_observation_policy_basis_mismatch"));
     idle_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
-    assert_eq!(fixture.producer.requests().len(), 1);
+    // The refused turn report is sent once and never retried. The turn's
+    // measured sighting is its own envelope and is sent once after it.
+    let kinds: Vec<Value> = fixture.producer.requests().iter()
+        .map(|request| request["occurrence"]["kind"].clone())
+        .collect();
+    assert_eq!(kinds, [json!("unadmitted_turn"), json!("source_sighting")]);
     assert_eq!(
         fixture.turn.record(|record| record.session.status),
         SessionStatus::Idle
@@ -741,15 +843,42 @@ async fn an_identity_collision_is_terminal_disclosed_and_not_sent_again() {
     assert!(reason.contains("not recorded"), "{reason}");
     assert!(reason.contains("earlier operation is not known"), "{reason}");
     idle_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
-    assert_eq!(fixture.producer.requests().len(), 1, "never sent again");
-    let report = fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone());
+    // The turn report's collision is terminal for that envelope only: it is
+    // never sent again, and the turn's measured sighting, its own envelope
+    // under its own key, is still sent once after it.
+    let requests = fixture.producer.requests();
+    let kinds: Vec<Value> = requests.iter()
+        .map(|request| request["occurrence"]["kind"].clone())
+        .collect();
+    assert_eq!(kinds, [json!("unadmitted_turn"), json!("source_sighting")], "never sent again");
+    let turn_ref = requests[0]["occurrence"]["host_turn_ref"].as_str().unwrap();
+    assert_eq!(requests[1]["idempotency_key"], format!("termal-source-sighting:{turn_ref}"));
+    // The setup turn's own settled reports come first; the adopted turn's
+    // report follows them.
+    let setup = fixture.setup_reports.len();
+    let report = fixture.turn.record(|record| record.engram.unadmitted_reports[setup].clone());
+    assert_eq!(report.envelopes.len(), 2, "{:?}", report.envelopes);
     assert!(
-        report.envelopes.iter().any(|envelope| matches!(
-            &envelope.delivery,
+        matches!(
+            &report.envelopes[0].delivery,
             EngramRuntimeObservationDelivery::Refused { code, message }
-                if code == "control_operation_idempotency_conflict" && message.starts_with("key ")
-        )),
-        "the envelope settles as a refused collision naming its key: {:?}",
+                if code == "control_operation_idempotency_conflict"
+                    && message.starts_with(&format!("key termal-unadmitted:{turn_ref}"))
+        ),
+        "the turn envelope settles as a refused collision naming its key: {:?}",
+        report.envelopes
+    );
+    // This producer answers every request with a collision, so the sighting
+    // settles the same way, under its own key.
+    assert_eq!(report.envelopes[1].request["occurrence"]["kind"], "source_sighting");
+    assert!(
+        matches!(
+            &report.envelopes[1].delivery,
+            EngramRuntimeObservationDelivery::Refused { code, message }
+                if code == "control_operation_idempotency_conflict"
+                    && message.starts_with(&format!("key termal-source-sighting:{turn_ref}"))
+        ),
+        "the sighting was sent after the collision and settled itself: {:?}",
         report.envelopes
     );
     assert!(
@@ -780,10 +909,10 @@ async fn an_identity_collision_is_terminal_disclosed_and_not_sent_again() {
         let inner = restarted.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&fixture.turn.session_id).unwrap()];
         let loaded = &record.engram.unadmitted_reports;
-        assert_eq!(loaded.len(), 1, "{loaded:?}");
-        assert!(loaded[0].is_settled(), "{loaded:?}");
+        assert_eq!(loaded.len(), setup + 1, "{loaded:?}");
+        assert!(loaded[setup].is_settled(), "{loaded:?}");
         assert!(
-            loaded[0].envelopes.iter().any(|envelope| matches!(
+            loaded[setup].envelopes.iter().any(|envelope| matches!(
                 &envelope.delivery,
                 EngramRuntimeObservationDelivery::Refused { code, .. }
                     if code == ENGRAM_IDEMPOTENCY_CONFLICT_CODE
@@ -792,17 +921,18 @@ async fn an_identity_collision_is_terminal_disclosed_and_not_sent_again() {
         );
         assert!(!record.engram.unadmitted_worker_running, "nothing is left to deliver");
     }
-    assert_eq!(fixture.producer.requests().len(), 1, "never sent again after a restart");
-    restarted.trigger_shutdown_signal();
-    restarted.shutdown_persist_blocking();
+    assert_eq!(fixture.producer.requests().len(), 2, "never sent again after a restart");
+    retire_reporting_hosts(fixture, vec![restarted, state]);
 }
 
 /// The write that would settle a collision fails while the process lives:
 /// the envelope is settled in memory, so nothing is sent again, and the store
-/// still holds the pending report without the collision. Only a host
+/// still holds the pending report without the collision. The turn's measured
+/// sighting, the report's next envelope, cannot leave either, because no
+/// request leaves before its exact report image is stored. Only a host
 /// restarted from that unsettled store sends the report once more, as the
 /// identical request under the same key, which Engram rejects again
-/// unapplied; that settlement is then stored.
+/// unapplied, and then sends the sighting; that settlement is then stored.
 #[test]
 fn a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_identically_after_restart() {
     let mut fixture = ReportingTurn::new("unadmitted-conflict-unstored", true, ReplyMode::Conflict, true);
@@ -810,7 +940,10 @@ fn a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_i
     let first = fixture.observation();
     assert!(first.durable_before_send);
     // The producer holds its answer: the stored image is the pending report.
-    let pending = fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone());
+    // The setup turn's own settled reports come first; the adopted turn's
+    // report follows them.
+    let setup = fixture.setup_reports.len();
+    let pending = fixture.turn.record(|record| record.engram.unadmitted_reports[setup].clone());
     let path = fixture.turn.state.persistence_path.as_ref().clone();
     let session_id = fixture.turn.session_id.clone();
     assert!(runtime_observation_report_is_durable(&path, &session_id, &pending).unwrap());
@@ -824,24 +957,34 @@ fn a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_i
              BEGIN SELECT RAISE(ABORT, 'fixture collision settlement failure'); END;"
         ))
         .expect("the trigger installs");
-    let (idle, idle_rx) = mpsc::channel();
-    *fixture
-        .turn
-        .state
-        .runtime_observation_lifetime
-        .install_hook
-        .lock()
-        .unwrap() = Some(Arc::new(move |phase| {
-        if phase == "idle" {
-            let _ = idle.send(());
-        }
-    }));
     fixture.producer.release();
-    idle_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
+    // The worker cannot go idle: the sighting stays pending behind an image
+    // the store never accepts. Wait for the collision to settle in memory.
+    let installed = crate::tests::phase_sync::PollGuard::new();
+    let settled = loop {
+        let report = fixture.turn.record(|record| record.engram.unadmitted_reports[setup].clone());
+        if !matches!(report.envelopes[0].delivery, EngramRuntimeObservationDelivery::Pending { .. }) {
+            break report;
+        }
+        installed.wait("the collision settles in memory");
+    };
 
-    // Settled in memory, so the live worker sends nothing again.
-    let settled = fixture.turn.record(|record| record.engram.unadmitted_reports[0].clone());
-    assert!(settled.is_settled(), "{settled:?}");
+    // Settled in memory, so the live worker sends nothing again: not the
+    // report, and not the sighting, whose image is not stored.
+    assert!(
+        matches!(
+            &settled.envelopes[0].delivery,
+            EngramRuntimeObservationDelivery::Refused { code, .. }
+                if code == ENGRAM_IDEMPOTENCY_CONFLICT_CODE
+        ),
+        "{settled:?}"
+    );
+    assert_eq!(settled.envelopes.len(), 2, "{settled:?}");
+    assert_eq!(settled.envelopes[1].request["occurrence"]["kind"], "source_sighting");
+    assert!(
+        matches!(settled.envelopes[1].delivery, EngramRuntimeObservationDelivery::Pending { .. }),
+        "{settled:?}"
+    );
     fixture.turn.state.start_runtime_observation_worker(&session_id);
     assert_eq!(fixture.producer.requests().len(), 1, "never sent again while the process lives");
     // The store is unsettled: the pending report, no collision.
@@ -870,6 +1013,15 @@ fn a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_i
     let replay = fixture.observation();
     assert_eq!(replay.request, first.request, "the identical request under the same key");
     assert!(replay.durable_before_send);
+    // Only now does the turn's measured sighting leave, once, after the
+    // replayed report's collision.
+    let sighting = fixture.observation();
+    assert_eq!(occurrence(&sighting)["kind"], "source_sighting");
+    assert_eq!(
+        sighting.request["idempotency_key"],
+        format!("termal-source-sighting:{}", occurrence(&first)["host_turn_ref"].as_str().unwrap())
+    );
+    assert!(sighting.durable_before_send);
     boot.join().unwrap().unwrap();
     let stored = loop {
         idle_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
@@ -877,7 +1029,7 @@ fn a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_i
             let inner = restarted.inner.lock().unwrap();
             inner.sessions[inner.find_session_index(&session_id).unwrap()]
                 .engram
-                .unadmitted_reports[0]
+                .unadmitted_reports[setup]
                 .clone()
         };
         if report.is_settled() {
@@ -892,12 +1044,24 @@ fn a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_i
         )),
         "{stored:?}"
     );
-    assert_eq!(fixture.producer.requests().len(), 2);
+    assert!(
+        matches!(
+            &stored.envelopes[1].delivery,
+            EngramRuntimeObservationDelivery::Refused { code, .. }
+                if code == ENGRAM_IDEMPOTENCY_CONFLICT_CODE
+        ),
+        "the sighting settles under its own key: {stored:?}"
+    );
+    let kinds: Vec<Value> = fixture.producer.requests().iter()
+        .map(|request| request["occurrence"]["kind"].clone())
+        .collect();
+    assert_eq!(kinds, [json!("unadmitted_turn"), json!("unadmitted_turn"), json!("source_sighting")]);
     // Shutting down drains the restarted host's writer, then the settlement
     // is read back from the store.
     restarted.trigger_shutdown_signal();
     restarted.shutdown_persist_blocking();
     assert!(runtime_observation_report_is_durable(&path, &session_id, &stored).unwrap());
+    retire_reporting_hosts(fixture, vec![restarted, state]);
 }
 
 /// Each answer to one retained envelope settles it by the Engram contract:
@@ -990,27 +1154,43 @@ fn an_undocumented_remote_error_replays_the_same_request_instead_of_refusing_it(
 }
 
 #[test]
-fn no_claimed_binding_sends_nothing_and_the_notice_explains_that() {
+fn no_claimed_binding_settles_quietly_without_report_or_retry_custody() {
     let mut fixture = ReportingTurn::new("unadmitted-unbound", false, ReplyMode::Recorded, false);
     fixture.check("unbound-check", false);
     fixture.finish();
+    let guard = phase_sync::PollGuard::new();
+    loop {
+        let settled = fixture.turn.record(|record| {
+            record.engram.unadmitted_active_turn.is_none()
+                && record.engram.unadmitted_closing_jobs.is_empty()
+                && !record.engram.unadmitted_worker_running
+        });
+        if settled { break; }
+        guard.wait(format_args!("canonical unclaimed observation must settle quietly"));
+    }
     assert!(fixture.producer.requests().is_empty());
     let notices = fixture.turn.record(system_notices);
     assert!(
-        notices
+        !notices
             .iter()
-            .any(|notice| notice.contains("not reported") && notice.contains("Engram")),
+            .any(|notice| notice.contains("not reported to Engram")),
         "{notices:?}"
     );
+    fixture.turn.record(|record| {
+        assert!(!runtime_observation_has_removal_duty(record));
+        assert!(record.engram.unadmitted_reports.is_empty());
+    });
     fixture.assert_no_granted_activity();
 }
 
 #[test]
-fn a_leftover_grant_is_never_used_to_report_the_observed_turn() {
+fn historical_grant_metadata_is_never_used_to_report_the_observed_turn() {
     let mut fixture = ReportingTurn::new("unadmitted-leftover", true, ReplyMode::Recorded, false);
     fixture
         .turn
-        .record_mut(|record| record.engram.active_grant_id = Some("leftover-grant".to_owned()));
+        .record_mut(|record| {
+            record.engram.historical_control.insert("engramOpenGrantId".into(), json!("leftover-grant"));
+        });
     fixture.check("unowned-check", false);
     fixture.finish();
     let observed = fixture.observation();
@@ -1018,9 +1198,8 @@ fn a_leftover_grant_is_never_used_to_report_the_observed_turn() {
     assert_eq!(
         fixture
             .turn
-            .record(|record| record.engram.active_grant_id.clone())
-            .as_deref(),
-        Some("leftover-grant")
+            .record(|record| record.engram.historical_control.get("engramOpenGrantId").cloned()),
+        Some(json!("leftover-grant"))
     );
     fixture.assert_no_granted_activity();
 }
@@ -1085,17 +1264,17 @@ fn end_binding_is_captured_without_borrowing_the_previous_turns_scope() {
 }
 
 #[test]
-fn ordinary_mediated_checks_keep_their_existing_granted_verification_path() {
-    let turn = CheckedTurn::start("unadmitted-mediated-control", true);
+fn host_started_checks_use_the_same_uncredited_ordinary_observation_contract() {
+    let turn = EOCheckedTurn::start("ordinary-check-control", true);
     turn.run(
         "mediated-check",
         SIZE_TEST,
         EngramCommandExit::Code(0),
         || {},
     );
-    let checkpoint = turn.finish();
+    let observed = turn.finish();
     assert_eq!(
-        checkpoint["verification_evidence"]
+        observed["occurrence"]["observed_checks"]
             .as_array()
             .unwrap()
             .len(),
@@ -1105,7 +1284,8 @@ fn ordinary_mediated_checks_keep_their_existing_granted_verification_path() {
         turn.transport
             .requests()
             .iter()
-            .all(|request| request.request["occurrence"]["kind"] != "unadmitted_turn")
+            .all(|request| !matches!(request.request["operation"].as_str(),
+                Some("session_bind" | "session_status" | "turn_grant_read" | "turn_evaluate" | "turn_begin" | "turn_checkpoint" | "verification_record" | "verification_bind")))
     );
 }
 
@@ -1150,7 +1330,6 @@ fn earlier_baseline_envelope_keeps_the_existing_out_of_window_protocol_rejection
         .unwrap()
         .with_timezone(&chrono::Utc);
     let request = engram_unadmitted_turn_request(
-        "fixture-routing",
         basis.clone(),
         "interval-control".to_owned(),
         Some(change.clone()),
@@ -1171,7 +1350,6 @@ fn earlier_baseline_envelope_keeps_the_existing_out_of_window_protocol_rejection
     let mut excluding_the_baseline = basis;
     excluding_the_baseline.observed_interval.from = "2026-10-18T10:01:00Z".to_owned();
     let error = engram_unadmitted_turn_request(
-        "fixture-routing",
         excluding_the_baseline,
         "interval-control".to_owned(),
         Some(change),

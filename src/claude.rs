@@ -339,9 +339,7 @@ fn classify_claude_control_request(
             approval: ClaudePendingApproval {
                 permission_mode_for_session: request.permission_mode_for_session,
                 request_id: request.request_id,
-                tool_name: request.tool_name,
                 tool_input: request.tool_input,
-                cwd: cwd.to_owned(),
             },
         },
         ClaudeApprovalMode::AutoApprove => {
