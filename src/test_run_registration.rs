@@ -134,15 +134,26 @@ fn test_run_diagnostic_id(value: &str) -> String {
 
 const TEST_RUN_REGISTRATION_DURABILITY_BUDGET: Duration = Duration::from_secs(5);
 
-/// The registration's durability deadline. On real time it is measured from
-/// `requested`, the instant before the capture lock, exactly as before the
-/// budget clock was consulted; a scripted fixture clock measures from its own
+/// The shared claim-read and durability deadline. On real time it is measured
+/// from `requested`, before either authority lock; a scripted fixture clock measures from its own
 /// current reading, which only the fixture advances.
 fn test_run_registration_deadline(clock: &EngramBudgetClock, requested: std::time::Instant) -> std::time::Instant {
     if matches!(clock, EngramBudgetClock::Real) {
         requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
     } else {
         clock.now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
+    }
+}
+
+fn test_run_registration_remaining(clock: &EngramBudgetClock, deadline: std::time::Instant,
+    diagnostics: &mut TestRunRegistrationDiagnostics) -> Result<Duration, ApiError> {
+    let remaining = deadline.saturating_duration_since(clock.now());
+    if remaining.is_zero() {
+        diagnostics.category = Some("deadline");
+        Err(ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
+            "test run registration budget expired before publication"))
+    } else {
+        Ok(remaining)
     }
 }
 
@@ -227,11 +238,10 @@ impl TestRunRegistrationDiagnostics {
     #[track_caller]
     fn lock<'a>(&self, state: &'a StateMutex<StateInner>) -> TestRunRegistrationGuard<'a> {
         #[cfg(test)]
-        TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|slot| {
-            if let Some(step) = slot.borrow_mut().take() {
-                step();
-            }
-        });
+        {
+            let step = TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|slot| slot.borrow_mut().take());
+            if let Some(step) = step { step(); }
+        }
         TestRunRegistrationGuard {
             guard: state.lock().expect("state mutex poisoned"),
             timings: Arc::clone(&self.lock_timings),
@@ -272,9 +282,10 @@ impl TestRunRegistrationDiagnostics {
     }
 
     fn report(&self, run_id: &str, error: &mut ApiError) {
+        let registration_pending = error.durability_deadline.as_ref().is_some_and(|deadline|
+            matches!(deadline.operation, Some(DurabilityPendingOperation::TestRunRegistration)));
         if self.method == "POST" && error.status == StatusCode::SERVICE_UNAVAILABLE
-            && let Some(deadline) = error.durability_deadline.as_mut()
-            && matches!(deadline.operation, Some(DurabilityPendingOperation::TestRunRegistration))
+            && (registration_pending || self.category == Some("deadline"))
         {
             let mut block = self.state_lock_block();
             if let Some(trace) = &self.trace
@@ -284,7 +295,11 @@ impl TestRunRegistrationDiagnostics {
                 block.loss_count = block.loss_count.saturating_add(1);
                 block.bound();
             }
-            deadline.state_lock = Some(block);
+            // A pre-insertion refusal remains definite, not pending. Keep its
+            // holder evidence in the existing exact diagnostic trace anyway.
+            if registration_pending && let Some(deadline) = error.durability_deadline.as_mut() {
+                deadline.state_lock = Some(block);
+            }
         }
         let category = self.category.unwrap_or(if error.status.is_client_error() {
             "request_refused"
@@ -550,19 +565,22 @@ impl AppState {
         let worktree_keys = committed_input
             .then(|| test_run_worktree_keys(FsPath::new(&disk.worktree)))
             .flatten();
-        if let Some(trace) = &diagnostics.trace { trace.mark("validated"); }
         let requested = std::time::Instant::now();
-        diagnostics.fence_deadline = Some(requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
+        let clock = self.engram_budget_clock();
+        let deadline = test_run_registration_deadline(&clock, requested);
+        diagnostics.fence_deadline = Some(deadline);
+        diagnostics.fence_clock = clock.clone();
+        let current_named_binding = if committed_input {
+            diagnostics.enter("read_current_claim");
+            Some(self.read_test_run_current_named_binding(session_id, &request.run_id,
+                worktree_keys.as_ref(), &clock, deadline, diagnostics)?)
+        } else {
+            None
+        };
+        if let Some(trace) = &diagnostics.trace { trace.mark("validated"); }
         diagnostics.enter("capture_registration");
-        let (expected, dispatch, clock, deadline) = {
+        let (expected, dispatch) = {
             let mut inner = diagnostics.lock(&self.inner);
-            // The durability budget runs on the state's budget clock, as the
-            // observation fence's does. Real time keeps the start taken
-            // before this lock, so a lock wait still counts against it.
-            let clock = inner.engram_budget_clock_snapshot();
-            let deadline = test_run_registration_deadline(&clock, requested);
-            diagnostics.fence_deadline = Some(deadline);
-            diagnostics.fence_clock = clock.clone();
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::conflict("test run initiating session changed"))?;
@@ -582,12 +600,12 @@ impl AppState {
                 .as_ref()
                 .and_then(|settings| settings.authority_store_key.clone());
             let (work_binding, named_root) = if committed_input {
-                test_run_registration_named_binding(
+                current_named_binding.as_ref().expect("committed input claim read").resolve_locked(
                     &inner,
                     session_id,
                     authority_store.as_ref(),
                     worktree_keys.as_ref(),
-                )
+                )?
             } else {
                 (inner.sessions[index].engram.work_binding.clone(), None)
             };
@@ -671,6 +689,12 @@ impl AppState {
                 }
                 earlier.clone()
             } else {
+                // Only the new off-lock claim-read path can outlive its
+                // caller before insertion. Preserve staged/unbound admission
+                // and its existing queued-persistence pending contract.
+                if matches!(current_named_binding, Some(TestRunCurrentNamedBinding::Fresh { target: Some(_), .. })) {
+                    test_run_registration_remaining(&clock, deadline, diagnostics)?;
+                }
                 inner
                     .test_run_registrations
                     .insert(request.run_id.clone(), registration.clone());
@@ -687,7 +711,7 @@ impl AppState {
                     diagnostics.cause = Some(format!("{error:#}"));
                     ApiError::internal("test run registration persistence failed")
                 })?;
-            (expected, dispatch, clock, deadline)
+            (expected, dispatch)
         };
         diagnostics.writer_progress = Some(match dispatch {
             PersistDispatch::BackgroundQueued => "background Delta queued".to_owned(),

@@ -317,10 +317,6 @@ fn live_root_fixture(
             home.to_str()
                 .expect("temporary home path should be Unicode"),
             "init",
-            "--required-assurance",
-            "turn_gated",
-            "--authorized-by",
-            "termal-live-root-recovery-test",
         ])
         .output()
         .expect("real Engram init should launch");

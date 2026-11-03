@@ -110,6 +110,17 @@ fn register_committed_run_as(
     run_id: &str,
     results: Value,
 ) -> TestRunRegistration {
+    try_register_committed_run_as(state, parent, named_root, run_id, results)
+        .unwrap_or_else(|error| panic!("the run registers: {}", error.message))
+}
+
+fn try_register_committed_run_as(
+    state: &AppState,
+    parent: &str,
+    named_root: &str,
+    run_id: &str,
+    results: Value,
+) -> Result<TestRunRegistration, ApiError> {
     let root = worktree(named_root);
     let common = test_runs_git_common_dir(&root)
         .and_then(|common| fs::canonicalize(common).ok())
@@ -136,8 +147,7 @@ fn register_committed_run_as(
                 run_id: run_id.to_owned(),
                 run_directory: test_run_display_path(&directory),
             },
-        )
-        .unwrap_or_else(|error| panic!("the run registers: {}", error.message));
+        )?;
     let registration = state
         .inner
         .lock()
@@ -162,7 +172,7 @@ fn register_committed_run_as(
         Some((named_root, 1)),
         "the run is pinned to the named root"
     );
-    registration
+    Ok(registration)
 }
 
 /// Writes the run's verification record beside it as the sender leaves it:
@@ -1258,8 +1268,8 @@ fn a_committed_run_is_admitted_only_while_the_current_claim_keeps_the_naming_fen
 
     // (b) The claim lapses and is recovered under the same claim id at F+1,
     // by the same holder or another, and the root is not named again: the
-    // root is not named in the current epoch, so neither the run at F nor a
-    // new run registered against the F naming is a candidate.
+    // root is not named in the current epoch. The run at F is not a candidate,
+    // and registration refuses a new run before it spends a gate on that name.
     let mut same_holder = renewed.clone();
     same_holder.claim_fence = naming_fence + 1;
     let another_holder = EngramControlWorkBinding {
@@ -1275,19 +1285,23 @@ fn a_committed_run_is_admitted_only_while_the_current_claim_keeps_the_naming_fen
     let after_recovery_id = "test-committed-input-after-recovery";
     let mut after_recovery_results = committed_results("passed", input_record(&head, "clean"));
     after_recovery_results["runId"] = json!(after_recovery_id);
-    let after_recovery = register_committed_run_as(
+    transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: vec![EngramHeldClaim {
+            work_id: same_holder.work_id.clone(), short_ref: "w-task".to_owned(),
+            claim_id: same_holder.claim_id.clone(), claim_fence: same_holder.claim_fence,
+            focused: false, control_binding: Some(same_holder.clone()),
+        }], omitted: 0,
+    })]);
+    let error = try_register_committed_run_as(
         &state,
         &parent,
         &named_root,
         after_recovery_id,
         after_recovery_results,
-    );
-    assert_eq!(
-        after_recovery.work_binding.as_ref().map(|binding| binding.claim_fence),
-        Some(naming_fence),
-        "a run registered without a new name is bound to the F naming"
-    );
-    host_observed(&state, &after_recovery, &head, acknowledged("settled"));
+    ).unwrap_err();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("name the source root again"), "{}", error.message);
+    assert!(!state.inner.lock().unwrap().test_run_registrations.contains_key(after_recovery_id));
     for claim in &recovered {
         assert_eq!(
             decide_task(&state, &parent, &task_under(claim.clone()), deadline()),
@@ -1308,7 +1322,13 @@ fn a_committed_run_is_admitted_only_while_the_current_claim_keeps_the_naming_fen
     // (c) The root is named again in the recovered epoch, at F+1, and a run
     // registered against that name is admitted; the runs at F stay as they
     // were registered and are not relabelled.
-    state.inner.lock().unwrap().engram_work_source_roots[0].claim_fence = naming_fence + 1;
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.engram_work_source_roots[0].claim_fence = naming_fence + 1;
+        for history in inner.engram_work_naming_history.iter_mut() {
+            for proof in &mut history.proofs { proof.binding = same_holder.clone(); }
+        }
+    }
     assert_eq!(
         decide_task(&state, &parent, &task_under(recovered[0].clone()), deadline()),
         Ok(AcceptanceCommittedInputDecision::Legacy),
@@ -1318,16 +1338,6 @@ fn a_committed_run_is_admitted_only_while_the_current_claim_keeps_the_naming_fen
     let mut renamed_results = committed_results("passed", input_record(&head, "clean"));
     renamed_results["runId"] = json!(renamed_id);
     register_committed_run_as(&state, &parent, &named_root, renamed_id, renamed_results);
-    // The binding the F+1 name proves; the fixture's naming proof predates it.
-    state
-        .inner
-        .lock()
-        .unwrap()
-        .test_run_registrations
-        .update(renamed_id, |row| {
-            row.work_binding.as_mut().unwrap().claim_fence = naming_fence + 1;
-        })
-        .expect("the registration is there to bind to the new name");
     let renamed = state.inner.lock().unwrap().test_run_registrations[renamed_id].clone();
     host_observed(&state, &renamed, &head, acknowledged("settled"));
     assert_eq!(
@@ -1340,17 +1350,10 @@ fn a_committed_run_is_admitted_only_while_the_current_claim_keeps_the_naming_fen
         )),
         "a run at F+1 under the F+1 name is admitted"
     );
-    for (run_id, fence) in [
-        (COMMITTED_RUN_ID, naming_fence),
-        (after_recovery_id, naming_fence),
-    ] {
-        assert_eq!(
-            state.inner.lock().unwrap().test_run_registrations[run_id]
-                .work_binding
-                .as_ref()
-                .map(|binding| binding.claim_fence),
-            Some(fence),
-            "{run_id} keeps the fence it was registered at"
-        );
-    }
+    assert_eq!(
+        state.inner.lock().unwrap().test_run_registrations[COMMITTED_RUN_ID]
+            .work_binding.as_ref().map(|binding| binding.claim_fence),
+        Some(naming_fence),
+        "the original run keeps the fence it was registered at"
+    );
 }

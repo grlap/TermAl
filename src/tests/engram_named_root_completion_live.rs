@@ -24,6 +24,9 @@ mod source_observation;
 #[path = "engram_build_checks_live.rs"]
 mod build_checks;
 
+#[path = "test_run_registration_revision_live.rs"]
+mod registration_revision;
+
 pub(super) struct CompletionFixture {
     pub(super) live: LiveRootFixture,
     pub(super) root: PathBuf,
@@ -155,8 +158,8 @@ impl CompletionFixture {
         }
     }
 
-    fn registered_check(&self, session: &str, root: &FsPath, command: &str)
-        -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
+    fn prepare_registered_check(&self, session: &str, root: &FsPath, command: &str, observe: bool)
+        -> (TestRunRegistration, EngramVerificationRecordFrozen)
     {
         let argv = engram_shell_words(command).unwrap();
         assert_eq!(argv.first().map(String::as_str), Some("cargo"));
@@ -183,9 +186,11 @@ impl CompletionFixture {
         assert_eq!(registration.work_binding.as_ref(), Some(&self.claim_binding(session)));
         assert_eq!(registration.authority_store.as_ref(), Some(&self.store()));
         assert!(registration.named_root.is_some(), "the actual naming owner pins the registered root");
-        let mut recorder = SessionRecorder::new(self.live.state.clone(), session.to_owned());
-        recorder.command_started_in(&run_id, command, Some(command), Some(&root.to_string_lossy())).unwrap();
-        self.wait_for_check_capture(session);
+        let mut recorder = observe.then(|| SessionRecorder::new(self.live.state.clone(), session.to_owned()));
+        if let Some(recorder) = &mut recorder {
+            recorder.command_started_in(&run_id, command, Some(command), Some(&root.to_string_lossy())).unwrap();
+            self.wait_for_check_capture(session);
+        }
         let stage_started = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let output = Command::new(&argv[0]).args(&argv[1..]).current_dir(root)
             .env("CARGO_TARGET_DIR", root.join("target")).output().expect("actual native Cargo launches");
@@ -210,12 +215,22 @@ impl CompletionFixture {
                 "outcome": "clean", "eligible": true },
         });
         fs::write(directory.join("results.json"), serde_json::to_vec(&results).unwrap()).unwrap();
-        recorder.command_completed_with_exit(&run_id, command, &text,
-            if code == 0 { CommandStatus::Success } else { CommandStatus::Error },
-            EngramCommandExit::Code(i64::from(code))).unwrap();
-        self.wait_for_check_capture(session);
+        if let Some(recorder) = &mut recorder {
+            recorder.command_completed_with_exit(&run_id, command, &text,
+                if code == 0 { CommandStatus::Success } else { CommandStatus::Error },
+                EngramCommandExit::Code(i64::from(code))).unwrap();
+            self.wait_for_check_capture(session);
+        }
         let EngramVerificationRecordPrepared::Ready(frozen) = engram_verification_record_prepare(&registration)
             else { panic!("the real registered artifact must produce a native verification body"); };
+        (registration, frozen)
+    }
+
+    fn registered_check(&self, session: &str, root: &FsPath, command: &str)
+        -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
+    {
+        let (registration, frozen) = self.prepare_registered_check(session, root, command, true);
+        let run_id = registration.run_id.clone();
         let route = self.live.state.engram_verification_record_route(&registration).unwrap();
         let sent = engram_verification_record_send(frozen.clone(), Ok(route.link()));
         let EngramVerificationRecordStep::Received { body, receipt } = &sent

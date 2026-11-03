@@ -1051,6 +1051,8 @@ struct ScriptedEngramControlTransport {
     /// What each held-claims read returns, in order; the last one repeats,
     /// and none scripted fails the read.
     held_claims: Mutex<VecDeque<std::result::Result<EngramHeldClaims, EngramTransportError>>>,
+    held_claim_reads: std::sync::atomic::AtomicUsize,
+    held_claim_hook: Mutex<Option<Box<dyn FnOnce(Duration) + Send>>>,
     /// What each `named_root_sighting_read` returns, in order; with none
     /// scripted, the read answers that no root is bound
     /// (`scripted_no_root_sighting`).
@@ -1093,6 +1095,8 @@ impl ScriptedEngramControlTransport {
             work_bindings: Mutex::new(VecDeque::new()),
             current_work_binding: Mutex::new(None),
             held_claims: Mutex::new(VecDeque::new()),
+            held_claim_reads: std::sync::atomic::AtomicUsize::new(0),
+            held_claim_hook: Mutex::new(None),
             sighting_reads: Mutex::new(VecDeque::new()),
             shutdowns: Mutex::new(Vec::new()),
             observation_policy_errors: Mutex::new(VecDeque::new()),
@@ -1128,6 +1132,14 @@ impl ScriptedEngramControlTransport {
             .expect("scripted Engram held claims mutex poisoned");
         held_claims.clear();
         held_claims.extend(reads);
+    }
+
+    fn held_claim_reads(&self) -> usize {
+        self.held_claim_reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn on_next_held_claim_read(&self, hook: impl FnOnce(Duration) + Send + 'static) {
+        *self.held_claim_hook.lock().expect("scripted held hook mutex poisoned") = Some(Box::new(hook));
     }
 
     fn requests(&self) -> Vec<RecordedEngramControlRequest> {
@@ -1235,8 +1247,11 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
     fn read_held_claims(
         &self,
         _connection: &EngramConnectionConfig,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
+        self.held_claim_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let hook = self.held_claim_hook.lock().expect("scripted held hook mutex poisoned").take();
+        if let Some(hook) = hook { hook(timeout); }
         let mut reads = self
             .held_claims
             .lock()

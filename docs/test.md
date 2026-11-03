@@ -903,6 +903,13 @@ registration, or whose record is not eligible, earns no credit, whatever its
 stages say. Only a root session holding the claim can name its root; a
 delegated session is measured in its workdir and has no named root.
 
+A committed-input registration in a named root reads that exact claim's
+current held association before it publishes the registration. An unavailable
+Engram service or a missing claim refuses the launch before tests start; a
+changed claim fence requires naming the root again. This read shares the
+registration's five-second durability budget. Replay keeps the original
+association and does not read the claim again.
+
 TermAl still carries such a launch past the turn as local custody, and says
 before the next prompt when a launch is not carried or a carried one is
 dropped: a launch joined to another command, a `--detach` launch that failed,

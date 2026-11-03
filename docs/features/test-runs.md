@@ -34,6 +34,15 @@ and `registered: true`. The host acknowledges only after content persistence and
 query visibility. Identical retries retain one record; changed immutable request
 identity is refused. Registration failure never returns a durable ACK.
 
+For a fresh committed-input run in a named root, registration reads the exact
+held claim before insertion. An unavailable or changed association returns 409;
+a failed Engram read returns 502; expiry of the shared five-second read and
+durability budget before insertion returns 503 without inserting a run. These
+are definite refusals and the launcher starts no tests. The shared budget can
+refuse even a healthy store that remains busy near five seconds. A deadline
+after persistence was queued keeps the separate typed pending contract;
+retrying the unchanged request preserves its captured association.
+
 Registration validates only the named run's canonical Git-admin parent and
 request. It does not enumerate historical runs or wait for the global artifact
 rescan. The four-field ACK stays unchanged. An immediate exact-id GET returns

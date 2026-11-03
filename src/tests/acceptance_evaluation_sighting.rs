@@ -49,14 +49,7 @@ fn named_root_parent() -> (AppState, String, EngramAuthorityStoreKey, String) {
         &root.to_string_lossy(),
     )
     .expect("the worktree may be named");
-    let binding = EngramControlWorkBinding {
-        root_execution_id: "root".to_owned(),
-        work_id: SIGHTED_WORK_ID.to_owned(),
-        run_id: "run".to_owned(),
-        work_revision: 1,
-        claim_id: "claim-task".to_owned(),
-        claim_fence: 1,
-    };
+    let binding = named_parent_binding();
     {
         let mut inner = state.inner.lock().unwrap();
         *inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
@@ -106,7 +99,32 @@ fn named_root_parent() -> (AppState, String, EngramAuthorityStoreKey, String) {
         &state,
         "acceptance-evaluation-runtime",
     );
+    let transport = ScriptedEngramControlTransport::new([]);
+    script_named_parent_claim(&transport);
+    state.install_test_engram_transport(transport);
     (state, parent, store, named_root)
+}
+
+/// Registration reads the same live association that the fixture's naming
+/// proof establishes. Replacing the sighting transport preserves this read
+/// independently of the sighting response under test.
+fn script_named_parent_claim(transport: &ScriptedEngramControlTransport) {
+    let binding = named_parent_binding();
+    transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: vec![EngramHeldClaim {
+            work_id: binding.work_id.clone(), short_ref: "w-task".to_owned(),
+            claim_id: binding.claim_id.clone(), claim_fence: binding.claim_fence,
+            focused: false, control_binding: Some(binding),
+        }], omitted: 0,
+    })]);
+}
+
+fn named_parent_binding() -> EngramControlWorkBinding {
+    EngramControlWorkBinding {
+        root_execution_id: "root".to_owned(), work_id: SIGHTED_WORK_ID.to_owned(),
+        run_id: "run".to_owned(), work_revision: 1,
+        claim_id: "claim-task".to_owned(), claim_fence: 1,
+    }
 }
 
 /// The task's active run, as the fixture's canonical core receipt names it.
@@ -157,6 +175,7 @@ fn install_sighting_answer(
     answer: std::result::Result<Value, EngramTransportError>,
 ) -> Arc<ScriptedEngramControlTransport> {
     let transport = ScriptedEngramControlTransport::new([]);
+    script_named_parent_claim(&transport);
     transport.script_sighting_reads([answer]);
     state.install_test_engram_transport(transport.clone());
     transport
