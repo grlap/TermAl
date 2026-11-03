@@ -441,6 +441,27 @@ describe("App control panel - helpers and compact coverage", () => {
     );
   });
 
+  it("bounds the real session-list DOM and searches an initially unmounted session", async () => {
+    const sessions = Array.from({ length: 1000 }, (_, index) => makeSession(`window-session-${String(index).padStart(4, "0")}`));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/state") return jsonResponse({ revision: 1, projects: [], sessions });
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    }));
+    await withFallbackStateHarness(async ({ eventSource }) => {
+      act(() => eventSource.dispatchError());
+      await settleAsyncUi();
+      const list = document.querySelector<HTMLElement>(".session-list")!;
+      expect(list.querySelectorAll(".session-row-shell").length).toBeGreaterThan(0);
+      expect(list.querySelectorAll(".session-row-shell").length).toBeLessThanOrEqual(30);
+      // Endpoint rows stay mounted for native Tab entry; search a non-endpoint.
+      expect(within(list).queryByText("window-session-0998")).not.toBeInTheDocument();
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search sessions" }), { target: { value: "window-session-0998" } });
+      await settleAsyncUi();
+      expect(within(list).getByText("window-session-0998", { selector: ".session-title-line strong" })).toBeInTheDocument();
+      expect(list.querySelectorAll(".session-row-shell")).toHaveLength(1);
+    });
+  });
+
   it.each(["docked", "standalone"] as const)(
     "filters error sessions and preserves their reason in the %s session list",
     async (surfaceKind) => {

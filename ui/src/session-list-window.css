@@ -1,0 +1,21 @@
+.session-list-entries {
+  display: block;
+}
+.session-list-windowed { overflow-anchor: none; }
+.session-window-row { padding-bottom: 0.7rem; }
+.session-orchestrator-group.session-window-group {
+  display: block;
+  padding: 0;
+  border-width: 0;
+  outline: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  outline-offset: -1px;
+}
+.session-window-group[data-status="running"] { outline-color: color-mix(in srgb, var(--signal-blue) 38%, var(--line)); }
+.session-window-group[data-status="paused"] { outline-color: color-mix(in srgb, var(--signal-gold) 46%, var(--line)); }
+.session-window-group[data-status="stopped"] { outline-color: color-mix(in srgb, var(--signal-red) 38%, var(--line)); }
+.session-window-group > .session-orchestrator-group-list { display: block; }
+.session-window-header { padding: 0.78rem 0.78rem 0.7rem; }
+.session-window-header.collapsed { padding-bottom: 0.78rem; }
+.session-window-group-row { padding: 0 0.78rem 0.7rem; }
+.session-window-group-row.last { padding-bottom: 0.78rem; }
+.session-window-footer { height: 0.7rem; }

@@ -1,4 +1,4 @@
-// Work row windowing shared by the tree, table and label views. Extracted
+// Measured row windowing shared by Work views and the session list. Extracted
 // from their row rendering responsibility; owns measurements/scroll anchors,
 // never source pagination, relation building or selection policy.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -8,8 +8,10 @@ export const WORK_WINDOW_ROWS = 60;
 const ESTIMATE = 96;
 // Compare geometry at browser layout precision, without changing user scrolls.
 const layoutPixel = (value: number) => Math.round(value * 64) / 64;
+const NO_RETAINED_KEYS: readonly string[] = [];
 
-export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, selectedKey?: string) {
+// Callers memoize retainedKeys so unrelated renders can reuse the window indices.
+export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, selectedKey?: string, retainedKeys: readonly string[] = NO_RETAINED_KEYS) {
   const content = useRef<HTMLElement | null>(null);
   const heights = useRef(new Map<string, number>());
   const nodes = useRef(new Map<string, HTMLElement>());
@@ -128,6 +130,7 @@ export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, 
   // collapse, regrouping or filter edit over the lifetime of the panel.
   useEffect(() => {
     const current = new Set(keys);
+    if (pendingReveal.current && !current.has(pendingReveal.current)) pendingReveal.current = undefined;
     for (const key of heights.current.keys()) if (!current.has(key)) heights.current.delete(key);
     for (const key of callbacks.current.keys()) if (!current.has(key)) callbacks.current.delete(key);
   }, [keys]);
@@ -136,9 +139,9 @@ export function useWorkWindow(keys: readonly string[], viewport?: WorkViewport, 
     const start = Math.max(0, firstAt(offsets, view.top) - 4);
     const end = Math.min(keys.length, start + WORK_WINDOW_ROWS, firstAt(offsets, view.top + view.height) + 5);
     const visible = new Set(Array.from({ length: Math.max(0, end - start) }, (_, index) => start + index));
-    for (const key of [selectedKey, focused, pendingReveal.current ?? anchor.current?.key]) { const index = key ? keys.indexOf(key) : -1; if (index >= 0) visible.add(index); }
+    for (const key of [selectedKey, focused, pendingReveal.current ?? anchor.current?.key, ...retainedKeys]) { const index = key ? keys.indexOf(key) : -1; if (index >= 0) visible.add(index); }
     return [...visible].sort((a, b) => a - b);
-  }, [enabled, keys, offsets, view, selectedKey, focused]);
+  }, [enabled, keys, offsets, view, selectedKey, focused, retainedKeys]);
   return {
     content: (node: HTMLElement | null) => { content.current = node; }, enabled, indices,
     before: (position: number) => enabled ? offsets[indices[position]] - offsets[position ? indices[position - 1] + 1 : 0] : 0,

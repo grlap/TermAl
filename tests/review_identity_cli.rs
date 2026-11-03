@@ -5,11 +5,34 @@
 mod fixture;
 #[path = "support/review_identity_questly_fixture.rs"]
 mod questly_fixture;
+#[path = "support/review_identity_test_group.rs"]
+mod test_group;
+
+// Every CLI/Git fixture owns the test-only group from before setup through
+// cleanup. Both nested and ordinary captures have exhausted the unchanged
+// 40-second child deadline under suite load. Serializing this binary removes
+// its own fixture contention regardless of libtest's worker count; unrelated
+// processes and external machine load remain outside this guard.
+// Keep the named guard as each test's first local, never inside Fixture::new:
+// the lock is not reentrant and the cursor test owns two fixtures.
 
 use fixture::*;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs;
+
+// Successful capture wall time is diagnostic evidence, never a pass threshold.
+fn measured_capture(fixture: &Fixture) -> Value {
+    let started = std::time::Instant::now();
+    let capture = fixture.capture();
+    let current = std::thread::current();
+    eprintln!(
+        "identity fixture capture: test={} capture_ms={}",
+        current.name().unwrap_or("unnamed"),
+        started.elapsed().as_millis()
+    );
+    capture
+}
 
 fn capture_request() -> Value {
     json!({"operation":"capture","schemaVersion":1})
@@ -17,6 +40,7 @@ fn capture_request() -> Value {
 
 #[test]
 fn review_identity_unborn_capture_and_exact_check_use_the_same_profile() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let capture = f.capture();
     assert_eq!(capture["counts"]["repositories"], 1);
@@ -28,6 +52,7 @@ fn review_identity_unborn_capture_and_exact_check_use_the_same_profile() {
 
 #[test]
 fn review_identity_keeps_staged_bytes_separate_from_raw_unstaged_binary_bytes() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put("binary", b"base");
     f.commit();
@@ -56,6 +81,7 @@ fn review_identity_keeps_staged_bytes_separate_from_raw_unstaged_binary_bytes() 
 
 #[test]
 fn review_identity_tracks_crlf_bytes_even_when_git_normalization_hides_them() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put(".gitattributes", b"* text=auto\n");
     f.put("tracked", b"a\nb\n");
@@ -69,6 +95,7 @@ fn review_identity_tracks_crlf_bytes_even_when_git_normalization_hides_them() {
 
 #[test]
 fn review_identity_reads_assume_unchanged_files_instead_of_stat_clean_candidates() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put("tracked", b"old");
     f.commit();
@@ -89,6 +116,7 @@ fn review_identity_reads_assume_unchanged_files_instead_of_stat_clean_candidates
 
 #[test]
 fn review_identity_reads_skip_worktree_files_and_intent_to_add_content() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put("tracked", b"old");
     f.commit();
@@ -113,6 +141,7 @@ fn review_identity_reads_skip_worktree_files_and_intent_to_add_content() {
 
 #[test]
 fn review_identity_hashes_raw_untracked_bytes_and_ignores_only_declared_ignored_files() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put(".gitignore", b"ignored\n");
     f.commit();
@@ -130,6 +159,7 @@ fn review_identity_hashes_raw_untracked_bytes_and_ignores_only_declared_ignored_
 
 #[test]
 fn review_identity_host_discovery_preserves_negated_and_all_ignored_directory_semantics() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put(".gitignore", b"visible/*\n!visible/keep\nempty/*\n");
     f.commit();
@@ -149,6 +179,7 @@ fn review_identity_host_discovery_preserves_negated_and_all_ignored_directory_se
 
 #[test]
 fn review_identity_host_discovery_keeps_children_of_a_tracked_blob_replaced_by_directory() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put("changed", b"tracked blob");
     f.commit();
@@ -166,6 +197,7 @@ fn review_identity_host_discovery_keeps_children_of_a_tracked_blob_replaced_by_d
 
 #[test]
 fn review_identity_keeps_all_unmerged_index_stages() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let a = git(&f.root, &["hash-object", "-w", "--stdin"], Some(b"base"));
     let b = git(&f.root, &["hash-object", "-w", "--stdin"], Some(b"ours"));
@@ -188,6 +220,7 @@ fn review_identity_keeps_all_unmerged_index_stages() {
 
 #[test]
 fn review_identity_covers_dirty_initialized_and_deeply_nested_submodules() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let (outer, outer_git) = child(&f.root, &f.root.join(".git"), "vendor");
     let (deep, _) = child(&outer, &outer_git, "deep");
@@ -217,6 +250,7 @@ fn review_identity_covers_dirty_initialized_and_deeply_nested_submodules() {
 
 #[test]
 fn review_identity_records_gitlink_oid_separately_from_the_checked_out_child() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let (worktree, _) = child(&f.root, &f.root.join(".git"), "vendor");
     let old = git(&worktree, &["rev-parse", "HEAD"], None);
@@ -243,6 +277,7 @@ fn review_identity_records_gitlink_oid_separately_from_the_checked_out_child() {
 
 #[test]
 fn review_identity_retains_a_removed_gitlinks_dirty_checkout_as_embedded_input() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let (worktree, _) = child(&f.root, &f.root.join(".git"), "vendor");
     f.commit();
@@ -257,6 +292,7 @@ fn review_identity_retains_a_removed_gitlinks_dirty_checkout_as_embedded_input()
 
 #[test]
 fn review_identity_uninitialized_gitlinks_have_an_explicit_node_without_fetching() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let (worktree, gitdir) = child(&f.root, &f.root.join(".git"), "vendor");
     f.commit();
@@ -279,6 +315,7 @@ fn review_identity_uninitialized_gitlinks_have_an_explicit_node_without_fetching
 
 #[test]
 fn review_identity_nonempty_uninitialized_checkout_refuses_instead_of_omitting_bytes() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let (worktree, _) = child(&f.root, &f.root.join(".git"), "vendor");
     fs::remove_file(worktree.join(".git")).unwrap();
@@ -291,20 +328,22 @@ fn review_identity_nonempty_uninitialized_checkout_refuses_instead_of_omitting_b
 
 #[test]
 fn review_identity_recurses_into_nonignored_untracked_embedded_git_directories() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let nested = f.root.join("embedded");
     fs::create_dir(&nested).unwrap();
     git(&nested, &["init", "--object-format=sha1"], None);
     put(&nested, "file", b"one");
     commit(&nested);
-    let before = f.capture();
+    let before = measured_capture(&f);
     assert_eq!(before["counts"]["repositories"], 2);
     put(&nested, "untracked", b"raw inner bytes");
-    assert_ne!(before["fingerprint"], f.capture()["fingerprint"]);
+    assert_ne!(before["fingerprint"], measured_capture(&f)["fingerprint"]);
 }
 
 #[test]
 fn review_identity_refuses_object_alternates_even_when_the_alternate_is_local() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let alternate = f.home.join("other-objects");
     fs::create_dir(&alternate).unwrap();
@@ -317,6 +356,7 @@ fn review_identity_refuses_object_alternates_even_when_the_alternate_is_local() 
 
 #[test]
 fn review_identity_refuses_a_submodule_gitdir_outside_the_owners_modules_tree() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let (worktree, _) = child(&f.root, &f.root.join(".git"), "vendor");
     let foreign = f.home.join("foreign-git");
@@ -331,6 +371,7 @@ fn review_identity_refuses_a_submodule_gitdir_outside_the_owners_modules_tree() 
 
 #[test]
 fn review_identity_refuses_configured_root_filters_without_executing_them() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put("tracked", b"data");
     f.commit();
@@ -351,6 +392,7 @@ fn review_identity_refuses_configured_root_filters_without_executing_them() {
 
 #[test]
 fn review_identity_checks_filters_again_inside_each_nested_repository() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let (worktree, _) = child(&f.root, &f.root.join(".git"), "vendor");
     let marker = f.home.join("nested-filter-ran");
@@ -370,6 +412,7 @@ fn review_identity_checks_filters_again_inside_each_nested_repository() {
 
 #[test]
 fn review_identity_missing_promisor_objects_refuse_without_transport() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     git(
         &f.root,
@@ -393,6 +436,7 @@ fn review_identity_missing_promisor_objects_refuse_without_transport() {
 
 #[test]
 fn review_identity_checks_refuse_another_platform_and_never_downgrade() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let capture = f.capture();
     refused(
@@ -408,6 +452,7 @@ fn review_identity_checks_refuse_another_platform_and_never_downgrade() {
 
 #[test]
 fn review_identity_unknown_schema_and_expected_mismatch_have_named_refusals() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     refused(
         &f.root,
@@ -426,6 +471,7 @@ fn review_identity_unknown_schema_and_expected_mismatch_have_named_refusals() {
 
 #[test]
 fn review_identity_pages_are_complete_and_bound_to_the_checked_fingerprint() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     for i in 0..4 {
         f.put(&format!("untracked-{i}"), &[i]);
@@ -467,6 +513,7 @@ fn review_identity_pages_are_complete_and_bound_to_the_checked_fingerprint() {
 
 #[test]
 fn review_identity_windows_and_unix_mode_coverage_are_explicit() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put("file", b"abc");
     git(&f.root, &["add", "--", "file"], None);
@@ -489,6 +536,7 @@ fn review_identity_windows_and_unix_mode_coverage_are_explicit() {
 
 #[test]
 fn review_identity_bounds_nested_repository_depth_without_silently_stopping() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let mut root = f.root.clone();
     for _ in 0..9 {
@@ -501,6 +549,7 @@ fn review_identity_bounds_nested_repository_depth_without_silently_stopping() {
 
 #[test]
 fn review_identity_composite_uses_independently_framed_root_and_platform_fields() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put("nonempty", b"abc");
     let actual = f.capture();
@@ -529,6 +578,7 @@ fn review_identity_composite_uses_independently_framed_root_and_platform_fields(
 #[cfg(windows)]
 #[test]
 fn review_identity_windows_junctions_refuse_without_traversing_them() {
+    let _fixture_group = test_group::exclusive();
     use std::os::windows::process::CommandExt;
     let f = Fixture::new();
     let outside = f.home.join("outside");
@@ -562,6 +612,7 @@ fn review_identity_windows_junctions_refuse_without_traversing_them() {
 #[cfg(windows)]
 #[test]
 fn review_identity_ignored_junctions_are_pruned_but_tracked_descendants_still_refuse() {
+    let _fixture_group = test_group::exclusive();
     use std::os::windows::process::CommandExt;
     let f = Fixture::new();
     f.put(".gitignore", b"ignored/\n");
@@ -610,6 +661,7 @@ fn review_identity_ignored_junctions_are_pruned_but_tracked_descendants_still_re
 #[cfg(unix)]
 #[test]
 fn review_identity_literal_colon_names_cannot_hide_behind_pathspec_magic() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put(".gitignore", b"foo\n:ignored\n");
     f.commit();
@@ -627,6 +679,7 @@ fn review_identity_literal_colon_names_cannot_hide_behind_pathspec_magic() {
 #[cfg(unix)]
 #[test]
 fn review_identity_hashes_symlink_targets_and_never_follows_outside_targets() {
+    let _fixture_group = test_group::exclusive();
     use std::os::unix::fs::symlink;
     let f = Fixture::new();
     let outside = f.home.join("outside");
@@ -644,6 +697,7 @@ fn review_identity_hashes_symlink_targets_and_never_follows_outside_targets() {
 
 #[test]
 fn review_identity_oversized_raw_payload_is_a_named_refusal() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let file = fs::File::create(f.root.join("oversized")).unwrap();
     file.set_len(128 * 1024 * 1024 + 1).unwrap();
@@ -653,6 +707,7 @@ fn review_identity_oversized_raw_payload_is_a_named_refusal() {
 
 #[test]
 fn review_identity_exclusion_policy_bytes_cannot_hide_themselves() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     f.put(".gitignore", b".gitignore\nignored\n");
     let before = f.capture();
@@ -671,6 +726,7 @@ fn review_identity_exclusion_policy_bytes_cannot_hide_themselves() {
 
 #[test]
 fn review_identity_cursor_for_another_root_is_refused_without_a_partial_inventory() {
+    let _fixture_group = test_group::exclusive();
     let first = Fixture::new();
     first.put("one", b"one");
     let second = Fixture::new();
@@ -690,6 +746,7 @@ fn review_identity_cursor_for_another_root_is_refused_without_a_partial_inventor
 
 #[test]
 fn review_identity_repository_count_is_bounded_even_without_gitlinks() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     for index in 0..64 {
         let nested = f.root.join(format!("nested-{index}"));
@@ -702,6 +759,7 @@ fn review_identity_repository_count_is_bounded_even_without_gitlinks() {
 
 #[test]
 fn review_identity_repeated_physical_repository_is_a_cycle_refusal() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     let (first, gitdir) = child(&f.root, &f.root.join(".git"), "first");
     let oid = git(&first, &["rev-parse", "HEAD"], None);
@@ -728,6 +786,7 @@ fn review_identity_repeated_physical_repository_is_a_cycle_refusal() {
 
 #[test]
 fn review_identity_case_collision_uses_the_platform_coverage_profile() {
+    let _fixture_group = test_group::exclusive();
     let f = Fixture::new();
     git(&f.root, &["config", "core.ignorecase", "false"], None);
     let oid = git(&f.root, &["hash-object", "-w", "--stdin"], Some(b"one"));
@@ -758,8 +817,9 @@ fn review_identity_case_collision_uses_the_platform_coverage_profile() {
 
 #[test]
 fn review_identity_questly_fixture_keeps_all_input_layers_and_nested_bytes() {
+    let _fixture_group = test_group::exclusive();
     let fixture = questly_fixture::QuestlyFixture::new(3);
-    let capture = fixture.repo.capture();
+    let capture = measured_capture(&fixture.repo);
     assert_eq!(capture["counts"]["repositories"], 3);
     assert_eq!(entry(&capture, "lib/main.dart", "index")["size"], 29);
     assert_eq!(entry(&capture, "lib/main.dart", "worktree")["size"], 32);
@@ -788,12 +848,13 @@ fn review_identity_questly_fixture_keeps_all_input_layers_and_nested_bytes() {
     put(&fixture.deep, "tracked", b"a second nested revision\n");
     assert_ne!(
         capture["fingerprint"],
-        fixture.repo.capture()["fingerprint"]
+        measured_capture(&fixture.repo)["fingerprint"]
     );
 }
 
 #[test]
 fn review_identity_questly_capacity_covers_ten_thousand_files_without_relaxing_limits() {
+    let _fixture_group = test_group::exclusive();
     let fixture = questly_fixture::QuestlyFixture::new(10_000);
     let started = std::time::Instant::now();
     let capture = fixture.repo.capture();
@@ -818,6 +879,7 @@ fn review_identity_questly_capacity_covers_ten_thousand_files_without_relaxing_l
 #[test]
 #[ignore = "Required explicit solo capacity measurement; no concurrent gate or warm build"]
 fn review_identity_questly_census_payload_fits_the_unchanged_double_capture_deadline() {
+    let _fixture_group = test_group::exclusive();
     use questly_fixture::QuestlyCensusFixture;
     let fixture = QuestlyCensusFixture::new();
     let project = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
@@ -862,6 +924,7 @@ fn review_identity_questly_census_payload_fits_the_unchanged_double_capture_dead
 
 #[test]
 fn review_identity_sha256_object_format_identifies_index_content_without_rehashing_it() {
+    let _fixture_group = test_group::exclusive();
     let fixture = Fixture::new();
     let root = fixture.home.join("sha256");
     fs::create_dir(&root).unwrap();
@@ -884,6 +947,7 @@ fn review_identity_sha256_object_format_identifies_index_content_without_rehashi
 
 #[test]
 fn review_identity_index_flags_are_independent_of_worktree_content() {
+    let _fixture_group = test_group::exclusive();
     let fixture = Fixture::new();
     fixture.put("tracked", b"abc");
     fixture.commit();

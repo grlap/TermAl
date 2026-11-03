@@ -71,6 +71,11 @@ export const APP_TEST_FILES: readonly string[] = [
 
 export const HEAVY_TEST_FILES: readonly HeavyTestFile[] = [
   {
+    file: "src/SessionListWindow.test.tsx",
+    tags: [],
+    reason: "measured virtualizer lifecycle with 8,327-row and 3,000-row fixtures",
+  },
+  {
     file: "src/panels/VirtualizedConversationMessageList.test.tsx",
     tags: ["cpu-heavy", "wall-clock"],
     reason: "virtualizer; tests at or above 2 s; waitFor in real time",

@@ -1,4 +1,5 @@
 import {
+  useMemo,
   type Dispatch,
   type DragEvent as ReactDragEvent,
   type JSX,
@@ -6,6 +7,7 @@ import {
   type SetStateAction,
 } from "react";
 import { AgentIcon } from "./agent-icon";
+import { SessionListWindow } from "./SessionListWindow";
 import { SessionRowRemoteMarker, describeSessionRemote } from "./session-row-remote-marker";
 import {
   describeProjectScope,
@@ -15,6 +17,7 @@ import { ProjectListSection } from "./ProjectListSection";
 import { ControlPanelConnectionIndicator } from "./workspace-shell-controls";
 import { OrchestratorRuntimeActionButton } from "./OrchestratorRuntimeActionButton";
 import {
+  type ControlSurfaceSessionListEntry,
   buildControlSurfaceSessionListEntries,
   buildControlSurfaceSessionListState,
   createControlPanelSectionLauncherTab,
@@ -76,6 +79,8 @@ import type {
   OrchestratorRuntimeAction,
   StandaloneControlSurfaceViewState,
 } from "./app-shell-internals";
+
+const NO_COLLAPSED_GROUPS: string[] = [];
 
 type AppControlSurfaceProps = {
   paneId: string;
@@ -271,7 +276,7 @@ export function AppControlSurface({
     const surfaceId = fixedSection ? `${paneId}-${fixedSection}` : paneId;
     const controlPanelProjectFilterId = `control-panel-project-scope-${surfaceId}`;
     const controlSurfaceCollapsedOrchestratorIds =
-      collapsedSessionOrchestratorIdsBySurfaceId[surfaceId] ?? [];
+      collapsedSessionOrchestratorIdsBySurfaceId[surfaceId] ?? NO_COLLAPSED_GROUPS;
     const {
       controlSurfacePane,
       controlSurfaceActiveTab,
@@ -358,11 +363,9 @@ export function AppControlSurface({
         : controlSurfaceSearchDefiniteMatchCount === 1
           ? "1 matching session"
           : `${controlSurfaceSearchDefiniteMatchCount} matching sessions`;
-    const controlSurfaceSessionListEntries =
-      buildControlSurfaceSessionListEntries(
-        controlSurfaceFilteredSessions,
-        orchestrators,
-      );
+    const controlSurfaceSessionListEntries = useMemo(() =>
+      buildControlSurfaceSessionListEntries(controlSurfaceFilteredSessions, orchestrators),
+      [controlSurfaceFilteredSessions, orchestrators]);
     const controlSurfaceFilesystemRoot =
       controlSurfaceActiveTab?.kind === "filesystem"
         ? controlSurfaceActiveTab.rootPath
@@ -375,6 +378,144 @@ export function AppControlSurface({
         : fixedSection === "git"
           ? controlSurfaceWorkspaceRoot
           : controlPanelGitWorkdir;
+
+    function renderControlSurfaceGroupHeader(entry: Extract<ControlSurfaceSessionListEntry, { kind: "orchestratorGroup" }>) {
+      const groupName = formatSessionOrchestratorGroupName(
+        entry.orchestrator,
+      );
+
+      const isGroupCollapsed =
+        controlSurfaceCollapsedOrchestratorIds.includes(
+          entry.orchestrator.id,
+        );
+      const groupListId = `${surfaceId}-orchestrator-group-list-${entry.orchestrator.id}`;
+      const pendingOrchestratorAction =
+        pendingOrchestratorActionById[entry.orchestrator.id];
+      const hasPendingOrchestratorAction = Boolean(
+        pendingOrchestratorAction,
+      );
+
+
+      return (
+        <header className="session-orchestrator-group-header">
+          <button
+            className="session-orchestrator-group-toggle"
+            type="button"
+            onClick={() =>
+              toggleControlSurfaceOrchestratorGroup(
+                entry.orchestrator.id,
+              )
+            }
+            aria-expanded={!isGroupCollapsed}
+            aria-controls={
+              !isGroupCollapsed ? groupListId : undefined
+            }
+            aria-label={`${isGroupCollapsed ? "Expand" : "Collapse"} ${groupName} sessions`}
+            title={
+              isGroupCollapsed
+                ? "Expand sessions"
+                : "Collapse sessions"
+            }
+          >
+            <svg
+              className={`session-orchestrator-group-chevron${!isGroupCollapsed ? " expanded" : ""}`}
+              viewBox="0 0 12 12"
+              focusable="false"
+              aria-hidden="true"
+            >
+              <path
+                d="M4 2.75 7.75 6 4 9.25"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.4"
+              />
+            </svg>
+          </button>
+          <div className="session-orchestrator-group-copy">
+            <span className="session-orchestrator-group-label">
+              Orchestration
+            </span>
+            <div className="session-orchestrator-group-title-row">
+              <strong className="session-orchestrator-group-name">
+                {groupName}
+              </strong>
+              <span className="session-orchestrator-group-count">
+                {entry.sessions.length === 1
+                  ? "1 session"
+                  : `${entry.sessions.length} sessions`}
+              </span>
+            </div>
+          </div>
+          <div className="session-orchestrator-group-meta">
+            {entry.orchestrator.status === "running" ? (
+              <div className="session-orchestrator-group-actions">
+                <OrchestratorRuntimeActionButton
+                  action="pause"
+                  orchestratorId={entry.orchestrator.id}
+                  isPending={
+                    pendingOrchestratorAction === "pause"
+                  }
+                  disabled={hasPendingOrchestratorAction}
+                  onClick={() =>
+                    void handleOrchestratorRuntimeAction(
+                      entry.orchestrator.id,
+                      "pause",
+                    )
+                  }
+                />
+                <OrchestratorRuntimeActionButton
+                  action="stop"
+                  orchestratorId={entry.orchestrator.id}
+                  isPending={
+                    pendingOrchestratorAction === "stop"
+                  }
+                  disabled={hasPendingOrchestratorAction}
+                  onClick={() =>
+                    void handleOrchestratorRuntimeAction(
+                      entry.orchestrator.id,
+                      "stop",
+                    )
+                  }
+                />
+              </div>
+            ) : entry.orchestrator.status === "paused" ? (
+              <div className="session-orchestrator-group-actions">
+                <OrchestratorRuntimeActionButton
+                  action="resume"
+                  orchestratorId={entry.orchestrator.id}
+                  isPending={
+                    pendingOrchestratorAction === "resume"
+                  }
+                  disabled={hasPendingOrchestratorAction}
+                  onClick={() =>
+                    void handleOrchestratorRuntimeAction(
+                      entry.orchestrator.id,
+                      "resume",
+                    )
+                  }
+                />
+                <OrchestratorRuntimeActionButton
+                  action="stop"
+                  orchestratorId={entry.orchestrator.id}
+                  isPending={
+                    pendingOrchestratorAction === "stop"
+                  }
+                  disabled={hasPendingOrchestratorAction}
+                  onClick={() =>
+                    void handleOrchestratorRuntimeAction(
+                      entry.orchestrator.id,
+                      "stop",
+                    )
+                  }
+                />
+              </div>
+            ) : null}
+          </div>
+        </header>
+      );
+    }
 
     function renderControlSurfaceSessionRow(session: Session) {
       const isActive = session.id === activeSession?.id;
@@ -1118,167 +1259,11 @@ export function AppControlSurface({
                     </div>
                   ) : null}
                 </div>
-                <div className="session-list">
-                  {controlSurfaceFilteredSessions.length > 0 ? (
-                    controlSurfaceSessionListEntries.map((entry) => {
-                      if (entry.kind === "session") {
-                        return renderControlSurfaceSessionRow(entry.session);
-                      }
+                <SessionListWindow surfaceId={surfaceId} entries={controlSurfaceSessionListEntries}
+                  collapsedIds={controlSurfaceCollapsedOrchestratorIds} selectedSessionId={activeSession?.id}
+                  pendingSessionId={pendingKillSessionId} actionSessionId={killRevealSessionId}
+                  renderSession={renderControlSurfaceSessionRow} renderGroupHeader={renderControlSurfaceGroupHeader}>
 
-                      const groupName = formatSessionOrchestratorGroupName(
-                        entry.orchestrator,
-                      );
-
-                      const isGroupCollapsed =
-                        controlSurfaceCollapsedOrchestratorIds.includes(
-                          entry.orchestrator.id,
-                        );
-                      const groupListId = `${surfaceId}-orchestrator-group-list-${entry.orchestrator.id}`;
-                      const pendingOrchestratorAction =
-                        pendingOrchestratorActionById[entry.orchestrator.id];
-                      const hasPendingOrchestratorAction = Boolean(
-                        pendingOrchestratorAction,
-                      );
-
-                      return (
-                        <section
-                          key={`${surfaceId}-orchestrator-group-${entry.orchestrator.id}`}
-                          className="session-orchestrator-group"
-                          role="group"
-                          aria-label={`Orchestration ${groupName}`}
-                          data-status={entry.orchestrator.status}
-                        >
-                          <header className="session-orchestrator-group-header">
-                            <button
-                              className="session-orchestrator-group-toggle"
-                              type="button"
-                              onClick={() =>
-                                toggleControlSurfaceOrchestratorGroup(
-                                  entry.orchestrator.id,
-                                )
-                              }
-                              aria-expanded={!isGroupCollapsed}
-                              aria-controls={
-                                !isGroupCollapsed ? groupListId : undefined
-                              }
-                              aria-label={`${isGroupCollapsed ? "Expand" : "Collapse"} ${groupName} sessions`}
-                              title={
-                                isGroupCollapsed
-                                  ? "Expand sessions"
-                                  : "Collapse sessions"
-                              }
-                            >
-                              <svg
-                                className={`session-orchestrator-group-chevron${!isGroupCollapsed ? " expanded" : ""}`}
-                                viewBox="0 0 12 12"
-                                focusable="false"
-                                aria-hidden="true"
-                              >
-                                <path
-                                  d="M4 2.75 7.75 6 4 9.25"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth="1.4"
-                                />
-                              </svg>
-                            </button>
-                            <div className="session-orchestrator-group-copy">
-                              <span className="session-orchestrator-group-label">
-                                Orchestration
-                              </span>
-                              <div className="session-orchestrator-group-title-row">
-                                <strong className="session-orchestrator-group-name">
-                                  {groupName}
-                                </strong>
-                                <span className="session-orchestrator-group-count">
-                                  {entry.sessions.length === 1
-                                    ? "1 session"
-                                    : `${entry.sessions.length} sessions`}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="session-orchestrator-group-meta">
-                              {entry.orchestrator.status === "running" ? (
-                                <div className="session-orchestrator-group-actions">
-                                  <OrchestratorRuntimeActionButton
-                                    action="pause"
-                                    orchestratorId={entry.orchestrator.id}
-                                    isPending={
-                                      pendingOrchestratorAction === "pause"
-                                    }
-                                    disabled={hasPendingOrchestratorAction}
-                                    onClick={() =>
-                                      void handleOrchestratorRuntimeAction(
-                                        entry.orchestrator.id,
-                                        "pause",
-                                      )
-                                    }
-                                  />
-                                  <OrchestratorRuntimeActionButton
-                                    action="stop"
-                                    orchestratorId={entry.orchestrator.id}
-                                    isPending={
-                                      pendingOrchestratorAction === "stop"
-                                    }
-                                    disabled={hasPendingOrchestratorAction}
-                                    onClick={() =>
-                                      void handleOrchestratorRuntimeAction(
-                                        entry.orchestrator.id,
-                                        "stop",
-                                      )
-                                    }
-                                  />
-                                </div>
-                              ) : entry.orchestrator.status === "paused" ? (
-                                <div className="session-orchestrator-group-actions">
-                                  <OrchestratorRuntimeActionButton
-                                    action="resume"
-                                    orchestratorId={entry.orchestrator.id}
-                                    isPending={
-                                      pendingOrchestratorAction === "resume"
-                                    }
-                                    disabled={hasPendingOrchestratorAction}
-                                    onClick={() =>
-                                      void handleOrchestratorRuntimeAction(
-                                        entry.orchestrator.id,
-                                        "resume",
-                                      )
-                                    }
-                                  />
-                                  <OrchestratorRuntimeActionButton
-                                    action="stop"
-                                    orchestratorId={entry.orchestrator.id}
-                                    isPending={
-                                      pendingOrchestratorAction === "stop"
-                                    }
-                                    disabled={hasPendingOrchestratorAction}
-                                    onClick={() =>
-                                      void handleOrchestratorRuntimeAction(
-                                        entry.orchestrator.id,
-                                        "stop",
-                                      )
-                                    }
-                                  />
-                                </div>
-                              ) : null}
-                            </div>
-                          </header>
-                          {!isGroupCollapsed ? (
-                            <div
-                              id={groupListId}
-                              className="session-orchestrator-group-list"
-                            >
-                              {entry.sessions.map((session) =>
-                                renderControlSurfaceSessionRow(session),
-                              )}
-                            </div>
-                          ) : null}
-                        </section>
-                      );
-                    })
-                  ) : (
                     <div className="session-filter-empty">
                       {sessions.length === 0
                         ? "No sessions yet."
@@ -1290,8 +1275,8 @@ export function AppControlSurface({
                             ? `No ${controlSurfaceSessionListFilter === "all" ? "" : `${controlSurfaceSessionListFilter} `}sessions in ${controlSurfaceSelectedProject.name}.`
                             : "No sessions match this filter."}
                     </div>
-                  )}
-                </div>
+
+                </SessionListWindow>
               </section>
 
               <section className="sidebar-status" aria-label="Session filters">
