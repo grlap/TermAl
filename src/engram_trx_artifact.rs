@@ -606,6 +606,7 @@ fn engram_trx_verdict(
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EngramDeclaredResult {
     verdict: EngramTrxVerdict,
+    format: EngramDeclaredArtifactFormat,
     artifact: Option<EngramArtifactFacts>,
     outcome: Option<String>,
     counters: Option<EngramTrxCounters>,
@@ -627,6 +628,7 @@ fn engram_declared_result(
 ) -> EngramDeclaredResult {
     let result = |verdict, artifact| EngramDeclaredResult {
         verdict,
+        format: EngramDeclaredArtifactFormat::Trx,
         artifact,
         outcome: None,
         counters: None,
@@ -642,14 +644,15 @@ fn engram_declared_result(
         EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess => {}
         EngramCommandExit::Code(code) => {
             let (artifact, reading) = match inspected {
-                Ok((facts, bytes)) => (Some(facts), Some(engram_read_trx(&bytes))),
+                Ok((facts, bytes)) => (Some(facts), Some(engram_read_declared_artifact(&bytes))),
                 Err(_) => (None, None),
             };
             return EngramDeclaredResult {
                 verdict: EngramTrxVerdict::Fail(format!("the command exited {code}")),
+                format: reading.as_ref().map_or(EngramDeclaredArtifactFormat::Trx, |(format, _)| *format),
                 artifact,
-                outcome: reading.as_ref().and_then(|reading| reading.outcome.clone()),
-                counters: reading.and_then(|reading| reading.counters),
+                outcome: reading.as_ref().and_then(|(_, reading)| reading.outcome.clone()),
+                counters: reading.and_then(|(_, reading)| reading.counters),
             };
         }
         EngramCommandExit::Unknown | EngramCommandExit::NotFinished => {
@@ -663,9 +666,10 @@ fn engram_declared_result(
         Ok(inspected) => inspected,
         Err(reason) => return result(EngramTrxVerdict::Unknown(reason.to_owned()), None),
     };
-    let reading = engram_read_trx(&bytes);
+    let (format, reading) = engram_read_declared_artifact(&bytes);
     EngramDeclaredResult {
         verdict: reading.verdict,
+        format,
         artifact: Some(facts),
         outcome: reading.outcome,
         counters: reading.counters,
@@ -841,7 +845,8 @@ fn engram_declared_summary(
                 .saturating_sub(counters.get("executed"));
             for (count, label) in [
                 (counters.get("inconclusive"), "inconclusive"),
-                (counters.get("notExecuted"), "not executed"),
+                (if result.format == EngramDeclaredArtifactFormat::DartJson { 0 }
+                    else { counters.get("notExecuted") }, "not executed"),
                 (skipped, "skipped"),
             ] {
                 if count > 0 {
@@ -858,10 +863,14 @@ fn engram_declared_summary(
         binding.map_or(".", |binding| binding.entry.cwd.as_str())
     );
     if let Some(outcome) = &result.outcome {
-        tail.push_str(&format!("; TRX outcome {}", engram_trx_outcome_word(outcome)));
+        if result.format == EngramDeclaredArtifactFormat::DartJson {
+            tail.push_str(&format!("; Dart JSON outcome {outcome}"));
+        } else {
+            tail.push_str(&format!("; TRX outcome {}", engram_trx_outcome_word(outcome)));
+        }
     }
     if let Some(counters) = &result.counters {
-        tail.push_str(&format!("; counters {}", counters.describe()));
+        tail.push_str(&format!("; counters {}", engram_declared_counter_description(result.format, counters)));
     }
     let head = format!("{verdict}. Declared test `");
     const CUT: &str = "...";
@@ -909,10 +918,15 @@ fn engram_declared_refs(
         refs.push(format!("artifact-modified:{}", artifact.modified));
     }
     if let Some(outcome) = &result.outcome {
-        refs.push(format!("trx-outcome:{}", engram_trx_outcome_word(outcome)));
+        if result.format == EngramDeclaredArtifactFormat::DartJson {
+            refs.push(format!("dart-json-outcome:{outcome}"));
+        } else {
+            refs.push(format!("trx-outcome:{}", engram_trx_outcome_word(outcome)));
+        }
     }
     if let Some(counters) = &result.counters {
-        refs.push(format!("trx-counters:{}", counters.describe()));
+        let prefix = if result.format == EngramDeclaredArtifactFormat::DartJson { "dart-json" } else { "trx" };
+        refs.push(format!("{prefix}-counters:{}", engram_declared_counter_description(result.format, counters)));
     }
     refs.retain(|reference| reference.len() <= ENGRAM_CHECK_REF_MAX_BYTES);
     refs

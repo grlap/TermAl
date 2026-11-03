@@ -15,6 +15,9 @@ use super::*;
 #[path = "test_run_registration_declared.rs"]
 mod test_run_registration;
 
+#[path = "engram_dart_checks.rs"]
+mod dart;
+
 /// The declared .NET line of the documentation's example, for a project at
 /// the repository root.
 pub(super) const DECLARED_TEST: &str =
@@ -1154,6 +1157,7 @@ fn a_check_stays_open_to_writes_until_its_artifact_is_read() {
     );
 
     reading.finish(EngramDeclaredResult {
+        format: EngramDeclaredArtifactFormat::Trx,
         verdict: EngramTrxVerdict::Pass,
         artifact: None,
         outcome: None,
@@ -1222,6 +1226,7 @@ fn a_passing_summary_names_inconclusive_tests() {
     let reading = engram_read_trx(document.as_bytes());
     assert_eq!(reading.verdict, EngramTrxVerdict::Pass);
     let result = EngramDeclaredResult {
+        format: EngramDeclaredArtifactFormat::Trx,
         verdict: reading.verdict,
         artifact: None,
         outcome: reading.outcome,
@@ -1446,6 +1451,7 @@ fn passing_summary(command_line: &str, trx: &[u8]) -> String {
     let reading = engram_read_trx(trx);
     assert_eq!(reading.verdict, EngramTrxVerdict::Pass);
     let result = EngramDeclaredResult {
+        format: EngramDeclaredArtifactFormat::Trx,
         verdict: reading.verdict,
         artifact: None,
         outcome: reading.outcome,

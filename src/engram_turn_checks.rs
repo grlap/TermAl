@@ -343,6 +343,7 @@ fn engram_declared_result_of(end: &EngramTurnCheckEnd) -> Option<EngramDeclaredR
         capture
             .wait_until(std::time::Instant::now())
             .unwrap_or_else(|| EngramDeclaredResult {
+                format: EngramDeclaredArtifactFormat::Trx,
                 verdict: EngramTrxVerdict::Unknown(
                     "the artifact was not read in time".to_owned(),
                 ),
@@ -2423,7 +2424,11 @@ impl AppState {
                     .is_ok_and(|expected| expected == words));
             let outcome = if matches {
                 let exit = exit.unwrap_or(EngramCommandExit::Unknown);
-                engram_declared_outcome(exit, &engram_declared_result(&binding, exit))
+                let result = engram_declared_result(&binding, exit);
+                if exit != EngramCommandExit::NotFinished {
+                    engram_write_declared_diagnostic(&mut std::io::stderr(), &result);
+                }
+                engram_declared_outcome(exit, &result)
             } else { Some(EngramExecutionOutcome::Unknown) };
             (turn, check_id, binding, outcome)
         });

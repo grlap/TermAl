@@ -1,0 +1,9 @@
+{"protocolVersion":"0.1.1","runnerVersion":"1.33.0","pid":0,"type":"start","time":0}
+{"suite":{"id":0,"platform":"vm","path":"test/skipped_test.dart"},"type":"suite","time":0}
+{"test":{"id":1,"name":"loading test/skipped_test.dart","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":1}
+{"count":1,"time":6,"type":"allSuites"}
+{"testID":1,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":257}
+{"group":{"id":2,"suiteID":0,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":1,"line":null,"column":null,"url":null},"type":"group","time":259}
+{"test":{"id":3,"name":"skipped","suiteID":0,"groupIDs":[2],"metadata":{"skip":true,"skipReason":null},"line":4,"column":3,"url":"file:////workspace/.tmp/dart-reporter/test/skipped_test.dart"},"type":"testStart","time":259}
+{"testID":3,"result":"success","skipped":true,"hidden":false,"type":"testDone","time":259}
+{"success":true,"type":"done","time":264}

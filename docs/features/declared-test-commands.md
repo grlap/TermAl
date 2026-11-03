@@ -1,6 +1,6 @@
 # Declared Test Commands
 
-**Status: IMPLEMENTED ON MASTER SINCE `2b1e3f85` (TRX).** Declared-command recognition requires a running TermAl host built from that commit or later. Installing a build does not change the host that is already running; recognition becomes available after restarting onto a build that contains the implementation. The post-restart live proof is still pending. A host without the implementation gains no recognition from a declaration; existing built-in commands retain their current behavior. TRX is implemented; JUnit XML is not yet implemented.
+**Status: IMPLEMENTED ON MASTER SINCE `2b1e3f85` (TRX).** Declared-command recognition requires a running TermAl host built from that commit or later. Installing a build does not change the host that is already running; recognition becomes available after restarting onto a build that contains the implementation. TRX passed post-restart technical qualification on 2026-10-09, host build `f5a96582`: passing and failing xUnit runs, an unmatched command, and a deleted artifact were observed. This was a disposable fixture qualification, separate from the team pilot's onboarding checklist. Dart/Flutter JSON support additionally requires a build containing its reader; its live proof follows installation and restart. A host without the implementation gains no recognition from a declaration; existing built-in commands retain their current behavior. TRX and Dart test JSON reporter streams are implemented; JUnit XML is not yet implemented.
 
 A repository tells TermAl which commands are its tests by committing one file, `termal-tests.toml`, at the repository root. When an agent runs a declared command exactly as declared, TermAl records it as a test check and judges it from the result artifact the command writes, never from console text. The runner is not TermAl's: the agent runs its real command through its own runtime, and TermAl observes.
 
@@ -12,9 +12,9 @@ Related: [Test Runs](test-runs.md) (the launcher's runs and cards), [Engram host
 
 | Field | Meaning |
 |---|---|
-| `command` | The exact command line the agent will run, compared token for token with the content of quoted arguments kept. The declared route reads a line by an allow-list, assuming bash or PowerShell 7.3 or later (`pwsh`) runs it: the line is printable ASCII, with words separated by spaces and tabs; the program, the first word, is unquoted and holds no `=`; an unquoted word holds only letters, digits and `. _ / : = @ + -`, starts with neither `@` nor `=`, and holds no `.` if it starts with `-` (PowerShell splits such an argument; quote it); a quoted word is one whole, non-empty token whose quote opens and closes at a separator, holding the same characters plus space, `;` and `=`, so a quoted `;` is literal argument text (the TRX logger needs `trx;LogFileName=…`). Anything else (shell operators, substitution, redirection, globbing, commas, `%`, `!`, `"` inside quotes, a backslash anywhere, mixed quoting, non-ASCII) is refused. Use forward slashes in declared paths (`./tests/Orders.Tests`, not `.\tests\Orders.Tests`): bash reads a backslash as an escape. In this build a `!=` test filter is therefore not declarable: use a positive filter (`TestCategory=Fast`, unquoted — a single-quoted argument is not recognised when Codex runs the entry, because the script of its `pwsh` wrapper may hold no `'`) or a runsettings file. The declared route refuses `cmd` and Windows PowerShell 5.1 (`powershell`) as the first program of the bare line or an accepted wrapper script; it also refuses a recognized Cmd dialect. TermAl does not follow commands invoked indirectly by another program. The line is read from its raw bytes: it must be printable ASCII from end to end, and only ASCII spaces and tabs are trimmed from its ends; CR, LF and every other control character except tab are refused before trimming. A wrapper counts only in an exact shape, every word of it as written: its shell named by a bare name or an absolute path that the program-word rule allows (unquoted, no `=`; not a `.cmd`, `.bat` or `.ps1` shim), and its option words spelled exactly, without quotes: `bash`, `sh` or `zsh` with one flag, `-c` or `-lc`, then the script; or `pwsh` with any of `-NoProfile`, `-NonInteractive`, `-NoLogo`, then `-Command` or `-c`, then the script; the script is one single-quoted word. Codex's Windows executable envelope also permits a whole double-quoted drive-absolute Windows path ending in `pwsh.exe`, such as `"C:\Program Files\PowerShell\7\pwsh.exe" -Command '<line>'`; the path uses letters, digits and `. _ / @ + -`, plus spaces and backslashes, with a colon only after the drive letter. The same pwsh option and single-quoted script rules apply. This exception applies only to the outer executable path: backslashes, quoting and all other characters in the inner declared line still follow the unchanged line rules above. Other quoted executables, relative paths and mixed quoting are refused. The declared program must be a native executable: a `.cmd` or `.bat` shim re-parses its arguments in cmd, which the route cannot see. TermAl's built-in recognition and its simple-command rule are unchanged. |
+| `command` | The exact command line the agent will run, compared token for token with the content of quoted arguments kept. The declared route reads a line by an allow-list, assuming bash or PowerShell 7.3 or later (`pwsh`) runs it: the line is printable ASCII, with words separated by spaces and tabs; the program, the first word, is unquoted and holds no `=`; an unquoted word holds only letters, digits and `. _ / : = @ + -`, starts with neither `@` nor `=`, and holds no `.` if it starts with `-` (PowerShell splits such an argument; quote it); a quoted word is one whole, non-empty token whose quote opens and closes at a separator, holding the same characters plus space, `;` and `=`, so a quoted `;` is literal argument text (the TRX logger needs `trx;LogFileName=…`). Anything else (shell operators, substitution, redirection, globbing, commas, `%`, `!`, `"` inside quotes, a backslash anywhere, mixed quoting, non-ASCII) is refused. Use forward slashes in declared paths (`./tests/Orders.Tests`, not `.\tests\Orders.Tests`): bash reads a backslash as an escape. In this build a `!=` test filter is therefore not declarable: use a positive filter (`TestCategory=Fast`, unquoted — a single-quoted argument is not recognised when Codex runs the entry, because the script of its `pwsh` wrapper may hold no `'`) or a runsettings file. The declared route refuses `cmd` and Windows PowerShell 5.1 (`powershell`) as the first program of the bare line or an accepted wrapper script; it also refuses a recognized Cmd dialect. TermAl does not follow commands invoked indirectly by another program. The line is read from its raw bytes: it must be printable ASCII from end to end, and only ASCII spaces and tabs are trimmed from its ends; CR, LF and every other control character except tab are refused before trimming. A wrapper counts only in an exact shape, every word of it as written: its shell named by a bare name or an absolute path that the program-word rule allows (unquoted, no `=`; not a `.cmd`, `.bat` or `.ps1` shim), and its option words spelled exactly, without quotes: `bash`, `sh` or `zsh` with one flag, `-c` or `-lc`, then the script; or `pwsh` with any of `-NoProfile`, `-NonInteractive`, `-NoLogo`, then `-Command` or `-c`, then the script; the script is one single-quoted word. Codex's Windows executable envelope also permits a whole double-quoted drive-absolute Windows path ending in `pwsh.exe`, such as `"C:\Program Files\PowerShell\7\pwsh.exe" -Command '<line>'`; the path uses letters, digits and `. _ / @ + -`, plus spaces and backslashes, with a colon only after the drive letter. The same pwsh option and single-quoted script rules apply. This exception applies only to the outer executable path: backslashes, quoting and all other characters in the inner declared line still follow the unchanged line rules above. Other quoted executables, relative paths and mixed quoting are refused. Command matching is lexical: TermAl does not resolve the program through PATH or run it. On Windows the Flutter SDK exposes `flutter` and `dart` as `.bat` shims; these real SDK invocations still use the same literal argument allow-list, without shell operators or expansion. The outer shell-wrapper restrictions above remain unchanged, as do built-in recognition and its simple-command rule. |
 | `cwd` | Directory the command runs in, relative to the repository root. Default `"."`. Must resolve inside the worktree. |
-| `artifact` | The one result file the command writes, relative to the repository root. This build reads TRX only (a `TestRun` root); JUnit XML (`testsuites`/`testsuite` root) is not read yet, see below. |
+| `artifact` | The one result file the command writes, relative to the repository root. The file content selects TRX (a `TestRun` XML root) or the Dart test JSON reporter (newline-delimited JSON objects), regardless of filename. JUnit XML (`testsuites`/`testsuite` root) is not read yet, see below. |
 
 A file that does not parse, exceeds the size or entry caps, an entry missing `command` or `artifact`, a `cwd` or `artifact` resolving outside the worktree, a `command` the route cannot read (above), or one that skips the build, lists tests or names an assembly disables the whole file; TermAl says so once in a host line. The last are matched by spelling: `--no-build` and `--list-tests` alone or with a `:` or `=` value, for `dotnet` also `-t` and the MSBuild properties `VSTestNoBuild` and `VSTestListTests`, and a `.dll` path, even with trailing dots or spaces. This guards against honest mistakes in a trusted declaration, not against a determined one.
 
@@ -45,6 +45,41 @@ A run can report passing tests and still have failed as a run (for example an at
 
 JUnit (not implemented in `2b1e3f85`; proposed follow-up contract): complete XML and one unambiguous aggregate (`testsuites` attributes, or the `testsuite` elements summed once). **PASS**: exit 0, `tests - skipped >= 1`, `failures = errors = 0`, levels consistent. **FAIL**: `failures + errors >= 1`, or exit not 0. **UNKNOWN**: zero or all skipped, contradiction, unknown dialect. A JUnit reader must be proven on captured producer output; other producers' files may read as UNKNOWN until a capture of theirs is added.
 
+### Dart and Flutter JSON file reporter
+
+Use the real `dart test` or `flutter test` command with
+`--file-reporter json:<path>`. `--reporter expanded` may be used alongside
+the file reporter; console output never decides the result. The reader uses
+the [Dart test JSON reporter protocol](https://github.com/dart-lang/test/blob/master/pkgs/test/doc/json_reporter.md),
+version 0.1.1, proven by captures from Dart 3.13.2 and Flutter 3.47.2.
+Other protocol versions, event types or test result words are UNKNOWN.
+A new SDK may need a reader update; an unsupported version fails closed
+until its output is supported. Extra fields on known events are allowed.
+
+- **PASS:** exit 0, a final `done` event with `success: true`, at least one
+  non-hidden, non-skipped `testDone` with result `success`, and no failure
+  or error anywhere in the complete stream.
+- **FAIL:** a nonzero exit; otherwise, in a complete supported stream, any
+  `testDone` result `failure` or `error`, any `error` event (including a
+  hidden load/setup test or an error after a successful `testDone`), or
+  `done.success: false`.
+- **UNKNOWN:** missing or null-success `done`, truncated/non-UTF-8/malformed
+  JSON, unknown events/protocol, inconsistent or duplicate IDs or unmatched
+  test starts/ends, no visible executed tests, or all tests skipped. The
+  same declaration and artifact placement/freshness/size rules apply.
+
+At exit 0, declaration, artifact and stream validity take precedence: a
+malformed or truncated stream is UNKNOWN even if an earlier event recorded
+a failure. Only a complete supported stream receives an event-based verdict.
+The reader scans through the final event; a passing prefix is insufficient.
+Exactly one `allSuites` event must match the number of suites seen.
+Successful hidden tests that load suites or run setup never count as passed
+or executed tests. Skipped visible tests are in `total` and `notExecuted`,
+but not `executed`. Counts are derived from unique matched test IDs, so
+parallel suites do not double-count, and a late error removes an earlier
+success from the passed count. An error makes a formerly hidden test visible
+in the counters. Any error event still means FAIL if a later retry succeeds.
+
 A passing result is reported as a `passed` check in the turn's host observation; the host's source, ownership and overlap checks still apply. It earns no test credit by itself: credit comes only from registered verification ([test evidence](engram-host-adapter.md#test-evidence)). A declaration by itself grants no credit. PASS is never inferred from exit 0 alone or from console output. UNKNOWN is not a weaker PASS: it earns nothing and names what was observed.
 
 ## Examples
@@ -60,7 +95,7 @@ artifact = "tests/Orders.Tests/.termal-results/results.trx"
 
 One project and one target framework per entry: a fixed `LogFileName` across several target frameworks overwrites the report. This exact line is recognised only by a running host that implements declared commands.
 
-Proposed JUnit example for a future reader. A matching command can be recorded as a declared check, but the current TRX-only reader cannot parse its JUnit results or report them as passed; at exit 0, the result is UNKNOWN. A project-provided wrapper runs the real tests synchronously, propagates their exit status, and writes exactly that one complete JUnit file (direct `npx vitest` and `pytest` are built-in checks and never take the declared route):
+Proposed JUnit example for a future reader. A matching command can be recorded as a declared check, but the current readers cannot parse its JUnit results or report them as passed; at exit 0, the result is UNKNOWN. A project-provided wrapper runs the real tests synchronously, propagates their exit status, and writes exactly that one complete JUnit file (direct `npx vitest` and `pytest` are built-in checks and never take the declared route):
 
 ```toml
 [[test]]
@@ -71,11 +106,39 @@ artifact = ".termal-results/junit.xml"
 
 `.gitignore` in both cases: `.termal-results/`.
 
+Flutter main suite (including the Windows SDK's `flutter.bat` reached through
+`flutter` on PATH); use this exact command in the one-call form:
+
+```toml
+[[test]]
+command  = "flutter test --no-pub --exclude-tags supabase-local --file-reporter json:.termal-results/flutter.json"
+cwd      = "."
+artifact = ".termal-results/flutter.json"
+```
+
+Pure Dart package in a subdirectory of the same repository:
+
+```toml
+[[test]]
+command  = "dart test --file-reporter json:.termal-results/dart.json"
+cwd      = "packages/common_core"
+artifact = "packages/common_core/.termal-results/dart.json"
+```
+
+Ignore `.termal-results/` in each package. Reporter paths are relative to the
+command's cwd; `artifact` and `cwd` in the declaration are relative to the
+repository root. A separate Flutter package uses its own entry and cwd in
+the same way. Prepare dependencies first when using `--no-pub`. A run with
+`--name`, `--plain-name`, `--tags`, a file/directory filter, or an added
+`--reporter expanded` needs its own exact declaration. Lint/format/analyze
+commands are not test commands. This route never starts external services
+or supplies test credentials.
+
 ## Workflow
 
-Operator, once per repository: write `termal-tests.toml`, ignore the result directory, commit both, run one declared command once and check that the check appears with its counters; an UNKNOWN reason here points at the declaration, the result path or the ignore rule.
+Operator, once per repository: write `termal-tests.toml`, ignore the result directory, commit both, run one declared command once and check its outcome. Internal host diagnostics emit one bounded `declared-check` line at declared completion, with format, verdict, numeric counters (or `unavailable`) and a fixed reason code such as `artifact_missing`, `artifact_not_ignored` or `dart_missing_done`. They contain no artifact path, command, test name or test output. Counts and reason codes are internal log diagnostics, not new public check fields.
 
-Agent, each run: read `termal-tests.toml` at the root; run one entry exactly as declared, from its `cwd`, in the recognised one-call form; then read the host's line or the check record. A passing result is reported as passed, and is not test credit. UNKNOWN gives an observed reason, not a diagnosed cause: on "missing", check that the logger flag and result path match the declaration; on "not ignored", check the ignore rule; on "zero executed", check what the command selects. Do not retype the command with other flags to make it match, and do not edit the declaration to fit a command already run: fix the declaration, commit it under the repository's rules, run again.
+Agent, each run: read `termal-tests.toml` at the root; run one entry exactly as declared, from its `cwd`, in the recognised one-call form; then read the check outcome. A passing result is reported as passed, and is not test credit. For an indeterminate/UNKNOWN result, inspect the internal host diagnostic with the operator. Its reason is an observation, not a diagnosed cause: on `artifact_missing`, check that the logger flag and result path match the declaration; on `artifact_not_ignored`, check the ignore rule; on `dart_no_executed_tests`, check what the command selects. Do not retype the command with other flags to make it match, and do not edit the declaration to fit a command already run: fix the declaration, commit it under the repository's rules, run again.
 
 Snippet for a repository's own agent instructions:
 
@@ -85,7 +148,7 @@ Snippet for a repository's own agent instructions:
 
 - It does not capture the environment of the agent's shell; TermAl cannot see it, and the artifact route does not need it.
 - It does not parse console output on the declared route; a declared run without an artifact is never PASS: it is UNKNOWN, or FAIL on a non-zero exit. Built-in runners are unchanged.
-- It has no framework or version matrix: the reader accepts the documented TRX result shape; a declaration is not a framework/version certification.
+- It has no framework matrix: readers accept the documented TRX shape or Dart JSON protocol above; a declaration is not a framework/version certification.
 - It trusts the declaration as current-worktree configuration; it cannot tell a real test command from a script that writes a plausible file.
 - It observes absence or the existing bounded file hash at command start and compares the completed artifact: correlation, not proof that the command produced it.
 - It reads the declaration at command start and keeps only the matched entry and the file hash on the check; no declaration history or lifecycle.

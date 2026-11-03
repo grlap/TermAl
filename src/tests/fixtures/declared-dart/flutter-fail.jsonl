@@ -1,0 +1,10 @@
+{"protocolVersion":"0.1.1","runnerVersion":null,"pid":0,"type":"start","time":0}
+{"suite":{"id":0,"platform":"vm","path":"/workspace/.tmp/flutter-reporter/test/fail_test.dart"},"type":"suite","time":0}
+{"test":{"id":1,"name":"loading /workspace/.tmp/flutter-reporter/test/fail_test.dart","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":0}
+{"count":1,"time":2,"type":"allSuites"}
+{"testID":1,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":889}
+{"group":{"id":2,"suiteID":0,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":1,"line":null,"column":null,"url":null},"type":"group","time":890}
+{"test":{"id":3,"name":"fails","suiteID":0,"groupIDs":[2],"metadata":{"skip":false,"skipReason":null},"line":4,"column":3,"url":"file:////workspace/.tmp/flutter-reporter/test/fail_test.dart"},"type":"testStart","time":890}
+{"testID":3,"error":"Expected: <5>\n  Actual: <4>\n","stackTrace":"package:matcher                                     expect\npackage:flutter_test/src/widget_tester.dart 473:18  expect\ntest\\fail_test.dart 4:23                            main.<fn>\n","isFailure":true,"type":"error","time":914}
+{"testID":3,"result":"failure","skipped":false,"hidden":false,"type":"testDone","time":914}
+{"success":false,"type":"done","time":934}

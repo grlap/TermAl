@@ -1,0 +1,22 @@
+{"protocolVersion":"0.1.1","runnerVersion":null,"pid":0,"type":"start","time":0}
+{"suite":{"id":0,"platform":"vm","path":"/workspace/.tmp/flutter-reporter/test/fail_test.dart"},"type":"suite","time":0}
+{"test":{"id":1,"name":"loading /workspace/.tmp/flutter-reporter/test/fail_test.dart","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":0}
+{"suite":{"id":2,"platform":"vm","path":"/workspace/.tmp/flutter-reporter/test/pass_test.dart"},"type":"suite","time":2}
+{"test":{"id":3,"name":"loading /workspace/.tmp/flutter-reporter/test/pass_test.dart","suiteID":2,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":3}
+{"suite":{"id":4,"platform":"vm","path":"/workspace/.tmp/flutter-reporter/test/skipped_test.dart"},"type":"suite","time":3}
+{"test":{"id":5,"name":"loading /workspace/.tmp/flutter-reporter/test/skipped_test.dart","suiteID":4,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":3}
+{"count":3,"time":3,"type":"allSuites"}
+{"testID":1,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":1248}
+{"group":{"id":6,"suiteID":0,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":1,"line":null,"column":null,"url":null},"type":"group","time":1249}
+{"test":{"id":7,"name":"fails","suiteID":0,"groupIDs":[6],"metadata":{"skip":false,"skipReason":null},"line":4,"column":3,"url":"file:////workspace/.tmp/flutter-reporter/test/fail_test.dart"},"type":"testStart","time":1249}
+{"testID":7,"error":"Expected: <5>\n  Actual: <4>\n","stackTrace":"package:matcher                                     expect\npackage:flutter_test/src/widget_tester.dart 473:18  expect\ntest\\fail_test.dart 4:23                            main.<fn>\n","isFailure":true,"type":"error","time":1269}
+{"testID":7,"result":"failure","skipped":false,"hidden":false,"type":"testDone","time":1270}
+{"testID":3,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":2396}
+{"group":{"id":8,"suiteID":2,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":1,"line":null,"column":null,"url":null},"type":"group","time":2397}
+{"test":{"id":9,"name":"passes","suiteID":2,"groupIDs":[8],"metadata":{"skip":false,"skipReason":null},"line":4,"column":3,"url":"file:////workspace/.tmp/flutter-reporter/test/pass_test.dart"},"type":"testStart","time":2397}
+{"testID":9,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":2406}
+{"testID":5,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":2555}
+{"group":{"id":10,"suiteID":4,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":1,"line":null,"column":null,"url":null},"type":"group","time":2555}
+{"test":{"id":11,"name":"skipped","suiteID":4,"groupIDs":[10],"metadata":{"skip":true,"skipReason":null},"line":4,"column":3,"url":"file:////workspace/.tmp/flutter-reporter/test/skipped_test.dart"},"type":"testStart","time":2556}
+{"testID":11,"result":"success","skipped":true,"hidden":false,"type":"testDone","time":2556}
+{"success":false,"type":"done","time":2572}
