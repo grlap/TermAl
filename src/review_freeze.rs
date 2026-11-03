@@ -60,6 +60,7 @@ impl ReviewFreezeGit {
     }
 
     fn new_with_deadline(cwd: &FsPath, deadline: Option<std::time::Instant>) -> Result<Self> {
+        check_capture_cancellation()?;
         let root = fs::canonicalize(cwd)?;
         // Never allow Windows' current-directory executable search, a relative
         // PATH entry, or a git shim supplied by the reviewed repository.
@@ -72,7 +73,7 @@ impl ReviewFreezeGit {
         let git = Self {
             root,
             binary,
-            deadline: deadline.unwrap_or_else(||std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT),
+            deadline: capture_deadline(deadline.unwrap_or_else(||std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT)),
         };
         let top = git.run(&["rev-parse", "--show-toplevel"], false)?;
         if fs::canonicalize(String::from_utf8(top)?.trim())? != git.root {
@@ -151,6 +152,7 @@ impl ReviewFreezeGit {
     }
 
     fn run(&self, args: &[&str], allow_absent: bool) -> Result<Vec<u8>> {
+        check_capture_cancellation()?;
         let mut command = self.command(args);
         let started = std::time::Instant::now();
         let remaining_at_start = self.deadline.saturating_duration_since(started);

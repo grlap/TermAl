@@ -118,10 +118,39 @@ impl StateInner {
         true
     }
 
+    /// Runs on every general commit, so its work must not grow with the
+    /// product of hidden sessions and delegations. A hidden session is
+    /// retained exactly when its delegated subtree holds a removal duty; the
+    /// duties are found in one pass and their ancestors in one walk, and only
+    /// those hidden sessions take the per-session retention below. Retention
+    /// changes visibility and dispatch markers, never the reports, jobs,
+    /// traces or binding owners the duty reads, so the duty set is fixed for
+    /// the whole pass and the order of hidden sessions is preserved.
     fn retain_hidden_source_observation_sessions(&mut self) {
         if !self.delegation_inventory_complete() { return; }
-        let hidden: Vec<_> = self.sessions.iter().filter(|record| record.hidden)
-            .map(|record| record.session.id.clone()).collect();
+        let duty: Vec<&str> = self.sessions.iter()
+            .filter(|record| runtime_observation_has_removal_duty(record)
+                || record.engram.source_root_bind_owner.is_some())
+            .map(|record| record.session.id.as_str())
+            .collect();
+        if duty.is_empty() { return; }
+        let mut parents: HashMap<&str, Vec<&str>> = HashMap::new();
+        for delegation in &self.delegations {
+            parents.entry(delegation.child_session_id.as_str())
+                .or_default()
+                .push(delegation.parent_session_id.as_str());
+        }
+        let mut covering: HashSet<&str> = duty.iter().copied().collect();
+        let mut frontier = duty;
+        while let Some(session_id) = frontier.pop() {
+            for parent in parents.get(session_id).into_iter().flatten() {
+                if covering.insert(parent) { frontier.push(parent); }
+            }
+        }
+        let hidden: Vec<String> = self.sessions.iter()
+            .filter(|record| record.hidden && covering.contains(record.session.id.as_str()))
+            .map(|record| record.session.id.clone())
+            .collect();
         for session_id in hidden { self.defer_source_observation_removal(&session_id); }
     }
 }

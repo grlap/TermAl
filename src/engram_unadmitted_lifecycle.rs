@@ -282,9 +282,8 @@ impl AppState {
                 // The kick waits for this lock to be released. Delivery still
                 // requires exact SQLite row read-back, even if commit fails.
                 let state = self.clone();
-                if let Err(error) = std::thread::Builder::new()
-                    .name("termal-observation-kick".to_owned())
-                    .spawn(move || state.start_runtime_observation_worker(&session_id))
+                if let Err(error) = self.capture_lifetime.spawn_observer("termal-observation-kick",
+                    move || state.start_runtime_observation_worker(&session_id))
                 {
                     eprintln!("engram> observation worker kick failed: {error}");
                 }

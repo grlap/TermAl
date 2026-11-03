@@ -674,6 +674,7 @@ fn a_validation_that_outlasts_its_budget_names_nothing_and_keeps_its_place() {
     let (ended_tx, ended) = std::sync::mpsc::channel::<()>();
     let outcome = engram_run_source_root_validation_within(
         &live,
+        &Arc::new(CaptureLifetime::default()),
         1,
         Duration::from_millis(20),
         "slow".to_owned(),
@@ -691,6 +692,7 @@ fn a_validation_that_outlasts_its_budget_names_nothing_and_keeps_its_place() {
     // without starting a thread.
     let refused = engram_run_source_root_validation_within(
         &live,
+        &Arc::new(CaptureLifetime::default()),
         1,
         Duration::from_secs(60),
         "next".to_owned(),
@@ -716,6 +718,7 @@ fn a_validation_that_outlasts_its_budget_names_nothing_and_keeps_its_place() {
     assert_eq!(
         engram_run_source_root_validation_within(
             &live,
+            &Arc::new(CaptureLifetime::default()),
             1,
             Duration::from_secs(60),
             "bad".to_owned(),

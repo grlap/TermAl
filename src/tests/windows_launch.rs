@@ -5,6 +5,85 @@ use std::time::Instant;
 const GUARD: Duration = Duration::from_secs(30);
 
 #[test]
+fn native_windows_capture_waits_for_descendant_completion_not_job_close() {
+    let root_lease = Arc::new(crate::TestTempRoot::create("termal-capture-job"));
+    let directory = root_lease.path().to_owned();
+    let cleaned = root_lease.observe_cleanup();
+    let lifetime = Arc::new(crate::CaptureLifetime::with_test_root(Some(root_lease)));
+    let marker = directory.join("ready.json");
+    let observer = Arc::new(Mutex::new(None));
+    let lease = observer.clone();
+    let (members_tx, members_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    lifetime.spawn("capture-job-completion-control", move || {
+        let mut spec = node_spec("root-independent");
+        spec.arg(&marker).current_dir(directory);
+        // Retaining a duplicate deterministically delays kill-on-close. An
+        // explicit job termination/completion barrier must work regardless.
+        spec.job_lease_observer = Some(lease);
+        let _ = crate::run_bounded_read_windows_with_setup(&mut spec,
+            Instant::now() + GUARD, 4096, |process| {
+                members_tx.send(identities(&ready(&marker, process),
+                    creation(process.handle.as_raw_handle()))).unwrap();
+                process.kill()?;
+                Ok(())
+            });
+        done_tx.send(()).unwrap();
+    }).unwrap();
+    let members = members_rx.recv_timeout(GUARD).unwrap();
+    done_rx.recv_timeout(GUARD).unwrap();
+    let states: Vec<_> = members.iter().map(|member| unsafe {
+        WaitForSingleObject(member.handle.as_raw_handle(), 0)
+    }).collect();
+    let all_ended = states.iter().all(|state| *state == WAIT_OBJECT_0);
+    let joined = lifetime.stop_and_join();
+    // Every RED fixture is retired through its retained handles before the
+    // assertion. No leaked descendant can turn a later test green.
+    for member in &members {
+        if unsafe { WaitForSingleObject(member.handle.as_raw_handle(), 0) } == WAIT_TIMEOUT {
+            unsafe { TerminateProcess(member.handle.as_raw_handle(), 1); }
+        }
+        member.assert_ended();
+    }
+    drop(members);
+    observer.lock().unwrap().take();
+    drop(lifetime);
+    cleaned.recv_timeout(GUARD).unwrap().unwrap();
+    assert!(joined && all_ended,
+        "capture completion must certify descendants, not only close a job lease; joined={joined} states={states:?}");
+}
+
+#[test]
+fn native_windows_uncertified_job_keeps_shutdown_pending_and_root_owned() {
+    let root_lease = Arc::new(crate::TestTempRoot::create("termal-capture-job-pending"));
+    let directory = root_lease.path().to_owned();
+    let cleaned = root_lease.observe_cleanup();
+    let lifetime = Arc::new(crate::CaptureLifetime::with_test_root(Some(root_lease)));
+    let probe = capture_job::CleanupProbe::blocked();
+    let worker_probe = probe.clone();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    lifetime.spawn("capture-job-certificate-control", move || {
+        let mut spec = node_spec("parity");
+        spec.capture_cleanup_probe = Some(worker_probe);
+        let error = crate::run_bounded_read_command(&mut spec,
+            Instant::now() + GUARD, 4096, true).unwrap_err();
+        done_tx.send(format!("{error:#}")).unwrap();
+    }).unwrap();
+    let error = done_rx.recv_timeout(GUARD).unwrap();
+    assert!(error.contains("capture job cleanup not certified"), "{error}");
+    lifetime.expire_shutdown.store(true, std::sync::atomic::Ordering::Release);
+    let joined = lifetime.stop_and_join();
+    drop(lifetime);
+    let retained = matches!(cleaned.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty))
+        && directory.exists();
+    // Only the positive native query, after releasing this injected unknown
+    // certificate, can retire the drainer and its root lease.
+    probe.release();
+    cleaned.recv_timeout(GUARD).unwrap().unwrap();
+    assert!(!joined && retained, "unfinished job cleanup must retain the host root");
+}
+
+#[test]
 fn native_windows_bounded_read_reports_inheritance_lock_budget() {
     // Deliberate contention belongs in its own process: holding this suite's
     // launch lock would make unrelated bounded-reader tests time out too.

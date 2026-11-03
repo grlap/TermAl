@@ -243,7 +243,12 @@ async fn run_server() -> Result<()> {
     if let Err(err) = &persist_result {
         eprintln!("[termal] final synchronous persist failed during graceful shutdown: {err:#}");
     }
-    let result = result.and(persist_result);
+    let capture_result = if shutdown_state.capture_lifetime.stop_and_join() {
+        Ok(())
+    } else {
+        Err(anyhow!("capture_cleanup_pending: host capture cleanup has not completed"))
+    };
+    let result = result.and(persist_result).and(capture_result);
     shutdown_state.shutdown_state_broadcast_blocking();
     if let Some(lifecycle) = host_lifecycle {
         let outcome = if result.is_ok() { HostShutdownOutcome::Graceful } else { HostShutdownOutcome::Fatal };
@@ -1054,10 +1059,12 @@ include!("delegation_mcp_timeouts.rs");
 include!("delegation_mcp_durability_pending.rs");
 include!("delegation_mcp_review_freeze.rs");
 include!("review_freeze.rs");
+include!("capture_lifetime.rs");
 include!("content_revision.rs");
 include!("ordinary_commit_input.rs");
 include!("engram_source_roots.rs");
 include!("engram_named_root_binding.rs");
+include!("engram_root_capture_reason.rs");
 include!("engram_root_authority.rs");
 include!("engram_named_root_reclamation.rs");
 include!("engram_named_root_release.rs");

@@ -166,7 +166,7 @@ fn a_rerun_that_capacity_refuses_is_told_once() {
     let pending = (0..ENGRAM_CAPTURE_WORKER_LIMIT)
         .map(|_| {
             let gate = gate.clone();
-            EngramCapture::spawn(&workers, move || {
+            EngramCapture::spawn(&workers, &Arc::new(CaptureLifetime::default()), move || {
                 let (open, opened) = &*gate;
                 let _ = opened
                     .wait_timeout_while(

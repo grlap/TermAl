@@ -309,24 +309,52 @@ fn engram_authority_work_unresolved(
     store: &EngramAuthorityStoreKey,
     work: &str,
 ) -> bool {
-    inner
+    engram_authority_work_unresolved_reason(inner, store, work).is_some()
+}
+
+/// Which condition leaves the work's authority unresolved, in the order
+/// `engram_authority_work_unresolved` has always tested them.
+fn engram_authority_work_unresolved_reason(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    work: &str,
+) -> Option<EngramUnconfirmedRootReason> {
+    let history = inner
         .engram_work_naming_history
         .iter()
-        .find(|history| &history.store == store && history.work_id == work)
-        .is_none_or(|history| {
-            history.epoch != ENGRAM_NAMING_HISTORY_EPOCH
-                || history.proofs.is_empty()
-                || !history.unresolved_runs.is_empty()
-                || history
-                    .transition
-                    .as_ref()
-                    .is_none_or(|transition| transition.phase != EngramAuthorityPhase::Published)
-        })
-        || inner.engram_named_root_journal.iter().any(|journal| {
-            &journal.store == store
-                && engram_journal_names_work(journal, work)
-                && journal.requires_reconciliation()
-        })
+        .find(|history| &history.store == store && history.work_id == work);
+    let reason = match history {
+        None => Some(EngramUnconfirmedRootReason::WorkHistoryMissing),
+        Some(history) if history.epoch != ENGRAM_NAMING_HISTORY_EPOCH => {
+            Some(EngramUnconfirmedRootReason::WorkHistoryEpoch)
+        }
+        Some(history) if history.proofs.is_empty() => {
+            Some(EngramUnconfirmedRootReason::WorkProofMissing)
+        }
+        Some(history) if !history.unresolved_runs.is_empty() => {
+            Some(EngramUnconfirmedRootReason::WorkRunsUnresolved)
+        }
+        Some(history)
+            if history
+                .transition
+                .as_ref()
+                .is_none_or(|transition| transition.phase != EngramAuthorityPhase::Published) =>
+        {
+            Some(EngramUnconfirmedRootReason::WorkTransitionUnpublished)
+        }
+        Some(_) => None,
+    };
+    reason.or_else(|| {
+        inner
+            .engram_named_root_journal
+            .iter()
+            .any(|journal| {
+                &journal.store == store
+                    && engram_journal_names_work(journal, work)
+                    && journal.requires_reconciliation()
+            })
+            .then_some(EngramUnconfirmedRootReason::WorkJournalReconciliation)
+    })
 }
 
 impl EngramAuthorityImage {

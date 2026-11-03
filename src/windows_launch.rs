@@ -26,6 +26,10 @@ use windows_sys::Win32::System::SystemServices::JOB_OBJECT_QUERY;
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::System::WindowsProgramming::PROCESS_CREATION_DESKTOP_APP_BREAKAWAY_DISABLE_PROCESS_TREE;
 
+#[path = "windows_capture_job.rs"]
+mod capture_job;
+pub(crate) use capture_job::CaptureJob;
+
 /// Deliberately supports ordinary argv and inherited environment with edits.
 /// No conversion from Command: its getters lose raw_arg and env_clear intent.
 #[derive(Debug)]
@@ -36,6 +40,12 @@ pub(crate) struct LaunchSpec {
     cwd: Option<PathBuf>,
     flags: u32,
     piped_stdin: bool,
+    #[cfg(test)]
+    force_unavailable: bool,
+    #[cfg(test)]
+    job_lease_observer: Option<Arc<Mutex<Option<OwnedHandle>>>>,
+    #[cfg(test)]
+    capture_cleanup_probe: Option<Arc<capture_job::CleanupProbe>>,
 }
 
 impl LaunchSpec {
@@ -47,6 +57,12 @@ impl LaunchSpec {
             cwd: None,
             flags: 0,
             piped_stdin: false,
+            #[cfg(test)]
+            force_unavailable: false,
+            #[cfg(test)]
+            job_lease_observer: None,
+            #[cfg(test)]
+            capture_cleanup_probe: None,
         }
     }
     pub(crate) fn arg(&mut self, arg: impl AsRef<OsStr>) -> &mut Self {
@@ -90,6 +106,10 @@ impl LaunchSpec {
     pub(crate) fn piped_stdin(&mut self) -> &mut Self {
         self.piped_stdin = true;
         self
+    }
+    #[cfg(test)]
+    pub(crate) fn force_unavailable_containment(&mut self) {
+        self.force_unavailable = true;
     }
     pub(crate) fn get_program(&self) -> &OsStr {
         &self.program
@@ -253,7 +273,10 @@ pub(crate) struct PreparedLaunch {
     process: Arc<WindowsChild>,
     thread: Mutex<Option<OwnedHandle>>,
     job: Mutex<Option<OwnedHandle>>,
+    capture_cleanup_owned: std::sync::atomic::AtomicBool,
     status: ContainmentStatus,
+    #[cfg(test)]
+    capture_cleanup_probe: Option<Arc<capture_job::CleanupProbe>>,
     #[cfg(test)]
     refused_job_observer: Option<OwnedHandle>,
 }
@@ -306,7 +329,9 @@ impl PreparedLaunch {
 impl Drop for PreparedLaunch {
     fn drop(&mut self) {
         let had_job = self.job.get_mut().unwrap().take().is_some();
-        if self.thread.get_mut().unwrap().is_some() {
+        if self.thread.get_mut().unwrap().is_some()
+            && !self.capture_cleanup_owned.load(std::sync::atomic::Ordering::Acquire)
+        {
             if !had_job {
                 let _ = self.process.kill();
             }
@@ -657,7 +682,11 @@ pub(crate) fn prepare_with_lock_timing(
     spec: &LaunchSpec,
     lock_wait: &mut Duration,
 ) -> io::Result<PreparedLaunch> {
-    prepare_with_hook_and_lock_timing(spec, false, false, |_| {}, lock_wait)
+    #[cfg(test)]
+    let force_unavailable = spec.force_unavailable;
+    #[cfg(not(test))]
+    let force_unavailable = false;
+    prepare_with_hook_and_lock_timing(spec, force_unavailable, false, |_| {}, lock_wait)
 }
 
 #[cfg(test)]
@@ -953,10 +982,24 @@ fn prepare_with_hook_and_lock_timing(
         process,
         thread: Mutex::new(Some(thread)),
         job: Mutex::new(job),
+        capture_cleanup_owned: std::sync::atomic::AtomicBool::new(false),
         status,
+        #[cfg(test)]
+        capture_cleanup_probe: spec.capture_cleanup_probe.clone(),
         #[cfg(test)]
         refused_job_observer,
     };
+    #[cfg(test)]
+    if let Some(observer) = &spec.job_lease_observer {
+        if let Some(job) = launch.job.lock().unwrap().as_ref() {
+            let mut duplicate = null_mut();
+            if unsafe { DuplicateHandle(GetCurrentProcess(), job.as_raw_handle(),
+                GetCurrentProcess(), &mut duplicate, 0, 0, DUPLICATE_SAME_ACCESS) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            *observer.lock().unwrap() = Some(owned(duplicate)?);
+        }
+    }
     eprintln!(
         "windows launch> pid={} {}",
         launch.process.id(),

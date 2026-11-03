@@ -515,9 +515,10 @@ fn handoff_prepared_turn_dispatch(
                 refresh_engram_source_root_notices_locked(&mut inner, index);
             let opening_unconfirmed = inner.sessions[index].engram.unadmitted_active_turn.as_ref()
                 .is_some_and(|trace| trace.generation == active_turn_generation && trace.opening_prepared)
-                && engram_turn_root_capture_locked(&inner, &session_id) == EngramRootCapture::Unconfirmed;
+                .then(|| engram_turn_root_capture_explained_locked(&inner, &session_id).err())
+                .flatten();
             let record = &mut inner.sessions[index];
-            if opening_unconfirmed { mark_runtime_observation_source_uncertain(record); }
+            if opening_unconfirmed.is_some() { mark_runtime_observation_source_uncertain(record); }
             refresh_engram_source_root_prompt_locked(
                 record,
                 &mut dispatch,

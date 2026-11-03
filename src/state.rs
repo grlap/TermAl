@@ -1301,6 +1301,8 @@ struct AppState {
     /// for SSE streams to drain".
     shutdown_signal_tx: Arc<tokio::sync::watch::Sender<bool>>,
     runtime_observation_lifetime: Arc<EngramRuntimeObservationLifetime>,
+    /// Host-owned capture handles and cancellation, outside the state mutex.
+    capture_lifetime: Arc<CaptureLifetime>,
     /// Background SSE state/delta broadcast mailbox. `publish_snapshot`
     /// stores a pre-built `StateResponse` here; a dedicated thread serializes
     /// snapshots to JSON and forwards each queued item to the matching SSE

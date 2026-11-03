@@ -86,6 +86,7 @@ impl AppState {
         let place = place.clone();
         bounded_content_revision_capture(
             &live,
+            &self.capture_lifetime,
             ACCEPTANCE_SOURCE_CAPTURE_LIMIT,
             REVIEW_FREEZE_TIMEOUT,
             move || engram_place_source_basis(&place),

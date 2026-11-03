@@ -863,6 +863,7 @@ impl AppState {
             persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
             runtime_observation_lifetime: Arc::new(EngramRuntimeObservationLifetime::default()),
+        capture_lifetime: Arc::new(CaptureLifetime::default()),
             state_broadcast_mailbox: Some(state_broadcast_mailbox),
             state_broadcast_worker: None,
             telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),

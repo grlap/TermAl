@@ -120,6 +120,7 @@ impl AppState {
         let place = place.clone();
         bounded_content_revision_capture(
             &live,
+            &self.capture_lifetime,
             ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
             budget,
             move || engram_place_source_basis(&place),
@@ -148,6 +149,7 @@ impl AppState {
         let sealed = sealed.cloned();
         bounded_content_revision_capture(
             &live,
+            &self.capture_lifetime,
             ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
             budget,
             move || {

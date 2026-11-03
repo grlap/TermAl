@@ -161,6 +161,8 @@ fn run_bounded_read_windows_observed(
     before_observe: impl FnOnce(&Arc<windows_launch::WindowsChild>) -> Result<()>,
     observed: &mut BoundedReadObservation,
 ) -> Result<std::process::Output> {
+    check_capture_cancellation()?;
+    let deadline = capture_deadline(deadline);
     command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     if deadline <= std::time::Instant::now() {
         return Err(io::Error::new(io::ErrorKind::TimedOut,
@@ -169,8 +171,33 @@ fn run_bounded_read_windows_observed(
     let mut lock_wait = Duration::ZERO;
     let launch = windows_launch::prepare_with_lock_timing(command, &mut lock_wait);
     observed.launch_lock_wait = Some(lock_wait);
-    let launch = launch?;
+    let launch = Arc::new(launch?);
     let process = launch.process();
+    let capture = current_capture_cancellation();
+    let capture_job = if capture.is_some() {
+        match launch.capture_job() {
+            Ok(job) => job,
+            Err(error) => {
+                // Association failed before ResumeThread: no descendant ran.
+                let _ = process.kill();
+                let _ = launch.kill(&process, "capture setup");
+                let _ = process.wait();
+                return Err(error.into());
+            }
+        }
+    } else { None };
+    let cancel_launch = launch.clone();
+    let cancel_process = process.clone();
+    let cancel_job = capture_job.clone();
+    let _cancel = register_capture_child(move || {
+        let result = match &cancel_job {
+            Some(job) => job.terminate(),
+            None => cancel_launch.kill(&cancel_process, "capture shutdown"),
+        };
+        if let Err(error) = result {
+            eprintln!("capture cancellation> {error}");
+        }
+    });
     let result = (|| {
         observed.stage = "read";
         let stdout = process
@@ -182,13 +209,30 @@ fn run_bounded_read_windows_observed(
         let out = bounded_read_pipe(stdout, output_limit, false);
         let err = bounded_read_pipe(stderr, 64 * 1024, true);
         observed.stage = "spawn";
+        check_capture_cancellation()?;
+        if current_capture_cancellation().is_some() {
+            if let windows_launch::ContainmentStatus::Unavailable { reason } = launch.containment() {
+                // The leader is still suspended. Error cleanup terminates it
+                // before it can run code or create an unowned descendant.
+                bail!("capture containment unavailable: {reason}");
+            }
+        }
         launch.resume_after_attach(&process)?;
         before_observe(&process)?;
         observed.stage = "wait";
         let status = process
             .wait_timeout(deadline.saturating_duration_since(std::time::Instant::now()))?
             .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "bounded read deadline exceeded"))?;
-        launch.cleanup_after_shell_exit(&process, "bounded read")?;
+        if let Some(job) = &capture_job {
+            job.terminate()?;
+            if !job.finish(Some(deadline))? {
+                return Err(io::Error::new(io::ErrorKind::TimedOut,
+                    "capture job cleanup not certified before shared deadline").into());
+            }
+        } else {
+            launch.cleanup_after_shell_exit(&process, "bounded read")?;
+        }
+        check_capture_cancellation()?;
         let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
         observed.stage = "pipe";
         let stdout = out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
@@ -205,10 +249,23 @@ fn run_bounded_read_windows_observed(
         })
     })();
     if result.is_err() {
-        if let Err(error) = launch.kill(&process, "bounded read") {
-            eprintln!("bounded read> cleanup: {error:#}");
+        if let Some(job) = &capture_job {
+            if let Err(error) = job.terminate() {
+                eprintln!("bounded read> capture termination: {error}");
+            }
+            match job.finish(Some(deadline)) {
+                Ok(true) => {}
+                outcome => {
+                    eprintln!("capture_cleanup_pending Windows job: {outcome:?}");
+                    capture.as_ref().unwrap().retain_job(job.clone());
+                }
+            }
+        } else {
+            if let Err(error) = launch.kill(&process, "bounded read") {
+                eprintln!("bounded read> cleanup: {error:#}");
+            }
+            let _ = process.wait();
         }
-        let _ = process.wait();
     }
     result
 }
@@ -306,7 +363,9 @@ fn run_bounded_read_process_input_observed(
     // Unix Git children stay in the checker process group, so terminating
     // the outer checker also terminates an in-flight Git read. Windows jobs
     // compose and retain descendant ownership even across nested jobs.
-    let own_tree = own_tree || cfg!(windows);
+    check_capture_cancellation()?;
+    let deadline = capture_deadline(deadline);
+    let own_tree = own_tree || cfg!(windows) || current_capture_cancellation().is_some();
     if own_tree {
         configure_terminal_process_tree(command);
     }
@@ -338,10 +397,16 @@ fn run_bounded_read_process_input_observed(
             return Err(err);
         }
     };
+    let cancel_process = process.clone();
+    let _cancel = register_capture_child(move || {
+        if let Err(error) = cancel_process.kill() {
+            eprintln!("capture cancellation> {error}");
+        }
+    });
     let mut reaped = false;
     #[cfg(unix)]
     let mut group_cleanup_started = false;
-    let result = (|| {
+    let result = (|| -> Result<std::process::Output> {
         observed.stage = "read";
         let stdout = process
             .take_stdout()
@@ -367,6 +432,7 @@ fn run_bounded_read_process_input_observed(
         }
         observed.stage = "wait";
         loop {
+            check_capture_cancellation()?;
             if read_child_has_exited(&process)? {
                 break;
             }
@@ -388,6 +454,7 @@ fn run_bounded_read_process_input_observed(
             reaped = true;
             status
         };
+        check_capture_cancellation()?;
         // A completed process may be observed just past its deadline. Give
         // both reader threads one shared, bounded EOF/drain grace, not a zero
         // timeout racing their sends and not an unbounded receive.
@@ -473,6 +540,9 @@ fn finish_read_process_tree(
             reap_state,
             pgid,
             probe_deadline: std::time::Instant::now() + Duration::from_millis(250),
+        }).inspect(|_| {
+            // Reaping the leader alone does not certify that its group is gone.
+            remove_reaped_bounded_read(process);
         })
     }
     #[cfg(not(unix))]

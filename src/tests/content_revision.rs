@@ -546,7 +546,7 @@ fn a_bounded_capture_counts_live_threads_and_refuses_past_the_limit() {
         let (release, stalled) = std::sync::mpsc::channel::<()>();
         releases.push(release);
         let started = started.clone();
-        let revision = bounded_content_revision_capture(&live, 2, budget, move || {
+        let revision = bounded_content_revision_capture(&live, &Arc::new(CaptureLifetime::default()), 2, budget, move || {
             started.fetch_add(1, Ordering::SeqCst);
             let _ = stalled.recv();
             Some("late".to_owned())
@@ -557,7 +557,7 @@ fn a_bounded_capture_counts_live_threads_and_refuses_past_the_limit() {
     // At the limit nothing new starts. The refused capture has its own
     // counter: the stalled ones may reach theirs at any moment.
     let refused_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let refused = bounded_content_revision_capture(&live, 2, budget, {
+    let refused = bounded_content_revision_capture(&live, &Arc::new(CaptureLifetime::default()), 2, budget, {
         let refused_ran = refused_ran.clone();
         move || {
             refused_ran.store(true, Ordering::SeqCst);
@@ -570,7 +570,7 @@ fn a_bounded_capture_counts_live_threads_and_refuses_past_the_limit() {
     drop(releases);
     wait_for_no_live_captures(&live);
     // A capture within its budget returns its revision and leaves no count.
-    let taken = bounded_content_revision_capture(&live, 2, TEST_PHASE_DEADLOCK_GUARD, || {
+    let taken = bounded_content_revision_capture(&live, &Arc::new(CaptureLifetime::default()), 2, TEST_PHASE_DEADLOCK_GUARD, || {
         Some("content-v1:taken".to_owned())
     });
     assert_eq!(taken.as_deref(), Some("content-v1:taken"));
@@ -581,13 +581,13 @@ fn a_bounded_capture_counts_live_threads_and_refuses_past_the_limit() {
 fn a_bounded_capture_that_panics_is_uncounted() {
     let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let revision: Option<String> =
-        bounded_content_revision_capture(&live, 1, TEST_PHASE_DEADLOCK_GUARD, || {
+        bounded_content_revision_capture(&live, &Arc::new(CaptureLifetime::default()), 1, TEST_PHASE_DEADLOCK_GUARD, || {
             panic!("a capture that panics")
         });
     assert_eq!(revision, None);
     wait_for_no_live_captures(&live);
     // The one slot is free again.
-    let taken = bounded_content_revision_capture(&live, 1, TEST_PHASE_DEADLOCK_GUARD, || {
+    let taken = bounded_content_revision_capture(&live, &Arc::new(CaptureLifetime::default()), 1, TEST_PHASE_DEADLOCK_GUARD, || {
         Some("content-v1:after".to_owned())
     });
     assert_eq!(taken.as_deref(), Some("content-v1:after"));

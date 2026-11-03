@@ -699,6 +699,7 @@ pub(super) struct EOCheckedTurn {
 pub(super) struct EOFixtureHost {
     federation: Arc<FederationExecutorWakeSignal>,
     observation: Arc<EngramRuntimeObservationLifetime>,
+    captures: Arc<CaptureLifetime>,
     shutdown: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
@@ -707,6 +708,10 @@ impl EOFixtureHost {
         Self {
             federation: state.federation_executor_wake_signal.clone(),
             observation: state.runtime_observation_lifetime.clone(),
+            captures: {
+                *state.capture_lifetime.root.lock().unwrap() = state.test_temp_root.clone();
+                state.capture_lifetime.clone()
+            },
             shutdown: state.shutdown_signal_tx.clone(),
         }
     }
@@ -716,9 +721,9 @@ impl Drop for EOFixtureHost {
     /// The production stop sequence, in `AppState::trigger_shutdown_signal`'s
     /// order (sse_broadcast.rs).
     fn drop(&mut self) {
-        self.federation.stop();
-        self.observation.stop_and_join();
-        self.shutdown.send_replace(true);
+        retire_capture_observation_workers(
+            &self.captures, &self.observation, &self.federation, &self.shutdown,
+        );
     }
 }
 
@@ -1245,7 +1250,7 @@ fn capture_capacity_refusals_are_explained_without_losing_ordinary_facts() {
         let pending = if capacity == "workers" {
             (0..ENGRAM_CAPTURE_WORKER_LIMIT).map(|_| {
                 let gate = gate.clone();
-                EngramCapture::spawn(&workers, move || {
+                EngramCapture::spawn(&workers, &Arc::new(CaptureLifetime::default()), move || {
                     let (open, opened) = &*gate;
                     let _ = opened.wait_timeout_while(open.lock().unwrap(), DEADLOCK_GUARD,
                         |open| !*open).unwrap();
@@ -2634,7 +2639,7 @@ fn a_session_starts_no_check_while_its_capture_workers_are_at_their_limit() {
     let pending = (0..ENGRAM_CAPTURE_WORKER_LIMIT)
         .map(|_| {
             let gate = gate.clone();
-            EngramCapture::spawn(&workers, move || {
+            EngramCapture::spawn(&workers, &Arc::new(CaptureLifetime::default()), move || {
                 let (open, opened) = &*gate;
                 let _ = opened
                     .wait_timeout_while(

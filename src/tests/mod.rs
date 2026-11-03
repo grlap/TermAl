@@ -39,6 +39,7 @@ mod codex_home;
 mod codex_profile_routing;
 mod codex_protocol;
 mod codex_read_guidance;
+mod commit_hidden_retain_cost;
 mod codex_read_only_profile;
 mod codex_read_only_tracker;
 mod codex_reviewer_mcp_startup;
@@ -47,6 +48,8 @@ mod codex_terminal_reset;
 mod codex_thread_recovery;
 mod codex_threads;
 mod content_revision;
+mod capture_lifetime;
+mod capture_shutdown_regressions;
 mod conversation_markers;
 mod coordination_board_routes;
 mod coordination_instructions;
@@ -985,6 +988,7 @@ pub(crate) fn test_app_state() -> AppState {
         persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
         runtime_observation_lifetime: Arc::new(EngramRuntimeObservationLifetime::default()),
+        capture_lifetime: Arc::new(CaptureLifetime::with_test_root(Some(test_temp_root.clone()))),
         state_broadcast_mailbox: None,
         state_broadcast_worker: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),

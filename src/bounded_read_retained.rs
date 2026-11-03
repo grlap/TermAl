@@ -109,6 +109,7 @@ impl<T> BoundedReadRetainedOwners<T> {
 #[cfg(unix)]
 struct RetainedUnixReadOwner {
     process: Arc<SharedChild>,
+    capture: Option<Arc<CaptureCancellation>>,
     // Preserve uncertainty as well as confirmed reaping. A future reconcile
     // must not infer a pinned PID from an unsuccessful wait or from this Arc.
     reap_state: BoundedReadReapState,
@@ -135,6 +136,10 @@ fn retain_unresolved_bounded_read(
     detail: String,
 ) {
     let pid = process.id();
+    let capture = current_capture_cancellation();
+    if let Some(capture) = &capture {
+        capture.retain_read(process.clone());
+    }
     let evicted = unresolved_bounded_reads()
         .lock()
         .expect("read owner mutex poisoned")
@@ -142,6 +147,7 @@ fn retain_unresolved_bounded_read(
             pid,
             RetainedUnixReadOwner {
                 process,
+                capture,
                 reap_state,
             },
             detail,
@@ -162,5 +168,13 @@ fn remove_reaped_bounded_read(process: &Arc<SharedChild>) {
         .lock()
         .expect("read owner mutex poisoned")
         // PID reuse after wait must not remove a newer retained child's row.
-        .remove_reaped_matching(process.id(), |owner| Arc::ptr_eq(&owner.process, process));
+        .remove_reaped_matching(process.id(), |owner| {
+            let matches = Arc::ptr_eq(&owner.process, process);
+            if matches {
+                if let Some(capture) = &owner.capture {
+                    capture.complete_read(process);
+                }
+            }
+            matches
+        });
 }

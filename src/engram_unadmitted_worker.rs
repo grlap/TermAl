@@ -78,9 +78,13 @@ impl EngramRuntimeObservationLifetime {
         Some(guard)
     }
 
-    fn stop_and_join(&self) {
+    fn request_stop(&self) {
         self.stopping
             .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    fn stop_and_join(&self) {
+        self.request_stop();
         #[cfg(test)]
         self.observe("stopping");
         let mut count = self
@@ -154,9 +158,8 @@ impl AppState {
         }
         let state = self.clone();
         let worker_session = session_id.to_owned();
-        let spawned = std::thread::Builder::new()
-            .name("termal-unadmitted-observation".to_owned())
-            .spawn(move || state.run_runtime_observation_worker(&worker_session));
+        let spawned = self.capture_lifetime.spawn_observer("termal-unadmitted-observation",
+            move || state.run_runtime_observation_worker(&worker_session));
         if let Err(error) = spawned {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(session_id) {

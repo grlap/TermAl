@@ -109,6 +109,22 @@ thread_local! {
     static TEST_BEFORE_STATE_SERIALIZE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
+// Shared by production host retirement and fixture hosts. No StateInner or
+// persistent store is needed to own these process-local workers.
+fn retire_capture_observation_workers(
+    captures: &Arc<CaptureLifetime>,
+    observations: &Arc<EngramRuntimeObservationLifetime>,
+    federation: &FederationExecutorWakeSignal,
+    shutdown: &tokio::sync::watch::Sender<bool>,
+) {
+    observations.request_stop();
+    captures.stop();
+    federation.stop();
+    observations.stop_and_join();
+    shutdown.send_replace(true);
+    captures.stop_and_join();
+}
+
 impl AppState {
     /// Central commit path: bumps the revision, wakes the persist
     /// thread, and broadcasts a metadata-first state snapshot over SSE.
@@ -625,9 +641,12 @@ impl AppState {
     /// single-producer broadcast" pattern. See bugs.md "One-shot SSE
     /// shutdown notification can be missed before waiter registration".
     fn trigger_shutdown_signal(&self) {
-        self.federation_executor_wake_signal.stop();
-        self.runtime_observation_lifetime.stop_and_join();
-        self.shutdown_signal_tx.send_replace(true);
+        retire_capture_observation_workers(
+            &self.capture_lifetime,
+            &self.runtime_observation_lifetime,
+            &self.federation_executor_wake_signal,
+            &self.shutdown_signal_tx,
+        );
     }
 
     fn host_is_shutting_down(&self) -> bool {

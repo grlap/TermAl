@@ -82,8 +82,9 @@ fn engram_spawn_basis_capture(
     place: EngramBasisPlace,
     workers: &Arc<std::sync::atomic::AtomicUsize>,
     provenance: EngramRootCapture,
+    lifetime: &Arc<CaptureLifetime>,
 ) -> Arc<EngramBasisCapture> {
-    EngramCapture::spawn(workers, move || provenance.stamp(engram_place_source_basis(&place)))
+    EngramCapture::spawn(workers, lifetime, move || provenance.stamp(engram_place_source_basis(&place)))
 }
 
 #[cfg(test)]
@@ -102,11 +103,12 @@ fn engram_spawn_toolchain_capture(
     command: EngramCheckCommand,
     directory: PathBuf,
     workers: &Arc<std::sync::atomic::AtomicUsize>,
+    lifetime: &Arc<CaptureLifetime>,
 ) -> Arc<EngramToolchainCapture> {
     if let Some(label) = TEST_ENGRAM_TOOLCHAIN_LABEL.with(|label| label.borrow().clone()) {
         return EngramToolchainCapture::settled(label);
     }
-    EngramCapture::spawn(workers, move || {
+    EngramCapture::spawn(workers, lifetime, move || {
         engram_toolchain_label(
             &command,
             &directory,
@@ -138,6 +140,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
     /// the capture ready also sees it no longer counted.
     fn spawn(
         workers: &Arc<std::sync::atomic::AtomicUsize>,
+        lifetime: &Arc<CaptureLifetime>,
         capture: impl FnOnce() -> T + Send + 'static,
     ) -> Arc<Self> {
         let pending = Arc::new(Self {
@@ -147,11 +150,13 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
         });
         let filling = pending.clone();
         let worker = EngramCaptureWorker::start(workers);
-        std::thread::spawn(move || {
+        if let Err(error) = lifetime.spawn("termal-check-capture", move || {
             let value = capture();
             drop(worker);
             filling.finish(value);
-        });
+        }) {
+            eprintln!("engram> check capture did not start: {error}");
+        }
         pending
     }
 
@@ -1905,14 +1910,14 @@ impl AppState {
             record.engram.active_turn_checks.remove(oldest);
         }
         let start_basis =
-            engram_spawn_basis_capture(target.basis_place(), &workers, provenance);
+            engram_spawn_basis_capture(target.basis_place(), &workers, provenance, &self.capture_lifetime);
         // The toolchain is named as the check starts, from the overrides it
         // ran under, not from whatever they say when the turn closes.
         #[cfg(test)]
         let toolchain_command = engram_build_toolchain_command(&command);
         #[cfg(test)]
         let toolchain = if engram_cargo_toolchain_selector(&toolchain_command).is_some() {
-            engram_spawn_toolchain_capture(toolchain_command, target.directory.clone(), &workers)
+            engram_spawn_toolchain_capture(toolchain_command, target.directory.clone(), &workers, &self.capture_lifetime)
         } else {
             EngramToolchainCapture::settled(None)
         };
@@ -2701,6 +2706,7 @@ impl AppState {
             runtime_output_cut,
             &workers,
             root_provenance,
+            &self.capture_lifetime,
         );
     }
 

@@ -29,6 +29,9 @@ mod unknown_fields;
 #[path = "engram_source_root_off_rebind.rs"]
 mod off_rebind;
 
+#[path = "engram_unconfirmed_root_reasons.rs"]
+mod unconfirmed_root_reasons;
+
 impl EOCheckedTurn {
     /// These reconciliation fixtures script BOTH producer operations. A
     /// status tuple alone cannot invent the canonical run/event carrier.
@@ -5339,7 +5342,7 @@ fn ordinary_capture_owners_keep_fixture_files_alive_after_the_turn_wrapper_drops
     let worker_root = temp_root.clone();
     let (ready, started) = mpsc::channel();
     let (release, released) = mpsc::channel();
-    let capture = EngramCapture::spawn(&workers, move || {
+    let capture = EngramCapture::spawn(&workers, &Arc::new(CaptureLifetime::default()), move || {
         ready.send(()).unwrap();
         released.recv_timeout(DEADLOCK_GUARD).unwrap();
         let exists = worker_root.exists();

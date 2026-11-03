@@ -956,21 +956,31 @@ impl EngramRootCapture {
 }
 
 fn engram_root_capture_locked(inner: &StateInner, session_id: &str) -> EngramRootCapture {
+    engram_root_capture_explained_locked(inner, session_id)
+        .unwrap_or(EngramRootCapture::Unconfirmed)
+}
+
+/// The capture, or the reason it is unconfirmed. This is the only judge;
+/// `engram_root_capture_locked` is exactly its `Unconfirmed` projection.
+fn engram_root_capture_explained_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> Result<EngramRootCapture, EngramUnconfirmedRootReason> {
     let Some(index) = inner.find_session_index(session_id) else {
-        return EngramRootCapture::Unconfirmed;
+        return Err(EngramUnconfirmedRootReason::SessionMissing);
     };
     let record = &inner.sessions[index];
     let Some(binding) = record.engram.work_binding.as_ref() else {
-        return EngramRootCapture::Unnamed;
+        return Ok(EngramRootCapture::Unnamed);
     };
     let Some(store) = engram_project_for_session_locked(inner, session_id)
         .and_then(|p| p.engram.as_ref())
         .and_then(|s| s.authority_store_key.as_ref())
     else {
-        return EngramRootCapture::Unconfirmed;
+        return Err(EngramUnconfirmedRootReason::StoreIdentityMissing);
     };
-    if engram_authority_work_unresolved(inner, store, &binding.work_id) {
-        return EngramRootCapture::Unconfirmed;
+    if let Some(reason) = engram_authority_work_unresolved_reason(inner, store, &binding.work_id) {
+        return Err(reason);
     }
     if !inner.engram_work_naming_history.iter().any(|history| {
         &history.store == store
@@ -980,17 +990,17 @@ fn engram_root_capture_locked(inner: &StateInner, session_id: &str) -> EngramRoo
                 .iter()
                 .any(|proof| engram_same_recovery_run(&proof.binding, binding))
     }) {
-        return EngramRootCapture::Unconfirmed;
+        return Err(EngramUnconfirmedRootReason::ClaimProofMissing);
     }
     if matches!(
         record.engram.named_root,
         Some(EngramNamedRootState::Unknown)
     ) {
-        return EngramRootCapture::Unconfirmed;
+        return Err(EngramUnconfirmedRootReason::NamedRootUnknown);
     }
     let journal = engram_root_journal(&inner.engram_named_root_journal, store, &binding.claim_id);
-    if journal.is_some_and(EngramNamedRootJournal::requires_reconciliation) {
-        return EngramRootCapture::Unconfirmed;
+    if let Some(reason) = journal.and_then(EngramUnconfirmedRootReason::of_journal) {
+        return Err(reason);
     }
     if let Some(EngramNamedRootState::Bound {
         generation,
@@ -1010,13 +1020,13 @@ fn engram_root_capture_locked(inner: &StateInner, session_id: &str) -> EngramRoo
                     && root.generation == *generation as u64
                     && engram_named_at_matches(&root.named_at, named_at)
             }) {
-            EngramRootCapture::Recorded {
+            Ok(EngramRootCapture::Recorded {
                 generation: *generation,
                 state: EngramSourceRootState::Named,
                 workspace_id: workspace_id.clone(),
-            }
+            })
         } else {
-            EngramRootCapture::Unconfirmed
+            Err(EngramUnconfirmedRootReason::BoundRootMismatch)
         };
     }
     if let Some(journal) = journal {
@@ -1038,25 +1048,25 @@ fn engram_root_capture_locked(inner: &StateInner, session_id: &str) -> EngramRoo
             {
                 // A lifecycle end not reported by this host has no host
                 // ended event to cite. It is an ordinary unbound capture.
-                return EngramRootCapture::Unnamed;
+                return Ok(EngramRootCapture::Unnamed);
             }
             if journal.obsolete && event.kind == EngramNamedRootKind::Bound {
-                return EngramRootCapture::Unconfirmed;
+                return Err(EngramUnconfirmedRootReason::ConfirmedEventRetired);
             }
-            return EngramRootCapture::Recorded {
+            return Ok(EngramRootCapture::Recorded {
                 generation: event.root.generation as i64,
                 workspace_id: event.root.root.clone(),
                 state: match event.kind {
                     EngramNamedRootKind::Bound => EngramSourceRootState::Named,
                     EngramNamedRootKind::Ended => EngramSourceRootState::Ended,
                 },
-            };
+            });
         }
     }
     // An older host's local-only entry has no event to cite. Its path is
     // retained for repair, but it cannot mint evidence as a confirmed root.
     match &record.engram.named_root {
-        Some(EngramNamedRootState::Unknown) => EngramRootCapture::Unconfirmed,
+        Some(EngramNamedRootState::Unknown) => Err(EngramUnconfirmedRootReason::NamedRootUnknown),
         _ if engram_work_source_root_for_claim(
             &inner.engram_work_source_roots,
             store,
@@ -1065,41 +1075,55 @@ fn engram_root_capture_locked(inner: &StateInner, session_id: &str) -> EngramRoo
         )
         .is_some() =>
         {
-            EngramRootCapture::Unconfirmed
+            Err(EngramUnconfirmedRootReason::LocalEntryWithoutEvent)
         }
-        _ => EngramRootCapture::Unnamed,
+        _ => Ok(EngramRootCapture::Unnamed),
     }
 }
 
 /// A running observation keeps the exact root image it opened with.
 /// Naming during the turn cannot relabel its checks or closing capture.
 fn engram_turn_root_capture_locked(inner: &StateInner, session_id: &str) -> EngramRootCapture {
-    let current = engram_root_capture_locked(inner, session_id);
+    engram_turn_root_capture_explained_locked(inner, session_id)
+        .unwrap_or(EngramRootCapture::Unconfirmed)
+}
+
+/// `engram_turn_root_capture_locked` with the reason it is unconfirmed.
+fn engram_turn_root_capture_explained_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> Result<EngramRootCapture, EngramUnconfirmedRootReason> {
+    let current = engram_root_capture_explained_locked(inner, session_id);
     let Some(index) = inner.find_session_index(session_id) else { return current; };
     let record = &inner.sessions[index];
     if record.engram.unadmitted_active_turn.as_ref().is_some_and(|trace|
         trace.generation == record.active_turn_generation
             && trace.opening_prepared && trace.opening_root.is_none())
     {
-        return EngramRootCapture::Unconfirmed;
+        return Err(EngramUnconfirmedRootReason::OpeningWithoutRoot);
     }
     let Some(opening) = record.engram.unadmitted_active_turn.as_ref()
         .filter(|trace| trace.generation == record.active_turn_generation)
         .and_then(|trace| trace.opening_root.as_ref())
     else { return current; };
-    if engram_authority_work_unresolved(inner, &opening.store, &opening.binding.work_id) {
-        return EngramRootCapture::Unconfirmed;
+    if let Some(reason) =
+        engram_authority_work_unresolved_reason(inner, &opening.store, &opening.binding.work_id)
+    {
+        return Err(reason);
     }
-    if current == EngramRootCapture::Unconfirmed {
+    if let Err(reason) = current {
         let retired = engram_root_journal(&inner.engram_named_root_journal,
             &opening.store, &opening.binding.claim_id).is_some_and(|journal|
                 journal.obsolete && journal.retirement.is_some()
                     && journal.pending.is_none() && journal.reconciliation.is_none());
         if !retired || record.engram.named_root == Some(EngramNamedRootState::Unknown) {
-            return current;
+            return Err(reason);
         }
     }
-    opening.provenance.clone()
+    match &opening.provenance {
+        EngramRootCapture::Unconfirmed => Err(EngramUnconfirmedRootReason::OpeningCapturedUnconfirmed),
+        provenance => Ok(provenance.clone()),
+    }
 }
 
 fn engram_removed_root_read_now(clock: &EngramBudgetClock) -> std::time::Instant {

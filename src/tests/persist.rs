@@ -2052,6 +2052,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
         runtime_observation_lifetime: Arc::new(EngramRuntimeObservationLifetime::default()),
+        capture_lifetime: Arc::new(CaptureLifetime::with_test_root(Some(test_temp_root.clone()))),
         state_broadcast_mailbox: None,
         state_broadcast_worker: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),

@@ -2653,8 +2653,8 @@ fn source_root_notice_recomposition_and_acknowledgement_keep_exact_ordinary_owne
     };
     claimed.record_mut(|record| {
         record.engram.source_root_notices = vec![notice.clone()];
-        refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[notice.clone()], false);
-        refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[notice.clone()], false);
+        refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[notice.clone()], None);
+        refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[notice.clone()], None);
     });
     let TurnDispatch::PersistentCodex { command, .. } = &dispatch else { panic!("Codex fixture") };
     assert_eq!(command.prompt, format!("{}\n\n{base}", notice.line()));
@@ -2666,7 +2666,7 @@ fn source_root_notice_recomposition_and_acknowledgement_keep_exact_ordinary_owne
             "equal prose is not equal delivery identity");
         acknowledge_engram_source_root_notices_locked(record, &[successor.clone()]);
         assert!(record.engram.source_root_notices.is_empty());
-        refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[], false);
+        refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[], None);
     });
     let TurnDispatch::PersistentCodex { command, .. } = &dispatch else { panic!("Codex fixture") };
     assert_eq!(command.prompt, base, "recomposition preserves the user quotation and naming line");
@@ -2675,7 +2675,7 @@ fn source_root_notice_recomposition_and_acknowledgement_keep_exact_ordinary_owne
         let next = EngramSourceRootNotice { id: "next-opening".into(), ..successor.clone() };
         record.engram.source_root_notices = vec![next.clone()];
         acknowledge_engram_source_root_notices_locked(record, &[successor]);
-        refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[next.clone()], false);
+        refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[next.clone()], None);
         assert_eq!(record.engram.source_root_notices, vec![next]);
         assert!(record.engram.pending_source_root_line.as_deref().unwrap().contains("ordinary naming line"));
     });

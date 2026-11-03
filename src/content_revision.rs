@@ -121,6 +121,7 @@ fn capture_content_revision(git: &ReviewFreezeGit) -> Result<String> {
     let mut entries = 0usize;
     let mut verified_parents = std::collections::HashSet::new();
     for (bytes, keeps_bytes) in paths {
+        check_capture_cancellation()?;
         if std::time::Instant::now() >= git.deadline {
             bail!("content revision deadline exceeded");
         }
@@ -269,14 +270,15 @@ fn content_revision_io_not_found(error: &std::io::Error) -> bool {
 }
 
 /// Runs `capture` on its own thread and waits at most `budget` for it. A file
-/// read cannot be interrupted, so a capture that overruns is left to finish
-/// and its result dropped; its thread lives until its read returns. `live`
+/// read cannot be interrupted, so a capture that overruns stays owned by the
+/// host lifetime until shutdown joins it (or retains pending cleanup). `live`
 /// counts the threads alive, healthy ones included, and no thread starts
 /// while it is at `limit`, so a worktree whose reads stall costs at most
 /// `limit` threads however often it is asked. `None` when the capture fails,
 /// overruns or panics, is refused for the limit, or its thread cannot start.
 fn bounded_content_revision_capture<T: Send + 'static>(
     live: &Arc<std::sync::atomic::AtomicUsize>,
+    lifetime: &Arc<CaptureLifetime>,
     limit: usize,
     budget: Duration,
     capture: impl FnOnce() -> Option<T> + Send + 'static,
@@ -302,9 +304,7 @@ fn bounded_content_revision_capture<T: Send + 'static>(
     // cannot start.
     let release = Release(live.clone());
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    let spawned = std::thread::Builder::new()
-        .name("termal-content-revision".to_owned())
-        .spawn(move || {
+    let spawned = lifetime.spawn("termal-content-revision", move || {
             let _release = release;
             let _ = sender.send(capture());
         });

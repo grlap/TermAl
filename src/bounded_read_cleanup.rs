@@ -188,7 +188,6 @@ impl BoundedReadGroupIo for UnixBoundedReadGroup<'_> {
     fn reap(&mut self) -> io::Result<Self::Status> {
         let status = self.reap_state.wait(|| self.process.wait())?;
         *self.reaped = true;
-        remove_reaped_bounded_read(self.process);
         Ok(status)
     }
 

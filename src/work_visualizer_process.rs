@@ -93,6 +93,9 @@ fn work_read_launch_command(
     connection: &EngramConnectionConfig,
     host_workdir: &FsPath,
 ) -> Result<BoundedReadCommand, ApiError> {
+    // Only the Windows launch validates and runs in the host workdir.
+    #[cfg(not(windows))]
+    let _ = host_workdir;
     #[cfg(not(windows))]
     let mut command = bounded_read_command(&connection.binary_path);
     #[cfg(not(windows))]

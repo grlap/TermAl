@@ -334,7 +334,7 @@ fn refresh_engram_source_root_prompt_locked(
     record: &mut SessionRecord,
     dispatch: &mut TurnDispatch,
     notices: &[EngramSourceRootNotice],
-    opening_unconfirmed: bool,
+    opening_unconfirmed: Option<EngramUnconfirmedRootReason>,
 ) {
     if record.active_turn_generation != dispatch.active_turn_generation() { return; }
     let (prompt, slot) = match dispatch {
@@ -342,11 +342,14 @@ fn refresh_engram_source_root_prompt_locked(
         TurnDispatch::PersistentCodex { command, opening_prompt, .. } => (&mut command.prompt, opening_prompt),
         TurnDispatch::PersistentAcp { command, opening_prompt, .. } => (&mut command.prompt, opening_prompt),
     };
-    if notices.is_empty() && !opening_unconfirmed && slot.is_none() { return; }
+    if notices.is_empty() && opening_unconfirmed.is_none() && slot.is_none() { return; }
     let base = &slot.get_or_insert_with(|| EngramOpeningPrompt { base: prompt.clone() }).base;
-    let mut lines: Vec<_> = notices.iter().map(EngramSourceRootNotice::line).collect();
-    if opening_unconfirmed {
-        lines.push("[TermAl] This turn's source root is unconfirmed. Any shown path is the last acknowledged local selection. Source, check and evaluation evidence is withheld; the prompt proceeds. Refresh authority or name the worktree for a later turn.");
+    let mut lines: Vec<_> = notices.iter().map(|notice| notice.line().to_owned()).collect();
+    if let Some(reason) = opening_unconfirmed {
+        lines.push(format!(
+            "[TermAl] This turn's source root is unconfirmed. Any shown path is the last acknowledged local selection. Source, check and evaluation evidence is withheld; the prompt proceeds. Refresh authority or name the worktree for a later turn. Reason: {}.",
+            reason.sentence()
+        ));
     }
     *prompt = if lines.is_empty() { base.clone() } else { format!("{}\n\n{base}", lines.join("\n")) };
 }
@@ -1550,6 +1553,7 @@ enum EngramSourceRootValidation {
 /// refused, and the thread is left to finish with its answer dropped.
 fn engram_validate_source_root_within(
     live: &Arc<std::sync::atomic::AtomicUsize>,
+    lifetime: &Arc<CaptureLifetime>,
     path: String,
     workdir: String,
     project_root: String,
@@ -1557,6 +1561,7 @@ fn engram_validate_source_root_within(
 ) -> std::result::Result<(String, String), EngramSourceRootValidation> {
     engram_run_source_root_validation_within(
         live,
+        lifetime,
         ENGRAM_SOURCE_ROOT_VALIDATION_LIMIT,
         budget,
         path.clone(),
@@ -1573,6 +1578,7 @@ const ENGRAM_SOURCE_ROOT_VALIDATION_LIMIT: usize = 4;
 /// fewer than `limit` such threads counted in `live` are still running.
 fn engram_run_source_root_validation_within(
     live: &Arc<std::sync::atomic::AtomicUsize>,
+    lifetime: &Arc<CaptureLifetime>,
     limit: usize,
     budget: Duration,
     path: String,
@@ -1599,9 +1605,7 @@ fn engram_run_source_root_validation_within(
     }
     let release = Release(live.clone());
     let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::Builder::new()
-        .name("engram-source-root-validate".to_owned())
-        .spawn(move || {
+    lifetime.spawn("engram-source-root-validate", move || {
             let _release = release;
             let _ = sender.send(validate());
         })
@@ -2400,6 +2404,7 @@ impl AppState {
             Some(path) => Some(
                 engram_validate_source_root_within(
                     &validations_live,
+                    &self.capture_lifetime,
                     path,
                     workdir.clone(),
                     project_root.clone(),
