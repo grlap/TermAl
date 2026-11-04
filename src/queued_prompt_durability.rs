@@ -19,6 +19,22 @@
 #[cfg_attr(not(test), allow(dead_code))]
 const QUEUED_PROMPT_DURABILITY_BUDGET: Duration = Duration::from_secs(30);
 
+#[cfg(test)]
+thread_local! {
+    // Installed by one test request and transferred to its settlement thread.
+    // Observing the content ACK alone does not join its later release attempt.
+    static TEST_QUEUED_PROMPT_SETTLEMENT: std::cell::RefCell<Option<Arc<dyn Fn(&str) + Send + Sync>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn test_queued_prompt_settlement_boundary(phase: &str) {
+    let hook = TEST_QUEUED_PROMPT_SETTLEMENT.with(|slot| slot.borrow().clone());
+    if let Some(hook) = hook {
+        hook(phase);
+    }
+}
+
 /// A queued prompt no entry point may promote until a persistence
 /// acknowledgement of exactly this content.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -247,6 +263,8 @@ impl AppState {
         let state = self.clone();
         let session_id = session_id.to_owned();
         let prompt_id = prompt_id.to_owned();
+        #[cfg(test)]
+        let settlement_hook = TEST_QUEUED_PROMPT_SETTLEMENT.with(|slot| slot.borrow_mut().take());
         // The writer thread only hands the outcome over: settling takes the
         // state lock and may dispatch, which never happens on the writer.
         // A thread the OS refuses must not unwind the writer: the hold then
@@ -255,6 +273,8 @@ impl AppState {
             let spawned = std::thread::Builder::new()
                 .name("queued-prompt-durability".to_owned())
                 .spawn(move || {
+                    #[cfg(test)]
+                    TEST_QUEUED_PROMPT_SETTLEMENT.with(|slot| *slot.borrow_mut() = settlement_hook);
                     state.settle_queued_prompt_durability(&session_id, &prompt_id, &nonce, result);
                 });
             if let Err(error) = spawned {
@@ -337,7 +357,11 @@ impl AppState {
         };
         match settlement {
             QueuedPromptDurabilitySettlement::Acknowledged => {
-                self.dispatch_released_queued_prompt(session_id, prompt_id)
+                #[cfg(test)]
+                test_queued_prompt_settlement_boundary("acknowledged");
+                self.dispatch_released_queued_prompt(session_id, prompt_id);
+                #[cfg(test)]
+                test_queued_prompt_settlement_boundary("released");
             }
             QueuedPromptDurabilitySettlement::Changed => {
                 if !self.request_queued_prompt_durability(session_id, prompt_id) {

@@ -2,6 +2,11 @@
 //! Historical checkpoint producers and their accounting are physically gone.
 use super::*;
 
+mod settlement_selection {
+    use super::*;
+    include!("engram_selected_resume_settlement.rs");
+}
+
 fn ordinary_receipt_fixture(queued: bool, receipted: bool) -> (
     AppState, String, String, Arc<ScriptedEngramControlTransport>,
     mpsc::Receiver<CodexRuntimeCommand>,
@@ -205,6 +210,7 @@ fn human_prompt_reusable_selected_ordinary_resume_runs_its_wal_preserving_stored
         assert!(!hold.acknowledged);
         (hold.nonce.clone(), hold.content.clone())
     };
+    let settled = settlement_selection::observe_settlement_completion();
     assert!(state.request_queued_prompt_durability(&session, "queued-before-off"));
     let guard = phase_sync::PollGuard::new();
     loop {
@@ -219,6 +225,9 @@ fn human_prompt_reusable_selected_ordinary_resume_runs_its_wal_preserving_stored
         if acknowledged { break; }
         guard.wait("actual content durability acknowledgement");
     }
+    // The ACK is published before the asynchronous paused-queue release attempt
+    // records the worktree. Select only after that attempt finishes mutating.
+    phase_sync::receive(&settled, "content settlement release attempt completed");
     assert!(receiver.try_recv().is_err(), "content ACK alone cannot resume a paused queue");
     let (selection, original) = {
         let inner = state.inner.lock().unwrap();
