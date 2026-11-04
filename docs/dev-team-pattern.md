@@ -379,13 +379,17 @@ condition→action table. `class` is `routine` only until tm-uwx.3.
 5. **Fingerprint helper.** One repo-provided command computing exactly
    the three §7.2.1 digests, so declarer and auditor never copy-paste
    the pipeline separately.
-6. **Queued-wake hygiene** (diagnosed in the field, bead ids pending
-   implementer filing) — three separable items: (a) dispatch-time
-   revalidation of queued wakes against the current cursor; (b)
-   ack-time sweep of emptied wakes; (c) workspace-watcher ignore-list
-   additions so coordination writes (`.collab/`, `.beads/`) stop being
-   attributed to whichever session happens to be mid-turn in the shared
-   worktree.
+6. **Queued-wake hygiene** — diagnosed in the field and originally recorded
+   with bead ids pending implementer filing. The proposal had three separable
+   items: (a) dispatch-time revalidation of queued wakes against the current
+   cursor; (b) ack-time sweep of emptied wakes; (c) workspace-watcher ignores.
+   This update does not assert the current status of (a) or (b).
+   Item (c) is **completed**: the workspace watcher ignores coordination
+   writes (`.collab/`, `.beads/`).
+   `is_ignored_workspace_file_event_path` in `src/workspace_watch.rs` keeps
+   these paths out of turn attribution; the
+   `workspace_watcher_ignores_internal_beads_and_collaboration_metadata`
+   test in `src/tests/file_changes.rs` preserves that behavior.
 
 ### 7.4 Scorecard
 

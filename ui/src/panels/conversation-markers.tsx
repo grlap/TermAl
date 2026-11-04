@@ -589,18 +589,14 @@ export function shouldOpenConversationMarkerContextMenu(
   }
   // Keep marker actions on an explicit message-header affordance. Message
   // bodies keep the native context menu for copy/select/link/code interactions.
-  if (!findConversationMarkerContextMenuTrigger(root, target)) {
-    return false;
-  }
-  return target.closest(NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR) === null;
+  return findActivatableConversationMarkerContextMenuTrigger(root, target) !== null;
 }
 
 /**
  * Resolves the explicit marker-menu trigger for pointer/keyboard activation.
  *
- * Unlike the context-menu predicate above, this intentionally does not inspect
- * selected text because click/key activation is only allowed from the trigger
- * itself.
+ * This lookup does not inspect selected text. Pointer context-menu admission
+ * checks the selection before resolving its explicit header trigger.
  */
 export function findConversationMarkerContextMenuTrigger(
   root: HTMLElement,

@@ -8,6 +8,45 @@ function session(id: string): Session {
     model: "codex", status: "idle", preview: "", messages: [], messagesLoaded: true };
 }
 
+describe("repair demand lookup bounds", () => {
+  it("does not search resident sessions for invisible repair demands", () => {
+    let residentIdReads = 0;
+    const count = 2048;
+    const residents = Array.from({ length: count }, (_, index) => {
+      const id = `hidden-${index}`;
+      return Object.defineProperty(session(id), "id", {
+        get() { residentIdReads += 1; return id; },
+        enumerable: true,
+      });
+    });
+    const authority = new TranscriptRepairAuthority(undefined, residents);
+
+    for (let index = 0; index < count; index += 1) {
+      expect(authority.needsTailRead(`hidden-${index}`, false)).toBe(false);
+    }
+
+    expect(residentIdReads).toBe(0);
+  });
+
+  it("retains invisible repair demand until the session becomes visible", () => {
+    const initial = { ...session("local"), bodySeq: 0, bodySeqEpoch: "local-instance" };
+    const authority = new TranscriptRepairAuthority(undefined, [initial]);
+    authority.setServerInstance("local-instance");
+    authority.adoptTail(initial);
+    authority.declareLoss("lagged");
+    const resident = authority.sessionsRef.current[0];
+
+    expect(authority.needsTailRead("local", false)).toBe(false);
+    expect(authority.needsTailRead("local", true)).toBe(true);
+    expect(authority.needsTailRead("local", false)).toBe(false);
+    expect(authority.needsTailRead("local", true)).toBe(true);
+    expect(authority.sessionsRef.current[0]).toBe(resident);
+
+    authority.adoptTail({ ...initial, bodySeq: 1 });
+    expect(authority.needsTailRead("local", true)).toBe(false);
+  });
+});
+
 describe("local attached-tail slice", () => {
   const text = (id: string, body: string) => ({ id, type: "text" as const,
     author: "assistant" as const, timestamp: "10:00", text: body });

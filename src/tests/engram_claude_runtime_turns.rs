@@ -410,6 +410,8 @@ fn endpoint_comparison() -> EngramRuntimeClosingCapture {
                 source_revision: "content-v1:before".into(),
                 observed_at: "2026-10-18T10:00:00Z".into(),
             },
+            source_root_generation: None,
+            source_root_state: None,
         }),
         binding,
         root_basis: EngramObservationRootBasis {

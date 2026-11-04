@@ -7,6 +7,9 @@ use super::*;
 #[path = "test_run_registration_identity.rs"]
 mod identity;
 
+#[path = "test_run_registration_clone.rs"]
+mod clone_binding;
+
 #[path = "test_run_exact_query.rs"]
 mod exact_query;
 

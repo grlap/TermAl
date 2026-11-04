@@ -47,6 +47,7 @@
 import type { ReactNode } from "react";
 import { renderHighlightedText, type SearchHighlightTone } from "../search-highlight";
 import type { ImageAttachment, Session } from "../types";
+import { MessageSourceSessionName } from "../message-source-session-navigation";
 
 export function promptCommandMetaLabel(text: string, expandedText?: string | null) {
   return expandedText && text.trim().startsWith("/") ? "Command" : null;
@@ -57,6 +58,7 @@ export function MessageMeta({
   timestamp,
   trailing,
   sourceName,
+  sourceSessionId,
 }: {
   author: string;
   timestamp: string;
@@ -64,21 +66,30 @@ export function MessageMeta({
   // Peer sender name for a queued prompt delivered through
   // `termal_send_to_session`. Ordinary user prompts leave this unset.
   sourceName?: string | null;
+  sourceSessionId?: string | null;
 }) {
   const isUser = author === "you";
   const trimmedSourceName =
     typeof sourceName === "string" ? sourceName.trim() : "";
   const displayName = isUser ? trimmedSourceName || "You" : "Agent";
+  const authorClassName = `message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`;
+  const authorLabel = <span className={authorClassName}>{displayName}</span>;
 
   return (
     <div
       className="message-meta"
     >
-      <span
-        className={`message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`}
-      >
-        {displayName}
-      </span>
+      {isUser && trimmedSourceName && sourceSessionId ? (
+        <MessageSourceSessionName
+          sessionId={sourceSessionId}
+          name={displayName}
+          className={authorClassName}
+          markerMenuTrigger={false}
+          fallback={authorLabel}
+        />
+      ) : (
+        authorLabel
+      )}
       <span className="message-meta-end">
         {trailing}
         <span>{timestamp}</span>

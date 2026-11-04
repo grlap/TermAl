@@ -31,6 +31,9 @@ Implemented:
   preformatted table-like layout for readability.
 - Token redaction in logs/errors and bounded chunking for long forwarded/chat
   text. Digest messages are intentionally compact single messages.
+- A session API that sends a Markdown file from the session's workdir or
+  project root to the linked chat as a document. See
+  [`telegram-markdown-documents.md`](./telegram-markdown-documents.md).
 
 Not implemented yet:
 

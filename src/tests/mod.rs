@@ -240,6 +240,7 @@ mod shared_codex_thread_setup;
 mod state_mutex;
 mod state_lock_registration;
 mod telegram;
+mod telegram_documents;
 mod telegram_forwarding;
 mod telegram_relay_lifecycle;
 mod telegram_settings;

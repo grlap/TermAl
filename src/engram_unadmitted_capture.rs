@@ -287,6 +287,77 @@ fn unadmitted_host_check_occurrence_id(turn_ref: &str, tool_key: &str, occurrenc
 struct EngramRuntimeCheckpointBasis {
     binding: EngramControlWorkBinding,
     endpoint: EngramMeasuredBaseline,
+    /// The root image the endpoint was measured in: a named root's generation
+    /// and state, or neither for an unnamed workdir. A later sighting compares
+    /// only under the same image, so a rebind or renaming starts unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_root_generation: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_root_state: Option<EngramSourceRootState>,
+}
+
+impl EngramRuntimeCheckpointBasis {
+    fn of_sighting(
+        binding: EngramControlWorkBinding,
+        source_basis: &EngramExecutionSourceBasis,
+        observed_at: &str,
+    ) -> Self {
+        Self {
+            binding,
+            endpoint: EngramMeasuredBaseline {
+                workspace_id: source_basis.workspace_id.clone(),
+                source_revision: source_basis.source_revision.clone(),
+                observed_at: observed_at.to_owned(),
+            },
+            source_root_generation: source_basis.source_root_generation,
+            source_root_state: source_basis.source_root_state,
+        }
+    }
+}
+
+/// The baseline a settlement establishes, if any: the closing source sighting
+/// of the session's newest turn, settled now from pending to a receipt that
+/// Engram accounted as a sighting (an audit-only or other receipt is not), while
+/// no later turn has started and the session still holds the sighting's exact
+/// binding. A refused, failed or unresolved sighting establishes nothing.
+fn engram_recorded_closing_baseline(
+    record: &SessionRecord,
+    expected: &EngramRuntimeObservationReport,
+    next: &EngramRuntimeObservationReport,
+    envelope_index: usize,
+) -> Option<EngramRuntimeCheckpointBasis> {
+    let before = expected.envelopes.get(envelope_index)?;
+    let after = next.envelopes.get(envelope_index)?;
+    let EngramRuntimeObservationDelivery::Recorded { receipt } = &after.delivery else {
+        return None;
+    };
+    if !matches!(before.delivery, EngramRuntimeObservationDelivery::Pending { .. }) {
+        return None;
+    }
+    let Ok(EngramControlRequest::ExecutionObserve { observation, .. }) =
+        serde_json::from_value::<EngramControlRequest>(after.request.clone())
+    else {
+        return None;
+    };
+    let EngramInterTurnOccurrence::SourceSighting { source_basis, observed_at } = &observation.occurrence
+    else {
+        return None;
+    };
+    let accepted = EngramSourceObservationReceipt::from_recorded_result(
+        receipt.clone(), &observation, &next.observing_session,
+    )
+    .is_ok_and(|receipt| receipt.is_sighting());
+    // Only the exact turn this process closed last qualifies, identified by
+    // its unique turn reference, never by a generation number (those restart
+    // with the host): a report from before a restart never does. Any later
+    // close replaces that reference, and any later turn start moves the
+    // active generation past the report's.
+    let newest = record.engram.runtime_closed_turn_ref.as_deref() == Some(next.host_turn_ref.as_str())
+        && record.active_turn_generation == next.generation;
+    let bound = record.engram.work_binding.as_ref() == Some(&observation.binding);
+    (accepted && newest && bound).then(|| {
+        EngramRuntimeCheckpointBasis::of_sighting(observation.binding.clone(), source_basis, observed_at)
+    })
 }
 
 // Closing facts wait durably for off-thread measurement/preparation. The
@@ -462,9 +533,12 @@ struct EngramRuntimeClosingCapture {
 
 impl EngramRuntimeClosingCapture {
     fn source_change(&self) -> Option<EngramObservedSourceChange> {
+        let source = &self.sighting.source_basis;
         let compatible = self.baseline.as_ref().filter(|basis| {
             basis.binding == self.binding
-                && basis.endpoint.workspace_id == self.sighting.source_basis.workspace_id
+                && basis.endpoint.workspace_id == source.workspace_id
+                && basis.source_root_generation == source.source_root_generation
+                && basis.source_root_state == source.source_root_state
         });
         match compatible {
             Some(basis)

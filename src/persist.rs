@@ -187,23 +187,47 @@ fn lock_sqlite_state_writer_for(
     timeout: Duration,
 ) -> Option<SqliteStateWriterGuard<'_>> {
     let deadline = std::time::Instant::now() + timeout;
+    lock_sqlite_state_writer_with_wait(
+        lock,
+        |ready| {
+            if ready {
+                Some(Duration::ZERO)
+            } else {
+                deadline.checked_duration_since(std::time::Instant::now())
+            }
+        },
+        || {},
+    )
+}
+
+// Own one FIFO ticket across wait intervals. None cancels that ticket;
+// another Some interval preserves its place even after a timeout. The
+// interval observer runs without the admission mutex, so it may wake peers.
+fn lock_sqlite_state_writer_with_wait(
+    lock: &SqliteStateWriterAdmission,
+    mut wait_budget: impl FnMut(bool) -> Option<Duration>,
+    mut interval_elapsed: impl FnMut(),
+) -> Option<SqliteStateWriterGuard<'_>> {
     let mut state = lock_sqlite_state_writer_admission(lock);
     let ticket = issue_sqlite_state_writer_ticket(lock, &mut state);
-    while state.serving_ticket != ticket {
-        let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
+    loop {
+        let ready = state.serving_ticket == ticket;
+        let Some(remaining) = wait_budget(ready) else {
             state.canceled_tickets.insert(ticket);
             advance_past_canceled_sqlite_state_writer_tickets(&mut state);
             lock.changed.notify_all();
             return None;
         };
+        if ready {
+            break;
+        }
         let (next_state, wait_result) =
             wait_timeout_sqlite_state_writer_admission(lock, state, remaining);
         state = next_state;
         if wait_result.timed_out() && state.serving_ticket != ticket {
-            state.canceled_tickets.insert(ticket);
-            advance_past_canceled_sqlite_state_writer_tickets(&mut state);
-            lock.changed.notify_all();
-            return None;
+            drop(state);
+            interval_elapsed();
+            state = lock_sqlite_state_writer_admission(lock);
         }
     }
     drop(state);
@@ -1120,6 +1144,10 @@ include!("persist_sqlite_transcript_read.rs");
 thread_local! {
     static DELEGATION_STARTUP_PAYLOAD_WORK: std::cell::Cell<(usize, usize)> =
         const { std::cell::Cell::new((0, 0)) };
+    // Exercise one expired own-writer admission without sleeping through the
+    // production budget. The real FIFO admission still decides the result.
+    static TEST_DELEGATION_INVENTORY_EXPIRE_ADMISSION: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -1155,16 +1183,44 @@ impl AppState {
     )> {
         let mut observed = false;
         loop {
-            // A StateInner wait is ordinary lock admission, not SQLite busy
-            // time. Start a fresh SQL budget after each released state wait.
-            let deadline = std::time::Instant::now() + SQLITE_BUSY_TIMEOUT;
-            let remaining = deadline.checked_duration_since(std::time::Instant::now())
-                .context("delegation inventory publication admission timed out")?;
-            let admission = lock_sqlite_state_writer_for(writer, remaining)
-                .context("delegation inventory writer admission timed out")?;
-            let remaining = deadline.checked_duration_since(std::time::Instant::now())
-                .context("delegation inventory publication admission timed out")?;
-            connection.busy_timeout(remaining)?;
+            // The process's own writer can legitimately spend longer than a
+            // SQLite busy budget on a large persist tick. Keep this owned
+            // publication pending while that FIFO admission settles, without
+            // holding StateInner or reserving SQLite.
+            let started = std::time::Instant::now();
+            let mut intervals = 0_u64;
+            let admission = lock_sqlite_state_writer_with_wait(
+                writer,
+                |_| {
+                    if self.host_is_shutting_down() {
+                        return None;
+                    }
+                    let remaining = SQLITE_BUSY_TIMEOUT;
+                    #[cfg(test)]
+                    let remaining = if TEST_DELEGATION_INVENTORY_EXPIRE_ADMISSION
+                        .with(|expire| expire.replace(false))
+                    {
+                        Duration::ZERO
+                    } else {
+                        remaining
+                    };
+                    Some(remaining)
+                },
+                || {
+                    intervals = intervals.saturating_add(1);
+                    if intervals.is_power_of_two() {
+                        eprintln!(
+                            "startup> phase=inventory_writer_wait intervals={intervals} elapsed_ms={}",
+                            started.elapsed().as_millis()
+                        );
+                    }
+                    observe("writer_admission_timed_out");
+                },
+            ).context("delegation inventory load interrupted by shutdown")?;
+            // External SQL contention has its own unchanged bounded budget.
+            // Neither own-writer admission nor a released StateInner wait
+            // consumes time from that budget.
+            connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
             let transaction = rusqlite::Transaction::new_unchecked(
                 connection, rusqlite::TransactionBehavior::Immediate,
             )?;

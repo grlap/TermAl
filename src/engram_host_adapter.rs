@@ -625,8 +625,9 @@ enum EngramControlRequest {
         end_reason: Option<EngramNamedRootEndReason>,
         idempotency_key: String,
     },
-    /// Host-private: binds one native passed check to other items this
-    /// session holds on the same worktree (`engram_verification_bind.rs`).
+    /// Retained host-private verification-bind request shape. Its constructor
+    /// is test-only (`engram_verification_bind.rs`); TermAl sends no batch
+    /// binds. Existing bound records remain readable as acceptance evidence.
     VerificationBind {
         idempotency_key: String,
         original: String,
@@ -1989,6 +1990,11 @@ struct EngramSessionState {
     unadmitted_reports: Vec<EngramRuntimeObservationReport>,
     /// Process-local coalescing flag, never restored as a live worker.
     unadmitted_worker_running: bool,
+    /// The unique turn reference of the last observed turn this process
+    /// closed. In memory only, and never a generation number: those restart
+    /// with the host, so a report from before a restart cannot pass for a
+    /// later turn that reached the same number.
+    runtime_closed_turn_ref: Option<String>,
     named_root: Option<EngramNamedRootState>,
     /// The new names this session gave during its current turn, one per
     /// claim, each with that turn's grant (`engram_source_roots.rs`): while
@@ -2096,6 +2102,7 @@ impl Default for EngramSessionState {
             unadmitted_closing_jobs: Vec::new(),
             unadmitted_reports: Vec::new(),
             unadmitted_worker_running: false,
+            runtime_closed_turn_ref: None,
             named_root: None,
             roots_named_in_turn: Vec::new(),
             pending_source_root_line: None,

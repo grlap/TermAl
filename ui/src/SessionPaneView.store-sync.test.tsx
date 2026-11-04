@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,12 @@ import {
 } from "./session-store";
 import type { Session } from "./types";
 import type { WorkspacePane } from "./workspace-types";
+import type { RenderMessageCard } from "./panels/virtualized-conversation-types";
+
+vi.mock("./api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./api")>()),
+  listMailboxes: vi.fn().mockResolvedValue([]),
+}));
 
 const scrollMockState = vi.hoisted(() => ({
   params: [] as Array<{
@@ -51,14 +57,16 @@ vi.mock("./panels/AgentSessionPanel", async () => {
   const { useSessionRecordSnapshot } = await import("./session-store");
 
   return {
-    AgentSessionPanel: (props: { activeSessionId: string | null }) => {
+    AgentSessionPanel: (props: { activeSessionId: string | null; renderMessageCard: RenderMessageCard }) => {
       const activeSession = useSessionRecordSnapshot(props.activeSessionId);
       return (
         <div data-testid="agent-session-panel">
           <div>{props.activeSessionId}</div>
           {activeSession?.messages.map((message) =>
             message.type === "text" ? (
-              <div key={message.id}>{message.text}</div>
+              <div key={message.id}>{message.source?.kind === "mailbox"
+                ? props.renderMessageCard(message, false, () => {}, async () => {}, () => {}, () => {})
+                : message.text}</div>
             ) : null,
           )}
         </div>
@@ -215,6 +223,28 @@ function renderSessionPaneView(
 }
 
 describe("SessionPaneView session-store synchronization", () => {
+  it("opens a known mailbox header source through the pane's existing session navigation", () => {
+    const target = makeSession({ id: "peer-session", name: "Engram::Merger", messages: [] });
+    const viewer = makeSession({ messages: [{
+      id: "header-navigation", type: "text", author: "you", timestamp: "10:05", text: "wake",
+      source: { kind: "mailbox", sessionId: target.id, name: target.name,
+        mailbox: { mailboxId: "navigation-mailbox", messageId: "wake-1", sequence: 1, unreadCount: 1 } },
+    }] });
+    upsertSessionStoreSession({ session: viewer, committedDraft: "", draftAttachments: [] });
+    const onOpenConversationFromDiff = vi.fn();
+    const rendered = renderSessionPaneView(viewer, {
+      sessionLookup: new Map([[viewer.id, viewer], [target.id, target]]),
+      onOpenConversationFromDiff,
+    });
+    fireEvent.click(within(rendered.container).getByRole("button", { name: "Open session Engram::Merger" }));
+    expect(onOpenConversationFromDiff).toHaveBeenCalledExactlyOnceWith(target.id, "pane-1");
+    rendered.rerender(<SessionPaneView {...makeSessionPaneViewProps(viewer, {
+      onOpenConversationFromDiff,
+    })} />);
+    expect(within(rendered.container).queryByRole("button", { name: "Open session Engram::Merger" })).toBeNull();
+    expect(rendered.container.querySelector(".message-meta-author")).toHaveTextContent(target.name);
+  });
+
   it("passes local sending, stopping and delegation waits to the trailing slot", () => {
     const session = makeSession({ status: "idle" });
     const props = makeSessionPaneViewProps(session);

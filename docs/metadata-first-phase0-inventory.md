@@ -227,7 +227,8 @@ owes.
 
 ## Fixture Inventory
 
-`rg -l "messages:\\s*\\[" ui/src src/tests` currently matches 23 files:
+The pre-implementation `rg -l "messages:\\s*\\[" ui/src src/tests` snapshot
+matched 23 files. Removed entries are marked below:
 
 - `src/tests/persist.rs`
 - `ui/src/App.live-state.deltas.test.tsx`
@@ -241,7 +242,7 @@ owes.
 - `ui/src/app-test-harness.tsx`
 - `ui/src/backend-connection.test.tsx`
 - `ui/src/live-updates.test.ts`
-- `ui/src/mockData.ts`
+- `ui/src/mockData.ts` (removed; unused prototype data)
 - `ui/src/panels/AgentSessionPanel.test.tsx`
 - `ui/src/panels/OrchestratorTemplatesPanel.test.tsx`
 - `ui/src/panels/PaneTabs.test.tsx`

@@ -301,7 +301,8 @@ an existing user choice.
 > [features/shared-codex-app-server.md](./features/shared-codex-app-server.md) for
 > process-vs-attachment identity, thread-setup parking, and orphan-thread discovery.
 
-**SessionRecord** wraps the serializable `Session` with runtime-only fields:
+**SessionRecord** wraps the serializable `Session` with runtime-only fields
+and host-private Engram state (illustrative subset):
 
 ```rust
 SessionRecord {
@@ -318,12 +319,15 @@ SessionRecord {
     remote_session_id: Option<String>,         // remote session id when proxied
     external_session_id: Option<String>,       // Claude/Codex/ACP resume identifier
     runtime_reset_required: bool,
-    engram_boot_recovery_pending: bool,         // process-local readiness fence, wire-visible
-    engram_boot_recovery_dispatch_pending: bool,// process-local queue activation, not persisted
-    engram_boot_recovery_retry_in_progress: bool,// process-local lazy retry ownership
+    engram: EngramSessionState,                // work/source-root state and EO reports
     hidden: bool,
 }
 ```
+
+Execution Observability records ordinary turns without a gated boot-recovery
+readiness fence. The former `engram_boot_recovery_*` fields and client
+`engramBootRecoveryPending` flag are gone; earlier control metadata remains
+passive history. See [the current observation contract](features/engram-host-adapter.md#reporting-turns-as-host-observations).
 
 ### State Mutation Pattern
 
@@ -429,6 +433,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | GET | `/api/telegram/status` | Read Telegram relay configuration/status -> `TelegramStatusResponse` with configured/enabled/running state, lifecycle, linked chat, masked token, subscribed projects, and default targets. One current single-bot response shape; no default-bot compatibility projection. |
 | POST | `/api/telegram/config` | Update the Telegram relay token in the OS credential store, enabled flag, subscribed projects, and default project/session. Returns sanitized `TelegramStatusResponse`; validation failures use the standard `{ "error": ... }` envelope. |
 | POST | `/api/telegram/test` | Validate a supplied or saved Telegram bot token through `getMe` -> `TelegramTestResponse`. Local test throttling returns `429` with `Retry-After`; Telegram auth/validation failures return `422`, and upstream/network failures return `502`. |
+| POST | `/api/sessions/{id}/telegram/documents` | Send one Markdown file from the session's workdir or project root to the linked Telegram chat as a document: `{ "path", "caption"? }` -> `{ messageId, fileName, path, sizeBytes }`. Refusals use `{ "error", "code" }` with a typed `code`; see [`telegram-markdown-documents.md`](./features/telegram-markdown-documents.md). |
 | POST | `/api/sessions` | Create session |
 | GET | `/api/sessions/{id}` | Fetch one bounded recent suffix -> `SessionResponse { revision, serverInstanceId, session }`. The default is 20 messages; `?tail=N` accepts `1..=64`. There is no unbounded transcript response or summary fallback. Remote-proxy sessions forward the same bounded tail request to the owner. |
 | GET | `/api/sessions/{id}/history` | Fetch one ascending transcript page by exclusive `before`/`after` cursor, true start, centered global `around` position, or latest tail -> `SessionHistoryResponse`. `limit` defaults to and is capped at 64. Capture shares immutable resident message bodies; only the selected page is materialized, with the existing pinned SQLite prefix and cursor consistency. |
@@ -1693,6 +1698,10 @@ termal/
 |   |-- telegram_forwarding.rs # assistant reply forwarding state machine
 |   |-- telegram_digest.rs   # project/session digest rendering and command replies
 |   |-- telegram.rs          # Telegram update/callback/prompt handling
+|   |-- telegram_documents.rs # session API: send a Markdown file to the linked chat
+|   |-- telegram_document_files.rs # Markdown document path/type/size admission
+|   |-- telegram_document_handle.rs # platform handle path and namespace checks
+|   |-- telegram_document_upload.rs # multipart `sendDocument` upload + test seam
 |   |
 |   `-- tests/               # backend regression tests, split by domain
 |       |-- mod.rs           # shared fixtures: TestRecorder, HTTP test server, handle factories

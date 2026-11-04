@@ -1,9 +1,13 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode } from "react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { DeferredHeavyContentActivationProvider } from "./deferred-heavy-content-activation";
 import { MessageCard } from "./message-cards";
+import { MessageSourceSessionNavigationContext } from "./message-source-session-navigation";
+import { PendingPromptCard } from "./panels/session-activity-cards";
+import { MessageMetaMarkerMenuProvider } from "./message-meta-marker-menu-context";
 import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
@@ -16,6 +20,7 @@ import type {
   FileChangesMessage,
   McpElicitationRequestMessage,
   ParallelAgentsMessage,
+  Session,
   TextMessage,
   ThinkingMessage,
   UserInputRequestMessage,
@@ -524,6 +529,72 @@ describe("MessageCard", () => {
     expect(screen.queryByText(/Read:/i)).toBeNull();
     expect(screen.queryByText("termal_read_mailbox")).toBeNull();
   });
+
+  it.each(["transcript", "queued"])("opens the mailbox header session name in a %s card", async (kind) => {
+    const target: Session = {
+      id: "source-session", name: "Engram::Merger", emoji: "", agent: "Codex",
+      workdir: "/repo", model: "gpt", status: "idle", preview: "", messages: [],
+    };
+    const message: TextMessage = {
+      id: `header-${kind}`, type: "text", author: "you", timestamp: "10:05", text: "wake",
+      source: { kind: "mailbox", name: target.name, sessionId: target.id,
+        mailbox: { mailboxId: `header-mailbox-${kind}`, messageId: "wake-1", sequence: 1, unreadCount: 1 } },
+    };
+    const onOpenSession = vi.fn();
+    const onOpenMailbox = vi.fn();
+    const openMarkerMenu = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(
+      <MessageSourceSessionNavigationContext.Provider value={{ onOpenSession, sessionLookup: new Map([[target.id, target]]) }}>
+        <MessageMetaMarkerMenuProvider>
+          <div onClick={openMarkerMenu} onKeyDown={openMarkerMenu}>
+            {kind === "queued" ? (
+              <PendingPromptCard prompt={message} sessionId="viewer" onOpenMailbox={onOpenMailbox} />
+            ) : (
+              <MessageCard message={message} mailboxViewerSessionId="viewer" onOpenMailbox={onOpenMailbox}
+                onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />
+            )}
+          </div>
+        </MessageMetaMarkerMenuProvider>
+      </MessageSourceSessionNavigationContext.Provider>,
+    );
+    const header = container.querySelector(".message-meta")! as HTMLElement;
+    const name = within(header).getByRole("button", { name: "Open session Engram::Merger" });
+    await user.click(name);
+    expect(onOpenSession).toHaveBeenCalledExactlyOnceWith(target.id);
+    expect(openMarkerMenu).not.toHaveBeenCalled();
+    name.focus();
+    await user.keyboard("{Enter}");
+    expect(onOpenSession).toHaveBeenCalledTimes(2);
+    expect(openMarkerMenu).not.toHaveBeenCalled();
+    fireEvent.click(container.querySelector(".mailbox-message-sender")!);
+    expect(onOpenSession).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Open mailbox →" }));
+    expect(onOpenMailbox).toHaveBeenCalledExactlyOnceWith(message.source!.mailbox!.mailboxId);
+    expect(onOpenSession).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([undefined, "unknown-session", "remote-unavailable-session"])(
+    "keeps an unavailable mailbox header target as text (%s)", (sessionId) => {
+      const onOpenSession = vi.fn();
+      const onOpenMailbox = vi.fn();
+      const { container } = render(
+        <MessageSourceSessionNavigationContext.Provider value={{ onOpenSession, sessionLookup: new Map() }}>
+          <MessageCard message={{ id: `missing-${sessionId}`, type: "text", author: "you", timestamp: "10:05", text: "wake",
+            source: { kind: "mailbox", name: "Unavailable peer", sessionId,
+              mailbox: { mailboxId: "missing-mailbox", messageId: "wake-1", sequence: 1, unreadCount: 1 } } }}
+            mailboxViewerSessionId="viewer" onOpenMailbox={onOpenMailbox}
+            onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />
+        </MessageSourceSessionNavigationContext.Provider>,
+      );
+      expect(container.querySelector(".message-meta-author")).toHaveTextContent("Unavailable peer");
+      expect(screen.queryByRole("button", { name: /Open session/ })).toBeNull();
+      fireEvent.click(container.querySelector(".message-meta-author")!);
+      expect(onOpenSession).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Open mailbox →" }));
+      expect(onOpenMailbox).toHaveBeenCalledExactlyOnceWith("missing-mailbox");
+    },
+  );
 
   it("collapses a long peer message and provides a bottom hide control", () => {
     const finalFinding = "Final peer finding remains hidden until expansion.";

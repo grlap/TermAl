@@ -2,12 +2,13 @@
 // records remain raw session history; no retry or send owner is restored.
 
 /// The members of a full gate launched in `root` by the session at `index`,
-/// bound to its claim: the other items it named on the same worktree
+/// attributed to its claim: the other items it named on the same worktree
 /// (`engram_bind_targets_at_launch`), each with the fence its claim has in
 /// `held`, the session's held claims read at the launch. With no read
 /// (`None`), the members only, with their root entries' fences: a launch
-/// whose read failed binds none of them. None when the session is unbound,
-/// its claim names no root, or the gate ran outside that root.
+/// whose read failed cannot supply held-claim fences. Empty when the session
+/// is unbound, its claim names no root, or the gate ran outside that root.
+/// These are launch-history members only; no verification_bind is sent.
 fn engram_launch_bind_targets(
     inner: &StateInner,
     index: usize,

@@ -2128,11 +2128,6 @@ textarea {
   gap: 1rem;
 }
 
-.project-engram-grant-form {
-  display: grid;
-  max-width: 42rem;
-}
-
 .project-engram-verification {
   margin-top: 1rem;
   padding: 0.9rem;

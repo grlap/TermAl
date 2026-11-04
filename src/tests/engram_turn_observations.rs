@@ -48,15 +48,27 @@ fn wait_for_observation_delivery(turn: &EOCheckedTurn) {
     }
 }
 
-// Explicit passive-history fixture, not an endpoint produced by current EO.
-// Source/time are measured for this fixture and persisted through the real
-// schema. Current ordinary receipts neither create nor advance this field.
+// An explicitly seeded baseline, as if an earlier turn's sighting had been
+// recorded. Source/time are measured for this fixture and persisted through
+// the real schema. The next closing turn compares with it once; that turn's
+// own recorded sighting then replaces it.
 fn install_passive_measured_baseline(turn: &EOCheckedTurn, root: &FsPath) -> EngramRuntimeCheckpointBasis {
-    let measured = engram_place_source_basis(&EngramBasisPlace::Workdir(root.to_string_lossy().into_owned())).unwrap();
+    // Stamped like a closing sighting, so the seed carries the root image
+    // (named generation and state) the next sighting is taken in; a root that
+    // is unnamed or not yet confirmed carries none, as its sighting does.
+    let measured = {
+        let inner = turn.state.inner.lock().unwrap();
+        let measured = engram_place_source_basis(
+            &EngramBasisPlace::Workdir(root.to_string_lossy().into_owned())).unwrap();
+        engram_turn_root_capture_locked(&inner, &turn.session_id)
+            .stamp(Some(measured.clone())).unwrap_or(measured)
+    };
     let baseline = EngramRuntimeCheckpointBasis {
         binding: turn.record(|record| record.engram.work_binding.clone().unwrap()),
         endpoint: EngramMeasuredBaseline { workspace_id: measured.workspace_id,
             source_revision: measured.source_revision, observed_at: unadmitted_observation_timestamp() },
+        source_root_generation: measured.source_root_generation,
+        source_root_state: measured.source_root_state,
     };
     {
         let mut inner = turn.state.inner.lock().unwrap();
@@ -166,6 +178,7 @@ fn actual_delegation_children_report_their_measured_workspace_without_native_cre
                 "src/lib.rs".into(), WorkspaceFileChangeKind::Modified); });
         }
         let after = content_revision_of(&turn.root);
+        let turn_ref = observed_turn_ref(&turn);
         let request = turn.finish();
         assert_ordinary_observation_has_no_native_credit(&turn, &request);
         assert_eq!(request["occurrence"]["outcome"], "succeeded");
@@ -186,7 +199,23 @@ fn actual_delegation_children_report_their_measured_workspace_without_native_cre
         wait_for_observation_delivery(&turn);
         assert_eq!(content_revision_of(&turn.root), after,
             "closing the actual child must not write host artifacts into its source root");
-        assert_eq!(turn.record(|record| record.engram.runtime_checkpoint.clone()), Some(historical));
+        let key = format!("termal-source-sighting:{turn_ref}");
+        let sighting = turn.transport.requests().into_iter().map(|sent| sent.request)
+            .find(|request| request["occurrence"]["kind"] == "source_sighting"
+                && request["idempotency_key"] == key.as_str())
+            .expect("the child's closing report sent its measured sighting");
+        let replaced = turn.record(|record| record.engram.runtime_checkpoint.clone())
+            .expect("the child's recorded closing sighting becomes its next baseline");
+        assert_ne!(replaced, historical, "the seeded baseline is used once, then replaced");
+        assert_eq!(replaced.binding, historical.binding);
+        assert_eq!((replaced.source_root_generation, replaced.source_root_state),
+            (historical.source_root_generation, historical.source_root_state),
+            "the replacing sighting was taken in the same root image as the seed");
+        assert_eq!(serde_json::to_value(&replaced.endpoint).unwrap(), json!({
+            "workspace_id": sighting["occurrence"]["source_basis"]["workspace_id"],
+            "source_revision": after,
+            "observed_at": sighting["occurrence"]["observed_at"],
+        }), "the replacing baseline is exactly the child's recorded sighting");
     }
 }
 

@@ -240,6 +240,11 @@ export const MessageCard = memo(
                     ? PEER_MESSAGE_BATCH_AUTHOR_LABEL
                     : message.source?.name
               }
+              sourceSessionId={
+                message.source?.kind === "mailbox"
+                  ? message.source.sessionId
+                  : undefined
+              }
               trailing={
                 <>
                   {metaTag ? (

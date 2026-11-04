@@ -415,6 +415,16 @@ fn run_coordination_cleanup_worker(
     }
 }
 
+// Fixed phase labels and durations only: startup diagnostics never print
+// persisted content, credentials, project names or filesystem paths.
+fn log_startup_phase(phase: &'static str, started: &mut std::time::Instant) {
+    eprintln!(
+        "startup> phase={phase} elapsed_ms={}",
+        started.elapsed().as_millis()
+    );
+    *started = std::time::Instant::now();
+}
+
 impl AppState {
     /// Builds a fully-initialized [`AppState`] from explicit paths.
     ///
@@ -449,6 +459,7 @@ impl AppState {
         persistence_path: PathBuf,
         orchestrator_templates_path: PathBuf,
     ) -> Result<Self> {
+        let mut phase_started = std::time::Instant::now();
         // Defensive: tests and other direct callers may pass an un-normalized workdir.
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
         let (loaded_state, mut boot_persistence_connection) = load_state_for_boot(&persistence_path)?;
@@ -471,7 +482,9 @@ impl AppState {
                 std::sync::atomic::Ordering::Release,
             );
         }
+        log_startup_phase("state_load", &mut phase_started);
         prepare_federation_boot(&mut inner, &persistence_path, &mut boot_persistence_connection)?;
+        log_startup_phase("federation_boot", &mut phase_started);
         let host_workdir = engram_host_workdir(&persistence_path)?;
         inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(host_workdir.clone()));
         #[cfg(test)]
@@ -492,6 +505,7 @@ impl AppState {
                     .expect("a test boot chooses its clock before any snapshot");
             }
         });
+        log_startup_phase("engram_adapter", &mut phase_started);
         let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
         #[cfg(test)]
         let skip_discovery = TEST_BOOT_SKIP_CODEX_DISCOVERY.with(|skip| skip.get());
@@ -515,8 +529,10 @@ impl AppState {
             }
         }
 
+        log_startup_phase("codex_discovery_and_import", &mut phase_started);
         let agent_readiness_cache =
             Arc::new(RwLock::new(fresh_agent_readiness_cache(&default_workdir)));
+        log_startup_phase("agent_readiness", &mut phase_started);
         let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
         let persist_observer = Arc::new(PersistObserver::default());
         #[cfg(test)]
@@ -544,6 +560,7 @@ impl AppState {
         // coordination database and its FIFO writer admission, while session
         // and transcript persistence remain isolated in termal.sqlite.
         let coordination_board_store = Arc::new(CoordinationBoardStore::open(&coordination_path)?);
+        log_startup_phase("coordination_store", &mut phase_started);
         // `AppState::inner` is built here (rather than inside the struct
         // literal further below) so we can share an `Arc` clone with the
         // background persist thread. The thread briefly re-locks it on
@@ -804,6 +821,7 @@ impl AppState {
             })
             .expect("failed to spawn persist thread");
 
+        log_startup_phase("primary_workers", &mut phase_started);
         let state_broadcast_mailbox = Arc::new(StateBroadcastMailbox::default());
 
         // Background state-broadcast thread: drains a bounded ordered mailbox
@@ -904,8 +922,10 @@ impl AppState {
             #[cfg(test)]
             test_temp_root: test_boot_temp_root(),
         };
+        log_startup_phase("state_assembly_and_remote_registry", &mut phase_started);
         state.warm_state_projection_cache();
         state.state_broadcast_worker = Some(Arc::new(StateBroadcastWorker::start(state.clone())));
+        log_startup_phase("state_projection", &mut phase_started);
         let remote_config_publication = {
             let inner = state.inner.lock().expect("state mutex poisoned");
             // Persist first so a boot failure cannot abandon a publication
@@ -931,11 +951,14 @@ impl AppState {
                 state.start_remote_event_bridge_by_id(&remote_id);
             }
         }
+        log_startup_phase("remote_configuration", &mut phase_started);
         state.restore_remote_event_bridges();
+        log_startup_phase("remote_bridges", &mut phase_started);
         #[cfg(not(test))]
         state.spawn_workspace_file_watcher();
         #[cfg(not(test))]
         state.spawn_test_run_index();
+        log_startup_phase("background_discovery", &mut phase_started);
         // Full delegation inventory and runtime recovery start only after the
         // listener binds and publishes the base URL. The returned state carries
         // the completeness fence even in tests of the production entry point.

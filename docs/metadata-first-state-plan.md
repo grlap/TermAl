@@ -678,7 +678,8 @@ Work:
   - Specific Rust test files to audit and update:
     `src/tests/persist.rs`, `src/tests/remote.rs`,
     `src/tests/http_routes.rs` (if present), `src/tests/mod.rs` helpers.
-  - Specific TypeScript test files: `ui/src/mockData.ts`,
+  - Specific TypeScript test files (the unused mock-data prototype has
+    since been removed):
     `ui/src/App.live-state.*.test.tsx`, `ui/src/session-reconcile.test.ts`,
     `ui/src/session-store.test.ts`, plus any file matched by the
     `messages: [` grep from Phase 0's fixture inventory.

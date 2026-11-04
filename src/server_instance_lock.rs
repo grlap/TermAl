@@ -198,7 +198,9 @@ impl AppState {
             .parent()
             .map(FsPath::to_path_buf)
             .context("the TermAl state database path has no parent directory")?;
+        let mut phase_started = std::time::Instant::now();
         ServerInstanceLock::acquire(&data_dir)?.keep_in(lock_holder)?;
+        log_startup_phase("instance_lock", &mut phase_started);
         Self::new_before_listen_with_paths(
             default_workdir,
             persistence_path,

@@ -159,31 +159,39 @@ impl TelegramApiClient {
         let response = request
             .send()
             .with_context(|| format!("failed to call Telegram `{method}`"))?;
-        let status = response.status();
-        let payload = response
-            .bytes()
-            .with_context(|| format!("failed to read Telegram `{method}` response"))?;
-        let envelope: TelegramApiEnvelope<T> = serde_json::from_slice(&payload)
-            .with_context(|| format!("failed to decode Telegram `{method}` response"))?;
-        if !status.is_success() || !envelope.ok {
-            let description = envelope
-                .description
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| {
-                    format!("Telegram `{method}` failed with HTTP {}", status.as_u16())
-                });
-            return Err(TelegramApiError {
-                method: method.to_owned(),
-                status,
-                error_code: envelope.error_code,
-                description,
-            }
-            .into());
-        }
-        envelope.result.ok_or_else(|| {
-            anyhow!("Telegram `{method}` succeeded without returning a result payload")
-        })
+        decode_telegram_api_response(method, response)
     }
+}
+
+/// Decodes one Telegram Bot API response envelope. Shared by the JSON request
+/// path above and the multipart document upload in
+/// `telegram_document_upload.rs`.
+fn decode_telegram_api_response<T: DeserializeOwned>(
+    method: &str,
+    response: BlockingHttpResponse,
+) -> Result<T> {
+    let status = response.status();
+    let payload = response
+        .bytes()
+        .with_context(|| format!("failed to read Telegram `{method}` response"))?;
+    let envelope: TelegramApiEnvelope<T> = serde_json::from_slice(&payload)
+        .with_context(|| format!("failed to decode Telegram `{method}` response"))?;
+    if !status.is_success() || !envelope.ok {
+        let description = envelope
+            .description
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("Telegram `{method}` failed with HTTP {}", status.as_u16()));
+        return Err(TelegramApiError {
+            method: method.to_owned(),
+            status,
+            error_code: envelope.error_code,
+            description,
+        }
+        .into());
+    }
+    envelope
+        .result
+        .ok_or_else(|| anyhow!("Telegram `{method}` succeeded without returning a result payload"))
 }
 
 fn telegram_send_message_body(

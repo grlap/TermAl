@@ -457,10 +457,13 @@ impl AppState {
         Ok(())
     }
 
-    // Only this immutable historical entry changes. A successor runtime,
-    // current binding, queue, grant and source-sighting baseline are not
-    // upgraded by a successful old receipt. Refusal diagnostics are inserted
-    // with the settlement under the same lock and leave the current preview.
+    // Only this immutable historical entry changes, plus one baseline: when
+    // Engram records the newest closed turn's source sighting under the
+    // session's current binding, that sighting becomes the next turn's
+    // baseline (`engram_recorded_closing_baseline`). A successor runtime,
+    // current binding, queue and grant are not upgraded by a successful old
+    // receipt. Refusal diagnostics are inserted with the settlement under the
+    // same lock and leave the current preview.
     fn install_runtime_observation_result(
         &self,
         session_id: &str,
@@ -514,7 +517,12 @@ impl AppState {
             )),
             _ => None,
         };
-        inner.sessions[index].engram.unadmitted_reports[position] = next;
+        let baseline = engram_recorded_closing_baseline(&inner.sessions[index], expected, &next, envelope_index);
+        let record = &mut inner.sessions[index];
+        record.engram.unadmitted_reports[position] = next;
+        if let Some(baseline) = baseline {
+            record.engram.runtime_checkpoint = Some(baseline);
+        }
         let message = diagnostic.map(|text| Message::Text {
             attachments: Vec::new(),
             id: inner.next_message_id(),

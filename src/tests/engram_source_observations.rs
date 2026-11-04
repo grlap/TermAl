@@ -63,6 +63,8 @@ fn historical_observation_endpoint() -> EngramRuntimeCheckpointBasis {
             workspace_id: "observation-workspace".into(),
             source_revision: "content-v1:imported".into(), observed_at: observation_at(5),
         },
+        source_root_generation: Some(2),
+        source_root_state: Some(EngramSourceRootState::Named),
     }
 }
 
@@ -473,3 +475,5 @@ mod delegation;
 mod removal;
 #[path = "engram_source_observation_delete_races.rs"]
 mod delete_races;
+#[path = "engram_ordinary_baseline.rs"]
+mod ordinary_baseline;

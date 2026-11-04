@@ -1,24 +1,17 @@
-// Binding one natively credited full gate to the other items of a batch.
+// Launch-member provenance and retained verification-bind protocol shapes.
 //
-// Owns: which other held items share a gate's worktree when it is launched,
-// whether each may be bound when the gate settles, the verification_bind
-// request for one item with its stable idempotency key, how Engram's answer
-// settles that item, and the line its holder is told.
+// The live helper captures the other named items sharing a carried gate's
+// worktree at launch (`engram_batch_binds.rs`). That snapshot is history:
+// it creates no binding, send, settlement or retry duty.
 //
-// Does not own: the gate's native credit and every fence on it
-// (`engram_carried_checks.rs`), sending the request, persisting what is owed
-// or replaying it after a restart, or the acceptance evaluation that cites the
-// bound record, which Engram serves from the item's own run.
+// The cfg(test) helpers below describe the retired verification_bind workflow;
+// they are not a production sender. Retained request and receipt data shapes
+// do not grant credit. New registered committed-input runs use the independent
+// verification_record sender (`engram_verification_record.rs`); acceptance
+// evidence still reads bound records Engram already holds
+// (`acceptance_evidence_selection.rs`).
 //
-// A new module, included from main.rs beside `engram_carried_checks.rs`.
-//
-// A batch is declared by holding it: the session that runs the combined gate
-// holds each member's claim, and each member's named source root is the
-// gate's worktree. Engram's `verification_bind` then writes, on each member's
-// own run, a passed record bound from the gate's native one, after checking
-// that member again itself (Engram docs/features/acceptance-evaluation.md and
-// behavioral-control-plane.md, verification_bind). One member per call, so one
-// refusal never blocks another.
+// Included from main.rs beside the ordinary carried-check owner.
 
 /// What the holder is told to do when a member has no sighting at the gate's
 /// revision: Engram binds only a member whose newest sighting is there, and
@@ -35,21 +28,19 @@ struct EngramBindTarget {
     short_ref: String,
     claim_id: String,
     claim_fence: i64,
-    /// The generation its named root had at launch: a rename or clear after
-    /// it moves the generation, and the item is no longer bound.
+    /// The named-root generation captured at launch, retained as provenance.
     root_generation: u64,
 }
 
-/// The other items a gate launched in `launch`'s root may be bound to: every
+/// The other named items captured for a gate launched in `launch`'s root: every
 /// other root entry this session named for the same worktree (the same root
 /// path and the same common Git directory) in the same store. A claim the
 /// session names there later is not one of them. Each member's fence is the
 /// one its claim has at launch, as `held` lists it: a root entry keeps the
 /// fence it was named at through a recovery, so a member recovered before
 /// the launch is judged by its fence then. A member not held at launch keeps
-/// its entry's fence, and settlement tells its holder it is no longer held.
-/// Every member is kept: each is bound by a call of its own, so Engram's
-/// limit on one request's targets never drops one.
+/// its entry's fence as captured provenance. Every matching member is kept;
+/// this helper neither binds a member nor sends a request.
 fn engram_bind_targets_at_launch(
     roots: &[EngramWorkSourceRoot],
     launch: &EngramWorkSourceRoot,

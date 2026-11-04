@@ -155,6 +155,11 @@ export const PendingPromptCard = memo(
                   ? PEER_MESSAGE_BATCH_AUTHOR_LABEL
                   : prompt.source?.name
             }
+            sourceSessionId={
+              prompt.source?.kind === "mailbox"
+                ? prompt.source.sessionId
+                : undefined
+            }
             trailing={
               commandLabel ? (
                 <span className="message-meta-tag">{commandLabel}</span>

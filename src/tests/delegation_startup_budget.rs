@@ -151,6 +151,104 @@ impl Drop for PendingInventoryFixture {
 }
 
 #[test]
+fn delegation_startup_budget_own_writer_contention_does_not_terminalize_inventory() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = PendingInventoryFixture::new();
+    let writer = sqlite_state_write_lock(&fixture.state.persistence_path);
+    let occupied = lock_sqlite_state_writer(&writer);
+    let state = fixture.state.clone();
+    let (expired_tx, expired_rx) = mpsc::channel();
+    let (released_tx, released_rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        TEST_DELEGATION_INVENTORY_EXPIRE_ADMISSION.with(|expire| expire.set(true));
+        state.load_delegation_inventory_observed(|phase| {
+            if phase == "writer_admission_timed_out" {
+                expired_tx.send(()).unwrap();
+                phase_sync::receive(&released_rx, "ordinary writer releases its ticket");
+            }
+        })
+    });
+    phase_sync::receive(&expired_rx, "real FIFO admission reports the expired local wait");
+    {
+        let inner = fixture.state.inner.try_lock_now()
+            .expect("inventory admission never holds StateInner while waiting for its own writer");
+        assert!(matches!(inner.delegation_inventory, DelegationInventoryState::Loading { .. }));
+        assert!(inner.delegations.is_empty());
+    }
+    drop(occupied);
+    released_tx.send(()).unwrap();
+    worker.join().unwrap().expect("ordinary writer contention must settle into a complete inventory");
+    let inner = fixture.state.inner.lock().unwrap();
+    assert!(inner.delegation_inventory_complete());
+    assert_eq!(inner.delegations.len(), 1);
+    assert_eq!(inner.delegations[0].prompt, "private original payload");
+}
+
+#[test]
+fn delegation_startup_budget_expired_wait_keeps_inventory_ahead_of_later_writer() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = PendingInventoryFixture::new();
+    let writer = sqlite_state_write_lock(&fixture.state.persistence_path);
+    let occupied = lock_sqlite_state_writer(&writer);
+    let tickets_before_inventory = sqlite_state_writer_issued_tickets(&writer);
+    let state = fixture.state.clone();
+    let (expired_tx, expired_rx) = mpsc::channel();
+    let (resume_tx, resume_rx) = mpsc::channel();
+    let (order_tx, order_rx) = mpsc::channel();
+    let inventory_order = order_tx.clone();
+    let inventory = std::thread::spawn(move || {
+        TEST_DELEGATION_INVENTORY_EXPIRE_ADMISSION.with(|expire| expire.set(true));
+        state.load_delegation_inventory_observed(|phase| {
+            if phase == "writer_admission_timed_out" {
+                expired_tx.send(()).unwrap();
+                phase_sync::receive(&resume_rx, "later writer has joined the FIFO");
+            }
+            if phase == "publication_reserved" {
+                inventory_order.send("inventory").unwrap();
+            }
+        })
+    });
+    phase_sync::receive(&expired_rx, "inventory's first wait interval expires");
+    let later_writer = Arc::clone(&writer);
+    let later = std::thread::spawn(move || {
+        let _guard = lock_sqlite_state_writer(&later_writer);
+        order_tx.send("later writer").unwrap();
+    });
+    wait_for_sqlite_state_writer_issued_tickets(&writer, tickets_before_inventory + 2);
+    drop(occupied);
+    resume_tx.send(()).unwrap();
+    assert_eq!(phase_sync::receive(&order_rx, "next admitted owner"), "inventory");
+    assert_eq!(phase_sync::receive(&order_rx, "later admitted owner"), "later writer");
+    inventory.join().unwrap().unwrap();
+    later.join().unwrap();
+    assert!(fixture.state.inner.lock().unwrap().delegation_inventory_complete());
+}
+
+#[test]
+fn delegation_startup_budget_shutdown_cancels_own_writer_admission() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = PendingInventoryFixture::new();
+    let writer = sqlite_state_write_lock(&fixture.state.persistence_path);
+    let mut occupied = Some(lock_sqlite_state_writer(&writer));
+    TEST_DELEGATION_INVENTORY_EXPIRE_ADMISSION.with(|expire| expire.set(true));
+    let mut observed_wait = false;
+    let error = fixture.state.load_delegation_inventory_observed(|phase| {
+        if phase == "writer_admission_timed_out" {
+            observed_wait = true;
+            fixture.state.trigger_shutdown_signal();
+            drop(occupied.take());
+        }
+    }).expect_err("shutdown must stop the pending inventory owner");
+    assert!(observed_wait);
+    assert!(error.to_string().contains("interrupted by shutdown"), "{error:#}");
+    assert!(lock_sqlite_state_writer_for(&writer, Duration::ZERO).is_some(),
+        "cancelled inventory ticket must not strand subsequent writers");
+    let inner = fixture.state.inner.lock().unwrap();
+    assert!(!inner.delegation_inventory_complete());
+    assert!(inner.delegations.is_empty(), "shutdown cannot publish the decoded inventory");
+}
+
+#[test]
 fn delegation_startup_budget_full_publication_and_sql_boundaries_leave_state_available() {
     let fixture = PendingInventoryFixture::new();
     let state = &fixture.state;

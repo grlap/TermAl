@@ -1,0 +1,19 @@
+/* Header navigation only; shared message metadata layout stays in styles.css. */
+.message-meta-session-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.message-meta-session-link:hover {
+  background: none;
+  color: var(--signal-blue);
+}
+
+.conversation-message-marker-shell.can-open-marker-menu .message-meta-session-link[data-conversation-marker-menu-trigger="true"] {
+  cursor: pointer;
+}

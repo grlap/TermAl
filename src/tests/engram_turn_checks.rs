@@ -2873,6 +2873,8 @@ fn late_file_tracking_does_not_invent_a_source_change_after_an_unchanged_check()
         binding: turn.record(|record| record.engram.work_binding.clone().unwrap()),
         endpoint: EngramMeasuredBaseline { workspace_id: measured.workspace_id,
             source_revision: measured.source_revision, observed_at: unadmitted_observation_timestamp() },
+        source_root_generation: measured.source_root_generation,
+        source_root_state: measured.source_root_state,
     };
     {
         let mut inner = turn.state.inner.lock().unwrap();

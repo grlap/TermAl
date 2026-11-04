@@ -121,9 +121,10 @@ export class TranscriptRepairAuthority {
   // Pure demand. The hook invokes it at task end, so a summary followed by
   // its own next delta in that task closes suspicion without another read.
   needsTailRead(id: string, visible: boolean) {
+    if (!visible) return false;
     const session = this.sessions.find(entry => entry.id === id);
     const state = this.tails.get(id);
-    return visible && !!session && !session.remoteId && session.hasNewerHistory !== true &&
+    return !!session && !session.remoteId && session.hasNewerHistory !== true &&
       !!state && (state.kind === "dirty" ||
         (state.observedSeq >= 0 && (state.kind === "certified"
           ? state.observedSeq > state.appliedSeq! : session.messagesLoaded === true || state.admittedBodySnapshot)));

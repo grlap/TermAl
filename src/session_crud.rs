@@ -180,6 +180,7 @@ fn reset_engram_session_associations_locked(
             unadmitted_closing_jobs: old.unadmitted_closing_jobs.clone(),
             unadmitted_reports: old.unadmitted_reports.clone(),
             unadmitted_worker_running: old.unadmitted_worker_running,
+            runtime_closed_turn_ref: old.runtime_closed_turn_ref.clone(),
             #[cfg(test)]
             test_source_root_lines: old.test_source_root_lines.clone(),
             // Context nudges belong to the MCP runtime reset below, which

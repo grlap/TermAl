@@ -431,6 +431,34 @@ Only an invocation with none of `TERMAL_BASE_URL`, `TERMAL_SESSION_ID` and
 A partial context cannot downgrade to standalone. The `RUN` receipt identifies
 the initial request, whose registration and source fingerprint are added later;
 neither `RUN` nor `TRACKED` is a passing test result.
+
+For an approved independent clone, create or select a local project for that
+clone **on the runner's host**, and start the native runner session in that
+project. Registration checks the session's configured project Git common
+directory against both the run directory and the launcher's request root.
+Changing only the command's working directory to a second clone leaves the
+session bound to the original project and is refused before a stage starts.
+Sharing a Git remote URL does not authorize another clone. Keep the native
+session's inherited `TERMAL_*` context; do not substitute a Central session's
+identity or weaken the run-directory guard.
+
+A mismatched project binding surfaces as HTTP 400, `test run directory is
+outside this project's run directories`, in `validate_target_directory`.
+For example, a session bound to an outer repository cannot register a run in
+an independent clone nested under that repository: the clone has a separate
+Git common directory. Select the clone's own local project and native session.
+Other invalid or redirected paths can produce the same refusal; the message
+alone does not identify which binding or path was wrong.
+
+This is origin-host registration, not remote verification credit or Central
+wait support. After correct registration, the origin host's own index and
+on-host wait can see the run. A wait on Central or another host cannot discover
+it through that host's local index. Until host-qualified remote waits are
+supported, use the existing completion mailbox notice through `--notify` to a
+different coordinator (see [detached gate delivery](#detached-gate-delivery)).
+Keep the runner's original inherited `TERMAL_SESSION_ID`; do not create a
+registration on another host or relaunch the run to make it appear in that index.
+
 `request.json` records the exact plan and captured source fingerprint, plus
 `detached` and the creating process's `creatorPid`, which TermAl's test-run
 index reads (see [test runs](features/test-runs.md)); `results.json` records
@@ -474,6 +502,8 @@ no-checkout worktree can share the staged-field hash while differing in this
 field. The launcher composite also includes the root, HEAD, status and untracked
 content, so equality of staged content alone does not imply composite equality.
 This launcher format is separate from Engram's schema-1 review freeze.
+
+<a id="detached-gate-delivery"></a>
 
 An existing root worker may deliver completion to a different coordinator:
 

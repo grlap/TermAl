@@ -188,10 +188,6 @@ fn observe_runtime_unadmitted_captured_end(
     }
 }
 
-fn runtime_previous_checkpoint(record: &SessionRecord) -> Option<EngramRuntimeCheckpointBasis> {
-    record.engram.runtime_checkpoint.clone()
-}
-
 impl AppState {
     // Provider handoff uses only the opening captured at turn start. Remote
     // confirmation belongs to the observation owner, never a runtime reader.
@@ -249,7 +245,10 @@ impl AppState {
         };
         trace.observed_outcome = Some(outcome);
         let session_id = record.session.id.clone();
-        let baseline = runtime_previous_checkpoint(record);
+        // Each closing turn consumes the baseline. Only this turn's own
+        // recorded sighting can replace it, so a turn whose sighting is never
+        // recorded leaves its successor without one: never an older baseline.
+        let baseline = inner.sessions[index].engram.runtime_checkpoint.take();
         let scope = EngramRuntimeClosingScope::capture(inner, &session_id);
         let record = &mut inner.sessions[index];
         let mut notices = engram_carry_running_codex_checks(record, &trace.host_turn_ref);
@@ -261,6 +260,7 @@ impl AppState {
             engram_publish_check_notice(&session_id, &mut record.engram, notice, &mut std::io::stderr());
         }
         record.engram.unadmitted_active_turn = None;
+        record.engram.runtime_closed_turn_ref = Some(trace.host_turn_ref.clone());
         match scope {
             Ok(scope) => {
                 if !record

@@ -402,7 +402,8 @@ impl ReportingTurn {
                     workspace_id: basis.workspace_id,
                     source_revision: basis.source_revision,
                     observed_at: unadmitted_observation_timestamp(),
-                } }
+                }, source_root_generation: basis.source_root_generation,
+                    source_root_state: basis.source_root_state }
             })
         }).flatten();
         turn.record_mut(|record| record.engram.runtime_checkpoint = prior);

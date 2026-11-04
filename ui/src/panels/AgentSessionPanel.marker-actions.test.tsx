@@ -26,6 +26,7 @@ import { VirtualizedConversationMessageList } from "./VirtualizedConversationMes
 import { SessionActivityStrip } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
+import { MessageSourceSessionNavigationContext } from "../message-source-session-navigation";
 import { applyDeltaToSessions } from "../live-updates";
 import {
   resetSessionStoreForTesting,
@@ -391,6 +392,61 @@ function lastJsonRequestBody(
 }
 
 describe("AgentSessionPanel conversation caching", () => {
+  it("keeps mailbox header navigation and marker context menus independent in the real shell", async () => {
+    const source = makeSession("source-session", { name: "Source session" });
+    const message: Message = {
+      id: "mailbox-wake", type: "text", author: "you", timestamp: "10:05", text: "Wake",
+      source: { kind: "mailbox", sessionId: source.id, name: source.name,
+        mailbox: { mailboxId: "mailbox-1", messageId: "wake-1", sequence: 1, unreadCount: 1 } },
+    };
+    const onOpenSession = vi.fn();
+    const onOpenMailbox = vi.fn();
+    const panel = createAgentSessionPanelHarness({
+      activeSession: makeSession("viewer", { messages: [message] }),
+      onCreateConversationMarker: vi.fn(),
+      renderMessageCard: (entry) => (
+        <MessageCard message={entry} mailboxViewerSessionId="viewer" onOpenMailbox={onOpenMailbox}
+          onApprovalDecision={() => {}} onUserInputSubmit={async () => {}} />
+      ),
+    });
+    render(
+      <MessageSourceSessionNavigationContext.Provider value={{
+        onOpenSession, sessionLookup: new Map([[source.id, source]]),
+      }}>
+        {panel()}
+      </MessageSourceSessionNavigationContext.Provider>,
+    );
+    const user = userEvent.setup();
+    const name = screen.getByRole("button", { name: "Open session Source session" });
+    expect(name.closest(".conversation-message-marker-shell")).not.toBeNull();
+    await user.click(name);
+    name.focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard(" ");
+    expect(onOpenSession).toHaveBeenCalledTimes(3);
+    expect(onOpenSession).toHaveBeenLastCalledWith(source.id);
+    expect(screen.queryByRole("menu", { name: "Conversation marker actions" })).not.toBeInTheDocument();
+
+    // Browsers dispatch contextmenu for right-click and for Shift+F10.
+    for (const init of [{ button: 2, clientX: 20, clientY: 30 },
+      { button: 0, clientX: 0, clientY: 0, shiftKey: true }]) {
+      const event = createEvent.contextMenu(name, { ...init, cancelable: true });
+      fireEvent(name, event);
+      expect(event.defaultPrevented).toBe(true);
+      const menu = screen.getByRole("menu", { name: "Conversation marker actions" });
+      expect(within(menu).getByRole("menuitem", { name: "Add checkpoint marker" })).toBeInTheDocument();
+      fireEvent.keyDown(menu, { key: "Escape" });
+      expect(screen.queryByRole("menu", { name: "Conversation marker actions" })).not.toBeInTheDocument();
+    }
+    expect(onOpenSession).toHaveBeenCalledTimes(3);
+    const mailbox = screen.getByRole("button", { name: "Open mailbox →" });
+    fireEvent.contextMenu(mailbox);
+    expect(screen.queryByRole("menu", { name: "Conversation marker actions" })).not.toBeInTheDocument();
+    await user.click(mailbox);
+    expect(onOpenMailbox).toHaveBeenCalledExactlyOnceWith("mailbox-1");
+    expect(onOpenSession).toHaveBeenCalledTimes(3);
+  });
+
   function renderAssistantMarkerMenuHarness() {
     const onCreateConversationMarker = vi.fn();
     const onDeleteConversationMarker = vi.fn();

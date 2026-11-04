@@ -17,6 +17,18 @@ src/api.rs, src/state.rs, src/runtime.rs, src/turns.rs, src/remote.rs,
 src/orchestrators.rs, and the Telegram relay fragments named below.
 */
 
+// Every `eprintln!` in the crate, include! fragments and child modules alike,
+// goes through the host console log (host_log.rs): in server mode each line
+// gets a UTC timestamp and recurring diagnostics are rate limited per kind.
+macro_rules! eprintln {
+    () => {
+        $crate::host_log_line(::std::format_args!(""))
+    };
+    ($($arg:tt)*) => {
+        $crate::host_log_line(::std::format_args!($($arg)*))
+    };
+}
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 mod engram_host;
 use engram_host::{EngramHost, EngramRecorderObservation};
@@ -135,6 +147,7 @@ async fn run() -> Result<()> {
 
 /// Runs the backend server.
 async fn run_server() -> Result<()> {
+    HOST_LOG_CONSOLE.store(true, Ordering::Relaxed);
     let boot_started = std::time::Instant::now();
     let cwd_path = std::env::current_dir().context("failed to resolve current directory")?;
     let ui_dist_dir = cwd_path.join("ui").join("dist");
@@ -592,6 +605,10 @@ fn app_router_with_acceptance_policy_limiter(
             post(resolve_agent_command),
         )
         .route("/api/sessions/{id}/messages", post(send_message))
+        .route(
+            "/api/sessions/{id}/telegram/documents",
+            post(send_session_telegram_document),
+        )
         .route("/api/sessions/{id}/mailboxes", get(list_mailboxes_api))
         .route("/api/sessions/{id}/mailbox-references", get(list_federation_mailbox_references).post(provision_federation_mailbox_reference))
         .route("/api/sessions/{id}/mailbox-references/{reference}/resolve", get(resolve_federation_mailbox_reference))
@@ -863,6 +880,7 @@ impl Mode {
     }
 }
 
+include!("host_log.rs");
 include!("process_limits.rs");
 include!("remote_authority.rs");
 include!("federation_identity.rs");
@@ -1261,6 +1279,10 @@ include!("telegram_messages.rs");
 include!("telegram_forwarding.rs");
 include!("telegram_digest.rs");
 include!("telegram.rs");
+include!("telegram_documents.rs");
+include!("telegram_document_files.rs");
+include!("telegram_document_handle.rs");
+include!("telegram_document_upload.rs");
 
 /// Marks the listening socket as non-inheritable so child processes (agent
 /// runtimes) do not keep the server port locked after the parent exits.

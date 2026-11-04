@@ -42,6 +42,7 @@ import { resolveControlPanelWorkspaceRoot } from "./session-model-utils";
 import { ThemedCombobox } from "./preferences/themed-combobox";
 import { SessionFindBar } from "./SessionFindBar";
 import { useStableEvent } from "./panels/use-stable-event";
+import { MessageSourceSessionNavigationContext } from "./message-source-session-navigation";
 import { resolveWorkspaceScopedSessionId } from "./control-surface-state";
 import { sourceFileStateFromResponse } from "./source-file-state";
 import { normalizeDisplayPath } from "./path-display";
@@ -388,6 +389,18 @@ export function SessionPaneView({
         activeSession.projectId ?? null,
       );
     },
+  );
+  const handleOpenMessageSourceSession = useStableEvent((sessionId: string) => {
+    if (activeContextSessionLookup.has(sessionId)) {
+      onOpenConversationFromDiff(sessionId, pane.id);
+    }
+  });
+  const messageSourceSessionNavigation = useMemo(
+    () => ({
+      onOpenSession: handleOpenMessageSourceSession,
+      sessionLookup: activeContextSessionLookup,
+    }),
+    [activeContextSessionLookup, handleOpenMessageSourceSession],
   );
   const paneRootRef = useRef<HTMLElement | null>(null);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
@@ -1914,43 +1927,47 @@ export function SessionPaneView({
             />
           )
         ) : (
-          <AgentSessionPanel
-            paneId={pane.id}
-            viewMode={pane.viewMode}
-            liveTailPinned={liveTailPinned}
-            onOverviewNavigateStart={beginOverviewNavigation}
-            scrollStateKey={scrollStateKey}
-            scrollContainerRef={messageStackRef}
-            virtualizerHandleRef={virtualizerHandleRef}
-            activeSessionId={activeSession?.id ?? null}
-            isLoading={isLoading}
-            isUpdating={isUpdating}
-            commandMessages={commandMessages}
-            diffMessages={diffMessages}
-            onApprovalDecision={onApprovalDecision}
-            onUserInputSubmit={onUserInputSubmit}
-            onMcpElicitationSubmit={onMcpElicitationSubmit}
-            onCodexAppRequestSubmit={onCodexAppRequestSubmit}
-            onCancelQueuedPrompt={onCancelQueuedPrompt}
-            onResumeSessionQueue={onResumeSessionQueue}
-            onCreateConversationMarker={onCreateConversationMarker}
-            onDeleteConversationMarker={onDeleteConversationMarker}
-            onPinResponseBoardMessage={handlePinResponseBoardMessage}
-            onOpenMailbox={handleOpenMailboxFromPendingPrompt}
-            onSessionSettingsChange={onSessionSettingsChange}
-            conversationSearchQuery={
-              hasSessionFindQuery ? sessionFindQuery : ""
-            }
-            conversationSearchMatchedItemKeys={sessionSearchMatchedItemKeys}
-            conversationSearchActiveItemKey={
-              activeSessionSearchMatch?.itemKey ?? null
-            }
-            onConversationSearchItemMount={handleConversationSearchItemMount}
-            renderCommandCard={renderSessionCommandCard}
-            renderDiffCard={renderSessionDiffCard}
-            renderMessageCard={renderSessionMessageCard}
-            renderPromptSettings={renderSessionPromptSettings}
-          />
+          <MessageSourceSessionNavigationContext.Provider
+            value={messageSourceSessionNavigation}
+          >
+            <AgentSessionPanel
+              paneId={pane.id}
+              viewMode={pane.viewMode}
+              liveTailPinned={liveTailPinned}
+              onOverviewNavigateStart={beginOverviewNavigation}
+              scrollStateKey={scrollStateKey}
+              scrollContainerRef={messageStackRef}
+              virtualizerHandleRef={virtualizerHandleRef}
+              activeSessionId={activeSession?.id ?? null}
+              isLoading={isLoading}
+              isUpdating={isUpdating}
+              commandMessages={commandMessages}
+              diffMessages={diffMessages}
+              onApprovalDecision={onApprovalDecision}
+              onUserInputSubmit={onUserInputSubmit}
+              onMcpElicitationSubmit={onMcpElicitationSubmit}
+              onCodexAppRequestSubmit={onCodexAppRequestSubmit}
+              onCancelQueuedPrompt={onCancelQueuedPrompt}
+              onResumeSessionQueue={onResumeSessionQueue}
+              onCreateConversationMarker={onCreateConversationMarker}
+              onDeleteConversationMarker={onDeleteConversationMarker}
+              onPinResponseBoardMessage={handlePinResponseBoardMessage}
+              onOpenMailbox={handleOpenMailboxFromPendingPrompt}
+              onSessionSettingsChange={onSessionSettingsChange}
+              conversationSearchQuery={
+                hasSessionFindQuery ? sessionFindQuery : ""
+              }
+              conversationSearchMatchedItemKeys={sessionSearchMatchedItemKeys}
+              conversationSearchActiveItemKey={
+                activeSessionSearchMatch?.itemKey ?? null
+              }
+              onConversationSearchItemMount={handleConversationSearchItemMount}
+              renderCommandCard={renderSessionCommandCard}
+              renderDiffCard={renderSessionDiffCard}
+              renderMessageCard={renderSessionMessageCard}
+              renderPromptSettings={renderSessionPromptSettings}
+            />
+          </MessageSourceSessionNavigationContext.Provider>
         )}
         {isSessionTabActive && pane.viewMode === "session" ? (
           <TranscriptActivitySlot

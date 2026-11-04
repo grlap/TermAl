@@ -811,8 +811,12 @@ the turn's attribution is certain, the same outbox appends a measured
 `source_sighting` occurrence: its source basis carries the exact source
 revision and it has no `host_turn_ref`. Engram accounts it as a sighting,
 which supplies measured freshness only, never mutation or check credit.
-Registered verification (`verification_record`, `verification_bind`) is a
-separate work-session service that carries no routing token. The reporting
+Registered verification is a separate work-session service that carries no
+routing token. TermAl sends eligible committed-input launcher runs through
+`verification_record`; it sends no `verification_bind`. Previously bound
+records remain readable through acceptance evidence, and captured launch
+members and stored owed binds remain passive history
+([batch full gates](#batch-full-gates)). The reporting
 path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
 `engram_unadmitted_closing.rs`, `engram_unadmitted_delivery.rs` and
 `engram_unadmitted_worker.rs`.

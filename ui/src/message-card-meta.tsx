@@ -9,6 +9,7 @@ import {
   type SearchHighlightTone,
 } from "./search-highlight";
 import type { ImageAttachment } from "./types";
+import { MessageSourceSessionName } from "./message-source-session-navigation";
 import {
   useIsMessageMetaMarkerMenuTriggerEnabled,
   useMessageMetaResponseBoardDragStart,
@@ -63,6 +64,7 @@ export function MessageMeta({
   timestamp,
   trailing,
   sourceName,
+  sourceSessionId,
 }: {
   author: string;
   timestamp: string;
@@ -70,6 +72,7 @@ export function MessageMeta({
   // Peer sender name for messages delivered via `termal_send_to_session`.
   // When set on a user-authored message the label shows this instead of "You".
   sourceName?: string | null;
+  sourceSessionId?: string | null;
 }) {
   const isUser = author === "you";
   const trimmedSourceName =
@@ -84,6 +87,20 @@ export function MessageMeta({
   const markerMenuTitle = isUser
     ? `Open marker actions for ${trimmedSourceName ? `${displayName}'s` : "your"} message`
     : `Open marker actions for ${author === "system" ? "system" : "assistant"} message`;
+  const authorClassName = `message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`;
+  const authorLabel = (
+    <span
+      className={authorClassName}
+      role={isMarkerMenuTrigger ? "button" : undefined}
+      tabIndex={isMarkerMenuTrigger ? 0 : undefined}
+      aria-haspopup={isMarkerMenuTrigger ? "menu" : undefined}
+      aria-label={isMarkerMenuTrigger ? markerMenuLabel : undefined}
+      title={isMarkerMenuTrigger ? markerMenuTitle : undefined}
+      data-conversation-marker-menu-trigger={isMarkerMenuTrigger || undefined}
+    >
+      {displayName}
+    </span>
+  );
 
   return (
     <div
@@ -91,19 +108,17 @@ export function MessageMeta({
       draggable={responseBoardDragStart ? true : undefined}
       onDragStart={responseBoardDragStart ?? undefined}
     >
-      <span
-        className={`message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`}
-        role={isMarkerMenuTrigger ? "button" : undefined}
-        tabIndex={isMarkerMenuTrigger ? 0 : undefined}
-        aria-haspopup={isMarkerMenuTrigger ? "menu" : undefined}
-        aria-label={isMarkerMenuTrigger ? markerMenuLabel : undefined}
-        title={isMarkerMenuTrigger ? markerMenuTitle : undefined}
-        data-conversation-marker-menu-trigger={
-          isMarkerMenuTrigger ? true : undefined
-        }
-      >
-        {displayName}
-      </span>
+      {isUser && trimmedSourceName && sourceSessionId ? (
+        <MessageSourceSessionName
+          sessionId={sourceSessionId}
+          name={displayName}
+          className={authorClassName}
+          markerMenuTrigger={isMarkerMenuTrigger}
+          fallback={authorLabel}
+        />
+      ) : (
+        authorLabel
+      )}
       <span className="message-meta-end">
         {trailing}
         <span>{timestamp}</span>
