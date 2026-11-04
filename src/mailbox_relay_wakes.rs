@@ -247,21 +247,29 @@ impl AppState {
             // outage. Re-drive that exact head after current authority returns;
             // a duplicate must not start an unrelated successor or recreate a
             // carrier removed by Cancel.
-            let owner = {
+            let (owner, local_owner) = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                inner
-                    .find_session_index(&wake.target.native_session_id)
-                    .and_then(|index| MailboxRelayDrainOwner::capture(
-                        &inner.sessions[index], wake, self.federation_executor_wake_signal.clone(),
-                    ))
+                inner.find_session_index(&wake.target.native_session_id)
+                    .map_or((None, None), |index| {
+                        let record = &inner.sessions[index];
+                        let relay = MailboxRelayDrainOwner::capture(
+                            record, wake, self.federation_executor_wake_signal.clone());
+                        let local = relay.is_none().then(|| local_mailbox_head_for_relay(
+                            record, &wake.conversation.home, &wake.mailbox_id, wake.sequence)).flatten();
+                        (relay, local)
+                    })
             };
-            if let Some(owner) = owner.filter(|_| !self.federation_executor_wake_signal.is_stopping()) {
+            if !self.federation_executor_wake_signal.is_stopping() && (owner.is_some() || local_owner.is_some()) {
                 #[cfg(test)]
                 if let Some(hook) = TEST_MAILBOX_RELAY_BEFORE_REDRIVE.with(|hook| hook.borrow_mut().take()) { hook(); }
-                if let Some(dispatch) = self
-                    .dispatch_next_queued_turn_for_mailbox_relay(&wake.target.native_session_id, owner)
-                    .map_err(mailbox_api_error)?
-                {
+                let dispatch = match (owner, local_owner) {
+                    (Some(owner), _) => self.dispatch_next_queued_turn_for_mailbox_relay(
+                        &wake.target.native_session_id, owner),
+                    (None, Some(owner)) => self.dispatch_next_queued_turn_for_activation(
+                        &wake.target.native_session_id, owner),
+                    (None, None) => Ok(None),
+                }.map_err(mailbox_api_error)?;
+                if let Some(dispatch) = dispatch {
                     let _ = deliver_turn_dispatch(self, dispatch);
                 }
             }
@@ -286,6 +294,13 @@ impl AppState {
             if let Some(owner) = outcome.relay_owner {
                 if let Some(dispatch) = self
                     .dispatch_next_queued_turn_for_mailbox_relay(&wake.target.native_session_id, owner)
+                    .map_err(mailbox_api_error)?
+                {
+                    let _ = deliver_turn_dispatch(self, dispatch);
+                }
+            } else if let Some(owner) = outcome.local_head_owner {
+                if let Some(dispatch) = self
+                    .dispatch_next_queued_turn_for_activation(&wake.target.native_session_id, owner)
                     .map_err(mailbox_api_error)?
                 {
                     let _ = deliver_turn_dispatch(self, dispatch);

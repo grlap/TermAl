@@ -2157,7 +2157,7 @@ impl EngramSessionState {
     /// A cached orientation is ready for admission even with a deferred refresh.
     /// Runtime acceptance releases this local buffer; it never acknowledges an
     /// Engram page. All host orientation reads use non-advancing peek.
-    fn context_needs_preparation(&self) -> bool {
+    fn context_needs_refresh(&self) -> bool {
         self.pending_context_nudge.is_none()
             && (self.context_nudge_pending || self.context_nudge_in_progress)
     }

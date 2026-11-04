@@ -269,9 +269,9 @@ rewrite the environment of an already-running process in place.
 
 ## Start and post-compaction context
 
-Before the first prompt in a TermAl process, and again after an observed Codex
-`thread/compacted` event or Claude stream-json `compact_boundary`, TermAl runs
-off-lock:
+At the first prompt in a TermAl process, and again after an observed Codex
+`thread/compacted` event or Claude stream-json `compact_boundary`, TermAl schedules
+an owned background read when no undelivered context is available:
 
 ```text
 engram --project-file <project>/.engram-project --home <home> \
@@ -311,8 +311,8 @@ tracker tool, which that brief tracks as its own gap. The host still keeps its
 generation locally. The agent continues ordinary advancing `work next` through
 MCP; host orientation does not replace that read.
 This protects the delivery cursor, not the completeness of recovery: the host
-prepares the nudge at the next TermAl prompt dispatch, not synchronously at the
-compaction boundary. It does not guarantee an Engram block before the model's
+requests the nudge at the next TermAl prompt dispatch without waiting for it,
+and not synchronously at the compaction boundary. It does not guarantee an Engram block before the model's
 first action in an automatically continued post-compaction turn. For Claude,
 the SessionStart compact hook below closes that gap where it can.
 
@@ -324,8 +324,8 @@ runtime prompt; the user's durable message remains unchanged. The cold-start
 command uses the bounded Engram CLI/store-open budget (six seconds in
 production), rather than the shorter control-frame deadline. A failure is
 logged, does not block the user's turn, and leaves the nudge pending for a later
-prompt. Concurrent prompt admission waits for the owning refresh; the context
-is consumed only after the runtime command channel accepts the prompt, so spawn
+prompt. Concurrent sends and queue drains use available local context without
+waiting for the owning refresh. The context is consumed only after the runtime command channel accepts the prompt, so spawn
 or delivery failure preserves it for retry. ACP runtimes receive the Engram MCP server, but
 this cut does not yet expose a portable ACP compaction event, so their refresh
 is session-start only.
@@ -874,6 +874,13 @@ path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
   when a comparison is included, and ends at the actual closing observation
   cut before request construction. It asserts neither continuous observation
   nor that the adopted turn caused the drift.
+  A definitive source-capture refusal, such as configured Git filters or an
+  unsupported gitlink, ends closing capture on its first failed attempt. The
+  retained job and one visible `not reported to Engram` notice keep the
+  original reason; later turns do not retry that job. No source sighting or
+  report is invented, and the local Test Runs row and declared-artifact
+  verdict are unchanged. Missing captures caused by deadlines, capacity,
+  races or other I/O failures keep the existing bounded retry behaviour.
 - **Durability and replay.** The prepared request and delivery state live in
   the session's SQLite row. A settled report's row space is bounded: a session
   keeps only its newest few reports that Engram answered definitively, so a
@@ -2319,6 +2326,21 @@ with different run ids, or equal positions with different events, withhold
 authority. A known binding's Ended cleanup changes lifecycle proof without
 inventing another naming; an unknown Ended event teaches its naming history.
 Persistence failure keeps the candidate and recovery guard unconfirmed.
+An interrupted publication is finished in the background, never on a turn's
+path: the next turn opening asks for the pass, which publishes that exact image
+without preparing another owner. A turn keeps its opening capture for its whole
+length, so a turn that opens before that finish stays unconfirmed, says so and
+loses its own source and check evidence; an ordinary turn opening after the pass
+finishes is confirmed, and if the publication can't finish, evidence stays
+withheld. The recovery pass at a naming or turn opening reads a settled root
+before it prepares an owner, and goes on only if the read learned something,
+which includes an answer that contradicts acknowledged history, so a live root
+stays Published through it. The recurring reclamation pass does the same, and that
+read only decides whether to stop: a root with something to settle goes through
+the ordinary recovery, which reads it again after its owner, so a pass makes at
+most two reads of a root and a live root costs one, once per cooldown. An unanswered
+read is reported as that attempt's outcome, with the root's authority untouched. A
+release or an own clear acts without that read.
 Legacy numeric history and evaluator tokens require canonical recovery and
 cannot be silently promoted into the new history epoch. Clear, release,
 removal and compaction never reset history. A

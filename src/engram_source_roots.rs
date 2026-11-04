@@ -1339,14 +1339,25 @@ fn engram_place_source_basis_with(
     place: &EngramBasisPlace,
     ordinary_commit_input: bool,
 ) -> Option<EngramExecutionSourceBasis> {
+    engram_place_source_capture_with(place, ordinary_commit_input).ok().flatten()
+}
+
+fn engram_place_source_capture(place: &EngramBasisPlace) -> EngramSourceCapture {
+    engram_place_source_capture_with(place, ORDINARY_COMMIT_INPUT_DEFAULT)
+}
+
+fn engram_place_source_capture_with(
+    place: &EngramBasisPlace,
+    ordinary_commit_input: bool,
+) -> EngramSourceCapture {
     match place {
         EngramBasisPlace::Workdir(workdir) => {
-            engram_execution_source_basis_with(FsPath::new(workdir), ordinary_commit_input)
+            engram_execution_source_capture_with(FsPath::new(workdir), ordinary_commit_input)
         }
         EngramBasisPlace::Named {
             root,
             common_dir_key,
-        } => engram_named_root_source_basis_with(root, common_dir_key, ordinary_commit_input),
+        } => engram_named_root_source_capture_with(root, common_dir_key, ordinary_commit_input),
     }
 }
 
@@ -1369,11 +1380,20 @@ fn engram_named_root_source_basis(
 
 /// [`engram_named_root_source_basis`] with the committed-input switch given
 /// ([`source_revision`]): on, a root that is not clean has no basis.
+#[cfg(test)]
 fn engram_named_root_source_basis_with(
     root: &str,
     common_dir_key: &str,
     ordinary_commit_input: bool,
 ) -> Option<EngramExecutionSourceBasis> {
+    engram_named_root_source_capture_with(root, common_dir_key, ordinary_commit_input).ok().flatten()
+}
+
+fn engram_named_root_source_capture_with(
+    root: &str,
+    common_dir_key: &str,
+    ordinary_commit_input: bool,
+) -> EngramSourceCapture {
     let path = FsPath::new(root);
     let resolves_to_itself =
         |resolved: &FsPath| engram_exact_path_key(resolved) == engram_exact_path_key(path);
@@ -1384,11 +1404,11 @@ fn engram_named_root_source_basis_with(
                 "engram> no source basis for the named root {root}: it now leads to {}",
                 resolved.display()
             );
-            return None;
+            return Ok(None);
         }
         Err(_) => {
             eprintln!("engram> no source basis for the named root {root}: it is gone");
-            return None;
+            return Ok(None);
         }
     }
     let Some(common) = engram_source_root_common_dir(path) else {
@@ -1396,39 +1416,42 @@ fn engram_named_root_source_basis_with(
             "engram> no source basis for the named root {root}: it is gone or no longer a \
              worktree root"
         );
-        return None;
+        return Ok(None);
     };
     if engram_exact_path_key(&common) != common_dir_key {
         eprintln!(
             "engram> no source basis for the named root {root}: it now belongs to another \
              repository"
         );
-        return None;
+        return Ok(None);
     }
     match source_revision(path, ordinary_commit_input) {
         Ok(SourceRevision::Taken {
             root: canonical,
             revision,
         }) if resolves_to_itself(&canonical) => {
-            engram_bounded_source_basis(path, &canonical, revision)
+            Ok(engram_bounded_source_basis(path, &canonical, revision))
         }
         Ok(SourceRevision::Taken { root: canonical, .. }) => {
             eprintln!(
                 "engram> no source basis for the named root {root}: it was measured as {}",
                 canonical.display()
             );
-            None
+            Ok(None)
         }
         Ok(SourceRevision::NotClean { dirty_paths }) => {
             eprintln!(
                 "engram> no source basis for the named root {root}: {}",
                 source_revision_not_clean_reason(&dirty_paths)
             );
-            None
+            Ok(None)
         }
         Err(error) => {
             eprintln!("engram> no source basis for the named root {root}: {error:#}");
-            None
+            match error.downcast_ref::<SourceBasisRefusal>() {
+                Some(refusal) => Err(*refusal),
+                None => Ok(None),
+            }
         }
     }
 }

@@ -91,7 +91,7 @@ impl ReviewFreezeGit {
             true,
         )?;
         if !filters.is_empty() {
-            bail!("review verification does not run configured Git filters");
+            return Err(SourceBasisRefusal::ConfiguredGitFilters.into());
         }
         Ok(git)
     }

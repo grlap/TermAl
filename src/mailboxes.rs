@@ -14,6 +14,11 @@ const MAX_MAILBOX_BODY_BYTES: usize = 256 * 1024;
 const MAX_MAILBOX_METADATA_BYTES: usize = 4 * 1024;
 const MAILBOX_WRITER_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[cfg(test)]
+std::thread_local! {
+    static TEST_MAILBOX_AFTER_PREFIX_OBSERVATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct MailboxParticipant {
@@ -223,6 +228,7 @@ struct MailboxWakeQueueOutcome {
     accepted: bool,
     changed: bool,
     relay_owner: Option<MailboxRelayDrainOwner>,
+    local_head_owner: Option<QueuedTurnOwner>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -710,240 +716,306 @@ impl AppState {
             return Ok(MailboxWakeQueueOutcome::default());
         }
 
-        let relay_link = expected_relay.and_then(|(_,lease,_)|lease).map(|lease| {
-            let guard = lease.channel.state.lock().expect("federation link mutex poisoned");
-            if guard.incarnation.as_deref() != Some(lease.incarnation.as_str())
-                || guard.recorded_incarnation.as_deref() != Some(lease.incarnation.as_str()) {
-                return Err(relay_store_error("native mailbox notification link changed"));
-            }
-            Ok(guard)
-        }).transpose()?;
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_visible_session_index(session_id) else {
-            return Ok(MailboxWakeQueueOutcome::default());
-        };
-        if let Some((principal,lease,peer)) = expected_relay {
-            let current = federation_snapshot_locked(&inner, &peer.peer.host_id).map_err(|error|relay_store_error(&error.message))?;
-            if !mailbox_relay_peer_current_locked(&inner, &current, peer.enrollment_generation) || !same_mailbox_relay_enrollment(peer, &current) {
-                return Err(relay_store_error("native relay wake enrollment changed before queue admission"));
-            }
-            if !inner.preferences.federation.enabled || principal.native_session_id != session_id || inner.federation.local.as_ref() != Some(&principal.host)
-                || inner.sessions[index].federation_native_creation_id != principal.native_creation_id {
+        let mut prefix_refreshes = 0;
+        loop {
+            // Queue eligibility includes relay authority, unlike the generic
+            // delivery-state predicate. Observe it off-lock through the dispatch
+            // owner; an unrelated fenced carrier remains owed but cannot trap a
+            // new runnable wake. This observation grants no dispatch authority.
+            let observed_prefix = if promote_existing_to_front {
+                Vec::new()
+            } else {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner.find_session_index(session_id)
+                    .map(|index| mailbox_fifo_prefix(&inner.sessions[index])).unwrap_or_default()
+            };
+            let relay_candidates = observed_prefix.iter().filter_map(|(id, source)| {
+                let (mailbox, sequence) = source.as_ref()?;
+                mailbox.starts_with("relay-mailbox-").then(|| (id.clone(), MailboxNotificationDelivery {
+                    session_id: session_id.to_owned(), mailbox_id: mailbox.clone(), through_sequence: *sequence,
+                }))
+            }).map(|(id, notification)| {
+                let authority = self.prepare_mailbox_relay_dispatch_authority(&notification);
+                (id, notification, authority)
+            }).collect::<Vec<_>>();
+            #[cfg(test)]
+            if let Some(hook) = TEST_MAILBOX_AFTER_PREFIX_OBSERVATION.with(|hook| hook.borrow_mut().take()) { hook(); }
+            let relay_link = expected_relay.and_then(|(_,lease,_)|lease).map(|lease| {
+                let guard = lease.channel.state.lock().expect("federation link mutex poisoned");
+                if guard.incarnation.as_deref() != Some(lease.incarnation.as_str())
+                    || guard.recorded_incarnation.as_deref() != Some(lease.incarnation.as_str()) {
+                    return Err(relay_store_error("native mailbox notification link changed"));
+                }
+                Ok(guard)
+            }).transpose()?;
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_visible_session_index(session_id) else {
                 return Ok(MailboxWakeQueueOutcome::default());
+            };
+            if let Some((principal,lease,peer)) = expected_relay {
+                let current = federation_snapshot_locked(&inner, &peer.peer.host_id).map_err(|error|relay_store_error(&error.message))?;
+                if !mailbox_relay_peer_current_locked(&inner, &current, peer.enrollment_generation) || !same_mailbox_relay_enrollment(peer, &current) {
+                    return Err(relay_store_error("native relay wake enrollment changed before queue admission"));
+                }
+                if !inner.preferences.federation.enabled || principal.native_session_id != session_id || inner.federation.local.as_ref() != Some(&principal.host)
+                    || inner.sessions[index].federation_native_creation_id != principal.native_creation_id {
+                    return Ok(MailboxWakeQueueOutcome::default());
+                }
+                if let Some(lease) = lease {
+                    self.refresh_federation_transport_snapshot_locked(&inner,&lease.channel.transport_basis(),&lease.incarnation)
+                        .map_err(|error|relay_store_error(&error.message))?;
+                }
             }
-            if let Some(lease) = lease {
-                self.refresh_federation_transport_snapshot_locked(&inner,&lease.channel.transport_basis(),&lease.incarnation)
-                    .map_err(|error|relay_store_error(&error.message))?;
+            if let Some(binding) = expected_binding {
+                // Revalidate while applying the queue change, after all store I/O.
+                // A delayed committed wake never targets a recreated native root.
+                if inner.sessions[index].mailbox_binding() != Some(binding)
+                    || inner.federation.mailbox_directory.get(&binding.participant_key()).is_none_or(|row| {
+                        row.binding != *binding
+                            || !federation_mailbox_participant_current_locked(&inner, row)
+                    })
+                {
+                    return Ok(MailboxWakeQueueOutcome::default());
+                }
             }
-        }
-        if let Some(binding) = expected_binding {
-            // Revalidate while applying the queue change, after all store I/O.
-            // A delayed committed wake never targets a recreated native root.
-            if inner.sessions[index].mailbox_binding() != Some(binding)
-                || inner.federation.mailbox_directory.get(&binding.participant_key()).is_none_or(|row| {
-                    row.binding != *binding
-                        || !federation_mailbox_participant_current_locked(&inner, row)
-                })
+            if !inner.sessions[index].is_local_session()
+                || inner.sessions[index].session.parent_delegation_id.is_some()
+                || inner
+                    .find_delegation_index_by_child_session_id(session_id)
+                    .is_some()
             {
                 return Ok(MailboxWakeQueueOutcome::default());
             }
-        }
-        if !inner.sessions[index].is_local_session()
-            || inner.sessions[index].session.parent_delegation_id.is_some()
-            || inner
-                .find_delegation_index_by_child_session_id(session_id)
-                .is_some()
-        {
-            return Ok(MailboxWakeQueueOutcome::default());
-        }
 
-        let mut changed = false;
-        let mut recovered_through = Vec::with_capacity(wakeups.len());
-        for (wakeup, storage_key) in wakeups {
-            recovered_through.push((wakeup.mailbox_id.clone(), wakeup.sequence, storage_key));
-            if inner.sessions[index]
-                .active_turn_mailbox_notification
-                .as_ref()
-                .is_some_and(|active| {
-                    active.mailbox_id == wakeup.mailbox_id
-                        && active.through_sequence >= wakeup.sequence
-                })
-            {
-                // A successor turn already owns this mailbox boundary. The
-                // failed delivery is covered, but queuing it again would
-                // duplicate the live wake after the terminal transition.
+            if !promote_existing_to_front && mailbox_fifo_prefix(&inner.sessions[index]) != observed_prefix {
+                // Releasing both guards is essential: preparing a newly exposed
+                // carrier performs store I/O and takes the dispatch owner's locks.
+                drop(inner);
+                drop(relay_link);
+                prefix_refreshes += 1;
+                if prefix_refreshes >= 3 {
+                    // No queue mutation occurred. The durable producer retains
+                    // its unconfirmed wake and can retry through its existing owner.
+                    return Err(anyhow!("mailbox queue changed during FIFO admission; wake remains owed"));
+                }
                 continue;
             }
-            let text = if wakeup.unread_count == 0 { mailbox_continuation_notification_text(
-                &wakeup.mailbox_id,wakeup.sequence,&wakeup.sender_name,wakeup.topic.as_deref(),
-            ) } else { mailbox_notification_text(
-                &wakeup.mailbox_id,
-                wakeup.unread_count,
-                wakeup.sequence,
-                &wakeup.sender_name,
-                wakeup.topic.as_deref(),
-            ) };
-            let source = MessageSource::mailbox(
-                wakeup.sender_session_id,
-                wakeup.sender_name,
-                MailboxMessageSource {
-                    mailbox_id: wakeup.mailbox_id.clone(),
-                    message_id: wakeup.message_id,
-                    sequence: wakeup.sequence,
-                    unread_count: wakeup.unread_count,
-                },
-            );
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            // A retained request is immutable, but it still covers its original
-            // boundary. Recovery of that same wake must not append a duplicate.
-            if record.queued_prompts.iter().any(|queued| {
-                queued.has_stored_history()
-                    && queued
-                        .pending_prompt
-                        .source
-                        .as_ref()
-                        .and_then(|source| source.mailbox.as_ref())
-                        .is_some_and(|mailbox| {
-                            mailbox.mailbox_id == wakeup.mailbox_id
-                                && mailbox.sequence >= wakeup.sequence
-                        })
-            }) {
-                continue;
-            }
-            // An entry enqueued with a durability prerequisite keeps the
-            // content proven durable; it is never rewritten as a wake.
-            let durability_holds = &record.queued_prompt_durability_holds;
-            if let Some(existing_index) = record.queued_prompts.iter().position(|queued| {
-                !queued.has_stored_history()
-                    && !durability_holds.contains_key(&queued.pending_prompt.id)
-                    && queued
+            let fenced_relays = relay_candidates.iter().filter_map(|(id, notification, authority)| {
+                let fenced = match authority {
+                    Ok(Some(authority)) => mailbox_fifo_authority_is_fenced(authority.validate_locked(&inner)),
+                    Ok(None) => false,
+                    Err(error) if error.status.is_client_error() => true,
+                    Err(error) => {
+                        eprintln!("mailbox> FIFO authority observation unavailable: {}", mailbox_preview(&error.message));
+                        false
+                    }
+                };
+                fenced.then(|| (id.as_str(), notification.mailbox_id.as_str(), notification.through_sequence))
+            }).collect::<Vec<_>>();
+            let mut changed = false;
+            let mut recovered_through = Vec::with_capacity(wakeups.len());
+            for (wakeup, storage_key) in wakeups {
+                recovered_through.push((wakeup.mailbox_id.clone(), wakeup.sequence, storage_key));
+                if inner.sessions[index]
+                    .active_turn_mailbox_notification
+                    .as_ref()
+                    .is_some_and(|active| {
+                        active.mailbox_id == wakeup.mailbox_id
+                            && active.through_sequence >= wakeup.sequence
+                    })
+                {
+                    // A successor turn already owns this mailbox boundary. The
+                    // failed delivery is covered, but queuing it again would
+                    // duplicate the live wake after the terminal transition.
+                    continue;
+                }
+                let text = if wakeup.unread_count == 0 { mailbox_continuation_notification_text(
+                    &wakeup.mailbox_id,wakeup.sequence,&wakeup.sender_name,wakeup.topic.as_deref(),
+                ) } else { mailbox_notification_text(
+                    &wakeup.mailbox_id,
+                    wakeup.unread_count,
+                    wakeup.sequence,
+                    &wakeup.sender_name,
+                    wakeup.topic.as_deref(),
+                ) };
+                let source = MessageSource::mailbox(
+                    wakeup.sender_session_id,
+                    wakeup.sender_name,
+                    MailboxMessageSource {
+                        mailbox_id: wakeup.mailbox_id.clone(),
+                        message_id: wakeup.message_id,
+                        sequence: wakeup.sequence,
+                        unread_count: wakeup.unread_count,
+                    },
+                );
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                // A retained request is immutable, but it still covers its original
+                // boundary. Recovery of that same wake must not append a duplicate.
+                if record.queued_prompts.iter().any(|queued| {
+                    queued.has_stored_history()
+                        && queued
+                            .pending_prompt
+                            .source
+                            .as_ref()
+                            .and_then(|source| source.mailbox.as_ref())
+                            .is_some_and(|mailbox| {
+                                mailbox.mailbox_id == wakeup.mailbox_id
+                                    && mailbox.sequence >= wakeup.sequence
+                            })
+                }) {
+                    continue;
+                }
+                // An entry enqueued with a durability prerequisite keeps the
+                // content proven durable; it is never rewritten as a wake.
+                let durability_holds = &record.queued_prompt_durability_holds;
+                if let Some(existing_index) = record.queued_prompts.iter().position(|queued| {
+                    !queued.has_stored_history()
+                        && !durability_holds.contains_key(&queued.pending_prompt.id)
+                        && queued
+                            .pending_prompt
+                            .source
+                            .as_ref()
+                            .and_then(|candidate| candidate.mailbox.as_ref())
+                            .is_some_and(|mailbox| mailbox.mailbox_id == wakeup.mailbox_id)
+                }) {
+                    let mut existing = record
+                        .queued_prompts
+                        .remove(existing_index)
+                        .expect("queued mailbox index should remain valid");
+                    let existing_sequence = existing
                         .pending_prompt
                         .source
                         .as_ref()
                         .and_then(|candidate| candidate.mailbox.as_ref())
-                        .is_some_and(|mailbox| mailbox.mailbox_id == wakeup.mailbox_id)
-            }) {
-                let mut existing = record
-                    .queued_prompts
-                    .remove(existing_index)
-                    .expect("queued mailbox index should remain valid");
-                let existing_sequence = existing
-                    .pending_prompt
-                    .source
-                    .as_ref()
-                    .and_then(|candidate| candidate.mailbox.as_ref())
-                    .map_or(0, |mailbox| mailbox.sequence);
-                if existing_sequence > wakeup.sequence {
-                    // A narrower recovery query can legitimately find an older
-                    // never-woken row while a newer wake is already queued.
-                    // The existing wake covers that row; never regress the
-                    // prompt's receipt metadata to the older sequence.
-                } else if existing.pending_prompt.text != text
-                    || existing.pending_prompt.source.as_ref() != Some(&source)
-                {
-                    existing.pending_prompt.timestamp = stamp_now();
-                    existing.pending_prompt.text = text;
-                    existing.pending_prompt.source = Some(source);
-                    changed = true;
+                        .map_or(0, |mailbox| mailbox.sequence);
+                    if existing_sequence > wakeup.sequence {
+                        // A narrower recovery query can legitimately find an older
+                        // never-woken row while a newer wake is already queued.
+                        // The existing wake covers that row; never regress the
+                        // prompt's receipt metadata to the older sequence.
+                    } else if existing.pending_prompt.text != text
+                        || existing.pending_prompt.source.as_ref() != Some(&source)
+                    {
+                        existing.pending_prompt.timestamp = stamp_now();
+                        existing.pending_prompt.text = text;
+                        existing.pending_prompt.source = Some(source);
+                        changed = true;
+                    }
+                    // Like an Engram-retained head, a head held for its
+                    // durability acknowledgement is never overtaken.
+                    if promote_existing_to_front
+                        && !record
+                            .queued_prompts
+                            .front()
+                            .is_some_and(QueuedPromptRecord::has_stored_history)
+                        && !queued_head_held_for_durability(record)
+                    {
+                        record.queued_prompts.push_front(existing);
+                        changed |= existing_index != 0;
+                    } else {
+                        record.queued_prompts.insert(existing_index, existing);
+                    }
+                    continue;
                 }
-                // Like an Engram-retained head, a head held for its
-                // durability acknowledgement is never overtaken.
-                if promote_existing_to_front
-                    && !record
-                        .queued_prompts
-                        .front()
-                        .is_some_and(QueuedPromptRecord::has_stored_history)
-                    && !queued_head_held_for_durability(record)
-                {
-                    record.queued_prompts.push_front(existing);
-                    changed |= existing_index != 0;
-                } else {
-                    record.queued_prompts.insert(existing_index, existing);
-                }
-                continue;
-            }
 
-            let prompt_id = inner.next_message_id();
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            let insert_at = usize::from(
-                record
-                    .queued_prompts
-                    .front()
-                    .is_some_and(QueuedPromptRecord::has_stored_history)
-                    || queued_head_held_for_durability(record),
-            );
-            record.queued_prompts.insert(
-                insert_at,
-                QueuedPromptRecord {
-                    engram_ordinary_handoff: false,
-                    engram_waiting: false,
-                    promoted_message_index: None,
-                    promotion_disposition_known: true,
-                    engram_bind: None,
-                    engram_evaluate: None,
-                    engram_interrupted: false,
-                    source: QueuedPromptSource::Mailbox,
-                    attachments: Vec::new(),
-                    pending_prompt: PendingPrompt {
+                let prompt_id = inner.next_message_id();
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                let mut insert_at = mailbox_fifo_protected_floor(record);
+                // New arrivals join the leading runnable mailbox run in FIFO
+                // order. A user prompt or protected entry remains a barrier.
+                // Failed-delivery recovery still restores the dispatched carrier
+                // ahead of its successors, as the existing recovery owner requires.
+                if !promote_existing_to_front {
+                    while record.queued_prompts.get(insert_at).is_some_and(|queued| {
+                        mailbox_fifo_entry_is_runnable(record, queued)
+                            && !queued.pending_prompt.source.as_ref().and_then(|source| source.mailbox.as_ref())
+                                .is_some_and(|mailbox| fenced_relays.iter().any(|(id, name, sequence)|
+                                    *id == queued.pending_prompt.id && *name == mailbox.mailbox_id && *sequence == mailbox.sequence))
+                    }) {
+                        insert_at += 1;
+                    }
+                }
+                record.queued_prompts.insert(
+                    insert_at,
+                    QueuedPromptRecord {
+                        engram_ordinary_handoff: false,
+                        engram_waiting: false,
+                        promoted_message_index: None,
+                        promotion_disposition_known: true,
+                        engram_bind: None,
+                        engram_evaluate: None,
                         engram_interrupted: false,
-                        is_engram_retained: false,
+                        source: QueuedPromptSource::Mailbox,
                         attachments: Vec::new(),
-                        id: prompt_id,
-                        timestamp: stamp_now(),
-                        text,
-                        expanded_text: None,
-                        source: Some(source),
+                        pending_prompt: PendingPrompt {
+                            engram_interrupted: false,
+                            is_engram_retained: false,
+                            attachments: Vec::new(),
+                            id: prompt_id,
+                            timestamp: stamp_now(),
+                            text,
+                            expanded_text: None,
+                            source: Some(source),
+                        },
                     },
-                },
-            );
-            changed = true;
-        }
-        let mut relay_owner = None;
-        if let Some((principal, _, _)) = expected_relay {
-            for (mailbox, sequence, _) in &recovered_through {
-                let Some(locator) = MailboxRelayLocator::decode(mailbox, false)
-                    .map_err(|error|anyhow!(error.message))? else { continue; };
-                let record = &inner.sessions[index];
-                let covered = record.queued_prompts.iter().any(|queued|
-                    queued.pending_prompt.source.as_ref().and_then(|source|source.mailbox.as_ref())
-                        .is_some_and(|source|source.mailbox_id == *mailbox && source.sequence >= *sequence));
-                if covered {
-                    // Record before releasing the same lock that first exposes
-                    // the cancellable carrier, even if either later write fails.
-                    self.mailbox_store.note_live_mailbox_relay_queued(principal, &locator.id, *sequence);
-                    relay_owner = relay_owner.or_else(|| MailboxRelayDrainOwner::capture_boundary(
-                        record, &locator.home, &locator.id, *sequence, self.federation_executor_wake_signal.clone()));
+                );
+                changed = true;
+            }
+            let mut relay_owner = None;
+            let mut local_head_owner = None;
+            if let Some((principal, _, _)) = expected_relay {
+                for (mailbox, sequence, _) in &recovered_through {
+                    let Some(locator) = MailboxRelayLocator::decode(mailbox, false)
+                        .map_err(|error|anyhow!(error.message))? else { continue; };
+                    let record = &inner.sessions[index];
+                    let covered = record.queued_prompts.iter().any(|queued|
+                        queued.pending_prompt.source.as_ref().and_then(|source|source.mailbox.as_ref())
+                            .is_some_and(|source|source.mailbox_id == *mailbox && source.sequence >= *sequence));
+                    if covered {
+                        // Record before releasing the same lock that first exposes
+                        // the cancellable carrier, even if either later write fails.
+                        self.mailbox_store.note_live_mailbox_relay_queued(principal, &locator.id, *sequence);
+                        relay_owner = relay_owner.or_else(|| MailboxRelayDrainOwner::capture_boundary(
+                            record, &locator.home, &locator.id, *sequence, self.federation_executor_wake_signal.clone()));
+                        if relay_owner.is_none() {
+                            // A relay joining behind a dormant local mailbox must
+                            // drive that exact head, not bypass it or a user barrier.
+                            local_head_owner = local_mailbox_head_for_relay(
+                                record, &locator.home, &locator.id, *sequence);
+                        }
+                    }
                 }
             }
+            if changed {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                sync_pending_prompts(record);
+                self.commit_locked(&mut inner)?;
+            }
+            drop(inner);
+            drop(relay_link);
+            for (mailbox_id, sequence, storage_key) in recovered_through {
+                if expected_relay.is_some() { continue; }
+                let Some(storage_key) = storage_key else { continue; };
+                self.mailbox_store.mark_notifications_recovered_through(
+                    &storage_key,
+                    &mailbox_id,
+                    sequence,
+                    recovery,
+                )?;
+            }
+            return Ok(MailboxWakeQueueOutcome {
+                accepted: true,
+                changed,
+                relay_owner,
+                local_head_owner,
+            });
         }
-        if changed {
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            sync_pending_prompts(record);
-            self.commit_locked(&mut inner)?;
-        }
-        drop(inner);
-        drop(relay_link);
-        for (mailbox_id, sequence, storage_key) in recovered_through {
-            if expected_relay.is_some() { continue; }
-            let Some(storage_key) = storage_key else { continue; };
-            self.mailbox_store.mark_notifications_recovered_through(
-                &storage_key,
-                &mailbox_id,
-                sequence,
-                recovery,
-            )?;
-        }
-        Ok(MailboxWakeQueueOutcome {
-            accepted: true,
-            changed,
-            relay_owner,
-        })
     }
 
     fn reconcile_never_woken_mailbox_notifications_for_session(

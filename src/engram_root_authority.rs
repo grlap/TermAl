@@ -620,6 +620,36 @@ impl EngramNamedRootReadResponse {
 
 /// The event position orders only this run; the run ordinal orders only this
 /// work/store. Neither is the local historical invalidation revision.
+/// What a new proof of `binding`'s run must keep of the one already acknowledged.
+fn engram_proof_keeps_acknowledged_history(
+    history: &EngramWorkNamingHistory,
+    binding: &EngramControlWorkBinding,
+    proof: &EngramNamedRootReadResponse,
+) -> Result<(), ApiError> {
+    if let Some(previous) = history
+        .proofs
+        .iter()
+        .find(|previous| engram_same_recovery_run(&previous.binding, binding))
+    {
+        if proof.read_cut.position < previous.read.read_cut.position {
+            return Err(ApiError::conflict(
+                "canonical recovery proof moved behind its acknowledged cut",
+            ));
+        }
+        if let Some(event) = &previous.read.latest_event
+            && proof
+                .latest_event
+                .as_ref()
+                .is_none_or(|next| next.position.position < event.position.position)
+        {
+            return Err(ApiError::conflict(
+                "canonical recovery proof lost acknowledged event history",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn engram_learn_canonical_history(
     history: &mut EngramWorkNamingHistory,
     read: &EngramNamedRootReadResponse,
@@ -974,27 +1004,7 @@ impl AppState {
                 ApiError::conflict("canonical proof has no retained recovery association")
             })?;
         proof.validate_authority(store, &binding)?;
-        if let Some(previous) = history
-            .proofs
-            .iter()
-            .find(|previous| engram_same_recovery_run(&previous.binding, &binding))
-        {
-            if proof.read_cut.position < previous.read.read_cut.position {
-                return Err(ApiError::conflict(
-                    "canonical recovery proof moved behind its acknowledged cut",
-                ));
-            }
-            if let Some(event) = &previous.read.latest_event
-                && proof
-                    .latest_event
-                    .as_ref()
-                    .is_none_or(|next| next.position.position < event.position.position)
-            {
-                return Err(ApiError::conflict(
-                    "canonical recovery proof lost acknowledged event history",
-                ));
-            }
-        }
+        engram_proof_keeps_acknowledged_history(history, &binding, proof)?;
         engram_learn_canonical_history(history, proof)?;
         history
             .proofs
@@ -1448,7 +1458,7 @@ impl AppState {
     ) {
         let clock = self.engram_budget_clock();
         let deadline = clock.now() + budget.min(Duration::from_secs(2));
-        let (store, runs) = {
+        let (store, runs, root_runs) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(store) =
                 Self::engram_source_root_target_locked(&inner, session_id)
@@ -1540,7 +1550,9 @@ impl AppState {
                 })
                 .collect::<Vec<_>>();
             retained.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut root_runs = Vec::new();
             for (_, binding) in retained {
+                root_runs.push(binding.clone());
                 if !runs
                     .iter()
                     .any(|current| engram_same_recovery_run(current, &binding))
@@ -1578,7 +1590,7 @@ impl AppState {
                 runs.sort_by_key(|binding| binding.work_id != preferred);
             }
             runs.truncate(8);
-            (store, runs)
+            (store, runs, root_runs)
         };
         for binding in runs {
             let left = deadline.saturating_duration_since(clock.now());
@@ -1590,11 +1602,122 @@ impl AppState {
                 .expect("state mutex poisoned")
                 .engram_authority_read_cursor
                 .insert(store.clone(), binding.claim_id.clone());
+            // An interrupted publication is finished by itself. A new owner
+            // would retain the run again, so a read left unanswered would
+            // re-withhold a work that had only to publish.
+            if self
+                .recover_engram_authority_candidate_until(&store, &binding.work_id, deadline)
+                .is_err()
+            {
+                continue;
+            }
+            // Whether the work is settled is judged now, not when the pass began:
+            // an earlier run of this pass may have settled it. A settled work has
+            // nothing owed but a retained root's lifecycle read, and until that
+            // learns something the root keeps the authority it has. The read
+            // leaves budget to act on what it learned.
+            let (settled, retired) = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                (
+                    !engram_authority_work_unresolved(&inner, &store, &binding.work_id),
+                    engram_run_retired(&inner.engram_work_naming_history, &store, &binding),
+                )
+            };
+            if settled {
+                let read_deadline =
+                    deadline - deadline.saturating_duration_since(clock.now()) / 4;
+                if retired
+                    || !root_runs.iter().any(|root| engram_same_recovery_run(root, &binding))
+                    || self.engram_settled_root_read_learns_nothing(
+                        session_id, &store, &binding, read_deadline,
+                    )
+                {
+                    continue;
+                }
+            }
             if let Ok(owner) = self.prepare_engram_authority_until(&store, &binding, deadline) {
                 let _ =
                     self.recover_engram_authority_batch_until(&store, &owner, deadline, true, None);
                 let _ = self.publish_engram_authority_until(&store, &owner, deadline);
             }
+        }
+    }
+
+    /// Reads a settled root's run before anything touches its work's authority:
+    /// preparing an owner takes the work out of Published, so one that couldn't
+    /// finish within this pass's budget would withhold another session's evidence
+    /// over a read with nothing to settle. Whatever would retire the root (the
+    /// retirement rules themselves decide), an answer that contradicts acknowledged
+    /// history (the checks learning it would make, run on a copy), a refusal, typed
+    /// or in an older build's words, or a sign of a damaged store goes on to the
+    /// owner that settles it. An unanswered read leaves everything as it is, for a
+    /// later pass to read.
+    fn engram_settled_root_read_learns_nothing(
+        &self,
+        session_id: &str,
+        store: &EngramAuthorityStoreKey,
+        binding: &EngramControlWorkBinding,
+        deadline: std::time::Instant,
+    ) -> bool {
+        let (target, root) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            (
+                Self::engram_source_root_target_locked(&inner, session_id).ok().flatten(),
+                engram_work_source_root_for_claim(
+                    &inner.engram_work_source_roots, store, &binding.work_id, &binding.claim_id,
+                ).cloned(),
+            )
+        };
+        let (Some(target), Some(root)) = (target, root) else {
+            return true;
+        };
+        let read = self.read_engram_authority_fact_classified_until(&target, binding, deadline);
+        self.engram_root_read_learns_nothing(&root, binding, &read)
+    }
+
+    /// What a read of `root`'s run shows: whether anything is left to settle.
+    fn engram_root_read_learns_nothing(
+        &self,
+        root: &EngramWorkSourceRoot,
+        binding: &EngramControlWorkBinding,
+        read: &Result<EngramNamedRootReadResponse, EngramAuthorityReadFailure>,
+    ) -> bool {
+        match read {
+            Ok(read) => {
+                let still_bound = matches!(&read.named_root,
+                    EngramNamedRootState::Bound { workspace_id, generation, named_at }
+                        if *workspace_id == root.root
+                            && u64::try_from(*generation).ok() == Some(root.generation)
+                            && engram_named_at_matches(named_at, &root.named_at));
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let history_agrees = inner.engram_work_naming_history.iter()
+                    .find(|history| history.store == root.store && history.work_id == binding.work_id)
+                    .is_some_and(|history| {
+                        history.proofs.iter().any(|proof| engram_same_recovery_run(&proof.binding, binding))
+                            && engram_proof_keeps_acknowledged_history(history, binding, read).is_ok()
+                            && engram_learn_canonical_history(&mut history.clone(), read).is_ok()
+                    });
+                still_bound
+                    && history_agrees
+                    && !matches!(read.run.state.as_str(), "completed" | "cancelled")
+                    && read.latest_event.as_ref().is_none_or(|event|
+                        event.kind != EngramNamedRootKind::Ended)
+                    && engram_root_retirement_reason(root, read).is_none()
+                    && engram_root_claim_retirement_reason(
+                        root,
+                        read,
+                        chrono::Utc::now(),
+                        engram_named_root_session_present(&inner, &root.named_by_session),
+                        engram_named_root_claim_holder(&inner, root).is_some()
+                            || inner.quarantined_persisted_session_ids.contains(&root.named_by_session),
+                    )
+                    .is_none()
+            }
+            Err(EngramAuthorityReadFailure::Refused(..) | EngramAuthorityReadFailure::Damaged(_)) => false,
+            Err(EngramAuthorityReadFailure::Source(error)) => {
+                !engram_named_root_read_refusal_closes_claim(&error.message)
+            }
+            Err(EngramAuthorityReadFailure::AdmissionInvalid(_)) => true,
         }
     }
 

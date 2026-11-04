@@ -224,3 +224,48 @@ fn a_replaced_or_ineligible_deferred_root_gets_no_priority() {
             "{case}: the ordinary plan, with no priority carried to another selection or past eligibility");
     }
 }
+
+/// Spend all but half of the per-root share just before the pass's first read.
+fn spend_the_budget_before_the_first_read(claimed: &EOCheckedTurn) {
+    let clock = claimed.state.engram_budget_clock();
+    let spent = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "before_recurring_read" && !spent.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            clock.advance(ENGRAM_ROOT_RECLAMATION_BUDGET - per_root_share() / 2);
+        }
+    }));
+}
+
+/// A root whose read found something to settle, with too little budget left to do it,
+/// waits like one the pass never reached: no owner, no cooldown, and first next time.
+#[test]
+fn a_root_whose_read_spent_the_budget_defers_its_settling_untouched() {
+    let (claimed, entry) = settled_root("reclaim-read-spent-budget", "completed");
+    let owner = authority_owner(&claimed, &entry);
+    spend_the_budget_before_the_first_read(&claimed);
+    claimed.state.run_engram_root_reclamation_pass(vec![unfocused(&entry)]);
+    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+    assert_eq!(authority_owner(&claimed, &entry), owner, "no owner it couldn't finish");
+    assert_eq!(unresolved_reason(&claimed, &entry), None);
+    assert_eq!(touched(&claimed, &entry).1, false, "no cooldown");
+    assert_eq!(claimed.state.inner.lock().unwrap().engram_root_reclamation.deferred.as_ref(), Some(&entry));
+    let plan = reclamation_plan(&claimed);
+    assert_eq!(plan[0].root, entry);
+    claimed.state.run_engram_root_reclamation_pass(plan);
+    assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry),
+        "with a fresh budget it settles");
+}
+
+/// A read that learned nothing but spent the budget doesn't starve a root behind it:
+/// that one is the pass's deferral, and goes first next time.
+#[test]
+fn a_skip_read_that_spends_the_budget_leaves_the_next_root_deferred() {
+    let (claimed, first) = settled_root("reclaim-skip-spent-budget", "live");
+    let starved = add_sibling_root(&claimed, &first, "starved", "2099-01-01T00:00:00.001Z");
+    spend_the_budget_before_the_first_read(&claimed);
+    claimed.state.run_engram_root_reclamation_pass(vec![unfocused(&first), unfocused(&starved)]);
+    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+    assert!(touched(&claimed, &first).1, "the live root had its read, and cools down");
+    assert_eq!(touched(&claimed, &starved), (false, false), "deferred untouched");
+    assert_eq!(reclamation_plan(&claimed)[0].root, starved);
+}

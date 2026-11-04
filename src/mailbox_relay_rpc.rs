@@ -284,7 +284,7 @@ impl AppState {
                 message_id,
             } => {
                 actor.require_origin(authenticated_origin)?;
-                let message = self
+                let mut message = self
                     .mailbox_store
                     .read_message(&actor.participant_key(), &message_id)
                     .map_err(mailbox_api_error)?;
@@ -294,6 +294,8 @@ impl AppState {
                     .map_err(mailbox_api_error)?
                     .ok_or_else(|| ApiError::not_found("native mailbox association not found"))?;
                 conversation.require_home(&home)?;
+                self.mailbox_store.attach_mailbox_relay_home_progress(&mut message)
+                    .map_err(mailbox_api_error)?;
                 let authority =
                     self.mailbox_relay_home_authority(lease, &home, std::slice::from_ref(&actor))?;
                 let _guard = authority.lock().map_err(mailbox_api_error)?;
@@ -367,6 +369,12 @@ impl AppState {
                     .map_err(mailbox_api_error)?;
                 let queued = self.queue_native_mailbox_relay_wake(&wake, Some(lease))?;
                 serde_json::to_value(queued)
+            }
+            MailboxRelayOperation::InspectWake { actor, conversation, target, mailbox_id, sequence } => {
+                actor.require_origin(authenticated_origin)?;
+                serde_json::to_value(self.observe_native_mailbox_relay_target(
+                    &actor, &conversation, &target, &mailbox_id, sequence, Some(lease),
+                )?)
             }
         };
         value.map_err(|_| ApiError::internal("native mailbox relay response encoding failed"))

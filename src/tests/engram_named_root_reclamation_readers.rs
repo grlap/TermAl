@@ -65,9 +65,10 @@ fn assert_peer_retirement(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot,
     let reads = requests[before..].iter()
         .filter(|request| request.request["operation"] == "named_root_read")
         .collect::<Vec<_>>();
-    assert_eq!(reads.len(), 1);
-    assert_eq!(reads[0].connection.session_id, reader);
-    assert_eq!(reads[0].request["claim_id"], entry.claim_id);
+    // One read decides there is something to settle, and the owner makes its own.
+    assert_eq!(reads.len(), 2);
+    assert!(reads.iter().all(|read| read.connection.session_id == reader
+        && read.request["claim_id"] == entry.claim_id));
     let notice_id = {
         let inner = claimed.state.inner.lock().unwrap();
         assert!(!inner.engram_work_source_roots.contains(entry));
@@ -142,14 +143,12 @@ fn named_root_reclamation_stale_owner_authority_restored_during_read_is_fenced()
     assert_eq!(plan[0].route, EngramRootReclamationRoute::Unfocused);
     let state = claimed.state.clone();
     let owner = claimed.session_id.clone();
-    TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&owner).unwrap();
-            assert_eq!(inner.sessions[index].session.project_id.as_ref(), Some(&owner_project));
-            inner.projects.iter_mut().find(|project| project.id == owner_project).unwrap()
-                .engram.as_mut().unwrap().enabled = true;
-        }));
+    during_owners_read(move || {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&owner).unwrap();
+        assert_eq!(inner.sessions[index].session.project_id.as_ref(), Some(&owner_project));
+        inner.projects.iter_mut().find(|project| project.id == owner_project).unwrap()
+            .engram.as_mut().unwrap().enabled = true;
     });
     let before = claimed.transport.requests().len();
     claimed.state.run_engram_root_reclamation_pass(plan);

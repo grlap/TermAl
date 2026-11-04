@@ -2,6 +2,9 @@
 // Uses the existing authority owner and canonical reader; does not create
 // producer events, infer claim end from disk state, or adopt session focus.
 
+/// How many roots one pass takes up. Each costs one read, and a root with
+/// something to settle a second, so a pass makes at most twice this many, and
+/// the pass's shared budget and each root's cooldown bound them all.
 const ENGRAM_ROOT_RECLAMATION_READ_LIMIT: usize = 8;
 const ENGRAM_ROOT_RECLAMATION_BUDGET: Duration = Duration::from_secs(2);
 const ENGRAM_ROOT_RECLAMATION_COOLDOWN: Duration = Duration::from_secs(30);
@@ -605,22 +608,26 @@ impl AppState {
             // with no recovery and no cooldown, and end the pass. Its next
             // pass is the ordinary recurring one, never an earlier one.
             if deadline.saturating_duration_since(clock.now()) < ENGRAM_ROOT_RECLAMATION_TASK_FLOOR {
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
-                if engram_root_reclamation_still_retained(&inner, &task.root) {
-                    inner.engram_root_reclamation.deferred = Some(task.root.clone());
-                }
-                drop(inner);
-                engram_root_reclamation_emit(self, &format!(
-                    "engram> named-root reclamation store={} work={} generation={} route={:?} outcome=deferred: less than {} ms of the pass budget left",
-                    task.root.store.project_id, task.root.work_id, task.root.generation, task.route,
-                    ENGRAM_ROOT_RECLAMATION_TASK_FLOOR.as_millis()));
+                self.defer_engram_root_reclamation(&task);
                 break;
             }
             self.inner.lock().expect("state mutex poisoned").engram_root_reclamation.last_store = Some(task.root.store.clone());
             attempted += 1;
-            // Current bindings go to the existing canonical recovery owner,
-            // never a second directory-probe or provider turn.
-            let outcome = self.recover_one_engram_root_until(&task.root, &task.route, deadline);
+            let outcome = match self.engram_root_read_first_leaves_it(&task.root, &task.route, deadline) {
+                Some(outcome) => outcome,
+                None => {
+                    // The read found something to settle, and may have spent
+                    // the share that takes: this root waits, untouched, as
+                    // one the pass never reached does.
+                    if deadline.saturating_duration_since(clock.now()) < ENGRAM_ROOT_RECLAMATION_TASK_FLOOR {
+                        self.defer_engram_root_reclamation(&task);
+                        break;
+                    }
+                    // Current bindings go to the existing canonical recovery
+                    // owner, never a second directory-probe or provider turn.
+                    self.recover_one_engram_root_until(&task.root, &task.route, deadline)
+                }
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let still_retained = engram_root_reclamation_still_retained(&inner, &task.root);
             inner.engram_root_reclamation.cooldowns.retain(|(root, until)|
@@ -647,6 +654,69 @@ impl AppState {
         engram_root_reclamation_emit(self, &format!(
             "engram> named-root reclamation pass attempted={} limit={} elapsed_ms={}",
             attempted, ENGRAM_ROOT_RECLAMATION_READ_LIMIT, clock.now().saturating_duration_since(started).as_millis()));
+    }
+
+    fn defer_engram_root_reclamation(&self, task: &EngramRootReclamationTask) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if engram_root_reclamation_still_retained(&inner, &task.root) {
+            inner.engram_root_reclamation.deferred = Some(task.root.clone());
+        }
+        drop(inner);
+        engram_root_reclamation_emit(self, &format!(
+            "engram> named-root reclamation store={} work={} generation={} route={:?} outcome=deferred: less than {} ms of the pass budget left",
+            task.root.store.project_id, task.root.work_id, task.root.generation, task.route,
+            ENGRAM_ROOT_RECLAMATION_TASK_FLOOR.as_millis()));
+    }
+
+    /// Reads a settled root before anything touches its work's authority:
+    /// preparing an owner takes the work out of Published, so a turn opening
+    /// during the pass, or after it left that unfinished, would be unconfirmed
+    /// over a read with nothing to settle. For authority this only decides whether
+    /// to stop here, with the attempt's outcome. `None` goes on to the ordinary
+    /// recovery, which makes all its own checks and its own read after its owner,
+    /// and settles nothing on this read, so a stale answer costs only a wait or an
+    /// owner it would have prepared anyway. Not settled, or not this pass's to read:
+    /// `None` too.
+    fn engram_root_read_first_leaves_it(
+        &self,
+        root: &EngramWorkSourceRoot,
+        route: &EngramRootReclamationRoute,
+        deadline: std::time::Instant,
+    ) -> Option<Result<bool, ApiError>> {
+        let binding = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if !inner.engram_work_source_roots.contains(root)
+                || !engram_root_reclamation_route_current(&inner, root, route)
+                || engram_authority_work_unresolved(&inner, &root.store, &root.work_id)
+            {
+                return None;
+            }
+            engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
+                .filter(|journal| journal.pending.is_none())
+                .and_then(|journal| journal.read_binding.clone())
+                .filter(|binding| binding.work_id == root.work_id && binding.claim_id == root.claim_id)?
+        };
+        let target = {
+            let snapshot = EngramRootReaderSnapshot::capture(&self.inner.lock().expect("state mutex poisoned"));
+            let readers = snapshot.readers();
+            engram_root_recovery_readers(&readers, &root.store, Some(&root.named_by_session))
+                .into_iter()
+                .find_map(|session| {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    Self::engram_source_root_target_locked(&inner, session).ok().flatten()
+                        .filter(|target| target.settings.authority_store_key.as_ref() == Some(&root.store))
+                })?
+        };
+        #[cfg(test)]
+        self.test_engram_authority_ack_boundary("before_recurring_read");
+        let clock = self.engram_budget_clock();
+        let reserve = deadline.saturating_duration_since(clock.now()) / 4;
+        let read = self.read_engram_authority_fact_classified_until(&target, &binding, deadline - reserve);
+        self.engram_root_read_learns_nothing(root, &binding, &read).then(|| match read {
+            Ok(_) => Ok(false),
+            // Reported as this attempt's outcome. No authority was touched.
+            Err(failure) => Err(failure.into_api()),
+        })
     }
 
     fn engram_root_capacity_refusal(&self) -> ApiError {

@@ -70,7 +70,8 @@ fn named_root_reclamation_other_store_frees_global_capacity_and_rotation_is_fair
     assert_eq!(rotated[0].root.store, first[1].root.store);
     let reads = read_count(&claimed);
     claimed.state.run_engram_root_reclamation_pass(rotated);
-    assert_eq!(read_count(&claimed) - reads, 2, "one read per candidate, not a second publication read");
+    assert_eq!(read_count(&claimed) - reads, 3,
+        "one read for the live root; two for the one it retires, and no publication read");
     let inner = claimed.state.inner.lock().unwrap();
     assert!(inner.engram_work_source_roots.contains(&retained));
     assert!(!inner.engram_work_source_roots.contains(&obsolete));
@@ -112,7 +113,7 @@ fn named_root_reclamation_full_refusal_is_prompt_and_single_flight_without_succe
     let worker_release = Mutex::new(release_rx);
     let first = std::sync::atomic::AtomicBool::new(true);
     claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(Arc::new(move |boundary| {
-        if boundary == "before_delta" && first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if boundary == "before_recurring_read" && first.swap(false, std::sync::atomic::Ordering::SeqCst) {
             entered_tx.send(()).unwrap();
             let _ = worker_release.lock().unwrap().recv_timeout(TEST_PHASE_DEADLOCK_GUARD);
         } else if boundary == "after_reclamation_pass" {
@@ -240,12 +241,10 @@ fn named_root_reclamation_reader_authority_change_during_read_retains_the_entry(
     let (claimed, entry) = settled_root("reclaim-reader-race", "completed");
     let state = claimed.state.clone();
     let session = claimed.session_id.clone();
-    TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].session.project_id = None;
-        }));
+    during_owners_read(move || {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index].session.project_id = None;
     });
     claimed.state.run_engram_root_reclamation_pass(reclamation_plan(&claimed));
     assert_root_retained(&claimed, &entry);

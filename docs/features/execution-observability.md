@@ -74,30 +74,29 @@ change the command's observed check or credit.
 The CLI read keeps its existing bounded timeout (at most six seconds); host
 shutdown may wait for that read and its child cleanup to finish.
 
-The ordinary handoff prepares its opening source-root guidance locally and
-performs no Engram read. There is a current exception
-earlier on direct sends and on queue drains, including Resume and queued
-mailbox wakes: [`dispatch_or_queue_turn_with_followup`](../../src/turn_dispatch.rs)
-and [`start_next_queued_turn_inner_off_lock`](../../src/turn_dispatch.rs) call
-[`prepare_engram_context_nudge_off_lock`](../../src/engram_mcp_config.rs)
-synchronously to prepare the base-tier work context. Its production command
-deadline is six seconds; waiting for an existing refresh owner has a
-seven-second deadline. This preparation can delay provider enqueue by about
-seven seconds under those bounds. Failure is advisory: the prompt still
-proceeds, with context refresh left pending. The bounds apply to a
-preparation, not a promise that every send or drain finishes within seven
-seconds.
+The ordinary handoff prepares its opening source-root guidance locally.
+It also checks the local `.engram-project` declaration before composing
+runtime MCP configuration, so adding or removing the file takes effect on
+that prompt without depending on a background context read.
+Direct sends and queue drains, including Resume and queued mailbox wakes,
+use already available local context and never wait for an Engram context read
+or another refresh owner before provider enqueue. When context is missing,
+an existing lifetime-owned observer prepares it for a later prompt. Only one
+refresh owns each session generation, and failed or slow reads leave the
+undelivered nudge pending. A superseded read cannot publish into a newer
+generation; cached context is consumed only after runtime delivery accepts it.
+This local acknowledgement does not acknowledge an Engram delivery page.
 
-Moving this remaining synchronous context-nudge preparation off the send path
-is open follow-up work. It is not part of the completed removal of per-turn
-authorization; see the host adapter's
+The CLI observer retains its own six-second read deadline and child cleanup;
+shutdown may wait for them. An explicit Claude compact hook keeps its separate
+generation ticket and can return only the context that ticket read. Neither
+path grants turn admission or test credit. See the host adapter's
 [start and post-compaction context](engram-host-adapter.md#start-and-post-compaction-context).
 
 ## What it never does
 
 - It never asks Engram for Evaluate/Begin/grant authorization to deliver an
-  ordinary prompt. The context preparation exception above is a work-context
-  read, not turn admission.
+  ordinary prompt. Advisory context reads grant no turn admission.
 - It never replays or settles control requests, grants or checkpoint debts
   that earlier builds recorded, before turn gating was removed. They stay
   readable as stored

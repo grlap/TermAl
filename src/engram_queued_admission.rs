@@ -31,6 +31,9 @@ struct QueuedTurnOwner {
     // A continuation carries its original acknowledged receipt. A new nonce
     // for the same prompt is a different attempt, even when its text matches.
     receipt_resume: Option<PromptDeliveryResume>,
+    // A wake driving an older head loses that opportunity if its own exact
+    // carrier is cancelled while off-lock admission is being prepared.
+    required_queued_prompt: Option<(String, String)>,
 }
 
 impl QueuedTurnOwner {
@@ -47,6 +50,7 @@ impl QueuedTurnOwner {
             promoted_message_index: queued.promoted_message_index,
             capacity_nonce: None,
             receipt_resume: None,
+            required_queued_prompt: None,
         })
     }
 
@@ -71,6 +75,7 @@ impl QueuedTurnOwner {
             promoted_message_index: queued.promoted_message_index,
             capacity_nonce: None,
             receipt_resume: None,
+            required_queued_prompt: None,
         })
     }
 
@@ -78,6 +83,10 @@ impl QueuedTurnOwner {
         record.active_turn_generation == self.active_turn_generation
             && record.runtime_stop_generation == self.stop_generation
             && record.auto_dispatch_pause_epoch == self.pause_epoch
+            && self.required_queued_prompt.as_ref().is_none_or(|(id, intent)| {
+                record.queued_prompts.iter().any(|queued|
+                    queued.pending_prompt.id == *id && receipted_prompt_intent(queued) == *intent)
+            })
             && record.prompt_deliveries.get(&self.prompt_id)
                 .map(|delivery| &delivery.write_ahead) == self.write_ahead.as_ref()
             && self.capacity_nonce.as_ref()

@@ -217,6 +217,7 @@ impl PromptDeliveryResume {
             write_ahead: Some(self.write_ahead.clone()),
             promoted_message_index: self.promoted_message_index,
             receipt_resume: Some(self.clone()),
+            required_queued_prompt: None,
             capacity_nonce: self.capacity_nonce.clone(),
             prompt_id: prompt_id.to_owned(),
             active_turn_generation: self.active_turn_generation,

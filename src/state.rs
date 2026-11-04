@@ -1866,7 +1866,7 @@ struct StateInner {
     /// Per-state test dependency for logical capture completion/absence.
     /// Never persisted; production always uses the bounded filesystem owner.
     #[cfg(test)]
-    test_engram_source_capture: Option<Arc<dyn Fn(&EngramBasisPlace, Duration) -> Option<EngramExecutionSourceBasis> + Send + Sync>>,
+    test_engram_source_capture: Option<Arc<dyn Fn(&EngramBasisPlace, Duration) -> EngramSourceCapture + Send + Sync>>,
     /// Threads checking a path named as a work's source root that are still
     /// alive, abandoned ones included (`engram_run_source_root_validation_within`).
     /// Memory only, one count for the host.

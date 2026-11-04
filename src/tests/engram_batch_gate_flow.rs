@@ -172,7 +172,7 @@ fn historical_owed_and_pending_batches_survive_sqlite_and_an_ordinary_turn_witho
     turn.state.select_test_engram_budget_clock(clock);
     turn.state.install_control_test_transport(turn.transport.clone());
     turn.state.inner.lock().unwrap().test_engram_source_capture =
-        Some(Arc::new(|place, _budget| engram_place_source_basis(place)));
+        Some(Arc::new(|place, _budget| engram_place_source_capture(place)));
     turn.record_mut(|record| {
         assert!(record.engram.work_binding.is_none(), "the reload restores no claim association");
         record.runtime = runtime;

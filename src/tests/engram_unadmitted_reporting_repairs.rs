@@ -71,7 +71,7 @@ impl Drop for InstallBarrier {
     }
 }
 
-fn stored_session(state: &AppState, session: &str) -> String {
+pub(super) fn stored_session(state: &AppState, session: &str) -> String {
     let db = open_sqlite_state_read_connection(&state.persistence_path).unwrap();
     db.query_row(
         "SELECT value_json FROM sessions WHERE id = ?1",
@@ -597,13 +597,14 @@ fn delete_without_observation_custody_needs_no_slow_writer_fence() {
 #[test]
 fn unadmitted_review_capture_absence_retains_exact_job_without_reporting() {
     let mut fixture = ReportingTurn::new("unadmitted-capture-absence", true, ReplyMode::Recorded, false);
+    let local_runs = super::source_refusals::observe_declared_failure(&mut fixture);
     let (installed, received) = mpsc::channel();
     *fixture.turn.state.runtime_observation_lifetime.install_hook.lock().unwrap() = Some(Arc::new(move |phase| {
         if phase == "closing_installed" { let _ = installed.send(()); }
     }));
     fixture.turn.state.inner.lock().unwrap().test_engram_source_capture = Some(Arc::new(|_, budget| {
         assert_eq!(budget, Duration::from_millis(250), "fixture must not inflate the capture deadline");
-        None
+        Ok(None)
     }));
     let original = fixture.turn.record(|record| record.engram.unadmitted_active_turn.clone().unwrap());
     fixture.finish();
@@ -625,6 +626,7 @@ fn unadmitted_review_capture_absence_retains_exact_job_without_reporting() {
     assert!(fixture.producer.requests().is_empty(), "missing source is not an empty or invented observation");
     let durable: Value = serde_json::from_str(&stored_session(&fixture.turn.state, &fixture.turn.session_id)).unwrap();
     assert_eq!(durable["engramUnadmittedClosingJobs"][0], serde_json::to_value(&job).unwrap());
+    super::source_refusals::assert_declared_failure_unchanged(&fixture, &local_runs);
     fixture.assert_no_granted_reporting();
     fixture.turn.state.trigger_shutdown_signal();
     fixture.turn.state.shutdown_persist_blocking();
@@ -1196,7 +1198,7 @@ fn restored_closing_capture_survives_a_source_measurement_longer_than_the_rpc_ca
     // The actual root-read barrier above orders installation of this hook.
     restarted.inner.lock().unwrap().test_engram_source_capture = Some(Arc::new(move |place, _budget| {
         std::thread::sleep(hold);
-        engram_place_source_basis(place)
+        engram_place_source_capture(place)
     }));
     read.release();
     let sent = fixture.observation();

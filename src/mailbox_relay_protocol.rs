@@ -331,6 +331,13 @@ enum MailboxRelayOperation {
     Wake {
         wake: MailboxRelayWake,
     },
+    InspectWake {
+        actor: MailboxRelayPrincipal,
+        conversation: MailboxRelayConversation,
+        target: MailboxRelayPrincipal,
+        mailbox_id: String,
+        sequence: u64,
+    },
 }
 
 #[derive(Deserialize, Serialize)]

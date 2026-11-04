@@ -107,13 +107,52 @@ report `durableButNotWoken`: commitment is not proof that a native agent ran.
 The home's message notification field also remains conservative; native wake
 handoff metadata is not a replicated mailbox cursor or an executor result.
 
+An exact `relay-message-*` read adds `currentStatus.relayProgress`. Its
+`homeObservedAt` and `homeQueueAdmissionConfirmed` describe the home's recorded
+confirmation that the target accepted the wake into its queue. This is separate
+from the target's observation, which has its own `observedAt`:
+
+- `queueAdmissionRecorded` and `providerHandoffRecorded` report retained target
+  metadata; `null` means no notification observation is retained there.
+- `currentlyQueued` reports whether that boundary is represented in the target
+  queue now. It is not a promise that the entry is runnable.
+- `currentSessionHolds` lists observed active-turn, approval, Stop/pause,
+  capacity, reset, durability, human-input, unsettled-delivery or wake-authority
+  holds. An empty list grants no dispatch authority.
+- `recovery` names existing recovery controls. Read the mailbox before receipt
+  acknowledgement; do not resend a saved message merely to wake the recipient.
+
+The target is inspected over the existing authenticated pair, with exact
+conversation, store and native-creation checks. If that inspection cannot
+answer, `target.availability` is `unavailable`, with a timestamp and reason.
+The successful authoritative home read is preserved; no prior target state is
+substituted. The home and target observations are separate cuts, not one atomic
+cross-host snapshot. Missing admission confirmation is not failed delivery,
+handoff is not completed work, and acknowledgement is not execution. Send
+receipts and the stored top-level notification disposition remain unchanged.
+The CLI prints this projection; `--json` retains its structured fields.
+
 ## Wakes and recovery
 
 The home atomically commits a metadata-only wake obligation with the body.
 Its joined worker delivers bounded wake batches over the authenticated pair.
 The receiver retains notification metadata and uses its normal queue and
 handoff guards. No message body is copied into a wake. Accepted wakes coalesce;
-acknowledging mail keeps an owed continuation while removing its unread claim,
+new arrivals join the leading runnable mailbox run in FIFO order without
+crossing a queued non-mailbox prompt. Ordinary coalescing keeps its position.
+An observed authority-fenced relay carrier is excluded from that runnable run;
+new mail may pass it while its original wake remains owed. Unknown eligibility
+preserves queue order. A changed queue prefix is observed again before admission.
+When the runnable head is a local mailbox wake, an arrival or retained relay
+retry drives that exact head through the normal guarded queue owner. The
+relay carrier must remain queued through admission; cancellation removes its
+dispatch opportunity. This preserves FIFO across mailboxes without bypassing
+Stop or pause.
+Failed or rejected delivery recovery keeps its existing front-restoration
+behavior ahead of successors. Stored-history and durability-held heads stay
+protected, and the existing active-turn, approval, Stop/pause and capacity
+guards still apply. FIFO does not interrupt an active provider turn.
+Acknowledging mail keeps an owed continuation while removing its unread claim,
 including an ACK that precedes a delayed wake. A failed handoff/turn restores
 the same native boundary and obeys existing paused-queue behavior.
 For an acknowledged continuation that has never reached the runtime, recovery

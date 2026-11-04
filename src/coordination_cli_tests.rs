@@ -737,6 +737,47 @@ fn coordination_cli_send_says_stored_and_read_message_prints_current_status() {
 }
 
 #[test]
+fn coordination_cli_native_relay_status_separates_queue_handoff_and_unavailable_target() {
+    let command = CoordinationCliCommand::MailboxReadMessage {
+        as_session: "session-root".into(), message_id: "relay-message-example".into(),
+    };
+    let mut message = json!({
+        "body": "saved body", "notificationState": "durableButNotWoken",
+        "currentStatus": {
+            "summary": "As of now: saved at home; no execution claim.",
+            "recipientAcknowledged": false,
+            "relayProgress": {
+                "homeObservedAt": "home-cut", "homeQueueAdmissionConfirmed": true,
+                "target": {"availability": "observed", "observedAt": "target-cut",
+                    "queueAdmissionRecorded": true, "providerHandoffRecorded": false,
+                    "currentlyQueued": true, "currentSessionHolds": ["approval"],
+                    "recovery": "Resolve the pending approval; do not resend."}
+            }
+        }
+    });
+    let render = |message: &Value| {
+        let mut bytes = Vec::new();
+        render_coordination_cli_output(&command, message, &mut bytes).unwrap();
+        String::from_utf8(bytes).unwrap()
+    };
+    let queued = render(&message);
+    assert!(queued.contains("home queue admission confirmed: true (observed home-cut)"));
+    assert!(queued.contains("queue admission recorded: true; provider handoff recorded: false; currently queued: true"));
+    assert!(queued.contains("observed target holds: [\"approval\"]"));
+    assert!(queued.contains("Resolve the pending approval; do not resend."));
+    message["currentStatus"]["relayProgress"]["target"] = json!({
+        "availability": "unavailable", "observedAt": "later-cut", "reason": "link unavailable",
+        "recovery": "Recover the existing link; do not resend."
+    });
+    let unavailable = render(&message);
+    assert!(unavailable.contains("target progress: unavailable (observed later-cut)"));
+    assert!(unavailable.contains("target unavailable: link unavailable"));
+    assert!(!unavailable.contains("provider handoff recorded:"),
+        "an unavailable target cannot inherit an earlier handoff observation");
+    assert!(unavailable.contains("recipientAcknowledged: false"));
+}
+
+#[test]
 fn coordination_cli_mailbox_commands_reject_child_and_self_targets_like_the_mcp_tools() {
     let (base_url, requests, server) = spawn_test_mcp_http_server(1, |request| {
         assert_eq!(request.path, "/api/state");

@@ -200,13 +200,21 @@ fn engram_refused_run_journals_settle_locked(
 }
 
 /// Whether `history`'s work needs a background recovery pass: it retains
-/// runs, the publication of a retired run's owner was interrupted, or a
-/// journal of one of its retired runs was reopened. Another unpublished owner
-/// belongs to its naming, which a background pass must not supersede.
+/// runs, a publication was interrupted (a Candidate has nothing left but to
+/// publish), the publication of a retired run's owner was interrupted, or a
+/// journal of one of its retired runs was reopened. Another Prepared owner
+/// belongs to its naming, which a background pass must not supersede. A
+/// Candidate's publisher may still be waiting on its fence: publishing that
+/// exact image is safe, and that publisher's caller is refused and can retry.
+/// This never runs on a turn's path. A turn keeps its opening capture for its
+/// whole length, so a turn that opens before this pass finishes stays unconfirmed
+/// and loses its own evidence, and an ordinary turn opening after it is confirmed.
 fn engram_history_needs_recovery_locked(inner: &StateInner, history: &EngramWorkNamingHistory) -> bool {
     !history.unresolved_runs.is_empty()
         || history.transition.as_ref().is_some_and(|owner| {
-            owner.phase != EngramAuthorityPhase::Published && history.run_is_retired(&owner.binding)
+            owner.phase == EngramAuthorityPhase::Candidate
+                || owner.phase != EngramAuthorityPhase::Published
+                    && history.run_is_retired(&owner.binding)
         })
         || inner.engram_named_root_journal.iter().any(|journal| {
             journal.store == history.store

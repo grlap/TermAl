@@ -1168,6 +1168,7 @@ include!("coordination_persist.rs");
 include!("mailboxes.rs");
 include!("mailbox_status_text.rs");
 include!("mailbox_current_status.rs");
+include!("mailbox_relay_progress.rs");
 include!("mailbox_acknowledged_wake.rs");
 include!("mailbox_continuation_coverage.rs");
 include!("delegation_review_results.rs");

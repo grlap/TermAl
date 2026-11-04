@@ -4,6 +4,8 @@
 
 const ENGRAM_SOURCE_BASIS_MAX_BYTES: usize = 512;
 
+type EngramSourceCapture = std::result::Result<Option<EngramExecutionSourceBasis>, SourceBasisRefusal>;
+
 #[cfg(test)]
 fn engram_turn_end_basis(
     place: &EngramBasisPlace,
@@ -34,15 +36,25 @@ fn engram_execution_source_basis(workdir: &FsPath) -> Option<EngramExecutionSour
 /// ([`source_revision`]). Off, the basis is the content revision. On, a clean
 /// worktree's is its HEAD commit, and one that is not clean has none, logged
 /// with the paths Git reported, exactly as a revision that cannot be taken.
+#[cfg(test)]
 fn engram_execution_source_basis_with(
     workdir: &FsPath,
     ordinary_commit_input: bool,
 ) -> Option<EngramExecutionSourceBasis> {
+    engram_execution_source_capture_with(workdir, ordinary_commit_input).ok().flatten()
+}
+
+fn engram_execution_source_capture_with(
+    workdir: &FsPath,
+    ordinary_commit_input: bool,
+) -> EngramSourceCapture {
     // A session may work in a subdirectory: its source identity is its
     // worktree's, which the fingerprint takes from the worktree root.
-    match source_revision(&engram_worktree_root_path(workdir), ordinary_commit_input) {
+    let root = engram_worktree_root_path(workdir);
+    let resolved_workdir = std::fs::canonicalize(workdir).ok();
+    match source_revision(&root, ordinary_commit_input) {
         Ok(SourceRevision::Taken { root, revision }) => {
-            engram_bounded_source_basis(workdir, &root, revision)
+            Ok(engram_bounded_source_basis(workdir, &root, revision))
         }
         Ok(SourceRevision::NotClean { dirty_paths }) => {
             eprintln!(
@@ -50,14 +62,25 @@ fn engram_execution_source_basis_with(
                 workdir.display(),
                 source_revision_not_clean_reason(&dirty_paths)
             );
-            None
+            Ok(None)
         }
         Err(error) => {
             eprintln!(
                 "engram> no source basis for workspace {}: {error:#}",
                 workdir.display()
             );
-            None
+            match error.downcast_ref::<SourceBasisRefusal>() {
+                // An absent workdir can make the ancestor walk select an
+                // enclosing repository. Its refusal does not establish a
+                // permanent cause for this session's workspace. Keep a path
+                // that disappeared or changed roots during capture transient.
+                Some(refusal) if resolved_workdir.as_ref().is_some_and(|resolved| {
+                    resolved.starts_with(&root)
+                        && std::fs::canonicalize(workdir).ok().as_ref() == Some(resolved)
+                        && engram_worktree_root_path(resolved) == root
+                }) => Err(*refusal),
+                _ => Ok(None),
+            }
         }
     }
 }
@@ -103,6 +126,16 @@ impl AppState {
         place: &EngramBasisPlace,
         budget: Duration,
     ) -> Option<EngramExecutionSourceBasis> {
+        self.engram_source_capture_within(place, budget).ok().flatten()
+    }
+
+    /// Preserve only typed definitive refusals. Exhausted capacity, deadline,
+    /// panic or any other missing capture remains transient absence.
+    fn engram_source_capture_within(
+        &self,
+        place: &EngramBasisPlace,
+        budget: Duration,
+    ) -> EngramSourceCapture {
         #[cfg(test)]
         {
             let capture = self.inner.lock().expect("state mutex poisoned")
@@ -123,8 +156,9 @@ impl AppState {
             &self.capture_lifetime,
             ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
             budget,
-            move || engram_place_source_basis(&place),
+            move || Some(engram_place_source_capture(&place)),
         )
+        .unwrap_or(Ok(None))
     }
 
     /// The closing basis of a turn at `place` (`engram_turn_end_basis`), on

@@ -4,7 +4,7 @@
 // controls in relay.rs or the revocation holds in relay_review*.rs.
 use super::*;
 
-struct ProxySend {
+pub(super) struct ProxySend {
     caller: String,
     _proxy: String,
     central_api: DomainServer,
@@ -15,7 +15,7 @@ struct ProxySend {
 impl ProxySend {
     /// A central caller and a central proxy for the satellite's native root,
     /// with each host's peer handle to the other, as on a connected pair.
-    async fn new(fixture: &Fixture) -> Self {
+    pub(super) async fn new(fixture: &Fixture) -> Self {
         Self::with_home_router(fixture, |router| router).await
     }
 
@@ -85,7 +85,7 @@ impl ProxySend {
         response.json().await.unwrap()
     }
 
-    async fn finish(mut self) {
+    pub(super) async fn finish(mut self) {
         self.central_api.finish().await;
         self.central_domain.finish().await;
     }

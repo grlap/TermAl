@@ -19,6 +19,8 @@ struct MailboxMessageCurrentStatus {
     notification_state: String,
     recipient_acknowledged: bool,
     summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    relay_progress: Option<MailboxRelayProgress>,
 }
 
 /// Adds the current projection to a message just read on `connection`, from
@@ -50,6 +52,7 @@ fn attach_mailbox_message_current_status(
         observed_at,
         notification_state: message.notification_state.clone(),
         recipient_acknowledged,
+        relay_progress: None,
     });
     Ok(())
 }

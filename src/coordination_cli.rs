@@ -935,6 +935,27 @@ fn render_coordination_cli_message(message: &Value, out: &mut impl Write) -> Res
             "  recipientAcknowledged: {}",
             coordination_cli_field(current, "recipientAcknowledged")
         )?;
+        if let Some(relay) = current.get("relayProgress").filter(|value| value.is_object()) {
+            writeln!(out, "  home queue admission confirmed: {} (observed {})",
+                coordination_cli_field(relay, "homeQueueAdmissionConfirmed"),
+                coordination_cli_field(relay, "homeObservedAt"))?;
+            if let Some(target) = relay.get("target").filter(|value| value.is_object()) {
+                writeln!(out, "  target progress: {} (observed {})",
+                    coordination_cli_field(target, "availability"),
+                    coordination_cli_field(target, "observedAt"))?;
+                if target.get("availability").and_then(Value::as_str) == Some("observed") {
+                    writeln!(out, "  queue admission recorded: {}; provider handoff recorded: {}; currently queued: {}",
+                        coordination_cli_field(target, "queueAdmissionRecorded"),
+                        coordination_cli_field(target, "providerHandoffRecorded"),
+                        coordination_cli_field(target, "currentlyQueued"))?;
+                    writeln!(out, "  observed target holds: {}",
+                        coordination_cli_field(target, "currentSessionHolds"))?;
+                } else {
+                    writeln!(out, "  target unavailable: {}", coordination_cli_field(target, "reason"))?;
+                }
+                writeln!(out, "  recovery: {}", coordination_cli_field(target, "recovery"))?;
+            }
+        }
     }
     writeln!(out)?;
     writeln!(out, "{}", coordination_cli_body(message))?;

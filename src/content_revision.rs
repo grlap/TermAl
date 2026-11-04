@@ -15,6 +15,26 @@
 /// algorithm never equals one of these, so a mix is visible in the string.
 const CONTENT_REVISION_SCHEME: &str = "content-v1";
 
+/// A capture limitation that retrying the same closing delivery cannot fix.
+/// Keep it typed through anyhow contexts; I/O, races and deadlines are not
+/// definitive refusals and must retain their existing retry behaviour.
+#[derive(Clone, Copy, Debug)]
+enum SourceBasisRefusal {
+    ConfiguredGitFilters,
+    UnsupportedGitlinks,
+}
+
+impl std::fmt::Display for SourceBasisRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::ConfiguredGitFilters => "review verification does not run configured Git filters",
+            Self::UnsupportedGitlinks => "a content revision does not cover submodules (Git gitlinks are unsupported)",
+        })
+    }
+}
+
+impl std::error::Error for SourceBasisRefusal {}
+
 /// At most this many listed paths, tracked and untracked together; a larger
 /// worktree gets no revision.
 const CONTENT_REVISION_PATH_LIMIT: usize = 200_000;
@@ -87,7 +107,7 @@ fn capture_content_revision(git: &ReviewFreezeGit) -> Result<String> {
         // would leave the revision equal, a false "unchanged". So it fails
         // closed, as the freeze does.
         if entry.starts_with(b"160000 ") {
-            bail!("a content revision does not cover submodules (Git gitlinks are unsupported)");
+            return Err(SourceBasisRefusal::UnsupportedGitlinks.into());
         }
     }
     // Every path, tracked or untracked and not ignored, with its line-ending

@@ -194,6 +194,28 @@ struct EngramContextNudgeTarget {
     timeout: Duration,
 }
 
+// Own the existing refresh reservation even if shutdown drops the worker
+// before its closure runs, or the read fails before reaching publication.
+struct EngramContextNudgeReadClaim {
+    state: AppState,
+    session_id: String,
+    generation: u64,
+    armed: std::sync::atomic::AtomicBool,
+}
+
+impl Drop for EngramContextNudgeReadClaim {
+    fn drop(&mut self) {
+        if !self.armed.load(std::sync::atomic::Ordering::Acquire) { return; }
+        let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(&self.session_id) else { return; };
+        let cache = &mut inner.sessions[index].engram;
+        if cache.context_nudge_in_progress_generation == Some(self.generation) {
+            cache.context_nudge_in_progress = false;
+            cache.context_nudge_in_progress_generation = None;
+        }
+    }
+}
+
 impl AppState {
     #[allow(dead_code)]
     fn engram_mcp_stdio_config_for_session(
@@ -335,14 +357,60 @@ impl AppState {
         declared
     }
 
-    /// Refreshes the base-tier work context without holding the global state
-    /// mutex. Failure is advisory: the prompt still runs and the pending bit
-    /// remains set so a later prompt can retry.
+    /// Ordinary sends only inspect local state and reserve an advisory read.
+    /// Cached context remains available to prompt composition; an absent or
+    /// in-flight page never holds provider enqueue.
+    fn schedule_engram_context_nudge(&self, session_id: &str) {
+        let generation = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else { return; };
+            if !inner.sessions[index].is_local_session()
+                || session_is_acceptance_evaluator_child_locked(&inner, session_id)
+            { return; }
+            let Some(project) = engram_project_for_session_locked(&inner, session_id) else { return; };
+            if project.remote_id != LOCAL_REMOTE_ID || inner.engram_project_resets.contains(&project.id)
+                || !project.engram.as_ref().is_some_and(|settings| settings.is_base_enabled()
+                    && settings.binary_path.is_some() && settings.home.is_some())
+            { return; }
+            let cache = &mut inner.sessions[index].engram;
+            if !cache.context_needs_refresh() || cache.context_nudge_in_progress
+            { return; }
+            let generation = if cache.context_refresh_needed {
+                cache.context_nudge_generation.saturating_add(1)
+            } else { cache.context_nudge_generation }.max(1);
+            cache.context_nudge_generation = generation;
+            cache.context_nudge_in_progress = true;
+            cache.context_nudge_in_progress_generation = Some(generation);
+            cache.context_refresh_needed = false;
+            generation
+        };
+        let claim = Arc::new(EngramContextNudgeReadClaim {
+            state: self.clone(), session_id: session_id.to_owned(), generation,
+            armed: std::sync::atomic::AtomicBool::new(true),
+        });
+        // Retain a caller reference until spawn returns, so an OS spawn
+        // failure cannot drop the claim while the capture registry is locked.
+        let worker_claim = claim.clone();
+        // The existing CLI read uses its own deadline and child cleanup;
+        // it does not register that child for capture shutdown cancellation.
+        if let Err(error) = self.capture_lifetime.spawn_observer("termal-context-nudge", move || {
+            let claim = worker_claim;
+            claim.state.prepare_engram_context_nudge_claiming_off_lock(
+                &claim.session_id, None, Some(&claim),
+            );
+        }) {
+            eprintln!("engram> session={session_id} context refresh worker failed: {error}");
+        }
+    }
+
+    /// Explicit synchronous preparation for context lifecycle fixtures. The
+    /// production compact hook calls the same owner with its exact ticket.
+    #[cfg(test)]
     fn prepare_engram_context_nudge_off_lock(
         &self,
         session_id: &str,
     ) -> EngramContextNudgePreparation {
-        self.prepare_engram_context_nudge_claiming_off_lock(session_id, None)
+        self.prepare_engram_context_nudge_claiming_off_lock(session_id, None, None)
     }
 
     /// The preparation above. With `compact_hook_generation`, it is a compact
@@ -355,7 +423,9 @@ impl AppState {
         &self,
         session_id: &str,
         compact_hook_generation: Option<u64>,
+        background_claim: Option<&EngramContextNudgeReadClaim>,
     ) -> EngramContextNudgePreparation {
+        let background_generation = background_claim.map(|claim| claim.generation);
         let hook_read = compact_hook_generation.is_some();
         let mut project_declared =
             self.refresh_engram_project_declaration_for_session_off_lock(session_id);
@@ -372,6 +442,13 @@ impl AppState {
                 let record = &inner.sessions[index];
                 if !record.is_local_session() {
                     return EngramContextNudgePreparation::NotApplicable;
+                }
+                if background_generation.is_some_and(|expected| {
+                    record.engram.context_nudge_generation != expected
+                        || !record.engram.context_nudge_in_progress
+                        || record.engram.context_nudge_in_progress_generation != Some(expected)
+                }) {
+                    return EngramContextNudgePreparation::Failed;
                 }
                 // An evaluator has no tracker server and is briefed by the
                 // host alone; an orientation of its own would only point it
@@ -396,7 +473,7 @@ impl AppState {
                 if !record.engram.context_nudge_pending {
                     return EngramContextNudgePreparation::Ready;
                 }
-                if record.engram.context_nudge_in_progress {
+                if record.engram.context_nudge_in_progress && background_generation.is_none() {
                     waited_for_generation = record.engram.context_nudge_in_progress_generation;
                     None
                 } else {
@@ -421,12 +498,11 @@ impl AppState {
                     else {
                         return EngramContextNudgePreparation::NotApplicable;
                     };
-                    let generation = if record.engram.context_refresh_needed {
+                    let generation = background_generation.unwrap_or_else(|| if record.engram.context_refresh_needed {
                         record.engram.context_nudge_generation.saturating_add(1)
                     } else {
                         record.engram.context_nudge_generation
-                    }
-                    .max(1);
+                    }.max(1));
                     if compact_hook_generation.is_some_and(|expected| expected != generation) {
                         return EngramContextNudgePreparation::Failed;
                     }
@@ -463,7 +539,9 @@ impl AppState {
                     record.engram.context_nudge_generation = generation;
                     // A later boundary during this read sets this back to true;
                     // completing this read must not consume that later request.
-                    record.engram.context_refresh_needed = false;
+                    if background_generation.is_none() {
+                        record.engram.context_refresh_needed = false;
+                    }
                     Some(target)
                 }
             };
@@ -513,11 +591,16 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             if record.engram.context_nudge_in_progress_generation == Some(target.generation) {
+                // Release and disarm together: a retry may reserve this same
+                // context generation as soon as StateInner is unlocked.
+                if let Some(claim) = background_claim {
+                    claim.armed.store(false, std::sync::atomic::Ordering::Release);
+                }
                 record.engram.context_nudge_in_progress = false;
                 record.engram.context_nudge_in_progress_generation = None;
             }
             if record.engram.context_nudge_generation != target.generation {
-                if hook_read {
+                if hook_read || background_generation.is_some() {
                     // Superseded while read: a newer read is the next
                     // prompt's, never this hook's answer.
                     return EngramContextNudgePreparation::Failed;
@@ -526,6 +609,12 @@ impl AppState {
                 continue;
             }
             if !target_still_current {
+                // An active runtime may change its reported actor identity
+                // without invalidating the context generation. Leave an
+                // advisory request pending for the current identity instead.
+                if background_generation.is_some() {
+                    return EngramContextNudgePreparation::Failed;
+                }
                 record.engram.context_nudge_pending = false;
                 record.engram.pending_context_nudge = None;
                 return EngramContextNudgePreparation::NotApplicable;
@@ -629,7 +718,7 @@ impl AppState {
                 record.engram.pending_context_nudge = None;
             }
         }
-        if self.prepare_engram_context_nudge_claiming_off_lock(session_id, Some(ticket.generation))
+        if self.prepare_engram_context_nudge_claiming_off_lock(session_id, Some(ticket.generation), None)
             != EngramContextNudgePreparation::Ready
         {
             return None;
@@ -770,9 +859,24 @@ fn engram_context_fence(context: &str) -> String {
     format!("<engram-work-context>\n{context}\n</engram-work-context>")
 }
 
+#[cfg(test)]
+type TestEngramContextRead = Box<dyn FnOnce() -> std::result::Result<String, String> + Send>;
+
+#[cfg(test)]
+fn engram_test_context_reads() -> &'static Mutex<BTreeMap<PathBuf, TestEngramContextRead>> {
+    static READS: std::sync::OnceLock<Mutex<BTreeMap<PathBuf, TestEngramContextRead>>> =
+        std::sync::OnceLock::new();
+    READS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
 fn run_engram_context_nudge(
     target: &EngramContextNudgeTarget,
 ) -> std::result::Result<String, String> {
+    #[cfg(test)]
+    {
+        let read = engram_test_context_reads().lock().unwrap().remove(&target.project_root);
+        if let Some(read) = read { return read(); }
+    }
     // A fresh host UUID prevents reuse after restore or a crash before persistence.
     // Keep the existing counter for context boundaries within this host run.
     let context_generation = format!("termal-{}-{}", target.host_instance_id, target.generation);

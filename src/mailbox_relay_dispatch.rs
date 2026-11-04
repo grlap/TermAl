@@ -11,6 +11,64 @@ std::thread_local! {
 #[derive(Debug)]
 struct MailboxRelayAdmissionHeld(String);
 
+// Shared structural boundary for observing and inserting a new mailbox wake.
+// Authority is prepared off-lock separately; these helpers grant no dispatch.
+fn mailbox_fifo_protected_floor(record: &SessionRecord) -> usize {
+    usize::from(record.queued_prompts.front().is_some_and(QueuedPromptRecord::has_stored_history)
+        || queued_head_held_for_durability(record))
+}
+
+fn mailbox_fifo_entry_is_runnable(record: &SessionRecord, queued: &QueuedPromptRecord) -> bool {
+    queued.source == QueuedPromptSource::Mailbox
+        && !queued.has_stored_history()
+        && !queued_prompt_held_for_durability(record, queued)
+        && ordinary_queue_entry_is_runnable(record, queued)
+}
+
+fn mailbox_fifo_prefix(record: &SessionRecord) -> Vec<(String, Option<(String, u64)>)> {
+    record.queued_prompts.iter().skip(mailbox_fifo_protected_floor(record))
+        .take_while(|queued| mailbox_fifo_entry_is_runnable(record, queued))
+        .map(|queued| (queued.pending_prompt.id.clone(), queued.pending_prompt.source.as_ref()
+            .and_then(|source| source.mailbox.as_ref())
+            .map(|mailbox| (mailbox.mailbox_id.clone(), mailbox.sequence))))
+        .collect()
+}
+
+fn mailbox_fifo_authority_is_fenced(result: Result<(), ApiError>) -> bool {
+    match result {
+        Ok(()) => false,
+        Err(error) if error.status.is_client_error() => true,
+        Err(error) => {
+            // Unknown eligibility preserves FIFO. Never silently turn a store
+            // or internal failure into permission to overtake an older wake.
+            eprintln!("mailbox> FIFO authority observation unavailable: {}", mailbox_preview(&error.message));
+            false
+        }
+    }
+}
+
+// Capture only an older runnable local mailbox head, and bind its ordinary
+// owner to the exact relay carrier that caused this dispatch opportunity.
+fn local_mailbox_head_for_relay(
+    record: &SessionRecord, home: &MailboxRelayHome, mailbox: &str, sequence: u64,
+) -> Option<QueuedTurnOwner> {
+    let carrier = record.queued_prompts.iter().find(|queued| {
+        queued.pending_prompt.source.as_ref().and_then(|source| source.mailbox.as_ref())
+            .is_some_and(|source| source.sequence >= sequence
+                && MailboxRelayLocator::decode(&source.mailbox_id, false).ok().flatten()
+                    .is_some_and(|locator| locator.id == mailbox && &locator.home == home))
+    })?;
+    let head = record.queued_prompts.get(ordinary_queue_position(record)?)?;
+    if !mailbox_fifo_entry_is_runnable(record, head)
+        || !head.pending_prompt.source.as_ref().and_then(|source| source.mailbox.as_ref())
+            .is_some_and(|source| matches!(MailboxRelayLocator::decode(&source.mailbox_id, false), Ok(None))) {
+        return None;
+    }
+    let mut owner = QueuedTurnOwner::capture(record)?;
+    owner.required_queued_prompt = Some((carrier.pending_prompt.id.clone(), receipted_prompt_intent(carrier)));
+    Some(owner)
+}
+
 impl std::fmt::Display for MailboxRelayAdmissionHeld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
 }

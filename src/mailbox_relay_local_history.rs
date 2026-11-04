@@ -126,7 +126,7 @@ impl AppState {
                         "native mailbox local message owner changed",
                     ));
                 }
-                let message = self
+                let mut message = self
                     .mailbox_store
                     .read_message(&actor.participant_key(), &message_id)
                     .map_err(mailbox_api_error)?;
@@ -136,6 +136,8 @@ impl AppState {
                     .map_err(mailbox_api_error)?
                     .ok_or_else(|| ApiError::not_found("native mailbox association not found"))?;
                 conversation.require_home(home)?;
+                self.mailbox_store.attach_mailbox_relay_home_progress(&mut message)
+                    .map_err(mailbox_api_error)?;
                 let _guard = authority.lock().map_err(mailbox_api_error)?;
                 serde_json::to_value(message)
             }

@@ -11,6 +11,12 @@ mod r3;
 #[path = "relay_review_r4.rs"]
 mod r4;
 
+#[path = "relay_wake_order.rs"]
+mod wake_order;
+
+#[path = "relay_wake_progress.rs"]
+mod wake_progress;
+
 fn claude_input(fixture: &Fixture) -> mpsc::Receiver<ClaudeRuntimeCommand> {
     claude_input_for(&fixture.central, &fixture.native)
 }

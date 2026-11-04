@@ -837,7 +837,7 @@ impl EOCheckedTurn {
         else { state.select_test_scripted_engram_budget_clock(); }
         // Capture real contents independently of the scripted RPC budget.
         state.inner.lock().unwrap().test_engram_source_capture =
-            Some(Arc::new(|place, _budget| engram_place_source_basis(place)));
+            Some(Arc::new(|place, _budget| engram_place_source_capture(place)));
         let root = state.test_temp_root.as_ref().unwrap().path()
             .join(format!("eo-check-{label}-project"));
         fs::create_dir_all(&root).unwrap();

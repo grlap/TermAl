@@ -67,7 +67,8 @@ fn named_root_reclamation_startup_discard_blocks_completed_selection() {
     assert_eq!(engram_named_root_capacity(&claimed.state.inner.lock().unwrap()), 1);
     clock.advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
     claimed.state.run_engram_root_reclamation_pass(reclamation_plan(&claimed));
-    assert_eq!(*transport.attempts.lock().unwrap(), 2);
+    // The cold start's failure, then the read that decides and the owner's own.
+    assert_eq!(*transport.attempts.lock().unwrap(), 3);
     let inner = claimed.state.inner.lock().unwrap();
     assert!(!inner.engram_work_source_roots.contains(&entry),
         "a completed associated selection must recover after a cold-start-only failure");
@@ -125,8 +126,8 @@ fn named_root_reclamation_startup_failure_retries_with_fresh_budget_after_cooldo
         let inner = claimed.state.inner.lock().unwrap();
         assert_eq!(engram_named_root_capacity(&inner), 1);
         assert!(inner.engram_work_naming_history[0].retirements.is_empty());
-        assert!(inner.engram_work_naming_history[0].recovery_reason.as_ref().unwrap()
-            .contains("budget exhausted during process startup"));
+        let status = engram_named_root_reclamation_text(&inner, &entry, clock.now());
+        assert!(status.contains("budget exhausted during process startup"), "{status}");
     }
     assert!(reclamation_plan(&claimed).is_empty(), "the failed selection must cool down");
     clock.advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
@@ -134,7 +135,8 @@ fn named_root_reclamation_startup_failure_retries_with_fresh_budget_after_cooldo
     assert_eq!(later.len(), 1);
     claimed.state.run_engram_root_reclamation_pass(later);
     let budgets = transport.read_budgets.lock().unwrap();
-    assert_eq!(budgets.len(), 2);
+    // The failed read, then the read that decides and the owner's own.
+    assert_eq!(budgets.len(), 3);
     assert!(!budgets[0].is_zero());
     assert_eq!(budgets[1], budgets[0], "a later pass has its own full read budget");
     let inner = claimed.state.inner.lock().unwrap();

@@ -63,8 +63,6 @@ struct OrphanedWorkflowDispatch {
     queued: QueuedPromptRecord,
 }
 
-const ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES: usize = 2;
-
 fn engram_context_runtime_prompt(context: &str, runtime_prompt: &str) -> String {
     format!("{}\n\n{runtime_prompt}", engram_context_fence(context))
 }
@@ -1322,36 +1320,17 @@ impl AppState {
                     .and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
             }).flatten(),
         };
-        let mut context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
-        // Base-tier context refresh is the sole external operation before this
-        // queue-drain path. With base integration absent or disabled, the
-        // pre-Engram zero-transport behavior remains intact.
+        // Runtime descriptors need the current local declaration before spawn;
+        // this filesystem probe performs no Engram/context transport read.
+        self.refresh_engram_project_declaration_for_session_off_lock(session_id);
+        self.schedule_engram_context_nudge(session_id);
+        // Context is advisory. Only already available local context is composed
+        // into this prompt; no refresh or ownership wait precedes enqueue.
         {
             let relay_authority = self.prepare_front_mailbox_relay_authority(session_id).map_err(|error|mailbox_relay_admission_held(error.message))?;
-            let mut context_admission_retries = 0;
-            let (_relay_link, mut inner) = loop {
-                let relay_link = relay_authority.as_ref().map(|(_, authority)| authority.lock_link()).transpose()
-                    .map_err(mailbox_relay_admission_held)?;
-                let inner = self.inner.lock().expect("state mutex poisoned");
-                let context_refresh_raced_prompt_admission =
-                    matches!(context_preparation, EngramContextNudgePreparation::Ready)
-                        && inner.find_session_index(session_id).is_some_and(|index| {
-                            inner.sessions[index].engram.context_needs_preparation()
-                        });
-                if !context_refresh_raced_prompt_admission {
-                    break (relay_link, inner);
-                }
-                context_admission_retries += 1;
-                if context_admission_retries >= ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES {
-                    eprintln!(
-                        "engram> session={session_id} context refresh kept racing queued prompt admission; dispatching without further delay"
-                    );
-                    break (relay_link, inner);
-                }
-                drop(inner);
-                drop(relay_link);
-                context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
-            };
+            let _relay_link = relay_authority.as_ref().map(|(_, authority)| authority.lock_link()).transpose()
+                .map_err(mailbox_relay_admission_held)?;
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
@@ -1551,36 +1530,14 @@ impl AppState {
         };
         #[cfg(test)]
         if let Some(hook) = TEST_MAILBOX_RELAY_AFTER_SEND_REVALIDATION.with(|hook| hook.borrow_mut().take()) { hook(); }
-        let mut context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
-        let mut context_admission_retries = 0;
+        self.refresh_engram_project_declaration_for_session_off_lock(session_id);
+        self.schedule_engram_context_nudge(session_id);
         // Capture outside StateInner, then hold link -> state through all
         // direct promotions. A pre-context proof alone cannot authorize them.
         let relay_authority = self.prepare_front_mailbox_relay_authority(session_id);
-        let (relay_link, mut inner) = loop {
-            let relay_link = relay_authority.as_ref().ok().and_then(|authority|authority.as_ref())
-                .map(|(_,authority)| authority.lock_link()).transpose();
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let context_refresh_raced_prompt_admission =
-                matches!(context_preparation, EngramContextNudgePreparation::Ready)
-                    && inner
-                        .find_visible_session_index(session_id)
-                        .is_some_and(|index| {
-                            inner.sessions[index].engram.context_needs_preparation()
-                        });
-            if !context_refresh_raced_prompt_admission {
-                break (relay_link, inner);
-            }
-            context_admission_retries += 1;
-            if context_admission_retries >= ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES {
-                eprintln!(
-                    "engram> session={session_id} context refresh kept racing prompt admission; dispatching without further delay"
-                );
-                break (relay_link, inner);
-            }
-            drop(inner);
-            drop(relay_link);
-            context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
-        };
+        let relay_link = relay_authority.as_ref().ok().and_then(|authority|authority.as_ref())
+            .map(|(_,authority)| authority.lock_link()).transpose();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;

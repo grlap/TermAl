@@ -142,7 +142,8 @@ fn named_root_reclamation_completed_selection_does_not_depend_on_warm_process_sc
                 history.retirements.iter().any(|notice| notice.published),
             )
         };
-        assert_eq!(*reader.attempts.lock().unwrap(), 2);
+        // The failure, then the read that decides and the owner's own.
+        assert_eq!(*reader.attempts.lock().unwrap(), 3);
         assert!(
             !retained,
             "a completed selection must not depend on a real warm fixture reply: {reason:?}"

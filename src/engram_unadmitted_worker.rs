@@ -370,6 +370,19 @@ impl AppState {
         if Self::runtime_observation_capture_waits_for_binding(&inner.sessions[index]) {
             return Ok(());
         }
+        // A definitive off-lock refusal belongs to the captured scope only.
+        // If that scope moved, retain the existing scope-change diagnosis
+        // rather than installing the old workspace's refusal on its successor.
+        let result = if result.as_ref().is_err_and(|error|
+            error.code.as_deref() == Some("runtime_observation_source_refused"))
+        {
+            match expected.scope.require_current(&inner, session_id) {
+                Ok(()) => result,
+                Err(error) => Err(error),
+            }
+        } else {
+            result
+        };
         if matches!(&result, Ok(EngramRuntimeClosingOutcome::Unclaimed)) {
             expected.scope.require_current(&inner, session_id)
                 .map_err(|error| anyhow::anyhow!("{}", error.message))?;
@@ -437,7 +450,8 @@ impl AppState {
             }
             Err(error) => {
                 let failed = expected.failed(session_id, &error);
-                if error.code.as_deref() == Some("runtime_observation_scope_changed")
+                if matches!(error.code.as_deref(), Some(
+                    "runtime_observation_scope_changed" | "runtime_observation_source_refused"))
                     || failed.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS
                 {
                     diagnostic = Some(format!(

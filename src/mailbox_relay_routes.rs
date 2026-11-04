@@ -694,20 +694,21 @@ impl AppState {
         })
         .await?;
         let conversation = conversations
-            .into_iter()
+            .iter()
             .find(|conversation| conversation.home == locator.home)
+            .cloned()
             .ok_or_else(|| ApiError::not_found("native mailbox home membership not found"))?;
         // Only a remote home can leave the current status unavailable; a
         // local home's errors are this host's own.
         let remote_home = conversation.home.host != actor.host;
-        let message = self
+        let mut message: MailboxMessage = self
             .call_native_mailbox_home(
                 &actor,
                 &conversation,
                 MailboxRelayOperation::ReadMessage {
                     actor: actor.clone(),
                     home: locator.home.clone(),
-                    message_id: locator.id,
+                    message_id: locator.id.clone(),
                 },
             )
             .await
@@ -718,6 +719,12 @@ impl AppState {
                     error
                 }
             })?;
+        if message.id != locator.id {
+            return Err(ApiError::conflict("native mailbox exact read returned another message"));
+        }
+        self.attach_native_mailbox_relay_progress(&actor, &locator.home, &conversations, &mut message).await;
+        // The target observation adds an await after the home read's fence.
+        self.mailbox_relay_current_native(&actor)?;
         public_mailbox_relay_message(&locator.home, message)
     }
 

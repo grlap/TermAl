@@ -85,6 +85,41 @@ fn mailbox_current_status_summary(
     )
 }
 
+/// Relay admission and target handoff are independent observations. The home
+/// disposition remains conservative, so it cannot describe the combined read.
+fn mailbox_relay_current_status_summary(
+    observed_at: &str,
+    progress: &MailboxRelayProgress,
+    recipient_acknowledged: bool,
+) -> String {
+    let home = match progress.home_queue_admission_confirmed {
+        Some(true) => "The home recorded target queue admission.",
+        Some(false) => "The home has not recorded target queue admission.",
+        None => "The home's queue-admission observation is unavailable.",
+    };
+    let target = match &progress.target {
+        MailboxRelayTargetProgress::Observed {
+            observed_at, provider_handoff_recorded, currently_queued, ..
+        } => {
+            let handoff = match provider_handoff_recorded {
+                Some(true) => "provider handoff recorded",
+                Some(false) => "no provider handoff recorded",
+                None => "provider handoff observation unavailable",
+            };
+            format!("Target observed at {observed_at}: currently queued = {currently_queued}; {handoff}.")
+        }
+        MailboxRelayTargetProgress::Unavailable { observed_at, reason, .. } => {
+            format!("Target progress unavailable at {observed_at}: {reason}.")
+        }
+    };
+    let acknowledgement = if recipient_acknowledged {
+        "The recipient has acknowledged it."
+    } else {
+        "Not yet acknowledged by the recipient."
+    };
+    format!("As of {observed_at}: {home} {target} {acknowledgement} Queue admission is not provider delivery; handoff and acknowledgement are not completed work.")
+}
+
 /// An exact read whose remote mailbox home could not be reached or gave no
 /// usable answer. Only the cause's first clause is kept: guidance written for
 /// another operation, such as retrying an original send, does not apply here.

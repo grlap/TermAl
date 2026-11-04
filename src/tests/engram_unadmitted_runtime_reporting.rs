@@ -14,6 +14,9 @@ mod all_harness_ordinary_turns;
 #[path = "engram_unadmitted_reporting_repairs.rs"]
 mod repairs;
 
+#[path = "engram_unadmitted_source_refusals.rs"]
+mod source_refusals;
+
 #[path = "engram_unadmitted_storage.rs"]
 mod storage;
 
@@ -259,7 +262,7 @@ fn install_reporting_source_capture(state: &AppState) {
     // unrelated 250ms scripted RPC cap. Absence/backoff has its own controlled
     // test; production bounded capture is unchanged.
     state.inner.lock().unwrap().test_engram_source_capture =
-        Some(Arc::new(|place, _budget| engram_place_source_basis(place)));
+        Some(Arc::new(|place, _budget| engram_place_source_capture(place)));
 }
 
 /// Restarts a reporting fixture's host from its persisted state, as a new

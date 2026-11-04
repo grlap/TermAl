@@ -435,7 +435,7 @@ fn a_failed_closing_measurement_keeps_the_job_without_a_synthetic_watcher_change
     let turn_ref = observed_turn_ref(&turn);
     turn.record_mut(|record| { record.active_turn_file_changes.insert(
         "README.md".into(), WorkspaceFileChangeKind::Modified); });
-    turn.state.inner.lock().unwrap().test_engram_source_capture = Some(Arc::new(|_, _| None));
+    turn.state.inner.lock().unwrap().test_engram_source_capture = Some(Arc::new(|_, _| Ok(None)));
     let (installed, installed_rx) = mpsc::channel();
     let (release, release_rx) = mpsc::channel::<()>();
     let release_rx = Mutex::new(release_rx);

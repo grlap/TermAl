@@ -210,17 +210,22 @@ impl AppState {
         let capture_budget = timeout()?;
         #[cfg(test)]
         let capture_started = std::time::Instant::now();
-        let measured = self.engram_source_basis_within(&place, capture_budget);
+        let measured = self.engram_source_capture_within(&place, capture_budget);
         #[cfg(test)]
         if let Some(line) = unadmitted_capture_diagnostic(
             session_id,
             job.attempts,
             capture_budget,
             capture_started.elapsed(),
-            measured.is_some(),
+            matches!(&measured, Ok(Some(_))),
         ) {
             eprintln!("{line}");
         }
+        let measured = measured.map_err(|refusal| {
+            let mut error = EngramTransportError::local_state(refusal.to_string());
+            error.code = Some("runtime_observation_source_refused".to_owned());
+            error
+        })?;
         let source_basis = provenance
             .stamp(measured)
             .ok_or_else(|| {
