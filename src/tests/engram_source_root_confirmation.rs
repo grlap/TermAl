@@ -3,6 +3,161 @@ use super::*;
 
 const SELECTION_WARNING: &str = "Engram no longer confirms this claim's local source-root selection";
 
+#[test]
+fn public_naming_round_trip_between_held_claims_confirms_each_next_opening() {
+    let label = "confirmation-public-round-trip";
+    let (turn, first_path) = confirmation_root(label);
+    let second_path = turn.root.join(".worktrees").join("second");
+    run_git_test_command(&turn.root, &[
+        "worktree", "add", "--quiet", "-b", "second", second_path.to_str().unwrap(),
+    ]);
+    let mut held = naming_claim(label);
+    let first_binding = held.items[0].control_binding.clone().unwrap();
+    let second_binding = test_control_work_binding("public-second-claim", 1);
+    held.items.push(EngramHeldClaim {
+        work_id: second_binding.work_id.clone(), short_ref: "w-second".to_owned(),
+        claim_id: second_binding.claim_id.clone(), claim_fence: second_binding.claim_fence,
+        focused: false, control_binding: Some(second_binding.clone()),
+    });
+    let check_opening = |binding: &EngramControlWorkBinding, root: &String, generation: u64| {
+        turn.begin_prompt("Continue in the explicitly named held claim.");
+        turn.record(|record| {
+            assert_eq!(record.engram.work_binding.as_ref(), Some(binding));
+            assert!(matches!(&record.engram.observed_opening().unwrap().provenance,
+                EngramRootCapture::Recorded { state: EngramSourceRootState::Named,
+                    generation: observed, workspace_id } if *observed == generation as i64
+                        && workspace_id == root));
+        });
+        assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
+    };
+    let first = request_naming(&turn, label, Some(&first_path), vec![held.clone()]).unwrap();
+    check_opening(&first_binding, first.root.as_ref().unwrap(), first.generation);
+
+    // Only the producer's held-focus snapshot changes here. The public naming
+    // owner must acquire the new association and root; the test writes neither
+    // session field and never invokes a reconciliation helper directly.
+    held.items[0].focused = false;
+    held.items[1].focused = true;
+    turn.transport.enable_named_roots(&turn.session_id, &second_binding);
+    turn.transport.set_current_work_binding(Some(second_binding.clone()));
+    turn.transport.replace_held_claims([Ok(held.clone())]);
+    let second = turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
+        work: "w-second".to_owned(),
+        path: Some(Some(second_path.to_string_lossy().into_owned())),
+    }).unwrap();
+    assert!(second.generation > first.generation);
+    check_opening(&second_binding, second.root.as_ref().unwrap(), second.generation);
+
+    held.items[0].focused = true;
+    held.items[1].focused = false;
+    turn.transport.enable_named_roots(&turn.session_id, &first_binding);
+    turn.transport.set_current_work_binding(Some(first_binding.clone()));
+    let returned = request_naming(&turn, label, Some(&first_path), vec![held]).unwrap();
+    assert_eq!(returned.generation, first.generation, "returning keeps A's valid name");
+    assert_eq!(returned.root, first.root);
+    check_opening(&first_binding, returned.root.as_ref().unwrap(), returned.generation);
+}
+
+#[test]
+fn same_root_rename_confirms_a_claim_returned_to_after_another_claim_ends() {
+    let label = "confirmation-returned-claim";
+    let (turn, first_path) = confirmation_root(label);
+    let second_path = turn.root.join(".worktrees").join("second");
+    run_git_test_command(&turn.root, &[
+        "worktree", "add", "--quiet", "-b", "second", second_path.to_str().unwrap(),
+    ]);
+    let mut held = naming_claim(label);
+    let first_binding = held.items[0].control_binding.clone().unwrap();
+    let second_binding = test_control_work_binding("confirmation-second-claim", 1);
+    held.items.push(EngramHeldClaim {
+        work_id: second_binding.work_id.clone(), short_ref: "w-second".to_owned(),
+        claim_id: second_binding.claim_id.clone(), claim_fence: second_binding.claim_fence,
+        focused: false, control_binding: Some(second_binding.clone()),
+    });
+    let first = request_naming(&turn, label, Some(&first_path), vec![held.clone()]).unwrap();
+    turn.transport.register_named_root_run(&second_binding);
+
+    // Claim focus changes without clearing the session's previous root tuple.
+    turn.transport.set_current_work_binding(Some(second_binding.clone()));
+    turn.record_mut(|record| record.engram.work_binding = Some(second_binding.clone()));
+    held.items[0].focused = false;
+    held.items[1].focused = true;
+    turn.transport.replace_held_claims([Ok(held.clone())]);
+    let second = confirmation_name(&turn, Some(&second_path)).unwrap();
+    assert!(second.generation > first.generation);
+
+    // Completion is a canonical lifecycle fact, observed by maintenance after
+    // focus has returned. It must retire B without inventing a new name for A.
+    let store = confirmation_store(&turn);
+    let (second_root, journal) = {
+        let inner = turn.state.inner.lock().unwrap();
+        let root = engram_work_source_root_for_claim(&inner.engram_work_source_roots,
+            &store, &second_binding.work_id, &second_binding.claim_id).unwrap().clone();
+        let journal = engram_root_journal(&inner.engram_named_root_journal,
+            &store, &second_binding.claim_id).unwrap().clone();
+        (root, journal)
+    };
+    let (event, receipt) = journal.confirmed.as_ref().unwrap();
+    let binding = journal.read_binding.as_ref().unwrap();
+    let proof = json!({"project_id":journal.store.project_id, "work_id":binding.work_id,
+        "root_execution_id":binding.root_execution_id, "run_id":binding.run_id,
+        "claim_id":binding.claim_id, "run":{"state":"completed","generation":1},
+        "named_root":{"state":"none"},
+        "latest_event":{"event":receipt.event,"position":receipt.position,
+            "generation":receipt.generation,"kind":receipt.kind,
+            "workspace_id":receipt.workspace_id,"named_at":event.root.named_at},
+        "read_cut":{"feed":{"kind":"run_execution","id":binding.run_id},
+            "position":receipt.position.position+1}});
+    turn.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .root_reads.insert(second_binding.claim_id.clone(), proof);
+
+    held.items.pop();
+    held.items[0].focused = true;
+    turn.transport.set_current_work_binding(Some(first_binding.clone()));
+    turn.record_mut(|record| record.engram.work_binding = Some(first_binding));
+    turn.transport.replace_held_claims([Ok(held.clone())]);
+    assert!(turn.state.recover_one_engram_root_until(&second_root,
+        &EngramRootReclamationRoute::Unfocused,
+        turn.state.engram_budget_clock().now() + Duration::from_secs(2)).unwrap());
+    let again = request_naming(&turn, label, Some(&first_path), vec![held]).unwrap();
+    assert_eq!(again.generation, first.generation, "the first claim's name is kept");
+    assert_eq!(again.root, first.root);
+
+    let prompt = turn.begin_prompt("Continue work on the first held claim.").prompt;
+    turn.record(|record| {
+        assert!(matches!(&record.engram.observed_opening().unwrap().provenance,
+            EngramRootCapture::Recorded { state: EngramSourceRootState::Named,
+                generation, workspace_id } if *generation == first.generation as i64
+                    && Some(workspace_id) == first.root.as_ref()),
+            "a successful same-root re-name must confirm the returned claim's next opening: {prompt}");
+    });
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
+}
+
+#[test]
+fn a_different_root_or_stale_generation_stays_unconfirmed_at_opening() {
+    for stale_generation in [false, true] {
+        let label = format!("confirmation-mismatch-{stale_generation}");
+        let (turn, path) = confirmation_root(&label);
+        let named = request_naming(&turn, &label, Some(&path), vec![naming_claim(&label)]).unwrap();
+        turn.record_mut(|record| {
+            let Some(EngramNamedRootState::Bound { workspace_id, generation, .. }) =
+                record.engram.named_root.as_mut() else { panic!("the initial root is bound") };
+            if stale_generation { *generation += 1; } else { workspace_id.push_str("-other"); }
+        });
+        {
+            let inner = turn.state.inner.lock().unwrap();
+            assert_eq!(engram_turn_root_capture_explained_locked(&inner, &turn.session_id),
+                Err(EngramUnconfirmedRootReason::BoundRootMismatch));
+        }
+        turn.begin_prompt("Observe a genuinely mismatched root.");
+        turn.record(|record| assert!(matches!(
+            record.engram.observed_opening().unwrap().provenance,
+            EngramRootCapture::Unconfirmed), "mismatch must not confirm generation {}", named.generation));
+        assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
+    }
+}
+
 fn confirmation_root(label: &str) -> (EOCheckedTurn, PathBuf) {
     let turn = EOCheckedTurn::idle(label, true);
     prepare_naming_worktree_container(&turn.root);

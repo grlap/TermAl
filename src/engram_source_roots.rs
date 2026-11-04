@@ -3000,6 +3000,15 @@ impl AppState {
                     },
                     EngramNamedRootKind::Ended => EngramNamedRootState::None,
                 });
+            } else if let Some(kept) = kept {
+                // A kept name confirms this claim's existing binding without
+                // an event. The session may still carry another claim's tuple
+                // after a focus change; refresh it after durable acknowledgement.
+                inner.sessions[index].engram.named_root = Some(EngramNamedRootState::Bound {
+                    workspace_id: kept.root.clone(),
+                    generation: kept.generation as i64,
+                    named_at: kept.named_at.clone(),
+                });
             }
         }
         let (root, source_revision, unmeasured) = match (&validated, basis) {

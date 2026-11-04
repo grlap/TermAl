@@ -5398,7 +5398,8 @@ fn focusing_another_named_claim_selects_its_next_ordinary_opening_and_check_fact
         focused: false,
         control_binding: Some(second_binding.clone()),
     });
-    request_naming(&claimed, label, Some(&first), vec![held.clone()]).expect("first root named");
+    let first_named = request_naming(&claimed, label, Some(&first), vec![held.clone()])
+        .expect("first root named");
     claimed.transport.register_named_root_run(&second_binding);
     claimed
         .state
@@ -5414,6 +5415,12 @@ fn focusing_another_named_claim_selects_its_next_ordinary_opening_and_check_fact
         .expect("explicitly select the first claim before its ordinary opening");
     claimed.begin("The first ordinary claim owns this opening.");
     claimed.record(|record| assert_eq!(record.engram.work_binding, Some(first_binding.clone())));
+    claimed.record(|record| assert!(matches!(
+        &record.engram.observed_opening().unwrap().provenance,
+        EngramRootCapture::Recorded { state: EngramSourceRootState::Named,
+            generation, workspace_id } if *generation == first_named.generation as i64
+                && Some(workspace_id) == first_named.root.as_ref()),
+        "the first opening must confirm A, not accidentally retain B's tuple"));
     claimed
         .state
         .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.record_mut(|record| record.runtime.runtime_token().unwrap()))
@@ -5437,6 +5444,19 @@ fn focusing_another_named_claim_selects_its_next_ordinary_opening_and_check_fact
     claimed.transport.enable_named_roots(&claimed.session_id, &second_binding);
     claimed.record_mut(|record| record.engram.work_binding = selected);
     claimed.transport.replace_held_claims([Ok(held)]);
+    // The fixture changed only the work association above. Apply the selected
+    // claim's canonical root through the fenced reader as ordinary binding does;
+    // a stale tuple left by the preceding naming is not proof of B's authority.
+    let selected_root = {
+        let inner = claimed.state.inner.lock().unwrap();
+        inner.engram_work_source_roots.iter()
+            .find(|root| root.claim_id == second_binding.claim_id).unwrap().clone()
+    };
+    claimed.canonical_root_readback(&claimed.session_id, Some(&second_binding),
+        Some(EngramNamedRootState::Bound {
+            workspace_id: selected_root.root, generation: selected_root.generation as i64,
+            named_at: selected_root.named_at,
+        }), selected_root.generation).expect("the focused claim's canonical read is applied");
     claimed.begin("A subsequent ordinary opening uses the explicitly selected association.");
     claimed.record_mut(|record| {
         assert_eq!(record.engram.work_binding, Some(second_binding.clone()));
