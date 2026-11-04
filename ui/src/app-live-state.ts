@@ -83,6 +83,7 @@ import {
   resolveAppPreferences,
 } from "./session-model-utils";
 import { resolveAdoptedStateSlices } from "./state-adoption";
+import { useStableEvent } from "./panels/use-stable-event";
 import { applyTestRunDelta, reconcileTestRunSnapshot, type TestRunSummary } from "./test-runs";
 import { applyTestRunWaitDelta, type TestRunWaitRecord } from "./test-run-waits";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
@@ -198,11 +199,12 @@ function rememberServerInstanceId(
 export function useAppLiveState(
   params: UseAppLiveStateParams,
 ): UseAppLiveStateReturn {
+  // Transport callbacks outlive a render; layout must use the current dock state.
+  const applyControlPanelLayout = useStableEvent(params.applyControlPanelLayout);
   const {
     adoptionRefs,
     stateSetters,
     preferenceSetters,
-    applyControlPanelLayout,
     clearRecoveredBackendRequestError,
     reportRequestError,
     requestBackendReconnectRef,

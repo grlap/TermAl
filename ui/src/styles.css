@@ -4125,6 +4125,8 @@ textarea {
 
 .session-title-line {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
@@ -4132,11 +4134,18 @@ textarea {
   padding-right: 2.9rem;
 }
 
-/* Shrinks before the session name does, and is cut with an ellipsis in a
-   narrow pane; the full label is its title. */
+.session-title-line > strong {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Keep short names intact; labels wrap or truncate in the remaining space. */
 .session-work-label {
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--muted);
@@ -4150,8 +4159,11 @@ textarea {
 }
 
 .session-search-count {
-  display: inline-flex;
-  align-items: center;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border-radius: var(--control-radius-pill);
   padding: 0.2rem 0.55rem;
   background: var(--surface-white-soft);

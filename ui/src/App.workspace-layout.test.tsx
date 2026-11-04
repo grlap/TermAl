@@ -2421,6 +2421,56 @@ describe("App workspace layout", () => {
     });
   });
 
+  it("keeps a dragged control panel width when a changed session snapshot is adopted", async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const workspaceId = "test-resize-session-snapshot";
+    window.history.replaceState(null, "", `/?workspace=${workspaceId}`);
+    const context = await renderAppWithProjectAndSession();
+    const storedRatio = () => {
+      const raw = window.localStorage.getItem(`${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceId}`);
+      expect(raw).not.toBeNull();
+      const { workspace } = JSON.parse(raw!) as { workspace: WorkspaceState };
+      expect(workspace.root?.type).toBe("split");
+      if (workspace.root?.type !== "split") throw new Error("Expected control panel split");
+      return workspace.root.ratio;
+    };
+
+    try {
+      const initialRatio = storedRatio();
+      const divider = document.querySelector(".tile-divider-row");
+      if (!(divider instanceof HTMLDivElement) || !divider.parentElement) {
+        throw new Error("Expected control panel resize divider");
+      }
+      vi.spyOn(divider.parentElement, "getBoundingClientRect").mockReturnValue({
+        x: 0, y: 0, left: 0, top: 0, right: 2000, bottom: 800,
+        width: 2000, height: 800, toJSON: () => ({}),
+      });
+      await act(async () => {
+        fireEvent.pointerDown(divider, { clientX: initialRatio * 2000, clientY: 40 });
+        fireEvent.pointerMove(window, { clientX: initialRatio * 2000 + 400, clientY: 40 });
+        fireEvent.pointerUp(window);
+        await flushUiWork();
+      });
+      const draggedRatio = storedRatio();
+      expect(draggedRatio).toBeGreaterThan(initialRatio + 0.1);
+
+      await dispatchOpenedStateEvent(latestEventSource(), makeStateResponse({
+        revision: 2,
+        orchestrators: [],
+        workspaces: [],
+        projects: [{ id: "project-termal", name: "TermAl", rootPath: "/projects/termal" }],
+        sessions: [makeSession("session-1", {
+          name: "Session 1", projectId: "project-termal", workdir: "/projects/termal",
+          preview: "Changed after resizing", sessionMutationStamp: 2,
+        })],
+      }));
+      expect(storedRatio()).toBeCloseTo(draggedRatio, 8);
+    } finally {
+      context.cleanup();
+      window.history.replaceState(null, "", originalUrl);
+    }
+  });
+
   it("keeps a claimed local control panel layout side while merging server preferences", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
