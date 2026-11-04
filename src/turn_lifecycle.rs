@@ -479,6 +479,7 @@ impl AppState {
         retain_runtime_for_retry: bool,
         shutdown_error: Option<&str>,
     ) -> EngramMcpRuntimeRevocationFinalization {
+        let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let (
             _revision,
             _pending_interaction_updates,
@@ -576,7 +577,9 @@ impl AppState {
                 shutdown_error
             };
 
-            self.queue_runtime_observation_close_locked(&mut inner, index);
+            self.queue_runtime_observation_close_with_notices_locked(
+                &mut inner, index, EngramObservedTurnOutcome::Unknown, &registered_check_notices,
+            );
             let was_busy = matches!(
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
@@ -884,6 +887,7 @@ impl AppState {
         error_message: &str,
     ) -> Result<bool> {
 
+        let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let cleaned = error_message.trim();
         let (should_dispatch_next, failed_mailbox_notification) = {
             let Some(_observation_install) =
@@ -920,7 +924,9 @@ impl AppState {
                 return Ok(false);
             }
             let _ = record;
-            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Failed);
+            self.queue_runtime_observation_close_with_notices_locked(
+                &mut inner, index, EngramObservedTurnOutcome::Failed, &registered_check_notices,
+            );
             let record = &mut inner.sessions[index];
             // A turn that failed before its runtime acknowledged a receipted
             // prompt leaves that delivery unknown. Settled here, under the
@@ -1208,6 +1214,7 @@ impl AppState {
         error_message: &str,
         mode: AtomicTurnFailureMode<'_>,
     ) -> Result<bool> {
+        let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let cleaned = error_message.trim();
         let preserve_accepted_turn_state = mode.preserves_accepted_turn_state();
         let (
@@ -1324,7 +1331,9 @@ impl AppState {
                 }
                 return Ok(false);
             }
-            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Failed);
+            self.queue_runtime_observation_close_with_notices_locked(
+                &mut inner, index, EngramObservedTurnOutcome::Failed, &registered_check_notices,
+            );
             let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
             let file_change_message_id = (preserve_accepted_turn_state
                 && !inner.sessions[index].active_turn_file_changes.is_empty())
@@ -1688,6 +1697,7 @@ impl AppState {
         error_message: &str,
     ) -> Result<()> {
 
+        let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let cleaned = error_message.trim();
         let (commit_result, should_dispatch_next, failed_mailbox_notification) = {
             let Some(_observation_install) =
@@ -1723,7 +1733,9 @@ impl AppState {
                 return Ok(());
             }
             let _ = record;
-            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Failed);
+            self.queue_runtime_observation_close_with_notices_locked(
+                &mut inner, index, EngramObservedTurnOutcome::Failed, &registered_check_notices,
+            );
             let record = &mut inner.sessions[index];
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
@@ -1847,6 +1859,7 @@ impl AppState {
             eprintln!("mailbox coverage> deferred before turn completion: {error:#}");
         }
         let stopping_orchestrator_session_ids = self.stopping_orchestrator_session_ids_snapshot();
+        let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let (should_dispatch_next, _orchestrator_delta) = {
             let Some(_observation_install) =
                 self.runtime_observation_lifetime.enter("terminal")
@@ -1911,7 +1924,8 @@ impl AppState {
                 return Ok(());
             }
             let _ = record;
-            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Succeeded);
+            self.queue_runtime_observation_close_with_notices_locked(
+                &mut inner, index, EngramObservedTurnOutcome::Succeeded, &registered_check_notices);
             let record = &mut inner.sessions[index];
 
             if record.session.status == SessionStatus::Active {
@@ -2035,6 +2049,7 @@ impl AppState {
         let Some(_install) = self.runtime_observation_lifetime.enter("terminal") else {
             return Ok(());
         };
+        let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(());
@@ -2049,7 +2064,9 @@ impl AppState {
             return Ok(());
         }
         let messages_before = session_message_count(record);
-        self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, outcome);
+        self.queue_runtime_observation_close_with_notices_locked(
+            &mut inner, index, outcome, &registered_check_notices,
+        );
         inner.stamp_session_at_index(index);
         if session_message_count(&inner.sessions[index]) != messages_before {
             self.commit_session_locked(&mut inner, session_id)?;
@@ -2105,6 +2122,7 @@ impl AppState {
         #[cfg(not(windows))]
         let _ = root_exit;
         let cleaned = error_message.map(str::trim).unwrap_or("");
+        let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let (
             should_dispatch_next,
             _pending_interaction_updates,
@@ -2160,7 +2178,9 @@ impl AppState {
                 && inner.sessions[index].session.preview == make_preview(cleaned) {
                 return Ok(());
             }
-            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, observed_outcome);
+            self.queue_runtime_observation_close_with_notices_locked(
+                &mut inner, index, observed_outcome, &registered_check_notices,
+            );
             let was_busy = matches!(
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval

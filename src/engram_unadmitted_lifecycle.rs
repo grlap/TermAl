@@ -1,3 +1,5 @@
+include!("engram_registered_check_notices.rs");
+
 // Shared observation lifecycle after the existing runtime/turn ownership fence.
 // Ordinary host-started turns and adopted runtime-started turns use the same
 // immutable report owner; foreign and replaced frames never enter its trace.
@@ -223,12 +225,9 @@ impl AppState {
     // Called only past a terminal path's runtime/generation/stop-owner fence,
     // before it clears those markers. Facts and the job share that path's
     // persistence commit; no RPC or source measurement occurs here.
-    fn queue_runtime_observation_close_locked(&self, inner: &mut StateInner, index: usize) {
-        self.queue_runtime_observation_close_with_outcome_locked(inner, index, EngramObservedTurnOutcome::Unknown);
-    }
-
-    fn queue_runtime_observation_close_with_outcome_locked(
+    fn queue_runtime_observation_close_with_notices_locked(
         &self, inner: &mut StateInner, index: usize, outcome: EngramObservedTurnOutcome,
+        registered: &[RegisteredCheckNotice],
     ) {
         // Retained work can become hazardous without a fresh frame callback.
         // Freeze the source-attribution decision under this same close lock.
@@ -250,8 +249,12 @@ impl AppState {
         // recorded leaves its successor without one: never an older baseline.
         let baseline = inner.sessions[index].engram.runtime_checkpoint.take();
         let scope = EngramRuntimeClosingScope::capture(inner, &session_id);
+        let (mut notices, correlated) = registered_check_notices_locked(inner, index, registered);
         let record = &mut inner.sessions[index];
-        let mut notices = engram_carry_running_codex_checks(record, &trace.host_turn_ref);
+        notices.extend(engram_carry_running_codex_checks(record, &trace.host_turn_ref));
+        record.engram.active_turn_checks.retain(|check|
+            !correlated.iter().any(|(turn, sequence)|
+                turn == &check.host_turn_ref && *sequence == check.sequence));
         notices.extend(engram_close_unended_checks(
             &mut record.engram, Some(&trace.host_turn_ref), "the ordinary turn's end",
         ));
@@ -328,6 +331,7 @@ impl AppState {
         let Some(_install) = self.runtime_observation_lifetime.enter("close") else {
             return Ok(());
         };
+        let registered = self.prepare_registered_check_notices(session_id);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(());
@@ -341,7 +345,9 @@ impl AppState {
             return Ok(());
         }
         let messages_before = session_message_count(&inner.sessions[index]);
-        self.queue_runtime_observation_close_locked(&mut inner, index);
+        self.queue_runtime_observation_close_with_notices_locked(
+            &mut inner, index, EngramObservedTurnOutcome::Unknown, &registered,
+        );
         inner.stamp_session_at_index(index);
         if session_message_count(&inner.sessions[index]) != messages_before {
             self.commit_session_locked(&mut inner, session_id)?;

@@ -54,7 +54,7 @@ import {
   summarize,
 } from "./test-launcher.mjs";
 import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
-import { focusedTestCounts } from "./test-counts.mjs";
+import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 import { registerLauncherRegistrationTests, withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
@@ -3022,6 +3022,137 @@ test("a focused run records its runner's counts and prints them with the input f
     const summary = await summarize(runDir);
     assert.match(summary, /^tests: passed=41 failed=0 ignored=1$/mu);
     assert.match(summary, new RegExp(`^input fingerprint: ${result.after}$`, "mu"));
+  });
+});
+
+test("focused test threads name what set them, and libtest's choice when nothing did", () => {
+  const cargo = { command: "cargo", availableParallelism: 144, platform: "linux" };
+  const unknown = { source: "unknown", threads: null };
+  const threads = (args, env = {}, extra = {}) => focusedTestThreads({ ...cargo, args, env, ...extra });
+  assert.deepEqual(threads(["test", "--bin", "termal", "--", "filter"]),
+    { source: "libtest-default", threads: null, availableParallelism: 144 });
+  assert.deepEqual(threads(["test"], { RUST_TEST_THREADS: "4" }), { source: "RUST_TEST_THREADS", threads: 4 });
+  // The harness's own argument wins over the variable, as it does in libtest.
+  for (const args of [["test", "--", "--test-threads=2"], ["+stable", "test", "--", "--test-threads", "2"]]) {
+    assert.deepEqual(threads(args, { RUST_TEST_THREADS: "4" }), { source: "--test-threads", threads: 2 });
+  }
+  assert.deepEqual(threads(["-q", "--config", "a=1", "test", "--", "--test-threads=2"]),
+    { source: "--test-threads", threads: 2 });
+  // None of these spellings is a thread option to libtest.
+  for (const args of [
+    ["test", "--test-threads=2"],
+    ["test", "--", "--", "--test-threads=2"],
+    ["test", "--", "--skip", "--test-threads=2"],
+  ]) assert.equal(threads(args).source, "libtest-default", args.join(" "));
+  // An effect the launcher can't be sure of is unknown, not a guess.
+  assert.deepEqual(threads(["test", "--", "--test-threads=2", "--test-threads=3"]), unknown);
+  assert.deepEqual(threads(["--config", "env.RUST_TEST_THREADS='2'", "test"]), unknown);
+  assert.deepEqual(threads(["--config", "ci.toml", "test"]), unknown);
+  assert.deepEqual(threads(["--config=ci.toml", "test"]), unknown);
+  // Cargo configuration naming the variable can set or override it.
+  const configured = { cargoConfigs: ["[env]\nRUST_TEST_THREADS = \"2\"\n"] };
+  assert.deepEqual(threads(["test"], {}, configured), unknown);
+  assert.deepEqual(threads(["test"], { RUST_TEST_THREADS: "4" }, configured), unknown);
+  assert.equal(threads(["test"], {}, { cargoConfigs: ["[build]\njobs = 4\n"] }).source, "libtest-default");
+  // Rust's parse, not a looser or a stricter one.
+  for (const [value, expected] of [["4", 4], ["04", 4], ["+4", 4], [" 4", null], ["0", null], ["many", null]]) {
+    assert.deepEqual(threads(["test"], { RUST_TEST_THREADS: value }), { source: "RUST_TEST_THREADS", threads: expected }, value);
+  }
+  // Windows reads the variable under any spelling; two spellings are ambiguous.
+  const windows = { platform: "win32" };
+  assert.deepEqual(threads(["test"], { rust_test_threads: "2" }, windows), { source: "RUST_TEST_THREADS", threads: 2 });
+  assert.deepEqual(threads(["test"], { rust_test_threads: "2", RUST_TEST_THREADS: "3" }, windows), unknown);
+  assert.equal(threads(["test"], { rust_test_threads: "2" }).source, "libtest-default");
+  assert.deepEqual(focusedTestThreads({ command: "C:\\tools\\cargo.exe", args: ["test"], env: { RUST_TEST_THREADS: "1" }, platform: "win32" }),
+    { source: "RUST_TEST_THREADS", threads: 1 });
+  // The wrapper says what it exported, only when argv itself runs it and nothing may override it.
+  const log = "Rust test gate: cargo=cargo, fd soft limit=4096, test threads=4\n";
+  for (const args of [
+    ["scripts/test-rust.sh"],
+    ["C:\\repo\\scripts\\test-rust.sh", "--bin", "termal"],
+    ["-c", "exec scripts/test-rust.sh --bin termal"],
+  ]) {
+    assert.deepEqual(focusedTestThreads({ command: "bash", args, log }), { source: "scripts/test-rust.sh", threads: 4 });
+  }
+  for (const [args, text, extra] of [
+    [["scripts/test-rust.sh", "--bin", "termal", "--", "--test-threads=1"], log],
+    [["-c", "exec scripts/test-rust.sh -- --test-threads=1"], log],
+    [["-c", "TERMAL_TEST_THREADS=1 scripts/test-rust.sh && cargo test"], log],
+    [["-c", "exec scripts/test-rust.sh && cargo test --bin b"], log],
+    [["ci.sh"], log],
+    [["scripts/test-rust.sh"], `${log}${log.replace("=4", "=1")}`],
+    [["scripts/test-rust.sh"], log, configured],
+    [["scripts/test-rust.sh", "--config", "ci.toml"], log],
+  ]) assert.deepEqual(focusedTestThreads({ command: "bash", args, log: text, ...extra }), unknown, args.join(" "));
+  // A command that runs libtest some other way may set anything.
+  for (const [command, args] of [
+    ["env", ["RUST_TEST_THREADS=4", "cargo", "test"]],
+    ["bash", ["-c", "cargo test -- --test-threads=1"]],
+    ["./target/debug/deps/termal-abc", ["--test-threads=2"]],
+  ]) {
+    assert.deepEqual(focusedTestThreads({ command, args, counts: { runner: "cargo-libtest" }, availableParallelism: 8 }), unknown);
+  }
+  // An indirect run that aborted before its result line still started libtest.
+  assert.deepEqual(focusedTestThreads({ command: "bash", args: ["-c", "cargo test"], log: "running 3 tests\n" }), unknown);
+  // Other Cargo commands and other runners have no libtest threads to report.
+  assert.equal(threads(["build"]), undefined);
+  assert.equal(threads(["-q", "check"]), undefined);
+  assert.equal(focusedTestThreads({ command: "node", args: ["--test"], counts: { runner: "node-test" } }), undefined);
+});
+
+test("Cargo configuration is read from the stage's directory upward and from Cargo's home", async (t) => {
+  await repository(t, async (root) => {
+    const inner = join(root, "a", "b");
+    mkdirSync(join(root, ".cargo"), { recursive: true });
+    mkdirSync(inner, { recursive: true });
+    writeFileSync(join(root, ".cargo", "config.toml"), "[env]\nRUST_TEST_THREADS = \"2\"\n");
+    const home = join(root, "cargo-home");
+    mkdirSync(home);
+    writeFileSync(join(home, "config"), "# home\n");
+    const texts = cargoConfigTexts(inner, { CARGO_HOME: home });
+    assert.ok(texts.some((text) => text.includes("RUST_TEST_THREADS")));
+    assert.ok(texts.includes("# home\n"));
+  });
+});
+
+test("the summary states a focused run's test threads in each form", () => {
+  const line = (testThreads) => focusedCountSummaryLines({ stages: [{ name: "focused", testThreads }] });
+  assert.deepEqual(line({ source: "RUST_TEST_THREADS", threads: 4 }), ["test threads: 4 (RUST_TEST_THREADS)"]);
+  assert.deepEqual(line({ source: "RUST_TEST_THREADS", threads: null }), ["test threads: not a valid count (RUST_TEST_THREADS)"]);
+  assert.deepEqual(line({ source: "libtest-default", threads: null, availableParallelism: 144 }),
+    ["test threads: none set, so libtest chooses; the launcher sees 144 available"]);
+  assert.match(line({ source: "unknown", threads: null })[0], /^test threads: unknown; /u);
+});
+
+test("a focused run records its test threads and prints them, and no other stage does", async (t) => {
+  const output = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s";
+  // The fixture command isn't `cargo test`, so its setting isn't visible, whatever the variable says.
+  await repository(t, async (root, registrationFixtureEnv) => {
+    const env = { ...registrationFixtureEnv, RUST_TEST_THREADS: "4" };
+    const runDir = await createRun({
+      root,
+      stages: [stage("focused", `console.log(${JSON.stringify(output)})`)],
+    }, env);
+    await executeRun(runDir, env);
+    assert.deepEqual(json(join(runDir, "results.json")).stages[0].testThreads, { source: "unknown", threads: null });
+    assert.match(await summarize(runDir), /^test threads: unknown; /mu);
+  });
+  await repository(t, async (root, registrationFixtureEnv) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("focused", "console.log('all good')")],
+    }, registrationFixtureEnv);
+    await executeRun(runDir, registrationFixtureEnv);
+    assert.equal(json(join(runDir, "results.json")).stages[0].testThreads, undefined);
+    assert.doesNotMatch(await summarize(runDir), /^test threads: /mu);
+  });
+  await repository(t, async (root, registrationFixtureEnv) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("report", `console.log(${JSON.stringify(output)})`)],
+    }, registrationFixtureEnv);
+    await executeRun(runDir, registrationFixtureEnv);
+    assert.equal(json(join(runDir, "results.json")).stages[0].testThreads, undefined);
   });
 });
 

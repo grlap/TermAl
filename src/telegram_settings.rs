@@ -794,8 +794,11 @@ fn validate_telegram_bot_token(token: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn check_telegram_test_rate_limit(_token: &str) -> Result<(), ApiError> {
-    let now = std::time::Instant::now();
+fn check_telegram_test_rate_limit(token: &str) -> Result<(), ApiError> {
+    check_telegram_test_rate_limit_at(token, std::time::Instant::now())
+}
+
+fn check_telegram_test_rate_limit_at(_token: &str, now: std::time::Instant) -> Result<(), ApiError> {
     let mut last_attempt = TELEGRAM_TEST_RATE_LIMIT
         .lock()
         .expect("telegram test rate limit mutex poisoned");
@@ -818,13 +821,6 @@ fn reset_telegram_test_rate_limit_for_tests() {
     *TELEGRAM_TEST_RATE_LIMIT
         .lock()
         .expect("telegram test rate limit mutex poisoned") = None;
-}
-
-#[cfg(test)]
-fn age_telegram_test_rate_limit_for_tests(age: Duration) {
-    *TELEGRAM_TEST_RATE_LIMIT
-        .lock()
-        .expect("telegram test rate limit mutex poisoned") = Some(std::time::Instant::now() - age);
 }
 
 fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {

@@ -365,6 +365,21 @@ For an authorized focused check, pass an argument array after `--`:
 node scripts/test-launcher.mjs focused -- node --test scripts/test-launcher.test.mjs
 ```
 
+A direct `focused -- cargo test` skips `scripts/test-rust.sh`, so unless something
+sets a count libtest runs one test thread per available core, where `full` defaults
+to `RUST_TEST_THREADS=4`. On a many-core host a direct run is far harsher than a
+gate: on a 144-core host one selection failed two tests at the default and passed
+all of them at 4. The focused stage of `results.json` records the setting as
+`testThreads`, and the summary prints it as `test threads:`. It reports only what
+the launcher can see. A direct `cargo test`, or `scripts/test-rust.sh` run directly,
+reports its count or that libtest chooses. Another command that runs libtest, or a
+setting whose effect isn't certain, such as Cargo configuration naming
+`RUST_TEST_THREADS`, reports `unknown`, so read the count from the test process. A
+command that shows no sign of running libtest reports nothing. State it with any
+timing or failure you report from a run. Don't set it to
+get a failing test to pass: a test that only passes at 4 threads is a finding. The
+default stays as it is because failures like those only come to light there.
+
 To run one UI test category on its own, name it after its Vitest project (see
 [UI test categories](#ui-test-categories)):
 

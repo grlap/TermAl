@@ -4,13 +4,44 @@
 use super::*;
 
 const RECOVERY_HOLD_SAMPLES: usize = 100;
+// The bound applies to the median of each call's worst hold. Before reader
+// selection moved off the state lock, a scan of the session table made every
+// call slow, so the median sees it. A thread can also sleep while it holds the
+// lock in a process running hundreds of other test threads, which slows only
+// some calls, and the median leaves those out. Known weakness: this does not
+// catch a scan that stays under the bound, or one that slows half the calls or fewer.
 const RECOVERY_HOLD_BOUND: Duration = Duration::from_millis(50);
+// Longer than the bound, so one such hold is over it on any host.
+const RECOVERY_FORCED_PAUSE: Duration = Duration::from_millis(60);
+
+/// One call's worst hold, and where it was taken.
+type RecoveryHold = (Duration, &'static str, u32);
+
+#[derive(Debug)]
+struct RecoveryHoldMeasure {
+    median: RecoveryHold,
+    second_worst: Duration,
+    maximum: Duration,
+}
+
+impl RecoveryHoldMeasure {
+    fn of(mut worst_per_call: Vec<RecoveryHold>) -> Self {
+        worst_per_call.sort_unstable();
+        let calls = worst_per_call.len();
+        Self {
+            median: worst_per_call[(calls - 1) / 2],
+            second_worst: worst_per_call[calls - 2].0,
+            maximum: worst_per_call[calls - 1].0,
+        }
+    }
+}
 
 struct RecoveryHoldFixture {
     claimed: EOCheckedTurn,
     store: EngramAuthorityStoreKey,
     owner: EngramAuthorityTransition,
-    holds: Arc<Mutex<Vec<Duration>>>,
+    holds: Arc<Mutex<Vec<RecoveryHold>>>,
+    pause_next_hold: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RecoveryHoldFixture {
@@ -81,6 +112,8 @@ impl RecoveryHoldFixture {
         };
         let holds = Arc::new(Mutex::new(Vec::new()));
         let seen = holds.clone();
+        let pause_next_hold = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let pause = pause_next_hold.clone();
         let measured_thread = std::thread::current().id();
         // The control-only wrapper owns a Weak pointer to this mutex. Even
         // after capture workers settle, that pointer prevents Arc::get_mut.
@@ -91,22 +124,46 @@ impl RecoveryHoldFixture {
             .expect("the settled fixture exclusively owns its state mutex");
         mutex.warn_after = Duration::ZERO;
         mutex.diagnostic_reporter = Arc::new(move |diagnostic| {
-            if std::thread::current().id() == measured_thread
-                && let StateMutexDiagnostic::Held { held, .. } = diagnostic
-            {
-                seen.lock().unwrap().push(held);
+            if std::thread::current().id() != measured_thread {
+                return;
+            }
+            match diagnostic {
+                StateMutexDiagnostic::Held { held, file, line, .. } => {
+                    seen.lock().unwrap().push((held, file, line));
+                }
+                // With warn_after zero this runs on every acquisition, after
+                // the hold's clock started and with the lock held: a real
+                // sleep under the lock. The file test skips the test-only
+                // clock lock, so the sleep lands in the batch's first real hold.
+                StateMutexDiagnostic::Waited { file, .. }
+                    if file.ends_with("engram_root_authority.rs")
+                        && pause.swap(false, std::sync::atomic::Ordering::SeqCst) =>
+                {
+                    std::thread::sleep(RECOVERY_FORCED_PAUSE);
+                }
+                _ => {}
             }
         });
         install_control_only_transport(&claimed.state, claimed.transport.clone());
-        Self { claimed, store, owner, holds }
+        Self { claimed, store, owner, holds, pause_next_hold }
     }
 
-    fn measure(&self, unresolved: bool) -> (Duration, Duration) {
+    fn measure(&self, unresolved: bool) -> RecoveryHoldMeasure {
+        self.measure_calls(unresolved, RECOVERY_HOLD_SAMPLES, |_| false)
+    }
+
+    /// Runs `calls` batches, sleeping under the lock in those `paused` selects.
+    fn measure_calls(
+        &self,
+        unresolved: bool,
+        calls: usize,
+        paused: impl Fn(usize) -> bool,
+    ) -> RecoveryHoldMeasure {
         let requests_before = self.claimed.transport.requests().len();
         let journals_before = self.claimed.state.inner.lock().unwrap()
             .engram_named_root_journal.clone();
         let mut worst_per_call = Vec::new();
-        for _ in 0..RECOVERY_HOLD_SAMPLES {
+        for call in 0..calls {
             {
                 let mut inner = self.claimed.state.inner.lock().unwrap();
                 let history = inner.engram_work_naming_history.iter_mut()
@@ -116,10 +173,11 @@ impl RecoveryHoldFixture {
                     history.unresolved_runs.push(self.owner.binding.clone());
                 }
             }
+            let clock = self.claimed.state.engram_budget_clock();
             // Exclude fixture preparation; capture every foreground lock in
             // the actual batch, including reader validation and settlement.
             self.holds.lock().unwrap().clear();
-            let clock = self.claimed.state.engram_budget_clock();
+            self.pause_next_hold.store(paused(call), std::sync::atomic::Ordering::SeqCst);
             self.claimed.state.recover_engram_authority_batch_until(
                 &self.store, &self.owner, clock.now() + DEADLOCK_GUARD, true, None,
             ).unwrap();
@@ -134,37 +192,66 @@ impl RecoveryHoldFixture {
             assert_eq!(history.transition.as_ref().unwrap(), &self.owner);
         }
         assert_eq!(self.claimed.transport.requests().len() - requests_before,
-            if unresolved { RECOVERY_HOLD_SAMPLES } else { 0 },
+            if unresolved { calls } else { 0 },
             "one canonical read per retained run, none for an empty batch");
-        worst_per_call.sort_unstable();
-        // Nearest-rank empirical p99 of 100 actual batch calls.
-        (worst_per_call[98], *worst_per_call.last().unwrap())
+        RecoveryHoldMeasure::of(worst_per_call)
     }
 }
 
 #[test]
 fn root_recovery_empty_batch_does_not_hold_state_for_retained_inventory() {
     let fixture = RecoveryHoldFixture::new(4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT);
-    let (p99, maximum) = fixture.measure(false);
-    eprintln!("root_recovery_hold empty=true sessions=4096 journals=256 samples=100 p99_us={} max_us={}",
-        p99.as_micros(), maximum.as_micros());
-    assert!(p99 < RECOVERY_HOLD_BOUND,
-        "empty recovery batch p99 {p99:?} exceeds {RECOVERY_HOLD_BOUND:?} (max {maximum:?})");
+    let measure = fixture.measure(false);
+    eprintln!("root_recovery_hold empty=true sessions=4096 journals=256 samples=100 median_us={} second_worst_us={} max_us={}",
+        measure.median.0.as_micros(), measure.second_worst.as_micros(), measure.maximum.as_micros());
+    assert!(measure.median.0 < RECOVERY_HOLD_BOUND,
+        "empty recovery batch exceeds {RECOVERY_HOLD_BOUND:?}: {measure:?}");
 }
 
 #[test]
-#[ignore = "disabled until redesigned: its absolute wall-clock bound on each call's worst hold fails on a Linux host without any change to the measured code, for a cause not yet measured"]
 fn root_recovery_active_batch_holds_stay_bounded_as_sessions_and_journals_grow() {
     let mut measurements = Vec::new();
     for (sessions, journals) in [(64, 1), (1024, 1), (4096, 1), (4096, 256)] {
         let fixture = RecoveryHoldFixture::new(sessions, journals);
-        let (p99, maximum) = fixture.measure(true);
-        eprintln!("root_recovery_hold empty=false sessions={sessions} journals={journals} samples=100 p99_us={} max_us={}",
-            p99.as_micros(), maximum.as_micros());
-        measurements.push((sessions, journals, p99, maximum));
+        let measure = fixture.measure(true);
+        eprintln!("root_recovery_hold empty=false sessions={sessions} journals={journals} samples=100 median_us={} second_worst_us={} max_us={}",
+            measure.median.0.as_micros(), measure.second_worst.as_micros(), measure.maximum.as_micros());
+        measurements.push((sessions, journals, measure));
     }
-    assert!(measurements.iter().all(|(_, _, p99, _)| *p99 < RECOVERY_HOLD_BOUND),
-        "recovery batch holds must stay below {RECOVERY_HOLD_BOUND:?}: {measurements:?}");
+    assert!(measurements.iter().all(|(_, _, measure)| measure.median.0 < RECOVERY_HOLD_BOUND),
+        "the median of recovery batch calls' worst holds must stay below {RECOVERY_HOLD_BOUND:?}: {measurements:?}");
+}
+
+// The oracle's exact boundary, with no timing in it: of 21 calls the median is
+// the 11th slowest, so 10 slow calls leave it fast and 11 don't.
+#[test]
+fn root_recovery_hold_median_is_decided_by_over_half_the_calls() {
+    let with_slow_calls = |slow: usize| {
+        RecoveryHoldMeasure::of((0..21).map(|call| {
+            let held = if call < slow { RECOVERY_FORCED_PAUSE } else { Duration::from_millis(1) };
+            (held, "test", 0)
+        }).collect())
+    };
+    assert!(with_slow_calls(10).median.0 < RECOVERY_HOLD_BOUND);
+    assert!(with_slow_calls(11).median.0 >= RECOVERY_HOLD_BOUND);
+}
+
+// Real sleeps under the lock. Ten paused calls of a hundred leave room for other
+// calls to stall as well, so this doesn't need a quiet host.
+#[test]
+fn root_recovery_hold_median_passes_when_a_thread_sleeps_in_under_half_the_calls() {
+    let fixture = RecoveryHoldFixture::new(64, 1);
+    let measure = fixture.measure_calls(true, RECOVERY_HOLD_SAMPLES, |call| call < 10);
+    assert!(measure.maximum >= RECOVERY_HOLD_BOUND, "the sleep is a hold: {measure:?}");
+    assert!(measure.second_worst >= RECOVERY_HOLD_BOUND, "{measure:?}");
+    assert!(measure.median.0 < RECOVERY_HOLD_BOUND, "{measure:?}");
+}
+
+#[test]
+fn root_recovery_hold_median_fails_when_over_half_the_calls_are_slow() {
+    let fixture = RecoveryHoldFixture::new(64, 1);
+    let measure = fixture.measure_calls(true, 21, |call| call < 11);
+    assert!(measure.median.0 >= RECOVERY_HOLD_BOUND, "{measure:?}");
 }
 
 #[test]

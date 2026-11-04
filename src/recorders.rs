@@ -948,8 +948,12 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
         .clone();
 
     state.upsert_command_message(&session_id, &message_id, command, output, status)?;
-    // A completion that still reports the command running is not its end.
-    if status != CommandStatus::Running {
+    // A Running reply is not an end. A simple launcher's explicit
+    // NotFinished reply may still contain its RUN locator; the observation
+    // owner preserves that nonterminal exit and the original invocation.
+    if status != CommandStatus::Running
+        || EngramHost::is_nonterminal_launcher_reply(command, exit)
+    {
         recorder.observe(EngramRecorderObservation::CommandFinished {
             key,
             command,

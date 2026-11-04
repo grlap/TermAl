@@ -1630,3 +1630,57 @@ fn import_discovered_codex_threads_stamps_newly_discovered_sessions() {
          the same imported session"
     );
 }
+
+#[test]
+fn import_discovered_codex_threads_stamps_only_actual_existing_metadata_changes() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let root = TestTempRoot::create("codex-import-metadata-stamps");
+    let cwd = normalize_local_user_facing_path(root.path().to_string_lossy().as_ref());
+    let mut inner = StateInner::new();
+    let mut thread = DiscoveredCodexThread {
+        id: "metadata-stamp-thread".into(), cwd: cwd.clone(), archived: false,
+        title: "Original title".into(), model: None, reasoning_effort: None,
+        sandbox_mode: None, approval_policy: None,
+    };
+    inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
+    let id = inner.sessions[0].session.id.clone();
+    let mut watermark = inner.last_mutation_stamp;
+    thread.title = "A new discovery title must preserve the selected name".into();
+    thread.model = Some("ignored-discovery-model".into());
+    inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
+    assert!(inner.collect_persist_delta(watermark).changed_sessions.is_empty());
+
+    thread.archived = true;
+    inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
+    let delta = inner.collect_persist_delta(watermark);
+    assert_eq!(delta.changed_sessions.len(), 1);
+    assert_eq!(delta.changed_sessions[0].session.id, id);
+    assert_eq!(delta.changed_sessions[0].session.codex_thread_state, Some(CodexThreadState::Archived));
+    assert_eq!(delta.changed_sessions[0].session.preview, "Archived Codex thread ready to reopen.");
+    watermark = delta.watermark;
+    inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
+    assert!(inner.collect_persist_delta(watermark).changed_sessions.is_empty());
+
+    let nested = root.path().join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    thread.cwd = normalize_local_user_facing_path(nested.to_string_lossy().as_ref());
+    inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
+    let delta = inner.collect_persist_delta(watermark);
+    assert_eq!(delta.changed_sessions.len(), 1);
+    assert_eq!(delta.changed_sessions[0].session.workdir, normalize_local_user_facing_path(&thread.cwd));
+    watermark = delta.watermark;
+    // Missing project attribution is a real refresh even when the thread's
+    // cwd and archived state already match.
+    let index = inner.find_session_index(&id).unwrap();
+    inner.sessions[index].session.project_id = None;
+    inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
+    let delta = inner.collect_persist_delta(watermark);
+    assert_eq!(delta.changed_sessions.len(), 1);
+    assert!(delta.changed_sessions[0].session.project_id.is_some());
+    watermark = delta.watermark;
+    inner.sessions[index].session.preview = "stale imported preview".into();
+    inner.import_discovered_codex_threads(&cwd, vec![thread]);
+    let delta = inner.collect_persist_delta(watermark);
+    assert_eq!(delta.changed_sessions.len(), 1);
+    assert_eq!(delta.changed_sessions[0].session.preview, "Archived Codex thread ready to reopen.");
+}

@@ -411,7 +411,8 @@ impl PersistedState {
         self.engram_session_obligations.validate()?;
         // Historical mirrors are validated before any row is converted. They
         // remain passive JSON and cannot reconstruct dispatch ownership.
-        let sessions = self.sessions.into_iter().map(|persisted| {
+        let mut consumed_carried_launch_indices = Vec::new();
+        let sessions = self.sessions.into_iter().enumerate().map(|(index, persisted)| {
             if let Some(raw) = persisted.historical_control.get("engramCheckpointOperation")
                 .filter(|value| !value.is_null())
             {
@@ -423,7 +424,12 @@ impl PersistedState {
                     bail!("Checkpoint mirror lacks its canonical original during restore");
                 }
             }
-            persisted.into_record()
+            let consumed_carried_launches = !persisted.engram_carried_launches.is_empty();
+            let record = persisted.into_record()?;
+            if consumed_carried_launches && record.is_local_session() {
+                consumed_carried_launch_indices.push(index);
+            }
+            Ok(record)
         }).collect::<Result<Vec<_>>>()?;
         let terminal_unbound_registrations: HashSet<_> = self
             .test_run_registrations
@@ -615,7 +621,7 @@ impl PersistedState {
             quarantined_persisted_delegation_ids: self.quarantined_persisted_delegation_ids,
             // Mutation stamps are in-memory only — start at `0` on each
             // process lifetime. The persist thread's watermark also
-            // starts at `0`, so a fresh load has no pending writes.
+            // starts at `0`; actual load repairs are stamped below.
             last_mutation_stamp: 0,
             removed_session_ids: Vec::new(),
             claude_orphaned_work: Vec::new(),
@@ -623,6 +629,13 @@ impl PersistedState {
             remote_settings_persist_dirty: false,
             remote_delta_persist_dirty: false,
         };
+        // Loading consumes durable carried-launch markers into a one-time
+        // restart notice. Persist their removal even for an otherwise Idle
+        // session; untouched rows remain outside the first persist delta.
+        for index in consumed_carried_launch_indices {
+            inner.stamp_session_at_index(index)
+                .expect("restored session index should be valid");
+        }
         let persisted_non_running_session_ids = inner
             .sessions
             .iter()
@@ -1183,8 +1196,8 @@ impl PersistedSessionRecord {
             engram_mcp_revocation_pending: false,
             deferred_stop_callbacks: Vec::new(),
             hidden: false,
-            // Freshly loaded records start unstamped; nothing has changed
-            // since the on-disk snapshot so nothing needs to be persisted.
+            // Start unstamped. `into_inner` stamps one-time durable load
+            // repairs after it has constructed the shared stamp owner.
             body_sequence: SessionBodySequence::default(),
             mutation_stamp: 0,
             persist_incarnation: Arc::new(()),

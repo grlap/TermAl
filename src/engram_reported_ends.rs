@@ -456,15 +456,15 @@ fn engram_carried_running_line(command: &EngramCheckCommand) -> String {
 /// was never reported is (`engram_close_unended_checks`). Whether its end had
 /// been reported (`ended`) decides only what the line says happened.
 fn engram_reported_end_lost_to_restart_line(command: &EngramCheckCommand, ended: bool) -> String {
+    let cause = if ended {
+        "its reported end was not settled before the host restarted"
+    } else {
+        "no end was reported for it before the host restarted"
+    };
     engram_unrecorded_check_line(
         command,
-        if ended {
-            "its reported end was not settled before the host restarted, so it was closed with \
-             outcome Unknown and is not credited; run it again to record it"
-        } else {
-            "no end was reported for it before the host restarted, so it was closed with outcome \
-             Unknown and is not credited; run it again to record it"
-        },
+        &format!("{cause}, so it was closed with outcome Unknown and is not credited; {}",
+            engram_registered_run_advice(command).unwrap_or("run it again to record it")),
     )
 }
 
@@ -595,8 +595,8 @@ fn engram_closed_unended_carry_line(command: &EngramCheckCommand, why: &str) -> 
     engram_unrecorded_check_line(
         command,
         &format!(
-            "{why}, so it was closed with outcome Unknown and is not credited; run it again to \
-             record it"
+            "{why}, so it was closed with outcome Unknown and is not credited; {}",
+            engram_registered_run_advice(command).unwrap_or("run it again to record it")
         ),
     )
 }

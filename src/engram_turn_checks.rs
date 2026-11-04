@@ -468,9 +468,11 @@ const ENGRAM_UNENDED_CLOSURE_LIMIT: usize = ENGRAM_TURN_CHECK_LIMIT;
 /// Closes, with outcome Unknown, each live check of `host_turn_ref` (of any grant
 /// when `None`) whose start the host saw but whose end was never reported
 /// (a runtime that lost the command's completion), as `boundary` drops the
-/// live checks, and returns the holder lines that say so. A background run's
-/// check ended at its launch and a carried gate left the live checks, so
-/// neither is closed here. Each closure is kept for a late end
+/// live checks, and returns the holder lines that say so. A completed
+/// launch-only check or a carried full gate is absent from this collection.
+/// A focused launcher's explicit NotFinished reply leaves its check open;
+/// without verified correlation it receives the same honest Unknown closure
+/// and registered-run advice. Each closure is kept for a late end
 /// (`engram_late_end_line`). Runs only at a turn boundary: no timer.
 fn engram_close_unended_checks(
     engram: &mut EngramSessionState,
@@ -486,7 +488,8 @@ fn engram_close_unended_checks(
             &check.command,
             &format!(
                 "no end was reported for it by {boundary}, so it was closed with outcome \
-                 Unknown and is not credited; run it again to record it"
+                 Unknown and is not credited; {}",
+                engram_registered_run_advice(&check.command).unwrap_or("run it again to record it")
             ),
         ));
         engram
@@ -534,9 +537,18 @@ fn engram_late_end_line(
     };
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} an end ({status}) was reported for {ended} under the \
-         same runtime id after {} was closed with outcome Unknown; it is not recorded; run the \
-         check again to record it.",
-        engram_check_label(closed)
+         same runtime id after {} was closed with outcome Unknown; it is not recorded; {}.",
+        engram_check_label(closed),
+        engram_registered_run_advice(closed).unwrap_or("run the check again to record it")
+    )
+}
+
+/// A missing provider end cannot establish whether an independently
+/// registered launcher run is still alive or already terminal.
+fn engram_registered_run_advice(command: &EngramCheckCommand) -> Option<&'static str> {
+    engram_launcher_words(command).is_some().then_some(
+        "check registered launcher runs for this root and input before starting another run; \
+         rerun only if none covers the intended check",
     )
 }
 
@@ -2616,7 +2628,7 @@ impl AppState {
         // that starts no check, or name a command by a title only. A check
         // started under the key since retired the closure, so its own end is
         // never told here.
-        if !record
+        if exit != Some(EngramCommandExit::NotFinished) && !record
             .engram
             .active_turn_checks
             .iter()
@@ -2700,6 +2712,16 @@ impl AppState {
         let check = &mut record.engram.active_turn_checks[position];
         if let Some(cause) = other_writer {
             check.note_overlap(|| cause);
+        }
+        // A provider's background reply can carry the original explicit RUN
+        // locator without ending the process. Keep a simple launcher check
+        // open for the existing native running/carry and terminal owners.
+        if exit == Some(EngramCommandExit::NotFinished)
+            && check.command.simple && !check.command.literal_pipe
+            && EngramHost::launcher_arguments(&check.command).is_some()
+            && engram_check_end_matches(check, &reading, starting_check.as_ref())
+        {
+            return;
         }
         engram_record_check_end(
             check,

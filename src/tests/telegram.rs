@@ -2704,9 +2704,11 @@ fn telegram_test_rate_limit_rejects_immediate_retry() {
         .expect("telegram test rate-limit test mutex poisoned");
     reset_telegram_test_rate_limit_for_tests();
     let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+    let start = std::time::Instant::now();
 
-    check_telegram_test_rate_limit(&token).expect("first attempt should pass");
-    let err = check_telegram_test_rate_limit(&token).expect_err("retry should be rate-limited");
+    check_telegram_test_rate_limit_at(&token, start).expect("first attempt should pass");
+    let err = check_telegram_test_rate_limit_at(&token, start + Duration::from_millis(1))
+        .expect_err("retry should be rate-limited");
 
     assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
     reset_telegram_test_rate_limit_for_tests();
@@ -2720,9 +2722,10 @@ fn telegram_test_rate_limit_rejects_immediate_retry_with_different_token() {
     reset_telegram_test_rate_limit_for_tests();
     let first_token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
     let second_token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+    let start = std::time::Instant::now();
 
-    check_telegram_test_rate_limit(&first_token).expect("first attempt should pass");
-    let err = check_telegram_test_rate_limit(&second_token)
+    check_telegram_test_rate_limit_at(&first_token, start).expect("first attempt should pass");
+    let err = check_telegram_test_rate_limit_at(&second_token, start + Duration::from_millis(1))
         .expect_err("endpoint-level retry should be rate-limited");
 
     assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
@@ -2736,11 +2739,12 @@ fn telegram_test_rate_limit_allows_retry_after_cooldown_expires() {
         .expect("telegram test rate-limit test mutex poisoned");
     reset_telegram_test_rate_limit_for_tests();
     let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+    let start = std::time::Instant::now();
+    let expired = start + TELEGRAM_TEST_COOLDOWN;
 
-    check_telegram_test_rate_limit(&token).expect("first attempt should pass");
-    age_telegram_test_rate_limit_for_tests(TELEGRAM_TEST_COOLDOWN + Duration::from_millis(1));
-    check_telegram_test_rate_limit(&token).expect("retry after cooldown should pass");
-    let err = check_telegram_test_rate_limit(&token)
+    check_telegram_test_rate_limit_at(&token, start).expect("first attempt should pass");
+    check_telegram_test_rate_limit_at(&token, expired).expect("retry after cooldown should pass");
+    let err = check_telegram_test_rate_limit_at(&token, expired + Duration::from_millis(1))
         .expect_err("successful retry should re-prime the cooldown");
 
     assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
@@ -2754,10 +2758,15 @@ async fn telegram_test_route_rate_limit_includes_retry_after_header() {
         .expect("telegram test rate-limit test mutex poisoned");
     reset_telegram_test_rate_limit_for_tests();
     let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
-    check_telegram_test_rate_limit(&token).expect("first attempt should prime rate limit");
+    let app = app_router(test_app_state());
+    // This test is about the route's answer. The tests above own the cooldown,
+    // and a real one could run out before a slow test gets to its request, so
+    // this attempt is dated an hour ahead.
+    check_telegram_test_rate_limit_at(&token, std::time::Instant::now() + Duration::from_secs(3600))
+        .expect("first attempt should prime rate limit");
 
     let response = request_response(
-        &app_router(test_app_state()),
+        &app,
         Request::post("/api/telegram/test")
             .header("content-type", "application/json")
             .body(Body::from(

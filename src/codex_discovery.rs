@@ -532,21 +532,49 @@ fn normalize_codex_discovery_path(path: &FsPath) -> PathBuf {
     fs::canonicalize(&resolved).unwrap_or(resolved)
 }
 
+// The existing-session path preserves prompt settings. Select an actual
+// metadata refresh before its caller obtains stamped mutable access.
+fn discovered_codex_thread_refresh_needed(
+    record: &SessionRecord,
+    thread: &DiscoveredCodexThread,
+    project_id: &str,
+) -> bool {
+    record.session.workdir != thread.cwd
+        || record.session.project_id.as_deref() != Some(project_id)
+        || record.external_session_id.as_deref() != Some(thread.id.as_str())
+        || record.session.external_session_id.as_deref() != Some(thread.id.as_str())
+        || record.session.codex_thread_state != Some(discovered_codex_thread_state(thread))
+        || (record.session.messages.is_empty()
+            && record.session.status == SessionStatus::Idle
+            && record.session.preview != discovered_codex_thread_preview(thread))
+}
+
+fn discovered_codex_thread_state(thread: &DiscoveredCodexThread) -> CodexThreadState {
+    if thread.archived {
+        CodexThreadState::Archived
+    } else {
+        CodexThreadState::Active
+    }
+}
+
+fn discovered_codex_thread_preview(thread: &DiscoveredCodexThread) -> &'static str {
+    if thread.archived {
+        "Archived Codex thread ready to reopen."
+    } else {
+        "Ready to continue this Codex thread."
+    }
+}
+
 /// Applies discovered Codex thread.
 fn apply_discovered_codex_thread(
     record: &mut SessionRecord,
     thread: &DiscoveredCodexThread,
     overwrite_prompt_settings: bool,
 ) {
+    // Keep discovered_codex_thread_refresh_needed in sync with every field
+    // this function writes when overwrite_prompt_settings is false.
     set_record_external_session_id(record, Some(thread.id.clone()));
-    set_record_codex_thread_state(
-        record,
-        if thread.archived {
-            CodexThreadState::Archived
-        } else {
-            CodexThreadState::Active
-        },
-    );
+    set_record_codex_thread_state(record, discovered_codex_thread_state(thread));
 
     if overwrite_prompt_settings {
         if let Some(model) = thread.model.as_ref() {
@@ -567,10 +595,6 @@ fn apply_discovered_codex_thread(
     }
 
     if record.session.messages.is_empty() && matches!(record.session.status, SessionStatus::Idle) {
-        record.session.preview = if thread.archived {
-            "Archived Codex thread ready to reopen.".to_owned()
-        } else {
-            "Ready to continue this Codex thread.".to_owned()
-        };
+        record.session.preview = discovered_codex_thread_preview(thread).to_owned();
     }
 }

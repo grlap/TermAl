@@ -159,14 +159,17 @@ struct InterruptedSessionRecovery {
     expanded_text: Option<String>,
 }
 
+fn session_needs_interruption_recovery(record: &SessionRecord) -> bool {
+    matches!(
+        record.session.status,
+        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+    ) || record.engram.unadmitted_active_turn.is_some()
+}
+
 /// Recovers interrupted session record, including observation custody whose
 /// process-local adoption marker deliberately does not survive a restart.
 fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<InterruptedSessionRecovery> {
-    let interrupted = matches!(
-        record.session.status,
-        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-    );
-    if !interrupted && record.engram.unadmitted_active_turn.is_none() {
+    if !session_needs_interruption_recovery(record) {
         return None;
     }
 

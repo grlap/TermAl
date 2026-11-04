@@ -2712,11 +2712,15 @@ fn a_restart_notice_is_told_once_through_the_store() {
         "{:?}",
         record.engram.pending_source_root_line
     );
-    // Marked to be written again (boot recovery marks every local
-    // session), now without the marker, so a second restart does not repeat
-    // the notice.
+    // Removing the durable marker must select this row for the first
+    // persist delta even though its runtime was Idle at shutdown.
     assert_ne!(record.mutation_stamp, 0);
-    persist_state(path, &loaded).expect("the loaded state persists");
+    let delta = collect_persist_delta_from_shared_state(&StateMutex::new(loaded), 0);
+    assert!(delta.changed_sessions.iter().any(|record|
+        record.session.id == turn.session_id), "the marker removal reaches the first delta");
+    let mut cache = SqlitePersistConnectionCache::new();
+    persist_delta_via_cache_timed(&mut cache, path, &delta, &mut PersistTickTimings::default())
+        .expect("the first delta persists the marker removal");
     let again = load_state(path)
         .expect("the state loads")
         .expect("a state was stored");
@@ -2724,6 +2728,8 @@ fn a_restart_notice_is_told_once_through_the_store() {
         .find_session_index(&turn.session_id)
         .expect("the session loads");
     assert_eq!(again.sessions[index].engram.pending_source_root_line, None);
+    assert_eq!(again.sessions[index].mutation_stamp, 0,
+        "a later clean restart has no marker removal to persist");
 }
 
 #[test]

@@ -675,6 +675,49 @@ fn a_directory_spelled_in_another_case_still_names_its_worktree() {
     );
 }
 
+/// Holds a session's capture workers at their limit until it is opened or
+/// dropped. They wait with no time limit: one that ran out would let a worker go
+/// while a slow test still counted on it, so the test's verdict would depend on
+/// how long it took. Dropping it opens it, so a panicking test strands no worker.
+pub(super) struct EOCaptureWorkerGate(Arc<(Mutex<bool>, std::sync::Condvar)>);
+
+impl EOCaptureWorkerGate {
+    pub(super) fn new() -> Self {
+        Self(Arc::new((Mutex::new(false), std::sync::Condvar::new())))
+    }
+
+    pub(super) fn hold_every_worker(
+        &self,
+        workers: &Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Vec<Arc<EngramCapture<()>>> {
+        (0..ENGRAM_CAPTURE_WORKER_LIMIT)
+            .map(|_| {
+                let gate = self.0.clone();
+                EngramCapture::spawn(workers, &Arc::new(CaptureLifetime::default()), move || {
+                    let (open, opened) = &*gate;
+                    drop(
+                        opened
+                            .wait_while(open.lock().expect("gate mutex poisoned"), |open| !*open)
+                            .expect("gate mutex poisoned"),
+                    );
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn open(&self) {
+        let (open, opened) = &*self.0;
+        *open.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        opened.notify_all();
+    }
+}
+
+impl Drop for EOCaptureWorkerGate {
+    fn drop(&mut self) {
+        self.open();
+    }
+}
+
 /// An ordinary root turn whose facts are reported after provider execution.
 /// The transport exposes work services and observation receipts, never grants.
 pub(super) struct EOCheckedTurn {
@@ -1246,16 +1289,9 @@ fn capture_capacity_refusals_are_explained_without_losing_ordinary_facts() {
     for capacity in ["workers", "retained"] {
         let turn = EOCheckedTurn::start(&format!("ordinary-check-capacity-{capacity}"), true);
         let workers = turn.record(|record| record.engram.capture_workers.clone());
-        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let gate = EOCaptureWorkerGate::new();
         let pending = if capacity == "workers" {
-            (0..ENGRAM_CAPTURE_WORKER_LIMIT).map(|_| {
-                let gate = gate.clone();
-                EngramCapture::spawn(&workers, &Arc::new(CaptureLifetime::default()), move || {
-                    let (open, opened) = &*gate;
-                    let _ = opened.wait_timeout_while(open.lock().unwrap(), DEADLOCK_GUARD,
-                        |open| !*open).unwrap();
-                })
-            }).collect::<Vec<_>>()
+            gate.hold_every_worker(&workers)
         } else {
             let checks = (0..ENGRAM_TURN_CHECK_LIMIT).map(|sequence| {
                 let mut check = turn.finished_check(sequence, engram_ready_basis_capture());
@@ -1275,9 +1311,7 @@ fn capture_capacity_refusals_are_explained_without_losing_ordinary_facts() {
             record.engram.unadmitted_active_turn.clone().unwrap(),
         ));
         // Release every fixture worker before asserting, including on a failing input.
-        let (open, opened) = &*gate;
-        *open.lock().unwrap() = true;
-        opened.notify_all();
+        gate.open();
         for capture in pending {
             capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
                 .expect("the released capture finishes");
@@ -2635,22 +2669,8 @@ fn a_session_starts_no_check_while_its_capture_workers_are_at_their_limit() {
     // finish meanwhile, none adds to them.
     let turn = EOCheckedTurn::start("capture-limit", true);
     let workers = turn.record(|record| record.engram.capture_workers.clone());
-    let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-    let pending = (0..ENGRAM_CAPTURE_WORKER_LIMIT)
-        .map(|_| {
-            let gate = gate.clone();
-            EngramCapture::spawn(&workers, &Arc::new(CaptureLifetime::default()), move || {
-                let (open, opened) = &*gate;
-                let _ = opened
-                    .wait_timeout_while(
-                        open.lock().expect("gate mutex poisoned"),
-                        DEADLOCK_GUARD,
-                        |open| !*open,
-                    )
-                    .expect("gate mutex poisoned");
-            })
-        })
-        .collect::<Vec<_>>();
+    let gate = EOCaptureWorkerGate::new();
+    let pending = gate.hold_every_worker(&workers);
     let running = || workers.load(std::sync::atomic::Ordering::SeqCst);
     assert_eq!(running(), ENGRAM_CAPTURE_WORKER_LIMIT);
 
@@ -2668,9 +2688,7 @@ fn a_session_starts_no_check_while_its_capture_workers_are_at_their_limit() {
     );
     assert_eq!(running(), ENGRAM_CAPTURE_WORKER_LIMIT, "and none adds one");
 
-    let (open, opened) = &*gate;
-    *open.lock().expect("gate mutex poisoned") = true;
-    opened.notify_all();
+    gate.open();
     for capture in pending {
         capture
             .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
@@ -4230,6 +4248,9 @@ mod declared_checks;
 // file does not grow further.
 #[path = "engram_unended_closures.rs"]
 mod unended_closures;
+
+#[path = "engram_registered_launcher_closures.rs"]
+mod registered_launcher_closures;
 
 #[path = "engram_checkpoint_non_application.rs"]
 mod checkpoint_non_application;

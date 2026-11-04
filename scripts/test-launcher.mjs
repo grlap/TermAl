@@ -19,6 +19,7 @@ import fs, {
   writeFileSync,
 } from "node:fs";
 import nodePath, { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   captureCommitInputStatus,
@@ -44,7 +45,7 @@ import {
   partialCheckLabel,
   resolveCategory,
 } from "./test-categories-plan.mjs";
-import { focusedCountSummaryLines, focusedTestCounts } from "./test-counts.mjs";
+import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
 import { runOwnedCommand } from "./test-process-owner.mjs";
 import { watchCommandProgress } from "./test-command-progress.mjs";
 import { bootstrapUiDependencies } from "./test-ui-bootstrap.mjs";
@@ -1512,8 +1513,15 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       // A focused run's exit says nothing about how many tests ran; its
       // wrapped runner's own result lines do (scripts/test-counts.mjs).
       if (stage.name === "focused" && !request.full && existsSync(entry.log)) {
-        const counts = focusedTestCounts(readFileSync(entry.log, "utf8"));
+        const log = readFileSync(entry.log, "utf8");
+        const counts = focusedTestCounts(log);
         if (counts) entry.tests = counts;
+        const testThreads = focusedTestThreads({
+          command: stage.command, args, env: childEnv, log, counts,
+          availableParallelism: availableParallelism(),
+          cargoConfigs: cargoConfigTexts(stage.cwd, childEnv),
+        });
+        if (testThreads) entry.testThreads = testThreads;
       }
       // A filtered live stage passes only when every named test ran: an
       // exact filter that matched nothing still exits 0.

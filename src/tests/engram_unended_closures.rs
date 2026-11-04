@@ -162,22 +162,8 @@ fn a_rerun_that_capacity_refuses_is_told_once() {
     close_a_check_with_no_end(&turn, &mut recorder, "rerun");
     turn.begin("Run the successor ordinary check.");
     let workers = turn.record(|record| record.engram.capture_workers.clone());
-    let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-    let pending = (0..ENGRAM_CAPTURE_WORKER_LIMIT)
-        .map(|_| {
-            let gate = gate.clone();
-            EngramCapture::spawn(&workers, &Arc::new(CaptureLifetime::default()), move || {
-                let (open, opened) = &*gate;
-                let _ = opened
-                    .wait_timeout_while(
-                        open.lock().expect("gate mutex poisoned"),
-                        DEADLOCK_GUARD,
-                        |open| !*open,
-                    )
-                    .expect("gate mutex poisoned");
-            })
-        })
-        .collect::<Vec<_>>();
+    let gate = EOCaptureWorkerGate::new();
+    let pending = gate.hold_every_worker(&workers);
     turn.run("rerun", SIZE_TEST, EngramCommandExit::Code(0), || {});
     let refused = turn.record(|record| {
         record
@@ -188,9 +174,7 @@ fn a_rerun_that_capacity_refuses_is_told_once() {
     });
     // Release every worker before asserting; no blocked fixture thread is
     // abandoned.
-    let (open, opened) = &*gate;
-    *open.lock().expect("gate mutex poisoned") = true;
-    opened.notify_all();
+    gate.open();
     for capture in pending {
         capture
             .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)

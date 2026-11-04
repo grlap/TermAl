@@ -203,6 +203,14 @@ impl EngramCarriedCheck {
                  it), ends the wait. Run the test again once it has ended",
             )
         };
+        let again = match engram_registered_run_advice(&self.check.command) {
+            Some(advice) if self.ends_by_report && !self.end_reported() => format!(
+                "It is still running, and later checks in its worktree are overlapped until it \
+                 ends; ending its process, or Stopping the session (whose runtime exit closes \
+                 it), ends the wait. {advice}"),
+            Some(advice) => advice.to_owned(),
+            None => again.to_owned(),
+        };
         format!(
             "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the {what} launched at {} in {} (check {}) earned \
              no credit: {why}. {again}.",
@@ -219,11 +227,12 @@ impl EngramCarriedCheck {
         let what = if self.ends_by_report { "Codex test" } else { "background full gate" };
         format!(
             "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the {what} launched at {} in {} (check {}) is no \
-             longer followed: {why}. What was already observed stays as reported; run it again \
-             once the new settings apply.",
+             longer followed: {why}. What was already observed stays as reported; {}.",
             self.check.started_at,
             engram_source_root_display(&self.check.target.root.to_string_lossy()),
             engram_check_fingerprint(&self.check.command),
+            engram_registered_run_advice(&self.check.command)
+                .unwrap_or("run it again once the new settings apply"),
         )
     }
 }

@@ -1228,6 +1228,7 @@ impl AppState {
         // A successor the Stop's promotion refused as a receipted head whose
         // hand-off has not begun: woken only after the Stop's commit.
         let mut receipted_successor = None;
+        let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let transition = {
             let Some(_observation_install) =
                 self.runtime_observation_lifetime.enter("terminal")
@@ -1253,7 +1254,9 @@ impl AppState {
                 drop(inner);
                 return Ok(self.snapshot());
             }
-            self.queue_runtime_observation_close_with_outcome_locked(&mut inner, index, EngramObservedTurnOutcome::Cancelled);
+            self.queue_runtime_observation_close_with_notices_locked(
+                &mut inner, index, EngramObservedTurnOutcome::Cancelled, &registered_check_notices,
+            );
             let message_id = inner.next_message_id();
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())

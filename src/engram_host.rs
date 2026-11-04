@@ -46,7 +46,8 @@ pub(crate) enum EngramRecorderObservation<'a> {
         ran: Option<&'a str>,
         cwd: Option<&'a str>,
     },
-    /// The command `key` ended, with what the runtime said about its end.
+    /// The runtime reported a result for `key`. An explicit NotFinished
+    /// result is a nonterminal background reply, never a process end.
     CommandFinished {
         key: &'a str,
         /// Transcript label, which may be only a provider's tool title.
@@ -266,6 +267,17 @@ impl EngramHost<'_> {
     /// The existing launcher's arguments, without adding a recognition rule.
     pub(crate) fn launcher_arguments(command: &EngramCheckCommand) -> Option<Vec<String>> {
         engram_launcher_words(command)
+    }
+
+    /// A provider may reply with a focused launcher's explicit locator while its
+    /// process is still running. Forward only this nonterminal reply to the
+    /// existing observation owner; ordinary Running transcript updates stay
+    /// presentation-only, as do full launchers. No terminal proof is supplied here.
+    pub(crate) fn is_nonterminal_launcher_reply(command: &str, exit: Option<EngramCommandExit>) -> bool {
+        exit == Some(EngramCommandExit::NotFinished)
+            && engram_check_command(command).is_some_and(|check|
+                check.simple && !check.literal_pipe && !engram_check_is_launcher_full(&check)
+                    && engram_launcher_words(&check).is_some())
     }
 
     /// Whether a recognized command is a full launcher run.

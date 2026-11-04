@@ -6,9 +6,10 @@
 // These methods are intentionally grouped together because they all
 // run *before* the runtime is live — before any runtime is spawned,
 // before SSE subscribers connect, before the persist thread starts
-// — so they can mutate `StateInner` freely without worrying about
-// RuntimeToken guards, mutation stamps propagating to clients, or
-// concurrent writers. That's also why they are plain `&mut self`
+// — so they can mutate `StateInner` without RuntimeToken guards or
+// concurrent writers. Persistence mutation stamps still matter: restored
+// rows must acquire a fresh stamp only when boot actually changes them.
+// That's also why these are plain `&mut self`
 // methods on `StateInner` rather than `&self` on `AppState` like
 // most of the other mutation paths.
 //
@@ -50,8 +51,10 @@ impl StateInner {
     ///   ScopeCheck -- no --> Skip([skip])
     ///   ScopeCheck -- yes --> Project[find or create local project]
     ///   Project --> Existing{already imported<br/>for this threadId?}
-    ///   Existing -- yes --> Refresh[refresh workdir and project,<br/>apply latest thread metadata]
-    ///   Refresh --> Done([done])
+    ///   Existing -- yes --> Changed{thread metadata changed?}
+    ///   Changed -- no --> Done([done])
+    ///   Changed -- yes --> Refresh[stamp row, refresh workdir and project,<br/>apply latest thread metadata]
+    ///   Refresh --> Done
     ///   Existing -- no --> Ignored{in ignored list?}
     ///   Ignored -- yes --> Skip
     ///   Ignored -- no --> Create[create_session + apply thread state]
@@ -108,6 +111,11 @@ impl StateInner {
 
             if let Some(index) = existing_index {
                 self.allow_discovered_codex_thread(Some(thread.id.as_str()));
+                if !discovered_codex_thread_refresh_needed(
+                    &self.sessions[index], &thread, &project_id,
+                ) {
+                    continue;
+                }
                 let record = self
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -244,7 +252,10 @@ impl StateInner {
     /// `handle_runtime_exit_if_matches` in `turn_lifecycle.rs` instead.
     fn recover_interrupted_sessions(&mut self) {
         for index in 0..self.sessions.len() {
-            if !self.sessions[index].is_local_session() {
+            let record = &self.sessions[index];
+            // Mutable access stamps a row for persistence. A clean restored
+            // row must stay outside the worker's first persist delta.
+            if !record.is_local_session() || !session_needs_interruption_recovery(record) {
                 continue;
             }
             let recovery = {

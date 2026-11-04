@@ -428,7 +428,6 @@ mod test_run_history_store {
         pub(super) fn producer(&self, observation_id: &str) -> impl Iterator<Item = &String> {
             members(&self.producer, observation_id)
         }
-        #[cfg(test)]
         pub(super) fn check(&self, bucket: &TestRunCheckBucket) -> impl Iterator<Item = &String> {
             members(&self.check, bucket)
         }

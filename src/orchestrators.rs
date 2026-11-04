@@ -907,14 +907,17 @@ impl StateInner {
             let Some(session_index) = self.find_session_index(&session_id) else {
                 continue;
             };
-            // Route through `session_mut_by_index` so the stamp bump
-            // makes `collect_persist_delta` pick this up. Going via
-            // `&mut self.sessions[session_index]` bypasses stamping,
-            // and the delete-session caller that follows up with
-            // `commit_locked` would silently drop the queued-prompt
-            // clear from SQLite. The load-path caller also reaches
-            // here, but re-persisting already-persisted rows on
-            // startup is harmless.
+            // Check before stamped access: unchanged stopped children must
+            // not replay their durable transcript tails on the first tick.
+            if !self.sessions[session_index]
+                .queued_prompts
+                .iter()
+                .any(|queued| queued.source == QueuedPromptSource::Orchestrator)
+            {
+                continue;
+            }
+            // Actual queue clears still need a fresh stamp so both boot and
+            // delete-session callers persist the change through their delta.
             if let Some(record) = self.session_mut_by_index(session_index) {
                 clear_stopped_orchestrator_queued_prompts(record);
             }
