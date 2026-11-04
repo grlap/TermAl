@@ -2008,6 +2008,9 @@ struct EngramSessionState {
     /// built waits for the next one. Set only through
     /// `set_pending_source_root_line`. In memory only.
     pending_source_root_line: Option<String>,
+    /// In-memory order of optional reads and published command feedback.
+    /// An older asynchronous notice cannot replace a newer refusal.
+    uncredited_feedback_revision: u64,
     /// For each retained-history repair line given to the pending lines, the
     /// authority store and work whose history it tells about
     /// (`set_pending_retained_history_repair_line`), so that only an
@@ -2106,6 +2109,7 @@ impl Default for EngramSessionState {
             named_root: None,
             roots_named_in_turn: Vec::new(),
             pending_source_root_line: None,
+            uncredited_feedback_revision: 0,
             retained_history_repair_origins: Vec::new(),
             #[cfg(test)]
             test_source_root_lines: None,

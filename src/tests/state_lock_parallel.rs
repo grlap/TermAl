@@ -6,6 +6,13 @@ use std::sync::atomic::AtomicUsize;
 const MODEL_SESSIONS: usize = 6_793;
 const MODEL_LANES: usize = 8;
 const MODEL_PAIRS: usize = 512;
+const MODEL_WARM_ROUNDS: usize = 90;
+/// One plan lock and one per candidate session, in at most two collection passes.
+const MODEL_MAX_COLLECT_LOCKS: usize = 2 * (1 + MODEL_LANES);
+/// One 16 KiB message with its encoding.
+const MODEL_MAX_RETAINED_MESSAGE_BYTES: usize = 17 * 1024;
+/// Session metadata with no transcript in it, before its checkout path.
+const MODEL_MAX_SESSION_METADATA_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Serialize)]
 struct OperationSample {
@@ -46,6 +53,30 @@ fn nonempty_committed_tick(tick: &PersistObservedTick) -> bool {
             .metadata_fields
             .iter()
             .any(|field| field.committed_upserts > 0 || field.committed_deletes > 0)
+}
+
+/// Waits, with every client and writer finished, for a tick that started after
+/// them. Nothing changes under such a tick, so no session is deferred and every
+/// edit made so far has been written once it ends. It has started after them
+/// because it follows a tick that finished after them.
+fn model_persist_quiet_point(
+    state: &AppState,
+    receiver: &mpsc::Receiver<(std::time::Instant, PersistObservedTick)>,
+) -> Vec<(std::time::Instant, PersistObservedTick)> {
+    let quiet_from = std::time::Instant::now();
+    let mut samples = Vec::new();
+    let mut one_finished_after = false;
+    loop {
+        state.persist_tx.send(PersistRequest::Delta).unwrap();
+        let (at, tick) = receiver
+            .recv_timeout(phase_sync::DEADLOCK_GUARD)
+            .expect("the production writer answers a delta with a tick");
+        samples.push((at, tick));
+        if one_finished_after {
+            return samples;
+        }
+        one_finished_after = at > quiet_from;
+    }
 }
 
 fn seed_model(root: &FsPath) -> (PathBuf, Vec<String>) {
@@ -251,7 +282,7 @@ async fn model_round_boundary(barrier: &tokio::sync::Barrier) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn modeled_parallel_mailbox_resume_and_writer_stay_within_agreed_bounds() {
+async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
     let _temp_scope = TestTempRootDirectoryScope::repository_local();
     let root = TestTempRoot::create("modeled-state-parallel");
     let (path, ids) = seed_model(root.path());
@@ -371,7 +402,7 @@ async fn modeled_parallel_mailbox_resume_and_writer_stay_within_agreed_bounds() 
     let mut all_ticks = Vec::new();
     let mut receiver = tick_rx;
     let mut warm_started = None;
-    for (phase_index, phase, iterations) in [(1, "cold", 10), (2, "warm", 90)] {
+    for (phase_index, phase, iterations) in [(1, "cold", 10), (2, "warm", MODEL_WARM_ROUNDS)] {
         phase_number.store(phase_index, Ordering::SeqCst);
         if phase_index == 2 {
             warm_started = Some(std::time::Instant::now());
@@ -483,6 +514,12 @@ async fn modeled_parallel_mailbox_resume_and_writer_stay_within_agreed_bounds() 
         let (next_receiver, samples) = writer.await.unwrap();
         receiver = next_receiver;
         all_ticks.extend(samples);
+        // Cold's writes end before warm starts, its first whole transcripts among
+        // them, and warm's writes end while it's still warm: which tick carries an
+        // edit is up to the host, which phase it counts in no longer is.
+        all_ticks.extend(tokio::task::block_in_place(|| {
+            model_persist_quiet_point(&state, &receiver)
+        }));
     }
     // Teardown begins after the last client and modeled writer round. Its
     // final synchronous full-store write is reported separately from the
@@ -616,7 +653,7 @@ async fn modeled_parallel_mailbox_resume_and_writer_stay_within_agreed_bounds() 
             "apiLatencyPolicy":"report-only for this trim slice; complete elapsed samples include projection, contention, readiness, response handling and fixture decoding; warm 1s p99/5s max references and overruns remain visible; end-to-end bounds belong to the separate snapshot/cold-start work",
             "projectionWaitAttribution":"unavailable: aggregate StateInner waits do not identify each intervening holder; no inferred wait, overlap or scheduler time is subtracted and no adjusted API latency is gated",
             "holdCategories":"snapshot cut belongs to the next synchronous Held report on its owning thread; complete holds are retained, cut duration is reported without subtraction; released_us is reporter-entry time after unlock",
-            "rounds":"one nonempty committed tick concurrent with each eight-lane triplet round",
+            "rounds":"each eight-lane triplet round waits for one nonempty committed tick, which need not carry that round's edit",
             "coldIncludesBoot":true,"setupOperations":setup_operations,
             "operations":all_operations,"holds":holds,"snapshotCuts":cuts,
             "writerTicks":ticks,"summaries":summaries,"apiPhases":api_phases,
@@ -624,7 +661,7 @@ async fn modeled_parallel_mailbox_resume_and_writer_stay_within_agreed_bounds() 
                 "startedUs":micros(teardown_started.duration_since(origin)),
                 "stateHolds":distribution(holds.iter().filter(|r| r.phase == "teardown").map(|r| r.held_us).collect()),
                 "writerTicks":distribution(all_ticks.iter().filter(|(at,_)| sample_phase(*at) == "teardown").map(|(_,t)| t.loop_wall_us).collect()),
-                "boundScope":"warm writer ticks and whole non-projection holds are numerical gates; API latency, cold, projection holds and teardown are report-only; functional/count checks apply unchanged",
+                "boundScope":"all elapsed times are report-only, with warm writer tick and non-projection hold limits in MODELED_PARALLEL_TIME_REPORT; functional and count checks decide the test",
             },
         })
     );
@@ -649,27 +686,99 @@ async fn modeled_parallel_mailbox_resume_and_writer_stay_within_agreed_bounds() 
             .count()
             >= 100
     );
-    for summary in summaries {
-        if summary["phase"] != "warm"
-            || matches!(summary["kind"].as_str(), Some("stateHold" | "stateHoldProjection"))
-        {
+    // Elapsed time on a shared host says how busy the host was, so these limits
+    // are reported and never decide the test. Written straight to stderr so that
+    // a passing run's log keeps them, which libtest's capture of println wouldn't.
+    let time_report = summaries
+        .iter()
+        .filter(|summary| summary["phase"] == "warm")
+        .filter_map(|summary| {
+            let (p99, maximum) = match summary["kind"].as_str()? {
+                "stateHoldOther" => (50_000u64, 250_000u64),
+                "writerTick" => (2_000_000, 5_000_000),
+                _ => return None,
+            };
+            let duration = &summary["duration"];
+            assert!(duration["count"].as_u64().unwrap() > 0, "{summary}");
+            Some(json!({
+                "kind":summary["kind"],"p99Us":duration["p99Us"],"maxUs":duration["maxUs"],
+                "p99LimitUs":p99,"maxLimitUs":maximum,
+                "p99Exceeded":duration["p99Us"].as_u64().unwrap() > p99,
+                "maxExceeded":duration["maxUs"].as_u64().unwrap() > maximum,
+            }))
+        })
+        .collect::<Vec<_>>();
+    let _ = std::io::Write::write_all(
+        &mut std::io::stderr(),
+        format!("MODELED_PARALLEL_TIME_REPORT {}\n", Value::from(time_report)).as_bytes(),
+    );
+    // What decides the test is the work counted under and around the state lock,
+    // so no host's speed changes the result. It catches a tick that collects more
+    // sessions than the lanes, a collection that copies its sessions under fewer
+    // locks than sessions or retries without bound, whole transcripts rewritten,
+    // a transcript carried in session metadata, and a request that builds extra
+    // snapshot cuts. It doesn't catch a scan under the lock that takes no extra
+    // lock and adds no row, a cut that only gets more expensive, one hold copying
+    // a few sessions on a tick where a retry added locks, one whole rewrite when
+    // enough edits coalesced, or rewritten metadata and prompt history rows. The
+    // time report may show some of these as slower ticks and holds, but it leaves
+    // out projection holds.
+    let warm_cuts = holds
+        .iter()
+        .filter(|row| row.phase == "warm")
+        .map(|row| {
+            assert!(row.snapshot_cut_count <= 1, "one cut per state hold: {}:{}", row.file, row.line);
+            row.snapshot_cut_count
+        })
+        .sum::<usize>();
+    // One for each writer commit, and two for a resume: its commit and its response.
+    let cuts_allowed = MODEL_WARM_ROUNDS + 2 * MODEL_LANES * MODEL_WARM_ROUNDS;
+    assert!(warm_cuts > 0, "warm holds report their snapshot cuts");
+    assert!(warm_cuts <= cuts_allowed, "{warm_cuts} warm snapshot cuts, {cuts_allowed} allowed");
+    // The checkout path is in every session row, and may be at any depth.
+    let session_metadata_allowed = MODEL_MAX_SESSION_METADATA_BYTES
+        + 4 * Value::from(root.path().to_string_lossy().as_ref()).to_string().len();
+    let mut warm_messages = 0;
+    for (at, tick) in &all_ticks {
+        if sample_phase(*at) != "warm" {
             continue;
         }
-        let duration = &summary["duration"];
-        assert!(duration["count"].as_u64().unwrap() > 0, "{summary}");
-        let (p99, maximum) = match summary["kind"].as_str().unwrap() {
-            "stateHoldOther" => (50_000, 250_000),
-            "writerTick" => (2_000_000, 5_000_000),
-            "read" | "ack" | "resume" => continue,
-            kind => panic!("unclassified warm summary: {kind}"),
-        };
+        let (counts, locks) = (&tick.counts, tick.phases.collect_lock_count);
+        let changed = counts.changed_sessions;
+        assert!(changed <= MODEL_LANES, "tick {} collected {changed} sessions", tick.tick);
         assert!(
-            duration["p99Us"].as_u64().unwrap() <= p99,
-            "p99 bound: {summary}"
+            changed == 0 || locks > changed,
+            "tick {} held the lock across sessions: {locks} locks for {changed}",
+            tick.tick,
         );
         assert!(
-            duration["maxUs"].as_u64().unwrap() <= maximum,
-            "maximum bound: {summary}"
+            locks <= MODEL_MAX_COLLECT_LOCKS,
+            "tick {} took {locks} collection locks",
+            tick.tick,
         );
+        assert!(
+            counts.message_bytes <= counts.retained_messages * MODEL_MAX_RETAINED_MESSAGE_BYTES,
+            "tick {} wrote {} messages, {} bytes",
+            tick.tick,
+            counts.retained_messages,
+            counts.message_bytes,
+        );
+        assert!(
+            counts.session_metadata_bytes <= changed * session_metadata_allowed,
+            "tick {} wrote {} session metadata bytes for {changed} sessions",
+            tick.tick,
+            counts.session_metadata_bytes,
+        );
+        warm_messages += counts.retained_messages;
     }
+    // A total, not a limit per tick: a tick that runs late can legitimately carry
+    // several rounds' edits. The quiet points leave warm exactly its own edits, so
+    // each is written at most once, and every one of the 64 messages it edited has
+    // to be written even if all of a message's edits coalesced.
+    let edits = MODEL_LANES * MODEL_WARM_ROUNDS;
+    let edited_messages = MODEL_LANES * 64;
+    assert!(
+        (edited_messages..=edits).contains(&warm_messages),
+        "{warm_messages} warm messages written for {edits} edits of {edited_messages} messages",
+    );
 }

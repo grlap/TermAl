@@ -1156,13 +1156,17 @@ fn engram_has_open_check(record: &SessionRecord) -> bool {
 }
 
 // Other claims are read only to explain command placement. This snapshot
-// owns no turn admission or evidence and cannot delay provider delivery.
+// owns no turn admission or evidence. Its read runs in an owned observer,
+// never on the runtime frame path.
 struct EngramOtherRootNoticeRead {
+    session_id: String,
     target: EngramBindingTarget,
     roots: Vec<EngramWorkSourceRoot>,
     host_turn_ref: String,
     turn_generation: u64,
     runtime: Option<RuntimeToken>,
+    workdir: String,
+    source_root: Option<EngramTurnSourceRoot>,
 }
 
 impl EngramOtherRootNoticeRead {
@@ -1181,9 +1185,11 @@ impl EngramOtherRootNoticeRead {
                 && (entry.work_id != binding.work_id || entry.claim_id != binding.claim_id)
         }).cloned().collect();
         if roots.is_empty() { return None; }
-        Some(Self { target, roots, host_turn_ref,
+        Some(Self { session_id: session_id.clone(), target, roots, host_turn_ref,
             turn_generation: record.active_turn_generation,
-            runtime: record.runtime.runtime_token() })
+            runtime: record.runtime.runtime_token(),
+            workdir: record.session.workdir.clone(),
+            source_root: record.engram.observed_source_root().cloned() })
     }
 
     fn read(&self) -> Vec<EngramWorkSourceRoot> {
@@ -1199,6 +1205,8 @@ impl EngramOtherRootNoticeRead {
         let record = &inner.sessions[index];
         record.active_turn_generation == self.turn_generation
             && record.runtime.runtime_token() == self.runtime
+            && record.session.workdir == self.workdir
+            && record.engram.observed_source_root() == self.source_root.as_ref()
             && runtime_observation_check_owner(record) == Some(self.host_turn_ref.as_str())
             && AppState::engram_source_root_target_locked(inner, &record.session.id)
                 .ok().flatten().is_some_and(|current| {
@@ -1207,6 +1215,36 @@ impl EngramOtherRootNoticeRead {
                         && current.work_binding == self.target.work_binding
                         && current.settings.same_work_service_settings(&self.target.settings)
                 })
+    }
+
+    fn schedule(self, state: &AppState, bound: String, shared: bool, feedback_revision: u64) {
+        if self.roots.is_empty() { return; }
+        let owner = state.clone();
+        if let Err(error) = state.capture_lifetime.spawn_observer("termal-other-root-notice", move || {
+            let roots = self.read();
+            if roots.is_empty() { return; }
+            let others = roots.iter().map(|entry| entry.short_ref.as_str())
+                .collect::<Vec<_>>().join(", ");
+            let line = if shared {
+                format!("[TermAl] A recognised test in a shared named root is reported for \
+                    bound item {bound} only; {others} receives no credit. Make that item \
+                    the focus and run its test in the next turn for its own credit.")
+            } else {
+                format!("[TermAl] A recognised test ran in the named root of {others}, \
+                    outside bound item {bound}'s root, and gets no credit for {bound}. \
+                    Make that item the focus and run its test in the next turn.")
+            };
+            let mut inner = owner.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(&self.session_id) else { return; };
+            if self.is_current(&inner, index)
+                && inner.sessions[index].engram.uncredited_feedback_revision == feedback_revision
+                && roots.iter().all(|entry| inner.engram_work_source_roots.contains(entry))
+            {
+                inner.sessions[index].engram.set_pending_source_root_line(line);
+            }
+        }) {
+            eprintln!("engram> optional other-root notice worker failed: {error}");
+        }
     }
 }
 
@@ -1410,10 +1448,6 @@ impl AppState {
                 TestRunCommandOrigin::capture(&inner, index, provenance, key),
             )
         };
-        // This ordinary read belongs to command observation, after the
-        // command started. Failure only omits the optional placement notice.
-        let other_roots = other_roots_read.as_ref()
-            .map(EngramOtherRootNoticeRead::read).unwrap_or_default();
         if ran.is_none() {
             self.remember_unclassified_test_command(test_run_origin.clone(), workdir.clone(), started_at.clone(), places.clone());
         }
@@ -1528,45 +1562,17 @@ impl AppState {
         let credit = credit_root
             .as_ref()
             .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str()));
-        let other_claim_line =
-            recognised
-                .as_ref()
-                .filter(|_| mediated && !child)
-                .and_then(|command| {
-                    let others = other_roots
-                        .iter()
-                        .filter(|entry| {
-                            engram_check_worktree_from(
-                                command,
-                                FsPath::new(&workdir),
-                                places.as_deref(),
-                                Some((FsPath::new(&entry.root), entry.common_dir_key.as_str())),
-                            )
-                            .is_some()
-                        })
-                        .map(|entry| entry.short_ref.as_str())
-                        .collect::<Vec<_>>();
-                    if others.is_empty() {
-                        return None;
-                    }
-                    let bound = bound_work.as_deref()?;
-                    let others = others.join(", ");
-                    Some(if target.is_some() {
-                        format!(
-                            "[TermAl] A recognised test in a shared named root is reported for \
-                        bound item {bound} only; {others} receives no credit. Make that item \
-                        the focus and run its test in the next turn for its own credit."
-                        )
-                    } else {
-                        format!(
-                            "[TermAl] A recognised test ran in the named root of {others}, \
-                        outside bound item {bound}'s root, and gets no credit for {bound}. \
-                        Make that item the focus and run its test in the next turn."
-                        )
-                    })
-                });
-        let other_claim_notice = other_claim_line.is_some();
-        let withheld_line = other_claim_line.map(EngramUncreditedLine::Placement).or_else(|| {
+        // Resolve candidate places off-lock, but leave the optional held-claim
+        // service read to a lifetime-owned worker after this frame is applied.
+        let other_claim_notice = other_roots_read.zip(bound_work).and_then(|(mut read, bound)| {
+            let command = recognised.as_ref().filter(|_| mediated && !child)?;
+            read.roots.retain(|entry| engram_check_worktree_from(
+                command, FsPath::new(&workdir), places.as_deref(),
+                Some((FsPath::new(&entry.root), entry.common_dir_key.as_str())),
+            ).is_some());
+            Some((read, bound, target.is_some()))
+        });
+        let withheld_line = {
             if !mediated {
                 None
             } else if let Some(check) = recognised.as_ref() {
@@ -1598,7 +1604,7 @@ impl AppState {
                         )
                     })
             }
-        });
+        };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         // Before any writer is counted below, in this same hold of the lock.
         engram_note_writer_worktrees(&mut inner, resolved_writers);
@@ -1609,10 +1615,6 @@ impl AppState {
         // section that applies it.
         let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
         let diagnostics_enabled = ordinary_runtime_observation_enabled(&inner, session_id);
-        let other_roots_current = other_roots_read.as_ref().is_some_and(|read| {
-            read.is_current(&inner, index)
-                && other_roots.iter().all(|entry| inner.engram_work_source_roots.contains(entry))
-        });
         // Any session's command may write, under a check another session
         // still has open in a worktree the command runs in.
         let record = inner
@@ -1656,7 +1658,6 @@ impl AppState {
             );
         }
         if disposition == ClaudeObservationDisposition::Current
-            && (!other_claim_notice || other_roots_current)
             && let Some(EngramUncreditedLine::Placement(line)) = withheld_line.as_ref()
         {
             record.engram.set_pending_source_root_line(line.clone());
@@ -1838,6 +1839,18 @@ impl AppState {
             .active_turn_checks
             .iter()
             .position(|check| check.key == key && check.end.is_none());
+        if let Some((read, bound, shared)) = other_claim_notice
+            && !read.roots.is_empty()
+            && read.is_current(&inner, index)
+        {
+            // Capture the order after this frame's own feedback. A later
+            // read or published refusal supersedes this optional result.
+            let engram = &mut inner.sessions[index].engram;
+            engram.uncredited_feedback_revision = engram.uncredited_feedback_revision.wrapping_add(1);
+            read.schedule(self, bound, shared, engram.uncredited_feedback_revision);
+        }
+        let record = &mut inner.sessions[index];
+        let engram = &mut record.engram;
         match started {
             Some(position) => {
                 let check = &engram.active_turn_checks[position];

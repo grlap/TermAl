@@ -98,6 +98,15 @@ impl EngramRuntimeObservationReport {
         self.pending().is_none()
     }
 
+    /// Engram answered every envelope definitively, so nothing about this
+    /// report is still owed. A local failure is settled but not discharged: its
+    /// outcome stays unresolved and it keeps its session from being removed.
+    fn is_discharged(&self) -> bool {
+        self.envelopes.iter().all(|envelope| matches!(envelope.delivery,
+            EngramRuntimeObservationDelivery::Recorded { .. }
+                | EngramRuntimeObservationDelivery::Refused { .. }))
+    }
+
     fn next_version(&self) -> Self {
         let mut next = self.clone();
         next.version = next.version.saturating_add(1);

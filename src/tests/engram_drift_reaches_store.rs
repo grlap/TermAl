@@ -49,6 +49,50 @@ fn assert_restored_baseline(turn: &EOCheckedTurn, expected: &EngramRuntimeCheckp
         "the baseline survives a restart");
 }
 
+/// Real turns, through closing and delivery, past what a session keeps: every
+/// turn's report was sent exactly once, nothing is sent again when the worker
+/// runs after them or after a reload, and the row holds only the newest reports.
+#[test]
+fn ordinary_turns_past_the_retention_send_each_report_once_and_keep_only_the_newest() {
+    let (turn, _worktree) = named_ordinary_fixture("ordinary-report-retention");
+    let turns = ENGRAM_DISCHARGED_REPORT_RETENTION + 4;
+    let mut refs = Vec::new();
+    for _ in 0..turns {
+        turn.begin_prompt("Observe the current contents.");
+        refs.push(observed_turn_ref(&turn));
+        turn.finish();
+        wait_for_observation_delivery(&turn);
+    }
+    let sends = |turn: &EOCheckedTurn| turn.transport.requests().into_iter()
+        .filter(|sent| sent.request["operation"] == "execution_observe")
+        .map(|sent| sent.request["idempotency_key"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let sent = sends(&turn);
+    assert_eq!(sent.len(), sent.iter().collect::<BTreeSet<_>>().len(),
+        "no observation was sent twice: {sent:?}");
+    for turn_ref in &refs {
+        assert_eq!(ordinary_turn_requests(&turn, turn_ref).len(), 1, "{turn_ref}'s report went once");
+    }
+    let newest = refs[turns - ENGRAM_DISCHARGED_REPORT_RETENTION..].to_vec();
+    let retained = |record: &SessionRecord| record.engram.unadmitted_reports.iter()
+        .map(|report| report.host_turn_ref.clone()).collect::<Vec<_>>();
+    assert_eq!(turn.record(|record| retained(record)), newest);
+
+    // A worker run finds nothing to report, evicted turns included.
+    turn.state.start_runtime_observation_worker(&turn.session_id);
+    wait_for_observation_delivery(&turn);
+    assert_eq!(sends(&turn), sent, "nothing was reported again");
+
+    turn.state.shutdown_persist_blocking();
+    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &loaded.sessions[loaded.find_session_index(&turn.session_id).unwrap()];
+    assert_eq!(retained(record), newest, "the bound survives a restart");
+    assert!(record.engram.unadmitted_closing_jobs.is_empty() && record.engram.unadmitted_active_turn.is_none(),
+        "nothing restored could report an evicted turn again");
+    assert!(record.engram.unadmitted_reports.iter().all(|report| report.is_settled()),
+        "a restart finds nothing owed");
+}
+
 #[test]
 fn successive_ordinary_turns_compare_against_the_previous_recorded_sighting() {
     let (turn, worktree) = named_ordinary_fixture("ordinary-recorded-baseline");

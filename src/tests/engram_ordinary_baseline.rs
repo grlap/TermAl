@@ -199,3 +199,115 @@ fn installing_a_recorded_sighting_persists_the_baseline_and_a_refusal_does_not()
     assert_eq!(loaded.sessions[loaded.find_session_index(&session.id).unwrap()].engram.runtime_checkpoint,
         Some(expected), "the baseline survives a restart with the settled report");
 }
+
+fn turn_report(session: &ObservationSession, turn: usize) -> EngramRuntimeObservationReport {
+    let mut report = session.report();
+    report.host_turn_ref = format!("turn-{turn}");
+    report
+}
+
+fn settle_turn(session: &ObservationSession, turn: usize) {
+    let report = turn_report(session, turn);
+    session.retain(report.clone());
+    session.state
+        .install_runtime_observation_result(&session.id, &report, recorded_report(&report), 0)
+        .unwrap();
+}
+
+fn retained_turns(session: &ObservationSession) -> Vec<String> {
+    session.record(|record| record.engram.unadmitted_reports.iter()
+        .map(|report| report.host_turn_ref.clone()).collect())
+}
+
+fn turn_refs(turns: std::ops::Range<usize>) -> Vec<String> {
+    turns.map(|turn| format!("turn-{turn}")).collect()
+}
+
+#[test]
+fn a_session_keeps_only_its_newest_discharged_reports_through_a_reload() {
+    let session = ObservationSession::new();
+    let turns = ENGRAM_DISCHARGED_REPORT_RETENTION + 12;
+    for turn in 0..turns {
+        settle_turn(&session, turn);
+    }
+    let reports = session.record(|record| record.engram.unadmitted_reports.clone());
+    let row_bytes = serde_json::to_string(&reports).unwrap().len();
+    let one_settled = recorded_report(&turn_report(&session, 0));
+    let one_bytes = serde_json::to_string(&one_settled).unwrap().len();
+    assert!(
+        row_bytes <= (one_bytes + 16) * ENGRAM_DISCHARGED_REPORT_RETENTION,
+        "{turns} settled turns left {row_bytes} bytes in the row, one report being {one_bytes}",
+    );
+    let newest = turn_refs(turns - ENGRAM_DISCHARGED_REPORT_RETENTION..turns);
+    assert_eq!(retained_turns(&session), newest);
+    session.persist();
+    let loaded = load_state(session.state.persistence_path.as_path()).unwrap().unwrap();
+    let record = &loaded.sessions[loaded.find_session_index(&session.id).unwrap()];
+    assert_eq!(serde_json::to_value(&record.engram.unadmitted_reports).unwrap(),
+        serde_json::to_value(&reports).unwrap(), "the bound survives a restart");
+}
+
+#[test]
+fn an_oversized_row_is_trimmed_at_the_next_settlement() {
+    let session = ObservationSession::new();
+    let earlier = ENGRAM_DISCHARGED_REPORT_RETENTION + 40;
+    for turn in 0..earlier {
+        session.retain(recorded_report(&turn_report(&session, turn)));
+    }
+    settle_turn(&session, earlier);
+    assert_eq!(retained_turns(&session),
+        turn_refs(earlier + 1 - ENGRAM_DISCHARGED_REPORT_RETENTION..earlier + 1));
+}
+
+#[test]
+fn pending_and_locally_failed_reports_are_never_evicted_and_keep_their_bytes() {
+    let session = ObservationSession::new();
+    let pending = turn_report(&session, 1000);
+    let mut failed = turn_report(&session, 1001);
+    for envelope in &mut failed.envelopes {
+        envelope.delivery = EngramRuntimeObservationDelivery::LocalFailure {
+            code: "runtime_observation_retry_exhausted".into(), message: "gave up".into() };
+    }
+    session.retain(pending.clone());
+    session.retain(failed.clone());
+    let turns = ENGRAM_DISCHARGED_REPORT_RETENTION + 5;
+    for turn in 0..turns {
+        settle_turn(&session, turn);
+    }
+    let reports = session.record(|record| record.engram.unadmitted_reports.clone());
+    assert_eq!(reports[0], pending, "a pending report keeps its exact content for a retry");
+    assert_eq!(reports[1], failed, "a local failure stays for its resolution");
+    assert_eq!(retained_turns(&session)[2..], turn_refs(turns - ENGRAM_DISCHARGED_REPORT_RETENTION..turns));
+    assert!(session.record(|record| runtime_observation_has_removal_duty(record)),
+        "the session still owes those two");
+
+    // Retrying the kept report still finds it, and its turn then counts as the
+    // oldest discharged one, so it leaves first.
+    session.state
+        .install_runtime_observation_result(&session.id, &pending, recorded_report(&pending), 0)
+        .unwrap();
+    let after = retained_turns(&session);
+    assert_eq!(after[0], "turn-1001");
+    assert!(!after.contains(&"turn-1000".to_owned()));
+    assert_eq!(after[1..], turn_refs(turns - ENGRAM_DISCHARGED_REPORT_RETENTION..turns));
+}
+
+#[test]
+fn a_partly_answered_report_is_never_evicted() {
+    let session = ObservationSession::new();
+    let mut partly_delivered = recorded_report(&turn_report(&session, 1000));
+    assert!(partly_delivered.envelopes.len() >= 2, "a closing report has its turn and its sighting");
+    partly_delivered.envelopes[1].delivery =
+        EngramRuntimeObservationDelivery::Pending { last_error: None };
+    let mut partly_failed = recorded_report(&turn_report(&session, 1001));
+    partly_failed.envelopes[1].delivery = EngramRuntimeObservationDelivery::LocalFailure {
+        code: "runtime_observation_retry_exhausted".into(), message: "gave up".into() };
+    session.retain(partly_delivered.clone());
+    session.retain(partly_failed.clone());
+    for turn in 0..ENGRAM_DISCHARGED_REPORT_RETENTION + 5 {
+        settle_turn(&session, turn);
+    }
+    let reports = session.record(|record| record.engram.unadmitted_reports.clone());
+    assert_eq!(reports[0], partly_delivered, "its pending envelope still has to be delivered");
+    assert_eq!(reports[1], partly_failed, "its failed envelope is still unresolved");
+}

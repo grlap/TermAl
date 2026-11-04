@@ -1495,8 +1495,8 @@ fn engram_merge_credit_lines(earlier: &str, later: &str) -> String {
 /// Whether a poll still reads the run of `carried` at `now`: its terminal
 /// record is not yet read, and nothing already settled that it can never be
 /// credited (a fence, a launcher gone, a run never found, its six hours
-/// over, or its launch ambiguous), so the next checkpoint refuses it
-/// without another read, and it finds no run.
+/// over, or its launch ambiguous), so another read can't change that, and it
+/// finds no run.
 fn engram_carried_check_polls(
     carried: &EngramCarriedCheck,
     now: chrono::DateTime<chrono::Utc>,

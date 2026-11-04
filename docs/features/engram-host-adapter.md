@@ -875,7 +875,11 @@ path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
   cut before request construction. It asserts neither continuous observation
   nor that the adopted turn caused the drift.
 - **Durability and replay.** The prepared request and delivery state live in
-  the session's SQLite row. Exact row read-back precedes every send, and the
+  the session's SQLite row. A settled report's row space is bounded: a session
+  keeps only its newest few reports that Engram answered definitively, so a
+  long-lived session's row doesn't grow with each turn. A pending report stays
+  until it settles. A local failure has no automatic resolution and stays for the
+  session's life. Exact row read-back precedes every send, and the
   turn/check identities determine immutable idempotency keys. An uncertain
   reply or a restart replays the identical retained request. Retained
   reports may replay automatically after boot as evidence, without

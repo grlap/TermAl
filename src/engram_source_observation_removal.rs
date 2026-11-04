@@ -26,11 +26,7 @@ fn runtime_observation_active_removal_duty(record: &SessionRecord) -> bool {
 fn runtime_observation_has_removal_duty(record: &SessionRecord) -> bool {
     runtime_observation_active_removal_duty(record)
         || record.engram.unadmitted_closing_jobs.iter().any(|job| job.terminal_failure.is_none())
-        || record.engram.unadmitted_reports.iter().any(|report| {
-            report.envelopes.iter().any(|envelope| !matches!(envelope.delivery,
-                EngramRuntimeObservationDelivery::Recorded { .. }
-                    | EngramRuntimeObservationDelivery::Refused { .. }))
-        })
+        || record.engram.unadmitted_reports.iter().any(|report| !report.is_discharged())
 }
 
 fn runtime_observation_terminal_removal_notice(record: &SessionRecord) -> Option<String> {

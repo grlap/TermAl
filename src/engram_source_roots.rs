@@ -400,6 +400,9 @@ impl EngramSessionState {
             .map(|pending| pending.lines().map(str::to_owned).collect::<Vec<_>>())
             .unwrap_or_default();
         let uncredited = engram_is_uncredited_check_line(&line);
+        if uncredited {
+            self.uncredited_feedback_revision = self.uncredited_feedback_revision.wrapping_add(1);
+        }
         // Lines about a check's credit merge into one, so several of them
         // never push a bind or name line out. One a prompt in flight carries
         // is left as it is, so its delivery takes it out when the runtime

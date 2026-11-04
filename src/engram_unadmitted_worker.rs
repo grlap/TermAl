@@ -117,6 +117,26 @@ impl EngramRuntimeObservationWork {
     }
 }
 
+/// How many discharged reports a session keeps in its row. They serve only as
+/// a recent local record and a guard against reporting a turn twice, while the
+/// row is rewritten on every session commit.
+const ENGRAM_DISCHARGED_REPORT_RETENTION: usize = 8;
+
+/// Removes the oldest discharged reports past the retention. Reports that are
+/// pending or locally failed still owe something, and never leave here.
+fn engram_evict_discharged_reports(reports: &mut Vec<EngramRuntimeObservationReport>) {
+    let mut excess = reports
+        .iter()
+        .filter(|report| report.is_discharged())
+        .count()
+        .saturating_sub(ENGRAM_DISCHARGED_REPORT_RETENTION);
+    reports.retain(|report| {
+        let evict = excess > 0 && report.is_discharged();
+        excess -= usize::from(evict);
+        !evict
+    });
+}
+
 impl AppState {
     // Reuse the binding/readiness owner's process-local fences. Restore does
     // not persist the work binding, so its absence before rebind is not proof
@@ -457,7 +477,8 @@ impl AppState {
         Ok(())
     }
 
-    // Only this immutable historical entry changes, plus one baseline: when
+    // Only this immutable historical entry changes, older discharged reports
+    // leave (`engram_evict_discharged_reports`), and one baseline: when
     // Engram records the newest closed turn's source sighting under the
     // session's current binding, that sighting becomes the next turn's
     // baseline (`engram_recorded_closing_baseline`). A successor runtime,
@@ -520,6 +541,7 @@ impl AppState {
         let baseline = engram_recorded_closing_baseline(&inner.sessions[index], expected, &next, envelope_index);
         let record = &mut inner.sessions[index];
         record.engram.unadmitted_reports[position] = next;
+        engram_evict_discharged_reports(&mut record.engram.unadmitted_reports);
         if let Some(baseline) = baseline {
             record.engram.runtime_checkpoint = Some(baseline);
         }

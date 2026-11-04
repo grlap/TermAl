@@ -64,6 +64,16 @@ With Execution Observability on as well:
 
 ## Delivery and context preparation
 
+When a recognised test starts, an optional placement notice can explain that
+its directory belongs to another held claim. The held-claims read runs in
+an owned background observer, so runtime frames continue while Engram is
+unavailable. A result is published only while the original turn, runtime,
+work association, connection and named roots are still current, and no newer
+command feedback has superseded it. An absent, failed or stale read does not
+change the command's observed check or credit.
+The CLI read keeps its existing bounded timeout (at most six seconds); host
+shutdown may wait for that read and its child cleanup to finish.
+
 The ordinary handoff prepares its opening source-root guidance locally and
 performs no Engram read. There is a current exception
 earlier on direct sends and on queue drains, including Resume and queued

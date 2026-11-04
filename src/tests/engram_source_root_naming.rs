@@ -5280,6 +5280,7 @@ fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
             Some("cargo test"),
             Some(second.to_str().expect("UTF-8 fixture path")),
         );
+        wait_for_other_root_notices(&claimed);
         let line = pending_line(&claimed).expect("test routing is explained");
         let checks = claimed.record_mut(|record| record.engram.active_turn_checks.len());
         if case == "expired" {
@@ -5628,6 +5629,7 @@ fn a_failed_optional_other_held_root_read_preserves_the_own_root_check_without_a
     let mut recorder = claimed.recorder();
     let cwd = worktree.to_string_lossy();
     recorder.command_started_in("optional-placement-check", "cargo test", Some("cargo test"), Some(&cwd)).unwrap();
+    wait_for_other_root_notices(&claimed);
     claimed.wait_for_snapshots();
     claimed.record(|record| {
         assert_eq!(record.engram.active_turn_checks.len(), 1,
@@ -5701,4 +5703,122 @@ fn other_root_notice_is_current_component_rejects_generation_work_and_connection
         assert_ordinary_turn_has_no_native_requests(&claimed);
         claimed.end();
     }
+}
+
+#[test]
+fn a_parked_other_root_notice_read_does_not_hold_runtime_frames() {
+    parked_other_root_notice("current");
+}
+
+#[test]
+fn a_parked_other_root_notice_read_rejects_replaced_owners_and_roots() {
+    for case in ["generation", "runtime", "work-association", "connection", "workdir", "source-root", "other-root"] {
+        parked_other_root_notice(case);
+    }
+}
+
+#[test]
+fn a_parked_other_root_notice_preserves_a_later_command_refusal() {
+    parked_other_root_notice("newer-refusal");
+}
+
+fn wait_for_other_root_notices(claimed: &EOCheckedTurn) {
+    claimed.wait_for_other_root_notices();
+}
+
+fn parked_other_root_notice(case: &str) {
+    let (claimed, worktree, other) = ordinary_other_root_notice_fixture(&format!("parked-placement-{case}"));
+    claimed.begin("Observe command frames while optional context is unavailable.");
+    claimed.record_mut(|record| record.engram.pending_source_root_line = None);
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let mut release = OrdinaryRequestRelease(Some(release_tx));
+    let runtime_thread = Arc::new(Mutex::new(None));
+    let reading_thread = runtime_thread.clone();
+    claimed.transport.on_next_held_claim_read(move |_| {
+        let on_runtime = Some(std::thread::current().id()) == *reading_thread.lock().unwrap();
+        entered_tx.send(on_runtime).unwrap();
+        // Report the old synchronous path directly, without making RED rely
+        // on a scheduling deadline or leaving the runtime worker blocked.
+        if !on_runtime { release_rx.recv().unwrap(); }
+    });
+    let mut recorder = claimed.recorder();
+    let cwd = worktree.to_string_lossy().into_owned();
+    let (frames_tx, frames_rx) = mpsc::channel();
+    let frames = std::thread::spawn(move || {
+        *runtime_thread.lock().unwrap() = Some(std::thread::current().id());
+        recorder.command_started_in("parked-placement-check", "cargo test", Some("cargo test"), Some(&cwd)).unwrap();
+        recorder.command_completed_with_exit("parked-placement-check", "cargo test",
+            "running 1 test\ntest result: ok. 1 passed", CommandStatus::Success,
+            EngramCommandExit::Code(0)).unwrap();
+        frames_tx.send(()).unwrap();
+    });
+    let on_runtime = entered_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
+    if on_runtime {
+        frames.join().unwrap();
+        panic!("optional held-claims transport ran synchronously on the runtime frame thread");
+    }
+    frames_rx.recv_timeout(DEADLOCK_GUARD).expect("command end must be processed while the optional read is parked");
+    frames.join().unwrap();
+    claimed.record(|record| {
+        assert_eq!(record.engram.active_turn_checks.len(), 1);
+        assert!(record.engram.active_turn_checks[0].end.is_some());
+        assert!(record.engram.unadmitted_active_turn.as_ref().unwrap().commands[0].check.finished_at.is_some());
+    });
+    assert!(!pending_line(&claimed).unwrap_or_default().contains("w-other-placement"));
+    let original_generation = claimed.record(|record| record.active_turn_generation);
+    let original_binding = claimed.record(|record| record.engram.work_binding.clone());
+    let original_workdir = claimed.record(|record| record.session.workdir.clone());
+    let original_root = claimed.record(|record| record.engram.observed_source_root().cloned());
+    let original_runtime = claimed.record(|record| record.runtime.clone());
+    let original_settings = {
+        let inner = claimed.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&claimed.session_id).unwrap();
+        EngramOtherRootNoticeRead::capture(&inner, index).unwrap().target.settings
+    };
+    let mut later_refusal = None;
+    match case {
+        "current" => {},
+        "generation" => claimed.record_mut(|record| record.active_turn_generation += 1),
+        "runtime" => claimed.record_mut(|record| record.runtime = SessionRuntime::None),
+        "work-association" => claimed.record_mut(|record| record.engram.work_binding = Some(other.clone())),
+        "connection" => change_engram_settings(&claimed.state, |settings| {
+            settings.binary_path = Some("successor-notice-engram.exe".into());
+        }),
+        "workdir" => claimed.record_mut(|record| record.session.workdir.push_str("-successor")),
+        "source-root" => claimed.record_mut(|record| record.engram.observed_source_root_mut().unwrap().generation += 1),
+        "other-root" => claimed.state.inner.lock().unwrap().engram_work_source_roots.retain(|entry| entry.claim_id != other.claim_id),
+        "newer-refusal" => {
+            let mut recorder = claimed.recorder();
+            let command = "node scripts/test-launcher.mjs focused -- node --test --test-name-pattern \"100%\" fixture.test.mjs";
+            recorder.command_started_in("later-refused-check", command, Some(command), Some(&worktree.to_string_lossy())).unwrap();
+            let line = pending_line(&claimed).expect("the later command is refused");
+            assert!(line.contains("was refused") && line.contains("unsupported expansion"), "{line}");
+            later_refusal = Some(line);
+            recorder.command_completed_with_exit("later-refused-check", command, "refused fixture", CommandStatus::Error, EngramCommandExit::Code(1)).unwrap();
+        },
+        _ => unreachable!(),
+    }
+    release.0.take().unwrap().send(()).unwrap();
+    wait_for_other_root_notices(&claimed);
+    let line = pending_line(&claimed).unwrap_or_default();
+    if case == "current" {
+        assert!(line.contains("shared named root"), "{line}");
+        assert!(line.contains("w-other-placement"), "{line}");
+    } else if case == "newer-refusal" {
+        assert_eq!(Some(line), later_refusal, "the parked optional result cannot erase the later refusal");
+    } else {
+        assert!(!line.contains("w-other-placement"), "{case}: stale notice was published: {line}");
+    }
+    // Restore only the changed fixture fields so its original ordinary turn
+    // closes through the real owner after the stale-result assertions.
+    claimed.record_mut(|record| {
+        record.active_turn_generation = original_generation;
+        record.engram.work_binding = original_binding;
+        record.session.workdir = original_workdir;
+        record.runtime = original_runtime;
+        *record.engram.observed_source_root_mut().unwrap() = original_root.unwrap();
+    });
+    change_engram_settings(&claimed.state, |settings| *settings = original_settings.clone());
+    assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }

@@ -993,6 +993,17 @@ impl EOCheckedTurn {
         }
     }
 
+    pub(super) fn wait_for_other_root_notices(&self) {
+        let captures = &self.state.capture_lifetime;
+        let mut workers = captures.state.lock().unwrap();
+        while workers.workers.iter().any(|worker| {
+            worker.thread.thread().name() == Some("termal-other-root-notice")
+                && !worker.done.load(std::sync::atomic::Ordering::Acquire)
+        }) {
+            workers = captures.changed.wait(workers).unwrap();
+        }
+    }
+
     fn change_readme(&self, content: &str) {
         fs::write(self.root.join("README.md"), content).unwrap();
     }

@@ -468,6 +468,7 @@ fn refused_admission_shared_root_notice_keeps_the_primary_check_admitted() {
     let mut recorder = turn.recorder();
     handle_codex_app_server_item_started(&item, &mut recorder).unwrap();
     turn.wait_for_snapshots();
+    turn.wait_for_other_root_notices();
     let notice = take_notice(&turn).expect("the other held item receives routing guidance");
     assert!(
         notice.contains("shared named root") && notice.contains("other-held-item"),
