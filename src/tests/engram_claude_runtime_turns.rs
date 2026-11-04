@@ -403,6 +403,7 @@ fn begin_next_turn(turn: &EOCheckedTurn) {
 fn endpoint_comparison() -> EngramRuntimeClosingCapture {
     let binding = test_control_work_binding("endpoint-comparison", 1);
     EngramRuntimeClosingCapture {
+        registered_check_baselines: Vec::new(),
         baseline: Some(EngramRuntimeCheckpointBasis {
             binding: binding.clone(),
             endpoint: EngramMeasuredBaseline {

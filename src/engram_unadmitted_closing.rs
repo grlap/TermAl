@@ -271,6 +271,7 @@ impl AppState {
                     observed_at,
                 },
                 baseline: job.baseline.clone(),
+                registered_check_baselines: job.registered_check_baselines.clone(),
                 policy: policy.clone(),
             },
             target.connection.clone(),

@@ -13,6 +13,16 @@ struct TestEngramNamedRoots {
     seen: BTreeMap<(String, String), (Value, Value)>,
     lose_next_reply: bool,
     refuse_next: bool,
+    // A claim's current fence, opt-in. As Engram does, a Bound under any other
+    // fence is refused and a named-root read of the claim reports its fence.
+    claim_fences: BTreeMap<String, i64>,
+    // The work's revision moved after the fence rose: Engram has no record of
+    // that revision at the old fence, so it refuses with a mismatch instead.
+    revision_moved: bool,
+    // A read of such a claim doesn't report its fence, as from an older Engram.
+    read_omits_claim: bool,
+    // After the next stale refusal, reads of this claim go unanswered.
+    fail_reads_after_stale_refusal: Option<String>,
     // Ordinary children are independent of historical control-session phase.
     // Populated only by an explicit, identity-checked work-session reply.
     work_sessions: BTreeSet<String>,
@@ -226,8 +236,8 @@ impl TestEngramNamedRoots {
             } else {
                 position
             });
-            return Some(Ok(
-                json!({"project_id":self.project_id.as_deref().unwrap_or("github.com/example/source-root"), "work_id":binding.work_id,
+            let fence = self.claim_fences.get(claim).filter(|_| !self.read_omits_claim);
+            let mut read = json!({"project_id":self.project_id.as_deref().unwrap_or("github.com/example/source-root"), "work_id":binding.work_id,
                     "root_execution_id":binding.root_execution_id,"run_id":binding.run_id,"claim_id":binding.claim_id,
                     "run":{"state":if self.released.contains_key(claim) { "open" } else { "claimed" },
                         "generation":self.run_generations[&binding.run_id]},
@@ -236,8 +246,11 @@ impl TestEngramNamedRoots {
                         "workspace_id":event["workspace_id"],"named_at":event["named_at"]})),
                     "read_cut":{"feed":{"kind":"run_execution", "id":binding.run_id},
                         "position":*cut}
-                }),
-            ));
+                });
+            if let Some(fence) = fence {
+                read["claim"] = json!({"state":"active", "fence":fence});
+            }
+            return Some(Ok(read));
         }
         if wire["operation"] != "named_root_bind" {
             return None;
@@ -264,6 +277,24 @@ impl TestEngramNamedRoots {
                 message: "claim has no registered run".to_owned(),
             })));
         };
+        if wire["kind"] == "bound"
+            && self.claim_fences.get(&claim).is_some_and(|fence| wire["claim_fence"] != *fence)
+        {
+            if let Some(unanswered) = self.fail_reads_after_stale_refusal.take() {
+                self.root_read_failures.insert(unanswered);
+            }
+            return Some(Err(EngramTransportError::remote(if self.revision_moved {
+                EngramControlErrorBody {
+                    code: "work_claim_mismatch".to_owned(),
+                    message: "claim does not match the work".to_owned(),
+                }
+            } else {
+                EngramControlErrorBody {
+                    code: "named_root_binding_refused".to_owned(),
+                    message: "work binding is stale; reread the current claim association".to_owned(),
+                }
+            })));
+        }
         let previous = self.latest.get(&claim);
         let valid = generation > 0
             && if wire["kind"] == "bound" {

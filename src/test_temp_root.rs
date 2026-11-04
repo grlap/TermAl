@@ -11,6 +11,7 @@ const TEST_TEMP_ROOT_OWNER_SUFFIX: &str = ".owner";
 struct TestTempRoot {
     path: PathBuf,
     cleanup_observers: Mutex<Vec<mpsc::Sender<std::result::Result<(), String>>>>,
+    retain_for_diagnosis: std::sync::atomic::AtomicBool,
 }
 
 thread_local! {
@@ -137,7 +138,15 @@ impl TestTempRoot {
         Self {
             path,
             cleanup_observers: Mutex::new(Vec::new()),
+            retain_for_diagnosis: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// A fixture may retain its failed run before its last worker drops this
+    /// guard. The decision must survive that drop occurring on another thread.
+    fn retain_for_diagnosis(&self) {
+        self.retain_for_diagnosis
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn path(&self) -> &FsPath {
@@ -160,15 +169,22 @@ impl TestTempRoot {
 
 impl Drop for TestTempRoot {
     fn drop(&mut self) {
-        let outcome = match fs::remove_dir_all(&self.path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(format!(
-                "test temp root not removed: {} ({error}; kind={:?}; os={:?})",
-                self.path.display(),
-                error.kind(),
-                error.raw_os_error()
-            )),
+        let outcome = if self
+            .retain_for_diagnosis
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            Err(format!("retained failed fixture: {}", self.path.display()))
+        } else {
+            match fs::remove_dir_all(&self.path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(format!(
+                    "test temp root not removed: {} ({error}; kind={:?}; os={:?})",
+                    self.path.display(),
+                    error.kind(),
+                    error.raw_os_error()
+                )),
+            }
         };
         // The owner marker goes only with its root: a root that could not be
         // removed keeps the marker that names its test.

@@ -206,7 +206,9 @@ struct EngramContextNudgeReadClaim {
 impl Drop for EngramContextNudgeReadClaim {
     fn drop(&mut self) {
         if !self.armed.load(std::sync::atomic::Ordering::Acquire) { return; }
-        let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        // This runs while the worker unwinds, and a second panic there aborts
+        // the process. With the mutex poisoned, nothing can read the release.
+        let Ok(mut inner) = self.state.inner.lock() else { return; };
         let Some(index) = inner.find_session_index(&self.session_id) else { return; };
         let cache = &mut inner.sessions[index].engram;
         if cache.context_nudge_in_progress_generation == Some(self.generation) {

@@ -32,6 +32,9 @@ mod unknown_fields;
 #[path = "engram_source_root_off_rebind.rs"]
 mod off_rebind;
 
+#[path = "engram_named_root_stale_fence.rs"]
+mod stale_fence;
+
 #[path = "engram_unconfirmed_root_reasons.rs"]
 mod unconfirmed_root_reasons;
 

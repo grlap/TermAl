@@ -1248,9 +1248,11 @@ happens elsewhere. The agent therefore names the item's worktree once with
   that exact image is acknowledged again. Recovery obligations for other
   canonical runs survive a claim handoff. Retry
   the same naming request; a conflicting request is refused. Pending events withhold source
-  bases and check credit and prevent an acceptance request. A definitive
-  `named_root_binding_refused` is surfaced and retires the refused intent;
-  a repair may then name again. Cleanup events remain queued until a live
+  bases and check credit and prevent an acceptance request. A
+  `named_root_binding_refused` or `work_claim_mismatch` is surfaced as a
+  conflict and triggers a canonical read. Only that read's proof settles the
+  intent, and a later name may then proceed; otherwise it stays pending for
+  retry. Cleanup events remain queued until a live
   connection to their store can send them. Reporter assignment is durable
   before transport and rolls back on persistence failure. An assigned attempt
   keeps its original reporter; transferring it to another session requires a
@@ -1290,7 +1292,10 @@ happens elsewhere. The agent therefore names the item's worktree once with
   generation and canonical bound event, subject to the existing exact claim,
   run, store, immutable-intent and persistence-acknowledgement checks. A
   conflicting pending intent must first be settled by retrying its original
-  request; naming never clears it or invents a historical receipt. This
+  request; naming never clears it or invents a historical receipt. A retried
+  bound intent whose claim was recovered under a newer fence can never apply:
+  Engram refuses it, the canonical read showing that fence settles it, and the
+  refusal tells the caller to name the root again. This
   action confirms only the new generation. Recovering an unexplained old
   association itself still requires its original history or authorized repair.
   The naming turn stays unconfirmed; start a fresh later turn before running

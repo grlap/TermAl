@@ -7,6 +7,7 @@ struct RegisteredCheckNotice {
     check: EngramTurnCheck,
     observation: Option<TestRunCommandObservation>,
     runs: Vec<(TestRunRegistration, Option<TestRunState>)>,
+    clean_commit_runs: Vec<String>,
 }
 
 impl AppState {
@@ -17,7 +18,7 @@ impl AppState {
             let record = &inner.sessions[index];
             let Some(trace) = record.engram.unadmitted_active_turn.as_ref() else { return Vec::new() };
             let checks = record.engram.active_turn_checks.iter().filter(|check|
-                check.end.is_none() && check.host_turn_ref == trace.host_turn_ref
+                check.host_turn_ref == trace.host_turn_ref
                     && EngramHost::launcher_arguments(&check.command).is_some()
             ).collect::<Vec<_>>();
             if checks.is_empty() { return Vec::new(); }
@@ -57,6 +58,7 @@ impl AppState {
                     generation: record.active_turn_generation, runtime: runtime.clone(),
                     check: check.clone(), observation,
                     runs: runs.into_iter().map(|run| (run, None)).collect(),
+                    clean_commit_runs: Vec::new(),
                 }
             }).collect::<Vec<_>>()
         };
@@ -68,12 +70,17 @@ impl AppState {
                 .and_then(|artifact| artifact.terminal_digest.as_deref());
             for (registration, state) in &mut notice.runs {
                 if associated_run != Some(registration.run_id.as_str()) { continue; }
-                *state = TestRunDisk::read(FsPath::new(&registration.run_directory), None)
+                let disk = TestRunDisk::read(FsPath::new(&registration.run_directory), None)
                     .filter(|disk| test_run_registered_disk_matches(registration, disk))
                     .filter(|disk| terminal_digest.is_none_or(|digest|
                         disk.results.as_ref().is_some_and(|results|
-                            test_run_terminal_digest_matches(Some(&results.digest), digest))))
-                    .map(|disk| disk.state_at(&test_run_process_writer_may_be_alive, chrono::Utc::now()));
+                            test_run_terminal_digest_matches(Some(&results.digest), digest))));
+                if notice.check.end.is_some() && disk.as_ref().is_some_and(|disk|
+                    registered_closing_clean_input(registration, disk))
+                {
+                    notice.clean_commit_runs.push(registration.run_id.clone());
+                }
+                *state = disk.map(|disk| disk.state_at(&test_run_process_writer_may_be_alive, chrono::Utc::now()));
             }
         }
         prepared

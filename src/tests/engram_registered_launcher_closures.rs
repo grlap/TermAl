@@ -512,8 +512,12 @@ fn a_registered_launcher_locator_cannot_be_borrowed_by_a_same_key_successor() {
     fixture.recorder.command_started(KEY, COMMAND).unwrap();
     fixture.turn.wait_for_snapshots();
     let prepared = fixture.turn.state.prepare_registered_check_notices(&fixture.turn.session_id);
-    assert_eq!(prepared.len(), 1);
-    assert!(prepared[0].observation.is_none(), "the previous start's locator is not this invocation's");
+    assert_eq!(prepared.len(), 2, "preparation retains the completed check and its successor");
+    let completed = prepared.iter().find(|notice| notice.check.end.is_some()).unwrap();
+    let successor = prepared.iter().find(|notice| notice.check.end.is_none()).unwrap();
+    assert_ne!(completed.check.sequence, successor.check.sequence);
+    assert!(completed.observation.is_some(), "the original invocation retains its locator");
+    assert!(successor.observation.is_none(), "the previous start's locator is not this invocation's");
     let _ = fixture.turn.finish();
     let (line, closed) = fixture.line();
     fixture.assert_advice(&line);

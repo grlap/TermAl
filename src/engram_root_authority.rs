@@ -1364,8 +1364,8 @@ impl AppState {
                         }
                         continue;
                     }
-                    // Only exact committed/superseded intent history or a
-                    // closed lifecycle settles a potentially executable write.
+                    // Only exact committed/superseded intent history, a superseded
+                    // fence or a closed lifecycle settles a potentially executable write.
                     // Keep its original bytes as readback, never a receipt.
                     let lifecycle_closed =
                         matches!(proof.run.state.as_str(), "completed" | "cancelled")

@@ -50,6 +50,7 @@ fn observation_capture() -> EngramRuntimeClosingCapture {
             source_basis: observation_source("content-v1:closing"), observed_at: observation_at(50),
         },
         baseline: None,
+        registered_check_baselines: Vec::new(),
         policy: observation_policy(),
     }
 }

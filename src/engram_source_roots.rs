@@ -2571,9 +2571,20 @@ impl AppState {
                 _ => false,
             };
             if !same {
-                return Err(ApiError::conflict(
-                    "an earlier named-root transition remains pending; retry that exact naming request first",
-                ));
+                return Err(ApiError::conflict(match (pending.kind, pending.end_reason) {
+                    (EngramNamedRootKind::Bound, _) => format!(
+                        "an earlier named-root transition remains pending for {}; retry that exact naming request first",
+                        pending.root.root,
+                    ),
+                    (EngramNamedRootKind::Ended, Some(EngramNamedRootEndReason::ExplicitClear)) => format!(
+                        "an earlier clear of the named root {} remains pending; retry that clear first",
+                        pending.root.root,
+                    ),
+                    (EngramNamedRootKind::Ended, _) => format!(
+                        "an earlier end of the named root {}, raised by the host, remains pending, and no call on this claim can retry it yet; naming stays blocked, so report this to the TermAl coordinator",
+                        pending.root.root,
+                    ),
+                }));
             }
         }
         let remote_generation = match &remote_root {

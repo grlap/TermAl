@@ -366,6 +366,9 @@ fn engram_recorded_closing_baseline(
 struct EngramRuntimeClosingJob {
     trace: EngramRuntimeObservedTurn,
     baseline: Option<EngramRuntimeCheckpointBasis>,
+    // Frozen before trace removal; old jobs conservatively have no fallback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    registered_check_baselines: Vec<EngramRuntimeCheckpointBasis>,
     scope: EngramRuntimeClosingScope,
     policy: Option<EngramObservationPolicyBasis>,
     attempts: u32,
@@ -384,6 +387,7 @@ impl EngramRuntimeClosingJob {
         Self {
             trace,
             baseline,
+            registered_check_baselines: Vec::new(),
             scope,
             policy: None,
             attempts: 0,
@@ -528,6 +532,7 @@ struct EngramRuntimeClosingCapture {
     root_basis: EngramObservationRootBasis,
     sighting: EngramMeasuredSighting,
     baseline: Option<EngramRuntimeCheckpointBasis>,
+    registered_check_baselines: Vec<EngramRuntimeCheckpointBasis>,
     policy: EngramObservationPolicyBasis,
 }
 
@@ -540,6 +545,26 @@ impl EngramRuntimeClosingCapture {
                 && basis.source_root_generation == source.source_root_generation
                 && basis.source_root_state == source.source_root_state
         });
+        let checked = !self.registered_check_baselines.is_empty()
+            && self.registered_check_baselines.iter().all(|basis| {
+                basis.binding == self.binding
+                    && basis.endpoint.workspace_id == source.workspace_id
+                    && basis.source_root_generation == source.source_root_generation
+                    && basis.source_root_state == source.source_root_state
+                    && EngramHost::check_timestamp(&basis.endpoint.observed_at).zip(
+                        EngramHost::check_timestamp(&self.sighting.observed_at))
+                        .is_some_and(|(before, after)| before <= after)
+            });
+        // Every qualifying check participates, even when the previous
+        // checkpoint or the last check equals the close (X -> Y -> X).
+        if checked && let Some(basis) = self.registered_check_baselines.iter().find(|basis|
+            basis.endpoint.source_revision != source.source_revision)
+        {
+            return Some(EngramObservedSourceChange::ContentComparison {
+                workspace_id: source.workspace_id.clone(),
+                baseline: basis.endpoint.clone(), sighting: self.sighting.clone(),
+            });
+        }
         match compatible {
             Some(basis)
                 if basis.endpoint.source_revision == self.sighting.source_basis.source_revision =>
@@ -551,6 +576,7 @@ impl EngramRuntimeClosingCapture {
                 baseline: basis.endpoint.clone(),
                 sighting: self.sighting.clone(),
             }),
+            None if checked => None,
             None => Some(EngramObservedSourceChange::AssumedMissingBaseline {
                 workspace_id: self.sighting.source_basis.workspace_id.clone(),
                 sighting: self.sighting.clone(),

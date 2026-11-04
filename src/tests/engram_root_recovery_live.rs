@@ -19,14 +19,18 @@ enum BoundaryFault {
     DropAfterReply {
         operation: &'static str,
     },
+    /// The request never reaches Engram.
+    LoseBeforeSend {
+        operation: &'static str,
+    },
 }
 
 impl BoundaryFault {
     fn operation(self) -> &'static str {
         match self {
-            Self::DelayAfterReply { operation, .. } | Self::DropAfterReply { operation } => {
-                operation
-            }
+            Self::DelayAfterReply { operation, .. }
+            | Self::DropAfterReply { operation }
+            | Self::LoseBeforeSend { operation } => operation,
         }
     }
 }
@@ -111,6 +115,17 @@ impl EngramControlTransport for BoundaryFaultTransport {
                 entered.take().unwrap().1.send(()).unwrap();
             }
         }
+        {
+            let mut faults = self.faults.lock().expect("live boundary fault mutex poisoned");
+            if faults.front().is_some_and(|fault| matches!(fault, BoundaryFault::LoseBeforeSend { .. })
+                && fault.operation() == operation)
+            {
+                faults.pop_front();
+                return Err(EngramTransportError::transport(format!(
+                    "live test lost {operation} before sending it"
+                )));
+            }
+        }
         let result = self.inner.request(connection, request, timeout);
         if operation == "named_root_read"
             && let Ok(reply) = &result
@@ -182,6 +197,9 @@ impl EngramControlTransport for BoundaryFaultTransport {
                 return Err(EngramTransportError::transport(format!(
                     "live test discarded committed {operation} reply"
                 )));
+            }
+            Some(BoundaryFault::LoseBeforeSend { .. }) => {
+                unreachable!("a lost send is taken before the request")
             }
             None => "returned",
         };

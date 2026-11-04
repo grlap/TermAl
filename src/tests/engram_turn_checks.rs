@@ -4263,6 +4263,9 @@ mod unended_closures;
 #[path = "engram_registered_launcher_closures.rs"]
 mod registered_launcher_closures;
 
+#[path = "engram_registered_closing_baseline.rs"]
+mod registered_closing_baseline;
+
 #[path = "engram_checkpoint_non_application.rs"]
 mod checkpoint_non_application;
 

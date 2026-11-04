@@ -60,6 +60,11 @@ impl Command {
         self.inner.env_remove(key);
         self
     }
+    #[cfg(test)]
+    pub(crate) fn env_clear(&mut self) -> &mut Self {
+        self.inner.env_clear();
+        self
+    }
     pub(crate) fn current_dir(&mut self, dir: impl AsRef<std::path::Path>) -> &mut Self {
         self.inner.current_dir(dir);
         self

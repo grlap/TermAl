@@ -1,4 +1,5 @@
 include!("engram_registered_check_notices.rs");
+include!("engram_registered_closing_baseline.rs");
 
 // Shared observation lifecycle after the existing runtime/turn ownership fence.
 // Ordinary host-started turns and adopted runtime-started turns use the same
@@ -249,6 +250,8 @@ impl AppState {
         // recorded leaves its successor without one: never an older baseline.
         let baseline = inner.sessions[index].engram.runtime_checkpoint.take();
         let scope = EngramRuntimeClosingScope::capture(inner, &session_id);
+        let check_baselines = scope.as_ref().ok().map(|scope|
+            registered_closing_baselines_locked(inner, index, registered, scope)).unwrap_or_default();
         let (mut notices, correlated) = registered_check_notices_locked(inner, index, registered);
         let record = &mut inner.sessions[index];
         notices.extend(engram_carry_running_codex_checks(record, &trace.host_turn_ref));
@@ -277,10 +280,12 @@ impl AppState {
                         .iter()
                         .any(|report| report.host_turn_ref == trace.host_turn_ref)
                 {
+                    let mut job = EngramRuntimeClosingJob::new(trace, baseline, scope);
+                    job.registered_check_baselines = check_baselines;
                     record
                         .engram
                         .unadmitted_closing_jobs
-                        .push(EngramRuntimeClosingJob::new(trace, baseline, scope));
+                        .push(job);
                 }
                 // The kick waits for this lock to be released. Delivery still
                 // requires exact SQLite row read-back, even if commit fails.

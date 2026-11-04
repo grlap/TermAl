@@ -108,13 +108,29 @@ path grants turn admission or test credit. See the host adapter's
 - It sends no environment or toolchain evidence, and it no longer binds one
   full gate to the other items of a batch
   ([batch full gates](batch-full-gates.md)).
-- It compares a turn's source with nothing but the previous traced turn's
-  recorded closing sighting, under the exact same binding, source root, root
-  generation and root state. A compatible checkpoint an earlier build recorded
-  serves once in that place. Without either, as after a refused, undelivered or
-  late sighting or a rebind, the turn reports `assumed_missing_baseline`, with
-  no older baseline to fall back on. A turn with uncertain source attribution
-  reports no source change and leaves no baseline.
+- It compares a turn's source with the previous traced turn's recorded closing
+  sighting, under the exact same binding, source root, root generation and root
+  state. A compatible checkpoint an earlier build recorded serves once in that
+  place; no older checkpoint is borrowed after a refused, undelivered or late
+  sighting or a rebind. Without a compatible checkpoint, a turn containing only
+  completed, non-overlapped registered Git-input checks that were clean before and after
+  can use those checks' existing source measurements. Every check's start and
+  after measurement is compared with the close, under the same claim, fence,
+  workspace and root generation; a difference reports `content_comparison`.
+  Equal measurements mean **the final input was checked**, not that every
+  change since the claim was observed. The preceding interval remains unknown.
+  Missing, incomplete, ambiguous or failed evidence, and unregistered or legacy
+  checks without a compatible checkpoint, retain `assumed_missing_baseline`.
+  This takes no new source measurement and never waits for a capture to finish.
+  A turn with uncertain source attribution reports no source change and leaves
+  no baseline.
+- If a turn checks revision A, changes source, then checks revision B, its
+  closing comparison still includes A. An evaluation can therefore refuse the
+  later check with `source_moved_after_check`, even when that check passed.
+  The work and recorded checks remain available. In a later ordinary work turn,
+  run a clean registered check on the intended committed revision and evaluate
+  again with its new record and fresh evidence basis. That later check follows
+  the previously recorded change; the closing comparison must also stay clean.
 - It does not promise that a turn in which the agent takes or changes a claim
   is reported or credited under it. A turn is traced only if its project has a
   verified store or its session already has a work binding when it starts. The

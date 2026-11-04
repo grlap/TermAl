@@ -50,6 +50,9 @@ const ENGRAM_CHECK_REF_MAX_BYTES: usize = 1024;
 struct EngramCapture<T> {
     /// The captured value once the capture finished; unset while it runs.
     result: Mutex<Option<T>>,
+    /// UTC completion of this measurement, published with its result. It is
+    /// never reconstructed from a command's end or a later closing turn.
+    measured_at: Mutex<Option<String>>,
     ready: std::sync::Condvar,
     /// When it finished, on the interference clock
     /// (`engram_claude_interference.rs`), set under `result`'s lock with the
@@ -145,6 +148,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
     ) -> Arc<Self> {
         let pending = Arc::new(Self {
             result: Mutex::new(None),
+            measured_at: Mutex::new(None),
             ready: std::sync::Condvar::new(),
             ready_tick: std::sync::atomic::AtomicU64::new(0),
         });
@@ -164,6 +168,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
     fn settled(value: T) -> Arc<Self> {
         let settled = Arc::new(Self {
             result: Mutex::new(None),
+            measured_at: Mutex::new(None),
             ready: std::sync::Condvar::new(),
             ready_tick: std::sync::atomic::AtomicU64::new(0),
         });
@@ -173,6 +178,8 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
 
     fn finish(&self, value: T) {
         let mut result = self.result.lock().expect("Engram capture mutex poisoned");
+        *self.measured_at.lock().expect("Engram capture time mutex poisoned") =
+            Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
         self.ready_tick.store(
             engram_interference_tick(),
             std::sync::atomic::Ordering::SeqCst,
@@ -180,6 +187,13 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
         *result = Some(value);
         drop(result);
         self.ready.notify_all();
+    }
+
+    /// Inspect a completed measurement without waiting for its worker or a
+    /// contended publication lock. Missing metadata remains unknown.
+    fn measured_value(&self) -> Option<(T, String)> {
+        let result = self.result.try_lock().ok()?;
+        Some((result.as_ref()?.clone(), self.measured_at.try_lock().ok()?.clone()?))
     }
 
     /// When the capture finished, on the interference clock; `None` while it

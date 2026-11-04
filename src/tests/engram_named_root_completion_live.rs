@@ -3,6 +3,12 @@
 //! Uses the production host transport and a pinned Engram disposable store.
 use super::*;
 
+const COMPLETION_SUFFIX: &str = "r";
+const COMPLETION_WORKTREE: &str = ".w/r";
+
+#[path = "engram_registered_launcher_live.rs"]
+mod registered_launcher;
+
 #[path = "engram_legacy_root_recovery_live.rs"]
 mod legacy_recovery;
 
@@ -27,15 +33,97 @@ mod build_checks;
 #[path = "test_run_registration_revision_live.rs"]
 mod registration_revision;
 
+#[path = "engram_named_root_stale_fence_live.rs"]
+mod stale_fence_live;
+
 pub(super) struct CompletionFixture {
+    // This field drops before the state and its workers release the root.
+    _evidence: CompletionEvidenceRetention,
     pub(super) live: LiveRootFixture,
     pub(super) root: PathBuf,
     pub(super) home: PathBuf,
     pub(super) project_id: String,
 }
 
+struct CompletionEvidenceRetention(Arc<TestTempRoot>);
+
+impl Drop for CompletionEvidenceRetention {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.retain_for_diagnosis();
+        }
+    }
+}
+
+#[test]
+fn failed_completion_fixture_retains_artifacts_after_worker_release() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let successful = Arc::new(TestTempRoot::create("completion-cleanup"));
+    let successful_path = successful.path().to_owned();
+    let cleaned = successful.observe_cleanup();
+    drop(CompletionEvidenceRetention(successful.clone()));
+    std::thread::spawn(move || drop(successful)).join().unwrap();
+    cleaned
+        .recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
+        .unwrap()
+        .expect("a successful fixture reports successful cleanup");
+    assert!(!successful_path.exists());
+    assert!(!TestTempRoot::owner_marker(&successful_path).exists());
+
+    let root = Arc::new(TestTempRoot::create("completion-retention"));
+    let path = root.path().to_owned();
+    fs::write(path.join("original-run.log"), "original failure\n").unwrap();
+    let released = root.observe_cleanup();
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _evidence = CompletionEvidenceRetention(root.clone());
+        panic!("fixture failure witness");
+    }))
+    .is_err());
+    std::thread::spawn(move || drop(root)).join().unwrap();
+    assert!(released
+        .recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
+        .unwrap()
+        .unwrap_err()
+        .contains("retained failed fixture"));
+    assert_eq!(
+        fs::read_to_string(path.join("original-run.log")).unwrap(),
+        "original failure\n"
+    );
+    assert!(TestTempRoot::owner_marker(&path).is_file());
+    fs::remove_file(path.join("original-run.log")).unwrap();
+    fs::remove_dir(&path).unwrap();
+    fs::remove_file(TestTempRoot::owner_marker(&path)).unwrap();
+}
+
+#[test]
+fn completion_fixture_layout_keeps_the_windows_helper_path_bounded() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let root = TestTempRoot::create("termal-test-state");
+    let scratch = root
+        .path()
+        .join(format!("live-root-project-{COMPLETION_SUFFIX}"))
+        .join(COMPLETION_WORKTREE)
+        .join(".tmp/ow/o-XXXXXX");
+    #[cfg(windows)]
+    assert!(
+        scratch.to_string_lossy().len() <= 200,
+        "fixture path: {}",
+        scratch.display()
+    );
+    #[cfg(not(windows))]
+    assert!(scratch.starts_with(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp")));
+}
+
 impl CompletionFixture {
     pub(super) fn command(&self, session_id: &str, args: &[&str], work: bool) -> Value {
+        let output = self.command_output(session_id, args, work);
+        assert!(output.status.success(), "Engram {args:?} failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error|
+            panic!("Engram {args:?}: {error}: {}", String::from_utf8_lossy(&output.stdout)))
+    }
+
+    fn command_output(&self, session_id: &str, args: &[&str], work: bool) -> std::process::Output {
         let (actor_id, actor_context) = {
             let inner = self.live.state.inner.lock().expect("state mutex poisoned");
             engram_runtime_actor_identity(
@@ -57,19 +145,7 @@ impl CompletionFixture {
                 command.args(["--actor-context", context]);
             }
         }
-        let output = command.args(args).output().expect("Engram launches");
-        assert!(
-            output.status.success(),
-            "Engram {args:?} failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-            panic!(
-                "Engram {args:?}: {error}: {}",
-                String::from_utf8_lossy(&output.stdout)
-            )
-        })
+        command.args(args).output().expect("Engram launches")
     }
 
     pub(super) fn work(&self, session_id: &str, args: &[&str]) -> Value {
@@ -230,6 +306,13 @@ impl CompletionFixture {
         -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
     {
         let (registration, frozen) = self.prepare_registered_check(session, root, command, true);
+        self.record_registered_check(registration, frozen)
+    }
+
+    fn record_registered_check(&self, registration: TestRunRegistration, frozen: EngramVerificationRecordFrozen)
+        -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
+    {
+        let session = registration.initiating_session_id.as_str();
         let run_id = registration.run_id.clone();
         let route = self.live.state.engram_verification_record_route(&registration).unwrap();
         let sent = engram_verification_record_send(frozen.clone(), Ok(route.link()));
@@ -330,8 +413,12 @@ impl CompletionFixture {
 }
 
 pub(super) fn completion_fixture() -> CompletionFixture {
-    let suffix = "recovered-named-completion";
+    // Avoid nesting the compiler helper below the outer launcher's long temp
+    // path. Placement is local to this test thread, without changing env vars.
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let suffix = COMPLETION_SUFFIX;
     let live = live_root_fixture(suffix, []);
+    let evidence = CompletionEvidenceRetention(live.state.test_temp_root.as_ref().unwrap().clone());
     let base = live.state.test_temp_root.as_ref().unwrap().path();
     let root = base.join(format!("live-root-project-{suffix}"));
     let home = base.join(format!("live-root-home-{suffix}"));
@@ -360,7 +447,7 @@ pub(super) fn completion_fixture() -> CompletionFixture {
     fs::write(root.join("README.md"), "initial content\n").unwrap();
     fs::write(
         root.join(".gitignore"),
-        "target/\nCargo.lock\n.worktrees/\n",
+        "target/\nCargo.lock\n.worktrees/\n.w/\n.tmp/\n",
     )
     .unwrap();
     run_git_test_command(
@@ -401,6 +488,19 @@ pub(super) fn completion_fixture() -> CompletionFixture {
             },
         )
         .expect("real readiness supplies the canonical store identity");
+    // Enabling drains the queue, which starts the advisory context read off
+    // this thread. It has to finish first, or it publishes after the witnesses
+    // below. Its claim releases the flag on every exit.
+    let context_read = phase_sync::PollGuard::new();
+    while {
+        let inner = live.state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&live.session_id)
+            .expect("completion session exists");
+        inner.sessions[index].engram.context_nudge_in_progress
+    } {
+        context_read.wait("the context read enabling started finishes");
+    }
     {
         let mut inner = live.state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -408,11 +508,11 @@ pub(super) fn completion_fixture() -> CompletionFixture {
             .expect("completion session exists");
         // Enabling invalidates orientation; these witnesses isolate handoff
         // from the optional context page, as the prompt fixture does.
-        assert!(!inner.sessions[index].engram.context_nudge_in_progress);
         inner.sessions[index].engram.pending_context_nudge = None;
         inner.sessions[index].engram.context_nudge_pending = false;
     }
     let fixture = CompletionFixture {
+        _evidence: evidence,
         live,
         root,
         home,
@@ -462,6 +562,7 @@ fn objects_with_key<'a>(value: &'a Value, key: &str, found: &mut Vec<&'a Value>)
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     let fixture = completion_fixture();
+    registered_launcher::install_launcher(&fixture);
     let first = &fixture.live.session_id;
     let added = fixture.work(first, &["add", "Check the recovered named worktree",
         "--accept", "A test passes in the named root", "--bind", "1=test", "--json"]);
@@ -483,7 +584,7 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     fs::write(fixture.root.join("README.md"), "newer content before naming\n").unwrap();
     run_git_test_command(&fixture.root, &["add", "README.md"]);
     run_git_test_command(&fixture.root, &["commit", "--quiet", "-m", "newer fixture content"]);
-    let worktree = fixture.root.join(".worktrees/new-root");
+    let worktree = fixture.root.join(COMPLETION_WORKTREE);
     run_git_test_command(&fixture.root, &["worktree", "add", "--quiet", "-b", "new-root", worktree.to_str().unwrap()]);
     let second = create_test_project_session(&fixture.live.state, Agent::Codex, &fixture.project_id, &fixture.root);
     let _cleanup = LiveRootCleanup { transport: fixture.live.transport.clone(), session_id: second.clone() };
@@ -501,7 +602,9 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     fixture.work(&second, &["note", work, "Recovered holder checks the named root without an edit", "--status", "--json"]);
     let before = content_revision(&worktree).unwrap().1;
     fixture.begin(&second, "Run the real check without changing source.");
-    let (body, receipt) = fixture.registered_check(&second, &worktree, "cargo test --offline");
+    let closing_turn = fixture.record(&second, |record|
+        record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref.clone());
+    let (body, receipt) = registered_launcher::run_check(&fixture, &second, &worktree);
     assert_eq!(body.registration.binding, recovered);
     assert_eq!(body.registration.root.generation, named.generation as i64);
     let stored = fixture.object(&receipt.verifications[0].record_id);
@@ -510,18 +613,26 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     assert_eq!(content_revision(&worktree).unwrap().1, before);
     assert!(worktree.join(".git").is_file(), "naming never removes the worktree");
     for prior in earlier { assert!(fixture.live.transport.requests_for("execution_observe").contains(&prior)); }
+    let checkpoint_before_close = fixture.record(&second, |record| record.engram.runtime_checkpoint.clone());
     finish_live_root(&fixture.live.state, &second);
     fixture.wait_for_reports(&second);
+    eprintln!("PINNED_LAUNCHER_CLOSING {}", json!({
+        "checkpoint_before_close": checkpoint_before_close,
+        "reports": fixture.record(&second, |record| record.engram.unadmitted_reports.iter()
+            .filter(|report| report.host_turn_ref == closing_turn).cloned().collect::<Vec<_>>()),
+    }));
     let shown = fixture.work(&second, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
     let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("the registered native witness requires committed input"); };
+    let judged = acceptance_committed_judged_revision(commit);
+    assert_eq!(stored["source_basis"]["source_revision"], judged);
     let verification = &receipt.verifications[0].record_id;
     fixture.work(&second, &[
         "evaluate", work, "--mode", "same-session", "--acceptance-basis", &acceptance,
         "--evidence-basis", &evidence, "--verdict", "1=pass:observed", "--rationale",
-        "1=Real registered cargo test in the recovered named root passed without an edit",
-        "--evidence", &format!("1={verification}"), "--source-fingerprint", commit,
+        "1=Real registered test in the recovered named root passed without an edit",
+        "--evidence", &format!("1={verification}"), "--source-fingerprint", &judged,
         "--attempt", "named-completion", "--json",
     ]);
     let evaluated = fixture.canonical_read(&second, &recovered);
@@ -536,7 +647,7 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     fixture.live.state.run_engram_root_reclamation_pass(plan);
     assert!(fixture.live.state.inner.lock().unwrap().engram_work_source_roots.contains(&retained));
     fixture.work(&second, &["done", work, "Named-root registered check passed without an edit",
-        "--source-fingerprint", commit, "--json"]);
+        "--source-fingerprint", &judged, "--json"]);
     let final_show = fixture.work(&second, &["show", work, "--json"]);
     assert_eq!(final_show["status"]["work"]["lifecycle"], "completed", "{final_show:#}");
     let terminal = fixture.canonical_read(&second, &recovered);

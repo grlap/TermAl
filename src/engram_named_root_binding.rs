@@ -113,9 +113,15 @@ struct EngramNamedRootReadEvent {
 
 impl EngramNamedRootReadResponse {
     /// No-event absence on an open run cannot retire a potentially executable
-    /// intent. Terminal lifecycle, the exact committed binding, or a strictly
-    /// newer binding makes this immutable replay harmless or refused.
+    /// intent. Terminal lifecycle, the exact committed binding, a strictly
+    /// newer binding, or a superseded fence makes this immutable replay harmless
+    /// or refused. Engram refuses a Bound under any fence but the claim's current
+    /// one and fences only rise, so a Bound this read doesn't show can't apply
+    /// later. An Ended isn't fence-checked, and a read with no fence proves nothing.
     fn settles_intent(&self, intent: &EngramNamedRootEvent) -> bool {
+        if self.supersedes_fence_of(intent) {
+            return true;
+        }
         if matches!(self.run.state.as_str(), "completed" | "cancelled")
             || matches!(
                 self.named_root,
@@ -132,6 +138,15 @@ impl EngramNamedRootReadResponse {
                     && (event.kind == intent.kind || event.kind == EngramNamedRootKind::Ended)
         })
     }
+    fn supersedes_fence_of(&self, intent: &EngramNamedRootEvent) -> bool {
+        intent.kind == EngramNamedRootKind::Bound
+            && self
+                .claim
+                .as_ref()
+                .and_then(|claim| claim.fence)
+                .is_some_and(|fence| fence > intent.root.claim_fence)
+    }
+
     /// A read never supplies a receipt. It must cover the real receipt already
     /// held and associate both positions with this exact canonical run.
     fn covers(&self, journal: &EngramNamedRootJournal) -> bool {
@@ -1729,7 +1744,11 @@ impl AppState {
             Err(error) => {
                 // A refusal alone does not settle the immutable event. Only
                 // covering intent or lifecycle proof can end its retry custody.
-                if error.code.as_deref() == Some("named_root_binding_refused") {
+                // A Bound under a superseded fence gets either code: the
+                // mismatch when the work's revision moved after the fence rose.
+                if let Some(code @ ("named_root_binding_refused" | "work_claim_mismatch")) =
+                    error.code.as_deref()
+                {
                     let proof = match self.read_engram_authority_fact_until(
                         target, &binding, deadline,
                     ) {
@@ -1740,6 +1759,7 @@ impl AppState {
                             return Err(read_error);
                         }
                     };
+                    let settled = proof.settles_intent(event);
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     Self::learn_engram_authority_locked(
                         &mut inner,
@@ -1751,7 +1771,7 @@ impl AppState {
                         .engram_named_root_journal
                         .iter()
                         .position(|journal| journal.pending.as_ref() == Some(event))
-                        && proof.settles_intent(event)
+                        && settled
                     {
                         inner.engram_named_root_journal[index].pending = None;
                         if proof.definitively_unbound() {
@@ -1764,9 +1784,16 @@ impl AppState {
                     }
                     drop(inner);
                     self.publish_engram_authority_until(&event.root.store, &owner, deadline)?;
-                    return Err(ApiError::conflict(format!(
-                        "named_root_binding_refused: {error}. Refresh the held claim before naming again."
-                    )));
+                    let next = if proof.supersedes_fence_of(event) {
+                        "This request can no longer apply and no longer blocks naming; name a root again under the held claim."
+                    } else if settled {
+                        "The canonical read settles this request, so it no longer blocks naming; name a root if this session still holds the claim."
+                    } else if event.kind == EngramNamedRootKind::Ended {
+                        "It stays pending: retry this same clear. If Engram keeps refusing it, release the claim and claim it again, which settles a clear of any root Engram recorded as bound."
+                    } else {
+                        "It stays pending: refresh the held claim and retry this same request."
+                    };
+                    return Err(ApiError::conflict(format!("{code}: {error}. {next}")));
                 }
                 return Err(ApiError::bad_gateway(format!(
                     "named_root_bind did not confirm the transition ({}): {error}. The exact intent is retained; retry the same naming request.",

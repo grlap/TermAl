@@ -1140,6 +1140,7 @@ fn a_check_stays_open_to_writes_until_its_artifact_is_read() {
     settled.finish(None);
     let reading: Arc<EngramCapture<EngramDeclaredResult>> = Arc::new(EngramCapture {
         result: Mutex::new(None),
+        measured_at: Mutex::new(None),
         ready: std::sync::Condvar::new(),
         ready_tick: std::sync::atomic::AtomicU64::new(0),
     });

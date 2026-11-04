@@ -704,6 +704,27 @@ fn context_nudge_dispatch_refreshes_acp_declaration_before_runtime_creation() {
 }
 
 #[test]
+fn context_nudge_read_claim_unwinding_over_a_poisoned_state_mutex_does_not_panic_again() {
+    let (state, id, _) = fixture(false);
+    let poisoner = state.clone();
+    assert!(std::thread::spawn(move || {
+        let _inner = poisoner.inner.lock().unwrap();
+        panic!("injected panic holding the state mutex");
+    }).join().is_err());
+    assert!(state.inner.inner.is_poisoned());
+    let claim = EngramContextNudgeReadClaim {
+        state: state.clone(), session_id: id, generation: 1,
+        armed: std::sync::atomic::AtomicBool::new(true),
+    };
+    // A second panic from the claim's Drop would abort this whole test process.
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _claim = claim;
+        panic!("injected worker panic");
+    }));
+    assert!(unwound.is_err());
+}
+
+#[test]
 fn context_nudge_superseded_entry_and_panicking_read_release_only_their_reservations() {
     for panic_read in [false, true] {
         let (state, id, root) = fixture(false);
