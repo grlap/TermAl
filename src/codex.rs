@@ -346,13 +346,15 @@ fn spawn_shared_codex_runtime(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if profile == SharedCodexProfile::ReadOnlySandbox {
+    if profile.needs_filtered_shell() {
         // Codex resolves its shell from this process's PATH. Without a
         // PowerShell 7 on it, Codex uses Windows PowerShell 5.1, which its
-        // read-only sandbox can start; see `shared_codex_profile.rs`. The
-        // Codex executable itself was resolved above, before PATH changes.
+        // read-only sandbox can start; delegated workspace-write threads also
+        // select this process environment. Their sandbox and approval policy
+        // still travel per thread. The Codex executable itself was resolved
+        // above, before PATH changes; see `shared_codex_profile.rs`.
         let path = shared_codex_read_only_sandbox_path()
-            .ok_or_else(|| anyhow!("cannot build the PATH for the read-only Codex app-server"))?;
+            .ok_or_else(|| anyhow!("cannot build the PATH for the sandbox-compatible Codex app-server"))?;
         command.env("PATH", path);
     }
     // This process hosts many TermAl sessions. Never let process-global

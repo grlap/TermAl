@@ -41,8 +41,8 @@ later discovery result.
 
 ## The one fact everything follows from
 
-**Codex does not run one process per chat. One long-lived Codex process hosts every
-*local* Codex session in a TermAl backend at once** (the "shared app-server";
+**Codex does not run one process per chat. One long-lived Codex process hosts the
+local sessions of each app-server profile** (the "shared app-server";
 remote-proxied sessions run on their own remote backend's app-server, and the handle
 lives on that backend's `AppState`). TermAl attaches many logical sessions to it and
 multiplexes JSON-RPC over a single stdio pipe:
@@ -51,6 +51,32 @@ multiplexes JSON-RPC over a single stdio pipe:
 Because the process is shared and long-lived, **its identity cannot answer
 per-session questions**. That single fact is the source of nearly every bug in this
 area.
+
+On Windows, new delegated WorkspaceWrite threads use a dedicated process and
+`shared-app-server-workspace-write` home. Its process PATH excludes directories
+containing `pwsh`, selecting Windows PowerShell 5.1 without changing the user's
+PATH, sandbox or approval policy. Read-only reviewers keep their separate
+`shared-app-server-read-only` process, so a worker process exit does not retire
+reviewers. Root WorkspaceWrite sessions keep the default profile.
+Tools found only through an excluded folder, including a shared `WindowsApps`
+shim folder, are also absent from this process's PATH. This affects both filtered
+profiles; it does not alter the user's PATH.
+
+An existing thread remains pinned to its recorded home, including after restart;
+the new profile does not move old worker threads. Dedicated homes are excluded
+from default-home startup discovery, which cannot resume their threads. Persisted
+TermAl session records retain each thread's profile for ordinary resumption.
+Every writable Windows Codex child receives shell guidance, including Reviewer
+and Explorer modes using a writable worktree policy. The brief names PowerShell
+5.1's rejection of `&&` and `||`; commands are not translated silently, and native
+parser errors remain visible. It also warns against writing source through
+PowerShell text cmdlets or redirection: their encoding defaults can corrupt
+non-ASCII bytes or change BOMs while exiting successfully. Children read through
+native Git or rg, edit with `apply_patch` or native tools that preserve the file's
+encoding, and inspect `git diff` for unintended encoding changes. This is guidance,
+not an encoding enforcement mechanism. See
+[Windows Codex writable children](./agent-delegation-sessions.md#windows-codex-writable-children)
+for the delegation boundary.
 
 ## Descriptor capacity
 

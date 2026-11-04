@@ -244,7 +244,7 @@ fn sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission) -> u64 
 
 #[cfg(test)]
 fn wait_for_sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission, expected: u64) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + crate::TEST_PHASE_DEADLOCK_GUARD;
     let mut state = lock_sqlite_state_writer_admission(lock);
     while state.next_ticket < expected {
         let remaining = deadline

@@ -53,7 +53,7 @@ async fn work_routes_validate_and_detect_without_available_cli_permits() {
         ),
     ] {
         let (status, _): (StatusCode, Value) = tokio::time::timeout(
-            Duration::from_secs(2),
+            crate::TEST_PHASE_DEADLOCK_GUARD,
             request_json(
                 &app,
                 Request::builder()
@@ -1034,7 +1034,7 @@ async fn removed_tracker_routes_are_refused_without_cli_admission() {
         ("work/beads/retired", StatusCode::NOT_FOUND),
     ] {
         let response = tokio::time::timeout(
-            Duration::from_secs(2),
+            crate::TEST_PHASE_DEADLOCK_GUARD,
             app.clone().oneshot(
                 Request::builder()
                     .uri(format!("/api/projects/{project}/{route}"))

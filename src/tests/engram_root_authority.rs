@@ -1444,7 +1444,7 @@ fn connected_authority_candidate_ack(supersede: bool) {
     });
     let mut batch = PersistFenceBatch::default();
     loop {
-        let request = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let request = rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
         let fence = matches!(request, PersistRequest::Fence(_));
         batch.accept(request);
         if fence {
@@ -1713,7 +1713,7 @@ fn connected_authority_settlement_failure(entry: &'static str) {
     let mut failed_candidate = false;
     for _ in 0..6 {
         let mut has_fence = false;
-        for _ in 0..50 {
+        for _ in 0..3000 {
             match rx.recv_timeout(Duration::from_millis(20)) {
                 Ok(request) => {
                     has_fence = matches!(request, PersistRequest::Fence(_));
@@ -2005,7 +2005,7 @@ fn source_root_authority_removed_reader_requires_a_durable_pre_io_guard() {
     });
     let mut batch = PersistFenceBatch::default();
     let mut has_fence = false;
-    for _ in 0..50 {
+    for _ in 0..3000 {
         match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(request) => {
                 has_fence = matches!(request, PersistRequest::Fence(_));

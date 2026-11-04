@@ -346,6 +346,8 @@ struct MailboxStore {
     #[cfg(test)]
     before_native_wake: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
+    before_relay_association_authorize: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(test)]
     internal_writer_waiters: Mutex<usize>,
     #[cfg(test)]
     internal_writer_waiter_changed: Condvar,
@@ -1619,6 +1621,8 @@ impl MailboxStore {
             #[cfg(test)]
             before_native_wake: Mutex::new(None),
             #[cfg(test)]
+            before_relay_association_authorize: Mutex::new(None),
+            #[cfg(test)]
             internal_writer_waiters: Mutex::new(0),
             #[cfg(test)]
             internal_writer_waiter_changed: Condvar::new(),
@@ -1641,6 +1645,7 @@ impl MailboxStore {
             relay_live_queued: Mutex::new(HashMap::new()),
             relay_home_wake_refusals: MailboxRelayHomeWakeRefusals::default(),
             before_native_wake: Mutex::new(None),
+            before_relay_association_authorize: Mutex::new(None),
             internal_writer_waiters: Mutex::new(0),
             internal_writer_waiter_changed: Condvar::new(),
         }
@@ -1805,7 +1810,7 @@ impl MailboxStore {
 
     #[cfg(test)]
     fn wait_for_dispatch_outcome_waiter(&self, message_id: &str) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + crate::TEST_PHASE_DEADLOCK_GUARD;
         let mut state = self
             .dispatch_finalization
             .state
@@ -1836,7 +1841,7 @@ impl MailboxStore {
 
     #[cfg(test)]
     fn wait_for_internal_writer_waiter(&self) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + crate::TEST_PHASE_DEADLOCK_GUARD;
         let mut waiters = self
             .internal_writer_waiters
             .lock()

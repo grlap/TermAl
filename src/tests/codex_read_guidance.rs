@@ -1,9 +1,9 @@
-// The Windows read-only Codex reviewer's source-read guidance in the
-// delegation prompt.
+// Windows Codex source-read and writable-shell guidance in delegation prompts.
 //
 // Owns: tests that a Windows, Codex, read-only delegation's prompt carries the
 // Unicode-safe native source-read guidance, that no other delegation's prompt
-// does, and that the /review-code command carries the same text.
+// does, and that the /review-code command carries the same text. Also covers
+// parser and encoding guidance for every writable Codex delegation mode.
 // Does not own: the rest of the delegation prompt, whose tests stay in
 // delegations.rs, delegation_child_links.rs and kimi_read_only.rs.
 
@@ -11,6 +11,7 @@ use super::*;
 
 /// The guidance's opening words.
 const CODEX_READ_GUIDANCE_START: &str = "Windows read-only Codex inspection:";
+const CODEX_WRITE_GUIDANCE_START: &str = "Windows Codex writable-child shell:";
 
 /// The /review-code command, which carries the same guidance for reviewers.
 const REVIEW_CODE_COMMAND: &str = include_str!("../../.claude/commands/review-code.md");
@@ -49,6 +50,56 @@ fn delegation_record(agent: Agent, write_policy: DelegationWritePolicy) -> Deleg
 
 fn read_only_codex() -> DelegationRecord {
     delegation_record(Agent::Codex, DelegationWritePolicy::ReadOnly)
+}
+
+#[test]
+fn windows_writable_codex_briefs_explain_parser_errors_and_encoding_without_translation() {
+    for mode in [
+        DelegationMode::Worker,
+        DelegationMode::Reviewer,
+        DelegationMode::Explorer,
+    ] {
+        for write_policy in [
+            DelegationWritePolicy::IsolatedWorktree {
+                owned_paths: vec!["src".to_owned()],
+                worktree_path: None,
+                base: None,
+            },
+            DelegationWritePolicy::SharedWorktree {
+                owned_paths: vec!["src".to_owned()],
+            },
+        ] {
+            let mut child = delegation_record(Agent::Codex, write_policy);
+            child.mode = mode;
+            child.prompt = "Run the requested check".to_owned();
+            let prompt = build_delegation_prompt_on(&child, true);
+            for detail in [
+                "Windows PowerShell 5.1",
+                "rejects && and ||",
+                "parser error",
+                "do not silently translate",
+                "Do not write or rewrite source through PowerShell text cmdlets",
+                "Get-Content/Set-Content pipelines and Out-File",
+                "> / >> redirection",
+                "corrupt non-ASCII bytes or change BOMs while exiting 0",
+                "Use apply_patch or native editing tools that preserve the file's encoding",
+                "inspect git diff for unintended encoding changes",
+                "workspace-write sandbox or approval policy",
+            ] {
+                assert!(prompt.contains(detail), "missing {detail}: {prompt}");
+            }
+            assert_eq!(prompt.matches(CODEX_WRITE_GUIDANCE_START).count(), 1);
+            assert!(prompt.contains(&child.prompt));
+            assert!(!prompt.contains(CODEX_READ_GUIDANCE_START));
+            assert!(!build_delegation_prompt_on(&child, false)
+                .contains(CODEX_WRITE_GUIDANCE_START));
+            child.agent = Agent::Claude;
+            assert!(!build_delegation_prompt_on(&child, true)
+                .contains(CODEX_WRITE_GUIDANCE_START));
+        }
+    }
+    assert!(!build_delegation_prompt_on(&read_only_codex(), true)
+        .contains(CODEX_WRITE_GUIDANCE_START));
 }
 
 /// On Windows a read-only Codex delegation is told to read source through

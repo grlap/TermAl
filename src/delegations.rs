@@ -2629,6 +2629,13 @@ Final answer requirements:\n\
         prompt.push_str("\n\n");
         prompt.push_str(&worker_handoff_prompt(record));
     }
+    if windows
+        && record.agent == Agent::Codex
+        && !matches!(record.write_policy, DelegationWritePolicy::ReadOnly)
+    {
+        prompt.push_str("\n\n");
+        prompt.push_str(WINDOWS_CODEX_WRITABLE_SHELL);
+    }
     if record.mode == DelegationMode::Reviewer {
         prompt.push_str("\n\n");
         prompt.push_str(DELEGATION_REVIEW_RESULT_PROTOCOL_INSTRUCTIONS.trim());
@@ -2654,6 +2661,11 @@ Final answer requirements:\n\
     }
     prompt
 }
+
+/// Every writable Codex child uses the same Windows shell profile, regardless
+/// of its delegation mode. Its brief covers both parser and file-encoding
+/// differences without changing the child's write policy.
+const WINDOWS_CODEX_WRITABLE_SHELL: &str = "Windows Codex writable-child shell: new delegated workspace-write threads use Windows PowerShell 5.1. It rejects && and || as statement separators. Use separate commands, or express the intended success/failure condition explicitly in PowerShell; do not silently translate a command and change its meaning. If a parser error occurs, report it and correct the syntax. Read source through native Git or rg output. Do not write or rewrite source through PowerShell text cmdlets (including Get-Content/Set-Content pipelines and Out-File) or > / >> redirection: their encoding defaults can corrupt non-ASCII bytes or change BOMs while exiting 0. Use apply_patch or native editing tools that preserve the file's encoding, and inspect git diff for unintended encoding changes. Existing threads keep their original shell environment. Shell selection does not change the child's workspace-write sandbox or approval policy.";
 
 /// Appended to a read-only Codex child's prompt on Windows. Its restricted
 /// default shell renders text through PowerShell, which can corrupt non-ASCII

@@ -67,9 +67,62 @@ async function identicalExport(directory, files, manifest) {
   }
 }
 
+// On Windows, renaming a directory fails while another process holds a handle
+// on anything inside it. A file just written to the staging directory can be
+// held that way for a moment. The rename waits for such a holder within a
+// budget that only detects one that never lets go: observed holds last under
+// 20 ms, and a longer budget costs time only when a refusal lasts. The staging
+// contents are already complete, so this retries nothing but the rename. The
+// first error is reported past the budget, with the attempts and time spent;
+// any other error or platform fails at once. A wait that succeeds is returned
+// beside the result, outside the manifest, so it stays visible.
+const PUBLISH_SHARING_BUDGET_MS = 10_000;
+const PUBLISH_SHARING_FIRST_BACKOFF_MS = 10;
+const PUBLISH_SHARING_MAX_BACKOFF_MS = 200;
+const PUBLISH_SHARING_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+const destinationAbsent = (destination) => fs.lstat(destination)
+  .then(() => false, (error) => error.code === "ENOENT");
+
+async function renameWithinSharingBudget(staging, destination, {
+  platform = process.platform,
+  rename = fs.rename,
+  now = () => performance.now(),
+  sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  budgetMs = PUBLISH_SHARING_BUDGET_MS,
+} = {}) {
+  const started = now();
+  let backoff = PUBLISH_SHARING_FIRST_BACKOFF_MS;
+  let firstError;
+  let attempts = 0;
+  const giveUp = () => {
+    firstError.publishAttempts = attempts;
+    firstError.publishElapsedMs = now() - started;
+    return firstError;
+  };
+  for (;;) {
+    attempts += 1;
+    try {
+      await rename(staging, destination);
+      return attempts > 1 ? { attempts, elapsedMs: now() - started } : undefined;
+    } catch (error) {
+      if (platform !== "win32" || !PUBLISH_SHARING_ERRORS.has(error.code)) throw error;
+      // An existing destination is not a holder: the caller settles it.
+      if (!(await destinationAbsent(destination))) throw error;
+      firstError ??= error;
+      const remaining = budgetMs - (now() - started);
+      if (remaining <= 0) throw giveUp();
+      await sleep(Math.min(backoff, remaining));
+      backoff = Math.min(backoff * 2, PUBLISH_SHARING_MAX_BACKOFF_MS);
+      // A sleep may overrun the budget; the deadline holds regardless.
+      if (now() - started >= budgetMs) throw giveUp();
+    }
+  }
+}
+
 /** Export one pinned attempt. Existing differing artifacts are never replaced. */
 export async function exportReviewAttempt({ baseUrl, parentSessionId, delegationId, submissionAttempt,
-  resultId: expectedResultId, outputRoot, repositoryRoot, fetcher = fetch }) {
+  resultId: expectedResultId, outputRoot, repositoryRoot, fetcher = fetch, publish }) {
   if (!identifier(parentSessionId) || !identifier(delegationId)
       || !Number.isSafeInteger(submissionAttempt) || submissionAttempt < 1) throw new Error("explicit parent, delegation and positive submission attempt are required");
   if (expectedResultId !== undefined && !identifier(expectedResultId)) throw new Error("invalid explicit result identity");
@@ -145,19 +198,22 @@ export async function exportReviewAttempt({ baseUrl, parentSessionId, delegation
   const written = [];
   let publishedManifest = manifest;
   let unchanged = false;
+  let publishWait;
   try {
     for (const [name, bytes] of files) {
       await fs.writeFile(path.join(staging, name), bytes, { flag: "wx" });
       written.push(name);
     }
-    try { await fs.rename(staging, destination); }
+    try { publishWait = await renameWithinSharingBudget(staging, destination, publish); }
     catch (error) {
       const existing = await identicalExport(destination, files, manifest);
       if (!existing) throw error;
       publishedManifest = existing;
       unchanged = true;
-      for (const name of written) await fs.unlink(path.join(staging, name));
-      await fs.rmdir(staging);
+      // The identical export is published, so a holder that still blocks this
+      // cleanup must not fail it. A leftover staging directory is not a manifest.
+      for (const name of written) await fs.unlink(path.join(staging, name)).catch(() => {});
+      await fs.rmdir(staging).catch(() => {});
     }
   } catch (error) {
     // Only the exact files created by this invocation are eligible for cleanup.
@@ -165,7 +221,7 @@ export async function exportReviewAttempt({ baseUrl, parentSessionId, delegation
     await fs.rmdir(staging).catch(() => {});
     throw error;
   }
-  return { directory: destination, unchanged, manifest: publishedManifest };
+  return { directory: destination, unchanged, manifest: publishedManifest, ...(publishWait ? { publishWait } : {}) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
@@ -176,5 +232,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   }
   const result = await exportReviewAttempt({ baseUrl: args[1], parentSessionId: args[3], delegationId: args[5],
     submissionAttempt: Number(args[7]), outputRoot: args[9], resultId: args[11] });
-  console.log(JSON.stringify({ directory: result.directory, unchanged: result.unchanged, resultId: result.manifest.resultId }));
+  console.log(JSON.stringify({ directory: result.directory, unchanged: result.unchanged, resultId: result.manifest.resultId,
+    ...(result.publishWait ? { publishWait: result.publishWait } : {}) }));
 }

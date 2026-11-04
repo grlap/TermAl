@@ -129,6 +129,12 @@ validates the first export's raw files against its original hashes and preserves
 those exact bytes and manifest. Changed retained content or damaged artifacts
 are refused and never overwrite its files. An external latest index may reference
 these manifests without replacing them.
+On Windows another process can briefly hold a file just written to the staging
+directory, which refuses the rename that publishes it. The exporter waits for
+such a holder for up to 10 s, on Windows and for EPERM, EACCES and EBUSY only,
+so a lasting refusal, such as a real permission problem, takes that long to
+report. Its error then carries the attempts and elapsed time. A wait that
+succeeded appears as `publishWait` in the output, outside the manifest.
 The `--parent` route argument names the requesting session; an eligible reader
 supplies its own ID. New manifests record that observation as `requesterSessionId`.
 It is excluded from retained-content identity comparison, as is the legacy

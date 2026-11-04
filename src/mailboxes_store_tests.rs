@@ -778,7 +778,7 @@ fn sqlite_state_writer_admission_serves_request_and_internal_tickets_in_fifo_ord
     let (request_acquired_tx, request_acquired_rx) = mpsc::channel();
     let (release_request_tx, release_request_rx) = mpsc::channel();
     let request_thread = std::thread::spawn(move || {
-        let _guard = lock_sqlite_state_writer_for(&request_admission, Duration::from_secs(2))
+        let _guard = lock_sqlite_state_writer_for(&request_admission, crate::TEST_PHASE_DEADLOCK_GUARD)
             .expect("queued request writer should acquire before its diagnostic deadline");
         request_acquired_tx
             .send(())
@@ -801,7 +801,7 @@ fn sqlite_state_writer_admission_serves_request_and_internal_tickets_in_fifo_ord
 
     drop(first_guard);
     request_acquired_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
         .expect("the first queued request ticket should acquire first");
     assert!(
         matches!(
@@ -814,7 +814,7 @@ fn sqlite_state_writer_admission_serves_request_and_internal_tickets_in_fifo_ord
         .send(())
         .expect("request writer should still be waiting for release");
     internal_acquired_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
         .expect("internal ticket should acquire after request release");
 
     request_thread
@@ -851,7 +851,7 @@ fn sqlite_state_writer_admission_skips_a_timed_out_head_ticket() {
     // stall behind a waiter that has already returned a 503.
     drop(first_guard);
     next_acquired_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
         .expect("queue advancement should skip the canceled head ticket");
     next_thread.join().expect("next writer thread should join");
 }

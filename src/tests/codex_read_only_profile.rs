@@ -69,6 +69,89 @@ fn a_read_only_codex_child_gets_the_read_only_sandbox_and_its_app_server_profile
     );
 }
 
+#[test]
+fn a_fresh_codex_worker_uses_the_filtered_profile_without_changing_permissions() {
+    let mut inner = StateInner::new();
+    let mut child = inner.create_session(
+        Agent::Codex, Some("Worker".to_owned()), "/tmp".to_owned(), None, None,
+    );
+    configure_delegation_child_prompt_settings(
+        &mut child, DelegationMode::Worker,
+        &DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: vec!["src".to_owned()], base: None, worktree_path: None,
+        },
+    );
+    // The real creation path sets this before starting the child's first turn.
+    child.session.parent_delegation_id = Some("delegation-worker".to_owned());
+    let expected = if cfg!(windows) {
+        SharedCodexProfile::WorkspaceWriteSandbox
+    } else {
+        SharedCodexProfile::Default
+    };
+    assert_eq!(child.shared_codex_profile(), expected);
+    assert_eq!(child.codex_sandbox_mode, CodexSandboxMode::WorkspaceWrite);
+    assert_eq!(child.session.sandbox_mode, Some(CodexSandboxMode::WorkspaceWrite));
+    assert_eq!(child.codex_approval_policy, CodexApprovalPolicy::AutoApprove);
+    assert_eq!(child.session.approval_policy, Some(CodexApprovalPolicy::AutoApprove));
+    child.session.status = SessionStatus::Active;
+    assert_eq!(child.codex_sandbox_change_refusal(CodexSandboxMode::ReadOnly).is_some(), cfg!(windows),
+        "a first turn cannot change the app-server it may be creating its thread on");
+    child.session.status = SessionStatus::Idle;
+
+    child.attach_to_shared_codex_profile(child.shared_codex_profile());
+    set_record_external_session_id(&mut child, Some("worker-thread".to_owned()));
+    let reloaded = PersistedSessionRecord::from_record(&child).into_record().unwrap();
+    assert_eq!(reloaded.shared_codex_profile(), expected);
+    assert_eq!(reloaded.codex_sandbox_mode, CodexSandboxMode::WorkspaceWrite);
+}
+
+#[test]
+fn an_existing_worker_keeps_its_home_and_a_root_keeps_its_default_profile() {
+    let mut root = delegation_child_sandbox(DelegationWritePolicy::SharedWorktree {
+        owned_paths: vec!["src".to_owned()],
+    });
+    assert!(root.session.parent_delegation_id.is_none());
+    assert_eq!(root.shared_codex_profile(), SharedCodexProfile::Default);
+
+    // A recorded worker thread cannot move homes, including one whose profile
+    // was absent before it was persisted. Re-sending its current mode is safe.
+    root.session.parent_delegation_id = Some("delegation-existing".to_owned());
+    set_record_external_session_id(&mut root, Some("existing-worker-thread".to_owned()));
+    for pinned in [None, Some(SharedCodexProfile::Default)] {
+        root.codex_thread_profile = pinned;
+        assert_eq!(root.shared_codex_profile(), SharedCodexProfile::Default);
+        assert!(root.codex_sandbox_change_refusal(CodexSandboxMode::WorkspaceWrite).is_none());
+    }
+    root.codex_sandbox_mode = CodexSandboxMode::DangerFullAccess;
+    let refusal = root.codex_sandbox_change_refusal(CodexSandboxMode::WorkspaceWrite);
+    assert_eq!(refusal.is_some(), cfg!(windows));
+    assert_eq!(root.shared_codex_profile(), SharedCodexProfile::Default);
+}
+
+#[test]
+fn a_worker_profile_exit_leaves_reviewer_and_root_processes_running() {
+    let state = test_app_state();
+    for (profile, runtime_id) in [
+        (SharedCodexProfile::Default, "isolated-root"),
+        (SharedCodexProfile::ReadOnlySandbox, "isolated-reviewer"),
+        (SharedCodexProfile::WorkspaceWriteSandbox, "isolated-worker"),
+    ] {
+        let (runtime, _, _) = test_shared_codex_runtime(runtime_id);
+        *state.shared_codex_runtime_slot(profile).lock().unwrap() = Some(runtime);
+    }
+    assert_eq!(state.shared_codex_profile_holding("isolated-worker"),
+        Some(SharedCodexProfile::WorkspaceWriteSandbox));
+    assert!(state.shared_codex_stdout_silence_if_matches("isolated-worker").is_some());
+    state.handle_shared_codex_runtime_exit("isolated-worker", None).unwrap();
+    assert!(state.running_shared_codex_runtime(SharedCodexProfile::WorkspaceWriteSandbox).is_none());
+    for (profile, expected) in [
+        (SharedCodexProfile::Default, "isolated-root"),
+        (SharedCodexProfile::ReadOnlySandbox, "isolated-reviewer"),
+    ] {
+        assert_eq!(state.running_shared_codex_runtime(profile).unwrap().runtime_id, expected);
+    }
+}
+
 // The read-only app-server's PATH leaves out every directory that holds a
 // PowerShell 7, including a Store app-execution alias, and keeps the rest in
 // order.
@@ -133,12 +216,12 @@ fn each_profile_keeps_its_own_app_server() {
                 SharedCodexProfile::ReadOnlySandbox,
                 "thread/list",
                 json!({}),
-                Duration::from_secs(5),
+                crate::TEST_PHASE_DEADLOCK_GUARD,
             )
         }
     });
     match read_only_rx
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
         .expect("the read-only app-server receives the request")
     {
         CodexRuntimeCommand::JsonRpcRequest {
@@ -397,6 +480,7 @@ fn discovery_skips_the_read_only_codex_home() {
     for scope in [
         SharedCodexProfile::Default.codex_home_scope(),
         SharedCodexProfile::ReadOnlySandbox.codex_home_scope(),
+        SharedCodexProfile::WorkspaceWriteSandbox.codex_home_scope(),
         "repl",
         "other-scope",
     ] {
@@ -410,5 +494,6 @@ fn discovery_skips_the_read_only_codex_home() {
     assert!(names.contains(&SharedCodexProfile::Default.codex_home_scope()));
     assert!(names.contains(&"other-scope"));
     assert!(!names.contains(&SharedCodexProfile::ReadOnlySandbox.codex_home_scope()));
+    assert!(!names.contains(&SharedCodexProfile::WorkspaceWriteSandbox.codex_home_scope()));
     assert!(!names.contains(&"repl"));
 }

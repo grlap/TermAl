@@ -401,7 +401,7 @@ termal/
 │   ├── codex*.rs            # Codex runtime, RPC, events, and thread actions
 │   ├── gemini.rs / acp*.rs  # Shared ACP runtime and Gemini integration
 │   ├── opencode.rs / kimi*.rs # OpenCode and Kimi ACP adapters
-│   ├── engram_*.rs         # Engram host adapter, admission, observations, checks
+│   ├── engram_*.rs         # Engram host adapter, observations, checks
 │   ├── work_*.rs           # Read-only Work and project-memory readers
 │   ├── delegat*.rs         # Child sessions, policies, results, MCP tools, waits
 │   ├── mailboxes.rs        # Durable cross-session messaging

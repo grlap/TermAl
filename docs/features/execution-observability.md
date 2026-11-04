@@ -66,17 +66,19 @@ With Execution Observability on as well:
 
 The ordinary handoff prepares its opening source-root guidance locally and
 performs no Engram read. There is a current exception
-earlier on queue drains, including Resume and queued mailbox wakes:
-[`start_next_queued_turn_inner_off_lock`](../../src/turn_dispatch.rs) calls
+earlier on direct sends and on queue drains, including Resume and queued
+mailbox wakes: [`dispatch_or_queue_turn_with_followup`](../../src/turn_dispatch.rs)
+and [`start_next_queued_turn_inner_off_lock`](../../src/turn_dispatch.rs) call
 [`prepare_engram_context_nudge_off_lock`](../../src/engram_mcp_config.rs)
 synchronously to prepare the base-tier work context. Its production command
 deadline is six seconds; waiting for an existing refresh owner has a
 seven-second deadline. This preparation can delay provider enqueue by about
 seven seconds under those bounds. Failure is advisory: the prompt still
 proceeds, with context refresh left pending. The bounds apply to a
-preparation, not a promise that every drain finishes within seven seconds.
+preparation, not a promise that every send or drain finishes within seven
+seconds.
 
-Moving this remaining synchronous context-nudge preparation off queue drains
+Moving this remaining synchronous context-nudge preparation off the send path
 is open follow-up work. It is not part of the completed removal of per-turn
 authorization; see the host adapter's
 [start and post-compaction context](engram-host-adapter.md#start-and-post-compaction-context).
@@ -97,10 +99,13 @@ authorization; see the host adapter's
 - It sends no environment or toolchain evidence, and it no longer binds one
   full gate to the other items of a batch
   ([batch full gates](batch-full-gates.md)).
-- It does not compare one turn's source with the previous turn's. A turn's
-  source change is measured against a compatible checkpoint an earlier build
-  recorded, when one exists, and is otherwise reported as
-  `assumed_missing_baseline`.
+- It compares a turn's source with nothing but the previous traced turn's
+  recorded closing sighting, under the exact same binding, source root, root
+  generation and root state. A compatible checkpoint an earlier build recorded
+  serves once in that place. Without either, as after a refused, undelivered or
+  late sighting or a rebind, the turn reports `assumed_missing_baseline`, with
+  no older baseline to fall back on. A turn with uncertain source attribution
+  reports no source change and leaves no baseline.
 - It does not promise that a turn in which the agent takes or changes a claim
   is reported or credited under it. A turn is traced only if its project has a
   verified store or its session already has a work binding when it starts. The

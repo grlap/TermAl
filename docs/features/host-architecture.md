@@ -18,12 +18,15 @@ commit `28e9ed5` and the structure the backend moves to.
 
 Since 2026-11-01 TermAl asks Engram for no per-turn authorization
 ([Execution Observability](./execution-observability.md)); turn gating has
-been removed. Turn admission in
-section 2.3 and rows 1, 3, 4, 7, 10 and 14 of the conformance table in
-section 5 describe the build at `28e9ed5`, not current behaviour. The field
-inventories in sections 6.2–6.4 also describe that historical build; they are
-not the current stored-state or client contract. Current batch credit limits
-are stated below and in [batch full gates](batch-full-gates.md).
+been removed. Throughout this brief, "today" and the present tense about what
+TermAl does with Engram mean the build at `28e9ed5`, not current behaviour. That
+applies in particular to turn admission in section 2.3, section 2.7 apart from
+its dated note on `engram authority revoke`, the facade's reporting and closing
+operations in section 5.2, all of section 5.3 with its
+conformance table, and the opening of section 5.4. The field inventories in
+sections 6.2–6.4 also describe that historical build; they are not the current
+stored-state or client contract. The passages on batch full gates state the
+current credit limits, as does [batch full gates](batch-full-gates.md).
 References elsewhere in this proposal to per-turn grants, admission or
 gated recovery are historical design context; the linked Execution
 Observability and host-adapter contracts describe the current implementation.
@@ -282,16 +285,15 @@ change twelve existing source files: the last two call sites above
   Engram sees it only as a `workspace_id`.
 - TermAl does not send `reported_source_change`, although it already
   distinguishes the three cases that field names.
-- TermAl sends no `engram authority revoke`. Engram removed work-authority
-  grants, and with them that command, in its cut B (commit 182c123). The
-  host-private turn grants of the control protocol are a different thing and
-  remain. A persisted retired-grant entry whose revoke was never confirmed
-  can only come from before that change. It is settled as moot once, at boot,
-  with a log line and no command
-  (`settle_retired_engram_work_authority_grants_after_boot`,
-  `session_crud.rs`). A retirement handed to the revoke step is settled the
-  same way (`revoke_project_engram_authority_off_lock`). The ledger keeps its
-  shape, so state written before the change still loads.
+- Added after `28e9ed5`: TermAl stopped sending `engram authority revoke` at
+  commit `06bffb05`, because Engram removed work-authority grants, and with them
+  that command, in its cut B (commit 182c123). The host-private turn grants of
+  the control protocol were a different thing. A persisted retired-grant entry
+  whose revoke was never confirmed can only come from before that change. From
+  that commit until turn gating was removed, such an entry was settled as moot
+  once, at boot, with a log line and no command, and a retirement handed to the
+  revoke step was settled the same way. Now it is kept unsettled as history.
+  The ledger keeps its shape, so state written before the change still loads.
 
 ### 2.8 Process launch
 
@@ -837,7 +839,7 @@ nothing else in the component is visible.
   is measured in; whether any check is open.
 
 The facade names **reporting evidence** and **closing a grant** as two
-operations. Both map to `turn_checkpoint` today, and Engram has no
+operations. Both mapped to `turn_checkpoint` at that build, and Engram had no
 operation that reports evidence without closing a grant. The separation
 states intent; it does not mean a closed grant accepts another checkpoint,
 and late evidence is never attributed to a new grant.
@@ -853,26 +855,26 @@ for hosts that cannot intercept compaction, requirements 12 to 15, and the
 paragraphs on what a checkpoint receipt proves, evidence order, dropped
 evidence, evidence apart from a grant, and the replay of a named-root event.
 A change to that text needs the concurrence of both projects' coordinators.
-What follows is what TermAl calls and what TermAl guarantees on top.
+What follows is what TermAl called and guaranteed on top at `28e9ed5`.
 
-**What TermAl calls.**
+**What TermAl called.**
 
 | Surface | Operations |
 | --- | --- |
-| Control sidecar, one process per session (`engram … control`) | `session_bind`, `session_status`, `turn_evaluate`, `turn_begin`, `turn_checkpoint`. `named_root_bind` exists in Engram and is not yet sent |
+| Control sidecar, one process per session (`engram … control`) | `session_bind`, `session_status`, `turn_evaluate`, `turn_begin`, `turn_checkpoint`. `named_root_bind` existed in Engram and was not yet sent |
 | Reads as the session | `work core held --json`; `work next --peek --context-generation termal-<n>` |
 | Reads as the host reader | `work ls`, `work show` (windowed and full), `work memories`, `control-policy show` |
 | Writes by command | `work evaluate` as the evaluator child; `control-policy set-acceptance-evaluation` on operator intent |
 | Diagnostics | `readiness --json`, `doctor --json`, `control-session-inspect` |
 | Agent-facing | the MCP child per session |
 
-`authority revoke` is not on this list. Engram removed work-authority grants and
-that command in its cut B, and TermAl no longer sends it: a leftover retired
-grant is settled as moot instead (section 2.7). This concerns work-authority
-grants only. The turn grants that `turn_begin` and `turn_checkpoint` carry are
-the control protocol's own and are unchanged.
+`authority revoke` is left off this list: Engram had already removed
+work-authority grants and that command in its cut B (commit 182c123), so TermAl's
+path to it was dead at that build. The path went at `06bffb05` (section 2.7). This concerns work-authority
+grants only. The turn grants that `turn_begin` and `turn_checkpoint` carried
+were the control protocol's own, and went with turn gating.
 
-**What TermAl guarantees on top.**
+**What TermAl guaranteed on top.**
 
 1. Admission order: bind, evaluate, begin, delivery, checkpoint. A retained
    bind or evaluate replays with the same payload and key.
@@ -943,7 +945,7 @@ from source for this brief.
 | 14 | Never open a grant only to carry evidence; never attribute a change made outside a turn to a later turn | Yes: a change made between two mediated turns is reported by neither |
 | 15 | Bind a named root with `named_root_bind` before stating its generation; treat an unknown binding as no binding under that generation | TermAl sends no `named_root_bind` and states no generation, so Engram's named-root rules apply to none of its roots. The requirement's second half binds a host that attempted a bind; TermAl's roots are host state only and keep their current credit until step 7. The contract's minimum is to claim nothing under the unconfirmed generation; TermAl's design for step 7 is stricter and withholds the turn's source sighting, check credit and evaluation source until the binding is confirmed (section 5.4) |
 
-**The evaluator's read, today.** A request takes `evidence_basis` from its
+**The evaluator's read at `28e9ed5`.** A request takes `evidence_basis` from its
 first windowed read of the work view and follows that read's continuation
 token for older pages. Engram serves a continuation only while the project
 has not moved since the first read and refuses it otherwise, so the pages of
@@ -958,17 +960,19 @@ nothing compares the run in the view with a binding's run; the evaluation
 hold adds that check and restarts the whole read, within its bound, when a
 continuation is refused (section 10.1).
 
-**Contract fields TermAl omits.** `named_root_bind`;
+**Contract fields TermAl omitted at `28e9ed5`.** `named_root_bind`;
 `source_root_generation` and `source_root_state` on a source basis;
 `reported_source_change`; `check_kind: build`; a new measurement at
-`done --source-fingerprint`. Each is a later step (section 10), owned as
-section 5.4 and the verification component say.
+`done --source-fingerprint`. Each was a later step (section 10), owned as
+section 5.4 and the verification component say. Since then `named_root_bind`,
+the two source-root fields and `check_kind: build` have landed.
 
 ### 5.4 The source-root component and the named-root binding
 
-Work in progress for the named-root binding exists outside `master` (a
-module of about 950 lines with its tests). Its design is the input for this
-component, so that whoever completes it keeps the following.
+At `28e9ed5` work in progress for the named-root binding existed outside
+`master` (a module of about 950 lines with its tests); it has since landed. Its
+design was the input for this component, and the following still records what it
+keeps.
 
 - **Per work, not per session.** Rule 10 is kept inside the contract's one
   binding per control session (section 5.3, guarantees 2 and 4): every
@@ -1494,7 +1498,7 @@ of uncertain attempts and reconciliation if the host crashes before saving the
 linkage. Definite refusal may produce a changed report and corresponding key;
 an uncertain outcome cannot.
 
-Current checkpoint reporting and grant closure remain coupled on the Engram
+At `28e9ed5` checkpoint reporting and grant closure were coupled on the Engram
 wire. Separate facade intents do not invent a report-only operation or allow
 evidence to be rebound to a new grant. Late evidence independent of a closed
 grant remains a joint-contract capability until explicitly delivered. See

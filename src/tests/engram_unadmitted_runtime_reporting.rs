@@ -52,8 +52,7 @@ struct ObservationProducer {
 
 impl ObservationProducer {
     fn release(&self) {
-        *self.response_gate.0.lock().unwrap() = false;
-        self.response_gate.1.notify_all();
+        crate::tests::phase_sync::set_gate(&self.response_gate, false);
     }
 
     fn requests(&self) -> Vec<Value> {
@@ -204,23 +203,14 @@ impl EngramControlTransport for ObservationProducer {
                 receipt
             }
         };
-        self.sent
-            .send(SentObservation {
-                request: wire,
-                receipt: receipt.clone(),
-                durable_before_send: durable,
-            })
-            .unwrap();
-        let (gate, changed) = &self.response_gate;
-        let mut blocked = gate.lock().unwrap();
-        while *blocked {
-            let (next, timeout) = changed.wait_timeout(blocked, DEADLOCK_GUARD).unwrap();
-            blocked = next;
-            assert!(
-                !timeout.timed_out(),
-                "test must release the producer response barrier"
-            );
-        }
+        // The receiver is gone only once the test has ended, and a late report
+        // has nobody to tell.
+        let _ = self.sent.send(SentObservation {
+            request: wire,
+            receipt: receipt.clone(),
+            durable_before_send: durable,
+        });
+        crate::tests::phase_sync::wait_for_gate(&self.response_gate, false);
         match self.mode {
             ReplyMode::TransientFirst(code) if attempt == 1 => {
                 Err(EngramTransportError::remote(EngramControlErrorBody {
@@ -707,6 +697,70 @@ fn lost_reply_resends_the_identical_persisted_request_and_accounts_once() {
     assert_eq!(first.receipt, retry.receipt);
     assert_eq!(fixture.producer.records.lock().unwrap().len(), 1);
     fixture.assert_no_granted_activity();
+}
+
+/// A guard opening a poisoned gate while its test unwinds must not panic: a panic
+/// in a destructor during unwinding aborts the whole test process.
+#[test]
+fn a_failing_test_opens_a_poisoned_gate_without_aborting_the_process() {
+    struct OpenOnDrop(Arc<(Mutex<bool>, Condvar)>);
+    impl Drop for OpenOnDrop {
+        fn drop(&mut self) {
+            crate::tests::phase_sync::set_gate(&self.0, false);
+        }
+    }
+    let gate = Arc::new((Mutex::new(true), Condvar::new()));
+    let poisoner = gate.clone();
+    let poisoned = std::thread::spawn(move || {
+        let _held = poisoner.0.lock().unwrap();
+        panic!("a worker panics holding the gate");
+    })
+    .join();
+    assert!(poisoned.is_err());
+    assert!(gate.0.is_poisoned(), "the gate is poisoned first");
+    let guarded = gate.clone();
+    let failed = std::thread::spawn(move || {
+        let _open = OpenOnDrop(guarded);
+        panic!("a failing test unwinds through its guard");
+    })
+    .join();
+    assert!(failed.is_err(), "the test fails as one failure");
+    assert!(!*gate.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner), "the gate opened");
+}
+
+/// A poisoned gate still holds its worker: the wakeup that reports the poison
+/// isn't the flag changing.
+#[test]
+fn a_poisoned_gate_holds_its_worker_until_the_flag_changes() {
+    let gate = Arc::new((Mutex::new(true), Condvar::new()));
+    let poisoner = gate.clone();
+    assert!(std::thread::spawn(move || {
+        let _held = poisoner.0.lock().unwrap();
+        panic!("a worker panics holding the gate");
+    })
+    .join()
+    .is_err());
+    let waiting = gate.clone();
+    let worker = std::thread::spawn(move || {
+        crate::tests::phase_sync::wait_for_gate(&waiting, false);
+        *waiting.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    });
+    crate::tests::phase_sync::set_gate(&gate, false);
+    assert!(!worker.join().unwrap(), "the worker went on only once the gate opened");
+}
+
+/// Past its limit a gate fails its waiter, with the gate unpoisoned for the
+/// cleanup guard that opens it next.
+#[test]
+fn a_gate_past_its_limit_panics_without_poisoning_itself() {
+    let gate = Arc::new((Mutex::new(true), Condvar::new()));
+    let waiting = gate.clone();
+    let hung = std::thread::spawn(move || {
+        crate::tests::phase_sync::wait_for_gate_within(&waiting, false, Duration::ZERO);
+    })
+    .join();
+    assert!(hung.is_err(), "a gate that stays closed fails its waiter");
+    assert!(!gate.0.is_poisoned(), "and leaves the gate usable");
 }
 
 #[test]

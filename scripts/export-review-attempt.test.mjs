@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { exportReviewAttempt } from "./export-review-attempt.mjs";
-import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
+import { removeFixture, removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 async function fixture(t) {
@@ -139,6 +139,197 @@ test("a repaired cut of one attempt has a distinct export and an older id remain
   const pinned = await exportReviewAttempt({ ...options(root, 1, host(1, "first cut")), resultId: first.manifest.resultId });
   assert.equal(pinned.unchanged, true);
   assert.deepEqual(await fs.readFile(path.join(first.directory, "manifest.json")), saved);
+});
+
+// A clock that only moves when the wait sleeps, so no case depends on real time.
+function sharingClock() {
+  let elapsed = 0;
+  const sleeps = [];
+  return { sleeps, now: () => elapsed, advance: (milliseconds) => { elapsed += milliseconds; }, sleep: async (milliseconds) => {
+    sleeps.push(milliseconds);
+    elapsed += milliseconds;
+  } };
+}
+const sharingError = (code) => Object.assign(new Error(`rename ${code}`), { code });
+const attemptEntries = (root) => fs.readdir(path.join(root, "delegation-1", "attempt-1"));
+// On Windows another process can briefly hold a new file, and failure cleanup
+// does not wait for it, so only other platforms can require staging to be gone.
+async function assertNothingPublished(root) {
+  const entries = await attemptEntries(root);
+  assert.ok(!entries.includes("review-result-1"), "nothing was published");
+  if (process.platform !== "win32") assert.deepEqual(entries, []);
+}
+
+test("a real handle inside staging refuses the rename, and publication waits for its release", {
+  skip: process.platform !== "win32" && "a held child refuses a directory rename only on Windows",
+}, async (t) => {
+  const root = await fixture(t);
+  let held;
+  const refusals = [];
+  const sleeps = [];
+  const sleep = async (milliseconds) => {
+    sleeps.push(milliseconds);
+    if (held) {
+      // The first backoff releases this test's handle. A later one means
+      // another process (a scanner) briefly holds the new file too; it
+      // waits as the real sleep would.
+      await held.close();
+      held = undefined;
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, milliseconds));
+    }
+  };
+  const rename = async (staging, destination) => {
+    if (refusals.length === 0) held ??= await fs.open(path.join(staging, "packet.json"), "r");
+    try { await fs.rename(staging, destination); }
+    catch (error) { refusals.push(error.code); throw error; }
+  };
+  let result;
+  try {
+    result = await exportReviewAttempt({ ...options(root, 1, host(1, "held once")),
+      publish: { rename, sleep } });
+  } finally {
+    await held?.close();
+  }
+  assert.equal(refusals[0], "EPERM", "the held handle is what refused the first rename");
+  assert.equal(sleeps[0], 10);
+  assert.equal(result.unchanged, false);
+  assert.equal(result.publishWait.attempts, refusals.length + 1);
+  assert.equal(await fs.readFile(path.join(result.directory, "full-output.txt"), "utf8"), "held once");
+  assert.deepEqual(await attemptEntries(root), ["review-result-1"], "no staging directory remains");
+});
+
+test("a real handle that is never released fails with the first refusal at the budget", {
+  skip: process.platform !== "win32" && "a held child refuses a directory rename only on Windows",
+}, async (t) => {
+  const root = await fixture(t);
+  let held;
+  const clock = sharingClock();
+  const rename = async (staging, destination) => {
+    held ??= await fs.open(path.join(staging, "packet.json"), "r");
+    await fs.rename(staging, destination);
+  };
+  try {
+    await assert.rejects(exportReviewAttempt({ ...options(root, 1, host(1, "held forever")),
+      publish: { rename, now: clock.now, sleep: clock.sleep, budgetMs: 1000 } }),
+    (error) => error.code === "EPERM" && error.syscall === "rename");
+  } finally {
+    await held?.close();
+  }
+  assert.ok(clock.sleeps.length > 1, "it waited before giving up");
+  assert.ok(!(await attemptEntries(root)).includes("review-result-1"), "nothing was published");
+});
+
+test("a sharing error on Windows is waited out with a doubling backoff", async (t) => {
+  const root = await fixture(t);
+  const clock = sharingClock();
+  let calls = 0;
+  const rename = async () => {
+    calls += 1;
+    if (calls <= 3) throw sharingError(["EPERM", "EACCES", "EBUSY"][calls - 1]);
+  };
+  const result = await exportReviewAttempt({ ...options(root, 1, host(1, "waited")),
+    publish: { platform: "win32", rename, now: clock.now, sleep: clock.sleep } });
+  assert.equal(calls, 4);
+  assert.deepEqual(clock.sleeps, [10, 20, 40]);
+  assert.equal(result.unchanged, false);
+  assert.deepEqual(result.publishWait, { attempts: 4, elapsedMs: 70 });
+});
+
+test("the wait reports the first error at the budget and starts no attempt after it", async (t) => {
+  const root = await fixture(t);
+  const clock = sharingClock();
+  const errors = [];
+  const rename = async () => { const error = sharingError("EPERM"); errors.push(error); throw error; };
+  await assert.rejects(exportReviewAttempt({ ...options(root, 1, host(1, "refused")),
+    publish: { platform: "win32", rename, now: clock.now, sleep: clock.sleep, budgetMs: 100 } }),
+  (error) => error === errors[0] && error.publishAttempts === 4 && error.publishElapsedMs === 100);
+  assert.deepEqual(clock.sleeps, [10, 20, 40, 30]);
+  assert.equal(errors.length, 4, "the sleep that reaches the budget is followed by no attempt");
+  await assertNothingPublished(root);
+});
+
+test("other errors and other platforms fail at once", async (t) => {
+  const root = await fixture(t);
+  for (const publish of [{ platform: "win32", code: "ENOSPC" }, { platform: "linux", code: "EPERM" }]) {
+    const clock = sharingClock();
+    let calls = 0;
+    const rename = async () => { calls += 1; throw sharingError(publish.code); };
+    await assert.rejects(exportReviewAttempt({ ...options(root, 1, host(1, "refused")),
+      publish: { platform: publish.platform, rename, now: clock.now, sleep: clock.sleep } }),
+    (error) => error.code === publish.code);
+    assert.equal(calls, 1);
+    assert.deepEqual(clock.sleeps, []);
+    await assertNothingPublished(root);
+  }
+});
+
+test("a refusal because another export published first settles without waiting", async (t) => {
+  const root = await fixture(t);
+  const clock = sharingClock();
+  let calls = 0;
+  const rename = async () => {
+    calls += 1;
+    await exportReviewAttempt(options(root, 1, host(1, "raced")));
+    throw sharingError("EPERM");
+  };
+  const result = await exportReviewAttempt({ ...options(root, 1, host(1, "raced")),
+    publish: { platform: "win32", rename, now: clock.now, sleep: clock.sleep } });
+  assert.equal(calls, 1);
+  assert.deepEqual(clock.sleeps, []);
+  assert.equal(result.unchanged, true);
+  assert.equal(result.publishWait, undefined);
+  const entries = await attemptEntries(root);
+  assert.ok(entries.includes("review-result-1"));
+  if (process.platform !== "win32") assert.deepEqual(entries, ["review-result-1"]);
+});
+
+test("a held staging file cannot fail an export whose identical copy is published", async (t) => {
+  const root = await fixture(t);
+  const realUnlink = fs.unlink;
+  t.after(() => { fs.unlink = realUnlink; });
+  const rename = async (staging) => {
+    await exportReviewAttempt(options(root, 1, host(1, "held and raced")));
+    // The holder keeps these names in use: removing them fails, here only.
+    fs.unlink = async (location) => {
+      if (location.startsWith(staging)) throw sharingError("EPERM");
+      return realUnlink(location);
+    };
+    throw sharingError("EPERM");
+  };
+  const result = await exportReviewAttempt({ ...options(root, 1, host(1, "held and raced")),
+    publish: { platform: "win32", rename } });
+  fs.unlink = realUnlink;
+  assert.equal(result.unchanged, true);
+  assert.equal(await fs.readFile(path.join(result.directory, "full-output.txt"), "utf8"), "held and raced");
+});
+
+test("fixture removal waits out a refusal on Windows and reports the first error at the budget", () => {
+  const clock = sharingClock();
+  const syncSleep = (milliseconds) => { clock.sleeps.push(milliseconds); clock.advance(milliseconds); };
+  let calls = 0;
+  removeFixture("fixture", { platform: "win32", now: clock.now, sleep: syncSleep, remove: () => {
+    calls += 1;
+    if (calls <= 2) throw sharingError(calls === 1 ? "EPERM" : "ENOTEMPTY");
+  } });
+  assert.equal(calls, 3);
+  assert.deepEqual(clock.sleeps, [50, 50]);
+
+  const errors = [];
+  assert.throws(() => removeFixture("fixture", { platform: "win32", now: clock.now, sleep: syncSleep, budgetMs: 100,
+    remove: () => { const error = sharingError("EPERM"); errors.push(error); throw error; } }),
+  (error) => error === errors[0]);
+  assert.equal(errors.length, 3, "the attempt at the budget is the last");
+});
+
+test("fixture removal fails at once on other errors and other platforms", () => {
+  for (const [platform, code] of [["win32", "ENOSPC"], ["linux", "EPERM"]]) {
+    let calls = 0;
+    assert.throws(() => removeFixture("fixture", { platform,
+      sleep: () => assert.fail("no wait"), remove: () => { calls += 1; throw sharingError(code); } }),
+    (error) => error.code === code);
+    assert.equal(calls, 1);
+  }
 });
 
 test("unsafe identifiers and repository-external destinations are refused", async (t) => {

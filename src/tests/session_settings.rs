@@ -778,6 +778,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),
+        shared_codex_workspace_write_runtime: Arc::new(Mutex::new(None)),
         shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),

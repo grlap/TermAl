@@ -995,6 +995,7 @@ pub(crate) fn test_app_state() -> AppState {
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),
+        shared_codex_workspace_write_runtime: Arc::new(Mutex::new(None)),
         shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
@@ -1886,13 +1887,10 @@ fn cursor_permission_request(request_id: &str) -> Value {
 }
 
 /// Opt-in single-wire fixtures test lifecycle/protocol behavior, not profile
-/// isolation. Install their script explicitly in both homes, including when
+/// isolation. Install their script explicitly in all homes, including when
 /// replacing/clearing it. Profile witnesses install distinct scripts instead.
 fn install_single_wire_codex_fixture(state: &AppState, runtime: Option<SharedCodexRuntime>) {
-    for profile in [
-        SharedCodexProfile::Default,
-        SharedCodexProfile::ReadOnlySandbox,
-    ] {
+    for profile in SharedCodexProfile::ALL {
         *state
             .shared_codex_runtime_slot(profile)
             .lock()
@@ -1993,7 +1991,7 @@ async fn next_sse_event<S>(stream: &mut std::pin::Pin<Box<S>>) -> String
 where
     S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
 {
-    next_sse_event_with_timeout(stream, Duration::from_secs(5)).await
+    next_sse_event_with_timeout(stream, crate::TEST_PHASE_DEADLOCK_GUARD).await
 }
 
 async fn next_sse_event_with_timeout<S>(
@@ -2064,7 +2062,7 @@ async fn expect_sse_stream_end<S>(stream: &mut std::pin::Pin<Box<S>>, context: &
 where
     S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
 {
-    let next = tokio::time::timeout(Duration::from_secs(2), async {
+    let next = tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, async {
         std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await
     })
     .await
@@ -2219,7 +2217,7 @@ async fn spawn_terminal_stream_worker_reports_panics_as_error_events() {
         panic!("synthetic terminal stream worker panic");
     });
 
-    let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+    let event = tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, event_rx.recv())
         .await
         .expect("panic recovery should emit an event")
         .expect("panic recovery should keep the event channel open for the error");
@@ -2231,7 +2229,7 @@ async fn spawn_terminal_stream_worker_reports_panics_as_error_events() {
         _ => panic!("expected terminal stream worker panic to emit an error event"),
     }
 
-    let channel_closed = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+    let channel_closed = tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, event_rx.recv())
         .await
         .expect("panic recovery sender should be dropped after reporting the error");
     assert!(

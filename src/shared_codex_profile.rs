@@ -8,7 +8,10 @@
 // app-server process from PATH. So a read-only Codex session there runs on
 // an app-server of its own whose PATH holds no `pwsh`, which makes Codex use
 // Windows PowerShell 5.1; the read-only sandbox then reads and refuses
-// writes. Every other session keeps the default app-server, unchanged.
+// writes. New delegated workspace-write threads use the same PATH filtering
+// in their own app-server; their per-thread sandbox remains workspace-write.
+// Root workspace-write sessions keep the default process, and existing threads
+// keep their home.
 //
 // Does not own: the runtime slots and their lifecycle (shared_codex_mgr.rs),
 // spawning the process (codex.rs), or the sandbox mode a delegation child
@@ -22,9 +25,20 @@ enum SharedCodexProfile {
     /// Windows only: an app-server for read-only-sandbox sessions, started
     /// with no PowerShell 7 on PATH.
     ReadOnlySandbox,
+    /// Windows only: a separate process/home for delegated workspace-write
+    /// threads. It uses the filtered PATH without sharing reviewer lifecycle.
+    WorkspaceWriteSandbox,
 }
 
 impl SharedCodexProfile {
+    const ALL: [Self; 3] = [
+        Self::Default, Self::ReadOnlySandbox, Self::WorkspaceWriteSandbox,
+    ];
+
+    fn needs_filtered_shell(self) -> bool {
+        matches!(self, Self::ReadOnlySandbox | Self::WorkspaceWriteSandbox)
+    }
+
     /// The profile a session with this sandbox mode runs under.
     fn for_sandbox_mode(sandbox_mode: CodexSandboxMode) -> Self {
         if cfg!(windows) && sandbox_mode == CodexSandboxMode::ReadOnly {
@@ -35,17 +49,29 @@ impl SharedCodexProfile {
     }
 
     /// The TermAl Codex home scope. Each profile keeps its threads apart, and
-    /// startup discovery does not import threads from the read-only home
+    /// startup discovery does not import threads from the dedicated homes
     /// (`codex_home_scope_is_importable`).
     fn codex_home_scope(self) -> &'static str {
         match self {
             Self::Default => "shared-app-server",
             Self::ReadOnlySandbox => "shared-app-server-read-only",
+            Self::WorkspaceWriteSandbox => "shared-app-server-workspace-write",
         }
     }
 }
 
 impl SessionRecord {
+    fn new_thread_codex_profile(&self, sandbox_mode: CodexSandboxMode) -> SharedCodexProfile {
+        if cfg!(windows)
+            && sandbox_mode == CodexSandboxMode::WorkspaceWrite
+            && self.session.parent_delegation_id.is_some()
+        {
+            SharedCodexProfile::WorkspaceWriteSandbox
+        } else {
+            SharedCodexProfile::for_sandbox_mode(sandbox_mode)
+        }
+    }
+
     /// The app-server profile this Codex session's turns and thread
     /// operations use. A session with a thread uses the app-server whose Codex
     /// home holds that thread, whatever its sandbox mode is now; a thread
@@ -57,7 +83,7 @@ impl SessionRecord {
                 .codex_thread_profile
                 .unwrap_or(SharedCodexProfile::Default);
         }
-        SharedCodexProfile::for_sandbox_mode(self.codex_sandbox_mode)
+        self.new_thread_codex_profile(self.codex_sandbox_mode)
     }
 
     /// Records that this session attaches to the app-server of `profile`. A
@@ -73,21 +99,21 @@ impl SessionRecord {
     /// `sandbox_mode` now, or `None` when it can. Re-sending the current mode
     /// is always accepted. An existing thread cannot move between Codex
     /// homes, so on Windows a thread on the default app-server cannot take
-    /// the read-only sandbox (its PowerShell 7 cannot start there). A session
+    /// a sandbox requiring the filtered process PATH. A session
     /// without a thread may change profile only while no turn runs: a running
     /// turn may be creating its first thread on the current app-server.
     fn codex_sandbox_change_refusal(&self, sandbox_mode: CodexSandboxMode) -> Option<&'static str> {
         if sandbox_mode == self.codex_sandbox_mode {
             return None;
         }
-        let target = SharedCodexProfile::for_sandbox_mode(sandbox_mode);
+        let target = self.new_thread_codex_profile(sandbox_mode);
         if self.external_session_id.is_some() {
-            return (target == SharedCodexProfile::ReadOnlySandbox
+            return (target.needs_filtered_shell()
                 && self.shared_codex_profile() == SharedCodexProfile::Default)
                 .then_some(
-                    "this Codex thread cannot take the read-only sandbox on Windows: it runs on \
-                     the default app-server, whose PowerShell 7 cannot start under that sandbox; \
-                     start a new Codex session with the read-only sandbox instead",
+                    "this Codex thread cannot change to that sandbox on its current Windows \
+                     app-server: the requested mode needs the filtered PowerShell environment; \
+                     start a new Codex session or delegation with that sandbox instead",
                 );
         }
         let turn_running = self.runtime_stop_in_progress
@@ -96,8 +122,8 @@ impl SessionRecord {
                 SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
             );
         (target != self.shared_codex_profile() && turn_running).then_some(
-            "wait for the current Codex turn to finish before changing between the read-only \
-             sandbox and another sandbox mode: the turn may be creating this session's thread",
+            "wait for the current Codex turn to finish before changing app-server profiles: \
+             the turn may be creating this session's thread",
         )
     }
 }

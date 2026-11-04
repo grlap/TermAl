@@ -356,7 +356,7 @@ async fn completed_error_is_redacted_and_retains_queued_ownership() {
     let (_stop, mut stopped) = tokio::sync::watch::channel(false);
     let mut states = Vec::new();
     let result = read
-        .wait(&mut stopped, Duration::from_secs(5), |state| {
+        .wait(&mut stopped, crate::TEST_PHASE_DEADLOCK_GUARD, |state| {
             states.push(state)
         })
         .await

@@ -48,16 +48,8 @@ impl InstallBarrier {
                 })
             });
             if event == phase && matches_report && !once.swap(true, std::sync::atomic::Ordering::AcqRel) {
-                entered.send(()).unwrap();
-                let released = gate.0.lock().unwrap();
-                let (released, timeout) = gate
-                    .1
-                    .wait_timeout_while(released, DEADLOCK_GUARD, |ready| !*ready)
-                    .unwrap();
-                assert!(
-                    *released && !timeout.timed_out(),
-                    "test must release the post-check install barrier"
-                );
+                let _ = entered.send(());
+                phase_sync::wait_for_gate(&gate, true);
             }
         }));
         Self {
@@ -69,8 +61,7 @@ impl InstallBarrier {
     }
 
     fn release(&self) {
-        *self.release.0.lock().unwrap() = true;
-        self.release.1.notify_all();
+        phase_sync::set_gate(&self.release, true);
     }
 }
 
@@ -1052,9 +1043,7 @@ impl ClosingReadBarrier {
         *fixture.producer.request_hook.lock().unwrap() = Some(Arc::new(move |request| {
             if !matches!(request, EngramControlRequest::NamedRootRead { .. }) { return; }
             let _ = entered.send(());
-            let lock = gate.0.lock().unwrap();
-            let (lock, timeout) = gate.1.wait_timeout_while(lock, DEADLOCK_GUARD, |ready| !*ready).unwrap();
-            assert!(*lock && !timeout.timed_out(), "release the ordinary closing root read");
+            phase_sync::wait_for_gate(&gate, true);
         }));
         Self { producer: fixture.producer.clone(), entered: received, release }
     }
@@ -1064,15 +1053,14 @@ impl ClosingReadBarrier {
     }
 
     fn release(&self) {
-        *self.release.0.lock().unwrap() = true;
-        self.release.1.notify_all();
+        phase_sync::set_gate(&self.release, true);
     }
 }
 
 impl Drop for ClosingReadBarrier {
     fn drop(&mut self) {
         self.release();
-        *self.producer.request_hook.lock().unwrap() = None;
+        *self.producer.request_hook.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 }
 

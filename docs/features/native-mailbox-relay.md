@@ -91,6 +91,15 @@ ACK cursor. An unrelated root cannot recover membership from a copied handle.
 An ordinary list with no known home or locator cannot discover an unknown
 home store; the exact handle or the normal metadata wake supplies that location.
 
+A remote page read returns 503 `mailbox page unavailable` when its configured
+home connection is missing or changes, or the transport returns no usable
+answer. The read does not reconnect the peer; retry after the connection
+recovers. When the mailbox's home is this host, missing association metadata
+returns 409 and names that local cause: retrying the read alone cannot restore it. Recovery accepts
+only the configured central home and current native membership. A busy local
+association writer retains its separate storage error and safe-replay advice;
+it does not imply that the home or connection is unavailable.
+
 Reads do not acknowledge. MCP/CLI request issuance; acknowledgements accept
 only the unchanged issued receipt, never a numeric boundary or `readKey`.
 `noContinuation` is refused for relay mailboxes. Relay receipts conservatively

@@ -591,11 +591,11 @@ fn delegation_startup_budget_publication_releases_writer_before_waiting_for_stat
                 state.persist_internal_locked(&inner).unwrap();
                 admitted.send(()).unwrap();
             }));
-            held_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            held_rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
             writer_admitted = Some(admitted_rx);
         }
     }).unwrap();
-    writer_admitted.unwrap().recv_timeout(Duration::from_secs(3)).unwrap();
+    writer_admitted.unwrap().recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
     worker.unwrap().join().unwrap();
     assert!(fixture.state.inner.lock().unwrap().delegation_inventory_complete());
 }
@@ -644,7 +644,7 @@ fn delegation_startup_budget_state_wait_does_not_exhaust_sql_admission_budget() 
                 ), Err(mpsc::RecvTimeoutError::Timeout)));
                 assert!(started.elapsed() > SQLITE_BUSY_TIMEOUT);
             }));
-            held_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            held_rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
             release = Some(release_tx);
         }
     }).expect("ordinary state contention must not make inventory permanently unavailable");
@@ -751,7 +751,7 @@ fn delegation_startup_budget_real_listener_serves_before_the_owned_loader_runs()
                 }
             })
             .unwrap();
-        tokio::task::spawn_blocking(move || arrived.recv_timeout(Duration::from_secs(3)).unwrap())
+        tokio::task::spawn_blocking(move || arrived.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap())
             .await
             .unwrap();
         assert!(
@@ -759,7 +759,7 @@ fn delegation_startup_budget_real_listener_serves_before_the_owned_loader_runs()
             "only one inventory loader may own boot"
         );
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(3))
+            .timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
             .build()
             .unwrap();
         let health = client

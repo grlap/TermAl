@@ -112,7 +112,7 @@ async fn host_utilization_refresh_cap_keeps_six_enrolled_peers_and_does_not_over
         app.federation_peer_handles.lock().unwrap().insert(peer_id, Arc::new(FederationPeerHandle { channel, rpc }));
     }
     let runtime = host_utilization::Runtime::start(app.clone()).unwrap();
-    let first = tokio::time::timeout(Duration::from_secs(5), async {
+    let first = tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, async {
         let mut ids = HashSet::new();
         for _ in 0..4 { ids.insert(entries.recv().await.unwrap()); }
         ids
@@ -120,7 +120,7 @@ async fn host_utilization_refresh_cap_keeps_six_enrolled_peers_and_does_not_over
     let before_release = active.load(Ordering::SeqCst);
     released.send_replace(true);
     let remaining = if first.is_ok() {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, async {
             let mut ids = HashSet::new();
             for _ in 0..2 { ids.insert(entries.recv().await.unwrap()); }
             ids

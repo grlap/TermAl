@@ -1743,7 +1743,7 @@ fn delegation_mcp_send_timeout_reports_unknown_outcome_and_safe_retry() {
         }))
     });
     let observed_request = request_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
         .expect("server should observe the request before holding its response");
     let result = client.join().expect("test client should join");
     release_server
@@ -2002,7 +2002,7 @@ fn delegation_mcp_acknowledgement_timeout_prescribes_cursor_reconciliation() {
         }))
     });
     let observed_request = request_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
         .expect("server should observe the request before holding its response");
     let result = client.join().expect("test client should join");
     release_server

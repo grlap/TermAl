@@ -2058,6 +2058,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),
+        shared_codex_workspace_write_runtime: Arc::new(Mutex::new(None)),
         shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
@@ -2497,7 +2498,7 @@ async fn shutdown_signal_wakes_a_subscriber_registered_before_the_signal() {
     tokio::task::yield_now().await;
     state.trigger_shutdown_signal();
 
-    tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+    tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, waiter)
         .await
         .expect("shutdown waiter must complete within the timeout")
         .expect("shutdown waiter task should not panic");
@@ -2533,7 +2534,7 @@ async fn shutdown_signal_wakes_a_subscriber_registered_after_the_signal() {
         }
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+    tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, waiter)
         .await
         .expect(
             "shutdown waiter must complete within the timeout — the watch \

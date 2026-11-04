@@ -1953,18 +1953,20 @@ be explicit about which guarantees are enforced and which are advisory.
   no PowerShell 7. There Codex uses Windows PowerShell 5.1, so commands such as
   `a && b` and other PowerShell 7-only syntax are unavailable to it. That
   app-server keeps its threads in a Codex home of its own, and its exit ends
-  only the sessions on it. Every other Codex session keeps the default
-  app-server, unchanged. A session's thread stays on the app-server whose home
-  holds it: the profile is fixed when a session without a thread attaches to
-  an app-server, a fork stays beside its source, and a thread created before
-  profiles existed stays on the default one. So on Windows an existing thread
-  on the default app-server cannot be switched to the read-only sandbox (that
-  change is refused; start a new session), while a read-only thread switched
-  to another mode keeps its app-server. A session without a thread may switch
-  between the read-only sandbox and another mode only while no turn runs,
-  since a running turn may be creating its first thread; re-sending the
-  current mode is always accepted. Startup discovery does not import threads
-  from the read-only home. The read-only app-server's PATH leaves out every
+  only the sessions on it. New Windows delegated WorkspaceWrite threads use a
+  third profile, described under
+  [Windows Codex writable children](#windows-codex-writable-children); other
+  Codex sessions keep the default app-server. A session's thread stays on the
+  app-server whose home holds it: the profile is fixed when a session without
+  a thread attaches to an app-server, a fork stays beside its source, and a
+  thread created before profiles existed stays on the default one. On Windows an existing default-home
+  thread cannot change to a sandbox mode requiring a filtered profile: read-only,
+  or WorkspaceWrite for a delegated child. That change is refused; start a new
+  session or delegation. A thread already on a filtered profile keeps its home
+  when its mode changes. A session without a thread may change profiles only
+  while no turn runs, since a running turn may be creating its first thread;
+  re-sending the current mode is always accepted. Startup discovery does not
+  import threads from either dedicated home. Both filtered app-servers' PATHs leave out every
   directory that holds PowerShell 7 (`pwsh.exe`, or a `pwsh.cmd` or `pwsh.bat`
   shim), including shared shim folders
   such as the Store's `WindowsApps` aliases; a tool found only through such a
@@ -2004,6 +2006,29 @@ be explicit about which guarantees are enforced and which are advisory.
 - The child runs inside that worktree, not the main workspace.
 - `ownedPaths` still constrain the intended write set and review surface.
 - Import back into the main workspace is an explicit compare/apply step.
+
+### Windows Codex writable children
+
+New Windows Codex threads under `sharedWorktree` or `isolatedWorktree` use the
+dedicated `shared-app-server-workspace-write` process and home. This includes
+writable Reviewer and Explorer children as well as Workers. Their workspace-write
+sandbox and approval policy are unchanged; existing threads retain their recorded
+home. Read-only children keep their independent process, and root WorkspaceWrite
+sessions keep the default profile.
+
+The writable-child brief explains that Windows PowerShell 5.1 rejects `&&` and
+`||`, asks for explicit success/failure conditions instead of silent translation,
+and warns against rewriting source through text cmdlets or redirection. Their
+encoding defaults can change non-ASCII bytes or BOMs while exiting successfully.
+Children read source through native Git or rg, edit with `apply_patch` or native
+tools that preserve encoding, and inspect `git diff` for unintended encoding
+changes. The guidance does not enforce encoding fidelity.
+
+Both filtered profiles omit whole PATH directories containing `pwsh`, including
+shared shim folders such as `WindowsApps`; tools available only through those
+folders are unavailable to those processes too. No user or global PATH changes.
+See [Shared Codex App-Server](./shared-codex-app-server.md#the-one-fact-everything-follows-from)
+for process ownership and thread pinning.
 
 ### Path Validation
 

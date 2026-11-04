@@ -5,6 +5,47 @@ use super::*;
 
 pub(super) use crate::TEST_PHASE_DEADLOCK_GUARD as DEADLOCK_GUARD;
 
+/// Sets the flag a test holds a worker on and wakes the worker. A guard calls
+/// this while a failed test is unwinding, where a second panic would abort the
+/// whole test process and lose every other result of the run, so a poisoned gate
+/// still opens.
+pub(super) fn set_gate(gate: &(Mutex<bool>, Condvar), value: bool) {
+    *gate.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = value;
+    gate.1.notify_all();
+}
+
+/// How long a gate may stay closed. A test can legitimately hold a worker across
+/// a slow host's boot, so this only detects a hang: well above the phase waits,
+/// because a regression can park the test thread itself on a gate, or park a
+/// worker holding what the test thread is waiting for. Without a limit the test
+/// would never end and the run would save no results.
+const GATE_HANG_LIMIT: Duration = Duration::from_secs(600);
+
+/// Holds a worker until the flag reads `value`.
+#[track_caller]
+pub(super) fn wait_for_gate(gate: &(Mutex<bool>, Condvar), value: bool) {
+    wait_for_gate_within(gate, value, GATE_HANG_LIMIT);
+}
+
+/// Panics past `limit` with the gate's lock released, so the failure doesn't
+/// poison the gate its cleanup guard is about to open.
+#[track_caller]
+pub(super) fn wait_for_gate_within(gate: &(Mutex<bool>, Condvar), value: bool, limit: Duration) {
+    let deadline = std::time::Instant::now() + limit;
+    let mut flag = gate.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    while *flag != value {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            drop(flag);
+            panic!("a test gate stayed closed for {limit:?}: something is hung");
+        }
+        flag = gate.1
+            .wait_timeout(flag, remaining)
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0;
+    }
+}
+
 /// Drains stderr from spawn onward and owns every waiter until teardown. Unlike
 /// an exit-only assertion, this owner also kills/reaps on timeout or unwind.
 pub(super) struct CapturedStderrProcess {

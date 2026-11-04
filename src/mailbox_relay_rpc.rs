@@ -1,6 +1,8 @@
 // Authenticated native mailbox operations; principal claims originate on their host.
 // Owns no provider/executor entry point and performs no network I/O under state/SQL locks.
 
+const NATIVE_MAILBOX_RELAY_LINK_CHANGED: &str = "native mailbox relay link changed";
+
 struct MailboxRelayAuthority {
     app: AppState,
     lease: FederationLinkLease,
@@ -19,7 +21,7 @@ impl MailboxRelayAuthority {
         if link.incarnation.as_deref() != Some(self.lease.incarnation.as_str())
             || link.recorded_incarnation.as_deref() != Some(self.lease.incarnation.as_str())
         {
-            return Err(relay_store_error("native mailbox relay link changed"));
+            return Err(relay_store_error(NATIVE_MAILBOX_RELAY_LINK_CHANGED));
         }
         let inner = self.app.inner.lock().expect("state mutex poisoned");
         let peer = self

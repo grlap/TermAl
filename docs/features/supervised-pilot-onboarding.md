@@ -8,7 +8,7 @@ operating guide for that pilot and nothing wider.
 
 **What TermAl records.** The pilot runs with the project's Engram integration
 enabled and its Execution Observability on (the default). The agent gets the
-Engram MCP server and work context from TermAl; no turn waits for Engram. The
+Engram MCP server and work context from TermAl; no turn waits for an Engram decision. The
 agent names its task's worktree, and TermAl reports each turn to Engram after
 it ran, as a host observation: how it ended, whether it changed source, and
 the declared tests it ran, each judged from its TRX file as passed, failed or

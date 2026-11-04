@@ -230,6 +230,12 @@ impl MailboxStore {
         let mut connection = self.connection()?;
         let transaction = begin_mailbox_write(&mut connection, "retaining native relay home")?;
         remember_mailbox_relay_association(&transaction, conversation, mailbox_id, names)?;
+        #[cfg(test)]
+        {
+            let before_authorize = self.before_relay_association_authorize.lock()
+                .expect("relay association observer mutex poisoned").take();
+            if let Some(before_authorize) = before_authorize { before_authorize(); }
+        }
         let _authority = authorize()?;
         transaction.commit()?;
         Ok(())

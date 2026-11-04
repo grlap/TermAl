@@ -1326,6 +1326,9 @@ struct AppState {
     /// (`SharedCodexProfile::ReadOnlySandbox`), started on first demand like
     /// the default one.
     shared_codex_read_only_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    /// A separate Windows workspace-write worker process; its lifecycle must
+    /// not retire read-only reviewers or default-profile root threads.
+    shared_codex_workspace_write_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     /// Runtime ids whose exit cascade has already been claimed. Several
     /// worker threads may report one shared-process death; only the first may
     /// terminalize sessions or rebind Engram.

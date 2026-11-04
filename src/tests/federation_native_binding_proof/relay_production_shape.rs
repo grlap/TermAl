@@ -1,4 +1,4 @@
-// Owns the production-shape native relay wake witness: only central verifies
+// Owns production-shape native relay wake, page-read and recovery witnesses: only central verifies
 // and activates the pair, so the satellite's own record of its central stays
 // enrolled, as on deployed hosts. Does not own the both-sides-active relay
 // controls in relay.rs or the revocation holds in relay_review*.rs.
@@ -16,6 +16,10 @@ impl ProxySend {
     /// A central caller and a central proxy for the satellite's native root,
     /// with each host's peer handle to the other, as on a connected pair.
     async fn new(fixture: &Fixture) -> Self {
+        Self::with_home_router(fixture, |router| router).await
+    }
+
+    async fn with_home_router(fixture: &Fixture, wrap: impl FnOnce(Router) -> Router) -> Self {
         let caller = test_session_id(&fixture.central, Agent::Codex);
         let proxy = test_session_id(&fixture.central, Agent::Codex);
         let peer = fixture.channel.current_authority().unwrap();
@@ -48,10 +52,10 @@ impl ProxySend {
             Arc::new(FederationPeerHandle { channel: fixture.channel.clone(), rpc: fixture.rpc.clone() }),
         );
         let checked = fixture.channel.clone();
-        let central_domain = DomainServer::start(federation_router(
+        let central_domain = DomainServer::start(wrap(federation_router(
             fixture.channel.clone(),
             Arc::new(move || checked.current_authority().map(|_| ())),
-        ))
+        )))
         .await;
         let checked = fixture.satellite_channel.clone();
         let reverse = FederationRpcClient::new(
@@ -427,4 +431,358 @@ async fn active_home_recovery_and_wake_keep_one_association_and_ack_owner() {
         proxy.finish().await;
         fixture.finish().await;
     }
+}
+
+async fn read_relay_page(
+    state: &AppState,
+    session: &str,
+    mailbox: &str,
+) -> Result<MailboxReadResponse, ApiError> {
+    read_mailbox(
+        AxumPath((session.to_owned(), mailbox.to_owned())),
+        State(state.clone()),
+        Json(ReadMailboxRequest {
+            after_sequence: None,
+            limit: 20,
+            issue_receipt: true,
+            read_key: None,
+        }),
+    )
+    .await
+    .map(|page| page.0)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_page_and_exact_message_agree_on_temporary_home_loss() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for loss in ["missing-handle", "stale-link"] {
+        let fixture = Fixture::production_shape().await;
+        let proxy = ProxySend::new(&fixture).await;
+        let sent = proxy.send(&fixture, loss).await;
+        read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await.unwrap();
+        let home = fixture.satellite_channel.snapshot.peer.host_id.clone();
+        let handle = if loss == "missing-handle" {
+            fixture.satellite.federation_peer_handles.lock().unwrap().remove(&home)
+        } else {
+            fixture.satellite_channel.invalidate();
+            None
+        };
+        let page = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+        let message = read_mailbox_message(
+            AxumPath((fixture.native.clone(), sent.message_id.clone())), State(fixture.satellite.clone()),
+        ).await;
+        if let Some(handle) = handle {
+            fixture.satellite.federation_peer_handles.lock().unwrap().insert(home, handle);
+        } else {
+            fixture.reconnect().await;
+        }
+        let restored_page = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+        let restored_message = read_mailbox_message(
+            AxumPath((fixture.native.clone(), sent.message_id.clone())), State(fixture.satellite.clone()),
+        ).await;
+        proxy.finish().await;
+        fixture.finish().await;
+
+        let page = page.err().expect("an unavailable home cannot supply a page");
+        let message = message.err().expect("an unavailable home cannot supply a message");
+        assert_eq!(page.status, StatusCode::SERVICE_UNAVAILABLE, "{loss}: {}", page.message);
+        assert_eq!(page.status, message.status, "{loss}");
+        assert!(page.message.contains("try the read again later"), "{loss}: {}", page.message);
+        assert!(!page.message.contains("refresh enrollment"), "{loss}: {}", page.message);
+        assert!(restored_page.unwrap().messages.iter().any(|row| row.id == sent.message_id));
+        assert_eq!(restored_message.unwrap().0.id, sent.message_id);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_missing_association_stale_home_recovers_after_reconnection() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "missing-association-stale-home").await;
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+    assert!(fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap().is_none());
+    fixture.satellite_channel.invalidate();
+    let refused = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    let still_missing = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap().is_none();
+    fixture.reconnect().await;
+    let recovered = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    proxy.finish().await;
+    fixture.finish().await;
+
+    assert!(still_missing, "a stale lease cannot create membership");
+    let error = refused.err().expect("a stale home link cannot recover an association");
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE, "{}", error.message);
+    assert!(error.message.contains("federation link changed"), "{}", error.message);
+    assert!(error.message.contains("try the read again later"), "{}", error.message);
+    assert!(recovered.unwrap().messages.iter().any(|row| row.id == sent.message_id));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_recovery_preserves_local_writer_busy_safe_replay() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "local-recovery-writer-busy").await;
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+    let writer = fixture.satellite.mailbox_store.write_lock.clone();
+    let held = lock_sqlite_state_writer(&writer);
+    let app = fixture.satellite.clone();
+    let session = fixture.native.clone();
+    let mailbox = sent.mailbox_id.clone();
+    let running = tokio::spawn(async move { read_relay_page(&app, &session, &mailbox).await });
+    let refused = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running).await.unwrap().unwrap();
+    drop(held);
+    let still_missing = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap().is_none();
+    let link_current = fixture.satellite_channel.current_lease().is_ok();
+    let recovered = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    proxy.finish().await;
+    fixture.finish().await;
+
+    assert!(still_missing && link_current, "the home answered but local admission committed nothing");
+    let error = refused.err().expect("the held local writer refuses first-read recovery");
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(message_carries_safe_replay_clause(&error.message), "{}", error.message);
+    assert!(error.message.contains("mailbox storage is temporarily busy"), "{}", error.message);
+    assert!(!error.message.contains("home could not be reached"), "{}", error.message);
+    assert!(!error.message.contains("connection recovers"), "{}", error.message);
+    assert!(recovered.unwrap().messages.iter().any(|row| row.id == sent.message_id));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_recovery_commit_fence_link_loss_is_retryable() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "recovery-commit-link-loss").await;
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+    let channel = fixture.satellite_channel.clone();
+    // Retire the actual lease synchronously after List and the tentative SQL
+    // association write, immediately before its real authorization fence.
+    *fixture.satellite.mailbox_store.before_relay_association_authorize.lock().unwrap() =
+        Some(Box::new(move || { channel.invalidate(); }));
+    let refused = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    let boundary_consumed = fixture.satellite.mailbox_store.before_relay_association_authorize.lock().unwrap().is_none();
+    let still_missing = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap().is_none();
+    fixture.reconnect().await;
+    let recovered = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    proxy.finish().await;
+    fixture.finish().await;
+
+    assert!(boundary_consumed, "the recovery transaction consumed the one-shot boundary");
+    assert!(still_missing, "the invalidated commit fence rolls back the new association");
+    let error = refused.err().expect("the old lease cannot commit recovery");
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE, "{}", error.message);
+    assert!(error.message.contains("native mailbox relay link changed"), "{}", error.message);
+    assert!(error.message.contains("try the read again later"), "{}", error.message);
+    assert!(!error.message.contains("refresh enrollment"), "{}", error.message);
+    assert!(recovered.unwrap().messages.iter().any(|row| row.id == sent.message_id));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_page_authenticated_statuses_cover_recovery_and_saved_reads() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for (saved, status) in [false, true].into_iter().flat_map(|saved| {
+        [StatusCode::BAD_GATEWAY, StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::GATEWAY_TIMEOUT, StatusCode::FORBIDDEN].map(|status| (saved, status))
+    }) {
+        let fixture = Fixture::production_shape().await;
+        let checked = fixture.channel.clone();
+        let listener = FederationListenerState {
+            channel: fixture.channel.clone(),
+            ensure_current: Arc::new(move || checked.current_authority().map(|_| ())),
+        };
+        let refuse = Arc::new(AtomicBool::new(!saved));
+        let refuse_request = refuse.clone();
+        let proxy = ProxySend::with_home_router(&fixture, move |_| {
+            Router::new().route(MAILBOX_RELAY_RPC_ROUTE, post(move |
+                peer: axum::Extension<FederationAuthenticatedPeer>, request: Json<MailboxRelayRequest>,
+            | {
+                let refuse_request = refuse_request.clone();
+                async move {
+                    if refuse_request.load(Ordering::SeqCst) {
+                        Err(ApiError::from_status(status, "test home status refusal"))
+                    } else {
+                        serve_mailbox_relay(peer, request).await
+                    }
+                }
+            }))
+                .layer(axum::middleware::from_fn_with_state(listener, federation_authenticate))
+        }).await;
+        let sent = proxy.send(&fixture, "unusable-home-response").await;
+        let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+        let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+        if saved {
+            read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await.unwrap();
+            refuse.store(true, Ordering::SeqCst);
+        }
+        let result = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+        let missing = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap().is_none();
+        let lease_current = fixture.satellite_channel.current_lease().is_ok();
+        proxy.finish().await;
+        fixture.finish().await;
+
+        assert_eq!(missing, !saved, "a refusal neither creates nor removes the association");
+        assert!(lease_current, "the authenticated {status} settles without fencing the link");
+        let error = result.err().expect("the unavailable home cannot answer the page read");
+        if status.is_server_error() {
+            assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE, "{status}: {}", error.message);
+            assert!(error.message.contains("native mailbox relay response unavailable"), "{}", error.message);
+            assert!(error.message.contains("try the read again later"), "{}", error.message);
+        } else {
+            assert_eq!(error.status, status, "{}", error.message);
+            assert!(error.message.contains("authenticated native mailbox relay refused"), "{}", error.message);
+            assert!(!error.message.contains("try the read again later"), "{}", error.message);
+        }
+        assert!(!error.message.contains("idempotencyKey"), "{}", error.message);
+        assert!(!error.message.contains("outcome may be unknown"), "{}", error.message);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_page_permanent_home_refusals_do_not_suggest_connection_recovery() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for refusal in ["revoked-without-handle", "unknown-host", "different-store"] {
+        let fixture = Fixture::production_shape().await;
+        let proxy = ProxySend::new(&fixture).await;
+        let sent = proxy.send(&fixture, refusal).await;
+        let mut locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+        let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+        if refusal == "unknown-host" {
+            locator.home.host.host_id = Uuid::new_v4().to_string();
+        } else if refusal == "different-store" {
+            locator.home.store_id = Uuid::new_v4().to_string();
+        } else {
+            fixture.satellite.inner.lock().unwrap().federation.peers
+                .get_mut(&locator.home.host.host_id).unwrap().membership = FederationMembershipState::Revoked;
+            fixture.satellite.federation_peer_handles.lock().unwrap().remove(&locator.home.host.host_id);
+        }
+        let encoded = MailboxRelayLocator::encode(&locator.home, &locator.id, false).unwrap();
+        let result = read_relay_page(&fixture.satellite, &fixture.native, &encoded).await;
+        let missing = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap().is_none();
+        proxy.finish().await;
+        fixture.finish().await;
+
+        assert!(missing, "{refusal} cannot create an association");
+        let error = result.err().expect("the original home identity and membership remain required");
+        assert_eq!(error.status, StatusCode::CONFLICT, "{refusal}: {}", error.message);
+        assert!(!error.message.contains("try the read again later"), "{refusal}: {}", error.message);
+        assert!(!error.message.contains("connection recovers"), "{refusal}: {}", error.message);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_recovery_rejects_a_different_home_identity_without_metadata() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "different-original-home").await;
+    let mut locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    locator.home.host.host_generation += 1;
+    let encoded = MailboxRelayLocator::encode(&locator.home, &locator.id, false).unwrap();
+    let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+    let refused = read_relay_page(&fixture.satellite, &fixture.native, &encoded).await;
+    let handle = fixture.satellite.federation_peer_handles.lock().unwrap()
+        .remove(&locator.home.host.host_id).unwrap();
+    let refused_without_handle = read_relay_page(&fixture.satellite, &fixture.native, &encoded).await;
+    fixture.satellite.federation_peer_handles.lock().unwrap()
+        .insert(locator.home.host.host_id.clone(), handle);
+    let missing = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id).unwrap().is_none();
+    proxy.finish().await;
+    fixture.finish().await;
+
+    assert!(missing, "a different home identity must not create an association");
+    for result in [refused, refused_without_handle] {
+        let error = result.err().expect("a different home is unauthorized even when its handle is absent");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(error.message.contains("configured central home"), "{}", error.message);
+        assert!(error.message.contains("retry alone will not"), "{}", error.message);
+        assert!(!error.message.contains("try the read again later"), "a permanent refusal must not claim transient recovery");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_missing_association_local_home_names_the_missing_metadata() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let caller = test_session_id(&fixture.central, Agent::Codex);
+    let actor = fixture.central.native_mailbox_relay_descriptor(&caller).unwrap().principal;
+    let home = MailboxRelayHome { host: actor.host.clone(), store_id: actor.store_id.clone() };
+    let mailbox_id = format!("mailbox-{}", Uuid::new_v4());
+    let locator = MailboxRelayLocator::encode(&home, &mailbox_id, false).unwrap();
+    let missing = fixture.central.mailbox_store.mailbox_relay_association(&actor, &mailbox_id)
+        .unwrap().is_none();
+    let no_handle = fixture.central.federation_peer_handle(&home.host.host_id).is_none();
+    let result = read_relay_page(&fixture.central, &caller, &locator).await;
+    fixture.finish().await;
+
+    assert!(missing && no_handle, "the local home has no saved association or peer handle");
+    let error = result.err().expect("an unowned mailbox locator cannot create membership");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("no saved association"), "{}", error.message);
+    assert!(error.message.contains("home=local"), "{}", error.message);
+    assert!(!error.message.contains("peer_handle"), "local metadata loss is not a remote connection failure");
+    assert!(error.message.contains("not repaired by this read"), "{}", error.message);
+    assert!(error.message.contains("retry alone will not restore it"), "{}", error.message);
+    assert!(!error.message.contains(&actor.participant_key()), "no extra actor identity");
+    assert!(!error.message.contains(&home.store_id), "no extra store identity");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_missing_association_remote_home_names_the_missing_handle() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "missing-association-remote").await;
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+    let missing = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id)
+        .unwrap().is_none();
+    let handle = fixture.satellite.federation_peer_handles.lock().unwrap()
+        .remove(&locator.home.host.host_id).expect("fixture starts with a connected home");
+    let refused = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    let still_missing = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id)
+        .unwrap().is_none();
+    fixture.satellite.federation_peer_handles.lock().unwrap()
+        .insert(locator.home.host.host_id.clone(), handle);
+    let recovered = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    proxy.finish().await;
+    fixture.finish().await;
+
+    assert!(missing && still_missing, "a refused read must not invent an association");
+    let page = recovered.expect("restoring the authenticated home handle lets the read recover");
+    assert!(page.messages.iter().any(|message| message.id == sent.message_id));
+    let error = refused.err().expect("a missing handle cannot access the remote home");
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(error.message.contains("no saved association"), "{}", error.message);
+    assert!(error.message.contains("home=remote"), "{}", error.message);
+    assert!(error.message.contains("peer_handle=absent"), "{}", error.message);
+    assert!(error.message.contains("try the read again later after the configured connection recovers"), "{}", error.message);
+    assert!(error.message.contains("this read does not reconnect"), "{}", error.message);
+    assert!(!error.message.contains(&actor.participant_key()), "no extra actor identity");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_missing_association_available_home_recovers_through_the_public_read() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "missing-association-available").await;
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+    let missing_before = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id)
+        .unwrap().is_none();
+    let result = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    let recovered = fixture.satellite.mailbox_store.mailbox_relay_association(&actor, &locator.id)
+        .unwrap().is_some();
+    proxy.finish().await;
+    fixture.finish().await;
+
+    assert!(missing_before && recovered, "the public page read retains the authoritative association");
+    let page = result.expect("a reachable authenticated home can recover membership");
+    assert!(page.receipt.is_some(), "the recovered read issues a real receipt");
+    assert!(page.messages.iter().any(|message| message.id == sent.message_id));
 }

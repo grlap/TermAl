@@ -238,6 +238,26 @@ describe("EngramProjectSettingsDialog", () => {
     ));
   });
 
+  it("still shows observations off after Disable", async () => {
+    mockUpdateProjectEngramSettings.mockResolvedValueOnce({
+      projects: [{ ...project, engram: { ...project.engram!, enabled: false } }],
+    } as StateResponse);
+    function Harness() {
+      const [current, setCurrent] = useState(project);
+      return <EngramProjectSettingsDialog project={current} onClose={vi.fn()}
+        onVerified={vi.fn()} onSaved={state => setCurrent(state.projects[0])} />;
+    }
+    render(<Harness />);
+    await screen.findByText("Policy unknown — Policy unavailable");
+    expect(screen.getByLabelText("Execution Observability")).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable Engram" }));
+
+    await screen.findByText("Declared · ready to enable");
+    expect(mockUpdateProjectEngramSettings).toHaveBeenCalledWith("project-1", { enabled: false });
+    expect(screen.getByLabelText("Execution Observability")).not.toBeChecked();
+  });
+
   it("resynchronizes observability from persisted project state", async () => {
     const props = {
       onClose: vi.fn(),

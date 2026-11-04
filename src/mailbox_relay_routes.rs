@@ -57,26 +57,50 @@ fn public_mailbox_relay_message(
 
 const NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE: &str =
     "native mailbox relay requires an enrolled authenticated peer with relay support";
+const NATIVE_MAILBOX_RELAY_RECOVERY_PEER_UNAVAILABLE: &str =
+    "native mailbox has no saved association for this caller and mailbox (home=remote, peer_handle=absent)";
+
+fn mailbox_relay_home_unavailable(error: &ApiError) -> bool {
+    let link_down = error.status == StatusCode::CONFLICT
+        && (error.message == federation_stale_link().message
+            || error.message == NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE
+            || error.message == NATIVE_MAILBOX_RELAY_RECOVERY_PEER_UNAVAILABLE);
+    link_down || matches!(
+        error.status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
+    )
+}
 
 /// An exact read whose remote home the relay cannot reach now: the link is
 /// down or changed, no relay peer handle is held, or the transport gave no
 /// usable answer. It reads as 503 current status unavailable; any other
 /// error, such as a membership or enrollment change, is left as it was.
 fn mailbox_relay_current_status_unavailable(error: ApiError) -> ApiError {
-    let link_down = error.status == StatusCode::CONFLICT
-        && (error.message == federation_stale_link().message
-            || error.message == NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE);
-    let no_usable_answer = matches!(
-        error.status,
-        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
-    );
-    if link_down || no_usable_answer {
+    if mailbox_relay_home_unavailable(&error) {
         return mailbox_current_status_unavailable(ApiError::from_status(
             StatusCode::SERVICE_UNAVAILABLE,
             error.message,
         ));
     }
     error
+}
+
+fn mailbox_relay_page_unavailable(error: ApiError) -> ApiError {
+    if mailbox_relay_home_unavailable(&error) || mailbox_relay_recovery_link_changed(&error) {
+        let cause = error.message.split(';').next().unwrap_or(&error.message).trim();
+        return ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE, format!(
+            "mailbox page unavailable: the original home could not be reached or gave no usable answer ({cause}); \
+             this read does not reconnect the peer; try the read again later after the configured connection recovers"
+        ));
+    }
+    error
+}
+
+// This is the local association commit's lease fence, not a storage failure.
+// Keep writer-busy and immutable-identity refusals out of the home mapper.
+fn mailbox_relay_recovery_link_changed(error: &ApiError) -> bool {
+    error.status == StatusCode::CONFLICT
+        && error.message == NATIVE_MAILBOX_RELAY_LINK_CHANGED
 }
 
 fn public_mailbox_relay_receipt(
@@ -554,18 +578,35 @@ impl AppState {
     async fn recover_native_mailbox_relay_association(
         &self, actor: &MailboxRelayPrincipal, locator: &MailboxRelayLocator,
     ) -> Result<MailboxRelayConversation, ApiError> {
-        let handle = self.federation_peer_handle(&locator.home.host.host_id)
-            .ok_or_else(|| ApiError::conflict("original native mailbox home is unavailable"))?;
-        let lease = handle.channel.current_lease()?;
-        lease.with_current(self, |_, peer| {
-            if peer.local != actor.host || peer.peer != locator.home.host
-                || peer.central != locator.home.host || peer.local_role != FederationRole::Satellite {
-                return Err(ApiError::conflict("native mailbox recovery requires its configured central home"));
-            }
-            Ok(())
-        })?;
-        let rows: Vec<MailboxRelaySummary> = self.request_mailbox_relay(&handle, &lease,
-            MailboxRelayOperation::List { actor: actor.clone(), home: locator.home.clone() }).await?;
+        if locator.home.host == actor.host {
+            return Err(ApiError::conflict(
+                "native mailbox has no saved association for this caller and mailbox \
+                 (home=local); local association metadata is not repaired by this read; \
+                 retry alone will not restore it",
+            ));
+        }
+        // A locator alone grants no new topology or membership. Distinguish an
+        // unsupported home from a configured connection that can reconnect.
+        let peer = self.federation_peer_snapshot(&locator.home.host.host_id)?;
+        if peer.local != actor.host || peer.peer != locator.home.host
+            || peer.central != locator.home.host || peer.local_role != FederationRole::Satellite {
+            return Err(ApiError::conflict("native mailbox recovery requires its configured central home; retry alone will not change that configuration"));
+        }
+        let (lease, rows) = async {
+            let handle = self.federation_peer_handle(&locator.home.host.host_id)
+                .ok_or_else(|| ApiError::conflict(NATIVE_MAILBOX_RELAY_RECOVERY_PEER_UNAVAILABLE))?;
+            let lease = handle.channel.current_lease()?;
+            lease.with_current(self, |_, peer| {
+                if peer.local != actor.host || peer.peer != locator.home.host
+                    || peer.central != locator.home.host || peer.local_role != FederationRole::Satellite {
+                    return Err(ApiError::conflict("native mailbox recovery requires its configured central home"));
+                }
+                Ok(())
+            })?;
+            let rows: Vec<MailboxRelaySummary> = self.request_mailbox_relay(&handle, &lease,
+                MailboxRelayOperation::List { actor: actor.clone(), home: locator.home.clone() }).await?;
+            Ok::<_, ApiError>((lease, rows))
+        }.await.map_err(mailbox_relay_page_unavailable)?;
         let row = rows.into_iter().find(|row| row.summary.id == locator.id)
             .ok_or_else(|| ApiError::not_found("native mailbox is not owned by this recipient at its original home"))?;
         row.conversation.require_home(&locator.home)?;
@@ -579,7 +620,14 @@ impl AppState {
         let saved = conversation.clone();
         let mailbox = locator.id.clone();
         run_blocking_api(move || app.mailbox_store.remember_mailbox_relay(
-            &saved, &mailbox, &names, || authority.lock()).map_err(mailbox_api_error)).await?;
+            &saved, &mailbox, &names, || authority.lock()).map_err(|error| {
+                let error = mailbox_api_error(error);
+                if mailbox_relay_recovery_link_changed(&error) {
+                    mailbox_relay_page_unavailable(error)
+                } else {
+                    error
+                }
+            })).await?;
         Ok(conversation)
     }
     async fn read_native_mailbox_relay(
@@ -594,6 +642,7 @@ impl AppState {
             ));
         }
         let actor = self.native_mailbox_relay_descriptor(session)?.principal;
+        let remote_home = locator.home.host != actor.host;
         let app = self.clone();
         let captured = actor.clone();
         let mailbox = locator.id.clone();
@@ -620,7 +669,8 @@ impl AppState {
                     issue_receipt: request.issue_receipt,
                 },
             )
-            .await?;
+            .await
+            .map_err(|error| if remote_home { mailbox_relay_page_unavailable(error) } else { error })?;
         page.messages = page
             .messages
             .into_iter()

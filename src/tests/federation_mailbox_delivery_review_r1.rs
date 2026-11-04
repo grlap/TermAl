@@ -255,7 +255,7 @@ fn federation_delivery_review_r1_satellite_lookup_yields_before_shared_sqlite_mu
     });
     // The executor must return from its first poll while storage is STILL held.
     // Always release before asserting, so an old blocking implementation exits.
-    let yielded_while_locked = yielded_rx.recv_timeout(Duration::from_secs(1)).is_ok();
+    let yielded_while_locked = yielded_rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).is_ok();
     drop(connection);
     let prepared = worker.join().unwrap();
     assert!(prepared.is_ok(), "fixture/preparation must remain valid after release");

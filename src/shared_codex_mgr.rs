@@ -2,9 +2,9 @@
 //
 // Codex is the odd one out among the agent backends. Where Claude
 // (`src/claude.rs`) and ACP (`src/acp.rs`) each spawn a dedicated
-// per-session subprocess, Codex runs as ONE long-lived
-// `codex app-server` process that hosts every Codex-backed session in
-// this `AppState`. Threads are Codex's native unit of conversation,
+// per-session subprocess, Codex runs one long-lived
+// `codex app-server` process per profile in this `AppState`.
+// Threads are Codex's native unit of conversation,
 // and a single app-server can serve many threads concurrently, so a
 // shared process is both correct and much cheaper than N per-session
 // children.
@@ -21,12 +21,11 @@
 // each of them via `handle_runtime_exit_if_matches` (see
 // `src/turn_lifecycle.rs`).
 //
-// Profiles. On Windows, read-only-sandbox sessions run on a second such
-// app-server (`src/shared_codex_profile.rs`); everything above holds per
-// profile, and one profile's exit leaves the other's sessions alone.
+// Profiles. On Windows, read-only sessions and delegated workspace-write
+// threads each have a separate app-server (`src/shared_codex_profile.rs`).
+// Everything above holds per profile; an exit leaves other profiles alone.
 //
-// Mutex pattern. Each profile's slot (`shared_codex_runtime` and
-// `shared_codex_read_only_runtime`) lives in `Arc<Mutex<Option<_>>>`
+// Mutex pattern. Each profile's slot lives in `Arc<Mutex<Option<_>>>`
 // on `AppState`, intentionally separate from `AppState.inner`. The
 // first-time handshake blocks for up to a few minutes, so holding the
 // main state mutex during spawn would freeze every other session. The
@@ -92,16 +91,14 @@ impl AppState {
         match profile {
             SharedCodexProfile::Default => &self.shared_codex_runtime,
             SharedCodexProfile::ReadOnlySandbox => &self.shared_codex_read_only_runtime,
+            SharedCodexProfile::WorkspaceWriteSandbox => &self.shared_codex_workspace_write_runtime,
         }
     }
 
     /// The profile whose slot holds the runtime `runtime_id`, or `None` when
     /// no slot holds it (torn down or replaced).
     fn shared_codex_profile_holding(&self, runtime_id: &str) -> Option<SharedCodexProfile> {
-        [
-            SharedCodexProfile::Default,
-            SharedCodexProfile::ReadOnlySandbox,
-        ]
+        SharedCodexProfile::ALL
         .into_iter()
         .find(|profile| {
             self.shared_codex_runtime_slot(*profile)
@@ -127,10 +124,7 @@ impl AppState {
         &self,
         runtime_id: &str,
     ) -> Option<(SharedCodexProfile, SharedCodexRuntime)> {
-        [
-            SharedCodexProfile::Default,
-            SharedCodexProfile::ReadOnlySandbox,
-        ]
+        SharedCodexProfile::ALL
         .into_iter()
         .find_map(|profile| {
             let mut slot = self
@@ -338,10 +332,7 @@ impl AppState {
     /// the stdout reader's EOF path and the `wait()` thread already fail
     /// pending requests and retire the runtime (`src/codex.rs`).
     fn shared_codex_stdout_silence_if_matches(&self, runtime_id: &str) -> Option<Duration> {
-        [
-            SharedCodexProfile::Default,
-            SharedCodexProfile::ReadOnlySandbox,
-        ]
+        SharedCodexProfile::ALL
         .into_iter()
         .find_map(|profile| {
             let shared_runtime = self

@@ -238,7 +238,7 @@ async fn utilization_endpoints_are_cached_read_only_even_while_state_is_held() {
     let revision = guard.revision;
     for uri in ["/api/host-utilization", "/api/federation/host-utilization"] {
         let response = tokio::time::timeout(
-            Duration::from_secs(2),
+            crate::TEST_PHASE_DEADLOCK_GUARD,
             router.clone().oneshot(
                 axum::http::Request::builder()
                     .uri(uri)
@@ -341,7 +341,7 @@ fn utilization_native_first_sample_and_platform_unsupported_markers() {
 }
 
 async fn wait_for_sampler_exit(app: &AppState) {
-    tokio::time::timeout(Duration::from_secs(2), async {
+    tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, async {
         while app.host_utilization.sampler_running.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -398,7 +398,7 @@ async fn utilization_shutdown_leaves_a_blocked_sampler_owned_until_its_actual_ex
     })
     .unwrap();
     entered_rx.await.unwrap();
-    tokio::time::timeout(Duration::from_secs(2), runtime.shutdown())
+    tokio::time::timeout(crate::TEST_PHASE_DEADLOCK_GUARD, runtime.shutdown())
         .await
         .expect("observational shutdown must return while the probe is blocked");
     assert!(app.host_utilization.sampler_running.load(Ordering::SeqCst));

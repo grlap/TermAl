@@ -366,10 +366,10 @@ fn registered_ordering_regression_success_fences_an_older_completed_failure() {
     let older_refresh = std::thread::spawn(move || {
         state.refresh_test_run_waits_with_hooks(&|| {}, &|| {
             ready_tx.send(()).unwrap();
-            resume_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            resume_rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
         });
     });
-    ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    ready_rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
     // A's failure read is complete. B now reads a good file, without changing
     // the durable results-seen/zero-failure state, before A can lock again.
     fs::write(&results, &good).unwrap();

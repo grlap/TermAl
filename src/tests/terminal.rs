@@ -425,7 +425,7 @@ fn terminal_output_reader_error_returns_non_empty_shared_prefix() {
         done_rx,
         buffer,
         "stdout",
-        Duration::from_secs(1),
+        crate::TEST_PHASE_DEADLOCK_GUARD,
         None,
     )
     .expect("reader error should return buffered prefix as truncated output");
@@ -452,7 +452,7 @@ fn terminal_output_reader_disconnected_reports_reader_panic() {
         done_rx,
         buffer,
         "stdout",
-        Duration::from_secs(1),
+        crate::TEST_PHASE_DEADLOCK_GUARD,
         None,
     )
     .expect_err("reader panic should surface as an internal error");

@@ -7,8 +7,7 @@ struct MailboxWorkerRelease(Arc<(Mutex<bool>, std::sync::Condvar)>);
 
 impl Drop for MailboxWorkerRelease {
     fn drop(&mut self) {
-        *self.0.0.lock().unwrap() = true;
-        self.0.1.notify_all();
+        phase_sync::set_gate(&self.0, true);
     }
 }
 
@@ -89,13 +88,7 @@ async fn mailbox_deadline_keeps_link_and_worker_capacity_until_worker_settlement
     channel.control.observed = Arc::new(move |event, _| {
         if event == "mailboxExecuted" && armed_hook.swap(false, Ordering::SeqCst) {
             entered.lock().unwrap().take().unwrap().send(()).unwrap();
-            let (released, _) = phase
-                .1
-                .wait_timeout_while(phase.0.lock().unwrap(), phase_sync::DEADLOCK_GUARD, |done| {
-                    !*done
-                })
-                .unwrap();
-            assert!(*released, "test did not release the executed mailbox worker");
+            phase_sync::wait_for_gate(&phase, true);
         }
     });
     let router = federation_router(channel.clone(), federation_link::allowed());

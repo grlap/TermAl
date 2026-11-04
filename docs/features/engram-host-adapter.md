@@ -39,9 +39,10 @@ Stop or reset, and it keeps claims, source-root naming, reads and explicit
 registered verification working.
 
 TermAl never asks Engram for permission before it delivers a prompt. Sends,
-queue drains, Resume and mailbox wakes do not wait for Engram, and an Engram
+queue drains, Resume and mailbox wakes wait for no Engram decision, and an Engram
 that is slow, refuses or is unreachable costs a turn its observations, never
-its delivery. Runtime ownership, Stop, settings-reset fences, provider
+its delivery. The one wait is the bounded, advisory context read described under
+[delivery and context preparation](execution-observability.md#delivery-and-context-preparation). Runtime ownership, Stop, settings-reset fences, provider
 durability and federation authorization still apply. Resume releases the
 ordinary queue pause. Explicit Human sends keep their priority over paused
 automatic work.
@@ -857,13 +858,17 @@ path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
 - **Measurement and policy.** The worker pins the observation policy once,
   off-thread, in a separately persisted phase before measuring source.
   Measurement and request construction use that same pinned policy. The
-  baseline is the session's last checkpoint that an earlier build's grant
-  lifecycle acknowledged, and only for the exact same binding and workspace:
-  differing revisions use `content_comparison` with the baseline's original
-  timestamp, equal revisions report a null change, and no compatible
-  baseline uses `assumed_missing_baseline`. A report does not advance that
-  baseline, so successive turns do not compare with each other: without such
-  a historical checkpoint, every turn reports `assumed_missing_baseline`. The
+  baseline is the previous traced turn's recorded closing sighting, or once a
+  compatible checkpoint an earlier build recorded, and only for the exact same
+  binding, workspace, root generation and root state: differing revisions use
+  `content_comparison` with the baseline's original timestamp, equal revisions
+  report a null change, and no compatible baseline uses
+  `assumed_missing_baseline`. A closing turn takes the baseline, so it's used
+  once. A sighting becomes the next baseline only when its receipt records it
+  and its report is still the session's newest closed turn with the same
+  binding, so a refused or late sighting, a rebind or a report from before a
+  restart leaves none. A turn with uncertain source attribution reports no
+  source change and leaves no baseline. The
   reported interval is an observation envelope, not the turn's execution
   duration. It starts when the trace opens, or at the earlier original baseline time
   when a comparison is included, and ends at the actual closing observation
@@ -3079,7 +3084,7 @@ A missing launchable CLI blocks new Claude sessions with installation guidance
 (authentication remains a runtime check). GUI-launched hosts must have the CLI
 directory on their PATH. Evaluator defaults are saved only by their dedicated
 button: editing them does not invalidate connection verification, and saving
-them does not discard an unsaved turn-gating draft (or vice versa). Switching
+them does not discard an unsaved connection draft (or vice versa). Switching
 projects releases the old acceptance form's busy state; late completions cannot
 unlock a newer project's in-flight operation.
 
