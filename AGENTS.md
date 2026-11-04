@@ -338,6 +338,12 @@ operations, so the rule holds only as long as every agent follows it:
   that worktree is removed. Engram's notes, gates and seals stay the lasting
   record: what a decision rests on is quoted there, never left only in a raw
   file.
+- Finishing work includes cleaning up after it, without waiting for a disk to
+  fill. When a worktree, build output or temporary file has served its purpose,
+  its owner removes it, after the path check below, and records it; the
+  integration owner does so for a landed candidate. To keep one longer,
+  record on an open item the concrete need and when it ends, then remove it
+  then. A periodic sweep doesn't replace this.
 - Outside the repository only tools write, as part of their own work: TermAl
   through its tools and test runs, Engram to its store home, Cargo and npm to
   their caches. Anything else there, such as installing, repairing or updating
