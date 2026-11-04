@@ -27,69 +27,88 @@ function checkLayout() {
     for (const grouped of [false, true]) {
       for (const remote of [false, true]) {
         for (const name of ['Claude', 'Engram::Coder-VerificationWorkspaceSol', 'Session with a longer readable name']) {
-          for (const label of ['', 'Foreground turn', 'Foreground turn + background work']) {
-            for (const count of ['', '12 hits', 'Transcript not loaded']) {
-              const scenario = { width, grouped, remote, name, label, count };
-              const list = document.createElement('div');
-              list.className = 'session-list';
-              list.style.width = `${width}px`;
-              const entries = document.createElement('div');
-              entries.className = 'session-list-entries';
-              list.append(entries);
-              let parent = entries;
-              if (grouped) {
-                const group = document.createElement('section');
-                group.className = 'session-orchestrator-group session-window-group';
-                const members = document.createElement('div');
-                members.className = 'session-orchestrator-group-list';
-                const row = document.createElement('div');
-                row.className = 'session-window-group-row last';
-                entries.append(group); group.append(members); members.append(row); parent = row;
-              }
-              const shell = document.createElement('div');
-              shell.className = `session-row-shell${remote ? ' remote' : ''}`;
-              const row = document.createElement('button'); row.className = 'session-row';
-              const copy = document.createElement('div'); copy.className = 'session-copy';
-              const title = document.createElement('div'); title.className = 'session-title-line';
-              const strong = document.createElement('strong'); strong.textContent = name;
-              title.append(strong);
-              for (const [className, text] of [['session-work-label', label], ['session-search-count', count]]) {
-                if (!text) continue;
-                const badge = document.createElement('span'); badge.className = className;
-                badge.textContent = text; title.append(badge);
-              }
-              const preview = document.createElement('div'); preview.className = 'session-preview';
-              preview.textContent = 'An ordinary session preview';
-              copy.append(title, preview); row.append(copy); shell.append(row); parent.append(shell);
-              document.body.append(list);
-              const range = document.createRange(); range.selectNodeContents(strong);
-              const lines = new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size;
-              const nameRect = strong.getBoundingClientRect();
-              const titleRect = title.getBoundingClientRect();
-              const right = titleRect.right - parseFloat(getComputedStyle(title).paddingRight);
-              const badges = [...title.querySelectorAll('span')].map(badge => {
-                const rect = badge.getBoundingClientRect();
-                return { text: badge.textContent, width: rect.width, right: rect.right,
-                  overlapsName: rect.left < nameRect.right - 1 && rect.right > nameRect.left + 1
-                    && rect.top < nameRect.bottom - 1 && rect.bottom > nameRect.top + 1 };
-              });
-              const observation = { ...scenario, clientWidth: list.clientWidth, scrollWidth: list.scrollWidth,
-                nameWidth: nameRect.width, nameLines: lines, badges };
-              observations.push(observation);
-              if (list.clientWidth < width - 1 || nameRect.width <= 0 || lines === 0
-                  || list.scrollWidth > list.clientWidth + 1 || nameRect.right > right + 1
-                  || (name === 'Claude' && lines !== 1)
-                  || badges.some(badge => badge.width <= 0 || badge.right > right + 1 || badge.overlapsName)) {
-                failures.push(observation);
-              }
-              list.remove();
+          for (const count of ['', '12 hits', 'Transcript not loaded']) {
+            const scenario = { width, grouped, remote, name, count };
+            const list = document.createElement('div');
+            list.className = 'session-list';
+            list.style.width = `${width}px`;
+            const entries = document.createElement('div');
+            entries.className = 'session-list-entries';
+            list.append(entries);
+            let parent = entries;
+            if (grouped) {
+              const group = document.createElement('section');
+              group.className = 'session-orchestrator-group session-window-group';
+              const members = document.createElement('div');
+              members.className = 'session-orchestrator-group-list';
+              const row = document.createElement('div');
+              row.className = 'session-window-group-row last';
+              entries.append(group); group.append(members); members.append(row); parent = row;
             }
+            const shell = document.createElement('div');
+            shell.className = `session-row-shell${remote ? ' remote' : ''}`;
+            const row = document.createElement('button'); row.className = 'session-row';
+            const copy = document.createElement('div'); copy.className = 'session-copy';
+            const title = document.createElement('div'); title.className = 'session-title-line';
+            const strong = document.createElement('strong'); strong.textContent = name;
+            title.append(strong);
+            if (count) {
+              const badge = document.createElement('span'); badge.className = 'session-search-count';
+              badge.textContent = count; title.append(badge);
+            }
+            const preview = document.createElement('div'); preview.className = 'session-preview';
+            preview.textContent = 'An ordinary session preview';
+            copy.append(title, preview); row.append(copy); shell.append(row); parent.append(shell);
+            document.body.append(list);
+            const range = document.createRange(); range.selectNodeContents(strong);
+            const lines = new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size;
+            const nameRect = strong.getBoundingClientRect();
+            const titleRect = title.getBoundingClientRect();
+            const right = titleRect.right - parseFloat(getComputedStyle(title).paddingRight);
+            const badges = [...title.querySelectorAll('span')].map(badge => {
+              const rect = badge.getBoundingClientRect();
+              return { text: badge.textContent, width: rect.width, right: rect.right,
+                overlapsName: rect.left < nameRect.right - 1 && rect.right > nameRect.left + 1
+                  && rect.top < nameRect.bottom - 1 && rect.bottom > nameRect.top + 1 };
+            });
+            const observation = { ...scenario, clientWidth: list.clientWidth, scrollWidth: list.scrollWidth,
+              nameWidth: nameRect.width, nameLines: lines, badges };
+            observations.push(observation);
+            if (list.clientWidth < width - 1 || nameRect.width <= 0 || lines === 0
+                || list.scrollWidth > list.clientWidth + 1 || nameRect.right > right + 1
+                || (name === 'Claude' && lines !== 1)
+                || badges.some(badge => badge.width <= 0 || badge.right > right + 1 || badge.overlapsName)) {
+              failures.push(observation);
+            }
+            list.remove();
           }
         }
       }
     }
   }
-  const result = { cases: observations.length, failures, observations };
+  // Real stylesheet rendering complements the App/JSDOM activity assertions.
+  const badgeObservations = [];
+  for (const [activity, status, background] of [
+    ['foreground', 'active', false], ['background', 'idle', true],
+    ['both', 'active', true], ['neither', 'idle', false],
+  ]) {
+    const shell = document.createElement('div'); shell.className = 'session-row-shell';
+    const button = document.createElement('button'); button.className = 'session-row-open';
+    const badge = document.createElement('span');
+    badge.className = 'status-agent-badge session-row-status-badge';
+    badge.dataset.status = status;
+    if (background) badge.dataset.work = 'background';
+    button.append(badge); shell.append(button); document.body.append(shell);
+    const rect = badge.getBoundingClientRect();
+    const animation = getComputedStyle(badge, '::before').animationName;
+    const observation = { activity, status, background, width: rect.width, height: rect.height, animation };
+    badgeObservations.push(observation);
+    if (rect.width <= 0 || rect.height <= 0 || animation !== (activity === 'neither' ? 'none' : 'spin')) {
+      failures.push(observation);
+    }
+    shell.remove();
+  }
+  const result = { cases: observations.length, failures, observations, badgeObservations };
   document.body.dataset.layoutResult = btoa(JSON.stringify(result));
 }
 
@@ -113,4 +132,4 @@ if (!encoded) throw new Error(`Browser produced no layout observations; see ${ou
 const result = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify({ cases: result.cases, failures: result.failures.length, output }));
-if (result.cases !== 324 || result.failures.length) process.exitCode = 1;
+if (result.cases !== 108 || result.failures.length) process.exitCode = 1;

@@ -4141,23 +4141,6 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-/* Keep short names intact; labels wrap or truncate in the remaining space. */
-.session-work-label {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--muted);
-  font-size: 0.78em;
-  white-space: nowrap;
-}
-
-.session-work-label[data-work="background"],
-.session-work-label[data-work="both"] {
-  color: var(--signal-blue);
-}
-
 .session-search-count {
   display: block;
   min-width: 0;

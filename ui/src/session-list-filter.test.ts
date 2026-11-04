@@ -6,7 +6,7 @@ import {
   filterSessionListVisibleSessions,
   filterSessionsByListFilter,
 } from "./session-list-filter";
-import { sessionWorkActivity, sessionWorkLabel } from "./session-work-activity";
+import { sessionWorkActivity } from "./session-work-activity";
 import { NO_RUNNING_RUNS_BY_OWNER, runningRunsByOwner } from "./test-runs";
 import { makeTestRun } from "./test-runs-fixtures";
 import type { Session } from "./types";
@@ -105,9 +105,12 @@ describe("session list filters", () => {
       expect(countWorkingBreakdown(four, fourRuns)).toEqual({ foreground: 2, background: 2 });
     });
 
-    it("labels each row with the kind of work keeping it busy", () => {
-      expect(four.map((session) => sessionWorkLabel(sessionWorkActivity(session, fourRuns)))).toEqual([
-        "Foreground turn", "Background work", "Foreground turn + background work", null,
+    it("classifies the activity used by row badges and working counts", () => {
+      expect(four.map((session) => sessionWorkActivity(session, fourRuns))).toEqual([
+        { foreground: true, background: false, modeUnknown: false },
+        { foreground: false, background: true, modeUnknown: false },
+        { foreground: true, background: true, modeUnknown: false },
+        { foreground: false, background: false, modeUnknown: false },
       ]);
     });
 
@@ -139,14 +142,15 @@ describe("session list filters", () => {
       expect(sessionWorkActivity(session, ownRun)).toEqual({ foreground: true, background: false, modeUnknown: false });
       // Without a turn, the same run is background work.
       expect(sessionWorkActivity(createSession("turn", "idle"), ownRun).background).toBe(true);
-      // During a turn, a run whose detach mode the host did not observe says so.
+      // Keep the activity classifier's unknown-mode distinction, independently
+      // of the removed row label.
       const unknownMode = runs({ runId: "seen", ownerSessionId: "turn", detached: null, registrationState: "hostObserved" });
-      expect(sessionWorkLabel(sessionWorkActivity(session, unknownMode))).toBe("Foreground turn + running work (mode unknown)");
+      expect(sessionWorkActivity(session, unknownMode)).toEqual({ foreground: true, background: true, modeUnknown: true });
       // Only a host-observed run lacks a known mode, as for the pane's marker:
       // a registered, discovered or unlabelled run without one is background.
       for (const registrationState of ["registered", "discovered", undefined] as const) {
         const nullMode = runs({ runId: "null", ownerSessionId: "turn", detached: null, registrationState });
-        expect(sessionWorkLabel(sessionWorkActivity(session, nullMode))).toBe("Foreground turn + background work");
+        expect(sessionWorkActivity(session, nullMode)).toEqual({ foreground: true, background: true, modeUnknown: false });
       }
     });
 

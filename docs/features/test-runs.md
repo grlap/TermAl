@@ -607,16 +607,13 @@ tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
     out in either form, while its accessible name stays "Working sessions
     (N)". A session with both kinds of work counts in each, and with no
     working session the chip shows no split.
-  - Each row says "Foreground turn", "Background work" or "Foreground turn +
-    background work". During a turn, a run the turn started in the foreground
-    (`detached: false`) is part of the turn; a host-observed run without a
-    detach mode (the same rule as the marker's "test running") says "running
-    work (mode unknown)", and the breakdown counts it as background. An idle
-    row with background work shows a busy badge, not the idle one. In a
-    narrow pane the label is cut with an ellipsis, and its full text is its
-    title.
+  - Rows show their status badge without an additional work-type text label.
+    During a turn, a run the turn started in the foreground (`detached: false`)
+    is part of the turn; a run without a detach mode counts as background
+    in the breakdown. An idle
+    row with background work shows a busy badge, not the idle one.
   - A run-only change (`testRunChanged`, `testRunRemoved` or a snapshot)
-    updates the counts, filters and labels without a session update.
+    updates the counts, filters and badges without a session update.
   - Only runs this index knows count: a detached build that was never
     registered as a run is not seen.
 - The prototype linked on the tm-ncc6 epic is the visual reference.

@@ -102,7 +102,7 @@ describe("App test-run badge", () => {
   });
 
   // A session whose turn has ended but whose detached gate is still running is
-  // busy in the background: Working, not Completed, with a row label and a
+  // busy in the background: Working, not Completed, with a busy badge and a
   // breakdown. A run-only delta (no session update) moves it back.
   it("counts a listed session busy only with a detached run as working, and follows run-only deltas", async () => {
     await withVerifiedNoReactActWarnings(async () => {
@@ -125,7 +125,7 @@ describe("App test-run badge", () => {
       expect(workingChip).toHaveAccessibleDescription(
         "0 foreground / 1 background. A session with a foreground turn and background work counts in both.",
       );
-      expect(screen.getByText("Background work")).toBeVisible();
+      expect(screen.queryByText("Background work")).toBeNull();
       expect(document.querySelector('.session-row-status-badge[data-work="background"]')).not.toBeNull();
       expect(railButton()).toHaveAccessibleName("Open Test Runs (1 active run)");
 
@@ -141,6 +141,50 @@ describe("App test-run badge", () => {
       expect(document.querySelector(".sidebar-status-split")).toBeNull();
       expect(screen.getByRole("button", { name: "Working sessions (0)" })).not.toHaveAttribute("aria-describedby");
       expect(document.querySelector('.session-row-status-badge[data-work="background"]')).toBeNull();
+    });
+  });
+
+  it("renders foreground, background, combined and idle rows without work labels or their tooltips", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const cases = [
+        makeSession("foreground", { name: "Foreground session", status: "active" }),
+        makeSession("background", { name: "Background session", status: "idle" }),
+        makeSession("both", { name: "Combined session", status: "active" }),
+        makeSession("neither", { name: "Idle session", status: "idle" }),
+        makeSession("unknown", { name: "Unknown mode session", status: "active" }),
+      ];
+      const state = {
+        ...makeStateResponse({ revision: 1, projects: [], sessions: cases.map(makeStateSessionSummary), orchestrators: [], workspaces: [] }),
+        testRuns: [
+          makeTestRun({ runId: "bg", ownerSessionId: "background", detached: true }),
+          makeTestRun({ runId: "both-bg", ownerSessionId: "both", detached: true }),
+          makeTestRun({ runId: "unknown-bg", ownerSessionId: "unknown", detached: null, registrationState: "hostObserved" }),
+        ],
+      };
+      vi.spyOn(api, "fetchState").mockResolvedValue(state);
+      await renderApp();
+      await dispatchOpenedStateEvent(latestEventSource(), state);
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      await clickAndSettle(screen.getByRole("button", { name: "No filter (5)" }));
+      for (const session of cases) {
+        const row = screen.getByText(session.name).closest<HTMLButtonElement>("button.session-row")!;
+        expect(row).toBeVisible();
+        for (const label of ["Foreground turn", "Background work", "Foreground turn + background work", "Foreground turn + running work (mode unknown)"]) {
+          expect(within(row).queryByText(label, { exact: true })).toBeNull();
+          expect(within(row).queryByTitle(label, { exact: true })).toBeNull();
+        }
+        expect(row.querySelector(".session-work-label")).toBeNull();
+        const badge = row.closest(".session-row-shell")?.querySelector(".session-row-status-badge");
+        expect(badge).toBeVisible();
+        expect(badge).toHaveAttribute("data-status", session.status);
+        if (["background", "both", "unknown"].includes(session.id)) {
+          expect(badge).toHaveAttribute("data-work", "background");
+        } else {
+          expect(badge).not.toHaveAttribute("data-work");
+        }
+      }
+      expect(screen.getByRole("button", { name: "Working sessions (4)" })).toHaveTextContent("3 foreground / 3 background");
+      expect(screen.getByRole("button", { name: "Completed (1)" })).toBeVisible();
     });
   });
 

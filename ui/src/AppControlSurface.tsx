@@ -68,7 +68,7 @@ import {
   type SessionListFilter,
   type SessionWorkingBreakdown,
 } from "./session-list-filter";
-import { sessionWorkActivity, sessionWorkLabel } from "./session-work-activity";
+import { sessionWorkActivity } from "./session-work-activity";
 import {
   WorkingSessionsBreakdownDescription,
   WorkingSessionsChipLabel,
@@ -539,12 +539,8 @@ export function AppControlSurface({
         remoteLookup,
       );
       // A session busy only with background work is not idle, whatever its
-      // turn status; the label says which kind of work keeps it busy.
+      // turn status; its badge reflects the background activity.
       const workActivity = sessionWorkActivity(session, testRunsByOwner);
-      const workLabel = sessionWorkLabel(workActivity);
-      const workKind = workActivity.foreground && workActivity.background
-        ? "both"
-        : workActivity.background ? "background" : workActivity.foreground ? "foreground" : undefined;
 
       return (
         <div
@@ -606,11 +602,6 @@ export function AppControlSurface({
             <div className="session-copy">
               <div className="session-title-line">
                 <strong>{session.name}</strong>
-                {workLabel ? (
-                  <span className="session-work-label" data-work={workKind} title={workLabel}>
-                    {workLabel}
-                  </span>
-                ) : null}
                 {searchResult ? (
                   <span className="session-search-count">
                     {searchResult.transcriptIncomplete &&

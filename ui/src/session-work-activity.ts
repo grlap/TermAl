@@ -1,7 +1,6 @@
 // What a session in the Sessions list is busy with: a foreground turn, owned
-// launcher work running in the background, or both, and the row label that
-// says so (session-list-filter.ts counts and filters with it;
-// AppControlSurface.tsx shows it).
+// launcher work running in the background, or both. session-list-filter.ts
+// counts and filters with it; AppControlSurface.tsx uses it for busy badges.
 // Does not own: run state or ownership (test-runs.ts), the session's lifecycle
 // status (the host's), or which runs exist (live state). Only runs the test-run
 // index knows about count; a build that was never registered there is not
@@ -40,15 +39,4 @@ export function sessionWorkActivity(
     background: background.length > 0,
     modeUnknown: foreground && background.length > 0 && background.every(testRunDetachModeUnobserved),
   };
-}
-
-export function sessionWorkLabel(activity: SessionWorkActivity): string | null {
-  if (activity.foreground && activity.background) {
-    return activity.modeUnknown
-      ? "Foreground turn + running work (mode unknown)"
-      : "Foreground turn + background work";
-  }
-  if (activity.foreground) return "Foreground turn";
-  if (activity.background) return "Background work";
-  return null;
 }
