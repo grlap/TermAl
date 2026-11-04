@@ -208,7 +208,9 @@ impl PersistFenceTarget {
     /// A request can arrive after the worker drained its channel but before
     /// that tick committed this content. Its next delta then omits the stable
     /// row. Verify the stored bytes on the SAME cached writer connection; do
-    /// not open another connection or treat row existence as proof.
+    /// not open another connection or treat row existence as proof. The one
+    /// exception is a test state's manual write refused as stale, whose cached
+    /// connection is already invalidated (`engram_authority_manual_write`).
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         let _snapshot = if connection.is_autocommit() {
             Some(rusqlite::Transaction::new_unchecked(

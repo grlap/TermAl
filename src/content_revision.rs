@@ -61,6 +61,10 @@ const CONTENT_REVISION_SLOW_CAPTURE: Duration = Duration::from_secs(2);
 /// included: a revision finished after it is not returned. One such path
 /// costs the whole tree its basis; an obligation opened without a basis can
 /// only be waived.
+/// Also refuses distinct tracked case/NFC/NFD spellings that name the same
+/// regular file. Directory spelling alone is admitted; ancestor redirects
+/// still refuse. Distinct-name hard links and terminal symlinks keep their
+/// existing treatment. Neither hash input nor stored revisions are rewritten.
 fn content_revision(root: &FsPath) -> Result<(PathBuf, String)> {
     // `ReviewFreezeGit::new` also refuses a repository that configures Git
     // filters. Nothing here runs a filter (ls-files runs none), so that
@@ -115,6 +119,7 @@ fn capture_content_revision(git: &ReviewFreezeGit) -> Result<String> {
     if paths.len() > CONTENT_REVISION_PATH_LIMIT {
         bail!("too many paths for a content revision");
     }
+    let mut collisions = ContentRevisionCollisions::from_index(&staged, git.deadline)?;
     let mut hash = Sha256::new();
     review_freeze_chunk(&mut hash, "schema", CONTENT_REVISION_SCHEME.as_bytes());
     let mut total = 0usize;
@@ -132,8 +137,8 @@ fn capture_content_revision(git: &ReviewFreezeGit) -> Result<String> {
         // A path that is not there (its file or a directory above it gone,
         // or a directory above it now a file) has no entry: a tracked file
         // deleted in the worktree counts as if its deletion were committed.
-        // Every other failure fails the capture, a tracked directory renamed
-        // in case only among them.
+        // Every other failure fails the capture. Directory spelling alone
+        // does not redirect the read; parent links and junctions still do.
         let present = match content_revision_path(&git.root, path, &mut verified_parents)? {
             Some(full) => match fs::symlink_metadata(&full) {
                 Ok(metadata) => Some((full, metadata)),
@@ -173,7 +178,11 @@ fn capture_content_revision(git: &ReviewFreezeGit) -> Result<String> {
                 bail!("symlink changed while it was read");
             }
         } else {
-            let (content, read) = review_freeze_file_versioned(&full, REVIEW_FREEZE_OUTPUT_LIMIT)?;
+            let (content, read, ()) = review_freeze_file_observed(
+                &full,
+                REVIEW_FREEZE_OUTPUT_LIMIT,
+                |file, opened| collisions.observe(path, file, opened),
+            )?;
             #[cfg(unix)]
             let executable = {
                 use std::os::unix::fs::PermissionsExt;
@@ -200,6 +209,7 @@ fn capture_content_revision(git: &ReviewFreezeGit) -> Result<String> {
             review_freeze_chunk(&mut hash, &format!("entry:{path}:{mode}"), &content);
         }
     }
+    collisions.recheck(&git.root, git.deadline)?;
     // A read cannot be interrupted, so the last one may end past the budget;
     // a revision finished after it is not returned.
     if std::time::Instant::now() >= git.deadline {
@@ -222,9 +232,9 @@ fn capture_content_revision(git: &ReviewFreezeGit) -> Result<String> {
 /// freeze's (`review_freeze_untracked_path`), except that `:` and `\` are
 /// refused only on Windows, where they would change what the path names; on
 /// Unix a tracked file may carry either in its name. A directory above the
-/// path must canonicalise to itself: no link leads it elsewhere, and its case
-/// matches the listing. Each directory is checked once per capture, in
-/// `verified`.
+/// path must be an ordinary directory: no link or junction leads it elsewhere.
+/// Its case or normalization spelling may differ from Git's listing. Each
+/// directory is checked once per capture, in `verified`.
 fn content_revision_path(
     root: &FsPath,
     path: &str,
@@ -243,24 +253,55 @@ fn content_revision_path(
         bail!("a content revision refuses the unsafe path {path:?}");
     }
     let full = root.join(path);
-    let parent = full
-        .parent()
-        .context("a content revision path has no parent")?
-        .to_path_buf();
-    if !verified.contains(&parent) {
-        match fs::canonicalize(&parent) {
-            Ok(canonical) if canonical == parent => {
-                verified.insert(parent);
+    let listed_parent = full.parent().context("a content revision path has no parent")?;
+    if verified.contains(listed_parent) {
+        return Ok(Some(full));
+    }
+    match fs::canonicalize(listed_parent) {
+        Ok(canonical) if canonical == listed_parent => {
+            // Preserve the old admitted path, including its filesystem's
+            // existing treatment of non-redirecting reparse metadata.
+            verified.insert(listed_parent.to_path_buf());
+            return Ok(Some(full));
+        }
+        Ok(canonical) => {
+            let actual = canonical.to_str().context("non-UTF8 canonical parent")?;
+            let listed = listed_parent.to_str().context("non-UTF8 listed parent")?;
+            if content_revision_spelling_key(actual) != content_revision_spelling_key(listed) {
+                bail!("a directory above {path:?} leads elsewhere");
             }
-            Ok(_) => bail!(
-                "a directory above {path:?} leads elsewhere or differs in case from the listing"
-            ),
+        }
+        Err(error) if content_revision_io_not_found(&error) => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
+    // Only a spelling-equivalent canonical mismatch reaches this widening.
+    // Check every ancestor so a link into a case-variant sibling cannot use it.
+    let mut parent = root.to_path_buf();
+    let mut components = path.split('/').peekable();
+    while let Some(component) = components.next() {
+        if components.peek().is_none() {
+            break;
+        }
+        parent.push(component);
+        if verified.contains(&parent) {
+            continue;
+        }
+        match fs::symlink_metadata(&parent) {
+            Ok(metadata) if review_freeze_is_link(&metadata) => {
+                bail!("a directory above {path:?} leads elsewhere through a link or junction")
+            }
+            Ok(metadata) if metadata.is_dir() => {
+                verified.insert(parent.clone());
+            }
+            Ok(_) => return Ok(None),
             Err(error) if content_revision_io_not_found(&error) => return Ok(None),
             Err(error) => return Err(error.into()),
         }
     }
     Ok(Some(full))
 }
+
+include!("content_revision_collisions.rs");
 
 fn content_revision_io_not_found(error: &std::io::Error) -> bool {
     matches!(

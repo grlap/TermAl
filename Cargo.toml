@@ -11,11 +11,13 @@ axum = "0.8.4"
 base64 = "0.22"
 chrono = { version = "0.4.42", default-features = true, features = ["clock"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "gzip", "json", "rustls-tls"] }
+regex-syntax = { version = "=0.8.10", default-features = false, features = ["std", "unicode-case"] }
 futures-core = "0.3"
 getrandom = "0.4.2"
 hkdf = "0.12.4"
 hmac = "0.12.1"
 http-body = "1.0"
+icu_normalizer = { version = "=2.1.1", default-features = false, features = ["compiled_data"] }
 keyring-core = "1.0.0"
 notify = "8"
 # Pinned: reads declared tests' TRX results; no default features, no serde.

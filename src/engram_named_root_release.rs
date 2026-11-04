@@ -154,6 +154,9 @@ fn engram_named_root_reclamation_text(
     // same flight's disposition decides it by rule.
     let status = if engram_named_root_association(inner, root).is_none() {
         engram_named_root_disposition_text(inner, root, now)
+    } else if engram_named_root_run_retired(inner, root).is_some() {
+        // Never planned for a read, as in the planner.
+        "skipped: Engram definitively refused its run; the disposition pass removes it".to_owned()
     } else if !engram_root_reclamation_reader_exists(inner, &root.store) {
         format!("skipped: no eligible reader for store {}", root.store.project_id)
     } else if let Some((_, until)) = inner
@@ -581,7 +584,7 @@ impl AppState {
                     // exact Prepared ACK, not an old Candidate ACK, guards
                     // the original release's current canonical reread.
                     history.transition.as_mut().expect("validated release owner").phase = EngramAuthorityPhase::Prepared;
-                    engram_retain_recovery_run(&mut history.unresolved_runs, binding);
+                    history.retain_recovery_run(binding);
                     history.recovery_reason.get_or_insert_with(||
                         "the retained release requires a fresh guarded canonical read".to_owned());
                 }
@@ -755,23 +758,19 @@ impl AppState {
         }
         #[cfg(test)]
         {
-            let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
-            let mut cache = SqlitePersistConnectionCache::new();
-            persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta).map_err(
-                |error| {
+            // Omission cannot prove selection absence. The existing scoped
+            // fence reader checks both collections in one committed cut.
+            let target = PersistFenceTarget::EngramNamedRootRelease(Box::new(audit.clone()));
+            let committed = self
+                .engram_authority_manual_write(|connection| {
+                    target.is_already_durable(connection).context("release read-back failed")
+                })
+                .map_err(|error| {
                     ApiError::internal(format!(
                         "the release persistence is unconfirmed: {error:#}; its slot stays reserved"
                     ))
-                },
-            )?;
-            // Omission cannot prove selection absence. The existing scoped
-            // fence reader checks both collections in one committed cut.
-            if !PersistFenceTarget::EngramNamedRootRelease(Box::new(audit.clone()))
-                .is_already_durable(
-                    cache.connection.as_ref().expect("committed writer connection"),
-                )
-                .map_err(|error| ApiError::internal(format!("release read-back failed: {error:#}")))?
-            {
+                })?;
+            if !committed {
                 return Err(ApiError::conflict(
                     "the released selection changed before its persistence was confirmed",
                 ));

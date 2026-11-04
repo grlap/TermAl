@@ -1791,6 +1791,9 @@ struct StateInner {
     engram_source_sightings: PersistTracked<Vec<EngramSourceSightingOwner>>,
     engram_root_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
     engram_authority_read_cursor: BTreeMap<EngramAuthorityStoreKey, String>,
+    /// Bounded background reads of retained runs at startup and turn
+    /// opening (`engram_retained_run_settlement.rs`). Not persisted.
+    engram_retained_run_reads: EngramRetainedRunReads,
     engram_root_reclamation: EngramRootReclamationSchedule,
     /// The generation the last new source-root name got; the next is one
     /// more, so no generation is given twice, even after a clear. Persisted
@@ -1962,6 +1965,7 @@ impl StateInner {
             engram_import_reconciliation: PersistTracked::default(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
+            engram_retained_run_reads: EngramRetainedRunReads::default(),
             engram_root_reclamation: EngramRootReclamationSchedule::default(),
             engram_source_root_generation: 0,
             pending_coordination_scope_deletions: PersistTracked::default(),

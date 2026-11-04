@@ -18,6 +18,9 @@ mod test_run_registration;
 #[path = "engram_dart_checks.rs"]
 mod dart;
 
+#[path = "engram_trx_shapes.rs"]
+mod trx_shapes;
+
 /// The declared .NET line of the documentation's example, for a project at
 /// the repository root.
 pub(super) const DECLARED_TEST: &str =

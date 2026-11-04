@@ -537,7 +537,7 @@ impl StateInner {
                     .iter_mut()
                     .find(|history| history.store == store && history.work_id == binding.work_id)
                 {
-                    engram_retain_recovery_run(&mut history.unresolved_runs, &binding);
+                    history.retain_recovery_run(&binding);
                 }
             }
             for root in &self.engram_work_source_roots {
@@ -547,7 +547,13 @@ impl StateInner {
                             journal.store == root.store && journal.claim_id == root.claim_id
                         })
                     {
-                        journal.retire(EngramRootRetirement::NamingSessionRemoved);
+                        // A retired run's journal was settled with it and
+                        // stays settled (engram_retained_run_settlement.rs).
+                        if !journal.read_binding.as_ref().is_some_and(|binding| {
+                            engram_run_retired(&self.engram_work_naming_history, &journal.store, binding)
+                        }) {
+                            journal.retire(EngramRootRetirement::NamingSessionRemoved);
+                        }
                     }
                 }
             }

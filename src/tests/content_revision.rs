@@ -5,6 +5,11 @@
 // src/tests/engram_turn_checks.rs). New module.
 use super::*;
 
+mod case_spelling {
+    use super::*;
+    include!("content_revision_case_spelling.rs");
+}
+
 /// Removes the directories it owns when dropped, on success and on an
 /// assertion's unwind alike; a failed removal is reported, never swallowed,
 /// and does not stop the removal of the others.

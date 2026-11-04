@@ -524,6 +524,7 @@ impl PersistedState {
             engram_import_reconciliation: self.engram_import_reconciliation.into(),
             engram_root_read_cursor: BTreeMap::new(),
             engram_authority_read_cursor: BTreeMap::new(),
+            engram_retained_run_reads: EngramRetainedRunReads::default(),
             engram_root_reclamation: EngramRootReclamationSchedule::default(),
             engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self.pending_coordination_scope_deletions.into(),
@@ -690,7 +691,14 @@ impl PersistedState {
             .chain(inner.quarantined_persisted_session_ids.iter().cloned())
             .collect::<HashSet<_>>();
         for root in &inner.engram_work_source_roots {
-            if !session_ids.contains(&root.named_by_session) {
+            // A retired run's journal was settled with it and stays settled
+            // (engram_retained_run_settlement.rs); no cleanup reopens it.
+            let retired = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
+                .and_then(|journal| journal.read_binding.as_ref())
+                .is_some_and(|binding| {
+                    engram_run_retired(&inner.engram_work_naming_history, &root.store, binding)
+                });
+            if !session_ids.contains(&root.named_by_session) && !retired {
                 engram_queue_root_cleanup(
                     &mut inner.engram_named_root_journal,
                     root,
@@ -707,7 +715,7 @@ impl PersistedState {
                             history.store == root.store && history.work_id == root.work_id
                         })
                 {
-                    engram_retain_recovery_run(&mut history.unresolved_runs, &binding);
+                    history.retain_recovery_run(&binding);
                 }
             }
         }

@@ -15,6 +15,9 @@ struct EngramRootReclamationSnapshot {
     cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
     deferred: Option<EngramWorkSourceRoot>,
     refused_claims: Vec<(EngramAuthorityStoreKey, String)>,
+    /// Runs Engram definitively refused (engram_retained_run_settlement.rs):
+    /// never read again, and their roots are due for disposition.
+    retired: Vec<(EngramAuthorityStoreKey, EngramControlWorkBinding)>,
     disposition_cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
 }
 
@@ -232,8 +235,21 @@ impl EngramRootReclamationSnapshot {
             cooldowns: schedule.cooldowns.clone(),
             deferred: schedule.deferred.clone(),
             refused_claims: schedule.refused_claims.clone(),
+            retired: inner
+                .engram_work_naming_history
+                .iter()
+                .flat_map(|history| {
+                    history.retired_runs.iter().map(|retired| (history.store.clone(), retired.binding.clone()))
+                })
+                .collect(),
             disposition_cooldowns: schedule.disposition_cooldowns.clone(),
         }
+    }
+
+    fn retired(&self, store: &EngramAuthorityStoreKey, binding: &EngramControlWorkBinding) -> bool {
+        self.retired
+            .iter()
+            .any(|(retired_store, retired)| retired_store == store && engram_same_recovery_run(retired, binding))
     }
 
     fn journal(&self, root: &EngramWorkSourceRoot) -> Option<&EngramReclamationJournal> {
@@ -285,6 +301,10 @@ impl EngramRootReclamationSnapshot {
             }) else {
                 continue;
             };
+            // A retired run has nothing to answer; disposition removes its root.
+            if self.retired(&root.store, binding) {
+                continue;
+            }
             let owner = readers.iter().find(|(session, store)| {
                 **store == root.store
                     && session
@@ -354,7 +374,10 @@ impl EngramRootReclamationSnapshot {
                 let refused = self
                     .refused_claims
                     .iter()
-                    .any(|(store, claim)| *store == root.store && *claim == root.claim_id);
+                    .any(|(store, claim)| *store == root.store && *claim == root.claim_id)
+                    || journal
+                        .and_then(|journal| journal.binding.as_ref())
+                        .is_some_and(|binding| self.retired(&root.store, binding));
                 let held = self.reader_snapshot.sessions.iter().any(|session| {
                     session.binding.as_ref().is_some_and(|binding| {
                         binding.work_id == root.work_id && binding.claim_id == root.claim_id

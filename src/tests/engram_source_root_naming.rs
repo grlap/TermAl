@@ -17,6 +17,9 @@ mod authority {
     include!("engram_root_authority.rs");
 }
 
+#[path = "engram_authority_manual_write.rs"]
+mod manual_write;
+
 #[path = "engram_legacy_root_recovery.rs"]
 mod legacy_recovery;
 
@@ -31,6 +34,9 @@ mod off_rebind;
 
 #[path = "engram_unconfirmed_root_reasons.rs"]
 mod unconfirmed_root_reasons;
+
+#[path = "engram_root_retained_runs.rs"]
+mod retained_runs;
 
 impl EOCheckedTurn {
     /// These reconciliation fixtures script BOTH producer operations. A

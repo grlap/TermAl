@@ -158,7 +158,12 @@ fn engram_named_root_automatic_disposition(
         return None;
     }
     if claim_refused {
-        return Some("Engram no longer counts its claim as its run's claim");
+        return Some(match engram_named_root_run_retired(inner, root) {
+            Some(EngramNamedRootReadRefusal::RunUnknown | EngramNamedRootReadRefusal::OtherProject) => {
+                "Engram definitively refused its run's canonical read"
+            }
+            _ => "Engram no longer counts its claim as its run's claim",
+        });
     }
     if engram_named_root_association(inner, root).is_some() {
         return None;
@@ -271,6 +276,27 @@ fn engram_named_root_claim_refused(inner: &StateInner, root: &EngramWorkSourceRo
         .refused_claims
         .iter()
         .any(|(store, claim_id)| *store == root.store && *claim_id == root.claim_id)
+        // A retired run is never read again; its durable record keeps the
+        // refusal across a restart (engram_retained_run_settlement.rs).
+        || engram_named_root_run_retired(inner, root).is_some()
+}
+
+/// The definitive refusal that retired `root`'s own run, through the run its
+/// journal reads, when that run was retired.
+fn engram_named_root_run_retired(
+    inner: &StateInner,
+    root: &EngramWorkSourceRoot,
+) -> Option<EngramNamedRootReadRefusal> {
+    let binding = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)?
+        .read_binding
+        .as_ref()?;
+    inner
+        .engram_work_naming_history
+        .iter()
+        .filter(|history| history.store == root.store && history.work_id == binding.work_id)
+        .flat_map(|history| &history.retired_runs)
+        .find(|retired| engram_same_recovery_run(&retired.binding, binding))
+        .map(|retired| retired.refusal)
 }
 
 /// Records that a canonical read of `claim_id` in `store` was refused as no

@@ -379,6 +379,14 @@ pub(super) fn completion_fixture() -> CompletionFixture {
         let mut inner = live.state.inner.lock().expect("state mutex poisoned");
         inner.preferences.engram.binary_path = live_engram_binary().to_string_lossy().into_owned();
         inner.preferences.engram.home = home.to_string_lossy().into_owned();
+        // The prompt fixture installs settings without learning the store.
+        // Start unconfigured so the real enable path must run readiness.
+        inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .expect("completion project exists")
+            .engram = None;
     }
     live.state
         .patch_project_engram_settings(
@@ -393,6 +401,17 @@ pub(super) fn completion_fixture() -> CompletionFixture {
             },
         )
         .expect("real readiness supplies the canonical store identity");
+    {
+        let mut inner = live.state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&live.session_id)
+            .expect("completion session exists");
+        // Enabling invalidates orientation; these witnesses isolate handoff
+        // from the optional context page, as the prompt fixture does.
+        assert!(!inner.sessions[index].engram.context_nudge_in_progress);
+        inner.sessions[index].engram.pending_context_nudge = None;
+        inner.sessions[index].engram.context_nudge_pending = false;
+    }
     let fixture = CompletionFixture {
         live,
         root,

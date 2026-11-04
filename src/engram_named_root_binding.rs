@@ -492,6 +492,10 @@ struct EngramWorkNamingHistory {
     transition: Option<EngramAuthorityTransition>,
     #[serde(default)]
     unresolved_runs: Vec<EngramControlWorkBinding>,
+    /// Retained runs Engram definitively refused to read
+    /// (`engram_retained_run_settlement.rs`); they block nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    retired_runs: Vec<EngramRetiredRecoveryRun>,
     /// Canonical no-event answers are knowledge too, scoped to the exact run.
     #[serde(default)]
     proofs: Vec<EngramAuthorityProof>,
@@ -620,6 +624,7 @@ fn engram_record_naming_history(
                 owner_version: 0,
                 transition: None,
                 unresolved_runs: Vec::new(),
+                retired_runs: Vec::new(),
                 proofs: Vec::new(),
                 retirements: Vec::new(),
                 recovery_reason: Some(
@@ -2077,7 +2082,9 @@ impl AppState {
                 Err(EngramAuthorityReadFailure::AdmissionInvalid(error)) => {
                     return Err(error.into());
                 }
-                Err(EngramAuthorityReadFailure::Source(error)) => {
+                Err(EngramAuthorityReadFailure::Source(error))
+                | Err(EngramAuthorityReadFailure::Refused(_, error))
+                | Err(EngramAuthorityReadFailure::Damaged(error)) => {
                     return Ok(EngramRootReconcileOutcome::EvidenceWithheld {
                         guard: Some(guard),
                         reason: EngramRootEvidenceUncertainty::CanonicalRead(error),

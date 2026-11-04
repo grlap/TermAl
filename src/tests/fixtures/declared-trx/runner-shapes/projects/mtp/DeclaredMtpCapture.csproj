@@ -1,0 +1,9 @@
+<Project Sdk="MSTest.Sdk/4.1.0">
+  <PropertyGroup>
+    <TestingExtensionsProfile>None</TestingExtensionsProfile>
+    <EnableMicrosoftTestingExtensionsTrxReport>true</EnableMicrosoftTestingExtensionsTrxReport>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../MSTestCases.cs" />
+  </ItemGroup>
+</Project>

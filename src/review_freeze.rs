@@ -203,6 +203,18 @@ fn review_freeze_file(path: &FsPath, limit: usize) -> Result<Vec<u8>> {
 /// read all showed that same entry, so the metadata belongs to these bytes
 /// and not to an earlier or later replacement.
 fn review_freeze_file_versioned(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metadata)> {
+    let (bytes, metadata, ()) = review_freeze_file_observed(path, limit, |_, _| Ok(()))?;
+    Ok((bytes, metadata))
+}
+
+/// Observe the same opened file that supplies the checked bytes. The default
+/// reader needs no additional observation; content revisions use this for the
+/// identity of potentially colliding tracked spellings.
+fn review_freeze_file_observed<T>(
+    path: &FsPath,
+    limit: usize,
+    observe: impl FnOnce(&fs::File, &fs::Metadata) -> Result<T>,
+) -> Result<(Vec<u8>, fs::Metadata, T)> {
     use std::io::Read;
     let before = fs::symlink_metadata(path)?;
     if !before.is_file() || before.file_type().is_symlink() || before.len() > limit as u64 {
@@ -223,6 +235,7 @@ fn review_freeze_file_versioned(path: &FsPath, limit: usize) -> Result<(Vec<u8>,
     if review_freeze_reparse_appeared(&before, &opened) || !review_freeze_same_entry(&before, &opened) {
         bail!("review input changed while opening");
     }
+    let observation = observe(&file, &opened)?;
     let mut bytes = Vec::new();
     (&mut file).take(limit as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.len() > limit
@@ -234,7 +247,7 @@ fn review_freeze_file_versioned(path: &FsPath, limit: usize) -> Result<(Vec<u8>,
     {
         bail!("review input changed while reading");
     }
-    Ok((bytes, before))
+    Ok((bytes, before, observation))
 }
 
 /// Opens for reading without following a final link and, on Unix, without

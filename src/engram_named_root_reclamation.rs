@@ -307,6 +307,10 @@ fn engram_root_reclamation_plan_locked(
         if journal.pending.is_some() || journal.read_binding.as_ref().is_none_or(|binding|
             binding.work_id != root.work_id || binding.claim_id != root.claim_id)
         { continue; }
+        // A retired run has nothing to answer, as in the snapshot's plan.
+        if journal.read_binding.as_ref().is_some_and(|binding|
+            engram_run_retired(&inner.engram_work_naming_history, &root.store, binding))
+        { continue; }
         let route = match engram_named_root_current_owner(inner, &root) {
             // A pass over a root whose work is being evaluated only re-learns
             // the same binding, and its unpublished window would refuse the

@@ -974,7 +974,10 @@ shape, then compares it for equality.
 - **Platform semantics.** On Unix the filesystem's executable bit counts even
   where the repository sets `core.fileMode=false`, so a chmod alone moves the
   revision. On a filesystem that ignores case, renaming a file in case only,
-  outside Git, does not move it. On Windows, a tracked file another process
+  outside Git, does not move it for tracked paths with `core.ignoreCase=true`;
+  this also holds for directory case renames. Untracked paths follow the
+  on-disk spelling Git lists, so their rename can move the value. Git-listed
+  path spellings remain the hash input. On Windows, a tracked file another process
   holds open without read sharing cannot be read, which fails the capture.
 - **When there is none.** The capture uses the review freeze's pinned Git
   runner and budget. A repository with a submodule gets none: what is inside
@@ -990,9 +993,13 @@ shape, then compares it for equality.
   for any reason but absence, or an exceeded bound (200,000 paths, tracked
   and untracked together, 128 MiB for one file, 512 MiB read in all, the
   forty-second budget; a revision finished after the budget is not
-  returned). On a filesystem that ignores case, a tracked directory renamed
-  in case only fails the path check the same way, because the index still
-  spells it the old way. So does a tracked `.gitattributes` deleted from the
+  returned). Directory case or NFC/NFD spelling differences are admitted,
+  while parent links or junctions leading elsewhere still refuse. Distinct
+  tracked paths differing only by case or NFC/NFD that resolve to one regular
+  file refuse, naming both paths, whether their index blobs agree or not.
+  Distinct-name hard links and terminal symlinks retain their previous treatment.
+  This changes new captures only; stored revisions and evaluations are untouched.
+  A tracked `.gitattributes` also refuses when deleted from the
   worktree but not yet in the index: Git would then take its attributes from
   the index, and staging the deletion alone would change which files count
   byte for byte. One such path costs the whole tree its basis. The

@@ -202,6 +202,15 @@ impl EngramControlTransport for BoundaryFaultTransport {
         self.inner.shutdown_session(session_id);
     }
 
+    fn shutdown_session_until(
+        &self,
+        session_id: &str,
+        clock: &EngramBudgetClock,
+        deadline: std::time::Instant,
+    ) -> Result<(), EngramTransportError> {
+        self.inner.shutdown_session_until(session_id, clock, deadline)
+    }
+
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,

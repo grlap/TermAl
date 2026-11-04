@@ -2995,6 +2995,12 @@ impl AppState {
                 claim.short_ref
             ),
         };
+        // A naming never reports a confirmed root while its work still
+        // retains runs no read has answered.
+        let notice = match engram_retained_runs_notice_locked(&inner, &store, &claim.work_id) {
+            Some(retained) => format!("{notice} {retained}"),
+            None => notice,
+        };
         Ok(EngramSourceRootResponse {
             work_ref: claim.short_ref,
             work_id: claim.work_id,

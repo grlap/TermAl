@@ -1068,6 +1068,7 @@ include!("engram_source_roots.rs");
 include!("engram_named_root_binding.rs");
 include!("engram_root_capture_reason.rs");
 include!("engram_root_authority.rs");
+include!("engram_retained_run_settlement.rs");
 include!("engram_named_root_reclamation.rs");
 include!("engram_named_root_release.rs");
 include!("engram_named_root_capacity.rs");

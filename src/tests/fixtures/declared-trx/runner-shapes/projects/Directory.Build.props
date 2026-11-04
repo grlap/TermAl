@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <CaptureCase Condition="'$(CaptureCase)' == ''">pass</CaptureCase>
+    <DefineConstants Condition="'$(CaptureCase)' == 'pass'">$(DefineConstants);CAPTURE_PASS</DefineConstants>
+    <DefineConstants Condition="'$(CaptureCase)' == 'fail'">$(DefineConstants);CAPTURE_FAIL</DefineConstants>
+  </PropertyGroup>
+</Project>

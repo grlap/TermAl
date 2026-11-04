@@ -179,6 +179,9 @@ impl EngramHost<'_> {
     /// off the state lock for the marks the start makes under it.
     pub(crate) fn turn_starting(&self, session_id: &str) {
         self.state.note_engram_session_worktree_off_lock(session_id);
+        // Retained runs of the opened work are read back in the background,
+        // never on this caller's thread.
+        self.state.schedule_engram_retained_run_reads(Some(session_id));
     }
 
     /// The turn of the session at `index` started. Called under the state
@@ -332,6 +335,8 @@ impl EngramHost<'_> {
         // (`spawn_engram_retry_tick`), so a slow Engram never holds up
         // carried-gate polling or the test-run index.
         self.state.schedule_engram_root_reclamation(false);
+        // The startup read of retained runs, until every store had one.
+        self.state.schedule_engram_retained_run_reads(None);
     }
 
     /// The exit a Codex command item states.

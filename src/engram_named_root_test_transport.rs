@@ -22,6 +22,12 @@ struct TestEngramNamedRoots {
     on_bind_refusal: Option<Box<dyn FnOnce() + Send>>,
     root_reads: BTreeMap<String, Value>,
     root_read_failures: BTreeSet<String>,
+    // Engram's own error for a named-root read of a claim, as sent on the
+    // wire (`code`, `message`, optional typed `reason`).
+    root_read_errors: BTreeMap<String, Value>,
+    // Runs once while such an error is being served, before it reaches the
+    // host: the host changing under a refused read.
+    on_root_read_error: Option<Box<dyn FnOnce() + Send>>,
     // First producer recording of a request, including a lost reply. This
     // notice is not local durability acknowledgement or verification credit.
     observation_notices: Option<mpsc::Sender<Value>>,
@@ -180,6 +186,13 @@ impl TestEngramNamedRoots {
                 return Some(Err(EngramTransportError::transport(
                     "claim reader timed out",
                 )));
+            }
+            if let Some(error) = self.root_read_errors.get(wire["claim_id"].as_str().unwrap()) {
+                let error: EngramControlErrorWire = serde_json::from_value(error.clone()).unwrap();
+                if let Some(meanwhile) = self.on_root_read_error.take() {
+                    meanwhile();
+                }
+                return Some(Err(EngramTransportError::remote(error.into_body())));
             }
             let claim = wire["claim_id"].as_str().unwrap();
             if let Some(read) = self.root_reads.get(claim) {

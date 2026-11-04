@@ -259,17 +259,16 @@ impl AppState {
             }
             #[cfg(test)]
             {
-                let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
-                let mut cache = SqlitePersistConnectionCache::new();
-                persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta)
+                let committed = self
+                    .engram_authority_manual_write(|connection| {
+                        Ok(target.is_already_durable(connection).unwrap_or(false))
+                    })
                     .map_err(|error| {
                         EngramTransportError::local_state(format!(
                             "source tracking recovery write failed: {error:#}"
                         ))
                     })?;
-                if !cache.connection.as_ref().is_some_and(|connection| {
-                    target.is_already_durable(connection).unwrap_or(false)
-                }) {
+                if !committed {
                     return Err(EngramTransportError::local_state(
                         "source tracking removal coupled content was not committed",
                     ));

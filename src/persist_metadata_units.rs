@@ -16,6 +16,19 @@ struct PersistMetadataCollectionCapture {
     image_stamps: PersistMetadataWatermarks,
 }
 
+/// Another writer committed metadata after this image was captured, so the
+/// image is refused and nothing of it is written.
+#[derive(Debug)]
+struct PersistMetadataSnapshotStale;
+
+impl std::fmt::Display for PersistMetadataSnapshotStale {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("stale metadata snapshot: durable predecessor changed")
+    }
+}
+
+impl std::error::Error for PersistMetadataSnapshotStale {}
+
 // The source's known durable predecessor is distinct from the writer cache.
 // Capturing never samples a newer database beside an older desired image.
 #[derive(Clone, Default)]
@@ -44,9 +57,7 @@ impl PersistMetadataCapture {
 
     fn verify(&self, generation: u64) -> Result<()> {
         if generation != self.predecessor {
-            return Err(anyhow!(
-                "stale metadata snapshot: durable predecessor changed"
-            ));
+            return Err(PersistMetadataSnapshotStale.into());
         }
         Ok(())
     }

@@ -58,6 +58,64 @@ fn engram_authority_manual_writer_allowed() -> bool {
     }
 }
 
+/// The turn that manual writes of the store at `path` take.
+#[cfg(test)]
+fn engram_authority_manual_write_turn(path: &FsPath) -> Arc<std::sync::Mutex<()>> {
+    static TURNS: std::sync::OnceLock<
+        std::sync::Mutex<HashMap<PathBuf, Arc<std::sync::Mutex<()>>>>,
+    > = std::sync::OnceLock::new();
+    TURNS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(path.to_path_buf())
+        .or_default()
+        .clone()
+}
+
+#[cfg(test)]
+impl AppState {
+    /// The durable write of a manually constructed test state, which has no
+    /// writer thread: capture and write the delta here, off the state lock,
+    /// then let `committed` read the wanted content back.
+    ///
+    /// Any other commit of such a state falls back to a synchronous write on
+    /// its own thread, and that can land between this capture and this write.
+    /// The metadata check then rightly refuses the older capture, and nothing
+    /// is written. That commit took its image under the state lock, after this
+    /// capture read its predecessor and so after the caller's change, since an
+    /// earlier one would have published the predecessor this capture read. The
+    /// stored bytes decide: if they hold the wanted content there is nothing
+    /// left to write, and otherwise the refusal stands.
+    ///
+    /// Manual writes of one store take turns. An off-lock capture is the one
+    /// writer that could commit an image older than another's change.
+    fn engram_authority_manual_write(
+        &self,
+        committed: impl Fn(&rusqlite::Connection) -> Result<bool>,
+    ) -> Result<bool> {
+        let path = self.persistence_path.as_path();
+        let turn = engram_authority_manual_write_turn(path);
+        let _turn = turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
+        self.test_engram_authority_ack_boundary("after_delta_capture");
+        let mut cache = SqlitePersistConnectionCache::new();
+        match persist_delta_via_cache(&mut cache, path, &delta) {
+            Ok(_) => committed(cache.connection.as_ref().expect("committed writer connection")),
+            // A refused write invalidates its cached connection.
+            Err(refused) if refused.is::<PersistMetadataSnapshotStale>() => {
+                self.test_engram_authority_ack_boundary("after_stale_capture_refused");
+                if committed(&open_sqlite_state_connection_unconfigured(path)?)? {
+                    Ok(true)
+                } else {
+                    Err(refused)
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
 // A renewed view changes revision and fence, but not the canonical run that
 // still needs reconciliation. Keep the newest view for that exact association.
 fn engram_same_recovery_run(
@@ -188,13 +246,27 @@ enum EngramRootReconcileFailure {
 
 enum EngramAuthorityReadFailure {
     Source(ApiError),
+    /// A source failure that is Engram's definitive refusal of the read
+    /// (`engram_retained_run_settlement.rs`). Every reader but the recovery
+    /// batch treats it as `Source`.
+    Refused(EngramNamedRootReadRefusal, ApiError),
+    /// A source failure that shows a damaged store: Engram's invalid work
+    /// projection, an undecodable answer, or an answer that contradicts the
+    /// run it was asked for. Every reader but the recovery batch treats it as
+    /// `Source`; the batch raises the store-integrity alarm.
+    Damaged(ApiError),
     AdmissionInvalid(EngramTransportError),
 }
+
+/// The canonical-history contradiction `validate_authority` reports. For an
+/// Unknown projection it is a non-answer, not damage.
+const ENGRAM_NAMED_ROOT_STATE_CONTRADICTS_HISTORY: &str =
+    "named-root state contradicts its canonical event history";
 
 impl EngramAuthorityReadFailure {
     fn into_api(self) -> ApiError {
         match self {
-            Self::Source(error) => error,
+            Self::Source(error) | Self::Refused(_, error) | Self::Damaged(error) => error,
             Self::AdmissionInvalid(error) => ApiError::conflict(error.to_string()),
         }
     }
@@ -524,9 +596,7 @@ impl EngramNamedRootReadResponse {
             }),
         };
         if !consistent {
-            return Err(ApiError::bad_gateway(
-                "named-root state contradicts its canonical event history",
-            ));
+            return Err(ApiError::bad_gateway(ENGRAM_NAMED_ROOT_STATE_CONTRADICTS_HISTORY));
         }
         Ok(())
     }
@@ -1059,6 +1129,9 @@ impl AppState {
             !Self::engram_root_reporter_available(&inner, intent)
         }).collect::<Vec<_>>();
         let reserve = budget / 4;
+        // Console lines are written after the state guard is released:
+        // a slow console must not extend the lock every session waits on.
+        let mut console = EngramRetainedRunConsole { state: self, lines: Vec::new() };
         for binding in runs {
             let left = deadline.saturating_duration_since(clock.now());
             let Some(_read_budget) = left.checked_sub(reserve).filter(|left| !left.is_zero())
@@ -1106,16 +1179,28 @@ impl AppState {
                     "the reclamation owner changed or became active before its canonical read",
                 ));
             }
-            let result = target
-                .as_ref()
-                .ok_or_else(|| {
-                    ApiError::conflict(
-                        "retained named-root run needs an authorized reader in its original store",
-                    )
-                })
-                .and_then(|target| {
-                    self.read_engram_authority_fact_until(target, &binding, deadline - reserve)
-                });
+            // Engram's definitive refusal of this read, or a sign of a damaged
+            // store, kept beside the error for the settlement below.
+            let mut refusal = None;
+            let mut damaged = false;
+            let result = match target.as_ref() {
+                None => Err(ApiError::conflict(
+                    "retained named-root run needs an authorized reader in its original store",
+                )),
+                Some(target) => self
+                    .read_engram_authority_fact_classified_until(target, &binding, deadline - reserve)
+                    .map_err(|failure| match failure {
+                        EngramAuthorityReadFailure::Refused(refused, error) => {
+                            refusal = Some(refused);
+                            error
+                        }
+                        EngramAuthorityReadFailure::Damaged(error) => {
+                            damaged = true;
+                            error
+                        }
+                        failure => failure.into_api(),
+                    }),
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             // Engram refusing the read because a newer claim replaced this one
             // is the disposition pass's proof (engram_named_root_capacity.rs).
@@ -1164,6 +1249,12 @@ impl AppState {
                 matches!(route, EngramRootReclamationRoute::Unfocused)
                     && engram_named_root_current_owner(&inner, root).is_some()
             });
+            let held = engram_recovery_run_held_locked(&inner, &binding);
+            // A definitive refusal retires the run only when its root
+            // journals settle with it; a live reporter's intent keeps it.
+            let retirable = refusal.is_some() && reader_current && route_current && !held;
+            let journals_settle = retirable
+                && engram_refused_run_journals_settle_locked(&inner, store, &binding, &abandoned);
             let current = inner
                 .engram_work_naming_history
                 .iter_mut()
@@ -1175,14 +1266,52 @@ impl AppState {
                 })
                 .ok_or_else(|| ApiError::conflict("recovery batch was superseded during I/O"))?;
             match result {
+                // Engram's definitive refusal, answered by a reader of this
+                // very store that is still current, settles a run no session
+                // holds: it can never be read, so it no longer blocks the work.
+                Err(error) if journals_settle => {
+                    let refused = refusal.expect("checked refusal");
+                    current.retire_recovery_run(&binding, refused, store, &error.message);
+                    let observer = target.as_ref().expect("a current reader").connection.session_id.clone();
+                    engram_settle_refused_run_journals_locked(&mut inner, store, &binding, refused, &observer);
+                    if refused == EngramNamedRootReadRefusal::OtherProject {
+                        console.lines.push(format!(
+                            "engram> host-binding bug: Engram places retained run {} / claim {} \
+                             of work {} in another project than {}; the run is retired",
+                            binding.run_id, binding.claim_id, binding.work_id, store.project_id
+                        ));
+                    }
+                }
                 Err(error) => {
                     // A failed association moves behind the others. Saving
                     // this image makes restart/refresh retries fair too.
-                    engram_retain_recovery_run(&mut current.unresolved_runs, &binding);
-                    current.recovery_reason = Some(format!(
-                        "retained run {} / claim {} remains unresolved: {}",
-                        binding.run_id, binding.claim_id, error.message
-                    ));
+                    current.retain_recovery_run(&binding);
+                    let message = if retirable {
+                        format!(
+                            "{}; Engram refused it definitively, but a root journal of this run \
+                             still holds an unsettled naming intent",
+                            error.message
+                        )
+                    } else {
+                        error.message.clone()
+                    };
+                    // Each new reason is reported once, not on every pass.
+                    let new = current.note_unresolved_run(&binding, &message, damaged);
+                    if new && damaged {
+                        console.lines.push(format!(
+                            "engram> {ENGRAM_STORE_INTEGRITY_ALARM}: retained run {} / claim {} of \
+                             work {} in store {}: {}",
+                            binding.run_id, binding.claim_id, binding.work_id,
+                            store.database_path.display(), error.message
+                        ));
+                    }
+                    if new && refusal == Some(EngramNamedRootReadRefusal::OtherProject) {
+                        console.lines.push(format!(
+                            "engram> host-binding bug: Engram places retained run {} / claim {} \
+                             of work {} in another project than {}; the run stays retained",
+                            binding.run_id, binding.claim_id, binding.work_id, store.project_id
+                        ));
+                    }
                 }
                 Ok(proof) => {
                     // A canonical answer authorizes only the image read for.
@@ -1192,7 +1321,7 @@ impl AppState {
                         || !reader_current
                         || !route_current
                     {
-                        engram_retain_recovery_run(&mut current.unresolved_runs, &binding);
+                        current.retain_recovery_run(&binding);
                         current.recovery_reason = Some(if current_owner_appeared {
                             "a current owner appeared during canonical read; entry retained"
                         } else {
@@ -1210,8 +1339,19 @@ impl AppState {
                                 &history.store == store && history.work_id == binding.work_id
                             })
                             .expect("owned recovery history");
-                        engram_retain_recovery_run(&mut history.unresolved_runs, &binding);
-                        history.recovery_reason = Some(error.message);
+                        history.retain_recovery_run(&binding);
+                        // A canonical contradiction is reported as a gateway
+                        // failure; a superseded owner or a missing association
+                        // as a conflict.
+                        let damaged = error.status == StatusCode::BAD_GATEWAY;
+                        if history.note_unresolved_run(&binding, &error.message, damaged) && damaged {
+                            console.lines.push(format!(
+                                "engram> {ENGRAM_STORE_INTEGRITY_ALARM}: retained run {} / claim {} \
+                                 of work {} in store {}: {}",
+                                binding.run_id, binding.claim_id, binding.work_id,
+                                store.database_path.display(), error.message
+                            ));
+                        }
                         continue;
                     }
                     // Only exact committed/superseded intent history or a
@@ -1295,6 +1435,17 @@ impl AppState {
     /// acknowledged forward name of that work retires
     /// (`retire_engram_retained_history_repair_lines_locked`).
     fn recover_engram_authority_runs(&self, session_id: &str, budget: Duration) {
+        self.recover_engram_authority_runs_preferring(session_id, None, budget);
+    }
+
+    /// The same bounded pass, reading the retained run of `preferred` work
+    /// first when it has one (a turn opening of that work).
+    fn recover_engram_authority_runs_preferring(
+        &self,
+        session_id: &str,
+        preferred: Option<&str>,
+        budget: Duration,
+    ) {
         let clock = self.engram_budget_clock();
         let deadline = clock.now() + budget.min(Duration::from_secs(2));
         let (store, runs) = {
@@ -1307,6 +1458,11 @@ impl AppState {
             else {
                 return;
             };
+            // A retired run's journal that some path reopened is settled here:
+            // that run is never read again, so no read could settle it.
+            if engram_settle_reopened_retired_journals_locked(&mut inner) {
+                let _ = self.persist_tx.send(PersistRequest::Delta);
+            }
             let repairs = inner
                 .engram_work_naming_history
                 .iter()
@@ -1392,6 +1548,20 @@ impl AppState {
                     runs.push(binding);
                 }
             }
+            // A retired run is never read again: it would only re-prepare an
+            // owner with nothing to answer. The binding of an unpublished
+            // transition stays, so an interrupted publication completes.
+            runs.retain(|binding| {
+                !inner.engram_work_naming_history.iter().any(|history| {
+                    history.store == store
+                        && history.work_id == binding.work_id
+                        && history.run_is_retired(binding)
+                        && !history.transition.as_ref().is_some_and(|owner| {
+                            owner.phase != EngramAuthorityPhase::Published
+                                && engram_same_recovery_run(&owner.binding, binding)
+                        })
+                })
+            });
             if !runs.is_empty() {
                 let offset = inner
                     .engram_authority_read_cursor
@@ -1402,6 +1572,10 @@ impl AppState {
                             .map_or(0, |index| (index + 1) % runs.len())
                     });
                 runs.rotate_left(offset);
+            }
+            if let Some(preferred) = preferred {
+                // Stable: the rest keep their fair rotation behind it.
+                runs.sort_by_key(|binding| binding.work_id != preferred);
             }
             runs.truncate(8);
             (store, runs)
@@ -1494,11 +1668,25 @@ impl AppState {
                 },
                 budget.min(target.settings.call_timeout()),
             )
-            .and_then(parse_engram_result::<EngramNamedRootReadResponse>)
             .map_err(|error| {
-                EngramAuthorityReadFailure::Source(ApiError::bad_gateway(format!(
+                let source = ApiError::bad_gateway(format!(
                     "named-root canonical read is unconfirmed: {error}"
-                )))
+                ));
+                if let Some(refusal) = engram_named_root_read_refusal(&error) {
+                    EngramAuthorityReadFailure::Refused(refusal, source)
+                } else if engram_transport_error_shows_store_damage(&error) {
+                    EngramAuthorityReadFailure::Damaged(source)
+                } else {
+                    EngramAuthorityReadFailure::Source(source)
+                }
+            })
+            .and_then(|reply| {
+                // An answer that does not decode is a malformed canonical reply.
+                parse_engram_result::<EngramNamedRootReadResponse>(reply).map_err(|error| {
+                    EngramAuthorityReadFailure::Damaged(ApiError::bad_gateway(format!(
+                        "named-root canonical read is unconfirmed: {error}"
+                    )))
+                })
             })?;
         #[cfg(test)]
         if let Some(hook) =
@@ -1506,8 +1694,15 @@ impl AppState {
         {
             hook();
         }
-        read.validate_authority(store, binding)
-            .map_err(EngramAuthorityReadFailure::Source)?;
+        read.validate_authority(store, binding).map_err(|error| {
+            if read.named_root == EngramNamedRootState::Unknown
+                && error.message == ENGRAM_NAMED_ROOT_STATE_CONTRADICTS_HISTORY
+            {
+                EngramAuthorityReadFailure::Source(error)
+            } else {
+                EngramAuthorityReadFailure::Damaged(error)
+            }
+        })?;
         self.validate_engram_authority_reader(target, store)
             .map_err(|error| {
                 EngramAuthorityReadFailure::AdmissionInvalid(EngramTransportError::local_state(
@@ -1692,6 +1887,7 @@ impl AppState {
                         owner_version: 0,
                         transition: None,
                         unresolved_runs: Vec::new(),
+                        retired_runs: Vec::new(),
                         proofs: Vec::new(),
                         retirements: Vec::new(),
                         recovery_reason: None,
@@ -1711,20 +1907,25 @@ impl AppState {
             .collect::<Vec<_>>();
         let history = &mut inner.engram_work_naming_history[index];
         for retained in journal_runs {
-            engram_retain_recovery_run(&mut history.unresolved_runs, &retained);
+            history.retain_recovery_run(&retained);
         }
         if let Some(previous) = history
             .transition
             .as_ref()
             .filter(|previous| previous.phase != EngramAuthorityPhase::Published)
+            .map(|previous| previous.binding.clone())
         {
-            engram_retain_recovery_run(&mut history.unresolved_runs, &previous.binding);
+            history.retain_recovery_run(&previous);
         }
-        engram_retain_recovery_run(&mut history.unresolved_runs, binding);
-        history.recovery_reason.get_or_insert_with(|| {
-            "canonical naming history for a retained run still needs an acknowledged read"
-                .to_owned()
-        });
+        history.retain_recovery_run(binding);
+        // Only a run left to read explains the wait. An owner of a retired
+        // run reads nothing, so it must not leave a reason nothing clears.
+        if !history.unresolved_runs.is_empty() {
+            history.recovery_reason.get_or_insert_with(|| {
+                "canonical naming history for a retained run still needs an acknowledged read"
+                    .to_owned()
+            });
+        }
         history.owner_version = history
             .owner_version
             .checked_add(1)
@@ -1800,22 +2001,19 @@ impl AppState {
             #[cfg(test)]
             {
                 self.test_engram_authority_ack_boundary("before_delta");
-                let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
-                let mut cache = SqlitePersistConnectionCache::new();
-                persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta)
+                // Sparse capture may omit this already committed image. Use
+                // the same committed proof as the connected writer's fence.
+                let target = PersistFenceTarget::EngramWorkAuthority(Box::new(image.clone()));
+                let committed = self
+                    .engram_authority_manual_write(|connection| {
+                        target.is_already_durable(connection).context("authority read-back failed")
+                    })
                     .map_err(|error| {
                         ApiError::internal(format!(
                             "named-root authority persistence is unconfirmed: {error:#}"
                         ))
                     })?;
-                // Sparse capture may omit this already committed image. Use
-                // the same committed proof as the connected writer's fence.
-                if !PersistFenceTarget::EngramWorkAuthority(Box::new(image.clone()))
-                    .is_already_durable(
-                        cache.connection.as_ref().expect("committed writer connection"),
-                    )
-                    .map_err(|error| ApiError::internal(format!("authority read-back failed: {error:#}")))?
-                {
+                if !committed {
                     return Err(ApiError::conflict(
                         "named-root authority image was superseded",
                     ));
@@ -1982,10 +2180,7 @@ impl AppState {
                 if !engram_authority_manual_writer_allowed() {
                     return Ok(result);
                 }
-                let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
-                let mut cache = SqlitePersistConnectionCache::new();
-                let _ =
-                    persist_delta_via_cache(&mut cache, self.persistence_path.as_path(), &delta);
+                let _ = self.engram_authority_manual_write(|_| Ok(true));
             }
         }
         Ok(result)

@@ -82,6 +82,31 @@ in the counters. Any error event still means FAIL if a later retry succeeds.
 
 A passing result is reported as a `passed` check in the turn's host observation; the host's source, ownership and overlap checks still apply. It earns no test credit by itself: credit comes only from registered verification ([test evidence](engram-host-adapter.md#test-evidence)). A declaration by itself grants no credit. PASS is never inferred from exit 0 alone or from console output. UNKNOWN is not a weaker PASS: it earns nothing and names what was observed.
 
+## Captured .NET result shapes
+
+The committed [capture matrix](../../src/tests/fixtures/declared-trx/runner-shapes/README.md)
+covers these exact Windows x64 producers with .NET SDK 9.0.318 and net9.0:
+
+| Framework and report producer | Passing run | Failing run | Zero-test run |
+|---|---|---|---|
+| NUnit 4.4.0, NUnit3TestAdapter 5.0.0, VSTest 17.14.1 TRX | PASS | FAIL | UNKNOWN |
+| MSTest 4.1.0, VSTest 17.14.1 TRX | PASS | FAIL | UNKNOWN |
+| MSTest.Sdk 4.1.0, MTP 2.1.0, TrxReport 2.1.0 | PASS | FAIL | FAIL |
+
+The zero-test difference is the producer's own verdict. In these captures,
+VSTest returns exit 0 with `outcome="Completed"` and `executed=0`, which is
+UNKNOWN. MTP returns native exit 8 (reported as exit 1 by `dotnet test`),
+with `outcome="Failed"`, a run-level error and zero counters. It is FAIL by
+both the nonzero-exit and explicit-failure rules. TermAl does not turn that
+failed run into UNKNOWN or PASS. No reader exception is needed.
+
+MTP requires its TRX reporting extension; `--logger trx` is the VSTest
+option. The captured SDK-9 MTP project passes extension arguments after
+`--`, using `--report-trx --report-trx-filename results.trx`. The capture
+README contains the pinned project files and exact commands. These are
+finite producer examples, not a certification of other versions or
+frameworks. Command matching and artifact rules remain the same.
+
 ## Examples
 
 .NET under VSTest (`dotnet test`), one project and one target framework per entry (a fixed report name across several target frameworks overwrites; the Testing Platform writes TRX through its reporting extension with `--report-trx`, a different command):
@@ -148,7 +173,7 @@ Snippet for a repository's own agent instructions:
 
 - It does not capture the environment of the agent's shell; TermAl cannot see it, and the artifact route does not need it.
 - It does not parse console output on the declared route; a declared run without an artifact is never PASS: it is UNKNOWN, or FAIL on a non-zero exit. Built-in runners are unchanged.
-- It has no framework matrix: readers accept the documented TRX shape or Dart JSON protocol above; a declaration is not a framework/version certification.
+- Its captured framework/version matrix is finite: readers accept the documented TRX shape or Dart JSON protocol above; a declaration is not a framework/version certification.
 - It trusts the declaration as current-worktree configuration; it cannot tell a real test command from a script that writes a plausible file.
 - It observes absence or the existing bounded file hash at command start and compares the completed artifact: correlation, not proof that the command produced it.
 - It reads the declaration at command start and keeps only the matched entry and the file hash on the check; no declaration history or lifecycle.

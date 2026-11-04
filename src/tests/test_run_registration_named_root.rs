@@ -139,6 +139,7 @@ pub(super) fn name_root(
         owner_version: 0,
         transition: None,
         unresolved_runs: Vec::new(),
+        retired_runs: Vec::new(),
         proofs: vec![EngramAuthorityProof {
             binding: binding.clone(),
             read,

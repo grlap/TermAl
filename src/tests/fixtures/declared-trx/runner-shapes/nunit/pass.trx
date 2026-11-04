@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="1ee468ce-dc5e-4f40-952f-55d94ba2d1fc" name="capture-run" runUser="capture-user" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-11-03T09:03:04.8777976-08:00" queuing="2026-11-03T09:03:04.8777979-08:00" start="2026-11-03T09:03:04.2220619-08:00" finish="2026-11-03T09:03:04.8800419-08:00" />
+  <TestSettings name="default" id="64063e23-aa47-4375-b0bf-aead9f03c782">
+    <Deployment runDeploymentRoot="capture-deployment" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="c9eebc35-b4ea-46a2-975f-855b5cceec65" testId="e32cb0c0-bad3-4013-878b-5b716367040a" testName="Passing" computerName="capture-host" duration="00:00:00.0016610" startTime="2026-11-03T09:03:04.7972376-08:00" endTime="2026-11-03T09:03:04.7988778-08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c9eebc35-b4ea-46a2-975f-855b5cceec65" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Passing" storage="C:\capture\nunit\bin\debug\net9.0\declarednunitcapture.dll" id="e32cb0c0-bad3-4013-878b-5b716367040a">
+      <Execution id="c9eebc35-b4ea-46a2-975f-855b5cceec65" />
+      <TestMethod codeBase="C:\capture\nunit\bin\Debug\net9.0\DeclaredNUnitCapture.dll" adapterTypeName="executor://nunit3testexecutor/" className="DeclaredNUnitCapture.CaptureCases" name="Passing" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="e32cb0c0-bad3-4013-878b-5b716367040a" executionId="c9eebc35-b4ea-46a2-975f-855b5cceec65" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="1" executed="1" passed="1" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>NUnit Adapter 5.0.0.0: Test execution started&#xD;
+Running all tests in C:\capture\nunit\bin\Debug\net9.0\DeclaredNUnitCapture.dll&#xD;
+   NUnit3TestExecutor discovered 1 of 1 NUnit test cases using Current Discovery mode, Non-Explicit run&#xD;
+NUnit Adapter 5.0.0.0: Test execution complete&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>
