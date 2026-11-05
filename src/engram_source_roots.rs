@@ -19,8 +19,9 @@ const ENGRAM_WORK_SOURCE_ROOT_LIMIT: usize = 64;
 
 /// One work's source root, persisted so a restart keeps it. It applies to the
 /// work's claim `claim_id` only, so a new claim on the same work does not
-/// inherit an old tree; `claim_fence` is recorded, not matched, so a renewal
-/// or a revision of the claim keeps the root.
+/// inherit an old tree. A same-root name under the live claim refreshes
+/// `claim_fence` for new registrations while keeping the name's identity.
+/// Confirmed events and existing registrations retain their recorded fence.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramWorkSourceRoot {
@@ -44,6 +45,22 @@ struct EngramWorkSourceRoot {
     /// a clear gets a new one. A turn and an evaluation record the one they
     /// were admitted or requested under.
     generation: u64,
+}
+
+impl EngramWorkSourceRoot {
+    /// The acknowledged name survives a live-fence refresh. Only the fence
+    /// may differ from the immutable naming event; every name field stays pinned.
+    fn same_name(&self, other: &Self) -> bool {
+        self.store == other.store
+            && self.work_id == other.work_id
+            && self.short_ref == other.short_ref
+            && self.claim_id == other.claim_id
+            && self.root == other.root
+            && self.common_dir_key == other.common_dir_key
+            && self.named_by_session == other.named_by_session
+            && self.named_at == other.named_at
+            && self.generation == other.generation
+    }
 }
 
 /// Two source captures, one shared control allowance and a commit reserve.
@@ -2628,7 +2645,13 @@ impl AppState {
                 generation,
             });
         if let Some(kept) = kept {
-            entry = Some(kept.clone());
+            // Keep the name's identity, but acknowledge the live claim's
+            // current fence for new registrations. The original naming event
+            // and registrations retain the authority they were recorded with.
+            entry = Some(EngramWorkSourceRoot {
+                claim_fence: claim.claim_fence,
+                ..kept.clone()
+            });
         }
         if let Some(pending) = &pending {
             if pending.kind == EngramNamedRootKind::Bound {

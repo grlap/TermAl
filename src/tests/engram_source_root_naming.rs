@@ -35,6 +35,9 @@ mod off_rebind;
 #[path = "engram_named_root_stale_fence.rs"]
 mod stale_fence;
 
+#[path = "engram_named_root_registration_refresh.rs"]
+mod registration_refresh;
+
 #[path = "engram_unconfirmed_root_reasons.rs"]
 mod unconfirmed_root_reasons;
 

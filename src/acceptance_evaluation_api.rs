@@ -562,7 +562,7 @@ fn acceptance_evaluation_claim_unconfirmed_locked(
     ) {
         Some(selected) => !confirmed.is_some_and(|(event, receipt)| {
             event.kind == EngramNamedRootKind::Bound
-                && event.root == *selected
+                && event.root.same_name(selected)
                 && event.matches_receipt(receipt)
         }),
         // An acknowledged bound root without its local selection cannot

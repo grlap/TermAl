@@ -1,0 +1,256 @@
+//! A successful same-root name refreshes new registrations' claim authority;
+//! it preserves the name and every registration already made under it.
+use super::*;
+
+fn registration_request_for(
+    turn: &EOCheckedTurn,
+    root: &FsPath,
+    run_id: &str,
+) -> RegisterTestRunRequest {
+    let common = test_runs_git_common_dir(root).expect("the named worktree has Git metadata");
+    let directory = common.join("review-runs").join(run_id);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("request.json"), json!({
+        "runId": run_id, "root": root.to_string_lossy(), "input": "commit",
+        "full": true, "stages": [{"name": "rust-tests"}],
+        "owner": turn.session_id, "creatorPid": std::process::id(),
+        "detached": true, "started": "2026-11-05T07:00:00.000Z",
+    }).to_string()).unwrap();
+    RegisterTestRunRequest {
+        run_id: run_id.to_owned(), run_directory: test_run_display_path(&directory),
+    }
+}
+
+fn advance_held_fence(turn: &EOCheckedTurn, label: &str) -> EngramHeldClaims {
+    let mut held = naming_claim(label);
+    let claim = &mut held.items[0];
+    claim.claim_fence += 1;
+    let binding = claim.control_binding.as_mut().unwrap();
+    binding.claim_fence = claim.claim_fence;
+    binding.work_revision += 1;
+    turn.transport.set_current_work_binding(Some(binding.clone()));
+    turn.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .claim_fences.insert(claim.claim_id.clone(), claim.claim_fence);
+    turn.transport.replace_held_claims([Ok(held.clone())]);
+    held
+}
+
+#[test]
+fn same_root_refresh_allows_current_fence_registration_without_rewriting_history() {
+    let label = "registration-refresh-current-fence";
+    let turn = EOCheckedTurn::idle(label, true);
+    let path = naming_worktree(&turn.root);
+    let named = request_naming(&turn, label, Some(&path), vec![naming_claim(label)]).unwrap();
+    let original_request = registration_request_for(&turn, &path, "test-refresh-original");
+    turn.state.register_test_run(&turn.session_id, original_request).unwrap();
+    let (original, original_entry, original_event) = {
+        let inner = turn.state.inner.lock().unwrap();
+        (serde_json::to_value(&inner.test_run_registrations["test-refresh-original"]).unwrap(),
+         inner.engram_work_source_roots[0].clone(),
+         serde_json::to_value(&inner.engram_named_root_journal[0].confirmed).unwrap())
+    };
+
+    // Only the producer's live claim changes. No host root entry, session
+    // association or registration is repaired by this fixture.
+    let held = advance_held_fence(&turn, label);
+    let request = registration_request_for(&turn, &path, "test-refresh-current");
+    let refused = turn.state.register_test_run(&turn.session_id, RegisterTestRunRequest {
+        run_id: request.run_id.clone(), run_directory: request.run_directory.clone(),
+    }).err().expect("registration must refuse the stale retained fence");
+    assert_eq!(refused.status, StatusCode::CONFLICT);
+    assert!(refused.message.contains("claim fence changed"), "{refused:?}");
+    assert!(!turn.state.inner.lock().unwrap().test_run_registrations
+        .contains_key("test-refresh-current"));
+
+    let refreshed = request_naming(&turn, label, Some(&path), vec![held.clone()]).unwrap();
+    assert_eq!(refreshed.generation, named.generation);
+    assert_eq!(refreshed.root, named.root);
+    turn.state.register_test_run(&turn.session_id, request)
+        .expect("the prescribed same-root refresh must make current registration possible");
+    let inner = turn.state.inner.lock().unwrap();
+    let current = &inner.test_run_registrations["test-refresh-current"];
+    assert_eq!(current.work_binding.as_ref(), held.items[0].control_binding.as_ref());
+    assert_eq!(current.named_root.as_ref().unwrap().generation, named.generation);
+    assert_eq!(current.authority_store, Some(original_entry.store.clone()));
+    let entry = engram_work_source_root_for_claim(&inner.engram_work_source_roots,
+        &original_entry.store, &original_entry.work_id, &original_entry.claim_id).unwrap();
+    assert_eq!(entry.claim_fence, held.items[0].claim_fence);
+    assert_eq!(entry.named_at, original_entry.named_at);
+    assert_eq!(serde_json::to_value(&inner.test_run_registrations["test-refresh-original"]).unwrap(),
+        original, "a new registration must not relabel historical evidence");
+    assert_eq!(serde_json::to_value(&inner.engram_named_root_journal[0].confirmed).unwrap(),
+        original_event, "the original naming event stays immutable");
+    drop(inner);
+    let saved = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    assert_eq!(saved.engram_work_source_roots[0].claim_fence, held.items[0].claim_fence);
+}
+
+#[test]
+fn refreshed_registration_still_refuses_missing_foreign_and_stale_claims() {
+    let label = "registration-refresh-refusals";
+    let turn = EOCheckedTurn::idle(label, true);
+    let path = naming_worktree(&turn.root);
+    request_naming(&turn, label, Some(&path), vec![naming_claim(label)]).unwrap();
+    let held = advance_held_fence(&turn, label);
+    let named = request_naming(&turn, label, Some(&path), vec![held.clone()]).unwrap();
+    let baseline = registration_request_for(&turn, &path, "test-refresh-negative-baseline");
+    turn.state.register_test_run(&turn.session_id, baseline).unwrap();
+    let original = serde_json::to_value(&turn.state.inner.lock().unwrap()
+        .test_run_registrations["test-refresh-negative-baseline"]).unwrap();
+
+    let mut displaced = held.clone();
+    displaced.items[0].claim_id.push_str("-successor");
+    displaced.items[0].control_binding.as_mut().unwrap().claim_id =
+        displaced.items[0].claim_id.clone();
+    let mut foreign_work = held.clone();
+    foreign_work.items[0].work_id.push_str("-foreign");
+    foreign_work.items[0].control_binding.as_mut().unwrap().work_id =
+        foreign_work.items[0].work_id.clone();
+    let mut foreign_run = held.clone();
+    foreign_run.items[0].control_binding.as_mut().unwrap().run_id.push_str("-foreign");
+    let mut foreign_root_execution = held.clone();
+    foreign_root_execution.items[0].control_binding.as_mut().unwrap()
+        .root_execution_id.push_str("-foreign");
+    let mut stale_fence = held.clone();
+    stale_fence.items[0].claim_fence -= 1;
+    stale_fence.items[0].control_binding.as_mut().unwrap().claim_fence -= 1;
+    let mut stale_revision = held.clone();
+    stale_revision.items[0].control_binding.as_mut().unwrap().work_revision -= 1;
+    let mut disagreement = held.clone();
+    disagreement.items[0].claim_fence += 1;
+    for (case, unavailable, reason) in [
+        ("released", no_held_claims(), "exact held claim is unavailable or ambiguous"),
+        ("displaced", displaced, "exact held claim is unavailable or ambiguous"),
+        ("foreign-work", foreign_work, "exact held claim is unavailable or ambiguous"),
+        ("foreign-run", foreign_run, "held association changed"),
+        ("foreign-root-execution", foreign_root_execution, "held association changed"),
+        ("stale-fence", stale_fence, "held association changed"),
+        ("stale-revision", stale_revision, "held association changed"),
+        ("fence-disagreement", disagreement, "held association changed"),
+    ] {
+        // Vary only the canonical held reply after a real successful refresh.
+        // Each case must refuse independently, then admit when restored.
+        turn.transport.replace_held_claims([Ok(unavailable)]);
+        let id = format!("test-refresh-refused-{case}");
+        let request = registration_request_for(&turn, &path, &id);
+        let error = turn.state.register_test_run(&turn.session_id, request)
+            .err().unwrap_or_else(|| panic!("{case} borrowed refreshed authority"));
+        assert_eq!(error.status, StatusCode::CONFLICT, "{case}: {error:?}");
+        assert!(error.message.contains(reason), "{case}: {error:?}");
+        assert!(!turn.state.inner.lock().unwrap().test_run_registrations.contains_key(&id));
+
+        turn.transport.replace_held_claims([Ok(held.clone())]);
+        let restored_id = format!("test-refresh-restored-{case}");
+        let request = registration_request_for(&turn, &path, &restored_id);
+        turn.state.register_test_run(&turn.session_id, request).unwrap();
+        let inner = turn.state.inner.lock().unwrap();
+        let restored = &inner.test_run_registrations[&restored_id];
+        assert_eq!(restored.work_binding.as_ref(), held.items[0].control_binding.as_ref());
+        assert_eq!(restored.named_root.as_ref().unwrap().generation, named.generation);
+        assert_eq!(serde_json::to_value(&inner.test_run_registrations[
+            "test-refresh-negative-baseline"]).unwrap(), original);
+    }
+}
+
+#[test]
+fn a_released_name_cannot_keep_the_refreshed_generation() {
+    let label = "refresh-release";
+    let turn = EOCheckedTurn::idle(label, true);
+    let path = naming_worktree(&turn.root);
+    request_naming(&turn, label, Some(&path), vec![naming_claim(label)]).unwrap();
+    let held = advance_held_fence(&turn, label);
+    let named = request_naming(&turn, label, Some(&path), vec![held.clone()]).unwrap();
+    let request = registration_request_for(&turn, &path, "test-refresh-before-release");
+    turn.state.register_test_run(&turn.session_id, request).unwrap();
+    let original = serde_json::to_value(&turn.state.inner.lock().unwrap()
+        .test_run_registrations["test-refresh-before-release"]).unwrap();
+
+    // The producer records a genuine release; a held recovery of the same
+    // claim is allowed to name again, but it must create a new generation.
+    let mut recovered = held.clone();
+    let claim = &mut recovered.items[0];
+    claim.claim_fence += 2;
+    let binding = claim.control_binding.as_mut().unwrap();
+    binding.claim_fence = claim.claim_fence;
+    binding.work_revision += 1;
+    turn.transport.set_current_work_binding(Some(binding.clone()));
+    {
+        let mut roots = turn.transport.named_roots.lock().unwrap();
+        let roots = roots.as_mut().unwrap();
+        roots.released.insert(recovered.items[0].claim_id.clone(), named.generation as i64);
+        roots.claim_fences.insert(recovered.items[0].claim_id.clone(), recovered.items[0].claim_fence);
+    }
+    let renamed = request_naming(&turn, label, Some(&path), vec![recovered.clone()]).unwrap();
+    assert!(renamed.generation > named.generation);
+    let request = registration_request_for(&turn, &path, "test-refresh-after-release");
+    turn.state.register_test_run(&turn.session_id, request).unwrap();
+    let inner = turn.state.inner.lock().unwrap();
+    let current = &inner.test_run_registrations["test-refresh-after-release"];
+    assert_eq!(current.named_root.as_ref().unwrap().generation, renamed.generation);
+    assert_eq!(current.work_binding.as_ref(), recovered.items[0].control_binding.as_ref());
+    assert_eq!(serde_json::to_value(&inner.test_run_registrations[
+        "test-refresh-before-release"]).unwrap(), original);
+}
+
+#[test]
+fn a_refreshed_name_stays_confirmed_when_the_parent_leaves_its_claim() {
+    let label = "refresh-eval";
+    let turn = EOCheckedTurn::idle(label, true);
+    let path = naming_worktree(&turn.root);
+    let held = naming_claim(label);
+    let original_binding = held.items[0].control_binding.clone().unwrap();
+    request_naming(&turn, label, Some(&path), vec![held]).unwrap();
+    let store = naming_store(&turn);
+    let claim = AcceptanceEvaluationSourceClaim {
+        work_id: original_binding.work_id.clone(),
+        claim_id: original_binding.claim_id.clone(),
+        named_generation_at_request: None,
+    };
+    let assert_confirmed = || {
+        let inner = turn.state.inner.lock().unwrap();
+        assert!(!acceptance_evaluation_claim_unconfirmed_locked(
+            &inner, &turn.session_id, &store, Some(&claim)),
+            "the requested claim's acknowledged name must remain confirmed after focus moves");
+    };
+    // Establish that the unbound-parent branch admits this name before the
+    // refresh. Only the session association changes; no root or event is repaired.
+    turn.record_mut(|record| record.engram.work_binding = None);
+    assert_confirmed();
+    turn.record_mut(|record| record.engram.work_binding = Some(original_binding));
+    let held = advance_held_fence(&turn, label);
+    request_naming(&turn, label, Some(&path), vec![held]).unwrap();
+    for binding in [None, Some(test_control_work_binding("other-eval-claim", 1))] {
+        turn.record_mut(|record| record.engram.work_binding = binding);
+        // Exercise the actual evaluator-admission predicate without spawning
+        // an evaluator or requesting a live evaluation under the OFF policy.
+        assert_confirmed();
+    }
+
+    let selected = turn.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
+    for field in ["store-database", "store-project", "work", "short-ref", "claim", "path",
+        "repository", "namer", "named-at", "generation"] {
+        let mut changed = selected.clone();
+        match field {
+            "store-database" => changed.store.database_path.push("foreign"),
+            "store-project" => changed.store.project_id.push_str("-foreign"),
+            "work" => changed.work_id.push_str("-foreign"),
+            "short-ref" => changed.short_ref.push_str("-foreign"),
+            "claim" => changed.claim_id.push_str("-foreign"),
+            "path" => changed.root.push_str("-foreign"),
+            "repository" => changed.common_dir_key.push_str("-foreign"),
+            "namer" => changed.named_by_session.push_str("-foreign"),
+            "named-at" => changed.named_at.push_str("-foreign"),
+            "generation" => changed.generation += 1,
+            _ => unreachable!(),
+        }
+        {
+            let mut inner = turn.state.inner.lock().unwrap();
+            inner.engram_work_source_roots[0] = changed;
+            assert!(acceptance_evaluation_claim_unconfirmed_locked(
+                &inner, &turn.session_id, &store, Some(&claim)),
+                "a changed {field} must not borrow the acknowledged name");
+            inner.engram_work_source_roots[0] = selected.clone();
+        }
+        assert_confirmed();
+    }
+}
