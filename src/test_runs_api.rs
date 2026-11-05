@@ -6,6 +6,26 @@
 // index itself (`test_runs.rs`) or run waits (`test_run_waits.rs`), and never
 // starts, cancels or reruns a run.
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InterruptTestRunMonitoringRequest {
+    owner_session_id: String,
+    started_at: String,
+    reason: String,
+}
+
+/// Stops host observation only. This is not process cancellation or a test
+/// verdict; the exact public origin must still match the selected observation.
+async fn interrupt_test_run_monitoring(
+    State(state): State<AppState>,
+    AxumPath(run_id): AxumPath<String>,
+    request: Result<Json<InterruptTestRunMonitoringRequest>, JsonRejection>,
+) -> Result<Json<TestRunSummary>, ApiError> {
+    let Json(request) = request
+        .map_err(|error| api_json_rejection("test monitoring interruption", error))?;
+    run_blocking_api(move || state.interrupt_test_run_monitoring(&run_id, request).map(Json)).await
+}
+
 /// Registers a wait for the session in the path on one or more test runs;
 /// the session is resumed with one bounded prompt when they settle.
 async fn create_test_run_wait(

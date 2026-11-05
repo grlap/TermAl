@@ -338,6 +338,98 @@ fn test_run_runtime_identity(
 }
 
 impl AppState {
+    fn interrupt_test_run_monitoring(
+        &self,
+        run_id: &str,
+        request: InterruptTestRunMonitoringRequest,
+    ) -> Result<TestRunSummary, ApiError> {
+        let reason = request.reason.trim();
+        if reason.is_empty() || reason.len() > 1024 {
+            return Err(ApiError::bad_request("monitoring interruption requires a reason of 1–1024 bytes"));
+        }
+        let detail = format!("Operator stopped monitoring this execution: {reason}. This action establishes neither workload completion nor a test verdict.");
+        let (expected, waiter) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let row = inner.test_run_observations.get(run_id)
+                .ok_or_else(|| ApiError::not_found("no exact host-observed execution with this id"))?;
+            if row.summary.owner_session_id.as_deref() != Some(request.owner_session_id.as_str())
+                || row.summary.started_at.as_deref() != Some(request.started_at.as_str())
+            {
+                return Err(ApiError::conflict("observed execution owner or start no longer matches"));
+            }
+            // A correlated launcher owns its own disposition. Never alter it
+            // indirectly through an observed alias, even when it is still live.
+            if row.artifact.is_some() || inner.test_runs.registered.contains(run_id)
+                || inner.test_run_registrations.contains_key(run_id)
+                || inner.test_runs.find(run_id).is_some()
+            {
+                return Err(ApiError::conflict("launcher runs cannot be interrupted through host monitoring"));
+            }
+            let duplicate = row.summary.state == TestRunState::Unknown
+                && row.summary.interrupted
+                && row.monitoring_interrupted_at.is_some()
+                && row.summary.error.as_deref() == Some(detail.as_str());
+            if row.summary.ended_at.is_some()
+                || (!duplicate && (row.summary.interrupted
+                    || !matches!(row.summary.state, TestRunState::Running | TestRunState::Unknown)))
+            {
+                return Err(ApiError::conflict("execution already has a terminal or monitoring disposition"));
+            }
+            let expected = if duplicate {
+                row.clone()
+            } else {
+                let row = inner.test_run_observations.update(run_id, |row| {
+                    row.summary.state = TestRunState::Unknown;
+                    row.summary.interrupted = true;
+                    row.monitoring_interrupted_at = Some(test_run_timestamp());
+                    row.summary.error = Some(detail.clone());
+                    // ended_at/exit_code/evidence and the runtime remain untouched.
+                    row.clone()
+                }).expect("observation checked under the same state lock");
+                self.persist_test_command_observation_locked(&mut inner, row.clone());
+                row
+            };
+            if inner.test_runs.observations_durable.contains(run_id) {
+                return Ok(test_run_observation_summary(&inner, &expected));
+            }
+            if inner.test_runs.observations_failed.contains(run_id) {
+                return Err(ApiError::internal("monitoring disposition changed in memory but persistence failed; inspect the row before retrying"));
+            }
+            // Keep the observation owner's own persistence waiter intact. This
+            // request waits off-lock on an exact durable read-back, not a scan.
+            let (fence, waiter) = PersistFence::new(
+                PersistFenceTarget::TestRunObservation(Box::new(expected.clone())),
+                std::time::Instant::now() + Duration::from_secs(5),
+            );
+            self.persist_tx.send(PersistRequest::Fence(Box::new(fence)))
+                .map_err(|_| ApiError::internal("monitoring disposition persistence unavailable; inspect the row before retrying"))?;
+            (expected, waiter)
+        };
+        waiter.wait().map_err(|error| ApiError::internal(format!(
+            "monitoring disposition not durably confirmed ({error:?}); inspect the row before retrying"
+        )))?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if inner.test_run_observations.get(run_id) != Some(&expected) {
+            return Err(ApiError::conflict("observed execution changed while confirming persistence; inspect its current disposition"));
+        }
+        // Finish only this exact observation. An operator request must not
+        // sweep unrelated executions whose provider runtime may have changed.
+        let pending = inner.test_runs.observation_persistence.clone();
+        let mut pending = pending.0.lock().expect("test observation mutex poisoned");
+        if pending.get(run_id).is_some_and(|(row, _)| row == &expected) {
+            pending.remove(run_id);
+        }
+        drop(pending);
+        inner.test_runs.observations_failed.remove(run_id);
+        if inner.test_runs.observations_durable.insert(run_id.to_owned())
+            && let Ok(revision) = self.commit_delta_locked(&mut inner)
+        {
+            let run = test_run_observation_summary(&inner, &expected);
+            self.publish_delta_locked(&inner, DeltaEvent::TestRunChanged { revision, run });
+        }
+        Ok(test_run_observation_summary(&inner, &expected))
+    }
+
     fn remember_unclassified_test_command(
         &self,
         origin: TestRunCommandOrigin,
@@ -597,6 +689,20 @@ impl AppState {
         exit: Option<EngramCommandExit>,
     ) -> Vec<String> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        self.observe_test_command_end_locked(&mut inner, session_id, provenance, key, exit, None)
+    }
+
+    // Reused by terminal Claude task notifications while their current-runtime
+    // fence and outstanding-work retirement still hold the same state lock.
+    fn observe_test_command_end_locked(
+        &self,
+        inner: &mut StateInner,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        exit: Option<EngramCommandExit>,
+        unknown_detail: Option<&str>,
+    ) -> Vec<String> {
         let Some(index) = inner.find_session_index(session_id) else {
             return Vec::new();
         };
@@ -635,7 +741,7 @@ impl AppState {
             let can_finalize = inner
                 .test_run_observations
                 .get(id)
-                .is_some_and(|row| test_run_can_finalize_unbound(&inner, index, row));
+                .is_some_and(|row| test_run_can_finalize_unbound(inner, index, row));
             // The row to persist, if this exit changes it; the same branches
             // as before, applied through the indexed store's update.
             let persist = inner.test_run_observations.update(id, |row| {
@@ -671,6 +777,11 @@ impl AppState {
                     Some(EngramCommandExit::Code(code)) => Some(code),
                     _ => None,
                 };
+                if row.summary.state == TestRunState::Unknown
+                    && let Some(detail) = unknown_detail
+                {
+                    row.summary.error = Some(detail.to_owned());
+                }
                 if matches.len() == 1 && can_finalize {
                     row.final_unbound_proof =
                         test_run_final_unbound_identity(row).map(|terminal_identity| {
@@ -683,7 +794,7 @@ impl AppState {
                 Some(row.clone())
             });
             if let Some(Some(observation)) = persist {
-                self.persist_test_command_observation_locked(&mut inner, observation);
+                self.persist_test_command_observation_locked(inner, observation);
             }
             if transitioned {
                 ended.push(id.clone());

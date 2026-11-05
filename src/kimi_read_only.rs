@@ -8,8 +8,8 @@
 // Does not own: runtime fencing and sending the answer (acp.rs,
 // `handle_acp_message`), the read-only bash grammar (claude.rs,
 // `claude_bash_command_is_read_only`, reused unchanged), control-plane
-// authority (delegations.rs), or Kimi's effective-mode ACK (kimi.rs), which
-// is always `default` for a read-only child.
+// authority (delegations.rs), tracker read policy (engram_mcp_config.rs), or
+// Kimi's effective-mode ACK (kimi.rs), always `default` for a read-only child.
 //
 // New module, not split from another file. Contract and evidence:
 // docs/features/kimi-cli-integration.md, "Read-only delegation children".
@@ -286,6 +286,7 @@ fn kimi_read_only_permission_decision(
     params: &Value,
     observation: Option<&KimiToolCallObservation>,
     workdir: &str,
+    tracker_reads_allowed: bool,
     control_plane_allowed: &dyn Fn(DelegationControlPlaneCapability) -> bool,
 ) -> KimiReadOnlyDecision {
     let title = params
@@ -329,8 +330,12 @@ fn kimi_read_only_permission_decision(
         }
         _ => None,
     };
-    if title != "Bash" && capability.is_none() {
-        return kimi_read_only_reject(title, "only read-only commands and the TermAl result tools are allowed");
+    let tracker_word = engram_mcp_tool_word(title);
+    if title != "Bash" && capability.is_none() && tracker_word.is_none() {
+        return kimi_read_only_reject(
+            title,
+            "only read-only commands, admitted tracker reads and the TermAl result tools are allowed",
+        );
     }
 
     // The arguments: the complete JSON object streamed for this very call.
@@ -354,10 +359,23 @@ fn kimi_read_only_permission_decision(
         );
     };
 
-    if let Some(capability) = capability {
+    if capability.is_some() || tracker_word.is_some() {
         if summary != format!("{KIMI_MCP_SUMMARY_PREFIX}{title}") {
             return kimi_read_only_reject(title, "the request summary does not match the tool");
         }
+    }
+
+    if let Some(word) = tracker_word {
+        if !tracker_reads_allowed {
+            return kimi_read_only_reject(title, "the host does not admit tracker reads for this child");
+        }
+        if !engram_mcp_tool_call_only_reads(word, &args) {
+            return kimi_read_only_reject(title, "the tracker call is not a read with known arguments");
+        }
+        return KimiReadOnlyDecision::Allow { args };
+    }
+
+    if let Some(capability) = capability {
         let shape_ok = match capability {
             DelegationControlPlaneCapability::SubmitReviewResult => {
                 args.get("schemaVersion").and_then(Value::as_u64)
@@ -558,6 +576,7 @@ impl AppState {
                     params,
                     tool_call_id.as_deref().and_then(|id| observations.get(id)),
                     &workdir,
+                    read_only_child_tracker_reads_allowed_locked(&inner, session_id),
                     &|capability| {
                         delegation_control_plane_capability_allowed_locked(
                             &inner, session_id, capability,

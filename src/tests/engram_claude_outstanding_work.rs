@@ -516,6 +516,102 @@ fn a_background_command_still_running_in_its_own_turn_overlaps_that_turns_later_
     reader.feed(named_result(&prompt));
 }
 
+#[test]
+fn a_background_test_terminal_notice_settles_only_its_observed_execution() {
+    let turn = EOCheckedTurn::start("background-observed-terminal", true);
+    let ownership = new_claude_turn_ownership();
+    let mut reader = ClaudeReaderOn::new(&turn, ownership.clone());
+    let prompt = host_prompt(
+        "Run two tests in the background.",
+        turn.record(|record| record.active_turn_generation),
+    );
+    lock_claude_turn_ownership(&ownership).reserve(claude_host_prompt_owner(&prompt));
+    reader.feed(capable_init());
+    reader.feed(lifecycle(&prompt, "started"));
+    for key in ["toolu-ended-test", "toolu-live-test"] {
+        reader.feed(root_bash(key, SIZE_TEST, true));
+        reader.feed(root_bash_result(key, "Command running in background with ID: b1."));
+    }
+    let observed = |key: &str| {
+        let inner = turn.state.inner.lock().unwrap();
+        inner.test_run_observations.values()
+            .find(|row| row.tool_identity == sha256_hex(key.as_bytes()))
+            .expect("the background test has an observed execution")
+            .summary.clone()
+    };
+    assert_eq!(observed("toolu-ended-test").state, TestRunState::Running);
+    assert_eq!(observed("toolu-live-test").state, TestRunState::Running);
+    reader.feed(named_result(&prompt));
+    begin_next_turn(&turn);
+
+    let mut progress = task_ended("toolu-ended-test");
+    progress["status"] = json!("running");
+    reader.feed(progress);
+    assert_eq!(observed("toolu-ended-test").state, TestRunState::Running);
+    reader.feed(task_ended("unrelated-tool"));
+    assert_eq!(observed("toolu-ended-test").state, TestRunState::Running);
+    reader.feed(task_ended("toolu-ended-test"));
+    let ended = observed("toolu-ended-test");
+    assert_eq!(ended.state, TestRunState::Unknown,
+        "the task ended, but its notification supplies no test verdict");
+    assert!(ended.ended_at.is_some());
+    assert!(ended.exit_code.is_none());
+    assert!(!ended.interrupted, "this is a reported end, not lost monitoring");
+    assert_eq!(ended.error.as_deref(),
+        Some("Claude reported this task ended without a test verdict or exit code."));
+    assert_eq!(observed("toolu-live-test").state, TestRunState::Running);
+    reader.feed(task_ended("toolu-ended-test"));
+    assert_eq!(observed("toolu-ended-test"), ended, "a duplicate end is inert");
+    {
+        let inner = turn.state.inner.lock().unwrap();
+        assert!(inner.test_run_observations.values().all(|row| row.evidence.is_empty()));
+    }
+    turn.state.shutdown_persist_blocking();
+    let restored = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    assert_eq!(restored.test_run_observations.values()
+        .find(|row| row.tool_identity == sha256_hex(b"toolu-ended-test"))
+        .expect("terminal observation survives reload").summary, ended);
+}
+
+#[test]
+fn a_background_test_terminal_notice_does_not_settle_a_replacement_runtime() {
+    let turn = EOCheckedTurn::start("background-observed-replaced", true);
+    let mut old_reader = ClaudeReaderOn::new(&turn, new_claude_turn_ownership());
+    old_reader.feed(root_bash("reused-tool", SIZE_TEST, true));
+    let (successor, _commands) = test_claude_runtime_handle("observed-successor");
+    turn.record_mut(|record| record.runtime = SessionRuntime::Claude(successor));
+    let mut reader = ClaudeReaderOn::new(&turn, new_claude_turn_ownership());
+    reader.feed(root_bash("reused-tool", SIZE_TEST, true));
+    let snapshot = || turn.state.inner.lock().unwrap().test_run_observations
+        .values().cloned().collect::<Vec<_>>();
+    let before = snapshot();
+    assert_eq!(before.len(), 2, "same tool key, different runtime owners");
+    old_reader.feed(task_ended("reused-tool"));
+    assert_eq!(snapshot(), before, "the old reader cannot settle either row");
+    reader.feed(task_ended("reused-tool"));
+    let after = snapshot();
+    assert_eq!(after.iter().filter(|row| row.summary.ended_at.is_some()).count(), 1);
+    assert_eq!(after.iter().filter(|row| row.summary.state == TestRunState::Running).count(), 1);
+    assert!(after.iter().all(|row| row.summary.exit_code.is_none() && row.evidence.is_empty()));
+}
+
+#[test]
+fn a_background_launcher_terminal_notice_does_not_invent_the_workloads_end() {
+    let turn = EOCheckedTurn::start("background-observed-launch-only", true);
+    let mut reader = ClaudeReaderOn::new(&turn, new_claude_turn_ownership());
+    reader.feed(root_bash("full-launch", "node scripts/test-launcher.mjs full", true));
+    reader.feed(root_bash_result("full-launch", "Command running in background with ID: full."));
+    reader.feed(task_ended("full-launch"));
+    let inner = turn.state.inner.lock().unwrap();
+    let row = inner.test_run_observations.values()
+        .find(|row| row.tool_identity == sha256_hex(b"full-launch")).unwrap();
+    assert!(row.launch_only);
+    assert_eq!(row.summary.state, TestRunState::Unknown);
+    assert!(row.summary.ended_at.is_none(), "launcher completion is not workload completion");
+    assert!(row.summary.exit_code.is_none());
+    assert!(row.evidence.is_empty());
+}
+
 fn system_texts(record: &SessionRecord, starting: &str) -> usize {
     record
         .session

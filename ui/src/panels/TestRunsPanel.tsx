@@ -3,11 +3,12 @@
 import { useContext, useMemo, useState } from "react";
 import type { Project, Session } from "../types";
 import { TestRunsContext } from "../test-runs-context";
-import { sortTestRuns, testRunMatchesSession, type TestRunState } from "../test-runs";
-import { TestRunDetails, TestRunDuration } from "./TestRunDetails";
+import { testRunMatchesSession, type TestRunState } from "../test-runs";
+import { TestRunDetails } from "./TestRunDetails";
 import "./test-runs-panel.css";
 import type { TestRunCardTarget } from "../test-run-card";
 import { useTestRunHistory } from "./use-test-run-history";
+import { TestRunList } from "./TestRunList";
 
 export function TestRunsPanel({ projects, sessions, initialProjectId = null, initialSessionId = null, initialRun = null }: {
   projects: readonly Project[]; sessions: readonly Session[];
@@ -22,10 +23,15 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
   const history = useTestRunHistory(projectId, liveRuns);
   const runs = history.runs;
   const names = useMemo(() => new Map(sessions.map(session => [session.id, session.name])), [sessions]);
-  const sessionIds = [...new Set([...sessions.map(session => session.id), ...runs.flatMap(run =>
-    [run.ownerSessionId, run.notifySessionId].filter((id): id is string => id !== null)), ...(sessionId ? [sessionId] : [])])];
-  const visible = sortTestRuns(runs.filter(run => (!projectId || run.projectId === projectId) &&
-    (!sessionId || testRunMatchesSession(run, sessionId)) && (!state || run.state === state)));
+  const sessionIds = useMemo(() => [...new Set([...sessions.map(session => session.id), ...runs.flatMap(run =>
+    [run.ownerSessionId, run.notifySessionId].filter((id): id is string => id !== null)), ...(sessionId ? [sessionId] : [])])],
+  [sessions, runs, sessionId]);
+  const sessionOptions = useMemo(() => sessionIds.map(id => <option key={id} value={id}>{names.get(id) ?? id}</option>),
+    [sessionIds, names]);
+  // History already has the canonical time/id order; filtering preserves it.
+  const visible = useMemo(() => runs.filter(run => (!projectId || run.projectId === projectId) &&
+    (!sessionId || testRunMatchesSession(run, sessionId)) && (!state || run.state === state)),
+  [runs, projectId, sessionId, state]);
   const selected = visible.find(run => run.runId === selectedId);
   return <section className="test-runs-panel" aria-label="Test Runs">
     <header><h2>Test Runs</h2><p>Registered launches and host-observed tests. Execution results and verification settlement are shown separately.</p>
@@ -42,32 +48,15 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
       </select></label>
       <label>Session <select value={sessionId} onChange={event => setSessionId(event.target.value)}>
         <option value="">All sessions</option>
-        {sessionIds.map(id => <option key={id} value={id}>{names.get(id) ?? id}</option>)}
+        {sessionOptions}
       </select></label>
     </div>
     {history.error ? <p role="alert">{history.error} <button type="button" disabled={history.busy} onClick={history.retry}>Retry history</button></p> : null}
     {history.busy ? <p role="status">Loading test-run history…</p> : null}
     {history.hasMore ? <p>Filters apply to loaded history. <button type="button" disabled={history.busy} onClick={history.more}>Load older</button></p> : null}
     <div className="test-runs-layout">
-      <div className="test-runs-list" aria-label="Discovered runs">
-        {!visible.length ? <p>{snapshotReady || history.loaded ? "No test runs match these filters." : "Waiting for the test-run index…"}</p> : visible.map(run => <button
-          key={run.runId} type="button" className="test-run-row" aria-pressed={selectedId === run.runId}
-          onClick={() => setSelectedId(run.runId)}>
-          <span className={`test-run-state is-${run.state}`}>{run.state}{run.interrupted ? " · interrupted" : ""}</span>
-          <strong>{run.command?.join(" ") || run.preset}{run.commandTruncated ? " … (truncated)" : ""}</strong>
-          <span>{run.runId}</span><span title={run.worktree}>{run.worktree || "Worktree not recorded"}</span>
-          <span>Owner: {run.ownerSessionId ? names.get(run.ownerSessionId) ?? run.ownerSessionId : "not recorded"}</span>
-          <span>Notify: {run.notifySessionId ? names.get(run.notifySessionId) ?? run.notifySessionId : run.notifyTo ?? "none"}</span>
-          <span>Tracking: {run.registrationState ?? "discovered"} · {run.trackingDurability ?? "unconfirmed"}</span>
-          <span>Observed through: {run.trackingProvenances?.join(", ") ?? "discovery"}</span>
-          <span>Creator PID: {run.creatorPid ?? "unknown"} · Runner PID: {run.runnerPid ?? "unknown"}</span>
-          <span>Evidence impact on restart: {run.restartWouldVoidEvidence === true ? "would void evidence" : run.restartWouldVoidEvidence === false ? "no pending evidence" : "unknown"}</span>
-          <span>{run.restartEvidenceReason ?? "Exact verification correlation is not available."}</span>
-          {run.monitoringInterruptedAt ? <span>Monitoring interrupted: {run.monitoringInterruptedAt}</span> : null}
-          <span>{run.startTimeOrigin === "hostCommandStart" ? "Command start observed" : "Started"}: {run.startedAt ?? "not recorded"} · <TestRunDuration start={run.startedAt} end={run.endedAt} running={run.state === "running"} /></span>
-          {run.state === "running" ? <span>Stage: {run.currentStage ?? "not recorded"}</span> : null}
-        </button>)}
-      </div>
+      <TestRunList runs={visible} names={names} selectedId={selectedId} onSelect={setSelectedId}
+        queryKey={JSON.stringify([projectId, sessionId, state])} ready={snapshotReady || history.loaded} />
       {selected ? <TestRunDetails key={selected.runId} run={selected} /> : initialRun && selectedId === initialRun.runId && !runs.some(run => run.runId === initialRun.runId) ?
         <TestRunDetails key={initialRun.runId} runId={initialRun.runId} fallback={
           <section aria-label="Recorded run evidence"><h3>{snapshotReady ? "Run not currently indexed" : "Waiting for the test-run index…"}</h3>

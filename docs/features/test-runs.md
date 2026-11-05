@@ -22,6 +22,35 @@ start time and work ownership; that late description creates no retroactive
 verification check. Visibility is independent of the owner's active or open
 session. Unknown PIDs, stages and locations remain unknown.
 
+A terminal Claude background-task notification settles the observation for its
+exact session, runtime and tool use, including after the originating prompt
+ends. Without a test verdict or exit code it records `unknown`, an end time and
+an explanation; the notification never implies a pass, failure or verification
+credit. A nonterminal notification, another tool use or a replaced runtime does
+not settle it, and duplicates leave the original terminal fact intact. A
+launch-only row still needs its exact launcher artifact: the launcher's end
+alone does not prove the test workload ended. This handles newly received
+events; it does not infer historical completion from process absence or a
+similar registered run.
+
+An operator can stop monitoring a specific host-observed execution through
+`POST /api/test-runs/{run_id}/interrupt-monitoring`, with the exact
+`ownerSessionId` and `startedAt` from that row and a nonempty `reason` of at most
+1024 UTF-8 bytes. This records `unknown`, `interrupted: true`, the monitoring
+interruption time and the reason, preserving the row and all evidence. It
+neither cancels a process nor claims workload completion: `endedAt` and the
+exit code stay unchanged. Other observations and the provider runtime continue.
+Later positively correlated provider facts remain recordable.
+
+The action refuses changed origin fields, completed executions, a different
+already-recorded interruption, registered/discovered runs and observations with
+an exact launcher association. An identical retry returns the same disposition.
+Success is returned only after persistence is confirmed; on a persistence error,
+inspect the row before retrying because its in-memory disposition may already
+have changed. This action does not grant test credit, resolve evidence currency
+or alter a registered run. Historical completion is never guessed from a similar
+run or an absent process.
+
 The flask icon shows the active-run count after the first state snapshot, with
 the same count in its accessible label and tooltip. Zero active runs means no
 badge. Clicking the icon opens all projects. Per-run status and restart evidence

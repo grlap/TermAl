@@ -311,8 +311,18 @@ returns, and `allow_always` is never chosen.
   Kimi execution witness. End-to-end passage through Kimi's runtime permission
   gate remains separately unverified.
 
-  Any other name is rejected, including a foreign alias and the
+  Any other result-tool name is rejected, including a foreign alias and the
   acceptance-evaluation tool.
+- **Engram reads.** When the host admits tracker reads for this child, exact
+  `mcp__engram__<word>` calls use the same read-only list and argument rules as
+  Claude (`engram_mcp_config.rs`): `next` with `peek: true`, `ls`, `search`,
+  `show` and `memories` without a context generation. The summary must name
+  the exact tool, and the complete streamed arguments must pass the checks
+  above. Unknown arguments and all writing words stay refused. The host must
+  have installed the tracker server for the running child; existing shared
+  session eligibility is unchanged. Admission does not replace Engram's own
+  argument validation. ACP fixture tests cover this host decision, not a live
+  Kimi execution witness.
 - **ExitPlanMode** is answered with `plan_reject_and_exit`. Without that
   option it is rejected.
 - **Everything else that asks** is rejected once. Kimi's failed tool card

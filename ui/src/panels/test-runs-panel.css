@@ -11,6 +11,10 @@
 .test-runs-filters select { max-width: 100%; }
 .test-runs-layout { display: grid; grid-template-columns: minmax(14rem, 1fr) minmax(0, 2fr); gap: 1rem; align-items: start; }
 .test-runs-list, .test-run-details { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.test-runs-list { display: block; max-height: 65vh; min-height: 8rem; overflow: auto; scrollbar-gutter: stable; }
+/* Include row spacing in the height observed by the shared measured window. */
+.test-run-list-item { padding-bottom: .6rem; }
+.test-run-list-item > .test-run-row { width: 100%; }
 .test-runs-panel .test-run-row { display: flex; flex-direction: column; gap: .25rem; text-align: left; overflow-wrap: anywhere; }
 .test-run-row[aria-pressed="true"] { border-color: var(--signal-blue); }
 .test-run-state { align-self: flex-start; border: 1px solid currentColor; border-radius: .3rem; padding: .1rem .3rem; }

@@ -763,12 +763,26 @@ impl AppState {
         if !record.runtime.matches_runtime_token(token) {
             return;
         }
-        let outstanding = &mut record.claude_outstanding;
         for (key, moved_to_background) in &work.results {
-            outstanding.tool_result(token, key, *moved_to_background);
+            record.claude_outstanding.tool_result(token, key, *moved_to_background);
         }
+        // A task can finish after its originating prompt. Match its original
+        // runtime/tool identity, without borrowing the current turn's identity.
+        // The notice proves completion, not a test verdict or launcher result.
+        let provenance = EngramObservationProvenance::Claude(ClaudeObservationProvenance {
+            token: token.clone(),
+            origin: ClaudeWorkOrigin::Unattributed,
+        });
         for key in &work.ended {
-            outstanding.task_ended(token, key);
+            inner.sessions[index].claude_outstanding.task_ended(token, key);
+            self.observe_test_command_end_locked(
+                &mut inner,
+                session_id,
+                &provenance,
+                key,
+                None,
+                Some("Claude reported this task ended without a test verdict or exit code."),
+            );
         }
     }
 

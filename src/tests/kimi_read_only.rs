@@ -10,6 +10,9 @@
 
 use super::*;
 
+#[path = "kimi_tracker_reads.rs"]
+mod tracker_reads;
+
 const WORKDIR: &str = "/work/repo";
 
 fn text_content(text: &str) -> Value {
@@ -54,7 +57,7 @@ fn observed(title: &str, args_text: &str) -> KimiToolCallObservation {
 }
 
 fn decide(params: &Value, observation: Option<&KimiToolCallObservation>) -> KimiReadOnlyDecision {
-    kimi_read_only_permission_decision(params, observation, WORKDIR, &|_| true)
+    kimi_read_only_permission_decision(params, observation, WORKDIR, true, &|_| true)
 }
 
 fn bash_summary(command: &str) -> String {
@@ -285,6 +288,7 @@ fn only_the_exact_termal_result_tool_with_a_valid_request_is_allowed() {
         &mcp_params(TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME),
         Some(&observation),
         WORKDIR,
+        false,
         &|_| false,
     )));
     // A wrong schema version is not a valid request.
@@ -437,6 +441,8 @@ fn a_read_only_kimi_child_is_told_what_the_gate_allows() {
     assert!(kimi.contains("TERMAL_STRUCTURED_REVIEW_RESULT_V1"));
     assert!(kimi.contains("TermAl read-only gate for Kimi"));
     assert!(kimi.contains("Do not use Agent or AgentSwarm"));
+    assert!(kimi.contains("When the host admits tracker reads"));
+    assert!(kimi.contains("memories without context_generation"));
     let codex = build_delegation_prompt(&kimi_reviewer_record(
         "session-parent".to_owned(),
         "session-child".to_owned(),

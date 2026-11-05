@@ -2679,10 +2679,10 @@ const WINDOWS_CODEX_READ_ONLY_SOURCE_READS: &str = "Windows read-only Codex insp
 /// gate allows (kimi_read_only.rs), so the child does not spend its turn on
 /// refusals. The refusal line depends on the mode: only a reviewer has the
 /// TermAl result tools.
-const KIMI_READ_ONLY_CHILD_INSTRUCTIONS: &str = "\n\nTermAl read-only gate for Kimi (TermAl answers your permission requests itself):\n- Read, Grep and Glob work as usual.\n- Bash runs only simple read-only commands (for example `git status`, `git diff`, `git log`, `ls`, `sed -n`), in the working directory, in the foreground. Do not pass `cwd`, `run_in_background` or `disable_timeout`; no redirection, `;`, backticks or `$(`.\n- Do not use Agent or AgentSwarm: a subagent's requests are always refused.\n- A refused tool is not a failure of your task; continue with what is allowed.";
-const KIMI_READ_ONLY_REVIEWER_REFUSALS: &str = "\n- Write, Edit, CronCreate and every other tool that asks permission are refused, except the TermAl result tools named above.";
+const KIMI_READ_ONLY_CHILD_INSTRUCTIONS: &str = "\n\nTermAl read-only gate for Kimi (TermAl answers your permission requests itself):\n- Read, Grep and Glob work as usual.\n- Bash runs only simple read-only commands (for example `git status`, `git diff`, `git log`, `ls`, `sed -n`), in the working directory, in the foreground. Do not pass `cwd`, `run_in_background` or `disable_timeout`; no redirection, `;`, backticks or `$(`.\n- When the host admits tracker reads, use the Engram MCP tools for reads only: next with peek:true, ls, search, show and memories without context_generation. Only known read arguments are allowed; writes and advancing reads are refused.\n- Do not use Agent or AgentSwarm: a subagent's requests are always refused.\n- A refused tool is not a failure of your task; continue with what is allowed.";
+const KIMI_READ_ONLY_REVIEWER_REFUSALS: &str = "\n- Write, Edit, CronCreate and every other tool that asks permission are refused, except admitted tracker reads and the TermAl result tools named above.";
 const KIMI_READ_ONLY_EXPLORER_REFUSALS: &str =
-    "\n- Write, Edit, CronCreate and every other tool that asks permission are refused.";
+    "\n- Write, Edit, CronCreate and every other tool that asks permission are refused, except admitted tracker reads.";
 
 impl AppState {
     fn delegation_control_plane_capability_allowed(

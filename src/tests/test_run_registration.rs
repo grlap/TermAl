@@ -29,6 +29,9 @@ mod compaction;
 #[path = "test_run_observed_terminal.rs"]
 mod observed_terminal;
 
+#[path = "test_run_monitoring.rs"]
+mod monitoring;
+
 #[path = "test_run_lifecycle_batch.rs"]
 mod lifecycle_batch;
 
