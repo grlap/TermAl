@@ -392,6 +392,49 @@ function lastJsonRequestBody(
 }
 
 describe("AgentSessionPanel conversation caching", () => {
+  it("keeps marker order through bounded history, additions, removals, and remount", () => {
+    const messages = makeTextMessages(8);
+    const marker = (position: number) => makeConversationMarker({
+      id: `marker-${position}`,
+      messageId: messages[position].id,
+      messageIndexHint: position,
+      name: `Point ${position}`,
+    });
+    const older = marker(1);
+    const resident = marker(6);
+    const added = marker(4);
+    let session = makeSession("session-1", {
+      messages: messages.slice(6),
+      messageCount: messages.length,
+      messageStartIndex: 6,
+      hasOlderHistory: true,
+      markers: [resident, older],
+    });
+    const view = renderSessionPanelWithDefaults({ activeSession: session });
+    const names = () => within(screen.getByRole("navigation", {
+      name: "Conversation markers",
+    })).getAllByRole("button", { name: /^Jump to/ }).map((button) =>
+      button.querySelector(".conversation-marker-chip-name")?.textContent,
+    );
+    const publish = (next: Partial<Session>) => {
+      session = { ...session, ...next };
+      act(() => syncComposerSessionsStore({
+        sessions: [session], draftsBySessionId: {}, draftAttachmentsBySessionId: {},
+      }));
+    };
+
+    expect(names()).toEqual(["Point 1", "Point 6"]);
+    publish({ markers: [resident, older, added] });
+    expect(names()).toEqual(["Point 1", "Point 4", "Point 6"]);
+    publish({ messages: messages.slice(1), messageStartIndex: 1 });
+    expect(names()).toEqual(["Point 1", "Point 4", "Point 6"]);
+    publish({ markers: [resident, added] });
+    expect(names()).toEqual(["Point 4", "Point 6"]);
+    view.unmount();
+    renderSessionPanelWithDefaults({ activeSession: session });
+    expect(names()).toEqual(["Point 4", "Point 6"]);
+  });
+
   it("keeps mailbox header navigation and marker context menus independent in the real shell", async () => {
     const source = makeSession("source-session", { name: "Source session" });
     const message: Message = {

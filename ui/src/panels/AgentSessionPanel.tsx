@@ -694,8 +694,12 @@ const SessionConversationPage = memo(
     );
     const sortedMarkers = useMemo(
       () =>
-        sortConversationMarkersForNavigation(visibleMarkers, visibleMessages),
-      [visibleMarkers, visibleMessages],
+        sortConversationMarkersForNavigation(
+          visibleMarkers,
+          visibleMessages,
+          overviewMessageStartIndex,
+        ),
+      [visibleMarkers, visibleMessages, overviewMessageStartIndex],
     );
     // activeMarkerId selects a persisted marker in the rail; activeMarkerMessageId
     // drives the message-shell highlight immediately, including the create flow

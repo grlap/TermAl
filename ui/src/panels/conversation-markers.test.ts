@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createElement, useEffect, useRef } from "react";
 
 import {
@@ -324,6 +325,28 @@ describe("conversation marker helpers", () => {
         [],
       ),
     ).toEqual([earliestHint, oldestById, oldestByIdAfter, newest]);
+  });
+
+  it("keeps off-window and resident markers in session order as history loads", () => {
+    const messages = Array.from({ length: 8 }, (_, index) =>
+      makeMessage(`message-${index}`),
+    );
+    const markers = [6, 1, 7, 4].map((index) =>
+      makeMarker(`marker-${index}`, {
+        messageId: `message-${index}`,
+        messageIndexHint: index,
+      }),
+    );
+    const expected = [markers[1], markers[3], markers[0], markers[2]];
+    // The window may be at the tail, in the middle, or expanded to older history.
+    for (const [start, end] of [[6, 8], [4, 7], [1, 8], [0, 8]]) {
+      expect(
+        sortConversationMarkersForNavigation(markers, messages.slice(start, end), start),
+      ).toEqual(expected);
+    }
+    expect(markers.map((marker) => marker.id)).toEqual([
+      "marker-6", "marker-1", "marker-7", "marker-4",
+    ]);
   });
 
   it("recovers a marker jump after the virtualized target mounts on the second frame", () => {
@@ -1089,6 +1112,38 @@ describe("conversation marker helpers", () => {
     expect(chip?.style.getPropertyValue("--conversation-marker-color")).toBe(
       DEFAULT_CONVERSATION_MARKER_COLOR,
     );
+  });
+
+  it("keeps the three named header controls keyboard operable", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onNavigatePrevious = vi.fn();
+    const onNavigateNext = vi.fn();
+    render(createElement(ConversationMarkerFloatingWindow, {
+      markers: [makeMarker("marker-1")],
+      activeMarkerId: null,
+      onClose,
+      onJump: vi.fn(),
+      onNavigatePrevious,
+      onNavigateNext,
+    }));
+    const names = ["Previous marker", "Next marker", "Hide markers window"];
+    for (const name of names) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAttribute("title", name);
+      expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    }
+    screen.getByRole("button", { name: names[0] }).focus();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    expect(screen.getByRole("button", { name: names[1] })).toHaveFocus();
+    await user.keyboard(" ");
+    await user.tab();
+    expect(screen.getByRole("button", { name: names[2] })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onNavigatePrevious).toHaveBeenCalledTimes(1);
+    expect(onNavigateNext).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("renders the floating-window close affordance as an icon-only button", () => {

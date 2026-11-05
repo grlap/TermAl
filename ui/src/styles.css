@@ -4746,7 +4746,7 @@ textarea {
   gap: var(--space-xs);
 }
 
-.conversation-marker-nav-button {
+.ghost-button.conversation-marker-nav-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -205,6 +205,8 @@ Controls:
 Ordering:
 
 - sort markers by resolved `messageIndex`, then `createdAt`, then `id`.
+- Loaded message positions include the transcript window's session offset,
+  so older off-window markers and loaded markers share the same ordering.
 - range markers occupy their start position for previous/next navigation.
 - unresolved markers stay in the list but are skipped by previous/next until
   their anchor can be resolved.
@@ -421,6 +423,17 @@ Frontend:
 - unresolved marker renders without crashing
 - marker deltas apply while `messagesLoaded === false`
 - marker edits preserve anchor identity
+
+The real-browser header check renders `ConversationMarkerFloatingWindow` with
+the complete stylesheets in light and dark themes, with and without markers.
+After `npm ci` in `ui/`, run from the repository root:
+
+```sh
+node scripts/check-conversation-markers.mjs --chrome-executable /absolute/path/to/chrome
+```
+
+It records icon geometry, accessible names, focus, enabled states, callbacks,
+and a screenshot under `.tmp/`. It does not connect to a host or build `ui/dist`.
 
 Virtualization:
 

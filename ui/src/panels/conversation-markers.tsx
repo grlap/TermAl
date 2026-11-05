@@ -101,13 +101,15 @@ export function findMountedConversationMessageSlot(
 export function sortConversationMarkersForNavigation(
   markers: readonly ConversationMarker[],
   messages: readonly Message[],
+  messageStartIndex = 0,
 ) {
   if (markers.length === 0) {
     return [];
   }
   const messageIndexById = new Map<string, number>();
   messages.forEach((message, index) => {
-    messageIndexById.set(message.id, index);
+    // Persisted hints and resident positions must use the same session origin.
+    messageIndexById.set(message.id, messageStartIndex + index);
   });
   return [...markers].sort((left, right) => {
     const leftIndex =
