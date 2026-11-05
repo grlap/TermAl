@@ -64,6 +64,11 @@ fn test_run_file_stamp(path: &FsPath) -> TestRunFileStamp {
 /// `.git` directory, or a `.git` file's `gitdir:` target and that directory's
 /// `commondir`.
 fn test_runs_git_common_dir(root: &FsPath) -> Option<PathBuf> {
+    // A removed project must not inherit its enclosing repository's runs.
+    // Existing subdirectories still discover the repository they belong to.
+    if !fs::metadata(root).ok()?.is_dir() {
+        return None;
+    }
     let mut current = Some(root);
     while let Some(directory) = current {
         let dot_git = directory.join(".git");

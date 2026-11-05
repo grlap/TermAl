@@ -48,6 +48,13 @@ fn engram_execution_source_capture_with(
     workdir: &FsPath,
     ordinary_commit_input: bool,
 ) -> EngramSourceCapture {
+    // Source identity requires the session's directory to exist. The general
+    // worktree router also handles file writes and already-deleted watcher paths.
+    if !std::fs::metadata(workdir).is_ok_and(|metadata| metadata.is_dir()) {
+        eprintln!("engram> no source basis for workspace {}: its directory is unavailable or is not a directory",
+            workdir.display());
+        return Ok(None);
+    }
     // A session may work in a subdirectory: its source identity is its
     // worktree's, which the fingerprint takes from the worktree root.
     let root = engram_worktree_root_path(workdir);
@@ -70,10 +77,9 @@ fn engram_execution_source_capture_with(
                 workdir.display()
             );
             match error.downcast_ref::<SourceBasisRefusal>() {
-                // An absent workdir can make the ancestor walk select an
-                // enclosing repository. Its refusal does not establish a
-                // permanent cause for this session's workspace. Keep a path
-                // that disappeared or changed roots during capture transient.
+                // A workdir can disappear or change roots after the initial
+                // directory check. An enclosing repository's refusal then
+                // establishes no permanent cause for this session's workspace.
                 Some(refusal) if resolved_workdir.as_ref().is_some_and(|resolved| {
                     resolved.starts_with(&root)
                         && std::fs::canonicalize(workdir).ok().as_ref() == Some(resolved)

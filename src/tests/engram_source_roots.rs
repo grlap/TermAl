@@ -107,6 +107,68 @@ fn a_linked_worktree_inside_the_project_can_be_named() {
 }
 
 #[test]
+fn naming_from_a_lost_session_workdir_cannot_inherit_the_enclosing_repository() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let project = project(&mut cleanup);
+    let workdir = project.worktree.to_string_lossy().into_owned();
+    let requested = project.root.to_string_lossy().into_owned();
+    assert!(validate_engram_source_root(&requested, &workdir, &requested).is_ok());
+    let subdirectory = project.worktree.join("src");
+    fs::create_dir(&subdirectory).unwrap();
+    assert!(validate_engram_source_root(&requested, &subdirectory.to_string_lossy(), &requested).is_ok());
+    fs::remove_dir_all(&project.worktree).unwrap();
+    let error = validate_engram_source_root(&requested, &workdir, &requested)
+        .expect_err("a removed session workdir must not become the enclosing checkout");
+    assert_eq!(error, "this session's workdir is not in a Git repository");
+    assert!(validate(&project.worktree, &project).is_err(), "a lost requested root stays refused");
+}
+
+#[test]
+fn a_missing_session_directory_cannot_capture_a_clean_enclosing_repository() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let project = project(&mut cleanup);
+    assert!(engram_execution_source_capture_with(&project.root, false).unwrap().is_some(),
+        "the clean enclosing repository supplies a real source basis");
+    let missing = project.root.join("removed-session-directory");
+    assert!(!missing.exists());
+    assert!(matches!(engram_execution_source_capture_with(&missing, false), Ok(None)),
+        "a missing session must not receive that enclosing repository's basis");
+}
+
+#[test]
+fn naming_from_a_link_to_a_repository_subdirectory_uses_its_target() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let project = project(&mut cleanup);
+    let target = project.root.join("src");
+    fs::create_dir(&target).unwrap();
+    let links = TestTempRoot::create("session-directory-link");
+    fs::create_dir(links.join(".git")).unwrap();
+    let workdir = links.join("session");
+    link_directory(&workdir, &target);
+    let requested = project.root.to_string_lossy();
+    assert!(validate_engram_source_root(&requested, &workdir.to_string_lossy(), &requested).is_ok(),
+        "a linked session directory still belongs to its target repository");
+}
+
+#[test]
+fn replacing_a_session_directory_with_a_foreign_link_cannot_name_its_old_repository() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let original = project(&mut cleanup);
+    let other = project(&mut cleanup);
+    let target = other.root.join("src");
+    fs::create_dir(&target).unwrap();
+    let workdir = original.root.join("session-directory");
+    fs::create_dir(&workdir).unwrap();
+    let requested = original.root.to_string_lossy();
+    assert!(validate_engram_source_root(&requested, &workdir.to_string_lossy(), &requested).is_ok());
+    fs::remove_dir(&workdir).unwrap();
+    link_directory(&workdir, &target);
+    let error = validate_engram_source_root(&requested, &workdir.to_string_lossy(), &requested)
+        .expect_err("the lexical parent no longer identifies the session's repository");
+    assert!(error.contains("another repository"), "{error}");
+}
+
+#[test]
 fn a_directory_inside_a_worktree_is_not_a_worktree_root() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let project = project(&mut cleanup);

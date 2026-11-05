@@ -1558,7 +1558,10 @@ fn validate_engram_source_root(
                  `--separate-git-dir` repository cannot be named; name a linked worktree of it)"
         )
     })?;
-    let session_common = test_runs_git_common_dir(&engram_worktree_root_path(FsPath::new(workdir)))
+    // Resolve the current directory, including links, before selecting its
+    // repository. A missing directory cannot inherit its lexical parent's Git.
+    let session_common = fs::canonicalize(workdir).ok()
+        .and_then(|directory| test_runs_git_common_dir(&directory))
         .and_then(|common| fs::canonicalize(common).ok())
         .ok_or_else(|| "this session's workdir is not in a Git repository".to_owned())?;
     if engram_exact_path_key(&common) != engram_exact_path_key(&session_common) {

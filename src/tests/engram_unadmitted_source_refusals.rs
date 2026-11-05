@@ -200,6 +200,9 @@ fn closing_gitlink_reports_declared_verdict_without_source_or_credit() {
     let durable = load_session_records_from_sqlite(&connection, &fixture.turn.state.persistence_path)
         .unwrap().into_iter().find(|record| record.session.id == fixture.turn.session_id)
         .expect("the stored session includes its normalized transcript");
+    // Release the test's own SQLite handle before retiring the last host;
+    // Windows cannot remove its fixture directory while this reader is open.
+    drop(connection);
     let restored = durable.into_record().unwrap();
     assert_eq!(system_notices(&restored), notices, "the diagnostic is durable with its report");
     assert_eq!(restored.engram.unadmitted_reports,
@@ -269,8 +272,8 @@ fn closing_missing_workdir_does_not_inherit_enclosing_repository_refusal() {
         &["update-index", "--add", "--cacheinfo", "160000", head.trim(), "child"]);
     let missing = fixture.turn.root.join("absent-worktree");
     assert!(!missing.exists());
-    assert_eq!(engram_worktree_root_path(&missing), fs::canonicalize(&fixture.turn.root).unwrap(),
-        "the missing workdir walks up to the enclosing repository");
+    assert!(test_runs_git_common_dir(&missing).is_none(),
+        "source naming must validate the session directory before ancestor normalization");
     assert!(engram_execution_source_capture_with(&fixture.turn.root, false).is_err(),
         "the enclosing repository really refuses capture");
     assert!(matches!(engram_execution_source_capture_with(&missing, false), Ok(None)),

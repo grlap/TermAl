@@ -300,6 +300,12 @@ project root. It indexes `<common>/review-runs/*` for the main worktree and
 `<common>/worktrees/*/review-runs/*` for linked worktrees. A Git common
 directory is indexed once, however many projects share it.
 
+The configured project root must still be a directory. If it disappears,
+discovery does not walk up to an enclosing repository or import that
+repository's history. Registration also refuses a missing project or request
+worktree. Existing subdirectories continue to resolve their own repository;
+a missing session workdir cannot establish that identity for source-root naming.
+
 A run's `projectId` is chosen in this order:
 1. the project captured by an exact, durable launcher registration, when present;
 2. otherwise, the project whose root equals the run's worktree (`request.json` `root`);
