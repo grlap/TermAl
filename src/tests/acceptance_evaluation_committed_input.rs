@@ -23,6 +23,12 @@
 // so its private fixture stays private.
 use super::*;
 
+#[path = "acceptance_committed_input_latest.rs"]
+mod latest;
+
+#[path = "acceptance_committed_input_selection_edges.rs"]
+mod selection_edges;
+
 /// The run every case registers.
 const COMMITTED_RUN_ID: &str = "test-committed-input-admission";
 
@@ -1119,6 +1125,12 @@ fn more_matching_runs_than_the_bound_none_started_is_refused_as_an_incomplete_sc
         for index in 0..ACCEPTANCE_COMMITTED_INPUT_CANDIDATES_MAX + 1 {
             let mut row = registration.clone();
             row.run_id = format!("{COMMITTED_RUN_ID}-{index}");
+            row.run_directory = PathBuf::from(&registration.run_directory)
+                .with_file_name(&row.run_id).to_string_lossy().into_owned();
+            let mut results = never_started_results("refused dirty before the run", &head);
+            results["runId"] = json!(row.run_id);
+            fs::create_dir_all(&row.run_directory).unwrap();
+            fs::write(PathBuf::from(&row.run_directory).join("results.json"), results.to_string()).unwrap();
             inner.test_runs.registered.insert(row.run_id.clone());
             inner.test_run_registrations.insert(row.run_id.clone(), row);
         }
@@ -1227,7 +1239,7 @@ fn reader_at_fence(
 }
 
 #[test]
-fn a_committed_run_is_admitted_only_while_the_current_claim_keeps_the_naming_fence() {
+fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
     let (state, parent, _store, named_root) = named_root_parent();
     let head = commit_named_root(&named_root);
     let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
@@ -1267,9 +1279,9 @@ fn a_committed_run_is_admitted_only_while_the_current_claim_keeps_the_naming_fen
     );
 
     // (b) The claim lapses and is recovered under the same claim id at F+1,
-    // by the same holder or another, and the root is not named again: the
-    // root is not named in the current epoch. The run at F is not a candidate,
-    // and registration refuses a new run before it spends a gate on that name.
+    // and the root is not named again. Its existing record survives when
+    // the current binding still proves the same work run. Registering a new
+    // run still requires a name under the recovered claim's current fence.
     let mut same_holder = renewed.clone();
     same_holder.claim_fence = naming_fence + 1;
     let another_holder = EngramControlWorkBinding {
@@ -1302,16 +1314,25 @@ fn a_committed_run_is_admitted_only_while_the_current_claim_keeps_the_naming_fen
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.contains("name the source root again"), "{}", error.message);
     assert!(!state.inner.lock().unwrap().test_run_registrations.contains_key(after_recovery_id));
-    for claim in &recovered {
+    assert_eq!(
+        decide_task(&state, &parent, &task_under(recovered[0].clone()), deadline()),
+        Ok(AcceptanceCommittedInputDecision::Admitted(
+            AcceptanceCommittedInputAdmission {
+                run_id: COMMITTED_RUN_ID.to_owned(), commit: head.clone(),
+            }
+        )),
+        "the same work run keeps its original record after claim recovery"
+    );
+    for claim in &recovered[1..] {
         assert_eq!(
             decide_task(&state, &parent, &task_under(claim.clone()), deadline()),
             Ok(AcceptanceCommittedInputDecision::Legacy),
-            "recovered without a new name: {claim:?}"
+            "a different or unproven work run cannot inherit the record: {claim:?}"
         );
     }
     assert_eq!(sighting_reads(&transport), 0, "the decision reads no sighting");
-    // The request takes the current fence from Engram's held read and falls
-    // back to the sighting preflight, which refuses the unsighted root.
+    // This reader omits the live binding: the new fence alone cannot prove
+    // the original work run, so the legacy sighting still decides this case.
     let response = state.request_acceptance_evaluation_with_runner(
         &parent,
         evaluation_request(Some(Agent::Codex)),

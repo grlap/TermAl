@@ -1640,8 +1640,9 @@ impl AppState {
         // (`acceptance_named_root_sighting.rs`). A task whose claim has a
         // registered committed-input run is in the committed flow instead,
         // whatever the launcher's committed-input default: admitted on
-        // a clean root, an eligible run at its HEAD and an acknowledged
-        // verification record, refused otherwise, and never sighted
+        // a clean root, its newest applicable terminal result passing eligibly
+        // at HEAD and an acknowledged verification record, refused otherwise,
+        // and never sighted
         // (`acceptance_committed_input.rs`).
         let committed_admission = self.require_acceptance_source_preflight(
             parent_session_id,

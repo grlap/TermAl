@@ -3,15 +3,16 @@
 // selects that flow explicitly whatever the launcher's default) pinned to its
 // named source root, which started on a clean checkout (a run refused before
 // any stage selects nothing), is in the committed flow: the request is admitted only
-// when the root is clean at a commit, an eligible passed run of the claim was
-// judged on exactly that commit, and Engram acknowledged that run's
+// when the root is clean at a commit, the newest applicable terminal result
+// passed eligibly on exactly that commit, and Engram acknowledged that run's
 // verification record (received or settled) for that commit, as the host
 // observed it and keeps it on the run's registration; otherwise it is
 // refused with a typed reason, and Engram's named-root sighting is never read
 // in this flow. A task with no such run is in the legacy flow, where the
-// sighting preflight decides as before; a scan that the read bound or the
-// request's deadline cut short, or that read a run whose results show neither
-// a start nor that it never started, decides neither and is refused. Owns reading the judged
+// sighting preflight decides as before. Unknown results ahead of a selected
+// terminal result refuse; coherent unfinished runs are skipped. A scan that
+// exhausts its bound without selecting a result, or reaches its deadline,
+// decides neither flow and is refused. Owns reading the judged
 // commit of the named root (HEAD, only when it is clean under the
 // committed-input rule of src/ordinary_commit_input.rs), finding the claim's
 // committed-input runs among the registrations, reading whether Engram
@@ -43,6 +44,9 @@ thread_local! {
     // Counts the runs' results files the decision reads on this thread.
     static TEST_ACCEPTANCE_COMMITTED_INPUT_RESULTS_READS: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
+    // A test changes a result between the start scan and terminal selection.
+    static TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_SELECTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// The run that admitted an evaluation, and the commit it was judged on.
@@ -71,8 +75,8 @@ enum AcceptanceCommittedInputRefusal {
     /// untracked path, a submodule gitlink, an index-skipped tracked path, an
     /// unborn HEAD, or a tree Git cannot read.
     NotClean,
-    /// No registered committed-input run of the claim passed eligibly and
-    /// cleanly on the root's HEAD `commit`.
+    /// The newest applicable terminal result did not pass eligibly and
+    /// cleanly on HEAD `commit`, or no terminal result matches that commit.
     NoEligibleRun { commit: String },
     /// A run passed eligibly on `commit`, but Engram has not acknowledged its
     /// verification record for that commit; `state` says where it stands.
@@ -85,8 +89,8 @@ enum AcceptanceCommittedInputRefusal {
     /// checked.
     Changed,
     /// The check could not finish: the claim's registrations held more runs
-    /// than one request reads before any of them showed a start, a read run's
-    /// results showed neither a start nor that it never started, or the
+    /// than one request reads without finding a deciding result, a newer
+    /// run's results cannot be classified coherently, or the
     /// request's deadline passed. Never taken as the legacy flow.
     ScanIncomplete,
 }
@@ -110,8 +114,9 @@ impl AcceptanceCommittedInputRefusal {
                  its changes, run the gate on that commit, and request again"
             ),
             Self::NoEligibleRun { commit } => format!(
-                "no registered committed-input run of `{work_ref}`'s claim passed eligibly on \
-                 its named root's HEAD {commit}; run the gate on that commit and request again"
+                "the newest applicable terminal result of `{work_ref}`'s claim did not pass \
+                 eligibly on its named root's HEAD {commit}, or no terminal result matches \
+                 that commit; run the gate on that commit and request again"
             ),
             Self::RecordNotAcknowledged {
                 run_id,
@@ -158,30 +163,47 @@ fn acceptance_committed_input_read_results(run_directory: &str) -> TestRunJson {
     test_run_read_json(&FsPath::new(run_directory).join("results.json"))
 }
 
-/// Whether the results in `run_directory` record a passed run of `run_id`
-/// whose committed input was `commit`, clean before and after, and eligible.
-/// A debris, input-changed, failed, unfinished, ineligible or unreadable run,
-/// or one on another commit, never admits.
-fn acceptance_committed_input_run_admits(run_id: &str, run_directory: &str, commit: &str) -> bool {
+/// The admission outcome of a terminal result of `run_id` on `commit`.
+/// Ok(None) skips a coherent unfinished or other-commit result; Ok(Some(false))
+/// selects a failed or ineligible result. An unreadable or incoherent result
+/// refuses selection rather than falling back to an older PASS.
+fn acceptance_committed_input_run_outcome(
+    run_id: &str,
+    run_directory: &str,
+    commit: &str,
+) -> Result<Option<bool>, AcceptanceCommittedInputRefusal> {
     let TestRunJson::Parsed(results, _, _) = acceptance_committed_input_read_results(run_directory)
     else {
-        return false;
+        return Err(AcceptanceCommittedInputRefusal::ScanIncomplete);
     };
-    if results.get("runId").and_then(Value::as_str) != Some(run_id)
-        || test_run_terminal_state(&results) != Some(TestRunState::Passed)
-    {
-        return false;
+    match acceptance_committed_input_result_start(run_id, &results) {
+        AcceptanceCommittedInputRunStart::Unknown => {
+            return Err(AcceptanceCommittedInputRefusal::ScanIncomplete)
+        }
+        AcceptanceCommittedInputRunStart::Pending
+        | AcceptanceCommittedInputRunStart::NotStarted => return Ok(None),
+        AcceptanceCommittedInputRunStart::Started => {}
     }
-    TestRunCommittedInput::read(&results).is_some_and(|input| {
-        input.clean_before
+    let input = TestRunCommittedInput::read(&results)
+        .ok_or(AcceptanceCommittedInputRefusal::ScanIncomplete)?;
+    if results.get("state").and_then(Value::as_str) == Some("running") {
+        return Ok(None);
+    }
+    let terminal =
+        test_run_terminal_state(&results).ok_or(AcceptanceCommittedInputRefusal::ScanIncomplete)?;
+    if input.commit.as_deref() != Some(commit) {
+        return Ok(None);
+    }
+    Ok(Some(
+        terminal == TestRunState::Passed
+            && input.clean_before
             && input.outcome == Some(TestRunCommittedInputOutcome::Clean)
             && input.eligible == Some(true)
-            && input.commit.as_deref() == Some(commit)
             && input
                 .after
                 .as_ref()
-                .is_some_and(|after| after.clean && after.commit == commit)
-    })
+                .is_some_and(|after| after.clean && after.commit == commit),
+    ))
 }
 
 /// What a matching committed-input run's results show about its start.
@@ -195,7 +217,10 @@ enum AcceptanceCommittedInputRunStart {
     /// the run, or clean before it with nothing recorded after (HEAD moved
     /// while its input was captured, an input drift).
     NotStarted,
-    /// Neither shown: the results are missing, unreadable or unfinished, or
+    /// Coherent running results before any stage. No completed outcome yet;
+    /// they neither supersede a terminal result nor establish the legacy flow.
+    Pending,
+    /// Neither shown: the results are missing, unreadable or incoherent, or
     /// their committed-input record is missing or incoherent although the
     /// run was registered as one (only an `input: "commit"` run is pinned to
     /// a named root). Never taken as `NotStarted`.
@@ -204,12 +229,43 @@ enum AcceptanceCommittedInputRunStart {
 
 /// Whether the results in `run_directory` show the run started on a clean
 /// checkout, never started, or neither ([`AcceptanceCommittedInputRunStart`]).
-fn acceptance_committed_input_run_start(run_directory: &str) -> AcceptanceCommittedInputRunStart {
+fn acceptance_committed_input_run_start(
+    run_id: &str,
+    run_directory: &str,
+) -> AcceptanceCommittedInputRunStart {
     use AcceptanceCommittedInputRunStart as Start;
     let TestRunJson::Parsed(results, _, _) = acceptance_committed_input_read_results(run_directory)
     else {
         return Start::Unknown;
     };
+    acceptance_committed_input_result_start(run_id, &results)
+}
+
+fn acceptance_committed_input_result_start(
+    run_id: &str,
+    results: &Value,
+) -> AcceptanceCommittedInputRunStart {
+    use AcceptanceCommittedInputRunStart as Start;
+    if results.get("runId").and_then(Value::as_str) != Some(run_id) {
+        return Start::Unknown;
+    }
+    // The launcher registers before capturing input. Only its coherent
+    // initial running shape is pending; a malformed or null input is unknown.
+    if results.get("state").and_then(Value::as_str) == Some("running")
+        && results.get("input").is_none()
+        && results
+            .get("stages")
+            .and_then(Value::as_array)
+            .is_some_and(|stages| {
+                stages.iter().all(|stage| {
+                    stage.get("state").and_then(Value::as_str) == Some("unrun")
+                        && stage.get("started").is_none_or(Value::is_null)
+                })
+            })
+        && results.get("ended").is_none_or(Value::is_null)
+    {
+        return Start::Pending;
+    }
     let Some(input) = TestRunCommittedInput::read(&results) else {
         return Start::Unknown;
     };
@@ -223,6 +279,9 @@ fn acceptance_committed_input_run_start(run_directory: &str) -> AcceptanceCommit
         });
     if input.clean_before && stage_started {
         return Start::Started;
+    }
+    if input.clean_before && results.get("state").and_then(Value::as_str) == Some("running") {
+        return Start::Pending;
     }
     if !stage_started
         && input.after.is_none()
@@ -298,8 +357,8 @@ fn acceptance_committed_input_record_acknowledged(
 /// (`engram work core held`) showed it when the evaluation was requested: its
 /// id, its current fence and, when Engram listed one, the binding it would
 /// accept. A live renewal by the same holder keeps the fence; a lapse and
-/// recovery keeps the claim id but raises the fence, and the root must then be
-/// named again.
+/// recovery keeps the claim id but raises the fence. Existing evidence keeps
+/// its registered binding; new registrations still require a current name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AcceptanceCurrentClaim {
     claim_id: String,
@@ -316,18 +375,17 @@ impl AcceptanceCurrentClaim {
         }
     }
 
-    /// Whether `entry` was named in this claim's current epoch: by this very
-    /// claim at its current fence. A root named before a recovery was not.
-    fn named(&self, entry: &EngramWorkSourceRoot) -> bool {
-        entry.claim_id == self.claim_id && entry.claim_fence == self.claim_fence
+    /// Recovery changes the claim's fence, not the identity that named the root.
+    fn same_claim(&self, entry: &EngramWorkSourceRoot) -> bool {
+        entry.claim_id == self.claim_id
     }
 }
 
 /// Whether `registration` is a durably registered committed-input run of the
 /// work `work_id` under the claim that named `entry`, pinned to that root and
-/// generation, in `store`, and of the `current` claim: the registration's,
-/// the naming's and the current claim's fences are one, and the binding's
-/// run and root execution are the current binding's where Engram listed one.
+/// generation, in `store`. Its original naming fence stays pinned; recovery
+/// may advance the live fence only when the live binding proves the same
+/// work run and root execution. Evidence is never relabelled to that fence.
 fn acceptance_committed_input_registration_matches(
     registration: &TestRunRegistration,
     store: &EngramAuthorityStoreKey,
@@ -336,7 +394,7 @@ fn acceptance_committed_input_registration_matches(
     current: &AcceptanceCurrentClaim,
 ) -> bool {
     registration.authority_store.as_ref() == Some(store)
-        && current.named(entry)
+        && current.same_claim(entry)
         && registration.named_root.as_ref().is_some_and(|named| {
             named.workspace_id == entry.root && named.generation == entry.generation
         })
@@ -344,13 +402,15 @@ fn acceptance_committed_input_registration_matches(
             binding.work_id == work_id
                 && binding.claim_id == entry.claim_id
                 && binding.claim_fence == entry.claim_fence
-                && current.binding.as_ref().map_or(true, |live| {
-                    live.work_id == binding.work_id
-                        && live.run_id == binding.run_id
-                        && live.root_execution_id == binding.root_execution_id
-                        && live.claim_id == binding.claim_id
-                        && live.claim_fence == binding.claim_fence
-                })
+                && current.binding.as_ref().map_or(
+                    current.claim_fence == binding.claim_fence,
+                    |live| {
+                        engram_same_recovery_run(live, binding)
+                            && live.claim_fence == current.claim_fence
+                            && live.claim_fence >= binding.claim_fence
+                            && live.work_revision >= binding.work_revision
+                    },
+                )
         })
 }
 
@@ -445,17 +505,17 @@ impl AppState {
     /// never by the launcher's committed-input default.
     ///
     /// `Legacy` when no durably registered committed-input run bound to the
-    /// task's work, claim and fence and pinned to the root's generation,
+    /// task's work run and original naming fence and pinned to the root's
+    /// generation,
     /// whose results show it started on a clean checkout
     /// (`acceptance_committed_input_run_start`), exists, and every matching
     /// run read was shown never to have started (or no root is named, or the session's tracker is no longer
-    /// `reader` and `store`, or the root was not named in the current
-    /// claim's epoch: the task's current claim is unknown, or its fence is
-    /// not the naming's, as after a recovery without a new name).
+    /// `reader` and `store`, or the task's current claim is unknown or is
+    /// not the claim that named the root).
     /// Otherwise the request is in the committed flow: `Admitted` when the
-    /// root is clean at HEAD, such a run passed eligibly and cleanly on that
-    /// very commit, and Engram acknowledged its verification record for that
-    /// commit; a typed refusal otherwise. Git and the run files are read off
+    /// root is clean at HEAD, the newest applicable terminal result passed
+    /// eligibly and cleanly on that very commit, and Engram acknowledged its
+    /// verification record for that commit; a typed refusal otherwise. Git and the run files are read off
     /// the state lock; after them the root's clean HEAD is read again and
     /// must be the same commit, and the root and the run's registration
     /// (with the acknowledgment the host keeps on it) are checked again under
@@ -464,10 +524,11 @@ impl AppState {
     /// At most [`ACCEPTANCE_COMMITTED_INPUT_CANDIDATES_MAX`] matching
     /// registrations, newest first, are read for a start, each only before
     /// `deadline` (as `now` tells the time); Git reads the root under the
-    /// same deadline. A scan the bound or the deadline cut short before any
-    /// run showed a start, a read run whose results show neither a start nor
-    /// that it never started, or a deadline that passes in the committed
-    /// flow, is refused as `ScanIncomplete`, never taken as `Legacy`.
+    /// same deadline. Selection re-reads started and pending candidates, so
+    /// a pending run that has since finished decides in the same order.
+    /// Unknown results before the selected terminal result, an exhausted
+    /// truncated scan, or an expired deadline refuse as `ScanIncomplete`.
+    /// Only a complete scan of coherent never-started runs selects `Legacy`.
     #[allow(clippy::too_many_arguments)]
     fn acceptance_committed_input_decision(
         &self,
@@ -503,7 +564,7 @@ impl AppState {
                     &root.work_id,
                     &root.claim_id,
                 )
-                .is_some_and(|entry| claim.named(entry))
+                .is_some_and(|entry| claim.same_claim(entry))
         };
         let candidates = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -518,22 +579,44 @@ impl AppState {
             ) else {
                 return Ok(Decision::Legacy);
             };
+            let indexed = test_run_indexed_ids(&inner.test_runs);
             let mut candidates = inner
                 .test_run_registrations
                 .values()
+                .filter(|registration| inner.test_runs.registered.contains(&registration.run_id))
+                // Compaction retains the original registration and artifacts;
+                // removing full detail must not erase a newer terminal result.
+                .chain(
+                    inner
+                        .test_run_compacted
+                        .values()
+                        .filter(|row| {
+                            row.compacted
+                                && test_run_compact_is_installed_with(&*inner, row, |id| {
+                                    indexed.contains(id)
+                                })
+                        })
+                        .filter_map(|row| row.registration.as_ref()),
+                )
                 .filter(|registration| {
-                    inner.test_runs.registered.contains(&registration.run_id)
-                        && acceptance_committed_input_registration_matches(
-                            registration,
-                            store,
-                            work_id,
-                            entry,
-                            claim,
-                        )
+                    acceptance_committed_input_registration_matches(
+                        registration,
+                        store,
+                        work_id,
+                        entry,
+                        claim,
+                    )
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            candidates.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
+            // This early check keeps registration order; overlapping runs can
+            // finish in another order. Engram rechecks its newest result at
+            // evaluation submission and completion.
+            candidates.sort_by(|a, b| {
+                b.registered_at
+                    .cmp(&a.registered_at)
+                    .then_with(|| a.run_id.cmp(&b.run_id))
+            });
             candidates
         };
         // Only a run that started on a clean checkout selects the committed
@@ -542,24 +625,27 @@ impl AppState {
         // in all, each only before the request's deadline.
         let total = candidates.len();
         let mut scanned = 0;
-        let mut started = Vec::new();
-        let mut unknown = false;
+        let mut observed = Vec::new();
+        let mut any_started = false;
         for registration in candidates {
             if scanned == ACCEPTANCE_COMMITTED_INPUT_CANDIDATES_MAX || now() >= deadline {
                 break;
             }
             scanned += 1;
-            match acceptance_committed_input_run_start(&registration.run_directory) {
-                AcceptanceCommittedInputRunStart::Started => started.push(registration),
-                AcceptanceCommittedInputRunStart::NotStarted => {}
-                AcceptanceCommittedInputRunStart::Unknown => unknown = true,
+            let start = acceptance_committed_input_run_start(
+                &registration.run_id,
+                &registration.run_directory,
+            );
+            if start != AcceptanceCommittedInputRunStart::NotStarted {
+                any_started |= start == AcceptanceCommittedInputRunStart::Started;
+                observed.push((registration, start));
             }
         }
-        if started.is_empty() {
+        if !any_started {
             // The legacy flow only when every matching run was read and each
             // was shown never to have started; an incomplete scan, or a run
             // whose results show neither, never decides it.
-            return if scanned == total && !unknown {
+            return if scanned == total && observed.is_empty() {
                 Ok(Decision::Legacy)
             } else {
                 Err(Refusal::ScanIncomplete)
@@ -570,39 +656,46 @@ impl AppState {
             None if now() >= deadline => return Err(Refusal::ScanIncomplete),
             None => return Err(Refusal::NotClean),
         };
-        let mut unacknowledged: Option<(String, String)> = None;
         let mut admitting: Option<TestRunRegistration> = None;
-        for registration in started {
+        #[cfg(test)]
+        TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_SELECTION.with(|slot| {
+            if let Some(step) = slot.borrow_mut().take() {
+                step();
+            }
+        });
+        for (registration, start) in observed {
             if now() >= deadline {
                 return Err(Refusal::ScanIncomplete);
             }
-            if !acceptance_committed_input_run_admits(
+            if start == AcceptanceCommittedInputRunStart::Unknown {
+                return Err(Refusal::ScanIncomplete);
+            }
+            let Some(admits) = acceptance_committed_input_run_outcome(
                 &registration.run_id,
                 &registration.run_directory,
                 &commit,
-            ) {
+            )?
+            else {
                 continue;
+            };
+            if !admits {
+                return Err(Refusal::NoEligibleRun { commit });
             }
-            match acceptance_committed_input_record_acknowledged(&registration, &commit) {
-                Ok(()) => {
-                    admitting = Some(registration);
-                    break;
-                }
-                Err(state) => {
-                    if unacknowledged.is_none() {
-                        unacknowledged = Some((registration.run_id.clone(), state));
-                    }
-                }
-            }
-        }
-        let Some(admitting) = admitting else {
-            return Err(match unacknowledged {
-                Some((run_id, state)) => Refusal::RecordNotAcknowledged {
-                    run_id,
-                    commit,
+            acceptance_committed_input_record_acknowledged(&registration, &commit).map_err(
+                |state| Refusal::RecordNotAcknowledged {
+                    run_id: registration.run_id.clone(),
+                    commit: commit.clone(),
                     state,
                 },
-                None => Refusal::NoEligibleRun { commit },
+            )?;
+            admitting = Some(registration);
+            break;
+        }
+        let Some(admitting) = admitting else {
+            return Err(if scanned < total {
+                Refusal::ScanIncomplete
+            } else {
+                Refusal::NoEligibleRun { commit }
             });
         };
         // The root may have moved or changed while the run and its record
@@ -623,11 +716,21 @@ impl AppState {
             });
         }
         let inner = self.inner.lock().expect("state mutex poisoned");
+        let retained = inner
+            .test_run_registrations
+            .get(&admitting.run_id)
+            .filter(|_| inner.test_runs.registered.contains(&admitting.run_id))
+            .or_else(|| {
+                inner
+                    .test_run_compacted
+                    .get(&admitting.run_id)
+                    .filter(|row| row.compacted && test_run_compact_is_installed(&*inner, row))
+                    .and_then(|row| row.registration.as_ref())
+            });
         if !current(&inner)
-            || !inner
-                .test_run_registrations
-                .get(&admitting.run_id)
-                .is_some_and(|row| acceptance_committed_input_registration_unchanged(&admitting, row))
+            || !retained.is_some_and(|row| {
+                acceptance_committed_input_registration_unchanged(&admitting, row)
+            })
         {
             return Err(Refusal::Changed);
         }
