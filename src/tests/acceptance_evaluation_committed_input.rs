@@ -1378,3 +1378,89 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         "the original run keeps the fence it was registered at"
     );
 }
+
+#[test]
+fn an_automatic_clean_start_keeps_the_committed_flow_after_dirty_work_and_a_plain_run() {
+    for code in [0, 7] {
+        let (state, parent, _store, named_root) = named_root_parent();
+        commit_named_root(&named_root);
+        let root = worktree(&named_root);
+        let transport =
+            install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
+        assert_eq!(decide(&state, &parent), Ok(AcceptanceCommittedInputDecision::Legacy));
+        // Use real automatic selection and execution, including a failed RED
+        // baseline. The second run explicitly selects plain after the edit.
+        let source = r#"
+const {pathToFileURL}=await import('node:url');
+const {readFileSync,writeFileSync}=await import('node:fs');
+const {join}=await import('node:path');
+const source=process.argv[2], root=process.argv[3], owner=process.argv[4], code=Number(process.argv[5]);
+const {createRun,executeRun}=await import(pathToFileURL(join(source,'scripts/test-launcher.mjs')));
+const {isolatedGitEnvironment}=await import(pathToFileURL(join(source,'scripts/review-freeze-fingerprint.mjs')));
+const {withHostedRegistrationFixture}=await import(pathToFileURL(join(source,'scripts/test-launcher-registration-fixtures.mjs')));
+const env=isolatedGitEnvironment({...process.env,TERMAL_BASE_URL:'http://127.0.0.1:0',TERMAL_SESSION_ID:owner,TERMAL_CLI:process.execPath});
+await withHostedRegistrationFixture(root,env,async hosted=>{
+  const automatic=await createRun({root,automaticInput:true,stages:[{name:'baseline',command:process.execPath,args:['-e',`process.exit(${code})`]}]},hosted);
+  const first=await executeRun(automatic,hosted);
+  writeFileSync(join(root,'judged.txt'),'uncommitted fix after baseline\n');
+  const plain=await createRun({root,input:'plain',stages:[{name:'plain',command:process.execPath,args:['-e','']}]},hosted);
+  const second=await executeRun(plain,hosted);
+  const request=directory=>JSON.parse(readFileSync(join(directory,'request.json'),'utf8'));
+  console.log('LAUNCHER_RESULT='+JSON.stringify({automatic,plain,first,second,automaticRequest:request(automatic),plainRequest:request(plain)}));
+});
+"#;
+        let output = Command::new("node")
+            .args(["--input-type=module", "-e", source, "fixture"])
+            .arg(env!("CARGO_MANIFEST_DIR"))
+            .arg(&root)
+            .arg(&parent)
+            .arg(code.to_string())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let frame: Value = serde_json::from_str(
+            stdout.lines().find_map(|line| line.strip_prefix("LAUNCHER_RESULT=")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(frame["automaticRequest"]["input"], "commit");
+        assert_eq!(frame["first"]["exitCode"], code);
+        assert_eq!(frame["first"]["input"]["cleanBefore"], true);
+        assert!(frame["first"]["stages"][0]["started"].is_string());
+        assert_eq!(frame["first"]["state"], if code == 0 { "passed" } else { "failed" });
+        assert!(frame["plainRequest"].get("input").is_none());
+        assert_eq!(frame["second"]["state"], "passed");
+        assert!(frame["second"].get("input").is_none());
+        // Register the actual immutable requests and results through the host
+        // seam, bound to the same claim, fence and naming generation.
+        for (directory, request) in [("automatic", "automaticRequest"), ("plain", "plainRequest")] {
+            let run_id = frame[request]["runId"].as_str().unwrap();
+            state
+                .register_test_run(
+                    &parent,
+                    RegisterTestRunRequest {
+                        run_id: run_id.to_owned(),
+                        run_directory: frame[directory].as_str().unwrap().to_owned(),
+                    },
+                )
+                .unwrap_or_else(|error| panic!("{directory}: {}", error.message));
+            let inner = state.inner.lock().unwrap();
+            let registration = &inner.test_run_registrations[run_id];
+            assert!(inner.test_runs.registered.contains(run_id));
+            assert_eq!(registration.work_binding.as_ref().unwrap().work_id, SIGHTED_WORK_ID);
+        }
+        assert_eq!(
+            assert_refused_without_a_sighting(
+                &transport,
+                decide(&state, &parent),
+                "committed_input_not_clean",
+                "automatic start, dirty edit, later plain run",
+            ),
+            AcceptanceCommittedInputRefusal::NotClean,
+        );
+        let error = refusal(&state, request(&state, &parent), "dirty after automatic start");
+        assert!(error.message.starts_with("committed_input_not_clean"));
+        assert!(error.message.contains("commit or remove its changes, run the gate on that commit"));
+        assert_eq!(sighting_reads(&transport), 0);
+    }
+}

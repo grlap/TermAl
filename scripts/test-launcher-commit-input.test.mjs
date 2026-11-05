@@ -1,13 +1,12 @@
-// The launcher's ordinary committed-input flow (`--input commit`): a run is
-// refused unless the checkout is clean before it, records the commit it ran
-// on, and classifies the checkout afterwards instead of throwing on drift.
+// Automatic launcher input selection, explicit plain/commit, and post-run
+// qualification using the existing committed-input status and fingerprints.
 // Disposable Git repositories live under this worktree's .tmp/; stages are
 // plain Node commands, so no product or Cargo test runs.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
   copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync,
-  writeFileSync,
+  writeFileSync, renameSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import test from "node:test";
@@ -16,6 +15,7 @@ import {
   captureCommitInputStatus, commitInputGitArgs, isolatedGitEnvironment,
 } from "./review-freeze-fingerprint.mjs";
 import {
+  commitInputSummaryLine,
   commitInputOutcome,
   commitInputStatusClean,
   createRun,
@@ -27,6 +27,9 @@ import {
 import { registrationHost, withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 
+import { writeUiBootstrapFixture } from "./test-ui-bootstrap-fixtures.mjs";
+
+const capacity = { statfs: () => ({ bavail: 200n * 1024n ** 3n, bsize: 1n }) };
 const sourceRoot = realpathSync.native(fileURLToPath(new URL("../", import.meta.url)));
 const json = (path) => JSON.parse(readFileSync(path, "utf8"));
 const stage = (name, source = "") => ({ name, command: process.execPath, args: ["-e", source] });
@@ -48,7 +51,7 @@ function fixtureEnv() {
   return env;
 }
 
-function gitRepository(t, files = {}) {
+function gitRepository(t, files = {}, { full = false } = {}) {
   const directory = join(sourceRoot, ".tmp", "launcher-commit-input-fixtures");
   mkdirSync(directory, { recursive: true });
   const canonical = realpathSync.native(directory);
@@ -65,6 +68,13 @@ function gitRepository(t, files = {}) {
     ["core.hooksPath", process.platform === "win32" ? "NUL" : "/dev/null"],
   ]) git(["config", key, value]);
   writeFileSync(join(root, ".gitignore"), "/.tmp/\nignored-*\n");
+  const uiFiles = [];
+  if (full) {
+    const ignored = readFileSync(join(root, ".gitignore"), "utf8");
+    Object.assign(env, writeUiBootstrapFixture(root, join(root, ".git")));
+    writeFileSync(join(root, ".gitignore"), `${ignored}/ui/node_modules/\n`);
+    uiFiles.push("ui/package.json", "ui/package-lock.json");
+  }
   writeFileSync(join(root, "tracked.txt"), "baseline\n");
   for (const [path, source] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -72,23 +82,24 @@ function gitRepository(t, files = {}) {
   }
   mkdirSync(join(root, ".git", "info"), { recursive: true });
   writeFileSync(join(root, ".git", "info", "exclude"), "excluded.txt\n");
-  git(["add", "--", ".gitignore", "tracked.txt", ...Object.keys(files)]);
+  git(["add", "--", ".gitignore", "tracked.txt", ...Object.keys(files), ...uiFiles]);
   git(["commit", "--quiet", "--no-gpg-sign", "-m", "baseline"]);
   const head = git(["rev-parse", "--verify", "HEAD^{commit}"]).trim();
   const admin = git(["rev-parse", "--absolute-git-dir"]).trim();
   return { root, env, git, head, admin };
 }
 
-async function hosted(t, callback, files) {
-  const repository = gitRepository(t, files);
+async function hosted(t, callback, files, options) {
+  const repository = gitRepository(t, files, options);
   await withHostedRegistrationFixture(repository.root, repository.env,
     (env) => callback({ ...repository, env }));
 }
 
 const executed = (admin) => existsSync(join(admin, marker));
 
-test("the committed-input flow is an explicit selection in this build", () => {
-  assert.equal(ORDINARY_COMMIT_INPUT_DEFAULT, false);
+test("the launcher enables automatic input selection independently of the host", () => {
+  assert.equal(ORDINARY_COMMIT_INPUT_DEFAULT, true);
+  assert.match(readFileSync(join(sourceRoot, "src/ordinary_commit_input.rs"), "utf8"), /ORDINARY_COMMIT_INPUT_DEFAULT: bool = false/u);
 });
 
 test("a clean commit records its commit, stays clean and is eligible when stages pass", async (t) => {
@@ -106,6 +117,244 @@ test("a clean commit records its commit, stays clean and is eligible when stages
     assert.deepEqual(result.input.after, { commit: head, clean: true, paths: [] });
     assert.equal(result.before, result.after);
     assert.match(await summarize(runDir), new RegExp(`^input: commit ${head} clean; eligible$`, "mu"));
+  });
+});
+
+for (const full of [false, true]) {
+  test(`automatic clean ${full ? "full" : "focused"} admission is chosen before immutable registration`, async (t) => {
+    const { root, env, head, admin } = gitRepository(t, {}, { full });
+    await registrationHost(async (host) => {
+      let captures = 0;
+      const runDir = await createRun({ root, full, stages: [markingStage(admin)], automaticInput: true,
+        commitInputStatus: (...args) => { captures += 1; return captureCommitInputStatus(...args); } },
+        { ...env, TERMAL_BASE_URL: host.url });
+      assert.equal(captures, 2, "selection reuses the initial status; only the final recheck follows it");
+      const runId = json(join(runDir, "request.json")).runId;
+      assert.equal(host.registrations.get(runId).request.input, "commit");
+      const result = await executeRun(runDir, { ...env, TERMAL_BASE_URL: host.url }, { diskSpace: capacity });
+      if (full) assert.equal(result.preflight.find((entry) => entry.name === "ui-dependencies")?.state, "passed");
+      assert.equal(result.state, "passed", result.error);
+      assert.equal(result.input.commit, head);
+      assert.equal(result.input.eligible, true);
+      assert.equal(result.before, result.after);
+      assert.doesNotMatch(await summarize(runDir), /^gate: not eligible/mu);
+      assert.ok(executed(admin));
+    }, { autoAcknowledge: true });
+  });
+}
+
+for (const [full, code] of [[false, 0], [true, 0], [false, 7], [true, 7]]) {
+  test(`automatic ${full ? "full" : "focused"} input preserves exit ${code} when post-run admission is unavailable`, async (t) => {
+    await hosted(t, async ({ root, env, head, admin }) => {
+      const headPath = join(admin, "HEAD");
+      const savedHead = join(admin, "fixture-saved-HEAD");
+      // Keep a valid Git directory so discovery cannot fall through to this
+      // fixture's parent repository. Only the requested commit is unavailable.
+      const makeUnavailable = `const fs=require('node:fs');fs.copyFileSync(${JSON.stringify(headPath)}, ${JSON.stringify(savedHead)});fs.writeFileSync(${JSON.stringify(headPath)}, 'ref: refs/heads/fixture-unavailable\\n');process.exit(${code});`;
+      const runDir = await createRun({ root, full, stages: [markingStage(admin, "unavailable-after", makeUnavailable)],
+        automaticInput: true }, env);
+      assert.equal(json(join(runDir, "request.json")).input, "commit");
+      try {
+        const result = await executeRun(runDir, env, { diskSpace: capacity });
+        if (full) assert.equal(result.preflight.find((entry) => entry.name === "ui-dependencies")?.state, "passed");
+        assert.ok(executed(admin), "the command must actually run");
+        assert.equal(result.stages[0].state, code === 0 ? "passed" : "failed");
+        assert.equal(result.stages[0].code, code);
+        assert.equal(result.state, code === 0 ? "passed" : "failed", result.error);
+        assert.equal(result.exitCode, code);
+        assert.equal(result.input.commit, head);
+        assert.equal(result.input.outcome, undefined);
+        assert.equal(result.input.eligible, false);
+        assert.equal(result.input.after, undefined);
+        assert.equal(result.after, undefined);
+        assert.match(result.input.unavailableReason, /post-run input unavailable: git /u);
+        assert.deepEqual(json(join(runDir, "results.json")).input, result.input);
+        assert.match(await summarize(runDir), /no post-run input recorded; not eligible/u);
+        assert.match(await summarize(runDir), /^gate: not eligible; not a landing gate: .+$/mu);
+      } finally {
+        if (existsSync(savedHead)) renameSync(savedHead, headPath);
+      }
+    }, {}, { full });
+  });
+}
+
+test("automatic registration refusal preserves its cause and names explicit plain without downgrading", async (t) => {
+  const { root, env, admin } = gitRepository(t);
+  await registrationHost(async (host) => {
+    const hostEnv = { ...env, TERMAL_BASE_URL: host.url };
+    let refusedDir;
+    await assert.rejects(createRun({ root, stages: [markingStage(admin)], automaticInput: true,
+      onRunCreated: (directory) => { refusedDir = directory; } }, hostEnv), (error) => {
+      assert.match(error.message, /exact held claim is unavailable or ambiguous/u);
+      assert.match(error.message, /renew the claim or name the source root again/u);
+      assert.match(error.message, /--input plain/u);
+      return true;
+    });
+    assert.equal(host.requests.length, 1, "a confirmed registration refusal never changes or retries the input kind");
+    assert.equal(json(join(refusedDir, "request.json")).input, "commit");
+    const refused = json(join(refusedDir, "results.json"));
+    assert.match(refused.error, /exact held claim is unavailable or ambiguous/u);
+    assert.ok(refused.stages.every((entry) => entry.state === "unrun"));
+    assert.equal(executed(admin), false);
+
+    // The user explicitly chooses another run; the failed committed request
+    // is never rewritten or silently turned into a plain registration.
+    const plainDir = await createRun({ root, input: "plain", automaticInput: true,
+      stages: [markingStage(admin)] }, hostEnv);
+    const request = json(join(plainDir, "request.json"));
+    assert.equal(Object.hasOwn(host.registrations.get(request.runId).request, "input"), false);
+    const result = await executeRun(plainDir, hostEnv);
+    assert.equal(result.state, "passed", result.error);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.input, undefined);
+    assert.ok(executed(admin));
+    assert.equal(host.requests.length, 2);
+    assert.notEqual(plainDir, refusedDir);
+  }, { autoAcknowledge: true,
+    status: (record) => json(join(record.body.runDirectory, "request.json")).input === "commit" ? 409 : 201,
+    errorReason: "named run's exact held claim is unavailable or ambiguous" });
+});
+
+for (const code of [0, 7]) {
+  test(`an automatic full run preserves command exit ${code} but rejects a changed input as a landing gate`, async (t) => {
+    await hosted(t, async ({ root, env, admin }) => {
+      const edit = `require('node:fs').writeFileSync('tracked.txt', 'changed during full');process.exit(${code});`;
+      const runDir = await createRun({ root, full: true, automaticInput: true,
+        stages: [markingStage(admin, "edit", edit)] }, env);
+      assert.equal(json(join(runDir, "request.json")).full, true);
+      const result = await executeRun(runDir, env, { diskSpace: capacity });
+      assert.equal(result.preflight.find((entry) => entry.name === "ui-dependencies")?.state, "passed");
+      assert.ok(executed(admin));
+      assert.equal(result.stages[0].code, code);
+      assert.equal(result.stages[0].state, code === 0 ? "passed" : "failed");
+      assert.equal(result.state, code === 0 ? "passed" : "failed");
+      assert.equal(result.exitCode, code);
+      assert.equal(result.input.outcome, "input_changed");
+      assert.equal(result.input.eligible, false);
+      assert.notEqual(result.before, result.after);
+      const summary = await summarize(runDir);
+      assert.match(summary, new RegExp(`^${code === 0 ? "PASS" : "FAIL"} .+ exit=${code}$`, "mu"));
+      assert.match(summary, /^gate: not eligible; not a landing gate: 1 path\(s\) reported by git status$/mu);
+    }, {}, { full: true });
+  });
+}
+
+test("automatic plain reasons stay bounded on one summary line", () => {
+  const reason = `fixture refused\n${"warning\r\n".repeat(10000)}`;
+  const line = commitInputSummaryLine({ inputSelection: { kind: "plain", reason } });
+  assert.match(line, /^input: plain; no committed-input verification: fixture refused /u);
+  assert.equal(line.split(/[\r\n]/u).length, 1);
+  assert.ok(line.length < 2500, "metadata and stderr cannot make the summary unbounded");
+  assert.ok(line.endsWith("..."));
+});
+
+for (const [name, dirty] of [
+  ["tracked", (root) => writeFileSync(join(root, "tracked.txt"), "ordinary work\n")],
+  ["untracked", (root) => writeFileSync(join(root, "new.txt"), "ordinary work\n")],
+]) {
+  for (const code of [0, 7]) {
+    test(`automatic ${name} input runs plainly and preserves command exit ${code}`, async (t) => {
+      const { root, env, admin } = gitRepository(t);
+      dirty(root);
+      await registrationHost(async (host) => {
+        const stage = markingStage(admin);
+        stage.args[1] += `; process.exit(${code})`;
+        const runDir = await createRun({ root, stages: [stage], automaticInput: true },
+          { ...env, TERMAL_BASE_URL: host.url });
+        const request = json(join(runDir, "request.json"));
+        assert.equal(Object.hasOwn(host.registrations.get(request.runId).request, "input"), false,
+          "the host receives a plain request before acknowledging registration");
+        const result = await executeRun(runDir, { ...env, TERMAL_BASE_URL: host.url });
+        assert.ok(executed(admin));
+        assert.equal(result.state, code === 0 ? "passed" : "failed", result.error);
+        assert.equal(result.exitCode, code);
+        assert.equal(result.stages[0].code, code);
+        assert.equal(result.input, undefined, "a plain run supplies no committed-input verification record");
+        assert.equal(result.inputSelection.kind, "plain");
+        assert.ok(result.inputSelection.reason);
+        assert.match(await summarize(runDir), /^input: plain; no committed-input verification: /mu);
+        assert.equal(result.before, result.after, "stable dirty input keeps the existing fingerprint guard");
+      }, { autoAcknowledge: true });
+    });
+  }
+}
+
+for (const [name, configure, reason] of [
+  ["skipped tracked input", ({ root, git }) => {
+    git(["update-index", "--skip-worktree", "tracked.txt"]);
+    writeFileSync(join(root, "tracked.txt"), "hidden ordinary work\n");
+  }, /Git is told to skip/u],
+  ["unavailable admission", () => {}, /fixture admission unavailable/u],
+]) {
+  test(`automatic ${name} keeps the command and names the plain selection`, async (t) => {
+    await hosted(t, async (repository) => {
+      const { root, env, admin, head } = repository;
+      configure(repository);
+      const runDir = await createRun({ root, stages: [markingStage(admin)], automaticInput: true,
+        ...(name === "unavailable admission" ? { commitInputStatus: async () => { throw new Error("fixture admission unavailable"); } } : {}) }, env);
+      assert.equal(Object.hasOwn(json(join(runDir, "request.json")), "input"), false);
+      const result = await executeRun(runDir, env);
+      assert.ok(executed(admin));
+      assert.equal(result.state, "passed", result.error);
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.input, undefined);
+      assert.match(result.inputSelection.reason, reason);
+      assert.match(await summarize(runDir), reason);
+    });
+  });
+}
+
+test("a clean checkout with a gitlink runs plainly and explicit commit still refuses it", async (t) => {
+  const dependency = gitRepository(t);
+  await hosted(t, async ({ root, env, git, admin }) => {
+    git(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "dep"]);
+    git(["commit", "--quiet", "--no-gpg-sign", "-m", "pin dependency"]);
+    assert.equal(git(["status", "--porcelain=v1", "--ignore-submodules=none"]), "");
+    const runDir = await createRun({ root, automaticInput: true, stages: [markingStage(admin)] }, env);
+    assert.equal(Object.hasOwn(json(join(runDir, "request.json")), "input"), false);
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "passed", result.error);
+    assert.ok(executed(admin));
+    assert.equal(result.input, undefined);
+    assert.match(await summarize(runDir), /^input: plain; no committed-input verification: 1 submodule gitlink\(s\) \(dep\)/mu);
+    const strictDir = await createRun({ root, input: "commit", stages: [stage("strict")] }, env);
+    const refused = await executeRun(strictDir, env);
+    assert.equal(refused.state, "failed");
+    assert.deepEqual(refused.input.gitlinks, ["dep"]);
+    assert.ok(refused.stages.every((entry) => entry.state === "unrun"));
+  });
+});
+
+test("automatic fallback does not bypass plain's readable HEAD precondition", async (t) => {
+  await hosted(t, async ({ root, env, git, admin }) => {
+    const original = git(["symbolic-ref", "HEAD"]).trim();
+    git(["symbolic-ref", "HEAD", "refs/heads/unborn-fixture"]);
+    try {
+      const runDir = await createRun({ root, automaticInput: true, stages: [markingStage(admin)] }, env);
+      assert.equal(Object.hasOwn(json(join(runDir, "request.json")), "input"), false);
+      const result = await executeRun(runDir, env);
+      assert.equal(result.state, "failed");
+      assert.match(result.error, /HEAD/u);
+      assert.equal(executed(admin), false);
+      assert.ok(result.stages.every((entry) => entry.state === "unrun"));
+    } finally {
+      git(["symbolic-ref", "HEAD", original]);
+    }
+  });
+});
+
+test("an automatic plain run retains the existing post-run fingerprint guard", async (t) => {
+  await hosted(t, async ({ root, env, admin }) => {
+    writeFileSync(join(root, "tracked.txt"), "dirty before\n");
+    const edit = `require('node:fs').writeFileSync(${JSON.stringify(join(root, "tracked.txt"))}, 'changed during');`;
+    const runDir = await createRun({ root, stages: [markingStage(admin, "edit", edit)], automaticInput: true }, env);
+    const result = await executeRun(runDir, env);
+    assert.ok(executed(admin));
+    assert.equal(result.stages[0].state, "passed");
+    assert.equal(result.stages[0].code, 0);
+    assert.equal(result.state, "failed");
+    assert.match(result.error, /input drift/u);
+    assert.equal(result.input, undefined);
   });
 });
 
@@ -534,9 +783,9 @@ test("status entries and outcomes classify renames, staged additions and debris"
   }), "input_changed");
 });
 
-// The command line: `--input commit` reaches the request and the printed
-// summary; any other `--input` value is refused before a run exists.
-test("the command line selects the flow with --input commit and refuses other values", async (t) => {
+// The command line selects before registration. Explicit `--input commit`
+// stays strict; other `--input` values are refused before a run exists.
+test("the command line selects automatically, preserves strict --input commit and refuses other values", async (t) => {
   const files = Object.fromEntries(helperSupportFiles.map((path) => [path, join(sourceRoot, path)]));
   const { root, env, admin } = gitRepository(t, files);
   const cli = (args, hostEnv) => new Promise((resolve, reject) => {
@@ -562,7 +811,35 @@ test("the command line selects the flow with --input commit and refuses other va
     assert.equal(json(join(runDir, "request.json")).input, "commit");
     assert.match(passed.stdout, new RegExp(`^input: commit ${head} clean; eligible$`, "mu"));
 
+    const automatic = await cli(["focused", "--", process.execPath, "-e", ""], hostEnv);
+    assert.equal(automatic.code, 0, `${automatic.stdout}\n${automatic.stderr}`);
+    const automaticDir = /^RUN (.+)$/mu.exec(automatic.stdout)[1].trim();
+    const automaticRequest = json(join(automaticDir, "request.json"));
+    assert.equal(host.registrations.get(automaticRequest.runId).request.input, "commit");
+    assert.equal(json(join(automaticDir, "results.json")).input.eligible, true);
+
+    const plainClean = await cli(["focused", "--input", "plain", "--", process.execPath,
+      "-e", markingStage(admin).args[1]], hostEnv);
+    assert.equal(plainClean.code, 0, `${plainClean.stdout}\n${plainClean.stderr}`);
+    const plainCleanDir = /^RUN (.+)$/mu.exec(plainClean.stdout)[1].trim();
+    const plainCleanRequest = json(join(plainCleanDir, "request.json"));
+    assert.equal(Object.hasOwn(host.registrations.get(plainCleanRequest.runId).request, "input"), false);
+    assert.equal(json(join(plainCleanDir, "results.json")).input, undefined);
+    assert.ok(executed(admin), "the explicit plain command must execute on a clean checkout");
+    assert.match(plainClean.stdout, /^input: plain; no committed-input verification: explicit --input plain$/mu);
+
     writeFileSync(join(root, "tracked.txt"), "dirty before the run\n");
+    for (const code of [0, 9]) {
+      const plain = await cli(["focused", "--", process.execPath, "-e", `process.exit(${code})`], hostEnv);
+      assert.equal(plain.code, code, `${plain.stdout}\n${plain.stderr}`);
+      const plainDir = /^RUN (.+)$/mu.exec(plain.stdout)[1].trim();
+      const plainRequest = json(join(plainDir, "request.json"));
+      assert.equal(Object.hasOwn(host.registrations.get(plainRequest.runId).request, "input"), false);
+      const plainResult = json(join(plainDir, "results.json"));
+      assert.equal(plainResult.stages[0].code, code);
+      assert.equal(plainResult.input, undefined);
+      assert.match(plain.stdout, /^input: plain; no committed-input verification: 1 path\(s\) reported by git status$/mu);
+    }
     const refused = await cli(["focused", "--input", "commit", "--", process.execPath, "-e", ""], hostEnv);
     assert.equal(refused.code, 1, `${refused.stdout}\n${refused.stderr}`);
     assert.match(refused.stdout, /^input: refused, not clean before the run: 1 path\(s\)$/mu);

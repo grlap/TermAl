@@ -66,10 +66,9 @@ const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
 const diagnosticLimit = 2400;
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
-// The ordinary committed-input flow becomes the default once candidate commits
-// on worker branches are allowed; until then it is an explicit selection
-// (`--input commit`). Flipping this one value makes it the default.
-export const ORDINARY_COMMIT_INPUT_DEFAULT = false;
+// Select launcher input before registration, independently of the host's
+// ordinary source-basis default. Explicit commit remains strict; plain opts out.
+export const ORDINARY_COMMIT_INPUT_DEFAULT = true;
 export const helperTestFiles = Object.freeze([
   "scripts/cleanup-report.test.mjs",
   "scripts/export-review-attempt.test.mjs",
@@ -532,12 +531,13 @@ export async function createRun({
   scope,
   detached = false,
   input: runInput,
+  automaticInput = false,
   onRunCreated,
   // The committed-input status reader; tests replace it to act between the
   // reads.
   commitInputStatus = captureCommitInputStatus,
 }, env = process.env) {
-  if (runInput !== undefined && runInput !== "commit") {
+  if (runInput !== undefined && !["commit", "plain"].includes(runInput)) {
     throw new Error(`unsupported run input: ${runInput}`);
   }
   const normalizedRoot = resolve(root);
@@ -553,6 +553,22 @@ export async function createRun({
     // notification's existing diagnostic.
     validateRegistrationContext(env);
     throw error;
+  }
+  let commitInput;
+  let plainInputReason = runInput === "plain" ? "explicit --input plain" : undefined;
+  if (automaticInput && runInput === undefined) {
+    try {
+      const observed = await commitInputStatus(normalizedRoot, gitEnv);
+      if (commitInputStatusClean(observed)) {
+        runInput = "commit";
+        commitInput = observed;
+      } else {
+        plainInputReason = boundedInputReason(commitInputNotCleanReason(observed));
+      }
+    } catch (error) {
+      // Plain execution still applies its existing root/HEAD/fingerprint checks.
+      plainInputReason = boundedInputReason(`committed-input admission unavailable: ${error.message}`);
+    }
   }
   const runDirectory = gitRunDirectory(normalizedRoot, gitEnv);
   const runId = `test-${randomUUID()}`;
@@ -572,7 +588,7 @@ export async function createRun({
     ...(scope ? { scope } : {}),
     // The ordinary committed-input flow (docs/test.md); absent is the
     // staged/freeze lane.
-    ...(runInput ? { input: runInput } : {}),
+    ...(runInput === "commit" ? { input: runInput } : {}),
     // Read by TermAl's run index (docs/features/test-runs.md): whether the
     // stages run in a detached worker, and the process that stands for the
     // run until a worker records its own pid in results.json.
@@ -589,6 +605,7 @@ export async function createRun({
     // Measured with the input fingerprint below; until then it identifies
     // nothing.
     source: unknownSource("not_yet_measured"),
+    ...(plainInputReason ? { inputSelection: { kind: "plain", reason: plainInputReason } } : {}),
     preflight: [],
     ...(scope ? { scope } : {}),
     stages: (stages ?? []).map(({ name, liveTests }) => ({
@@ -605,20 +622,22 @@ export async function createRun({
     const result = readJson(join(runDir, "results.json"));
     const pending = error.durabilityPending;
     const stateLock = boundedStateLockEvidence(error.stateLock);
+    const message = request.input === "commit"
+      ? `${error.message}; if the named claim lapsed or changed, renew the claim or name the source root again; use --input plain for a run without verification credit`
+      : error.message;
     Object.assign(result, {
       state: "failed", exitCode: 1, ended: new Date().toISOString(),
-      error: error.message,
+      error: message,
       registration: { state: pending ? "pending" : "failed", reason: error.message,
         ...(pending ? { pending } : {}), ...(stateLock ? { stateLock } : {}) },
     });
     save(join(runDir, "results.json"), result);
-    const failure = new Error(`${error.message}; run directory: ${runDir}`, { cause: error });
+    const failure = new Error(`${message}; run directory: ${runDir}`, { cause: error });
     if (pending) failure.durabilityPending = pending;
     if (stateLock) failure.stateLock = stateLock;
     throw failure;
   }
   try {
-    let commitInput;
     // Refuses the run as not clean before it: no stage runs.
     const refuseNotClean = (status, when) => {
       const result = readJson(join(runDir, "results.json"));
@@ -644,7 +663,7 @@ export async function createRun({
       return runDir;
     };
     if (request.input === "commit") {
-      commitInput = await commitInputStatus(normalizedRoot, gitEnv);
+      commitInput ??= await commitInputStatus(normalizedRoot, gitEnv);
       if (!commitInputStatusClean(commitInput)) return refuseNotClean(commitInput, "");
       const result = readJson(join(runDir, "results.json"));
       result.input = { kind: "commit", commit: commitInput.commit, cleanBefore: true };
@@ -1051,6 +1070,11 @@ export function commitInputStatusClean(status) {
     && (status.gitlinks ?? []).length === 0;
 }
 
+function boundedInputReason(reason) {
+  const line = String(reason).replace(/\s+/gu, " ").trim();
+  return line.length > diagnosticLimit ? `${line.slice(0, diagnosticLimit - 3)}...` : line;
+}
+
 // Why a committed-input status is not clean, for a refusal message.
 function commitInputNotCleanReason(status) {
   const skipped = status.skipped ?? [];
@@ -1085,6 +1109,9 @@ export function commitInputOutcome(beforeCommit, after) {
 
 // One summary line for the committed-input flow; none for the staged lane.
 export function commitInputSummaryLine(result) {
+  if (result?.inputSelection?.kind === "plain") {
+    return `input: plain; no committed-input verification: ${boundedInputReason(result.inputSelection.reason)}`;
+  }
   const input = result?.input;
   if (input?.kind !== "commit") return undefined;
   if (input.cleanBefore === false) {
@@ -1106,6 +1133,22 @@ export function commitInputSummaryLine(result) {
     default:
       return `input: commit ${input.commit} clean before the run; no post-run input recorded; ${eligibility}`;
   }
+}
+
+// Stage success and validation of the source it ran on are separate judgments.
+function commitInputGateSummaryLine(result) {
+  const input = result.input;
+  if (input?.kind !== "commit" || !isTerminal(result) ||
+      (input.eligible === true && typeof result.before === "string" && result.before === result.after)) return undefined;
+  const after = input.after;
+  let reason = input.unavailableReason || result.error;
+  if (!reason && (input.outcome === "input_changed" || input.outcome === "debris_pending_disposition")) {
+    reason = commitInputNotCleanReason({ entries: after?.paths ?? [], skipped: after?.skippedPaths,
+      filters: after?.filters, gitlinks: after?.gitlinks }) || "committed-input identity changed";
+  }
+  reason ||= result.state === "failed" ? "one or more stages failed or were interrupted"
+    : result.before !== result.after ? "input fingerprints differ" : "no eligible post-run input recorded";
+  return `gate: not eligible; not a landing gate: ${boundedInputReason(reason)}`;
 }
 
 function validateInitialResult(request, result) {
@@ -1144,6 +1187,7 @@ function startupFailureResult(runDir, request, result, error, notificationEligib
       ? result.started
       : typeof request?.started === "string" ? request.started : new Date().toISOString(),
     source,
+    ...(result?.inputSelection ? { inputSelection: result.inputSelection } : {}),
     stages,
     preflight: [],
     exitCode: 1,
@@ -1552,25 +1596,29 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       save(resultPath, result);
       if (entry.state === "failed") break;
     }
-    const after = await captureFingerprint(request.root, childEnv);
-    result.after = after.fingerprint;
-    if (request.input === "commit") {
-      // The committed-input flow classifies a changed checkout instead of
-      // throwing: the stage results and the run's own state stay as they are.
-      const status = await captureCommitInputStatus(request.root, childEnv);
+    let after, status;
+    try {
+      after = await captureFingerprint(request.root, childEnv);
+      if (request.input === "commit") status = await captureCommitInputStatus(request.root, childEnv);
+    } catch (error) {
+      if (request.input !== "commit") throw error;
+      // No invented after identity or outcome: the legacy reader accepts an
+      // absent post-run observation, but it can never admit it as eligible.
+      result.input.unavailableReason = boundedInputReason(`post-run input unavailable: ${error.message}`);
+    }
+    if (after) result.after = after.fingerprint;
+    if (request.input === "commit" && status) {
       result.input.after = {
         commit: status.commit,
         clean: commitInputStatusClean(status),
         paths: status.entries,
         ...(status.skipped.length ? { skippedPaths: status.skipped } : {}),
-        // A filter configured during the run stops the status being read:
-        // it is recorded, as the change it is.
         ...((status.filters ?? []).length ? { filters: status.filters } : {}),
         ...((status.gitlinks ?? []).length ? { gitlinks: status.gitlinks } : {}),
       };
       result.input.outcome = commitInputOutcome(result.input.commit, status);
       if (result.input.outcome === "debris_pending_disposition") result.input.disposition = null;
-    } else if (result.after !== result.expectedFingerprint) {
+    } else if (request.input !== "commit" && result.after !== result.expectedFingerprint) {
       throw new Error(driftError("input drift: results do not validate the current source", expectedInput, after));
     }
     result.state = result.stages.every((stage) => stage.state === "passed") ? "passed" : "failed";
@@ -1583,7 +1631,8 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     const failedStage = result.stages.find((stage) => stage.state === "failed");
     result.exitCode = failedStage ? failedStage.code || 1 : result.state === "passed" ? 0 : 1;
     if (result.input?.kind === "commit") {
-      result.input.eligible = result.input.outcome === "clean" && result.state === "passed";
+      result.input.eligible = result.input.outcome === "clean" && result.state === "passed"
+        && result.before === result.after;
     }
   } catch (error) {
     result.state = "failed";
@@ -1619,6 +1668,8 @@ export async function summarize(runDir) {
   }
   const inputLine = commitInputSummaryLine(result);
   if (inputLine) lines.push(inputLine);
+  const gateLine = commitInputGateSummaryLine(result);
+  if (gateLine) lines.push(gateLine);
   const liveTests = result.stages?.find((stage) => stage.liveTests?.length)?.liveTests;
   if (liveTests) lines.push(`live tests: ${liveTests.join(" ")}`);
   const investigation = result.failureInvestigation ??
@@ -2056,7 +2107,7 @@ function parseCommon(args) {
   while (args.length && args[0] !== "--") {
     const flag = args.shift();
     if (flag === "--detach") detach = true;
-    else if (flag === "--input" && args[0] === "commit") input = args.shift();
+    else if (flag === "--input" && ["commit", "plain"].includes(args[0])) input = args.shift();
     else if (flag === "--notify" && args.length) notifyTo = args.shift();
     else if (flag === "--require-binary-env" && /^[A-Z][A-Z0-9_]*$/u.test(args[0] ?? "")) {
       requiredBinaryEnv.push(args.shift());
@@ -2098,7 +2149,7 @@ async function main(args) {
     return;
   }
   if (!["full", "focused", "live", "category"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--input commit] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
+    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--input commit|plain] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit|plain] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
   }
   // A category is resolved, or refused, before any run directory exists.
   let category;
@@ -2112,7 +2163,7 @@ async function main(args) {
   const options = parseCommon(args);
   if (mode === "category" && (options.rest.length || options.liveBinary || options.liveSha256 ||
       options.requiredBinaryEnv.length)) {
-    throw new Error("category takes only NAME, --notify and --detach, plus --input commit");
+    throw new Error("category takes only NAME, --notify and --detach, plus --input commit or plain");
   }
   if (mode === "full" && options.rest.length) throw new Error("full takes no command");
   if (mode === "focused" && !options.rest.length) throw new Error("focused requires -- COMMAND ARGS");
@@ -2157,7 +2208,8 @@ async function main(args) {
       : undefined,
     full: mode === "full",
     detached: Boolean(options.detach),
-    ...(options.input === "commit" || ORDINARY_COMMIT_INPUT_DEFAULT ? { input: "commit" } : {}),
+    ...(options.input ? { input: options.input } : {}),
+    automaticInput: ORDINARY_COMMIT_INPUT_DEFAULT && options.input === undefined,
     onRunCreated: (directory) => console.log(`RUN ${directory}`),
   });
   if (!options.detach) {

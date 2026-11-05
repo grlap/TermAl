@@ -1,8 +1,11 @@
-// The committed-input decision of an acceptance evaluation. A task whose
-// claim has a durably registered committed-input run (`--input commit`, which
-// selects that flow explicitly whatever the launcher's default) pinned to its
-// named source root, which started on a clean checkout (a run refused before
-// any stage selects nothing), is in the committed flow: the request is admitted only
+// The committed-input decision of an acceptance evaluation.
+// Once a claim has a registered committed-input run that started on a clean
+// checkout, whether selected automatically or by `--input commit`, and whatever
+// its result, evaluations of that claim follow the committed flow for that
+// claim, fence and naming. A later plain run or `--input plain` does not undo
+// this. A dirty root is refused until the work is committed and a run passes
+// on that commit. A claim with no such run stays in the legacy flow.
+// The request is admitted only
 // when the root is clean at a commit, the newest applicable terminal result
 // passed eligibly on exactly that commit, and Engram acknowledged that run's
 // verification record (received or settled) for that commit, as the host

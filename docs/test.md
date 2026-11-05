@@ -132,7 +132,9 @@ Every run's `results.json` carries a `source` block
 launcher's isolated configuration (no system or global Git config). The block
 is measured right after the input fingerprint (`input.json`) and kept only
 when it describes the same `HEAD` and the same clean or dirty `git status` as
-that fingerprint, which every stage is checked against; otherwise it records
+that fingerprint; the worker checks it before execution and captures it again
+after the stages. A plain run fails on drift; a committed-input run keeps the
+stages' actual outcome but loses eligibility. A mismatched source record says
 `source_changed_during_measure`. Until then it records `not_yet_measured`.
 It is never changed afterwards:
 
@@ -235,11 +237,27 @@ these bytes; it uses the producing host's own retained copy.
 
 ### Ordinary committed-input runs (`--input commit`)
 
-By default the launcher tests the staged/freeze input: whatever the checkout
-holds, tracked changes and untracked files included, identified by the review
-freeze fingerprint before and after the stages, and any drift fails the run.
-`full`, `focused`, `live` and `category` also accept `--input commit`, the
-ordinary committed-input flow, which tests a commit instead:
+By default the launcher selects its input before immutable run registration.
+A checkout admitted as clean by the committed-input producer selects commit
+input. Any other checkout selects a plain run without a committed-input
+verification record, and the summary names the reason. A plain run tests
+whatever the checkout holds, including tracked changes and untracked files;
+its existing review-freeze fingerprints and drift guards remain in force.
+Its own preconditions, including a readable root and HEAD, also remain: an
+unborn repository or unavailable Git input can still fail that plain preflight.
+Ordinary command failures keep their actual exit code.
+
+For a committed-input run, unavailable post-run admission preserves the actual
+stage outcome but makes the run ineligible for a verification record. Capture
+failures before execution still stop the run before any command starts.
+
+Use `--input plain` to choose the existing plain run explicitly, even on a
+clean checkout. It registers without `input: "commit"` and earns no committed-input
+verification; its summary names the explicit selection. This flag does not
+bypass the plain run's existing preconditions or fingerprint guards.
+
+`full`, `focused`, `live` and `category` also accept explicit `--input commit`.
+That selection is strict: an unadmitted checkout refuses before any stage:
 
 ```bash
 node scripts/test-launcher.mjs full --input commit
@@ -294,7 +312,14 @@ After the stages it reads status and HEAD again into `input.after`
 
 In this flow a changed fingerprint after the stages does not fail the run:
 the stage results, the run's own `state` and `after` are kept as recorded.
-`input.eligible` is true only when the outcome is `clean` and the run passed.
+`input.eligible` is true only when the outcome is `clean`, the run passed, and
+the before and after fingerprints are equal. If a post-run capture throws,
+`input.after` and `input.outcome` stay absent, `input.eligible` is false, and
+`input.unavailableReason` keeps a bounded reason; no commit identity is invented.
+The stages retain their actual outcome and exit code. Every terminal committed
+run without eligible input and equal fingerprints adds its own summary line:
+`gate: not eligible; not a landing gate: <reason>`. Exit 0 alone is insufficient
+for a landing gate. Plain runs keep their existing fingerprint failures.
 Only an eligible run of this flow counts as committed-input evidence; debris is
 not eligible until a disposition is recorded, and `input_changed` never is. The
 printed summary, and `summary RUN_DIRECTORY`, shows one `input:` line, for
@@ -303,9 +328,28 @@ example `input: commit <sha> clean; eligible`,
 `input: commit <sha> input changed; not eligible` or
 `input: refused, not clean before the run: 2 path(s)`.
 
-The flow is an explicit selection until candidate commits on worker branches
-are allowed. It then becomes the default by flipping the one constant
-`ORDINARY_COMMIT_INPUT_DEFAULT` in `scripts/test-launcher.mjs`.
+The launcher enables automatic selection with
+`ORDINARY_COMMIT_INPUT_DEFAULT=true`. The host's independent switch remains
+`false`, retaining content-v1 for ordinary host source measurements. Run
+registration and verification select the committed flow from the run's
+`input: "commit"`, independently of that host switch. Automatic plain runs
+omit that input kind and preserve their selection reason in
+`results.json.inputSelection`; for example, the summary reads
+`input: plain; no committed-input verification: 1 path(s) reported by git status`.
+Commit eligibility does not certify a byte-for-byte or case-faithful checkout.
+The registered producer wire remains `Commit { commit }`, bound through the
+existing claim, store and named-root registration. Content-v1 and schema-1
+review-freeze behavior are unchanged. A checkout with a submodule gitlink
+selects plain automatically: the existing committed-input producer refuses it
+unread. Explicit committed-input refusal never falls back; automatic plain
+selection earns no commit credit.
+
+Once a claim has a registered committed-input run that started on a clean
+checkout, whether selected automatically or by `--input commit`, and whatever
+its result, evaluations of that claim follow the committed flow for that
+claim, fence and naming. A later plain run or `--input plain` does not undo
+this. A dirty root is refused until the work is committed and a run passes
+on that commit. A claim with no such run stays in the legacy flow.
 
 ### Disk space and worktree build-output retention
 
@@ -485,9 +529,10 @@ it waits for the reader within a 2 s budget, retrying only the rename of the
 complete temporary file, and fails with the original error once the budget is
 spent.
 Diagnostic extraction is bounded and does not decide success. A missing
-terminal result is `UNKNOWN`, never a pass. Source/index drift before or during
-execution invalidates the run, and `execution.lock` prevents rerunning the same
-plan.
+terminal result is `UNKNOWN`, never a pass. Source/index drift before execution
+stops the command. Post-run drift fails a plain run; a committed-input run keeps
+the command outcome but is ineligible, as the separate gate line explains.
+`execution.lock` prevents rerunning the same plan.
 
 The fingerprint's own Git calls ignore system and global Git configuration
 (`GIT_CONFIG_NOSYSTEM`, and `GIT_CONFIG_GLOBAL` pointing at the null device), so
@@ -938,8 +983,8 @@ pushd "C:\path\to\worktree" && node scripts/test-launcher.mjs full --input commi
 with the Bash tool's background mode, then ends the turn. A runtime that can
 notify a coordinator may launch it with `--detach` instead.
 
-Credit comes only from registered verification. A run registered with
-`--input commit` ([committed-input runs](#ordinary-committed-input-runs---input-commit))
+Credit comes only from registered verification. A run registered with committed
+input, automatically or with explicit `--input commit` ([committed-input runs](#ordinary-committed-input-runs---input-commit))
 in the claim's named source root, on the exact store, that ends with terminal
 results and an eligible committed-input record (`input: commit <sha> clean;
 eligible`), is sent to Engram with `verification_record` over the session's
@@ -953,7 +998,12 @@ current held association before it publishes the registration. An unavailable
 Engram service or a missing claim refuses the launch before tests start; a
 changed claim fence requires naming the root again. This read shares the
 registration's five-second durability budget. Replay keeps the original
-association and does not read the claim again.
+association and does not read the claim again. Automatic selection does not
+downgrade or retry a refused committed registration. Its error preserves the
+cause and suggests renewing the claim or naming the root again, or explicitly
+choosing `--input plain` for a run without verification credit. A runner with no
+matching named root stays unbound; it does not read a held claim for that absent
+binding and earns no claim-bound verification credit.
 
 TermAl still carries such a launch past the turn as local custody, and says
 before the next prompt when a launch is not carried or a carried one is
@@ -1037,8 +1087,9 @@ coherent native Node TAP/spec totals block, records them
 on the focused stage of `results.json` as `tests` (`passed`, `failed`,
 `ignored`), and prints them in its summary as `tests: passed=N failed=M
 ignored=K` beside `input fingerprint: …`. A runner it does not recognise gets
-no counts. A focused run earns credit only as registered verification, run
-with `--input commit` as a full gate above; otherwise the host reports it as
+no counts. A focused run earns credit only as registered verification with
+committed input, selected automatically or with `--input commit` as above;
+otherwise the host reports it as
 an uncredited check, and reports it passed only from that run's own
 `results.json`, found through the summary's `results:` line under the same
 checks as a full gate's request record: the summary's own verdict, its first

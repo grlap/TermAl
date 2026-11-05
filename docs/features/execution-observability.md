@@ -41,7 +41,8 @@ With the integration enabled:
   ([start and post-compaction context](engram-host-adapter.md#start-and-post-compaction-context)).
 - **Source roots, test evidence and acceptance.** An agent names the worktree
   its claim is measured in ([source root](engram-host-adapter.md#source-root)).
-  A test-launcher run started with `--input commit` in that worktree is
+  A test-launcher run selecting committed input automatically or with explicit
+  `--input commit` in that worktree is
   sent to Engram as registered verification, the only source of test credit
   ([test evidence](engram-host-adapter.md#test-evidence)), and
   acceptance is judged by an independent evaluator

@@ -1,5 +1,5 @@
 // The committed-input record a launcher run writes into its results.json
-// (`input`, for an ordinary committed-input run: `--input commit` in
+// (`input`, selected automatically or with `--input commit` in
 // scripts/test-launcher.mjs), as the host reads it into a run's detail.
 // Owns the record's typed shape, its tolerant read (a run without one, or
 // with one that is malformed, contradictory or not a commit input, reads as

@@ -1554,7 +1554,8 @@ happens elsewhere. The agent therefore names the item's worktree once with
 ### Test evidence
 
 Test credit comes only from registered verification. A test-launcher run
-(`full`, `focused`, `live` or `category`) started with `--input commit`
+(`full`, `focused`, `live` or `category`) selecting committed input automatically
+on an admitted clean checkout or explicitly with `--input commit`
 ([committed-input runs](../test.md#ordinary-committed-input-runs---input-commit))
 in a claim's named source root, on the exact store, that ends with terminal
 results and a coherent committed-input record, is sent to Engram with
@@ -1928,7 +1929,8 @@ runs in the runtime's background mode or detached, and its result marks only
 its launch (`src/engram_carried_checks.rs`). TermAl keeps local custody of
 such a launch: its run, its launch facts and the fences below. That custody
 is not verification and settles nothing at a later turn. A gate earns credit
-only as registered verification, launched with `--input commit` in the
+only as registered verification with committed input, selected automatically
+or with `--input commit`, in the
 claim's named source root (Test evidence above); a carried launch without
 that registration earns none.
 

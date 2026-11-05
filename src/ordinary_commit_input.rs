@@ -11,11 +11,10 @@
 // absence means (src/engram_source_roots.rs, src/engram_turn_observations.rs).
 // New module. Reuses review_freeze.rs's pinned Git runner.
 
-/// Whether the ordinary committed-input flow is the default. It flips together
-/// with `ORDINARY_COMMIT_INPUT_DEFAULT` in scripts/test-launcher.mjs, in one
-/// landing, never one without the other: a test holds the two equal. While it
-/// is off every source basis is a content revision, exactly as before the
-/// switch existed.
+/// Whether ordinary host source measurements use committed input. The
+/// launcher's same-named switch selects run input independently; enabling it
+/// does not enable this host default. While this is off, ordinary host source
+/// measurements retain content revisions.
 const ORDINARY_COMMIT_INPUT_DEFAULT: bool = false;
 
 /// The scheme of a committed source revision. It never equals a content

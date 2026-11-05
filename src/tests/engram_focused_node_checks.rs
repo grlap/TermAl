@@ -31,6 +31,9 @@ fn engram_node_focused_recognition_preserves_quoted_filter_and_test_kind() {
 fn engram_focused_outer_options_preserve_node_and_other_test_recognition() {
     for options in [
         "--input commit",
+        "--input plain",
+        "--input plain --notify session-recipient",
+        "--require-binary-env FIXTURE_BINARY --input plain",
         "--input commit --notify session-recipient",
         "--require-binary-env FIXTURE_BINARY --input commit",
         "--notify session-recipient",
@@ -69,9 +72,12 @@ fn engram_focused_outer_options_unknown_or_malformed_have_named_refusals() {
         ("--input ''", "--input"),
         ("--input staged", "--input"),
         ("--input Commit", "--input"),
+        ("--input Plain", "--input"),
+        ("--input 'plain '", "--input"),
         ("--input 'commit '", "--input"),
         ("--input=commit", "--input=commit"),
         ("--input commit --input commit", "--input"),
+        ("--input plain --input commit", "--input"),
         ("--input --notify session-recipient", "--input"),
         ("--future-option value", "--future-option"),
         ("--input commit --future-option value", "--future-option"),

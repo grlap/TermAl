@@ -610,8 +610,9 @@ fn engram_focused_launcher_words<'a>(
                 }
                 let max_bytes = if flag == "--next-action" { 2000 } else { 256 };
                 let valid = match flag.as_str() {
-                    // Committed-input runs must retain their actual launcher argv.
-                    "--input" => value == "commit",
+                    // Both input selections retain their actual launcher argv;
+                    // recognizing a plain check grants no verification credit.
+                    "--input" => matches!(value.as_str(), "commit" | "plain"),
                     "--notify" => !value.trim().starts_with('-'),
                     _ => {
                         !value.contains(['\r', '\n'])

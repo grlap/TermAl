@@ -1,5 +1,5 @@
 // Owns the tests of the committed-input switch (src/ordinary_commit_input.rs):
-// that it matches the launcher's, that off it leaves the content revision
+// that host and launcher defaults are independent, that off it leaves the content revision
 // untouched, and that on it gives a clean root its HEAD commit and a root that
 // is not clean a typed not-clean outcome and no basis. Does not own the
 // content revision's own tests (src/tests/content_revision.rs) or those of
@@ -48,7 +48,8 @@ fn not_clean(root: &FsPath) -> Vec<SourceRevisionDirtyPath> {
 }
 
 #[test]
-fn the_host_switch_matches_the_launcher_switch() {
+fn the_launcher_selects_automatically_while_the_host_source_default_stays_off() {
+    assert!(!ORDINARY_COMMIT_INPUT_DEFAULT, "ordinary host measurements retain content-v1");
     let launcher = fs::read_to_string(
         FsPath::new(env!("CARGO_MANIFEST_DIR"))
             .join("scripts")
@@ -62,8 +63,8 @@ fn the_host_switch_matches_the_launcher_switch() {
     assert_eq!(declared.len(), 1, "the launcher declares the switch once");
     assert_eq!(
         declared[0].trim_end(),
-        format!("export const ORDINARY_COMMIT_INPUT_DEFAULT = {ORDINARY_COMMIT_INPUT_DEFAULT};"),
-        "the host and launcher switches flip together"
+        "export const ORDINARY_COMMIT_INPUT_DEFAULT = true;",
+        "launcher selection is independent of ordinary host measurements"
     );
 }
 

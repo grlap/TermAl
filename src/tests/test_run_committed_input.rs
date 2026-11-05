@@ -26,6 +26,23 @@ fn with_input(input: Value) -> Value {
 }
 
 #[test]
+fn unavailable_post_run_input_keeps_no_invented_observation_or_credit() {
+    let input = json!({
+        "kind": "commit", "commit": COMMIT, "cleanBefore": true,
+        "eligible": false, "unavailableReason": "post-run input unavailable: HEAD unreadable",
+    });
+    let record = TestRunCommittedInput::read(&with_input(input.clone()))
+        .expect("an absent post-run observation remains coherent");
+    assert!(record.clean_before);
+    assert!(record.after.is_none());
+    assert!(record.outcome.is_none());
+    assert_eq!(record.eligible, Some(false));
+    let mut invented_credit = input;
+    invented_credit["eligible"] = json!(true);
+    assert!(TestRunCommittedInput::read(&with_input(invented_credit)).is_none());
+}
+
+#[test]
 fn each_committed_input_outcome_reads_as_recorded() {
     let fixture = RunFixture::new("committed-input-outcomes");
     let clean = detail_of(
