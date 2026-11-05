@@ -419,14 +419,14 @@ fn endpoint_comparison() -> EngramRuntimeClosingCapture {
             capture_run_cut: 1, latest_event: None,
             state: EngramObservationRootState::None {},
         },
-        sighting: EngramMeasuredSighting {
+        source: EngramRuntimeClosingSource::Measured(EngramMeasuredSighting {
             source_basis: EngramExecutionSourceBasis {
                 workspace_id: "workspace-original".into(),
                 source_revision: "content-v1:after".into(),
                 source_root_generation: None, source_root_state: None,
             },
             observed_at: "2026-10-18T10:02:00Z".into(),
-        },
+        }),
         policy: EngramObservationPolicyBasis::AccountIfEligible {
             project_policy_epoch: 1, policy: "a".repeat(32), obligation_rule_set: "b".repeat(32),
         },
@@ -443,14 +443,15 @@ fn an_ordinary_source_comparison_keeps_the_original_endpoint_and_new_measurement
     };
     assert_eq!(workspace_id, "workspace-original");
     assert_eq!(baseline, before.endpoint);
-    assert_eq!(sighting, capture.sighting);
+    assert_eq!(Some(&sighting), capture.source.sighting());
     assert_eq!(capture.baseline.as_ref(), Some(&before), "comparison never advances historical state");
 }
 
 #[test]
 fn an_equal_source_endpoint_does_not_manufacture_an_edit() {
     let mut capture = endpoint_comparison();
-    capture.sighting.source_basis.source_revision = capture.baseline.as_ref().unwrap().endpoint.source_revision.clone();
+    let EngramRuntimeClosingSource::Measured(sighting) = &mut capture.source else { panic!() };
+    sighting.source_basis.source_revision = capture.baseline.as_ref().unwrap().endpoint.source_revision.clone();
     assert!(capture.source_change().is_none());
 }
 
@@ -472,7 +473,7 @@ fn an_ordinary_source_comparison_never_borrows_another_bindings_or_workspaces_en
             panic!("{mismatch}: an incompatible endpoint cannot become this observation's baseline");
         };
         assert_eq!(workspace_id, "workspace-original");
-        assert_eq!(sighting, capture.sighting);
+        assert_eq!(Some(&sighting), capture.source.sighting());
     }
 }
 

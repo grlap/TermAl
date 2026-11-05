@@ -63,7 +63,7 @@ fn ordinary_observation_superseded_capture_cannot_overwrite_a_newer_closing_job(
     newer.policy = Some(observation_policy());
     fixture.record(|record| record.engram.unadmitted_closing_jobs.push(newer.clone()));
     fixture.state.install_runtime_closing_result(&fixture.id, &old,
-        Ok(EngramRuntimeClosingOutcome::Report(fixture.report()))).unwrap();
+        Ok(EngramRuntimeClosingOutcome::Report(fixture.report(), None))).unwrap();
     fixture.record(|record| {
         assert_eq!(record.engram.unadmitted_closing_jobs, vec![newer]);
         assert!(record.engram.unadmitted_reports.is_empty());
@@ -73,28 +73,47 @@ fn ordinary_observation_superseded_capture_cannot_overwrite_a_newer_closing_job(
 
 #[test]
 fn ordinary_observation_delete_during_capture_transfers_custody_to_original_report() {
-    let fixture = ObservationSession::new();
-    let job = observation_closing_job(&fixture);
-    let report = fixture.report();
-    let mut successor = observation_trace();
-    successor.host_turn_ref = "newer-active-turn".into();
-    successor.generation += 1;
-    fixture.record(|record| {
-        record.engram.unadmitted_closing_jobs.push(job.clone());
-        record.engram.unadmitted_active_turn = Some(successor.clone());
-        record.active_turn_generation = successor.generation;
-        record.engram.observation_delete_requested = true;
-        record.set_auto_dispatch_blocked(true);
-    });
-    fixture.state.install_runtime_closing_result(&fixture.id, &job,
-        Ok(EngramRuntimeClosingOutcome::Report(report.clone()))).unwrap();
-    fixture.record(|record| {
-        assert!(record.engram.unadmitted_closing_jobs.is_empty());
-        assert_eq!(record.engram.unadmitted_reports, vec![report]);
-        assert_eq!(record.engram.unadmitted_active_turn, Some(successor));
-        assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
-        assert!(runtime_observation_has_removal_duty(record));
-    });
+    for source_free in [false, true] {
+        let fixture = ObservationSession::new();
+        let job = observation_closing_job(&fixture);
+        let mut capture = observation_capture();
+        if source_free {
+            capture.source = EngramRuntimeClosingSource::UnsupportedGitlinks {
+                observed_at: observation_at(50),
+            };
+        }
+        let root = FsPath::new(&fixture.state.default_workdir);
+        let report = EngramRuntimeObservationReport::prepare(&job.trace, capture,
+            observation_connection(root), observation_store(root),
+            "fixture-observer".into(), Duration::from_secs(1)).unwrap();
+        if source_free {
+            assert_eq!(report.envelopes.len(), 1, "the source-free report has no sighting");
+        }
+        let mut successor = observation_trace();
+        successor.host_turn_ref = "newer-active-turn".into();
+        successor.generation += 1;
+        fixture.record(|record| {
+            record.engram.unadmitted_closing_jobs.push(job.clone());
+            record.engram.unadmitted_active_turn = Some(successor.clone());
+            record.active_turn_generation = successor.generation;
+            record.engram.observation_delete_requested = true;
+            record.set_auto_dispatch_blocked(true);
+        });
+        let refusal = source_free.then_some(SourceBasisRefusal::UnsupportedGitlinks);
+        fixture.state.install_runtime_closing_result(&fixture.id, &job,
+            Ok(EngramRuntimeClosingOutcome::Report(report.clone(), refusal))).unwrap();
+        fixture.record(|record| {
+            assert!(record.engram.unadmitted_closing_jobs.is_empty());
+            assert_eq!(record.engram.unadmitted_reports, vec![report]);
+            assert_eq!(record.engram.unadmitted_active_turn, Some(successor));
+            assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
+            assert!(runtime_observation_has_removal_duty(record));
+            let notices = record.session.messages.iter().filter(|message| matches!(message,
+                Message::Text { author: Author::System, text, .. }
+                    if text.contains("has no measured source"))).count();
+            assert_eq!(notices, usize::from(source_free));
+        });
+    }
 }
 
 #[test]
@@ -206,7 +225,7 @@ fn ordinary_observation_retired_process_cannot_install_delayed_capture_or_receip
     fixture.state.runtime_observation_lifetime.stop_and_join();
     fixture.state.install_runtime_observation_result(&fixture.id, &report, recorded_report(&report), 0).unwrap();
     fixture.state.install_runtime_closing_result(&fixture.id, &job,
-        Ok(EngramRuntimeClosingOutcome::Report(report.clone()))).unwrap();
+        Ok(EngramRuntimeClosingOutcome::Report(report.clone(), None))).unwrap();
     fixture.record(|record| {
         assert_eq!(record.engram.unadmitted_reports, vec![report]);
         assert_eq!(record.engram.unadmitted_closing_jobs, vec![job]);

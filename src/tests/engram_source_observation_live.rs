@@ -3,6 +3,65 @@ use super::*;
 
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn source_observation_live_gitlink_reports_outcome_and_declared_check_only() {
+    // Real host construction/delivery and real producer accounting; command
+    // telemetry and its failing TRX are fixtures, not a native test-credit run.
+    let fixture = completion_fixture();
+    let session = &fixture.live.session_id;
+    let added = fixture.work(session, &["add", "Observe checks without submodule source attribution", "--json"]);
+    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    fixture.work(session, &["claim", work, "--json"]);
+    fixture.live.state.name_engram_source_root(session, EngramSourceRootRequest {
+        work: work.to_owned(), path: Some(Some(fixture.root.to_string_lossy().into_owned())),
+    }).unwrap();
+    fs::write(fixture.root.join("termal-tests.toml"),
+        "[[test]]\ncommand = \"dotnet test\"\ncwd = \".\"\nartifact = \".termal-results/check.trx\"\n").unwrap();
+    let ignored = fs::read_to_string(fixture.root.join(".gitignore")).unwrap_or_default();
+    fs::write(fixture.root.join(".gitignore"), format!("{ignored}\n.termal-results/\n")).unwrap();
+    let head = run_git_test_command_output(&fixture.root, &["rev-parse", "HEAD"]);
+    run_git_test_command(&fixture.root, &["update-index", "--add", "--cacheinfo", "160000", head.trim(), "child"]);
+    assert!(matches!(engram_execution_source_capture_with(&fixture.root, false),
+        Err(SourceBasisRefusal::UnsupportedGitlinks)));
+    fixture.begin(session, "Observe the declared result while submodule measurement is unavailable.");
+    let mut recorder = SessionRecorder::new(fixture.live.state.clone(), session.to_owned());
+    recorder.command_started_in("gitlink-declared-check", "dotnet test", Some("dotnet test"),
+        Some(&fixture.root.to_string_lossy())).unwrap();
+    fs::create_dir_all(fixture.root.join(".termal-results")).unwrap();
+    fs::write(fixture.root.join(".termal-results/check.trx"), include_bytes!(
+        "fixtures/declared-trx/fail.trx")).unwrap();
+    recorder.command_completed_with_exit("gitlink-declared-check", "dotnet test", "process exited zero",
+        CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    finish_live_root(&fixture.live.state, session);
+    fixture.wait_for_reports(session);
+    let requests = fixture.live.transport.requests_for("execution_observe");
+    assert_eq!(requests.len(), 1, "the unmeasured close emits no source sighting");
+    let occurrence = &requests[0]["occurrence"];
+    assert_eq!(occurrence["kind"], "unadmitted_turn");
+    assert!(occurrence["source_change"].is_null());
+    assert_eq!(occurrence["observed_checks"].as_array().unwrap().len(), 1);
+    assert_eq!(occurrence["observed_checks"][0]["observed_result"], "failed");
+    assert!(occurrence["observed_checks"][0]["source_basis"].is_null());
+    let receipt = fixture.record(session, |record| {
+        assert!(record.engram.runtime_checkpoint.is_none());
+        let envelope = &record.engram.unadmitted_reports.last().unwrap().envelopes[0];
+        let EngramRuntimeObservationDelivery::Recorded { receipt } = &envelope.delivery else {
+            panic!("the real Engram producer must record the source-free report");
+        };
+        receipt.clone()
+    });
+    assert_eq!(receipt["accounting"]["kind"], "no_source_change");
+    assert_eq!(receipt["observed_checks"][0]["credit"], "uncredited");
+    let mut recorded_occurrence = occurrence.clone();
+    recorded_occurrence["observed_checks"] = json!([{
+        "check": occurrence["observed_checks"][0], "credit": "uncredited",
+    }]);
+    assert_eq!(fixture.object(receipt["observation"].as_str().unwrap())["occurrence"], recorded_occurrence);
+    assert!(fixture.live.transport.requests_for("verification_record").is_empty());
+    assert_no_live_turn_gate(&fixture.live.transport);
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn source_observation_live_delete_recovers_original_committed_reply() {
     let fixture = completion_fixture();
     let session = &fixture.live.session_id;

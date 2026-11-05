@@ -46,9 +46,9 @@ fn observation_capture() -> EngramRuntimeClosingCapture {
             "state": {"state": "bound", "workspace_id": "observation-workspace",
                 "generation": 2, "named_at": observation_at(0)}
         })).unwrap(),
-        sighting: EngramMeasuredSighting {
+        source: EngramRuntimeClosingSource::Measured(EngramMeasuredSighting {
             source_basis: observation_source("content-v1:closing"), observed_at: observation_at(50),
-        },
+        }),
         baseline: None,
         registered_check_baselines: Vec::new(),
         policy: observation_policy(),
@@ -251,7 +251,8 @@ fn ordinary_observation_imported_endpoint_requires_exact_claim_and_workspace() {
     capture.baseline = Some(imported.clone());
     assert!(matches!(capture.source_change(), Some(EngramObservedSourceChange::ContentComparison { baseline, .. })
         if baseline == imported.endpoint));
-    capture.sighting.source_basis.source_revision = imported.endpoint.source_revision;
+    let EngramRuntimeClosingSource::Measured(sighting) = &mut capture.source else { panic!() };
+    sighting.source_basis.source_revision = imported.endpoint.source_revision;
     assert!(capture.source_change().is_none());
 }
 
@@ -272,7 +273,8 @@ fn ordinary_observation_imported_endpoint_keeps_its_original_timestamp() {
 fn ordinary_observation_rejects_reversed_and_future_closing_cuts() {
     for second in [9, 59] {
         let mut capture = observation_capture();
-        capture.sighting.observed_at = observation_at(second);
+        let EngramRuntimeClosingSource::Measured(sighting) = &mut capture.source else { panic!() };
+        sighting.observed_at = observation_at(second);
         let built_at = engram_observation_instant(&observation_at(55), "fixture").unwrap();
         assert!(prepare_runtime_observations(&observation_trace(), capture, built_at).is_err());
     }

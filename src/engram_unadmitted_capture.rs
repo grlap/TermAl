@@ -523,14 +523,38 @@ enum EngramRuntimeClosingOutcome {
     Unclaimed,
     Binding(EngramRuntimeClosingScope),
     Policy(EngramObservationPolicyBasis),
-    Report(EngramRuntimeObservationReport),
+    Report(EngramRuntimeObservationReport, Option<SourceBasisRefusal>),
+}
+
+// An unmeasured closing cut still bounds the observed outcome/check facts.
+// It is never a source sighting, a revision or an assumed source change.
+#[derive(Clone, Debug)]
+enum EngramRuntimeClosingSource {
+    Measured(EngramMeasuredSighting),
+    UnsupportedGitlinks { observed_at: String },
+}
+
+impl EngramRuntimeClosingSource {
+    fn sighting(&self) -> Option<&EngramMeasuredSighting> {
+        match self {
+            Self::Measured(sighting) => Some(sighting),
+            Self::UnsupportedGitlinks { .. } => None,
+        }
+    }
+
+    fn observed_at(&self) -> &str {
+        match self {
+            Self::Measured(sighting) => &sighting.observed_at,
+            Self::UnsupportedGitlinks { observed_at } => observed_at,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 struct EngramRuntimeClosingCapture {
     binding: EngramControlWorkBinding,
     root_basis: EngramObservationRootBasis,
-    sighting: EngramMeasuredSighting,
+    source: EngramRuntimeClosingSource,
     baseline: Option<EngramRuntimeCheckpointBasis>,
     registered_check_baselines: Vec<EngramRuntimeCheckpointBasis>,
     policy: EngramObservationPolicyBasis,
@@ -538,7 +562,8 @@ struct EngramRuntimeClosingCapture {
 
 impl EngramRuntimeClosingCapture {
     fn source_change(&self) -> Option<EngramObservedSourceChange> {
-        let source = &self.sighting.source_basis;
+        let sighting = self.source.sighting()?;
+        let source = &sighting.source_basis;
         let compatible = self.baseline.as_ref().filter(|basis| {
             basis.binding == self.binding
                 && basis.endpoint.workspace_id == source.workspace_id
@@ -552,7 +577,7 @@ impl EngramRuntimeClosingCapture {
                     && basis.source_root_generation == source.source_root_generation
                     && basis.source_root_state == source.source_root_state
                     && EngramHost::check_timestamp(&basis.endpoint.observed_at).zip(
-                        EngramHost::check_timestamp(&self.sighting.observed_at))
+                        EngramHost::check_timestamp(&sighting.observed_at))
                         .is_some_and(|(before, after)| before <= after)
             });
         // Every qualifying check participates, even when the previous
@@ -562,24 +587,24 @@ impl EngramRuntimeClosingCapture {
         {
             return Some(EngramObservedSourceChange::ContentComparison {
                 workspace_id: source.workspace_id.clone(),
-                baseline: basis.endpoint.clone(), sighting: self.sighting.clone(),
+                baseline: basis.endpoint.clone(), sighting: sighting.clone(),
             });
         }
         match compatible {
             Some(basis)
-                if basis.endpoint.source_revision == self.sighting.source_basis.source_revision =>
+                if basis.endpoint.source_revision == source.source_revision =>
             {
                 None
             }
             Some(basis) => Some(EngramObservedSourceChange::ContentComparison {
-                workspace_id: self.sighting.source_basis.workspace_id.clone(),
+                workspace_id: source.workspace_id.clone(),
                 baseline: basis.endpoint.clone(),
-                sighting: self.sighting.clone(),
+                sighting: sighting.clone(),
             }),
             None if checked => None,
             None => Some(EngramObservedSourceChange::AssumedMissingBaseline {
-                workspace_id: self.sighting.source_basis.workspace_id.clone(),
-                sighting: self.sighting.clone(),
+                workspace_id: source.workspace_id.clone(),
+                sighting: sighting.clone(),
             }),
         }
     }
@@ -605,7 +630,7 @@ fn prepare_runtime_observations(
                 .map_err(EngramTransportError::protocol)?;
         from = from.min(earlier);
     }
-    let through = engram_observation_instant(&capture.sighting.observed_at, "closing observation")
+    let through = engram_observation_instant(capture.source.observed_at(), "closing observation")
         .map_err(EngramTransportError::protocol)?;
     if through < adoption || through > built_at {
         return Err(EngramTransportError::protocol(
@@ -658,10 +683,10 @@ fn prepare_runtime_observations(
             EngramTransportError::protocol(format!("could not serialize observed check: {error}"))
         })?);
     }
-    if !trace.source_attribution_uncertain {
+    if !trace.source_attribution_uncertain && let Some(sighting) = capture.source.sighting() {
         let request = engram_source_sighting_request(
             basis(format!("termal-source-sighting:{}", trace.host_turn_ref)),
-            capture.sighting.clone(), built_at,
+            sighting.clone(), built_at,
         )?;
         requests.push(serde_json::to_value(request).map_err(|error| {
             EngramTransportError::protocol(format!("could not serialize measured source sighting: {error}"))

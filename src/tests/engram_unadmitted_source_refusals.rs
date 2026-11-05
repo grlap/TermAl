@@ -1,5 +1,6 @@
-//! Permanent source-basis refusals retire closing custody once. Transient
-//! absence keeps the existing retry path, independently of local test verdicts.
+//! Gitlink source refusals preserve outcome/check reporting without source
+//! attribution. Other permanent refusals retire closing custody once, while
+//! transient absence keeps the existing retry path and local test verdicts.
 use super::*;
 use super::super::super::declared_checks::{
     declare, write_artifact, DECLARED_ARTIFACT, DECLARED_TEST, FAILING_TRX,
@@ -146,12 +147,106 @@ fn closing_source_refusal_configured_filter_settles_once() {
     }, "filters", false);
 }
 
+fn add_gitlink(root: &FsPath) {
+    let head = run_git_test_command_output(root, &["rev-parse", "HEAD"]);
+    run_git_test_command(root, &["update-index", "--add", "--cacheinfo", "160000", head.trim(), "child"]);
+    assert!(matches!(engram_execution_source_capture_with(root, false),
+        Err(SourceBasisRefusal::UnsupportedGitlinks)), "the real content capture must refuse gitlinks");
+}
+
+fn settle_closing(fixture: &ReportingTurn) {
+    let guard = crate::tests::phase_sync::PollGuard::new();
+    loop {
+        let settled = fixture.turn.record(|record| {
+            record.engram.unadmitted_active_turn.is_none()
+                && !record.engram.unadmitted_worker_running
+                && record.engram.unadmitted_closing_jobs.iter().all(|job| job.terminal_failure.is_some())
+                && record.engram.unadmitted_reports.iter().all(EngramRuntimeObservationReport::is_settled)
+        });
+        if settled { return; }
+        guard.wait("the closing worker settles either its report or its explicit refusal");
+    }
+}
+
 #[test]
-fn closing_source_refusal_gitlink_settles_once() {
-    permanent_source_refusal_settles_once("closing-refused-gitlink", |root| {
-        let head = run_git_test_command_output(root, &["rev-parse", "HEAD"]);
-        run_git_test_command(root, &["update-index", "--add", "--cacheinfo", "160000", head.trim(), "child"]);
-    }, "submodules", false);
+fn closing_gitlink_reports_declared_verdict_without_source_or_credit() {
+    let mut fixture = ReportingTurn::new("closing-gitlink-audit", true, ReplyMode::Recorded, false);
+    add_gitlink(&fixture.turn.root);
+    let local_runs = observe_declared_failure(&mut fixture);
+    let check = fixture.turn.record(|record|
+        record.engram.unadmitted_active_turn.as_ref().unwrap().commands[0].check.clone());
+    assert!(check.source_basis.is_none(), "an unmeasured check has no revision");
+    fixture.turn.state.shutdown_persist_blocking();
+    fixture.finish();
+    settle_closing(&fixture);
+    let requests = fixture.producer.requests();
+    assert_eq!(requests.len(), 1, "a gitlink source refusal must not discard the outcome/check report");
+    let sent = fixture.observation();
+    assert!(sent.durable_before_send);
+    let body = occurrence(&sent);
+    assert_eq!(body["kind"], "unadmitted_turn");
+    assert_eq!(body["outcome"], "unknown");
+    assert!(body["source_change"].is_null(), "unreported source is never assumed changed or unchanged");
+    assert_eq!(body["observed_checks"], json!([check]));
+    assert_eq!(body["observed_checks"][0]["observed_result"], "failed");
+    assert_eq!(sent.receipt["accounting"]["kind"], "no_source_change");
+    assert_eq!(sent.receipt["observed_checks"][0]["credit"], "uncredited");
+    assert!(fixture.turn.record(|record| record.engram.runtime_checkpoint.is_none()));
+    assert!(fixture.turn.record(|record| record.engram.unadmitted_closing_jobs.is_empty()));
+    let notices = fixture.turn.record(system_notices);
+    assert_eq!(notices.iter().filter(|line| line.contains("has no measured source")
+        && line.contains("submodules")).count(), 1, "the source limitation stays visible: {notices:?}");
+    let connection = open_sqlite_state_read_connection(&fixture.turn.state.persistence_path).unwrap();
+    let durable = load_session_records_from_sqlite(&connection, &fixture.turn.state.persistence_path)
+        .unwrap().into_iter().find(|record| record.session.id == fixture.turn.session_id)
+        .expect("the stored session includes its normalized transcript");
+    let restored = durable.into_record().unwrap();
+    assert_eq!(system_notices(&restored), notices, "the diagnostic is durable with its report");
+    assert_eq!(restored.engram.unadmitted_reports,
+        fixture.turn.record(|record| record.engram.unadmitted_reports.clone()));
+    assert!(restored.engram.unadmitted_closing_jobs.is_empty());
+    assert!(restored.engram.runtime_checkpoint.is_none());
+    assert_declared_failure_unchanged(&fixture, &local_runs);
+    fixture.assert_no_granted_reporting();
+    retire_reporting_hosts(fixture, Vec::new());
+}
+
+#[test]
+fn closing_gitlink_gap_cannot_reuse_an_older_measured_baseline() {
+    let mut fixture = ReportingTurn::new("closing-gitlink-gap", true, ReplyMode::Recorded, false);
+    let before = fixture.turn.record(|record|
+        record.engram.runtime_checkpoint.as_ref().unwrap().endpoint.clone());
+    add_gitlink(&fixture.turn.root);
+    fixture.finish();
+    settle_closing(&fixture);
+    assert_eq!(fixture.producer.requests().len(), 1,
+        "the unmeasured turn must publish an outcome-only observation");
+    let unmeasured = fixture.observation();
+    assert!(occurrence(&unmeasured)["source_change"].is_null());
+    assert!(fixture.turn.record(|record| record.engram.runtime_checkpoint.is_none()),
+        "an outcome-only receipt cannot establish or retain a checkpoint");
+
+    // Restore the original measurable tree. Equal endpoints must not turn
+    // the intervening unmeasured submodule state into measured continuity.
+    run_git_test_command(&fixture.turn.root, &["update-index", "--force-remove", "child"]);
+    assert_eq!(fixture.turn.revision(), before.source_revision);
+    fixture.reader = ClaudeReaderOn::new(&fixture.turn, new_claude_turn_ownership());
+    for frame in [task_notification(), init(), assistant_text("Inspecting after the source gap.")] {
+        fixture.reader.feed(frame);
+    }
+    fixture.finish();
+    settle_closing(&fixture);
+    let measured = fixture.observation();
+    assert_eq!(occurrence(&measured)["source_change"]["detection"], "assumed_missing_baseline",
+        "the later measurable close must not compare against the pre-gap endpoint");
+    assert_eq!(occurrence(&measured)["source_change"]["sighting"]["source_basis"]["source_revision"],
+        before.source_revision);
+    let sighting = fixture.observation();
+    assert_eq!(occurrence(&sighting)["kind"], "source_sighting");
+    assert_eq!(fixture.producer.requests().len(), 3,
+        "only the later measured close establishes a real source sighting");
+    fixture.assert_no_granted_reporting();
+    retire_reporting_hosts(fixture, Vec::new());
 }
 
 #[test]
@@ -159,6 +254,11 @@ fn closing_source_refusal_after_scope_moves_keeps_scope_changed_reason() {
     permanent_source_refusal_settles_once("closing-refused-moved-scope", |root| {
         run_git_test_command(root, &["config", "filter.lfs.process", "must-not-run-a-filter"]);
     }, "filters", true);
+}
+
+#[test]
+fn closing_gitlink_after_scope_moves_cannot_publish_source_free_facts() {
+    permanent_source_refusal_settles_once("closing-gitlink-moved-scope", add_gitlink, "submodules", true);
 }
 
 #[test]

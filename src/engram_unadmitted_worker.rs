@@ -398,7 +398,7 @@ impl AppState {
                 return Ok(());
             }
         }
-        if matches!(&result, Ok(EngramRuntimeClosingOutcome::Report(_)))
+        if matches!(&result, Ok(EngramRuntimeClosingOutcome::Report(..)))
             && inner.sessions[index].engram.unadmitted_closing_jobs.iter().any(|job| job == expected)
         {
             // Off-lock measurement produced a candidate, not an immutable
@@ -438,12 +438,18 @@ impl AppState {
                 job.retry_at = unadmitted_observation_timestamp();
                 job.last_error = None;
             }
-            Ok(EngramRuntimeClosingOutcome::Report(report)) => {
+            Ok(EngramRuntimeClosingOutcome::Report(report, source_refusal)) => {
                 if !state
                     .unadmitted_reports
                     .iter()
                     .any(|existing| existing.host_turn_ref == report.host_turn_ref)
                 {
+                    if let Some(refusal) = source_refusal {
+                        diagnostic = Some(format!(
+                            "Runtime-started turn {} has no measured source: {}. Only its outcome and observed checks are being reported to Engram; its checks remain uncredited.",
+                            report.host_turn_ref, refusal
+                        ));
+                    }
                     state.unadmitted_reports.push(report);
                 }
                 state.unadmitted_closing_jobs.remove(position);

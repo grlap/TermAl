@@ -874,12 +874,15 @@ path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
   when a comparison is included, and ends at the actual closing observation
   cut before request construction. It asserts neither continuous observation
   nor that the adopted turn caused the drift.
-  A definitive source-capture refusal, such as configured Git filters or an
-  unsupported gitlink, ends closing capture on its first failed attempt. The
-  retained job and one visible `not reported to Engram` notice keep the
+  A definitive source-capture refusal such as configured Git filters ends
+  closing capture on its first failed attempt. The retained job and one
+  visible `not reported to Engram` notice keep the
   original reason; later turns do not retry that job. No source sighting or
   report is invented, and the local Test Runs row and declared-artifact
-  verdict are unchanged. Missing captures caused by deadlines, capacity,
+  verdict are unchanged. An unsupported gitlink instead produces an outcome
+  and observed-check report without source attribution, with a visible
+  `has no measured source` diagnostic; it creates no source sighting or
+  checkpoint and earns no credit. Missing captures caused by deadlines, capacity,
   races or other I/O failures keep the existing bounded retry behaviour.
 - **Durability and replay.** The prepared request and delivery state live in
   the session's SQLite row. A settled report's row space is bounded: a session
@@ -1546,8 +1549,16 @@ happens elsewhere. The agent therefore names the item's worktree once with
   refuse its submission, and the tracker's own freshness check is what
   stands. A turn's report carries its source facts with unknown causality,
   as described above; a change made between two turns is attributed to
-  neither. Missing scope or measurement can still leave history unreported, with the
-  runtime reporting path's visible diagnostic. The main checkout of a
+  neither. A closing `content-v1` capture that refuses Git submodules still
+  reports the turn's outcome and observed checks with source attribution
+  unavailable. It reports no source change, sighting or checkpoint and grants
+  no freshness or credit. In this case null source change reports no source
+  measurement; null alone cannot distinguish unavailable source from a
+  measured-equal close, which also reports a null change but has a companion
+  source sighting.
+  The host retains the source-measurement diagnostic. Other missing scope or
+  measurement can still leave history unreported, with the runtime reporting
+  path's visible diagnostic. The main checkout of a
   `--separate-git-dir` repository cannot be named, since its `.git` file
   names no linked worktree; a linked worktree of it can.
 

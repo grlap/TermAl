@@ -221,17 +221,26 @@ impl AppState {
         ) {
             eprintln!("{line}");
         }
-        let measured = measured.map_err(|refusal| {
-            let mut error = EngramTransportError::local_state(refusal.to_string());
-            error.code = Some("runtime_observation_source_refused".to_owned());
-            error
-        })?;
-        let source_basis = provenance
-            .stamp(measured)
-            .ok_or_else(|| {
-                EngramTransportError::local_state("runtime closing source could not be measured")
-            })?;
         let observed_at = unadmitted_observation_timestamp();
+        let (source, source_refusal) = match measured {
+            Ok(measured) => {
+                let source_basis = provenance.stamp(measured).ok_or_else(|| {
+                    EngramTransportError::local_state("runtime closing source could not be measured")
+                })?;
+                (EngramRuntimeClosingSource::Measured(EngramMeasuredSighting {
+                    source_basis, observed_at,
+                }), None)
+            }
+            Err(SourceBasisRefusal::UnsupportedGitlinks) => (
+                EngramRuntimeClosingSource::UnsupportedGitlinks { observed_at },
+                Some(SourceBasisRefusal::UnsupportedGitlinks),
+            ),
+            Err(refusal) => {
+                let mut error = EngramTransportError::local_state(refusal.to_string());
+                error.code = Some("runtime_observation_source_refused".to_owned());
+                return Err(error);
+            }
+        };
         let observer = target.adapter.read_work_session(&target.connection, &store, timeout()?)?;
         // The ordinary child's identity proves the observing session. No
         // control status, phase or leftover open grant enters this report.
@@ -266,10 +275,7 @@ impl AppState {
             EngramRuntimeClosingCapture {
                 binding,
                 root_basis,
-                sighting: EngramMeasuredSighting {
-                    source_basis,
-                    observed_at,
-                },
+                source,
                 baseline: job.baseline.clone(),
                 registered_check_baselines: job.registered_check_baselines.clone(),
                 policy: policy.clone(),
@@ -279,7 +285,7 @@ impl AppState {
             observer,
             target.settings.call_timeout(),
         )
-        .map(EngramRuntimeClosingOutcome::Report)
+        .map(|report| EngramRuntimeClosingOutcome::Report(report, source_refusal))
     }
 }
 

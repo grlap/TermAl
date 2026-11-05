@@ -59,9 +59,23 @@ With Execution Observability on as well:
   result. Codex, Claude, Cursor, Gemini, OpenCode and Kimi turns report in the
   same shape. A turn a runtime starts by itself is reported the same way.
 - **Source sightings.** After a traced turn closes, when the turn's
-  attribution is certain, TermAl also reports a measured sighting of the
-  claim's source at its exact revision. A sighting tells Engram how fresh the
-  source is; it earns no test credit and records no change.
+  attribution is certain and its source can be measured, TermAl also reports
+  a measured sighting of the claim's source at its exact revision. A sighting
+  tells Engram how fresh the source is; it earns no test credit and records no change.
+
+If the ordinary `content-v1` capture refuses a repository because it contains
+Git submodules, the turn still reports its outcome and observed checks.
+Source attribution is unavailable: `source_change: null` reports no source
+measurement in this case. Null alone does not distinguish this from a
+measured-equal close, which also reports null but has a companion source
+sighting. A null value alone never proves source was unchanged. For the
+gitlink refusal no source sighting or baseline is created, freshness does
+not advance, and the checks remain uncredited.
+The host keeps a diagnostic explaining the missing source measurement.
+This reporting path does not provide a committed-input test-credit workflow
+for consumer repositories; that requires separate registered verification.
+Other source refusals and temporary capture failures keep their existing
+reporting and retry behavior.
 
 ## Delivery and context preparation
 
