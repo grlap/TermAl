@@ -769,6 +769,26 @@ The binary path, fingerprint, executable probe, native Cargo and Git Bash are
 verified before the ignored live stage starts. A mismatch is a terminal failed
 run with the stage unrun; required live checks are never silently skipped.
 
+The whole suite includes the cross-project launcher row in the
+[ordinary evaluation matrix](engineering/ordinary-evaluation-matrix.md).
+Before running the whole suite or selecting that row, set these process
+environment variables from the reviewed Engram source manifest:
+
+- `TERMAL_TEST_ENGRAM_LAUNCHER_ROOT`: an absolute local Engram source repository.
+- `TERMAL_TEST_ENGRAM_LAUNCHER_COMMIT`: its exact full 40-hex source commit.
+
+The row clones that source into its disposable fixture and uses Engram's own
+maintained launcher. It never edits the source repository. These inputs are
+separate from the executable pin; the row checks them and records them in its
+`MATRIX_ENGRAM_LAUNCHER_SOURCE` output. Missing inputs fail the row. Other named
+rows do not require them. They are not additional launcher CLI flags or entries
+in `results.json`.
+
+Live stages always pass `--nocapture` to libtest so passing-test provenance and
+diagnostics survive in `engram-live.log`, including the matrix's actual check,
+evaluation, completion and source-attribution records. The launcher still
+returns a bounded summary while retaining the complete stage log.
+
 To run only some of the live tests under the same pin, name them after `--`:
 
 ```bash
@@ -779,8 +799,8 @@ Each name is the test's full libtest path, as `cargo test --bin termal --
 --ignored --list` prints it. The live suite's tests sit in nested modules, so
 no module prefix is assumed. A name must lie inside the `root_recovery_live`
 module. A malformed or repeated name is refused before any run directory
-exists. The named tests run with `--ignored --exact --test-threads=1`, after the
-same verification as the whole suite. The stage passes only when libtest
+exists. The named tests run with `--ignored --exact --test-threads=1 --nocapture`,
+after the same verification as the whole suite. The stage passes only when libtest
 reports a result for every named test and its counts cover exactly those tests.
 A name that matches nothing fails the run, which names the tests that did not
 run, so a filter never passes having run no tests. The request, results and
@@ -992,6 +1012,15 @@ work session, and Engram decides credit from that record. A run without that
 registration, or whose record is not eligible, earns no credit, whatever its
 stages say. Only a root session holding the claim can name its root; a
 delegated session is measured in its workdir and has no named root.
+
+A terminal verification refusal is stored beside the run in
+`engram-verification-record-state.json`. The launcher `summary` shows that
+refusal separately from the native test verdict, including Engram's returned
+field and reason when supplied. A passing test can therefore still have a
+rejected verification record. Both the run command and each check command
+have Engram's 8192 UTF-8 byte limit; a longer command is reported as
+`verification_command_too_long`, with its field and byte count. Commands and
+their fingerprints are preserved, and a terminal refusal is not resent.
 
 A committed-input registration in a named root reads that exact claim's
 current held association before it publishes the registration. An unavailable

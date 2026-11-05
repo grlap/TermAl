@@ -65,6 +65,24 @@ pub(super) fn isolated_launcher(
     session: &str,
     service: &LoopbackRegistration,
 ) -> Command {
+    isolated_launcher_for(
+        root,
+        session,
+        service,
+        &if cfg!(windows) {
+            ["node", "--test", NODE_TEST]
+        } else {
+            ["cargo", "test", "--offline"]
+        },
+    )
+}
+
+pub(super) fn isolated_launcher_for(
+    root: &FsPath,
+    session: &str,
+    service: &LoopbackRegistration,
+    native_command: &[&str],
+) -> Command {
     let mut command = Command::new(if cfg!(windows) { "node.exe" } else { "node" });
     // Construct a child environment, including only this fixture's identity.
     // Outer outputs, notifications, wrappers and failure injection stay out.
@@ -110,11 +128,7 @@ pub(super) fn isolated_launcher(
             "commit",
             "--",
         ])
-        .args(if cfg!(windows) {
-            ["node", "--test", NODE_TEST]
-        } else {
-            ["cargo", "test", "--offline"]
-        });
+        .args(native_command);
     let retained = command
         .get_envs()
         .filter_map(|(key, value)| {
@@ -139,9 +153,11 @@ pub(super) fn isolated_launcher(
         );
     }
     if cfg!(windows) {
-        assert!(!retained
-            .keys()
-            .any(|key| key.starts_with("CARGO") || key.starts_with("RUSTUP")));
+        assert!(
+            !retained
+                .keys()
+                .any(|key| key.starts_with("CARGO") || key.starts_with("RUSTUP"))
+        );
     } else {
         assert_eq!(
             retained["CARGO_TARGET_DIR"],

@@ -1322,26 +1322,45 @@ const liveRun = (names, ran) => ({
   liveTests: names,
 });
 
-test("whole-suite live keeps its argv; named live tests run exactly, by full path", () => {
+test("whole-suite and named live retain passing diagnostics and exact test selection", () => {
   for (const platform of ["linux", "win32"]) {
     const env = { ...process.env, ProgramFiles: "C:\\Program Files" };
     const whole = liveStage(platform, env);
     const named = liveStage(platform, env, [liveWitness, liveSibling]);
-    const wholeArgs = ["--bin", "termal", "root_recovery_live", "--", "--ignored", "--test-threads=1"];
-    const namedArgs = ["--bin", "termal", "--", "--ignored", "--exact", "--test-threads=1", liveWitness, liveSibling];
+    const wholeArgs = ["--bin", "termal", "root_recovery_live", "--", "--ignored", "--test-threads=1", "--nocapture"];
+    const namedArgs = ["--bin", "termal", "--", "--ignored", "--exact", "--test-threads=1", "--nocapture", liveWitness, liveSibling];
     assert.equal(whole.name, "engram-live");
     assert.equal(named.name, "engram-live");
     assert.equal(named.command, whole.command);
     assert.equal("liveTests" in whole, false);
     assert.deepEqual(named.liveTests, [liveWitness, liveSibling]);
     if (platform === "win32") {
-      assert.deepEqual(whole.args, ["-c", `exec scripts/test-rust.sh ${wholeArgs.join(" ")}`]);
-      assert.deepEqual(named.args, ["-c", `exec scripts/test-rust.sh ${namedArgs.join(" ")}`]);
+      assert.deepEqual(whole.args, ["-c", 'exec scripts/test-rust.sh "$@"', "termal-live", ...wholeArgs]);
+      assert.deepEqual(named.args, ["-c", 'exec scripts/test-rust.sh "$@"', "termal-live", ...namedArgs]);
     } else {
       assert.deepEqual(whole.args, ["scripts/test-rust.sh", ...wholeArgs]);
       assert.deepEqual(named.args, ["scripts/test-rust.sh", ...namedArgs]);
     }
   }
+});
+
+test("live stage delivers every long filter through its real shell and native process", async (t) => {
+  const root = mkdtempSync(join(testTempDirectory(), "launcher-live-argv-"));
+  removeFixtureOnPass(t, root);
+  mkdirSync(join(root, "scripts"));
+  const node = process.execPath.replaceAll("\\", "/").replaceAll("'", "'\\''");
+  writeFileSync(join(root, "scripts", "test-rust.sh"),
+    `#!/bin/sh\nexec '${node}' ./argv.mjs "$@"\n`);
+  writeFileSync(join(root, "argv.mjs"), "console.log(JSON.stringify(process.argv.slice(2)));\n");
+  const names = Array.from({ length: 50 }, (_, index) =>
+    `tests::root_recovery_live::${"long_filter_component_".repeat(8)}case_${index}`);
+  assert.ok(names.join(" ").length > 9000);
+  const stage = liveStage(process.platform, process.env, names);
+  const log = join(root, "argv.log");
+  const outcome = await runCommand(stage.command, stage.args, { cwd: root, env: process.env, log });
+  assert.equal(outcome.code, 0, readFileSync(log, "utf8"));
+  assert.deepEqual(JSON.parse(readFileSync(log, "utf8")),
+    ["--bin", "termal", "--", "--ignored", "--exact", "--test-threads=1", "--nocapture", ...names]);
 });
 
 test("live test names are full paths inside the suite, each named once", () => {

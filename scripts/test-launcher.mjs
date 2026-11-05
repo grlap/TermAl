@@ -390,14 +390,18 @@ export function liveStage(platform = process.platform, env = process.env, names 
   const command = platform === "win32" ? windowsGitBash(env) : "sh";
   // The whole suite is selected by its module name; named tests by their
   // exact paths, so a name that matches nothing runs nothing.
+  // Retain fixture provenance and diagnostics in the stage log on success.
+  // Libtest otherwise discards eprintln output from passing tests.
   const liveArgs = names.length
-    ? ["--bin", "termal", "--", "--ignored", "--exact", "--test-threads=1", ...names]
-    : ["--bin", "termal", "root_recovery_live", "--", "--ignored", "--test-threads=1"];
+    ? ["--bin", "termal", "--", "--ignored", "--exact", "--test-threads=1", "--nocapture", ...names]
+    : ["--bin", "termal", "root_recovery_live", "--", "--ignored", "--test-threads=1", "--nocapture"];
   return {
     name: "engram-live",
     command,
     args: platform === "win32"
-      ? ["-c", `exec scripts/test-rust.sh ${liveArgs.join(" ")}`]
+      // Keep long filter lists out of Bash's command string. Windows can
+      // silently lose its tail; positional arguments preserve every filter.
+      ? ["-c", 'exec scripts/test-rust.sh "$@"', "termal-live", ...liveArgs]
       : ["scripts/test-rust.sh", ...liveArgs],
     ...(names.length ? { liveTests: [...names] } : {}),
   };
@@ -1668,6 +1672,17 @@ export async function summarize(runDir) {
   }
   const inputLine = commitInputSummaryLine(result);
   if (inputLine) lines.push(inputLine);
+  // The host writes this separately after launcher completion. Reading it
+  // reports delivery status; it never changes the run's native verdict.
+  try {
+    const verification = readJson(join(runDir, "engram-verification-record-state.json"));
+    if (verification.state === "rejected") {
+      const detail = typeof verification.detail === "string" ? verification.detail : "reason unavailable";
+      lines.push(`verification: rejected: ${detail.replace(/[\r\n\x1b]/g, " ").slice(0, diagnosticLimit)}`);
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") lines.push("verification: status unreadable");
+  }
   const gateLine = commitInputGateSummaryLine(result);
   if (gateLine) lines.push(gateLine);
   const liveTests = result.stages?.find((stage) => stage.liveTests?.length)?.liveTests;

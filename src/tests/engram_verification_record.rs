@@ -13,6 +13,9 @@ mod naming_rebind;
 #[path = "test_run_receipt_record_ids.rs"]
 mod receipt_record_ids;
 
+#[path = "engram_verification_refusals.rs"]
+mod refusals;
+
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const SESSION: &str = "session-record";
 const STARTED: &str = "2026-10-30T10:00:00.000Z";

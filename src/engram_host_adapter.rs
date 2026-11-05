@@ -719,6 +719,8 @@ struct EngramControlErrorWire {
     message: String,
     #[serde(default)]
     reason: Option<String>,
+    #[serde(default)]
+    details: Value,
 }
 
 impl EngramControlErrorWire {
@@ -729,6 +731,18 @@ impl EngramControlErrorWire {
             }
             _ => self.message,
         };
+        // Registered-verification refusals carry safe field/reason labels in
+        // details. Keep those labels through the existing error message; do
+        // not expose other details or the rejected request's values.
+        let message = if self.code == "verification_record_refused" {
+            match (self.details.get("field").and_then(Value::as_str),
+                self.details.get("reason").and_then(Value::as_str)) {
+                (Some(field), Some(reason)) if [field, reason].iter().all(|text|
+                    !text.is_empty() && text.len() <= 4096 && !text.chars().any(char::is_control)) =>
+                    format!("{message} (field: {field}; reason: {reason})"),
+                _ => message,
+            }
+        } else { message };
         EngramControlErrorBody { code: self.code, message,
         }
     }

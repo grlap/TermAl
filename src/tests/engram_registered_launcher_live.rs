@@ -6,6 +6,9 @@ use super::*;
 mod environment;
 use environment::{isolated_launcher, LAUNCH};
 
+#[path = "engram_evaluation_matrix_live.rs"]
+mod evaluation_matrix;
+
 pub(super) fn install_launcher(fixture: &CompletionFixture) {
     environment::install_launcher(fixture);
 }

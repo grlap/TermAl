@@ -1217,8 +1217,6 @@ fn engram_verification_record_send(
     if !support.is_supported() {
         return pending(EngramVerificationRecordPending::CapabilityUnsupported { support });
     }
-    let request = engram_verification_record_request(&frozen);
-    let reply = link.adapter.request(link.connection, &request, link.timeout);
     let rejected = |detail: String| {
         eprintln!("engram> run={} verification record not settled: {detail}", frozen.run_id);
         engram_verification_record_set_progress(
@@ -1228,6 +1226,18 @@ fn engram_verification_record_send(
         );
         EngramVerificationRecordStep::Rejected(detail)
     };
+    // Engram validates both command labels before association. Refuse the
+    // original command explicitly rather than changing its text/fingerprint.
+    const COMMAND_LIMIT: usize = 8192;
+    for (field, command) in std::iter::once(("run.command".to_owned(), &frozen.body.run.command))
+        .chain(frozen.body.checks.iter().enumerate()
+            .map(|(index, check)| (format!("checks[{index}].command"), &check.command))) {
+        if command.len() > COMMAND_LIMIT {
+            return rejected(format!("verification_command_too_long: {field} has {} UTF-8 bytes; Engram limit is {COMMAND_LIMIT} bytes", command.len()));
+        }
+    }
+    let request = engram_verification_record_request(&frozen);
+    let reply = link.adapter.request(link.connection, &request, link.timeout);
     match reply {
         Ok(value) => {
             let receipt = match parse_engram_result::<EngramVerificationRecordReceipt>(value) {
@@ -1271,8 +1281,8 @@ fn engram_verification_record_send(
                     .is_some_and(|code| ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS.contains(&code)) =>
         {
             rejected(format!(
-                "Engram refused it: {}",
-                error.code.as_deref().unwrap_or("no code")
+                "Engram refused it: {}: {}",
+                error.code.as_deref().unwrap_or("no code"), error.message
             ))
         }
         // Any other answer, transient (a deadline, a busy or unavailable
