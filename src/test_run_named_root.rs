@@ -88,17 +88,17 @@ fn engram_named_root_claim_binding(
 /// The binding and pinned root of a run that `session_id` launched in the
 /// worktree with `worktree` keys, under the registration's authority `store`:
 /// those of the one named root that session named for that worktree in that
-/// store. With no store, no keys, no such entry, more than one, or no proven
-/// binding for its claim, the run stays unbound; the session's own binding,
-/// and which session or work has focus, never decide.
+/// store. Multiple entries refuse registration explicitly. With no store,
+/// no keys, no such entry, or no proven binding for its claim, the run stays
+/// unbound; the session's own binding and focus never decide.
 fn test_run_registration_named_binding(
     inner: &StateInner,
     session_id: &str,
     store: Option<&EngramAuthorityStoreKey>,
     worktree: Option<&TestRunWorktreeKeys>,
-) -> (Option<EngramControlWorkBinding>, Option<TestRunNamedRoot>) {
+) -> Result<(Option<EngramControlWorkBinding>, Option<TestRunNamedRoot>), ApiError> {
     let (Some(store), Some(worktree)) = (store, worktree) else {
-        return (None, None);
+        return Ok((None, None));
     };
     let mut matching = inner.engram_work_source_roots.iter().filter(|entry| {
         &entry.store == store
@@ -106,10 +106,22 @@ fn test_run_registration_named_binding(
             && entry.common_dir_key == worktree.common_dir
             && engram_exact_path_key(FsPath::new(&entry.root)) == worktree.root
     });
-    let (Some(entry), None) = (matching.next(), matching.next()) else {
-        return (None, None);
+    let Some(entry) = matching.next() else {
+        return Ok((None, None));
     };
-    match engram_named_root_claim_binding(&inner.engram_work_naming_history, entry) {
+    if let Some(other) = matching.next() {
+        // Keep both identities and the remedy inside the launcher's 384-character
+        // host-reason limit. No filesystem paths or arbitrary control text escape.
+        let identity = |value: &str| value.chars().take(48)
+            .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '?' })
+            .collect::<String>();
+        return Err(ApiError::conflict(format!(
+            "ambiguous named roots: work {} claim {} generation {}; work {} claim {} generation {}. Clear the earlier name or use separate worktrees.",
+            identity(&entry.work_id), identity(&entry.claim_id), entry.generation,
+            identity(&other.work_id), identity(&other.claim_id), other.generation,
+        )));
+    }
+    Ok(match engram_named_root_claim_binding(&inner.engram_work_naming_history, entry) {
         Some(binding) => (
             Some(binding),
             Some(TestRunNamedRoot {
@@ -118,7 +130,7 @@ fn test_run_registration_named_binding(
             }),
         ),
         None => (None, None),
-    }
+    })
 }
 
 /// An existing registration is immutable. A new one pins an off-lock held
@@ -159,7 +171,7 @@ impl AppState {
                 .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
                 .and_then(|project| project.engram.as_ref())
                 .and_then(|settings| settings.authority_store_key.clone());
-            let named = test_run_registration_named_binding(&inner, session_id, store.as_ref(), keys);
+            let named = test_run_registration_named_binding(&inner, session_id, store.as_ref(), keys)?;
             let named_fence = test_run_named_root_fence(&inner, session_id, store.as_ref(), named.1.as_ref());
             let target = if named.0.is_some() {
                 Some(Self::engram_source_root_target_locked(&inner, session_id)
@@ -223,7 +235,7 @@ impl TestRunCurrentNamedBinding {
             }
             Self::Fresh { store: expected_store, named, named_fence, current, target } => {
                 if expected_store.as_ref() != store
-                    || &test_run_registration_named_binding(inner, session_id, store, keys) != named
+                    || &test_run_registration_named_binding(inner, session_id, store, keys)? != named
                     || &test_run_named_root_fence(inner, session_id, store, named.1.as_ref()) != named_fence
                 {
                     return Err(ApiError::conflict("test run named root changed during its claim read"));

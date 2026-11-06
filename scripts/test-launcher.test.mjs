@@ -85,7 +85,7 @@ function writeNodeStandIn(path) {
 }
 const launcherScript = fileURLToPath(new URL("./test-launcher.mjs", import.meta.url));
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
-// Both private launcher copies must include its complete runtime dependency
+// Private launcher copies must include its complete runtime dependency
 // closure, including the native helpers selected only when a stage executes.
 const copiedLauncherFiles = Object.freeze([
   "test-launcher.mjs", "test-launcher-source.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
@@ -668,7 +668,7 @@ async function isolatedDetachedRepository(t, callback) {
   });
 }
 
-registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit });
+registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit, copiedLauncherFiles });
 registerLauncherLifecycleTests({ repository, stage, json });
 
 test("disk space native filesystem smoke reports capacity without imposing a threshold", () => {

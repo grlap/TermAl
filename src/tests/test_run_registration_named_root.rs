@@ -3,7 +3,7 @@
 // from the one named source root the launching session named for the run's
 // worktree, with that claim's current held binding, and pins
 // that root; that a stale session binding is never used for it; that such a
-// run in another worktree, or under two matching names, stays unbound; and
+// run in another worktree stays unbound, but two matching names refuse; and
 // that a staged-lane run keeps copying the session's binding; and that the
 // input kind joins the registration identity only when a request names one.
 // Uses the parent's run and registration fixtures. Does not own the
@@ -285,7 +285,7 @@ fn a_committed_input_run_without_a_matching_named_root_stays_unbound() {
 }
 
 #[test]
-fn a_committed_input_run_under_two_matching_named_roots_stays_unbound() {
+fn a_committed_input_run_under_two_matching_named_roots_reports_both_names() {
     let fixture = RunFixture::new("registration-named-root-two");
     let (session, store) = engram_owner(&fixture);
     let first = claim("first");
@@ -293,9 +293,66 @@ fn a_committed_input_run_under_two_matching_named_roots_stays_unbound() {
     name_root(&fixture, &store, &first, &session, &canonical_root(&fixture), 1);
     name_root(&fixture, &store, &second, &session, &canonical_root(&fixture), 2);
     set_session_binding(&fixture, &session, Some(first.clone()));
-    let registration = register_run(&fixture, &session, "test-named-root-two", true);
-    assert_eq!(registration.work_binding, None, "no pick by focus");
-    assert_eq!(registration.named_root, None);
+    let id = "test-named-root-two";
+    let directory = registered_run(&fixture, &session, id);
+    let path = directory.join("request.json");
+    let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    request["input"] = json!("commit");
+    fs::write(path, request.to_string()).unwrap();
+    let error = fixture.state.register_test_run(&session, registration_request(id, &directory))
+        .err().expect("focus cannot resolve two matching names");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    for reason in ["ambiguous", &first.work_id, &first.claim_id, "generation 1",
+        &second.work_id, &second.claim_id, "generation 2", "Clear the earlier name"] {
+        assert!(error.message.contains(reason), "{}", error.message);
+    }
+    assert!(!fixture.state.inner.lock().unwrap().test_run_registrations.contains_key(id));
+}
+
+#[test]
+fn committed_registration_refuses_ambiguity_added_during_its_held_read() {
+    let fixture = RunFixture::new("registration-ambiguity-during-read");
+    let (session, store) = engram_owner(&fixture);
+    let original = claim("original");
+    name_root(&fixture, &store, &original, &session, &canonical_root(&fixture), 1);
+    let keys = test_run_worktree_keys(&fixture.root).unwrap();
+    let clock = fixture.state.inner.lock().unwrap().engram_budget_clock_snapshot();
+    let mut diagnostics = TestRunRegistrationDiagnostics::new("fixture");
+    let prepared = fixture.state.read_test_run_current_named_binding(
+        &session, "test-ambiguity-race", Some(&keys), &clock,
+        test_run_registration_deadline(&clock, std::time::Instant::now()), &mut diagnostics).unwrap();
+    let second = claim("second");
+    name_root(&fixture, &store, &second, &session, &canonical_root(&fixture), 2);
+    let inner = fixture.state.inner.lock().unwrap();
+    let error = prepared.resolve_locked(&inner, &session, Some(&store), Some(&keys)).unwrap_err();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("ambiguous named roots"), "{}", error.message);
+    for identity in [&original.work_id, &original.claim_id, &second.work_id, &second.claim_id] {
+        assert!(error.message.contains(identity), "{}", error.message);
+    }
+    assert!(!inner.test_run_registrations.contains_key("test-ambiguity-race"));
+}
+
+#[test]
+fn registration_ambiguity_reason_is_bounded_and_keeps_the_remedy() {
+    let fixture = RunFixture::new("registration-ambiguity-reason");
+    let (session, store) = engram_owner(&fixture);
+    name_root(&fixture, &store, &claim("first"), &session, &canonical_root(&fixture), 1);
+    name_root(&fixture, &store, &claim("second"), &session, &canonical_root(&fixture), 2);
+    let keys = test_run_worktree_keys(&fixture.root).unwrap();
+    let mut inner = fixture.state.inner.lock().unwrap();
+    for entry in &mut inner.engram_work_source_roots {
+        entry.work_id = format!("work-{}", "x\n\u{1b}雪".repeat(1000));
+        entry.claim_id = format!("claim-{}", "y\r\u{1b}雪".repeat(1000));
+        entry.generation = u64::MAX;
+    }
+    let error = test_run_registration_named_binding(&inner, &session, Some(&store), Some(&keys)).unwrap_err();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.is_ascii());
+    assert!(error.message.len() <= 384, "{}", error.message.len());
+    assert!(!error.message.chars().any(char::is_control));
+    assert_eq!(error.message.matches("generation 18446744073709551615").count(), 2);
+    assert!(error.message.ends_with("Clear the earlier name or use separate worktrees."));
 }
 
 #[test]

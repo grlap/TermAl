@@ -36,8 +36,77 @@ fn advance_held_fence(turn: &EOCheckedTurn, label: &str) -> EngramHeldClaims {
 }
 
 #[test]
+fn naming_one_worktree_for_a_second_claim_reports_registration_ambiguity() {
+    let label = "reg-two-names";
+    let turn = EOCheckedTurn::idle(label, true);
+    let path = naming_worktree(&turn.root);
+    let mut held = naming_claim(label);
+    let first_claim = held.items[0].clone();
+    let first = request_naming(&turn, label, Some(&path), vec![held.clone()]).unwrap();
+    let request = registration_request_for(&turn, &path, "test-before-second-name");
+    turn.state.register_test_run(&turn.session_id, request).unwrap();
+    let original = turn.state.inner.lock().unwrap()
+        .test_run_registrations["test-before-second-name"].clone();
+    assert_eq!(original.work_binding.as_ref(), first_claim.control_binding.as_ref());
+
+    let second_binding = test_control_work_binding("second-reg", 1);
+    held.items.push(EngramHeldClaim {
+        work_id: second_binding.work_id.clone(), short_ref: "w-second-reg".to_owned(),
+        claim_id: second_binding.claim_id.clone(), claim_fence: second_binding.claim_fence,
+        focused: false, control_binding: Some(second_binding.clone()),
+    });
+    turn.transport.replace_held_claims([Ok(held.clone())]);
+    turn.transport.register_named_root_run(&second_binding);
+    let second = turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
+        work: "w-second-reg".to_owned(), path: Some(Some(path.to_string_lossy().into_owned())),
+    }).unwrap();
+    assert_ne!(first.generation, second.generation);
+    assert_eq!(turn.state.inner.lock().unwrap().engram_work_source_roots.len(), 2);
+
+    // Replaying an already admitted request preserves its original association.
+    let replay = registration_request_for(&turn, &path, "test-before-second-name");
+    turn.state.register_test_run(&turn.session_id, replay).unwrap();
+    assert_eq!(turn.state.inner.lock().unwrap()
+        .test_run_registrations["test-before-second-name"].work_binding, original.work_binding);
+
+    // Neither the current session binding nor focus may silently pick a name.
+    for (index, binding) in [None, first_claim.control_binding.clone(), Some(second_binding.clone())]
+        .into_iter().enumerate()
+    {
+        turn.record_mut(|record| record.engram.work_binding = binding);
+        let id = format!("test-ambiguous-name-{index}");
+        let request = registration_request_for(&turn, &path, &id);
+        let error = turn.state.register_test_run(&turn.session_id, request)
+            .err().expect("two retained names must not produce a silently unbound registration");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(error.message.contains("ambiguous"), "{error:?}");
+        for (work, claim, generation) in [
+            (&first_claim.work_id, &first_claim.claim_id, first.generation),
+            (&second_binding.work_id, &second_binding.claim_id, second.generation),
+        ] {
+            assert!(error.message.contains(work), "{error:?}");
+            assert!(error.message.contains(claim), "{error:?}");
+            assert!(error.message.contains(&format!("generation {generation}")), "{error:?}");
+        }
+        assert!(!turn.state.inner.lock().unwrap().test_run_registrations.contains_key(&id));
+    }
+
+    // The supported own-clear removes only the earlier name. The remaining
+    // single entry registers normally without relabelling the original run.
+    request_naming(&turn, label, None, vec![held]).unwrap();
+    let request = registration_request_for(&turn, &path, "test-after-earlier-clear");
+    turn.state.register_test_run(&turn.session_id, request).unwrap();
+    let inner = turn.state.inner.lock().unwrap();
+    let current = &inner.test_run_registrations["test-after-earlier-clear"];
+    assert_eq!(current.work_binding.as_ref(), Some(&second_binding));
+    assert_eq!(current.named_root.as_ref().unwrap().generation, second.generation);
+    assert_eq!(serde_json::to_value(&inner.test_run_registrations["test-before-second-name"]).unwrap(),
+        serde_json::to_value(original).unwrap());
+}
+
+#[test]
 fn same_root_refresh_allows_current_fence_registration_without_rewriting_history() {
-    let label = "registration-refresh-current-fence";
+    let label = "reg-current-fence";
     let turn = EOCheckedTurn::idle(label, true);
     let path = naming_worktree(&turn.root);
     let named = request_naming(&turn, label, Some(&path), vec![naming_claim(label)]).unwrap();

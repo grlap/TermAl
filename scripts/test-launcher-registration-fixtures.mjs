@@ -2,9 +2,9 @@
 // Owns the held host acknowledgement and execution barriers; it does not own
 // registration, run indexing, credit, or restart policy in the product.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { basename, join, relative } from "node:path";
 import test from "node:test";
@@ -186,7 +186,51 @@ async function refusedLaunch(root, env, detached, workerExit) {
   assertNoExecution(root, runDir);
 }
 
-export function registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit }) {
+export function registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit, copiedLauncherFiles }) {
+  test("ambiguous named roots print both identities and refuse the committed launcher before execution", async (t) => {
+    await repository(t, async (root, env) => {
+      const scripts = join(root, "scripts");
+      mkdirSync(scripts);
+      for (const name of copiedLauncherFiles) {
+        copyFileSync(new URL(name, import.meta.url), join(scripts, name));
+      }
+      execFileSync("git", ["add", "--", "scripts"], { cwd: root, env });
+      execFileSync("git", ["commit", "--quiet", "--no-gpg-sign", "-m", "launcher fixture"], { cwd: root, env });
+      const identities = [
+        "work 11111111-1111-4111-8111-111111111111 claim 22222222-2222-4222-8222-222222222222 generation 18446744073709551614",
+        "work 33333333-3333-4333-8333-333333333333 claim 44444444-4444-4444-8444-444444444444 generation 18446744073709551615",
+      ];
+      const reason = `ambiguous named roots: ${identities.join("; ")}. Clear the earlier name or use separate worktrees.`;
+      assert.ok(reason.length <= 384, "both real-sized identities and the remedy survive the host-reason limit");
+      await registrationHost(async (host) => {
+        const { code, output } = await new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, [join(scripts, "test-launcher.mjs"),
+            "focused", "--input", "commit", "--", process.execPath, "-e",
+            "require('node:fs').writeFileSync('stage-after-registration-error', 'ran')"], {
+            cwd: root, env: { ...env, TERMAL_BASE_URL: host.url },
+            stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+          });
+          let output = "";
+          child.stdout.on("data", (chunk) => { output += chunk; });
+          child.stderr.on("data", (chunk) => { output += chunk; });
+          child.once("error", reject);
+          child.once("close", (code) => resolve({ code, output }));
+        });
+        assert.equal(code, 1, output);
+        assert.match(output, /FAIL launcher:.*POST HTTP 409/u);
+        assert.ok(output.includes(reason), output);
+        assert.equal(host.requests.length, 1, "an explicit ambiguity never retries registration");
+        assert.equal(host.queries.length, 0);
+        const runDir = host.requests[0].body.runDirectory;
+        assert.equal(JSON.parse(readFileSync(join(runDir, "request.json"), "utf8")).input, "commit");
+        assertNoExecution(root, runDir);
+        const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+        assert.equal(result.state, "failed");
+        assert.ok(result.error.includes(reason), result.error);
+      }, { status: 409, autoAcknowledge: true, errorReason: reason });
+    });
+  });
+
   async function pendingRepository(t, callback) {
     // Respect the maintained wrapper when present. A plain, filtered Node
     // invocation needs no environment prefix or writes to the OS temp folder.
