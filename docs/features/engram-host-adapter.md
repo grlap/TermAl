@@ -81,7 +81,7 @@ A handoff marker that an earlier build saved on a queue head means, after a
 restart, that provider delivery is unknown; Resume does not make that row
 replayable. The primary reader floor `2-metadata-units-2-handoff-1` protects
 this meaning from older readers. The current joint floor
-`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`
+`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1`
 migrates supported predecessors through units-2 and handoff-1 in one
 transaction, preserving session JSON, authority and retained records.
 Unsupported numeric drafts and unknown floors are refused before recovery or
@@ -3258,7 +3258,7 @@ An inactive original checkpoint may outlive explicit local session or project
 removal and settings changes, including a same-store re-enable. Those
 administrative actions preserve its complete immutable request and report in
 mandatory metadata; they do not confirm settlement. The joint
-`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`
+`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1`
 reader floor keeps these records in mandatory metadata outside session rows.
 Its `entries` and `checkpointOperations` collections are mandatory known
 fields, with explicit empty collections representing no retained operation.

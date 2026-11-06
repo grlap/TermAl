@@ -102,6 +102,7 @@ fn every_metadata_collection_mutable_borrow_marks_its_field() {
     check!(test_run_observations, "testRunObservations", store);
     check!(test_run_compacted, "testRunCompacted", store);
     check!(test_run_waits, "testRunWaits");
+    check!(remote_test_run_facts, "remoteTestRunFacts");
     check!(workspace_layouts, "workspaceLayouts");
 
     let fixture = FenceFixture::new();

@@ -159,7 +159,7 @@ quarantine set so a later synchronous full-snapshot persistence fallback does
 not misinterpret the isolated row as a user deletion; the original SQLite row
 stays available for recovery or inspection.
 
-`meta.schema_version` is `2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`, and
+`meta.schema_version` is `2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1`, and
 `meta.prompt_history_storage_version` is `1`. Existing databases must contain
 all required tables above, but may retain unrelated tables from earlier development
 builds. Each required table must have exactly the column set shown above,
@@ -185,6 +185,13 @@ effects. Existing unrelated unit rows and normalized session bytes survive
 unchanged; adding the ledger advances the metadata generation. A failed floor
 write rolls back unit rows, generation and every header transition together.
 The units-2, handoff and outbox-only readers refuse the joint marker before mutation.
+The native-completion extension adds a mandatory empty `remoteTestRunFacts`
+descriptor and one metadata generation, without adopting old registrations.
+An activated import predecessor advances directly to the matching
+`-native-test-completion-1-import-reconciliation-1` floor with its raw journal
+unchanged. Ordinary migration never activates import reconciliation. The
+[metadata migration contract](persistence-metadata-units.md) defines raw-key
+refusal and atomic rollback across these ordered steps.
 The checkpoint-result-1 inventory also includes preservation of existing
 pending-batch session fields when their producer, Test input, source and target
 fences belong to one validated canonical original. Whole-state recovery stages

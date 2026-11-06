@@ -9,7 +9,10 @@ fn predecessor() -> rusqlite::Connection {
     seed_current_state_core_tables(&connection);
     seed_current_state_auxiliary_tables(&connection);
     seed_current_state_metadata(&connection);
+    assert_eq!(read_persisted_metadata_field(&connection, "remoteTestRunFacts").unwrap(), Some(json!({})),
+        "a historical specimen cannot discard native completion custody");
     connection.execute("DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations'", []).unwrap();
+    assert_eq!(connection.execute("DELETE FROM state_metadata_units WHERE field_name='remoteTestRunFacts'", []).unwrap(), 1);
     connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [PREDECESSOR]).unwrap();
     connection
 }
@@ -18,13 +21,17 @@ fn predecessor() -> rusqlite::Connection {
 fn unadmitted_runtime_reporting_storage_upgrades_exact_predecessor_before_new_custody() {
     let connection = predecessor();
     let mut metadata = read_metadata_units_unchecked(&connection).unwrap();
-    metadata.extend(metadata_value_to_units(json!({"engramSessionObligations": EngramSessionObligationLedger::empty()})).unwrap());
+    metadata.extend(metadata_value_to_units(json!({
+        "engramSessionObligations": EngramSessionObligationLedger::empty(),
+        "remoteTestRunFacts": {}
+    })).unwrap());
     let generation = metadata_unit_generation(&connection).unwrap();
     ensure_sqlite_state_schema_for_load(&connection).unwrap();
     assert_eq!(required_state_meta_value(&connection, "schema_version").unwrap(), SUCCESSOR);
     assert_eq!(SQLITE_SCHEMA_VERSION, SUCCESSOR);
     assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), metadata);
-    assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
+    assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 2,
+        "obligation and native completion extensions each advance the generation");
     ensure_sqlite_state_schema_for_load(&connection).unwrap();
 }
 
@@ -89,13 +96,17 @@ fn unadmitted_review_predecessor_upgrade_keeps_ignored_legacy_mailboxes() {
         connection.execute_batch("CREATE TABLE mailboxes(id TEXT PRIMARY KEY);
             INSERT INTO mailboxes VALUES('obsolete-but-retained');").unwrap();
         let mut metadata = read_metadata_units_unchecked(&connection).unwrap();
-        metadata.extend(metadata_value_to_units(json!({"engramSessionObligations": EngramSessionObligationLedger::empty()})).unwrap());
+        metadata.extend(metadata_value_to_units(json!({
+            "engramSessionObligations": EngramSessionObligationLedger::empty(),
+            "remoteTestRunFacts": {}
+        })).unwrap());
         let generation = metadata_unit_generation(&connection).unwrap();
         ensure_sqlite_state_schema_for_load(&connection)
             .expect("a supported predecessor's ignored legacy table must not prevent upgrade");
         assert_eq!(required_state_meta_value(&connection, "schema_version").unwrap(), SUCCESSOR);
         assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), metadata);
-        assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
+        assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 2,
+            "obligation and native completion extensions each advance the generation");
         assert_eq!(connection.query_row("SELECT id FROM mailboxes", [], |row| row.get::<_, String>(0)).unwrap(),
             "obsolete-but-retained");
     }

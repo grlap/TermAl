@@ -10,16 +10,37 @@ thread_local! {
     // Post-publication contention schedule; neither hook supplies durability.
     static TEST_TEST_RUN_REGISTRATION_PUBLISHED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     static TEST_TEST_RUN_REGISTRATION_NEXT_LOCK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    // Schedule a scanner after durable identity readback, before the ACK CAS.
+    static TEST_TEST_RUN_REGISTRATION_RECHECKED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn test_run_timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+/// Native provenance captured by the registration owner. A later observer
+/// cannot adopt an old run into a replacement host or session. This is not
+/// a destination binding, remote completion or verification qualification.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TestRunNativeOrigin {
+    host: FederationHostIdentity,
+    native_session_id: String,
+    native_creation_id: String,
+    project_id: String,
+    /// Logical project identity already validated by the existing Engram
+    /// connection owner. Never send its host-private database path.
+    project_scope: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct TestRunRegistration {
     run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    native_origin: Option<TestRunNativeOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    native_completion: Option<TestRunNativeCompletion>,
     #[serde(default)]
     project_id: Option<String>,
     run_directory: String,
@@ -57,6 +78,22 @@ struct TestRunRegistration {
     // informational mirror and never stands in for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     verification_record: Option<TestRunVerificationAck>,
+}
+
+impl TestRunRegistration {
+    // A scan may append its original native terminal while an identity read
+    // or registration ACK is off-lock. That append does not supersede the
+    // acknowledged registration. Every other field, and any completion already
+    // present in the snapshot, must still match. Full equality remains required
+    // for publishing a durable completion and retiring its compaction custody.
+    fn matches_registration_snapshot(&self, expected: &Self) -> bool {
+        if expected.native_completion.is_some() {
+            return self == expected;
+        }
+        let mut identity = self.clone();
+        identity.native_completion = None;
+        &identity == expected
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -611,6 +648,17 @@ impl AppState {
             };
             let registration = TestRunRegistration {
                 run_id: request.run_id.clone(),
+                native_completion: None,
+                native_origin: inner.federation.local.as_ref()
+                    .filter(|host| host.validate().is_ok())
+                    .filter(|_| mailbox_relay_uuid(&inner.sessions[index].federation_native_creation_id))
+                    .map(|host| TestRunNativeOrigin {
+                        host: host.clone(),
+                        native_session_id: session_id.to_owned(),
+                        native_creation_id: inner.sessions[index].federation_native_creation_id.clone(),
+                        project_id: project.id.clone(),
+                        project_scope: authority_store.as_ref().map(|store| store.project_id.clone()),
+                    }),
                 project_id: Some(project.id.clone()),
                 run_directory: test_run_display_path(&run_directory),
                 locator_identity: disk.locator_identity.clone(),
@@ -786,10 +834,15 @@ impl AppState {
         if test_run_registration_identity(&current)? != expected.request_identity {
             return Err(ApiError::conflict("test run request changed before acknowledgement"));
         }
+        #[cfg(test)]
+        TEST_TEST_RUN_REGISTRATION_RECHECKED.with(|slot| {
+            if let Some(step) = slot.borrow_mut().take() { step(); }
+        });
         diagnostics.enter("publish_registration");
         let acknowledgement = {
             let mut inner = diagnostics.lock(&self.inner);
-            if inner.test_run_registrations.get(&request.run_id) != Some(&expected) {
+            if !inner.test_run_registrations.get(&request.run_id)
+                .is_some_and(|actual| actual.matches_registration_snapshot(&expected)) {
                 return Err(ApiError::conflict(
                     "test run registration changed before acknowledgement",
                 ));

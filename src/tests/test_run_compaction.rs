@@ -26,7 +26,7 @@ fn fill_safe(fixture: &RunFixture, session: &str, count: usize) {
 // unrelated terminal history with genuine unbound command observations under
 // a fresh owner while that project's integration is absent. Restore the
 // connection metadata afterwards; no native association or receipt is changed.
-fn fill_unbound_history(fixture: &RunFixture, count: usize) {
+pub(super) fn fill_unbound_history(fixture: &RunFixture, count: usize) {
     let settings = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let settings = inner.projects.iter_mut().find(|project| project.id == fixture.project_id)

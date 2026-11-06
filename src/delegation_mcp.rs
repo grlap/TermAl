@@ -1756,7 +1756,14 @@ impl TermalDelegationMcpBridge {
     /// (docs/features/test-runs.md, run waits): a wait never mixes
     /// delegations and runs.
     fn tool_resume_after_test_runs(&self, arguments: Value) -> Result<Value> {
-        let run_ids = required_path_identifier_array(arguments.get("runIds"), "runIds")?;
+        let array = arguments.get("runIds").and_then(Value::as_array)
+            .context("runIds must be an array")?;
+        let run_ids = array.iter().map(|value| {
+            let reference = required_string(Some(value), "runIds")?;
+            if remote_test_run_reference(&reference).map_err(|error| anyhow!(error.message))?.is_some() {
+                Ok(reference)
+            } else { required_path_identifier(Some(value), "runIds") }
+        }).collect::<Result<Vec<_>>>()?;
         let mut body = serde_json::Map::new();
         body.insert(
             "runIds".to_owned(),
@@ -2916,7 +2923,7 @@ fn mcp_tools_list_result() -> Value {
 fn test_run_wait_tool_definition() -> Value {
     json!({
         "name": "termal_resume_after_test_runs",
-        "description": "Schedule a durable TermAl backend resume wait for test-launcher runs in this session's project (1 to 16 run ids, from the RUN or STARTED receipt of scripts/test-launcher.mjs). End your turn after it returns; TermAl resumes this session with one bounded result per run when they settle. A run not yet indexed is found by one forced rescan; runs already settled resume at once.",
+        "description": "Schedule a durable TermAl backend resume wait for test-launcher runs in this session's project (1 to 16 references, from RUN or STARTED). Bare run ids are local; host:<origin host UUID>::<native run id> observes an explicitly remote run through the authenticated native relay and matching validated logical project scope. Remote paths are never indexed locally. Missing or Unknown native facts remain pending; observed remote results grant no verification credit. Keep --notify END mail as the older-host/delivery fallback. End your turn after registration; TermAl resumes this session once when the wait settles. Local index lag uses one forced rescan.",
         "inputSchema": {
             "type": "object",
             "required": ["runIds"],

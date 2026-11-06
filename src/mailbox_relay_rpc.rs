@@ -184,6 +184,11 @@ impl AppState {
         authenticated_origin: &FederationHostIdentity,
     ) -> Result<Value, ApiError> {
         let value = match operation {
+            MailboxRelayOperation::ObserveTestRun { actor, project_scope, run_id } => {
+                serde_json::to_value(self.read_remote_test_run_origin(
+                    &actor, &project_scope, &run_id, lease, authenticated_origin,
+                )?)
+            }
             MailboxRelayOperation::Describe { native_session_id } => {
                 let descriptor = self.native_mailbox_relay_descriptor(&native_session_id)?;
                 let authority = MailboxRelayAuthority {

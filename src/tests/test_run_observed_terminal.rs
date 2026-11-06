@@ -3,9 +3,9 @@
 // terminal-history regressions; does not run providers or award verification.
 use super::*;
 
-const LAUNCH: &str = "node scripts/test-launcher.mjs full";
+pub(super) const LAUNCH: &str = "node scripts/test-launcher.mjs full";
 
-fn start(fixture: &RunFixture, session: &str, key: &str, command: &str) -> String {
+pub(super) fn start(fixture: &RunFixture, session: &str, key: &str, command: &str) -> String {
     fixture.state.note_engram_command_started(
         session,
         &EngramObservationProvenance::Ambient,
@@ -26,7 +26,7 @@ fn start(fixture: &RunFixture, session: &str, key: &str, command: &str) -> Strin
         .clone()
 }
 
-fn launcher(fixture: &RunFixture, session: &str) -> (String, PathBuf) {
+pub(super) fn launcher(fixture: &RunFixture, session: &str) -> (String, PathBuf) {
     let id = format!("test-{}", Uuid::new_v4());
     let mut request = full_request(
         &fs::canonicalize(&fixture.root).unwrap(),
@@ -47,7 +47,7 @@ fn launcher(fixture: &RunFixture, session: &str) -> (String, PathBuf) {
     (id, directory)
 }
 
-fn finish_artifact(directory: &FsPath, id: &str, success: bool) {
+pub(super) fn finish_artifact(directory: &FsPath, id: &str, success: bool) {
     let mut results = passed_results();
     results["runId"] = json!(id);
     results["ended"] = json!(test_run_timestamp());
@@ -60,7 +60,7 @@ fn finish_artifact(directory: &FsPath, id: &str, success: bool) {
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
 }
 
-fn assert_no_credit(fixture: &RunFixture) {
+pub(super) fn assert_no_credit(fixture: &RunFixture) {
     let inner = fixture.state.inner.lock().unwrap();
     assert!(
         inner

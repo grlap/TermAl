@@ -36,7 +36,9 @@ const SQLITE_METADATA_UNITS_VERSION: &str = "2-metadata-units-2";
 const SQLITE_OBSERVATION_PREDECESSOR: &str = "2-metadata-units-2-handoff-1";
 const SQLITE_OBSERVATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1";
 const SQLITE_CHECKPOINT_RESULT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1";
-const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1";
+const SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1";
+const SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-import-reconciliation-1";
+const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
@@ -1023,6 +1025,7 @@ fn load_state_for_boot(
 include!("persist_metadata_units.rs");
 include!("persist_sqlite_schema.rs");
 include!("persist_sqlite_obligations.rs");
+include!("persist_native_test_completion.rs");
 
 include!("persist_sqlite_overview.rs");
 include!("persist_sqlite_messages.rs");

@@ -815,7 +815,7 @@ startup failure boundaries: a malformed record is reported and skipped rather
 than aborting the process and hiding every healthy session. The primary state
 database must use the current normalized authority: all required state
 tables with their canonical column sets,
-`schema_version=2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`,
+`schema_version=2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1`,
 `prompt_history_storage_version=1`, and no metadata-embedded session,
 delegation, or prompt-history records. Unrelated extra tables are tolerated.
 Metadata units must pass complete inventory, kind, member-count and typed
@@ -828,6 +828,10 @@ initialization and supported predecessor migration install it atomically;
 missing safety metadata in an already-current store is refused. Migration
 preserves retained legacy uncertainty and cannot reconstruct a missing old
 checkpoint request or prove remote settlement from absent history.
+The native-completion extension requires the `remoteTestRunFacts` descriptor
+and preserves an already activated import journal under the corresponding
+`-import-reconciliation-1` successor. It does not activate an ordinary store;
+see [metadata migration](features/persistence-metadata-units.md).
 Only the five columns added by retained
 message-overview and response-board maintenance may initially be absent;
 unexpected columns reject, and the post-maintenance shape must be canonical.

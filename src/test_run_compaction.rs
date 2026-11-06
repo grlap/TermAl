@@ -423,6 +423,9 @@ impl AppState {
             inner.test_run_registrations.get(id).is_none_or(|actual| {
                 let mut actual = actual.clone();
                 actual.stage_names.clear();
+                // Unlike an identity read, retirement requires the complete
+                // retained evidence in the durable survivor. A newly appended
+                // native completion defers retirement until that copy is saved.
                 actual != *row
             })
         }) {

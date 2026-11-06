@@ -51,7 +51,12 @@ fn test_run_exact_query(
         changed();
     }
     let inner = diagnostics.lock(&state.inner);
-    if inner.test_run_registrations.get(run_id) != registration.as_ref()
+    let same_registration = match (inner.test_run_registrations.get(run_id), registration.as_ref()) {
+        (Some(actual), Some(expected)) => actual.matches_registration_snapshot(expected),
+        (None, None) => true,
+        _ => false,
+    };
+    if !same_registration
         || inner.test_runs.registered.contains(run_id) != durable
     {
         return Err(ApiError::conflict("test run registration changed during query; retry"));

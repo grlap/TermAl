@@ -104,7 +104,8 @@ fn registered_check_notices_locked(
         { continue; }
         let rows = notice.runs.iter().filter(|(run, _)|
             inner.test_runs.registered.contains(&run.run_id)
-                && inner.test_run_registrations.get(&run.run_id) == Some(run)).collect::<Vec<_>>();
+                && inner.test_run_registrations.get(&run.run_id)
+                    .is_some_and(|actual| actual.matches_registration_snapshot(run))).collect::<Vec<_>>();
         let exact = notice.observation.as_ref().filter(|row|
             inner.test_run_observations.get(&row.execution_id) == Some(*row))
             .and_then(|row| row.artifact.as_ref()).and_then(|artifact| {

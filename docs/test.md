@@ -509,12 +509,22 @@ Git common directory. Select the clone's own local project and native session.
 Other invalid or redirected paths can produce the same refusal; the message
 alone does not identify which binding or path was wrong.
 
-This is origin-host registration, not remote verification credit or Central
-wait support. After correct registration, the origin host's own index and
-on-host wait can see the run. A wait on Central or another host cannot discover
-it through that host's local index. Until host-qualified remote waits are
-supported, use the existing completion mailbox notice through `--notify` to a
-different coordinator (see [detached gate delivery](#detached-gate-delivery)).
+This is origin-host registration, not remote verification credit. The origin
+host's index and on-host wait can see the run. A coordinator can also register
+a wait using `host:<origin host UUID>::<native run id>`; a bare id remains local
+and never searches other hosts. Both hosts must support native completion
+observations over their existing authenticated relay, and both projects need
+the same logical project key already validated by their Engram connection.
+The wait needs neither a local run directory nor a preissued job or mailbox
+request. Missing registration, project association or native terminal facts
+remain pending; a remote path or raw `results.json` cannot supply a success.
+The origin retains the completion only through its existing registration and
+positively correlated native execution settlement. These remote observations
+are explicitly uncredited; remote verification admission is a separate contract.
+
+Keep the existing completion mailbox notice through `--notify` to a different
+coordinator as the fallback for older hosts or unavailable completion delivery
+(see [detached gate delivery](#detached-gate-delivery)).
 Keep the runner's original inherited `TERMAL_SESSION_ID`; do not create a
 registration on another host or relaunch the run to make it appear in that index.
 

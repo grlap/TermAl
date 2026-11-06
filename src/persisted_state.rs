@@ -95,6 +95,8 @@ struct PersistedState {
     test_run_compacted: PersistTracked<BTreeMap<String, TestRunCompacted>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     test_run_waits: PersistTracked<Vec<TestRunWaitRecord>>,
+    #[serde(default)]
+    remote_test_run_facts: PersistTracked<BTreeMap<String, RemoteTestRunFacts>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     workspace_layouts: PersistTracked<BTreeMap<String, WorkspaceLayoutDocument>>,
     sessions: Vec<PersistedSessionRecord>,
@@ -156,6 +158,7 @@ impl PersistedState {
             "testRunObservations" => self.test_run_observations.stamp(),
             "testRunCompacted" => self.test_run_compacted.stamp(),
             "testRunWaits" => self.test_run_waits.stamp(),
+            "remoteTestRunFacts" => self.remote_test_run_facts.stamp(),
             "workspaceLayouts" => self.workspace_layouts.stamp(),
             _ => return None,
         })
@@ -284,6 +287,7 @@ impl PersistedState {
             test_run_observations: collection!("testRunObservations", &inner.test_run_observations,),
             test_run_compacted: collection!("testRunCompacted", &inner.test_run_compacted,),
             test_run_waits: collection!("testRunWaits", &inner.test_run_waits),
+            remote_test_run_facts: collection!("remoteTestRunFacts", &inner.remote_test_run_facts),
             workspace_layouts: collection!("workspaceLayouts", &inner.workspace_layouts,),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: inner.quarantined_persisted_session_ids.clone(),
@@ -373,6 +377,7 @@ impl PersistedState {
             test_run_observations: self.test_run_observations.snapshot_clone(),
             test_run_compacted: self.test_run_compacted.snapshot_clone(),
             test_run_waits: self.test_run_waits.snapshot_clone(),
+            remote_test_run_facts: self.remote_test_run_facts.snapshot_clone(),
             workspace_layouts: self.workspace_layouts.snapshot_clone(),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: self.quarantined_persisted_session_ids.clone(),
@@ -610,6 +615,7 @@ impl PersistedState {
                 })
                 .collect(),
             test_run_waits: self.test_run_waits.into(),
+            remote_test_run_facts: self.remote_test_run_facts.into(),
             delegation_waits: self.delegation_waits.into(),
             delegation_mutation_stamps: BTreeMap::new(),
             delegation_catalog_children: Mutex::new(delegation_catalog_children),

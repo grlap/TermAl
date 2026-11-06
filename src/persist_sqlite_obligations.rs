@@ -201,6 +201,10 @@ fn prepare_sqlite_obligation_reader_floor(
     for_load: bool,
 ) -> Result<Option<PersistedState>> {
     let (_, version) = sqlite_state_schema_header(connection)?;
+    if matches!(version.as_str(), SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
+        | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR) {
+        return prepare_sqlite_native_test_completion_reader_floor(connection, for_load);
+    }
     if version == SQLITE_CHECKPOINT_RESULT_PREDECESSOR {
         return prepare_sqlite_checkpoint_result_reader_floor(connection, for_load);
     }
@@ -225,6 +229,7 @@ fn prepare_sqlite_obligation_reader_floor(
             .context("failed to begin joint state reader-floor migration")?;
     let (actual_tables, mut version) = sqlite_state_schema_header(&transaction)?;
     if is_sqlite_obligation_predecessor(&version) {
+        reject_unversioned_native_test_custody(&transaction, &version)?;
         let known = CURRENT_SQLITE_STATE_TABLE_COLUMNS.iter()
             .map(|(name, _)| (*name).to_owned()).collect::<BTreeSet<_>>();
         // Keep the landed ignored coordination-table exception; other unknown
@@ -278,6 +283,7 @@ fn prepare_sqlite_obligation_reader_floor(
             let typed =
                 previous.unwrap_or_else(|| PersistedState::metadata_from_inner(&StateInner::new()));
             let mut complete = metadata_units_to_value(&project_metadata_units(&typed)?)?;
+            complete.as_object_mut().unwrap().remove("remoteTestRunFacts");
             complete
                 .as_object_mut()
                 .unwrap()
@@ -323,6 +329,7 @@ fn prepare_sqlite_obligation_reader_floor(
             // this branch. Its full current inventory is installed atomically.
             desired =
                 project_metadata_units(&PersistedState::metadata_from_inner(&StateInner::new()))?;
+            desired.retain(|(field, _), _| field != "remoteTestRunFacts");
         } else {
             validate_metadata_unit_inventory_for_floor(&desired, false)?;
             // Extend the raw map: unrelated rows remain byte exact.
@@ -330,7 +337,7 @@ fn prepare_sqlite_obligation_reader_floor(
                 "engramSessionObligations": EngramSessionObligationLedger::empty()
             }))?);
         }
-        validate_metadata_unit_inventory(&desired)?;
+        validate_metadata_unit_inventory_for_floor(&desired, true)?;
         let prospective: PersistedState =
             serde_json::from_value(metadata_units_to_value(&desired)?)
                 .map_err(reject_invalid_persisted_state_metadata_shape)?;
@@ -352,11 +359,12 @@ fn prepare_sqlite_obligation_reader_floor(
             "INSERT INTO meta(key,value) VALUES('metadata_units_generation',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             [generation.to_string()],
         )?;
-        advance_sqlite_reader_floor(&transaction, &version, SQLITE_SCHEMA_VERSION)?;
+        advance_sqlite_reader_floor(&transaction, &version, SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR)?;
     } else {
         // A concurrent opener may have finished the whole ordered migration.
         validate_current_sqlite_state_schema(&transaction)?;
     }
+    advance_sqlite_native_test_completion_reader_floor(&transaction)?;
     validate_current_sqlite_state_schema(&transaction)?;
     let persisted = if for_load {
         validate_no_legacy_embedded_state(&transaction)?
@@ -373,13 +381,15 @@ fn prepare_sqlite_obligation_reader_floor(
 
 // This successor changes only the understood result vocabulary. The complete
 // old ledger and safety mirrors are validated under the locked old header;
-// their raw units, session rows and metadata generation are never rewritten.
+// their raw units and session rows are never rewritten. The following native
+// completion extension advances the generation in the same transaction.
 fn prepare_sqlite_checkpoint_result_reader_floor(connection: &rusqlite::Connection,
     for_load: bool) -> Result<Option<PersistedState>> {
     let transaction = rusqlite::Transaction::new_unchecked(connection,
         rusqlite::TransactionBehavior::Immediate)?;
     let version = required_state_meta_value(&transaction, "schema_version")?;
     if version == SQLITE_CHECKPOINT_RESULT_PREDECESSOR {
+        reject_unversioned_native_test_custody(&transaction, &version)?;
         validate_sqlite_state_schema_for_version(&transaction, &version)?;
         let previous = validate_no_legacy_embedded_state(&transaction)?
             .ok_or_else(|| reject_unsupported_state_schema("missing predecessor obligation metadata"))?;
@@ -393,10 +403,11 @@ fn prepare_sqlite_checkpoint_result_reader_floor(connection: &rusqlite::Connecti
             }) {
             return Err(reject_unsupported_state_schema("checkpoint Refused result under predecessor floor"));
         }
-        advance_sqlite_reader_floor(&transaction, &version, SQLITE_SCHEMA_VERSION)?;
+        advance_sqlite_reader_floor(&transaction, &version, SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR)?;
     } else {
         validate_current_sqlite_state_schema(&transaction)?;
     }
+    advance_sqlite_native_test_completion_reader_floor(&transaction)?;
     validate_current_sqlite_state_schema(&transaction)?;
     let persisted = if for_load { validate_no_legacy_embedded_state(&transaction)? }
         else { validate_sqlite_obligation_metadata(&transaction)?; None };

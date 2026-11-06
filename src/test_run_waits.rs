@@ -38,6 +38,8 @@ type TestRunWaitMode = DelegationWaitMode;
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TestRunWaitRunLabel {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote: Option<RemoteTestRunWaitLabel>,
     run_id: String,
     run_dir: String,
     preset: TestRunPreset,
@@ -135,6 +137,7 @@ enum TestRunWaitVerdict {
     Fail,
     Unknown(TestRunCardUnknownReason),
     UnknownRegistration(TestRunWaitRegistrationUnknownReason),
+    RemoteConflict,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,6 +216,7 @@ fn test_run_wait_verdict_label(verdict: Option<TestRunWaitVerdict>) -> String {
     match verdict {
         Some(TestRunWaitVerdict::Pass) => "PASS".to_owned(),
         Some(TestRunWaitVerdict::Fail) => "FAIL".to_owned(),
+        Some(TestRunWaitVerdict::RemoteConflict) => "UNKNOWN (conflicting authoritative remote terminals)".to_owned(),
         Some(TestRunWaitVerdict::Unknown(reason)) => format!(
             "UNKNOWN ({})",
             match reason {
@@ -253,6 +257,9 @@ fn test_run_wait_run_section(
     failure: Option<&TestRunCardFailure>,
     evidence: Option<&TestRunWaitEvidence>,
 ) -> String {
+    if let Some(remote) = &label.remote {
+        return remote_test_run_wait_section(label, remote, verdict);
+    }
     let optional = |value: Option<&str>| value.map_or_else(|| "unknown".to_owned(), str::to_owned);
     let run_dir = summary.map_or(label.run_dir.as_str(), |summary| summary.run_dir.as_str());
     let mut lines = vec![
@@ -338,7 +345,7 @@ fn test_run_wait_run_section(
                     .map_or_else(|| "none".to_owned(), |stage| format!("`{stage}`"))
             ));
         }
-        Some(TestRunWaitVerdict::Pass) => {}
+        Some(TestRunWaitVerdict::Pass | TestRunWaitVerdict::RemoteConflict) => {}
     }
     lines.push(format!(
         "- Inspect: `node scripts/test-launcher.mjs summary \"{run_dir}\"`"
@@ -441,7 +448,7 @@ fn build_test_run_wait_prompt(
         .zip(&wait.runs)
         .zip(verdicts)
         .map(|((section, label), verdict)| {
-            if *verdict != Some(TestRunWaitVerdict::Fail) {
+            if label.remote.is_some() || *verdict != Some(TestRunWaitVerdict::Fail) {
                 return section;
             }
             let failure = test_run_wait_failure(failures, &label.run_id);
@@ -493,6 +500,7 @@ fn test_run_wait_summaries<'a>(
     wait.runs
         .iter()
         .map(|label| {
+            if label.remote.is_some() { return None; }
             inner
                 .test_runs
                 .find(&label.run_id)
@@ -690,6 +698,12 @@ impl AppState {
             };
             let mut runs = Vec::with_capacity(run_ids.len());
             for run_id in &run_ids {
+                if let Some((host, native_run)) = remote_test_run_reference(run_id)
+                    .map_err(TestRunWaitValidation::Rejected)? {
+                    runs.push(remote_test_run_wait_label(inner, index, &project_id, run_id, &host, &native_run)
+                        .map_err(TestRunWaitValidation::Rejected)?);
+                    continue;
+                }
                 let Some(entry) = inner.test_runs.find(run_id) else {
                     if let Some(row) = inner.test_run_registrations.get(run_id) {
                         if row.project_id.as_deref().is_some_and(|id| id != project_id.as_str()) {
@@ -708,6 +722,7 @@ impl AppState {
                             )).with_kind(ApiErrorKind::TestRunWaitRegistrationUnavailable)));
                         }
                         runs.push(TestRunWaitRunLabel {
+                            remote: None,
                             run_id: run_id.clone(),
                             run_dir: row.run_directory.clone(),
                             preset: row.preset,
@@ -744,6 +759,7 @@ impl AppState {
                     ))));
                 }
                 runs.push(TestRunWaitRunLabel {
+                    remote: None,
                     run_id: run_id.clone(),
                     run_dir: summary.run_dir.clone(),
                     preset: summary.preset,
@@ -785,6 +801,7 @@ impl AppState {
                             Some(&TestRunWaitEvidence::mandatory_bound()),
                         )
                         .len()
+                            .max(if label.remote.is_some() { 4096 } else { 0 })
                             + 8
                     })
                     .sum::<usize>();
@@ -832,6 +849,7 @@ impl AppState {
         // Runs that already settled resume at once, which is also how a
         // session re-fetches a verdict.
         let refresh = self.refresh_test_run_waits();
+        self.federation_executor_wake_signal.kick();
         let queued = refresh.queue_results.get(&wait.id).copied().unwrap_or_default();
         Ok(TestRunWaitResponse {
             revision: refresh.revision.unwrap_or(revision),
@@ -897,7 +915,7 @@ impl AppState {
         // upper bound; phase 2 decides the actual verdicts and consumption.
         let (checks, reads) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if !inner.test_runs.scanned_once || inner.test_run_waits.is_empty() {
+            if inner.test_run_waits.is_empty() {
                 return TestRunWaitRefresh::default();
             }
             let mut checks: Vec<(String, TestRunWaitRunLabel)> = Vec::new();
@@ -905,6 +923,7 @@ impl AppState {
             for wait in &inner.test_run_waits {
                 let summaries = test_run_wait_summaries(&inner, wait);
                 for (label, summary) in wait.runs.iter().zip(&summaries) {
+                    if label.remote.is_some() || !inner.test_runs.scanned_once { continue; }
                     if summary.is_none()
                         || (label.registration_backed && !label.registration_progress.indexed)
                     {
@@ -998,6 +1017,13 @@ impl AppState {
                                 !test_run_wait_identity_matches(label, &entry.disk)
                             })
                 });
+                for (index, label) in wait.runs.iter().enumerate() {
+                    if let Some(remote) = &label.remote {
+                        verdicts[index] = remote_test_run_wait_verdict(&inner, &wait, remote);
+                    } else if !inner.test_runs.scanned_once {
+                        verdicts[index] = None;
+                    }
+                }
                 for (index, label) in wait.runs.iter_mut().enumerate() {
                     if !label.registration_backed || label.registration_progress.indexed || project_removed {
                         continue;
@@ -1063,7 +1089,9 @@ impl AppState {
                     .iter()
                     .zip(&verdicts)
                     .any(|(run_id, verdict)| {
-                        *verdict == Some(TestRunWaitVerdict::Fail) && !failures.contains_key(run_id)
+                        *verdict == Some(TestRunWaitVerdict::Fail)
+                            && wait.runs.iter().find(|label| &label.run_id == run_id).is_some_and(|label| label.remote.is_none())
+                            && !failures.contains_key(run_id)
                     });
                 if unread_failure {
                     remaining.push(wait);
@@ -1181,6 +1209,7 @@ fn normalize_test_run_wait_ids(ids: Vec<String>) -> Result<Vec<String>, ApiError
         let Some(id) = non_empty_trimmed(&id) else {
             return Err(ApiError::bad_request("test run ids cannot be empty"));
         };
+        remote_test_run_reference(&id)?;
         // Distinct ids, as for delegation waits: a repeat is dropped.
         if !normalized.contains(&id) {
             normalized.push(id);

@@ -64,6 +64,8 @@ fn federation_legacy_schema_upgrade_preserves_local_metadata() {
         Some(json!(EngramSessionObligationLedger::empty())),
         "a primary-2 specimen cannot contain modern obligation custody"
     );
+    assert_eq!(metadata.as_object_mut().unwrap().remove("remoteTestRunFacts"), Some(json!({})),
+        "a primary-2 specimen cannot discard native completion custody");
     connection.execute("INSERT INTO app_state(key,value_json) VALUES(?1,?2)",
         rusqlite::params![SQLITE_METADATA_KEY, serde_json::to_string(&metadata).unwrap()]).unwrap();
     let before: String = connection

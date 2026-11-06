@@ -19,6 +19,8 @@ fn primary2_fixture_copy(app: &AppState) -> PathBuf {
         Some(json!(EngramSessionObligationLedger::empty())),
         "a historical specimen cannot discard modern obligation custody"
     );
+    assert_eq!(metadata.as_object_mut().unwrap().remove("remoteTestRunFacts"), Some(json!({})),
+        "a historical specimen cannot discard native completion custody");
     let metadata = serde_json::to_string(&metadata).unwrap();
     let mut rows = source.prepare("SELECT value_json FROM sessions").unwrap();
     for encoded in rows.query_map([], |row| row.get::<_, String>(0)).unwrap() {

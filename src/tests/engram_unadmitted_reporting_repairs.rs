@@ -1399,23 +1399,30 @@ fn assert_runtime_custody_reader_refusal(binary: Option<&FsPath>, migrate_outbox
             let connection = rusqlite::Connection::open(&path).unwrap();
             let ledger = read_persisted_metadata_field(&connection, "engramSessionObligations").unwrap().unwrap();
             assert_eq!(ledger, serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap());
+            assert_eq!(read_persisted_metadata_field(&connection, "remoteTestRunFacts").unwrap(), Some(json!({})),
+                "a historical specimen cannot discard native completion custody");
             connection.execute("DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations'", []).unwrap();
+            assert_eq!(connection.execute("DELETE FROM state_metadata_units WHERE field_name='remoteTestRunFacts'", []).unwrap(), 1);
             connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [SQLITE_OBSERVATION_SCHEMA_VERSION]).unwrap();
             let original = read_metadata_units_unchecked(&connection).unwrap();
             let generation = metadata_unit_generation(&connection).unwrap();
             let capture = PersistMetadataCapture::new(Arc::new(std::sync::atomic::AtomicU64::new(generation)));
             ensure_sqlite_state_schema_for_load(&connection).unwrap();
             let mut expected = original.clone();
-            expected.extend(metadata_value_to_units(json!({"engramSessionObligations": ledger})).unwrap());
+            expected.extend(metadata_value_to_units(json!({
+                "engramSessionObligations": ledger,
+                "remoteTestRunFacts": {}
+            })).unwrap());
             assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), expected);
-            assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
+            assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 2,
+                "obligation and native completion extensions each advance the generation");
             assert_eq!(connection.query_row("SELECT value_json FROM sessions WHERE id=?1",
                 [&fixture.turn.session_id], |row| row.get::<_, String>(0)).unwrap(), raw,
                 "active capture, closing job and pending request survive byte-for-byte");
             assert!(write_metadata_units(&connection, original, None, &[], Some(&capture), false).is_err());
             assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), expected);
             ensure_sqlite_state_schema_for_load(&connection).unwrap();
-            assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
+            assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 2);
         }
         let connection = open_sqlite_state_read_connection(&path).unwrap();
         let metadata = read_metadata_units_unchecked(&connection).unwrap();

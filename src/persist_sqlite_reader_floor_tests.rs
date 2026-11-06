@@ -26,7 +26,7 @@ mod ordinary_handoff_reader_floor_tests {
         seed_current_state_core_tables(&connection);
         seed_current_state_auxiliary_tables(&connection);
         seed_current_state_metadata(&connection);
-        connection.execute("DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations'", []).unwrap();
+        connection.execute("DELETE FROM state_metadata_units WHERE field_name IN ('engramSessionObligations','remoteTestRunFacts')", []).unwrap();
         connection
             .execute(
                 "INSERT INTO meta VALUES('metadata_units_generation','7')",
@@ -84,6 +84,7 @@ mod ordinary_handoff_reader_floor_tests {
     fn predecessor_metadata(metadata: &PersistedState) -> Value {
         let mut value = serde_json::to_value(metadata).unwrap();
         value.as_object_mut().unwrap().remove("engramSessionObligations");
+        value.as_object_mut().unwrap().remove("remoteTestRunFacts");
         value
     }
 
@@ -146,7 +147,8 @@ mod ordinary_handoff_reader_floor_tests {
     fn joint_extension(mut predecessor: (PersistMetadataUnits, u64, Vec<(String, String)>, String)) -> (PersistMetadataUnits, u64, Vec<(String, String)>, String) {
         assert!(!predecessor.0.keys().any(|(field, _)| field == "engramSessionObligations"));
         predecessor.0.extend(metadata_value_to_units(json!({"engramSessionObligations": EngramSessionObligationLedger::empty()})).unwrap());
-        predecessor.1 += 1;
+        predecessor.0.extend(metadata_value_to_units(json!({"remoteTestRunFacts": {}})).unwrap());
+        predecessor.1 += 2;
         predecessor
     }
 
@@ -162,7 +164,7 @@ mod ordinary_handoff_reader_floor_tests {
             assert_eq!(
                 image(&connection),
                 expected,
-                "only the mandatory ledger and its generation extend the predecessor authority"
+                "only the mandatory ledger, empty native facts and their generations extend predecessor authority"
             );
             assert_eq!(
                 read_federation_persist_image(&connection).unwrap(),

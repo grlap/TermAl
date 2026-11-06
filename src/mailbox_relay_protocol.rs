@@ -299,6 +299,12 @@ struct MailboxRelayRequest {
     deny_unknown_fields
 )]
 enum MailboxRelayOperation {
+    /// Native observed completion only; no remote verification admission.
+    ObserveTestRun {
+        actor: MailboxRelayPrincipal,
+        project_scope: String,
+        run_id: String,
+    },
     Describe {
         native_session_id: String,
     },

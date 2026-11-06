@@ -176,6 +176,8 @@ fn record_run(fixture: &RunFixture, run_id: &str, request: Value, results: Value
     };
     let registration = TestRunRegistration {
         run_id: run_id.to_owned(),
+        native_origin: None,
+        native_completion: None,
         project_id: Some(fixture.project_id.clone()),
         run_directory: test_run_display_path(&run_dir),
         locator_identity: None,
@@ -697,6 +699,8 @@ fn producer_fixture_run(fixture: &RunFixture, producer: &Value) -> (TestRunRegis
     let run = record_run(fixture, &text(&registration["host_run_id"]), request.clone(), results.clone());
     let registration = TestRunRegistration {
         request_identity: registration["request_identity"].as_str().unwrap().to_owned(),
+        native_origin: None,
+        native_completion: None,
         registered_at: registration["registered_at"].as_str().unwrap().to_owned(),
         initiating_session_id: registration["initiating_session_id"].as_str().unwrap().to_owned(),
         owning_session_id: registration["owning_session_id"].as_str()

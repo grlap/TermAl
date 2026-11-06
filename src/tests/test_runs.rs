@@ -12,7 +12,7 @@
 use super::*;
 
 #[path = "test_run_registration.rs"]
-mod test_run_registration;
+pub(super) mod test_run_registration;
 
 #[path = "test_run_listing.rs"]
 mod test_run_listing;

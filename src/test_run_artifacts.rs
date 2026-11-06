@@ -28,6 +28,7 @@ impl AppState {
         // but only unfinished same-run candidates reach exact matching.
         let projection = TestRunProjection::new(inner);
         let mut terminal = Vec::new();
+        let mut native_completions = Vec::new();
         for entry in &inner.test_runs.entries {
             if !entry.disk.is_terminal()
                 || !matches!(
@@ -36,6 +37,21 @@ impl AppState {
                 )
             {
                 continue;
+            }
+            if let Some(registration) = test_run_matching_registration(inner, &entry.disk)
+                .filter(|row| row.native_origin.is_some() && row.native_completion.is_none())
+            {
+                let mut candidates = projection.observations(&entry.summary.run_id)
+                    .iter().copied().filter_map(|row| {
+                        test_run_native_completion_from_settlement(inner, registration, row, entry)
+                    });
+                if let Some(completion) = candidates.next() {
+                    // Two provider executions are ambiguous, even when they
+                    // repeat the same locator. Never choose the nearby one.
+                    if candidates.next().is_none() {
+                        native_completions.push((registration.run_id.clone(), completion));
+                    }
+                }
             }
             let Some(digest) = entry
                 .summary
@@ -67,6 +83,15 @@ impl AppState {
             }
         }
         drop(projection);
+        let native_changed = !native_completions.is_empty();
+        for (run_id, completion) in native_completions {
+            inner.test_run_registrations.update(&run_id, |row| {
+                if row.native_completion.is_none() {
+                    row.native_completion = Some(completion);
+                }
+            });
+        }
+        let observation_changed = !terminal.is_empty();
         for (id, terminal, digest) in terminal {
             let Some(row) = inner.test_run_observations.update(&id, |row| {
                 // Keep original execution identity, provenance and authority.
@@ -89,6 +114,14 @@ impl AppState {
                 continue;
             };
             self.persist_test_command_observation_locked(inner, row);
+        }
+        if native_changed && !observation_changed {
+            // A foreground provider may already have persisted its terminal.
+            // Remote publication still requires exact durable read-back of
+            // this registration and its original observation.
+            if let Err(error) = self.persist_internal_locked(inner) {
+                eprintln!("native completion persistence deferred: {error:#}");
+            }
         }
     }
 

@@ -1889,6 +1889,8 @@ struct StateInner {
     /// Pending run waits (`test_run_waits.rs`). Persisted; a wait exists only
     /// while pending.
     test_run_waits: PersistTracked<Vec<TestRunWaitRecord>>,
+    /// Authenticated origin facts, independent of transient destination waits.
+    remote_test_run_facts: PersistTracked<BTreeMap<String, RemoteTestRunFacts>>,
     /// Durable delegation rows isolated during startup validation. See
     /// `quarantined_persisted_session_ids` for the preservation contract.
     quarantined_persisted_delegation_ids: BTreeSet<String>,
@@ -1995,6 +1997,7 @@ impl StateInner {
             test_run_cards_epoch: None,
             test_run_cards: PersistTracked::default(),
             test_run_waits: PersistTracked::default(),
+            remote_test_run_facts: PersistTracked::default(),
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_inventory: DelegationInventoryState::Ready,
             delegation_waits: PersistTracked::default(),

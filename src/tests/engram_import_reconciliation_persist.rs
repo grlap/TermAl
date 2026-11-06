@@ -258,7 +258,8 @@ fn a_predecessor_only_reader_refuses_the_successor_floor() {
     let version = floor(&fixture);
     assert_eq!(version, SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION);
     assert!(!predecessor_accepts(&version), "the predecessor build refuses this floor before any effect");
-    assert!(predecessor_accepts(SQLITE_SCHEMA_VERSION), "control: it accepts its own floor");
+    assert!(predecessor_accepts(SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR), "control: it accepts its own floor");
+    assert!(!predecessor_accepts(SQLITE_SCHEMA_VERSION), "native completion custody also requires the newer reader");
     // The successor build loads it, with the journal established.
     let loaded = load_state(&store_path(&fixture)).unwrap().unwrap();
     assert!(matches!(*loaded.engram_import_reconciliation, EngramImportReconciliationState::Activated(_)));

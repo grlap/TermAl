@@ -77,6 +77,8 @@ fn registered_history(count: usize) -> RunFixture {
             disk.locator_identity = Some(format!("fixture-locator-{ordinal}"));
             TestRunRegistration {
                 run_id: disk.run_id.clone(),
+                native_origin: None,
+                native_completion: None,
                 project_id: Some(fixture.project_id.clone()),
                 run_directory: test_run_display_path(&disk.run_dir),
                 locator_identity: disk.locator_identity.clone(),

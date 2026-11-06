@@ -17,6 +17,7 @@ fn metadata_units_connection(fixture: &FenceFixture) -> &rusqlite::Connection {
 fn metadata_units_seed_legacy(connection: &rusqlite::Connection, metadata: &PersistedState) {
     let mut legacy = serde_json::to_value(metadata).unwrap();
     legacy.as_object_mut().unwrap().remove("engramSessionObligations");
+    legacy.as_object_mut().unwrap().remove("remoteTestRunFacts");
     connection
         .execute_batch(include_str!("fixtures/state_schema2.sql"))
         .unwrap();
@@ -743,7 +744,7 @@ fn metadata_units_seed_rollback_predecessor(connection: &rusqlite::Connection) {
     ).unwrap();
     assert!(ledger.entries.is_empty() && ledger.checkpoint_operations.is_empty());
     connection.execute_batch("BEGIN IMMEDIATE;
-        DELETE FROM state_metadata_units WHERE field_name='engramSessionObligations';
+        DELETE FROM state_metadata_units WHERE field_name IN ('engramSessionObligations','remoteTestRunFacts');
         UPDATE meta SET value='2-metadata-units-2' WHERE key='schema_version';
         COMMIT;").unwrap();
 }

@@ -9,6 +9,7 @@ mod fixture_clock;
 mod references;
 mod relay;
 mod alias_grammar;
+mod remote_test_waits;
 
 const PROOF_PATH: &str = "/federation/v1/mailbox/native-binding";
 

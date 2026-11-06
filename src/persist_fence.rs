@@ -159,7 +159,8 @@ impl PersistFenceTarget {
                 delta.metadata.test_run_cards_epoch.as_deref() == Some(expected.as_str())
             }
             Self::TestRunRegistration(expected) => {
-                delta.metadata.test_run_registrations.get(&expected.run_id) == Some(expected)
+                delta.metadata.test_run_registrations.get(&expected.run_id)
+                    .is_some_and(|actual| actual.matches_registration_snapshot(expected))
             }
             Self::TestRunObservation(expected) => {
                 delta
@@ -366,7 +367,8 @@ impl PersistFenceTarget {
                 &["testRunRegistrations"],
             )?
             .is_some_and(|metadata| {
-                metadata.test_run_registrations.get(&expected.run_id) == Some(expected)
+                metadata.test_run_registrations.get(&expected.run_id)
+                    .is_some_and(|actual| actual.matches_registration_snapshot(expected))
             })),
             Self::TestRunObservation(expected) => Ok(read_metadata_for_fence(
                 connection,

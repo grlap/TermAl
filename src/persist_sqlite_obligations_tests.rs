@@ -147,6 +147,7 @@ mod session_obligation_storage_tests {
 
     fn predecessor(connection: &rusqlite::Connection, version: &str) -> Value {
         let mut value = metadata(connection);
+        value.as_object_mut().unwrap().remove("remoteTestRunFacts");
         value
             .as_object_mut()
             .unwrap()
@@ -212,6 +213,7 @@ mod session_obligation_storage_tests {
                 let mut expected = old_metadata;
                 expected["engramSessionObligations"] =
                     serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
+                expected["remoteTestRunFacts"] = json!({});
                 assert_eq!(metadata(&connection), expected);
                 let row: String = connection
                     .query_row(
@@ -389,9 +391,9 @@ mod session_obligation_storage_tests {
         let original = read_metadata_units_unchecked(&connection).unwrap();
         let capture = PersistMetadataCapture::new(Arc::new(std::sync::atomic::AtomicU64::new(7)));
         ensure_sqlite_state_schema_for_load(&connection).unwrap();
-        assert_eq!(metadata_unit_generation(&connection).unwrap(), 8);
+        assert_eq!(metadata_unit_generation(&connection).unwrap(), 9);
         let mut upgraded = read_metadata_units_unchecked(&connection).unwrap();
-        upgraded.retain(|(field, _), _| field != "engramSessionObligations");
+        upgraded.retain(|(field, _), _| !matches!(field.as_str(), "engramSessionObligations" | "remoteTestRunFacts"));
         assert_eq!(
             upgraded, original,
             "unrelated unit bytes are not reserialized"
@@ -538,7 +540,7 @@ mod session_obligation_storage_tests {
         ensure_sqlite_state_schema_for_load(&connection).unwrap();
         assert_eq!(
             metadata_unit_generation(&connection).unwrap(),
-            generation + 1,
+            generation + 2,
             "the opener which observed an old header does not migrate twice"
         );
         assert_eq!(

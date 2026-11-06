@@ -16,6 +16,10 @@ fn commit_content(turn: &EOCheckedTurn, content: &str) {
 }
 
 fn registered_check(turn: &EOCheckedTurn, key: &str) {
+    registered_check_with_result_publication(turn, key, false);
+}
+
+fn registered_check_with_result_publication(turn: &EOCheckedTurn, key: &str, after_completion: bool) {
     let directory = root(turn);
     assert!(run_git_test_command_output(&directory, &["status", "--porcelain"]).is_empty());
     let commit = run_git_test_command_output(&directory, &["rev-parse", "HEAD"])
@@ -72,11 +76,9 @@ fn registered_check(turn: &EOCheckedTurn, key: &str) {
             "after": { "commit": commit, "clean": true, "paths": [] },
             "outcome": "clean", "eligible": true },
     });
-    fs::write(
-        run_dir.join("results.json"),
-        serde_json::to_vec(&results).unwrap(),
-    )
-    .unwrap();
+    let publish_results = || fs::write(run_dir.join("results.json"),
+        serde_json::to_vec(&results).unwrap()).unwrap();
+    if !after_completion { publish_results(); }
     recorder
         .command_completed_with_exit(
             key,
@@ -89,6 +91,10 @@ fn registered_check(turn: &EOCheckedTurn, key: &str) {
             EngramCommandExit::Code(0),
         )
         .unwrap();
+    // Completing a recorder command attaches its locator and immediately
+    // scans the artifacts. Delay terminal publication in the race fixture so
+    // that scan cannot retain the completion before closing preparation.
+    if after_completion { publish_results(); }
     turn.wait_for_snapshots();
     let registration = turn.state.inner.lock().unwrap().test_run_registrations[&run_id].clone();
     assert!(registration.named_root.is_some());
@@ -131,6 +137,49 @@ fn a_clean_registered_check_is_a_closing_baseline_without_a_prior_checkpoint() {
         observation["occurrence"]["source_change"].is_null(),
         "{observation:#}"
     );
+}
+
+#[test]
+fn native_completion_retained_after_preparation_preserves_the_registered_closing_baseline() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let turn = EOCheckedTurn::start_named("registered-native-completion-race");
+    {
+        let inner = turn.state.inner.lock().unwrap();
+        turn.state.persist_internal_locked(&inner).unwrap();
+    }
+    {
+        let connection = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
+        let mut inner = turn.state.inner.lock().unwrap();
+        bind_loaded_federation(&mut inner, &connection, turn.state.persistence_path.as_path()).unwrap();
+    }
+    registered_check_with_result_publication(&turn, "native-completion-race", true);
+    let prepared = turn.state.prepare_registered_check_notices(&turn.session_id);
+    let before = prepared.iter().flat_map(|notice| &notice.runs)
+        .map(|(run, _)| run.clone()).next().expect("prepared original registration");
+    assert!(before.native_origin.is_some());
+    assert!(before.native_completion.is_none());
+    let baselines = || {
+        let inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&turn.session_id).unwrap();
+        let scope = EngramRuntimeClosingScope::capture(&inner, &turn.session_id).unwrap();
+        registered_closing_baselines_locked(&inner, index, &prepared, &scope)
+    };
+    let original = baselines();
+    assert_eq!(original.len(), 2, "real registered check has both content endpoints");
+    // Drive the real scan between the off-lock preparation and closing CAS.
+    // Its native completion is retained from the original provider/artifacts.
+    turn.state.refresh_test_runs_with(&|_, _| false, &|_, _| {});
+    let after = turn.state.inner.lock().unwrap().test_run_registrations[&before.run_id].clone();
+    assert!(after.native_completion.is_some());
+    assert_ne!(after, before);
+    assert_eq!(baselines(), original, "a factual completion append preserves the endpoints");
+    {
+        let mut inner = turn.state.inner.lock().unwrap();
+        inner.test_run_registrations.update(&before.run_id, |run| {
+            run.request_identity.push_str("-replaced");
+        });
+    }
+    assert!(baselines().is_empty(), "an actual registration identity change still fences closing");
 }
 
 #[test]

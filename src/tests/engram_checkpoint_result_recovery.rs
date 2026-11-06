@@ -192,12 +192,13 @@ fn orphan_historical_checkpoint_survives_without_a_live_session() {
 }
 
 #[test]
-fn original_checkpoint_reader_floor_preserves_raw_unknown_units_rows_and_generation() {
+fn original_checkpoint_reader_floor_preserves_raw_unknown_units_rows_with_native_extension() {
     let (_root, path, _inner, _session, original) = passive_state("checkpoint-unknown-floor");
     let connection = rusqlite::Connection::open(&path).unwrap();
     let units = read_metadata_units_unchecked(&connection).unwrap();
     let rows = raw_session_rows(&connection);
     let generation = metadata_unit_generation(&connection).unwrap();
+    connection.execute("DELETE FROM state_metadata_units WHERE field_name='remoteTestRunFacts'", []).unwrap();
     connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [SQLITE_CHECKPOINT_RESULT_PREDECESSOR]).unwrap();
     drop(connection);
     let loaded = load_state(&path).unwrap().unwrap();
@@ -205,8 +206,10 @@ fn original_checkpoint_reader_floor_preserves_raw_unknown_units_rows_and_generat
     assert_eq!(required_state_meta_value(&connection, "schema_version").unwrap(), SQLITE_SCHEMA_VERSION);
     assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), units);
     assert_eq!(raw_session_rows(&connection), rows);
-    assert_eq!(metadata_unit_generation(&connection).unwrap(), generation);
-    assert_eq!(loaded.metadata_predecessor.load(std::sync::atomic::Ordering::Acquire), generation);
+    // The vocabulary-only step preserves the units; the following native
+    // completion descriptor extension advances the generation exactly once.
+    assert_eq!(metadata_unit_generation(&connection).unwrap(), generation + 1);
+    assert_eq!(loaded.metadata_predecessor.load(std::sync::atomic::Ordering::Acquire), generation + 1);
     assert_historical_operation(&loaded, &original);
 }
 
@@ -223,6 +226,7 @@ fn original_checkpoint_refused_result_requires_successor_floor_and_keeps_older_u
     assert_eq!(serde_json::to_value(&operation.attempts[0]).unwrap(), first);
     assert_ne!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
     let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute("DELETE FROM state_metadata_units WHERE field_name='remoteTestRunFacts'", []).unwrap();
     connection.execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [SQLITE_CHECKPOINT_RESULT_PREDECESSOR]).unwrap();
     let units = read_metadata_units_unchecked(&connection).unwrap();
     let rows = raw_session_rows(&connection);

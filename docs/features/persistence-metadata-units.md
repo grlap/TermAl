@@ -5,7 +5,7 @@ See the [storage layout](sqlite-session-storage.md) and
 session, transcript and writer contracts.
 
 The metadata layout is `2-metadata-units-2`. The current primary reader floor,
-`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1`, requires preserving ordinary
+`2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1`, requires preserving ordinary
 provider-handoff uncertainty in normalized session rows and the mandatory
 `engramSessionObligations` ledger. Supported predecessors advance through
 units-2 and handoff-1 in one transaction before that ledger is installed; the
@@ -22,6 +22,23 @@ batch receipt inputs in existing session fields across restart. It does not
 restore launcher verification; unprovable inputs retain lost-credit behavior.
 This custody interpretation is part of the unpublished checkpoint-result-1
 inventory, without an additional field, ledger or reader suffix.
+
+The `native-test-completion-1` extension adds the required `remoteTestRunFacts`
+object and protects native registration provenance, retained completions and
+remote wait labels from older readers. From the direct `checkpoint-result-1`
+predecessor it inserts only an empty facts descriptor and advances the metadata
+generation once. Existing registrations gain no inferred provenance or result.
+An already activated `checkpoint-result-1-import-reconciliation-1` store advances
+directly to `checkpoint-result-1-native-test-completion-1-import-reconciliation-1`,
+preserving every raw journal unit and its Activated state. Ordinary stores stay
+NotActivated; only the existing explicit activation capability creates a journal.
+Earlier supported migrations perform this extension in their same immediate
+transaction, after their existing ordered steps. Descriptor, generation and
+reader-header changes roll back together on any failure. Target-only custody
+keys under any older floor are refused before typed normalization, including
+null or empty values. Missing or malformed descriptors under either current
+floor remain corruption. Source snapshots captured before migration stay stale.
+
 The units-2 rollback script refuses these stronger floors. Federation profile
 versioning is independent of this local reader floor.
 Growing root collections
@@ -43,7 +60,7 @@ field-to-unit inventory. It covers federation, preferences, revision and
 allocation counters, projects, source-root authority/history/audit/sighting
 collections, pending coordination detachments, ignored thread IDs,
 orchestrator instances, delegation waits, test-run epochs/cards/registrations/
-observations/compaction/waits, layouts, the empty session carrier and Codex
+observations/compaction/waits, remote native completion facts, layouts, the empty session carrier and Codex
 state. Runtime-only fields and delegation payloads are excluded.
 
 | Reader or writer | Authority and mapping |

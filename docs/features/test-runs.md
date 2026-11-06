@@ -976,9 +976,48 @@ of the reviewed `/review-changes` contract.
   delegation children, and the backend rejects one (400). A child that ended
   its turn to wait would read as finished to its parent, then start a new
   turn when resumed. A child runs its gates in the foreground instead.
-- **`runIds`.** One to 16 distinct ids (a repeated id is kept once), each
-  indexed or durably registered on this host, and in the caller's project.
+- **`runIds`.** One to 16 distinct references (a repeated reference is kept
+  once), in the caller's project. A bare id is indexed or durably registered
+  on this host. An explicit `host:<host UUID>::<native run id>` names a remote
+  native run; it never aliases a local bare id or reads a remote path locally.
   A caller without a project cannot wait on runs.
+  - Remote references pin the enrolled host generation and the waiting root's
+    creation and project. The authenticated origin supplies its original native
+    runner, project, immutable request and canonical locator when available.
+    Cross-host project equality uses the logical project key already validated
+    by each project's Engram connection; host-local ids, path spelling, display
+    names and Git URLs are not substitutes. A missing association stays pending.
+    No preissued job, placement binding or prior mailbox request is required.
+  - The existing federation supervisor owns a bounded round-robin recovery
+    batch (at most four observations per pass, five seconds per relay request),
+    using the existing authenticated native relay. Reconnect and restart retry
+    only observation delivery, never the test. A persisted wait is read back
+    before a request; accepted origin facts are independently persisted and
+    read back before the wait can resume. Stop still consumes the wait.
+  - The origin publishes retained native launcher settlement, not a caller's
+    claimed verdict or a fresh raw-results read. A launch acknowledgement,
+    missing evidence or Unknown delivery remains pending. Native FAIL and
+    INTERRUPTED remain failures. Conflicting authoritative terminals or changed
+    original identities remain visible as `result_conflict`, with no PASS
+    substitution. Duplicate delivery queues at most one resume for a wait.
+    Immutable origin facts outlive the destination wait and survive reload;
+    this retention does not authorize their reuse for another credit destination.
+  - Remote observation creates no local run, registration, check, source
+    sighting or verification credit. Results explicitly retain the shared
+    `producer_unsupported` reason while remote verification admission is
+    unavailable; qualification and destination association belong to that
+    separate admission contract. The completion uses the existing v1 native
+    result/input shape and imposes no fingerprint qualification on a wait.
+    Focused and full native completions are supported; a live-preset run or
+    legacy registration without original native provenance remains pending.
+    Retaining a completion does not replace the acknowledged registration:
+    concurrent registration, query and turn-closing identity checks tolerate
+    that append. Publishing the completion and retiring its active custody
+    still require the complete retained evidence to be durable.
+    Keep the launcher's `--notify` END notice as the older-host/delivery fallback.
+    Remote result sections never suggest running a local summary command on
+    an origin path. Their worst-case header size counts toward the 48 KiB bound,
+    so a large mixed wait may need fewer than sixteen references.
   - The caller need not be the owner: a coordinator may wait on a run it did
     not start.
   - Each new wait pins the request identity and a digest of the canonical native

@@ -1944,6 +1944,7 @@ fn test_run_wait_record(id: &str, session_id: &str) -> TestRunWaitRecord {
         created_at: stamp_now(),
         title: None,
         runs: vec![TestRunWaitRunLabel {
+            remote: None,
             run_id: "test-seeded".to_owned(),
             run_dir: "/repo/.git/review-runs/test-seeded".to_owned(),
             preset: TestRunPreset::Full,

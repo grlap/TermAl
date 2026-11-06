@@ -216,7 +216,7 @@ impl TestRunCurrentNamedBinding {
                 let saved = inner.test_run_registrations.get(&earlier.run_id).or_else(|| {
                     inner.test_run_compacted.get(&earlier.run_id).and_then(|row| row.registration.as_ref())
                 });
-                if saved != Some(earlier) {
+                if !saved.is_some_and(|actual| actual.matches_registration_snapshot(earlier)) {
                     return Err(ApiError::conflict("test run registration changed during its read"));
                 }
                 Ok((earlier.work_binding.clone(), earlier.named_root.clone()))

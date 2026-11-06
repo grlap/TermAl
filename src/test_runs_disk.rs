@@ -365,6 +365,9 @@ impl TestRunWaitEvidence {
 #[derive(Clone, Debug)]
 struct TestRunResultsExtract {
     wait_evidence: TestRunWaitEvidence,
+    /// Optional facts projected during this same bounded native results read.
+    /// They carry no source/credit qualification or new measurement.
+    native_input: native_test_completion::Input,
     /// The digest of the bytes this extract was read from (`detailVersion`).
     digest: String,
     /// `Passed` or `Failed` when the results are terminal.
@@ -402,6 +405,7 @@ impl TestRunResultsExtract {
         };
         Self {
             wait_evidence: TestRunWaitEvidence::from_results(results),
+            native_input: test_run_native_input(results),
             digest,
             terminal_state: test_run_terminal_state(results),
             current_stage: valid_stages()

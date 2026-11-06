@@ -10,7 +10,7 @@
 /// The successor of the current MAIN reader floor: the predecessor's exact
 /// inventory plus the required import-reconciliation journal field.
 const SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION: &str =
-    "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-import-reconciliation-1";
+    "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-import-reconciliation-1";
 const ENGRAM_IMPORT_RECONCILIATION_FIELD: &str = "engramImportReconciliation";
 
 /// The authority to make the first activation. Only a real enrollment or
@@ -54,7 +54,8 @@ fn engram_import_reconciliation_floor_is_successor(connection: &rusqlite::Connec
         .query_row("SELECT value FROM meta WHERE key='schema_version'", [], |row| row.get(0))
         .optional()
         .context("failed to read the state reader floor")?;
-    Ok(version.as_deref() == Some(SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION))
+    Ok(matches!(version.as_deref(), Some(SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+        | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR)))
 }
 
 /// The successor floor's inventory: the predecessor's exact fields plus the
@@ -79,7 +80,12 @@ fn validate_metadata_unit_inventory_for_store(
     units: &PersistMetadataUnits,
 ) -> Result<()> {
     if engram_import_reconciliation_floor_is_successor(connection)? {
-        validate_engram_import_successor_inventory(units)
+        if persisted_metadata_storage_version(connection)? == SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR {
+            validate_native_test_predecessor_inventory(units, true)
+        } else { validate_engram_import_successor_inventory(units) }
+    } else if matches!(persisted_metadata_storage_version(connection)?.as_str(),
+        SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR | SQLITE_CHECKPOINT_RESULT_PREDECESSOR) {
+        validate_metadata_unit_inventory_for_floor(units, true)
     } else {
         validate_metadata_unit_inventory(units)
     }

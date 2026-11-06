@@ -155,7 +155,8 @@ fn registered_closing_baselines_locked(
                 && notice.clean_commit_runs.contains(&run.run_id)
                 && matches!(state, Some(TestRunState::Passed | TestRunState::Failed))
                 && inner.test_runs.registered.contains(&run.run_id)
-                && inner.test_run_registrations.get(&run.run_id) == Some(run)
+                && inner.test_run_registrations.get(&run.run_id)
+                    .is_some_and(|actual| actual.matches_registration_snapshot(run))
                 && engram_verification_record_row_matches(row, run)
                 && run.owning_session_id == record.session.id
                 && run.work_binding.as_ref() == Some(binding)

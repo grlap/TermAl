@@ -13,7 +13,9 @@ const METADATA_UNIT_PREDECESSOR_FIELDS: &[&str] = &[
     "workspaceLayouts", "sessions", "codex",
 ];
 
-const METADATA_UNIT_FIELDS: &[&str] = &[
+// Frozen checkpoint-result predecessor inventory. It never includes native
+// completion custody, even when the current writer projects that field.
+const METADATA_UNIT_CHECKPOINT_FIELDS: &[&str] = &[
     "federation",
     "preferences",
     "revision",
@@ -42,6 +44,17 @@ const METADATA_UNIT_FIELDS: &[&str] = &[
     "workspaceLayouts",
     "sessions",
     "codex",
+];
+
+const METADATA_UNIT_FIELDS: &[&str] = &[
+    "federation", "preferences", "revision", "nextSessionNumber", "nextMessageNumber",
+    "projects", "engramRetiredWorkAuthorityGrants", "engramSessionObligations",
+    "engramWorkSourceRoots", "engramNamedRootJournal", "engramWorkNamingHistory",
+    "engramNamedRootReleaseAudit", "engramSourceSightings", "engramSourceRootGeneration",
+    "pendingCoordinationScopeDeletions", "pendingResponseBoardProjectDetachments",
+    "ignoredDiscoveredCodexThreadIds", "orchestratorInstances", "delegationWaits",
+    "testRunCardsEpoch", "testRunCards", "testRunRegistrations", "testRunObservations",
+    "testRunCompacted", "testRunWaits", "remoteTestRunFacts", "workspaceLayouts", "sessions", "codex",
 ];
 
 fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUnits> {
@@ -106,6 +119,7 @@ fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUn
     field!("testRunObservations", &metadata.test_run_observations);
     field!("testRunCompacted", &metadata.test_run_compacted);
     field!("testRunWaits", &metadata.test_run_waits);
+    field!("remoteTestRunFacts", &metadata.remote_test_run_facts);
     field!("workspaceLayouts", &metadata.workspace_layouts);
     field!("sessions", &metadata.sessions);
     field!("codex", &metadata.codex);
@@ -173,14 +187,18 @@ fn read_metadata_units(connection: &rusqlite::Connection) -> Result<PersistMetad
 }
 
 fn validate_metadata_unit_inventory(units: &PersistMetadataUnits) -> Result<()> {
-    validate_metadata_unit_inventory_for_floor(units, true)
+    validate_metadata_unit_inventory_for_fields(units, METADATA_UNIT_FIELDS)
 }
 
 fn validate_metadata_unit_inventory_for_floor(
     units: &PersistMetadataUnits,
     requires_obligations: bool,
 ) -> Result<()> {
-    let fields = if requires_obligations { METADATA_UNIT_FIELDS } else { METADATA_UNIT_PREDECESSOR_FIELDS };
+    let fields = if requires_obligations { METADATA_UNIT_CHECKPOINT_FIELDS } else { METADATA_UNIT_PREDECESSOR_FIELDS };
+    validate_metadata_unit_inventory_for_fields(units, fields)
+}
+
+fn validate_metadata_unit_inventory_for_fields(units: &PersistMetadataUnits, fields: &[&str]) -> Result<()> {
     for field in fields {
         let Some((kind, encoded)) = units.get(&(field.to_string(), String::new())) else {
             return Err(anyhow!("missing required metadata descriptor `{field}`"));
@@ -199,6 +217,7 @@ fn validate_metadata_unit_inventory_for_floor(
             | "testRunRegistrations"
             | "testRunObservations"
             | "testRunCompacted"
+            | "remoteTestRunFacts"
             | "workspaceLayouts"
             | "codex" => "object",
             _ => "array",
@@ -338,7 +357,8 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
             version
             @ ("2" | "2-metadata-units-1" | SQLITE_METADATA_UNITS_VERSION
                 | SQLITE_OBSERVATION_PREDECESSOR | SQLITE_OBSERVATION_SCHEMA_VERSION
-                | SQLITE_CHECKPOINT_RESULT_PREDECESSOR | SQLITE_SCHEMA_VERSION
+                | SQLITE_CHECKPOINT_RESULT_PREDECESSOR | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
+                | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR | SQLITE_SCHEMA_VERSION
                 | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION),
         ) => Ok(version.to_owned()),
         Some(version) => Err(reject_unsupported_state_schema(format!(
@@ -375,6 +395,7 @@ fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Opt
             .map_err(Into::into);
     }
     let units = if matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+        | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
         | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
         read_metadata_units(connection)?
     } else {

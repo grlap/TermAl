@@ -4,6 +4,82 @@
 // verification credit from an execution result.
 use super::*;
 
+ // Shared real native registration/provider fixture for authenticated
+ // completion-consumer tests. Telemetry is synthetic; it grants no credit.
+ pub(in crate::tests) fn native_completion_producer_fixture(
+     state: AppState, label: &str, scope: &str,
+ ) -> (String, String, PathBuf) {
+     let root = state.test_temp_root.as_ref().unwrap().path().join(label);
+     fs::create_dir_all(&root).unwrap();
+     run_git_test_command(&root, &["init", "--quiet"]);
+     let project_id = create_test_project(&state, &root, label);
+     let fixture = RunFixture { state, root, project_id };
+     let session = running_owner(&fixture, "native-wire-runtime");
+     {
+         let mut inner = fixture.state.inner.lock().unwrap();
+         let project = inner.projects.iter_mut().find(|project| project.id == fixture.project_id).unwrap();
+         project.engram = Some(EngramProjectSettings {
+             authority_store_key: Some(EngramAuthorityStoreKey {
+                 database_path: fixture.root.join("private-disposable-store.db"),
+                 project_id: scope.to_owned(),
+             }), ..EngramProjectSettings::default()
+         });
+     }
+     observed_terminal::start(&fixture, &session, "native-wire-tool", observed_terminal::LAUNCH);
+     let (id, directory) = observed_terminal::launcher(&fixture, &session);
+     fixture.state.note_engram_command_finished_with_capture(
+         &session, &EngramObservationProvenance::Ambient, "native-wire-tool", observed_terminal::LAUNCH,
+         &format!("RUN {}", test_run_display_path(&directory)), Some(EngramCommandExit::NotFinished), false,
+     );
+     (session, id, directory)
+ }
+
+ pub(in crate::tests) fn finish_native_completion_producer(
+     state: &AppState, id: &str, directory: &FsPath, success: bool,
+ ) {
+     observed_terminal::finish_artifact(directory, id, success);
+     state.refresh_test_runs_with(&|_, _| false, &|_, _| {});
+ }
+
+// Use the existing receipt/lifecycle fixtures to make history eligible for
+// real compaction. Their telemetry and producer replies are fixture inputs;
+// this helper neither executes a consumer test nor proves native credit.
+pub(in crate::tests) fn compacted_native_completion_producer_fixture(
+    state: AppState, label: &str, scope: &str, success: bool,
+) -> (String, TestRunNativeCompletion) {
+    let root = state.test_temp_root.as_ref().unwrap().path().join(label);
+    fs::create_dir_all(&root).unwrap();
+    run_git_test_command(&root, &["init", "--quiet"]);
+    let project_id = create_test_project(&state, &root, label);
+    let (fixture, id, store, binding, native) = native_evidence_fixture_from(
+        RunFixture { state, root, project_id }, false, success, scope);
+    fixture.refresh(&[]);
+    let retained = fixture.state.inner.lock().unwrap().test_run_registrations[&id]
+        .native_completion.clone().expect("original native settlement retained");
+    record_native_evidence(&fixture, &native);
+    let read = serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
+    fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
+    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(false));
+    compaction::fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
+    fixture.refresh(&[]);
+    let loaded = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
+    assert!(!loaded.test_run_registrations.contains_key(&id));
+    assert!(!loaded.test_run_observations.contains_key(&retained.execution_id));
+    let survivor = &loaded.test_run_compacted[&id];
+    assert!(survivor.compacted);
+    assert_eq!(survivor.registration.as_ref().unwrap().native_completion.as_ref(), Some(&retained));
+    assert!(survivor.observations.iter().any(|row| row.execution_id == retained.execution_id));
+    // Reinstall exactly the canonical loader's history collections while the
+    // fixture's authenticated transport stays live; no cached index remains.
+    let mut inner = fixture.state.inner.lock().unwrap();
+    inner.test_run_registrations = loaded.test_run_registrations;
+    inner.test_run_observations = loaded.test_run_observations;
+    inner.test_run_compacted = loaded.test_run_compacted;
+    inner.test_runs = TestRunIndex::default();
+    (id, retained)
+}
+
+
 #[path = "test_run_registration_identity.rs"]
 mod identity;
 
@@ -40,6 +116,12 @@ mod batch_failure_deltas;
 
 #[path = "test_run_registration_named_root.rs"]
 mod named_root;
+
+#[path = "test_run_registration_native_origin.rs"]
+mod native_origin;
+
+#[path = "test_run_native_completion.rs"]
+mod native_completion;
 
 #[tokio::test]
 async fn http_registration_returns_the_versioned_durable_contract_and_one_global_row_on_retry() {
@@ -760,11 +842,16 @@ fn native_evidence_fixture(label: &str) -> (
 fn native_evidence_fixture_with_build(label: &str, with_build: bool) -> (
     RunFixture, String, EngramAuthorityStoreKey, EngramControlWorkBinding, NativeEvidenceRun,
 ) {
-    let fixture = RunFixture::new(label);
+    native_evidence_fixture_from(RunFixture::new(label), with_build, true, "canonical-project")
+}
+
+fn native_evidence_fixture_from(fixture: RunFixture, with_build: bool, success: bool, scope: &str) -> (
+    RunFixture, String, EngramAuthorityStoreKey, EngramControlWorkBinding, NativeEvidenceRun,
+) {
     let session = running_owner(&fixture, "registry-native-evidence-runtime");
     let store = EngramAuthorityStoreKey {
         database_path: fixture.root.join("tracker.db"),
-        project_id: "canonical-project".to_owned(),
+        project_id: scope.to_owned(),
     };
     let binding = EngramControlWorkBinding {
         root_execution_id: "root-execution-one".to_owned(),
@@ -821,10 +908,21 @@ fn native_evidence_fixture_with_build(label: &str, with_build: bool) -> (
             "command": ["cargo", "check"], "started": started.to_rfc3339(), "ended": ended.to_rfc3339(),
         }));
     }
+    if !success {
+        results["state"] = json!("failed");
+        results["exitCode"] = json!(101);
+        let focused = results["stages"].as_array_mut().unwrap().iter_mut()
+            .find(|stage| stage["name"] == "focused").unwrap();
+        focused["state"] = json!("failed");
+        focused["code"] = json!(101);
+        focused["tests"]["passed"] = json!(0);
+        focused["tests"]["failed"] = json!(1);
+    }
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
     fixture.state.note_engram_command_finished_with_capture(&session,
         &EngramObservationProvenance::Ambient, key, command,
-        &format!("RUN {}", test_run_display_path(&directory)), Some(EngramCommandExit::Code(0)), false);
+        &format!("RUN {}", test_run_display_path(&directory)),
+        Some(EngramCommandExit::Code(if success { 0 } else { 101 })), false);
     let id = fixture.state.inner.lock().unwrap().test_run_observations.values()
         .find(|row| row.artifact.as_ref().is_some_and(|artifact| artifact.run_id == run_id))
         .expect("the real locator attaches to its own observed command").execution_id.clone();
@@ -834,7 +932,8 @@ fn native_evidence_fixture_with_build(label: &str, with_build: bool) -> (
     };
     let mut receipt_wire = json!({
         "operation": "b".repeat(32), "producer": "b".repeat(32),
-        "run_outcome": "passed", "verifications": [{"stage": "focused", "record_id": "e".repeat(64)}],
+        "run_outcome": if success { "passed" } else { "failed" },
+        "verifications": [{"stage": "focused", "record_id": "e".repeat(64)}],
     });
     if with_build {
         receipt_wire["verifications"].as_array_mut().unwrap().insert(0,
