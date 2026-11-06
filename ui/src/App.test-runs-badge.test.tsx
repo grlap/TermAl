@@ -63,6 +63,28 @@ function railButton() {
 }
 
 describe("App test-run badge", () => {
+  it("keeps background rotation calm without changing foreground or stopping pace", async () => {
+    // Vitest stubs CSS imports, including ?raw. Read the real stylesheet
+    // beside this module so this assertion also works from the repo root.
+    const nodeFsModule = "node:fs";
+    const nodeUrlModule = "node:url";
+    const { readFileSync } = (await import(nodeFsModule)) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
+    };
+    const { fileURLToPath } = (await import(nodeUrlModule)) as { fileURLToPath: (url: string) => string };
+    const moduleUrl = import.meta.url;
+    const styles = readFileSync(fileURLToPath(new URL("./styles.css", moduleUrl).href), "utf8");
+    const background = styles.match(/\.status-agent-badge\[data-status="idle"\]\[data-work="background"\]::before\s*\{([^}]+)\}/)?.[1];
+    const active = styles.match(/\.status-agent-badge\[data-status="active"\]::before\s*\{([^}]+)\}/)?.[1];
+    const stopping = styles.match(/\.status-agent-badge\[data-status="stopping"\]::before\s*\{([^}]+)\}/)?.[1];
+    expect(background).toMatch(/animation:\s*spin 3200ms linear infinite;/);
+    expect(active).toMatch(/animation:\s*spin 850ms linear infinite;/);
+    expect(stopping).toMatch(/animation:\s*spin 850ms linear infinite;/);
+    // Keep the reduced-motion override as specific as the background rule;
+    // it must not change the foreground/combined badge animation.
+    expect(styles).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.status-agent-badge\[data-status="idle"\]\[data-work="background"\]::before\s*\{\s*animation:\s*none;\s*\}\s*\}/);
+  });
+
   it("loads the run snapshot and preserves per-run restart detail in the panel", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const run = makeTestRun({ restartWouldVoidEvidence: true });

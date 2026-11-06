@@ -3005,7 +3005,13 @@ textarea {
   border-width: 1.9px;
   border-color: color-mix(in srgb, var(--signal-blue) 36%, transparent);
   border-top-color: var(--signal-blue);
-  animation: spin 1600ms linear infinite;
+  animation: spin 3200ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-agent-badge[data-status="idle"][data-work="background"]::before {
+    animation: none;
+  }
 }
 
 .status-agent-badge[data-status="approval"]::before {
