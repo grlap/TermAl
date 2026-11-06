@@ -116,7 +116,7 @@ export function FileChangesCard({
         {isFilesExpanded
           ? message.files.map((file) => {
               const displayPath = relativizePathToWorkspace(
-                file.path,
+                file.path || "Workspace",
                 workspaceRoot,
               );
               const copied = copiedPath === file.path;
@@ -150,7 +150,7 @@ export function FileChangesCard({
                       className="command-icon-button"
                       type="button"
                       onClick={(event) => handleOpenPath(file.path, event)}
-                      disabled={!onOpenSourceLink}
+                      disabled={!onOpenSourceLink || file.kind === "subtree"}
                       aria-label={`Open ${displayPath}`}
                       title="Open file"
                     >
@@ -189,5 +189,7 @@ export function fileChangeKindLabel(
       return "D";
     case "other":
       return "*";
+    case "subtree":
+      return "Changes";
   }
 }

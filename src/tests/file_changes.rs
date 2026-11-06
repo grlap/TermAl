@@ -180,6 +180,27 @@ fn file_change_capture_event(
 }
 
 #[test]
+fn global_file_changes_summary_covers_distinct_workdir_and_named_root() {
+    let (state, owner, _) = file_change_capture_fixture();
+    let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    let workdir = root.join("session-dir");
+    fs::create_dir_all(&workdir).unwrap();
+    state.inner.lock().unwrap().sessions[0].session.workdir = workdir.to_string_lossy().into_owned();
+    let source_path = root.join("sibling-root/source.rs").to_string_lossy().into_owned();
+    state.record_active_turn_file_changes(&[file_change_capture_event(&owner, &source_path, WorkspaceFileChangeKind::Modified)]);
+    state.record_active_turn_file_changes(&[file_change_capture_event(&owner, "", WorkspaceFileChangeKind::Subtree)]);
+    let mut inner = state.inner.lock().unwrap();
+    let record = &mut inner.sessions[0];
+    assert_eq!(record.active_turn_file_changes.len(), 1);
+    assert_eq!(record.active_turn_file_changes.get(""), Some(&WorkspaceFileChangeKind::Subtree));
+    assert!(push_active_turn_file_changes_on_record(record, "global-summary".to_owned()));
+    let Message::FileChanges { files, .. } = record.session.messages.last().unwrap() else { panic!("persisted file summary") };
+    assert_eq!(files.len(), 1);
+    assert!(files[0].path.is_empty());
+    assert_eq!(files[0].kind, WorkspaceFileChangeKind::Subtree);
+}
+
+#[test]
 fn file_change_capture_retains_original_evidence_across_owner_changes() {
     for change in [
         "stop",

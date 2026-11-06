@@ -348,6 +348,9 @@ mod watcher_metadata;
 #[path = "engram_watcher_provenance.rs"]
 mod watcher_provenance;
 
+#[path = "engram_watcher_pending.rs"]
+mod watcher_pending;
+
 // A Codex test carried past its turn until its end is reported, a child
 // module so this file does not grow further.
 #[path = "engram_reported_ends.rs"]

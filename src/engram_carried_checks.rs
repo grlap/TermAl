@@ -1750,12 +1750,13 @@ impl AppState {
             }
         }
         let mut cargo_candidates = Vec::new();
-        let placed = if directories.len() > ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT {
+        let mut placed = if directories.len() > ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT {
             // Too many places to resolve: any carried check may be touched.
             vec![(
                 None,
                 format!("{} files changed at once", changes.len()),
                 engram_watcher_changes_latest_mtime(changes),
+                false,
             )]
         } else {
             // Each directory once: its worktree key for routing the fence.
@@ -1787,15 +1788,42 @@ impl AppState {
             let mut exact: Vec<(PathBuf, String, String, String, bool)> = Vec::new();
             // Per worktree: its key, the change its cause names, and that
             // change's modification time.
-            let mut placed: Vec<(Option<String>, String, Option<u64>)> = Vec::new();
+            let mut placed: Vec<(Option<String>, String, Option<u64>, bool)> = Vec::new();
             for change in changes {
+                if change.kind == WorkspaceFileChangeKind::Subtree && change.path.is_empty() {
+                    continue; // Global loss is placed below, without filesystem resolution.
+                }
                 let path = FsPath::new(&change.path);
                 let directory = path.parent().unwrap_or(path);
                 let Some((_, remembered)) = resolved.iter().find(|(known, _)| known == directory)
                 else {
                     continue;
                 };
-                let mut worktree = remembered;
+                let marker_root;
+                // A namespace change to a link belongs to its parent, not
+                // the worktree reached through its current link target.
+                let marker_is_root = change.kind == WorkspaceFileChangeKind::Subtree
+                    && !engram_network_path(&change.path)
+                    && path.join(".git").exists()
+                    && std::fs::symlink_metadata(path).is_ok_and(|meta| {
+                        let plain = !meta.file_type().is_symlink();
+                        #[cfg(windows)]
+                        let plain = {
+                            use std::os::windows::fs::MetadataExt;
+                            plain && meta.file_attributes() & 0x400 == 0
+                        };
+                        plain
+                    });
+                let mut worktree = if change.kind == WorkspaceFileChangeKind::Subtree {
+                    marker_root = if engram_network_path(&change.path) {
+                        engram_path_key(path)
+                    } else {
+                        engram_path_key(&engram_worktree_root_path(if marker_is_root { path } else { directory }))
+                    };
+                    &marker_root
+                } else {
+                    remembered
+                };
                 let mut shown = None;
                 let names_scratch = path.components().any(|component| {
                     component.as_os_str() == std::ffi::OsStr::new(ENGRAM_WORKTREE_SCRATCH_DIRECTORY)
@@ -1806,7 +1834,7 @@ impl AppState {
                         .to_str()
                         .is_some_and(engram_is_cargo_target_sibling_name)
                 });
-                if (names_scratch || names_cargo_sibling) && !engram_network_path(&change.path) {
+                if !marker_is_root && (names_scratch || names_cargo_sibling) && !engram_network_path(&change.path) {
                     if !exact.iter().any(|(known, ..)| known == directory) {
                         let existed = directory.is_dir();
                         let canonical = engram_canonical_path(directory);
@@ -1865,11 +1893,17 @@ impl AppState {
                             entry.2 = change.mtime_ms;
                         }
                     }
-                    None => placed.push((Some(worktree.clone()), shown, change.mtime_ms)),
+                    None => placed.push((Some(worktree.clone()), shown, change.mtime_ms, false)),
                 }
             }
             placed
         };
+        // A marker wholly inside a worktree follows the exact-path routing
+        // and exemptions above. Independently it reaches any check rooted
+        // *under* the marker, including a nested root inside parent's scratch.
+        // An ancestor fact must not be erased by the parent's exemption.
+        placed.extend(changes.iter().filter(|change| change.kind == WorkspaceFileChangeKind::Subtree)
+            .map(|change| (None, change.path.clone(), change.mtime_ms, true)));
         if placed.is_empty() && cargo_candidates.is_empty() {
             return;
         }
@@ -1877,7 +1911,7 @@ impl AppState {
         // representative event per root and the same conservative fallback.
         let placed = placed
             .into_iter()
-            .map(|(worktree, path, mtime_ms)| {
+            .map(|(worktree, path, mtime_ms, ancestor_only)| {
                 let root = worktree.as_deref().unwrap_or("unknown");
                 let facts = format!(
                     "{} routed_root_sha256={} delivered={} routed_root={:?}",
@@ -1886,7 +1920,7 @@ impl AppState {
                     engram_interference_tick(),
                     engram_truncate_utf8(root, 120),
                 );
-                (worktree, path, mtime_ms, facts)
+                (worktree, path, mtime_ms, facts, ancestor_only)
             })
             .collect::<Vec<_>>();
         let mut diagnostics = Vec::new();
@@ -1944,7 +1978,7 @@ impl AppState {
                     }
                 }
             }
-            for (worktree, path, mtime_ms, facts) in &placed {
+            for (worktree, path, mtime_ms, facts, ancestor_only) in &placed {
                 let cause = engram_watcher_change_cause(path, *mtime_ms, arrival);
                 // The watcher reports late, so its change may have landed
                 // while the run was going, even when the run has ended since.
@@ -1956,6 +1990,9 @@ impl AppState {
                 // change is kept as exempted and judged again at settlement.
                 // Only a change that fences records its watcher provenance.
                 for carried in &mut record.engram.carried_checks {
+                    if *ancestor_only && !workspace_subtree_contains(path, &carried.check.target.root) {
+                        continue;
+                    }
                     if carried.fence.is_none()
                         && engram_worktrees_may_hold(
                             std::slice::from_ref(worktree),
@@ -1988,6 +2025,9 @@ impl AppState {
                 // A full gate still being launched carries the change into its
                 // fence once carried.
                 for check in &mut record.engram.active_turn_checks {
+                    if *ancestor_only && !workspace_subtree_contains(path, &check.target.root) {
+                        continue;
+                    }
                     if check.end.is_none()
                         && check.watcher_fence.is_none()
                         && engram_check_is_launcher_full(&check.command)

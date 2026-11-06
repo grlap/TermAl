@@ -25,6 +25,7 @@ import type { MonacoAppearance } from "../monaco";
 import { normalizeDisplayPath, relativizePathToWorkspace } from "../path-display";
 import type { DiffMessage, WorkspaceFilesChangedEvent } from "../types";
 import { workspaceFilesChangedEventChangeForPath } from "../workspace-file-events";
+import { isSourceFileMissingError } from "../source-file-state";
 import {
   applyMarkdownDocumentEolStyle,
   buildMarkdownDiffDocumentSegments,
@@ -940,8 +941,9 @@ export function DiffPanel({
     const currentEditValue = editValueRef.current;
     const wasDirty =
       currentFile.status === "ready" && currentEditValue !== currentFile.content;
-    if (change.kind === "deleted") {
-      if (wasDirty) {
+    const handleDeleted = () => {
+      const snapshot = latestFileRef.current;
+      if (snapshot.status === "ready" && editValueRef.current !== snapshot.content) {
         setExternalFileNotice("The file was deleted on disk. Your diff edit buffer is preserved.");
         setDiffEditConflictOnDisk(true);
         return;
@@ -959,6 +961,10 @@ export function DiffPanel({
       });
       setEditValueState("");
       setExternalFileNotice("The file was deleted on disk.");
+      return;
+    };
+    if (change.kind === "deleted") {
+      handleDeleted();
       return;
     }
 
@@ -1012,6 +1018,12 @@ export function DiffPanel({
       })
       .catch((error) => {
         if (cancelled) {
+          return;
+        }
+
+        if (isSourceFileMissingError(error)) {
+          if (renderedMarkdownDraftSegmentIdsRef.current.size > 0 && !commitRenderedMarkdownDrafts()) return;
+          handleDeleted();
           return;
         }
 

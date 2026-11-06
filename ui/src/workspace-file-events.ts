@@ -64,7 +64,7 @@ export function workspacePathContains(
 
   return (
     normalizedCandidate === normalizedRoot ||
-    normalizedCandidate.startsWith(`${normalizedRoot}/`)
+    normalizedCandidate.startsWith(normalizedRoot.endsWith("/") ? normalizedRoot : `${normalizedRoot}/`)
   );
 }
 
@@ -132,7 +132,7 @@ export function workspaceFilesChangedEventChangeForPath(
       return false;
     }
 
-    return workspaceFileChangeMatchesCandidate(change.path, normalizedTargetPath);
+    return workspaceChangeTouchesCandidate(change, normalizedTargetPath, scope?.rootPath);
   }) ?? null;
 }
 
@@ -149,7 +149,8 @@ export function workspaceFilesChangedEventTouchesRoot(
   return event.changes.some(
     (change) =>
       workspaceFileChangeMatchesScope(change, scope) &&
-      workspacePathContains(normalizedRoot, change.path),
+      (workspacePathContains(normalizedRoot, change.path) ||
+        change.kind === "subtree" && (!change.path || workspacePathContains(change.path, normalizedRoot))),
   );
 }
 
@@ -173,7 +174,7 @@ export function workspaceFilesChangedEventTouchesGitDiffTab(
       sessionId: tab.originSessionId,
     }) &&
     candidates.some((candidatePath) =>
-      workspaceFileChangeMatchesCandidate(change.path, candidatePath),
+      workspaceChangeTouchesCandidate(change, candidatePath, request?.workdir),
     ),
   );
 }
@@ -182,6 +183,7 @@ function mergeWorkspaceFileChangeKind(
   current: WorkspaceFileChangeKind,
   next: WorkspaceFileChangeKind,
 ): WorkspaceFileChangeKind {
+  if (current === "subtree" || next === "subtree") return "subtree";
   if (
     (current === "deleted" && next === "created") ||
     (current === "created" && next === "deleted")
@@ -221,16 +223,14 @@ export function mergeWorkspaceFilesChangedEvents(
   }
 
   const changesByKey = new Map<string, WorkspaceFileChange>();
-  const orderedKeys: string[] = [];
   for (const change of [...current.changes, ...next.changes]) {
-    if (!normalizeWorkspaceFileEventPath(change.path)) {
+    if (!normalizeWorkspaceFileEventPath(change.path) && change.kind !== "subtree") {
       continue;
     }
 
     const key = workspaceFileChangeKey(change);
     const existing = changesByKey.get(key);
     if (!existing) {
-      orderedKeys.push(key);
       changesByKey.set(key, { ...change });
       continue;
     }
@@ -242,10 +242,42 @@ export function mergeWorkspaceFilesChangedEvents(
     });
   }
 
+  // Index covering prefixes once; exact-heavy bursts do no pairwise scans.
+  // A covering marker supersedes exact hints regardless of arrival order.
+  const markers = new Map<string, WorkspaceFileChange>();
+  for (const change of changesByKey.values()) {
+    if (change.kind === "subtree" && !change.sessionId && !change.rootPath) {
+      markers.set(normalizeWorkspaceFileEventPath(change.path), change);
+    }
+  }
+  const covered = (change: WorkspaceFileChange) => {
+    const global = markers.get("");
+    if (global) return global !== change;
+    const path = normalizeWorkspaceFileEventPath(change.path);
+    const same = markers.get(path);
+    if (same && same !== change) return true;
+    for (let end = path.lastIndexOf("/"); end >= 0; end = path.lastIndexOf("/", end - 1)) {
+      const cover = markers.get(path.slice(0, end)) ?? markers.get(path.slice(0, end + 1));
+      if (cover && cover !== change) return true;
+      if (end === 0) break;
+    }
+    return false;
+  };
   return {
     revision: next.revision,
-    changes: orderedKeys
-      .map((key) => changesByKey.get(key))
-      .filter((change): change is WorkspaceFileChange => Boolean(change)),
+    changes: Array.from(changesByKey.values()).filter((change) => !covered(change)),
   };
+}
+
+function workspaceChangeTouchesCandidate(
+  change: WorkspaceFileChange,
+  candidate: string | null | undefined,
+  root?: string | null,
+) {
+  const resolved = joinWorkspacePath(root, candidate);
+  if (change.kind !== "subtree") return workspaceFileChangeMatchesCandidate(change.path, resolved);
+  if (!change.path) return true;
+  // With no root a relative target has no provably disjoint workspace.
+  if (!root && candidate && !workspacePathIsAbsolute(candidate)) return true;
+  return workspacePathContains(change.path, resolved);
 }

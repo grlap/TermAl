@@ -67,7 +67,7 @@ impl FileChangeOwnerCapture {
             reset_required: record.runtime_reset_required,
             paused: record.orchestrator_auto_dispatch_blocked,
             workdir: record.session.workdir.clone(),
-                                            naming: record.engram.observed_naming_identity(),
+            naming: record.engram.observed_naming_identity(),
             source_root: record.engram.observed_source_root().cloned(),
             delete_requested: record.engram.observation_delete_requested,
         }
@@ -143,14 +143,14 @@ fn prepare_file_change_capture(
     let mut prepared = Vec::new();
     for change in changes {
         let path = change.path.trim();
-        if path.is_empty() {
+        let subtree = change.kind == WorkspaceFileChangeKind::Subtree;
+        if path.is_empty() && !subtree {
             continue;
         }
         let in_root = root_key.as_deref().is_some_and(|root| {
-            engram_path_within(
-                &engram_path_key(&normalize_user_facing_path(FsPath::new(path))),
-                root,
-            )
+            let key = engram_path_key(&normalize_user_facing_path(FsPath::new(path)));
+            engram_path_within(&key, root)
+                || subtree && (path.is_empty() || engram_path_within(root, &key))
         });
         if !in_root
             && (change.session_id.is_none() && scoped_paths.contains(path)
@@ -171,9 +171,13 @@ fn prepare_file_change_capture(
             let candidate = normalized
                 .entry(path.to_owned())
                 .or_insert_with(|| normalize_path_best_effort(FsPath::new(path)));
-            *candidate == root || candidate.starts_with(&root)
+            *candidate == root
+                || candidate.starts_with(&root)
+                || subtree && (path.is_empty() || root.starts_with(&*candidate))
         };
         prepared.push(PreparedFileChange {
+            // An empty subtree covers both the captured workdir and source
+            // root, which need not overlap. Keep its scope-wide meaning.
             path: path.to_owned(),
             kind: change.kind,
             path_check: !in_root,
@@ -191,6 +195,15 @@ fn merge_captured_file_changes(
     captured: BTreeMap<String, WorkspaceFileChangeKind>,
 ) {
     for (path, kind) in captured {
+        if target.iter().any(|(known, kind)| {
+            *kind == WorkspaceFileChangeKind::Subtree
+                && (known.is_empty() || FsPath::new(&path).starts_with(known))
+        }) {
+            continue;
+        }
+        if kind == WorkspaceFileChangeKind::Subtree {
+            target.retain(|known, _| !path.is_empty() && !FsPath::new(known).starts_with(&path));
+        }
         target
             .entry(path)
             .and_modify(|previous| {
@@ -205,11 +218,16 @@ fn amend_late_file_change_summary(
     id: &str,
     captured: BTreeMap<String, WorkspaceFileChangeKind>,
 ) -> bool {
-    let Some(index) = record.session.messages.iter().position(|message| {
-        matches!(message, Message::FileChanges { .. }) && message.id() == id
-    }) else { return false; };
-    let Message::FileChanges { files, title, .. } = &mut record.session.messages[index]
-    else { unreachable!("selected file change summary"); };
+    let Some(index) =
+        record.session.messages.iter().position(|message| {
+            matches!(message, Message::FileChanges { .. }) && message.id() == id
+        })
+    else {
+        return false;
+    };
+    let Message::FileChanges { files, title, .. } = &mut record.session.messages[index] else {
+        unreachable!("selected file change summary");
+    };
     let mut merged = files
         .iter()
         .map(|entry| (entry.path.clone(), entry.kind))
@@ -219,7 +237,12 @@ fn amend_late_file_change_summary(
         .into_iter()
         .map(|(path, kind)| FileChangeSummaryEntry { path, kind })
         .collect();
-    *title = if files.len() == 1 {
+    *title = if files
+        .iter()
+        .any(|file| file.kind == WorkspaceFileChangeKind::Subtree)
+    {
+        "Workspace changes during turn (includes directory markers)".to_owned()
+    } else if files.len() == 1 {
         "1 file changed during turn".to_owned()
     } else {
         format!("{} files changed during turn", files.len())

@@ -16,6 +16,8 @@ use phase_sync::receive_result as recv_within_guard;
 use std::io::Read as _;
 use tower::util::ServiceExt;
 
+mod workspace_pending_memory;
+
 mod acceptance_evaluation;
 mod acceptance_settings;
 mod acp_gemini;

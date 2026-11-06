@@ -1529,12 +1529,39 @@ describe("DiffPanel", () => {
     );
   });
 
-  it("preserves dirty diff edits when a watcher event reports deletion", async () => {
+  it.each(["modified", "subtree"] as const)("shows a clean diff file as missing after a watcher %s without a refresh error", async (kind) => {
+    fetchFileMock.mockResolvedValueOnce({
+      content: "alpha\nbeta\n", language: "typescript", path: "/repo/src/example.ts",
+    }).mockRejectedValue(new Error("File not found"));
+    const props = {
+      appearance: "dark" as const, fontSizePx: 13, changeType: "edit" as const,
+      diff: ["@@ -1,2 +1,2 @@", " alpha", "-beta base", "+beta"].join("\n"),
+      diffMessageId: "diff-transient-missing", filePath: "/repo/src/example.ts",
+      language: "typescript", sessionId: "session-1", workspaceRoot: "/repo",
+      onOpenPath: () => {}, onSaveFile: async () => {}, summary: "Updated example file",
+    };
+    const { rerender } = render(<DiffPanel {...props} workspaceFilesChangedEvent={null} />);
+    const initialEditor = await screen.findByTestId("monaco-diff-editor-modified");
+    await waitFor(() => {
+      expect(initialEditor).toHaveValue("alpha\nbeta\n");
+      expect(initialEditor).not.toHaveAttribute("readonly");
+    });
+    rerender(<DiffPanel {...props} workspaceFilesChangedEvent={{ revision: 1, changes: [{ path: props.filePath, kind }] }} />);
+    expect(await screen.findByText("The file was deleted on disk.")).toBeInTheDocument();
+    expect(fetchFileMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/refresh failed/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save anyway" })).not.toBeInTheDocument();
+    await clickAndSettle(screen.getByRole("button", { name: "Edit mode" }));
+    expect(screen.queryByTestId("monaco-code-editor")).not.toBeInTheDocument();
+    expect(screen.getAllByText("File was deleted on disk.").length).toBeGreaterThan(0);
+  });
+
+  it.each(["deleted", "subtree"] as const)("preserves dirty diff edits when a watcher %s reveals deletion", async (kind) => {
     fetchFileMock.mockResolvedValueOnce({
       content: "alpha\nbeta\n",
       language: "typescript",
       path: "/repo/src/example.ts",
-    });
+    }).mockRejectedValue(new Error("File not found"));
 
     const { rerender } = render(
       <DiffPanel
@@ -1572,7 +1599,7 @@ describe("DiffPanel", () => {
         workspaceRoot="/repo"
         workspaceFilesChangedEvent={{
           revision: 4,
-          changes: [{ path: "/repo/src/example.ts", kind: "deleted" }],
+          changes: [{ path: "/repo/src/example.ts", kind }],
         }}
         onOpenPath={() => {}}
         onSaveFile={async () => {}}
@@ -1584,8 +1611,9 @@ describe("DiffPanel", () => {
       "alpha local\nbeta\n",
     );
     expect(
-      screen.getByText("The file was deleted on disk. Your diff edit buffer is preserved."),
+      await screen.findByText("The file was deleted on disk. Your diff edit buffer is preserved."),
     ).toBeInTheDocument();
+    expect(fetchFileMock).toHaveBeenCalledTimes(kind === "subtree" ? 2 : 1);
     expect(screen.getByRole("button", { name: "Apply my edits to disk version" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save anyway" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload from disk" })).toBeInTheDocument();

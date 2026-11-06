@@ -1,6 +1,7 @@
 // Bounded diagnostic facts captured before watcher queueing/conversion.
 // These clocks describe receipt and processing, never the time of the write.
 // They do not authorize a source-event exemption or identify an OS writer.
+#[derive(Clone, Copy)]
 struct WorkspaceWatchObservation {
     observed: u64,
     received_at: std::time::Instant,
@@ -79,6 +80,41 @@ fn take_workspace_watch_diagnostics() -> Vec<String> {
 }
 
 impl AppState {
+    fn process_workspace_dirty_batch(&self, batch: Vec<(PathBuf, WorkspaceDirtyFact)>) -> Vec<WorkspaceFileChangeEvent> {
+        let processed = engram_interference_tick();
+        let started_at = std::time::Instant::now();
+        let mut publication = Vec::new();
+        for (path, fact) in batch {
+            if fact.kind != WorkspaceFileChangeKind::Subtree
+                && fact
+                    .raw_kind
+                    .as_ref()
+                    .is_some_and(|kind| workspace_directory_metadata_hint(kind, &path))
+            {
+                continue;
+            }
+            // No scope fan-out: consumers match the source path themselves.
+            let changes = workspace_file_changes_from_path(&path, fact.kind, &[]);
+            let observation = fact.observation.map(|raw| raw.processing(processed, started_at))
+                .unwrap_or_else(|| "raw_kind=unknown observed=unknown writer_pid=unknown".to_owned());
+            let facts = format!(
+                "{} coalesced=true first_order={} last_order={} subtree={}",
+                observation,
+                fact.first.order,
+                fact.last.order,
+                fact.kind == WorkspaceFileChangeKind::Subtree
+            );
+            // Keep each interval: a late arrival for a different path must not
+            // cancel a pre-launch exemption for this path.
+            self.engram_host()
+                .observed_workspace_files_changed(&changes, &facts, Some(fact.last));
+            publication.extend(changes);
+        }
+        self.record_active_turn_file_changes(&publication);
+        self.publish_workspace_files_changed(publication.clone());
+        publication
+    }
+
     fn publish_workspace_watch_diagnostics(&self, diagnostics: Vec<String>) {
         #[cfg(test)]
         assert!(self.inner.is_not_held_by_current_thread_for_test());
@@ -96,28 +132,21 @@ impl AppState {
         }
     }
 
-    // The production watcher and tests use the same conversion and handoff.
+    // Test entrypoint through the production ingress, drain and handoff.
     // UI publication/coalescing remains owned by the watcher loop. `arrival`
     // is when the notification reached the host, taken in the notify callback
     // (`EngramHost::watcher_arrival_now`); the Engram fence orders it against
     // a check's launch. The observation stays diagnostic only.
+    #[cfg(test)]
     fn process_workspace_watch_event(
         &self,
         event: &notify::Event,
         observation: &WorkspaceWatchObservation,
         arrival: EngramWatcherArrival,
-        scopes: &[WorkspaceFileWatchScope],
+        _scopes: &[WorkspaceFileWatchScope],
     ) -> Vec<WorkspaceFileChangeEvent> {
-        let processed = engram_interference_tick();
-        let started_at = std::time::Instant::now();
-        let changes = workspace_file_changes_from_notify_event(event, scopes);
-        if changes.is_empty() {
-            return changes;
-        }
-        let facts = observation.processing(processed, started_at);
-        self.record_active_turn_file_changes(&changes);
-        self.engram_host()
-            .observed_workspace_files_changed(&changes, &facts, Some(arrival));
-        changes
+        let mut pending = WorkspacePendingChanges::default();
+        pending.ingest_observed(Ok(event.clone()), arrival, std::time::Instant::now(), Some(*observation));
+        self.process_workspace_dirty_batch(pending.take())
     }
 }

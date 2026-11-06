@@ -63,6 +63,39 @@ fn recorded_fence(turn: &EOCheckedTurn) -> String {
 }
 
 #[test]
+fn coalesced_path_crossing_launch_uses_latest_arrival_and_keeps_first_provenance() {
+    let (turn, worktree) = ordinary_carried_turn("coalesced-watcher-interval");
+    let before = engram_watcher_arrival_now();
+    ordinary_launch_gate(&turn, &worktree, false);
+    let after = engram_watcher_arrival_now();
+    let mut pending = WorkspacePendingChanges::default();
+    let path = fs::canonicalize(&worktree).unwrap().join("README.md");
+    for arrival in [before, after] {
+        pending.insert(&path, WorkspaceDirtyFact {
+            kind: WorkspaceFileChangeKind::Modified, first: arrival, last: arrival, raw_kind: None, observation: None,
+        }, std::time::Instant::now());
+    }
+    let batch = pending.take();
+    assert_eq!(batch.len(), 1);
+    assert_eq!(batch[0].1.first.order, before.order);
+    assert_eq!(batch[0].1.last.order, after.order);
+    turn.state.process_workspace_dirty_batch(batch);
+    assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_some()));
+}
+
+#[test]
+fn covering_parent_marker_reaches_check_in_nested_worktree_without_scratch_exemption() {
+    let (turn, worktree) = ordinary_carried_turn("coalesced-watcher-directory");
+    ordinary_launch_gate(&turn, &worktree, false);
+    let arrival = engram_watcher_arrival_now();
+    let parent = fs::canonicalize(&worktree).unwrap().parent().unwrap().to_path_buf();
+    turn.state.process_workspace_dirty_batch(vec![(parent, WorkspaceDirtyFact {
+        kind: WorkspaceFileChangeKind::Subtree, first: arrival, last: arrival, raw_kind: None, observation: None,
+    })]);
+    assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_some()));
+}
+
+#[test]
 fn a_late_report_before_launch_keeps_unfenced_artifact_custody() {
     // The 2026-10-22 shape: a patch applied minutes before the launch, whose
     // notification the host handled only after the launch.

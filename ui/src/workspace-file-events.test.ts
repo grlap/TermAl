@@ -28,6 +28,48 @@ function change(
 }
 
 describe("workspace file events", () => {
+  it("resolves relative exact deletions against the source and Git diff roots", () => {
+    const event: WorkspaceFilesChangedEvent = { revision: 1, changes: [change("/repo-b/src/a.ts", { kind: "deleted" })] };
+    expect(workspaceFilesChangedEventChangeForPath(event, "src/a.ts", { rootPath: "/repo-a" })).toBeNull();
+    expect(workspaceFilesChangedEventChangeForPath(event, "src/a.ts", { rootPath: "/repo-b" })?.kind).toBe("deleted");
+    const tab: WorkspaceDiffPreviewTab = {
+      id: "tab", kind: "diffPreview", changeType: "edit", diff: "", diffMessageId: "message", summary: "Source",
+      filePath: "src/a.ts", displayPath: "src/a.ts", originSessionId: null,
+      gitDiffRequest: { sectionId: "unstaged", workdir: "/repo-a", path: "src/a.ts" },
+    };
+    expect(workspaceFilesChangedEventTouchesGitDiffTab(event, tab)).toBe(false);
+    expect(workspaceFilesChangedEventTouchesGitDiffTab(event, { ...tab, gitDiffRequest: { ...tab.gitDiffRequest!, workdir: "/repo-b" } })).toBe(true);
+  });
+
+  it("merges wide exact bursts and removes only hints covered by a marker", () => {
+    const current = { revision: 1, changes: Array.from({ length: 4000 }, (_, i) => change(`/repo/src/f${i}`)) };
+    const next = { revision: 2, changes: [change("/repo/src", { kind: "subtree" }), change("/other/src/f1", { kind: "deleted" })] };
+    expect(mergeWorkspaceFilesChangedEvents(current, next).changes.map((c) => c.path)).toEqual(["/repo/src", "/other/src/f1"]);
+    expect(mergeWorkspaceFilesChangedEvents(next, { revision: 3, changes: current.changes }).changes).toEqual(next.changes);
+    const drive = change("C:/", { kind: "subtree" });
+    expect(mergeWorkspaceFilesChangedEvents(current, { revision: 2, changes: [drive, change("C:/a")] }).changes).toEqual([...current.changes, drive]);
+  });
+  it("routes directory markers to covered source, diff and tree scopes", () => {
+    const event: WorkspaceFilesChangedEvent = {
+      revision: 1,
+      changes: [change("C:/repo/src", { kind: "subtree" })],
+    };
+    expect(workspaceFilesChangedEventChangeForPath(event, "C:/repo/src/main.ts")?.kind).toBe("subtree");
+    expect(workspaceFilesChangedEventChangeForPath(event, "C:/repo/src2/main.ts")).toBeNull();
+    expect(workspaceFilesChangedEventTouchesRoot(event, "C:/repo")).toBe(true);
+    expect(workspaceFilesChangedEventTouchesRoot(event, "C:/repo/src/nested")).toBe(true);
+    expect(workspaceFilesChangedEventTouchesRoot(event, "C:/other")).toBe(false);
+  });
+
+  it("retains a global covering marker across buffered event merges", () => {
+    const event = mergeWorkspaceFilesChangedEvents(
+      { revision: 1, changes: [change("C:/repo/a")] },
+      { revision: 2, changes: [change("", { kind: "subtree" })] },
+    );
+    expect(workspaceFilesChangedEventChangeForPath(event, "C:/another/open.ts")?.kind).toBe("subtree");
+    expect(workspaceFilesChangedEventTouchesRoot(event, "C:/another")).toBe(true);
+  });
+
   it("normalizes Windows paths, duplicate separators, and trailing slashes", () => {
     expect(normalizeWorkspaceFileEventPath(" C:\\Repo\\src\\\\main.ts ")).toBe(
       "c:/repo/src/main.ts",

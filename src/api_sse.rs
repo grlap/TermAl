@@ -88,6 +88,8 @@ enum WorkspaceFileChangeKind {
     Modified,
     Deleted,
     Other,
+    /// A covering directory invalidation; an empty path covers all roots.
+    Subtree,
 }
 
 /// Represents a file changed during an agent turn.
@@ -429,7 +431,19 @@ async fn state_events(
                 result = file_receiver.recv() => {
                     match result {
                         Ok(payload) => yield Ok(Event::default().event("workspaceFilesChanged").data(payload)),
-                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            // Lost exact paths become a covering invalidation,
+                            // rather than an apparently quiet workspace.
+                            let recovery = WorkspaceFilesChangedEvent {
+                                revision: state.file_events_revision.load(Ordering::Relaxed),
+                                changes: vec![WorkspaceFileChangeEvent {
+                                    path: String::new(), kind: WorkspaceFileChangeKind::Subtree,
+                                    root_path: None, session_id: None, mtime_ms: None, size_bytes: None,
+                                }],
+                            };
+                            yield Ok(Event::default().event("workspaceFilesChanged")
+                                .data(serde_json::to_string(&recovery).expect("workspace recovery serializes")));
+                        }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
                 }

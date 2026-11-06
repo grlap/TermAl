@@ -14,11 +14,10 @@
 // stays focused on the core state model.
 
 include!("workspace_watch_observation.rs");
+include!("workspace_watch_pending.rs");
 
 #[cfg(not(test))]
 const WORKSPACE_FILE_WATCH_ROOT_REFRESH_MS: Duration = Duration::from_secs(2);
-#[cfg(not(test))]
-const WORKSPACE_FILE_WATCH_COALESCE_MS: Duration = Duration::from_millis(250);
 #[cfg(not(test))]
 const WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS: Duration = Duration::from_millis(100);
 
@@ -33,18 +32,24 @@ fn run_workspace_file_watcher(state: AppState) {
     // Each event carries when its notification reached the host, before it
     // waits behind earlier events: the Engram fence judges a change by it.
     // The diagnostic observation is captured beside it and authorizes nothing.
-    let (event_tx, event_rx) = mpsc::channel::<(
-        EngramWatcherArrival,
-        notify::Result<(NotifyEvent, WorkspaceWatchObservation)>,
-    )>();
+    let pending = Arc::new(Mutex::new(WorkspacePendingChanges::default()));
+    let callback_pending = Arc::clone(&pending);
+    // Only a wake is queued. The bounded trie owns all pending path state.
+    let (event_tx, event_rx) = mpsc::sync_channel::<()>(1);
     let mut watcher = match RecommendedWatcher::new(
         move |result: notify::Result<NotifyEvent>| {
             let arrival = EngramHost::watcher_arrival_now();
-            let received = result.map(|event| {
-                let observation = WorkspaceWatchObservation::capture(&event);
-                (event, observation)
-            });
-            let _ = event_tx.send((arrival, received));
+            let now = std::time::Instant::now();
+            let mut pending = callback_pending
+                .lock()
+                .expect("workspace pending mutex poisoned");
+            let log_error = result.is_err() && pending.error_log_due(now);
+            pending.ingest(result, arrival, now);
+            drop(pending);
+            if log_error {
+                eprintln!("file watch> workspace watcher error; invalidating all roots (rate limited to once per 30s)");
+            }
+            let _ = event_tx.try_send(());
         },
         NotifyConfig::default(),
     ) {
@@ -57,8 +62,6 @@ fn run_workspace_file_watcher(state: AppState) {
 
     let mut watched_roots = BTreeSet::<PathBuf>::new();
     let mut watch_scopes = Vec::<WorkspaceFileWatchScope>::new();
-    let mut pending_changes = BTreeMap::<String, WorkspaceFileChangeEvent>::new();
-    let mut last_change_at: Option<std::time::Instant> = None;
     let mut next_root_refresh_at = std::time::Instant::now();
 
     loop {
@@ -74,40 +77,20 @@ fn run_workspace_file_watcher(state: AppState) {
         }
 
         match event_rx.recv_timeout(WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS) {
-            Ok((arrival, Ok((event, observation)))) => {
-                let changes = state.process_workspace_watch_event(
-                    &event,
-                    &observation,
-                    arrival,
-                    &watch_scopes,
-                );
-                for change in changes {
-                    let key = workspace_file_change_event_key(&change);
-                    pending_changes
-                        .entry(key)
-                        .and_modify(|current| {
-                            current.kind =
-                                merge_workspace_file_change_kind(current.kind, change.kind);
-                            current.mtime_ms = change.mtime_ms;
-                            current.size_bytes = change.size_bytes;
-                        })
-                        .or_insert(change);
-                    last_change_at = Some(std::time::Instant::now());
-                }
-            }
-            Ok((_, Err(err))) => {
-                eprintln!("file watch> workspace watcher error: {err}");
-            }
+            Ok(()) => {}
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
 
-        if last_change_at.is_some_and(|at| at.elapsed() >= WORKSPACE_FILE_WATCH_COALESCE_MS) {
-            let changes = pending_changes.values().cloned().collect::<Vec<_>>();
-            pending_changes.clear();
-            last_change_at = None;
-            state.publish_workspace_files_changed(changes);
-        }
+        let batch = {
+            let mut pending = pending.lock().expect("workspace pending mutex poisoned");
+            if pending.due(std::time::Instant::now()) {
+                pending.take()
+            } else {
+                Vec::new()
+            }
+        };
+        state.process_workspace_dirty_batch(batch);
     }
 }
 
@@ -235,6 +218,7 @@ fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathB
     pruned
 }
 
+#[cfg(test)]
 fn workspace_file_changes_from_notify_event(
     event: &NotifyEvent,
     watch_scopes: &[WorkspaceFileWatchScope],
@@ -307,6 +291,9 @@ fn merge_workspace_file_change_kind(
     next: WorkspaceFileChangeKind,
 ) -> WorkspaceFileChangeKind {
     match (current, next) {
+        (WorkspaceFileChangeKind::Subtree, _) | (_, WorkspaceFileChangeKind::Subtree) => {
+            WorkspaceFileChangeKind::Subtree
+        }
         (WorkspaceFileChangeKind::Deleted, WorkspaceFileChangeKind::Created)
         | (WorkspaceFileChangeKind::Created, WorkspaceFileChangeKind::Deleted) => {
             WorkspaceFileChangeKind::Modified
@@ -379,7 +366,8 @@ fn workspace_file_changes_from_path(
         .collect()
 }
 
-#[cfg_attr(test, allow(dead_code))]
+#[cfg(test)]
+#[allow(dead_code)]
 fn workspace_file_change_event_key(change: &WorkspaceFileChangeEvent) -> String {
     format!(
         "{}\0{}\0{}",

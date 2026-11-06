@@ -24,10 +24,8 @@ fn deliver_raw(
     kind: NotifyEventKind,
 ) -> Vec<WorkspaceFileChangeEvent> {
     let event = NotifyEvent::new(kind).add_path(path.to_path_buf());
-    let changes = workspace_file_changes_from_notify_event(&event, &[]);
-    turn.state.record_active_turn_file_changes(&changes);
-    turn.state.engram_host().workspace_files_changed(&changes);
-    changes
+    turn.state.process_workspace_watch_event(&event, &WorkspaceWatchObservation::capture(&event),
+        EngramHost::watcher_arrival_now(), &[])
 }
 
 #[test]
@@ -213,10 +211,9 @@ fn watcher_metadata_child_create_delete_or_rename_remains_observable() {
             }
             _ => unreachable!(),
         };
-        let changes = workspace_file_changes_from_notify_event(&event, &[]);
+        let changes = turn.state.process_workspace_watch_event(&event, &WorkspaceWatchObservation::capture(&event),
+            EngramHost::watcher_arrival_now(), &[]);
         assert_eq!(changes.len(), event.paths.len());
-        turn.state.record_active_turn_file_changes(&changes);
-        turn.state.engram_host().workspace_files_changed(&changes);
         // Equal final file contents must not cancel an already witnessed write.
         match action {
             "create" => fs::remove_file(directory.join("commands/new.md")).unwrap(),
@@ -237,7 +234,8 @@ fn watcher_metadata_mixed_batch_keeps_the_file_event() {
     let event = NotifyEvent::new(NotifyEventKind::Modify(ModifyKind::Any))
         .add_path(directory)
         .add_path(path.clone());
-    let changes = workspace_file_changes_from_notify_event(&event, &[]);
+    let changes = turn.state.process_workspace_watch_event(&event, &WorkspaceWatchObservation::capture(&event),
+        EngramHost::watcher_arrival_now(), &[]);
     assert_eq!(changes.len(), 1);
     assert_eq!(
         changes[0].path,
@@ -245,7 +243,24 @@ fn watcher_metadata_mixed_batch_keeps_the_file_event() {
             .to_string_lossy()
             .into_owned()
     );
-    turn.state.engram_host().workspace_files_changed(&changes);
     finish_run(&worktree, "passed", &"f".repeat(64));
+    assert_carried_fence_custody(&turn, "a file in its worktree changed");
+}
+
+#[test]
+fn watcher_metadata_parent_and_child_events_coalesce_without_fabricating_parent() {
+    let (turn, worktree, directory) = instruction_fixture("directory-merged-metadata");
+    ordinary_launch_gate(&turn, &worktree, false);
+    let child = directory.join("commands/new.md");
+    let mut pending = WorkspacePendingChanges::default();
+    let now = std::time::Instant::now();
+    pending.ingest(Ok(NotifyEvent::new(NotifyEventKind::Modify(ModifyKind::Any)).add_path(directory)),
+        EngramHost::watcher_arrival_now(), now);
+    pending.ingest(Ok(NotifyEvent::new(NotifyEventKind::Create(CreateKind::File)).add_path(child.clone())),
+        EngramHost::watcher_arrival_now(), now);
+    let changes = turn.state.process_workspace_dirty_batch(pending.take());
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].path, normalize_user_facing_path(&child).to_string_lossy());
+    assert_eq!(changes[0].kind, WorkspaceFileChangeKind::Created);
     assert_carried_fence_custody(&turn, "a file in its worktree changed");
 }

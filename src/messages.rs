@@ -661,7 +661,9 @@ fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_i
             .expect("file tracking mutex poisoned")
             .late_summary_id = Some(message_id.clone());
     }
-    let title = if count == 1 {
+    let title = if files.iter().any(|file| file.kind == WorkspaceFileChangeKind::Subtree) {
+        "Workspace changes during turn (includes directory markers)".to_owned()
+    } else if count == 1 {
         "1 file changed during turn".to_owned()
     } else {
         format!("{count} files changed during turn")

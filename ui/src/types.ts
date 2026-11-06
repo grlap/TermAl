@@ -1402,7 +1402,8 @@ export type WorkspaceFileChangeKind =
   | "created"
   | "modified"
   | "deleted"
-  | "other";
+  | "other"
+  | "subtree";
 
 export type WorkspaceFileChange = {
   path: string;

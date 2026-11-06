@@ -36,6 +36,13 @@ time and writer as unknown. Routing overflow keeps its existing conservative
 unknown-root behavior. Existing scratch and Cargo sibling handling is unchanged.
 The diagnostic adds no event exemption, source-hash waiver, or writer inference.
 
+The [bounded pending trie](../workspace-watch.md) retains the first raw
+observation of each merged fact and both first/last callback arrival orders.
+The raw fields describe that first observation; the last arrival controls
+change-after-launch fencing. A collapsed marker carries the first observation
+of its covered facts, not a fabricated raw directory event. Provenance and
+metadata tests run through production ingress, drain and batch processing.
+
 There is no additional event history or persisted schema. Each check keeps
 only its first refusal and one provenance record of at most 1400 bytes; raw
 provenance has a fixed field set, backend text is omitted, and routed-root
