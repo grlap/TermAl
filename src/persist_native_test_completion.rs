@@ -66,13 +66,18 @@ fn reject_unversioned_native_test_custody(connection: &rusqlite::Connection, ver
         }
         return Ok(());
     }
+    let invalid_units = |error: &dyn std::fmt::Display| {
+        reject_unsupported_state_schema(format!("persisted state metadata units are invalid: {error}"))
+    };
     let mut statement = connection.prepare(
         "SELECT field_name,item_key,value_json FROM state_metadata_units
-         WHERE field_name IN ('remoteTestRunFacts','remote_test_run_facts','testRunRegistrations','testRunCompacted','testRunWaits')")?;
-    let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))?;
+         WHERE field_name IN ('remoteTestRunFacts','remote_test_run_facts','testRunRegistrations','testRunCompacted','testRunWaits')")
+        .map_err(|error| invalid_units(&error))?;
+    let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+        .map_err(|error| invalid_units(&error))?;
     for row in rows {
-        let (field, key, encoded) = row?;
-        let value: Value = serde_json::from_str(&encoded)?;
+        let (field, key, encoded) = row.map_err(|error| invalid_units(&error))?;
+        let value: Value = serde_json::from_str(&encoded).map_err(|error| invalid_units(&error))?;
         if native_test_field_has_target_keys(&field, &value, !key.is_empty()) {
             bail!("native test completion custody under an unsupported predecessor floor");
         }

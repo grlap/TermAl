@@ -185,6 +185,42 @@ fn native_floor_rolls_back_descriptor_generation_header_and_older_normalization_
 }
 
 #[test]
+fn native_floor_invalid_predecessor_units_keep_reset_guidance_without_writes() {
+    for version in OLD_FLOORS.iter().copied().filter(|version| *version != "2") {
+        for for_load in [false, true] {
+            for field in ["remoteTestRunFacts", "testRunRegistrations", "testRunCompacted", "testRunWaits"] {
+                let connection = source(version, true);
+                connection.execute(
+                    "INSERT INTO state_metadata_units(field_name,item_key,kind,value_json) VALUES(?1,'','object','{broken json')
+                     ON CONFLICT(field_name,item_key) DO UPDATE SET value_json=excluded.value_json",
+                    [field],
+                ).unwrap();
+                let before = image(&connection);
+                let changes = connection.total_changes();
+                let error = prepare_existing_sqlite_state_reader_floor(&connection, for_load).err().unwrap();
+                let diagnostic = format!("{error:#}");
+                assert!(diagnostic.contains("unsupported state database schema"), "{version}/{field}: {diagnostic}");
+                assert!(diagnostic.contains("Move or delete `termal.sqlite`"), "{version}/{field}: {diagnostic}");
+                assert_eq!(connection.total_changes(), changes, "{version}/{field}");
+                assert_eq!(image(&connection), before, "header, generation and raw custody: {version}/{field}");
+                assert!(connection.is_autocommit());
+            }
+            let connection = source(version, true);
+            connection.execute_batch("DROP TABLE state_metadata_units").unwrap();
+            let before = image(&connection);
+            let changes = connection.total_changes();
+            let error = prepare_existing_sqlite_state_reader_floor(&connection, for_load).err().unwrap();
+            let diagnostic = format!("{error:#}");
+            assert!(diagnostic.contains("unsupported state database schema"), "{version}: {diagnostic}");
+            assert!(diagnostic.contains("Move or delete `termal.sqlite`"), "{version}: {diagnostic}");
+            assert_eq!(connection.total_changes(), changes, "{version}");
+            assert_eq!(image(&connection), before, "missing table stays missing: {version}");
+            assert!(connection.is_autocommit());
+        }
+    }
+}
+
+#[test]
 fn native_floor_current_missing_malformed_and_unknown_metadata_stay_corruption() {
     for activated in [false, true] {
         for sql in [
