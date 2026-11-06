@@ -2,7 +2,7 @@
 
 Status: replacement contract frozen for exact-wording review. The agreed direction is
 one general git-commit test-credit lane for Git repositories, with or without
-gitlinks. Commit-input v1 names its versioned eligibility rules. Content-v1
+gitlinks. The committed-input lane extends its existing eligibility predicate to recursive submodules. Content-v1
 retains its hash format and gains the spelling-admission change below.
 The adopted Git collision observations appear in the conformance cases below.
 TermAl test credit is the first implementation; later consumers must
@@ -12,7 +12,7 @@ rather than maintaining a second copy.
 
 `source_id` is the field name. The content basis is `content-v1:<digest>`;
 the general committed-input lane uses `git-commit:<full commit id>` of the root
-repository, with its tree recorded separately. Gitlinks add child eligibility
+repository. That commit already identifies its tree and recorded child pins. Gitlinks add child eligibility
 checks to that lane; Phoenix and Questly are examples, not its scope. These
 are distinct schemes, not interchangeable labels.
 
@@ -59,7 +59,7 @@ verify_source(explicit_local_worktree_root, expected_source_id)
 ```
 
 The consumer explicitly selects `requested_basis`: `content-v1` or
-`commit-input v1`. Capture applies only that basis and never falls back to the
+`git-commit`. Capture applies only that basis and never falls back to the
 other one on refusal. This API does not change any consumer's default.
 Verification validates the expected scheme and value, derives the requested
 basis from that scheme (`content-v1:` or `git-commit:`), then performs the same
@@ -68,11 +68,11 @@ match or mismatch. Unavailable files, unknown schemes, unsupported states, cance
 races, deadlines and failed reads yield errors. An error is never an empty
 identity, an invented mismatch, or permission to reuse an earlier match.
 
-For commit-input v1, admission evidence includes the root commit and tree,
-child pins and checked HEADs, materialization, and the cleanliness result at
-that boundary. Failure to establish eligibility
-returns a named reason and makes the run ineligible for credit. Knowing a Git
-commit id alone is not a successful eligible capture.
+For committed input, the existing run record carries the root commit and the
+before/after cleanliness judgment. Child initialization, pins and guards are
+checked during capture; they do not add a version, child table or wire field.
+Failure to establish eligibility names a reason and earns no credit. Knowing
+a Git commit id alone is not a successful eligible capture.
 
 The API needs an explicit local root, the requested basis (or expected identity
 for verification), and a trusted installed producer. It needs no project store,
@@ -86,14 +86,14 @@ external diff programs; write objects or an index; stage files; or modify source
 or configuration. Pin the Git executable outside the inspected repository and
 retain the existing bounded Git runner, disabled optional locks, disabled
 fsmonitor, disabled global/system ignore and attribute files, disabled hooks,
-filter refusal, and denied transports/lazy fetching. In committed-input capture,
-disable replacement objects for every Git operation in the root and children,
-including status and commit, tree and pin reads. Local settings may not silently
-weaken child cleanliness checks.
+filter refusal, and denied transports/lazy fetching. The committed-input extension reuses each caller's existing Git runner and
+isolation. It adds no per-child settings table or status parser and makes no
+new claim about replacement-object behavior or byte-faithful checkouts.
 
-For committed-input captures, compare the root commit, tree and every child pin at both
-run boundaries; root HEAD and each initialized child's HEAD must remain
-unchanged. Re-establish eligibility at each boundary.
+At both run boundaries, repeat the admission predicate below on the root and
+its direct children. The root commit must remain unchanged across the run;
+its tree identifies the pins. A new root commit is different input even when
+its tree is equal. Child dirt, a wrong pin or deinitialization loses eligibility.
 Observed drift during a capture refuses its result. Content-v1 captures retain
 their existing race checks and gain only the admission change below, whose
 one new refusal is the spelling-only collision; this rollout adds no other
@@ -196,117 +196,89 @@ v1 completeness guarantee: sparse checkouts, skip-worktree or assume-unchanged
 index flags, a conflicted index, and changes between reads. This list does not
 claim that every such fixture succeeds; existing refusals still apply.
 
-## General committed input: commit-input v1
+## General committed input: existing git-commit lane
 
-The git-commit test-credit lane applies to every Git repository, with or
-without gitlinks. Commit-input v1 versions only the eligibility rules of that
-lane. Gitlinks add the requirement that every child is initialized at its pin
-and Git-clean. The original content-v1 producer
-refused gitlinks; support uses the existing typed Git form, not new content-v1
-chunks:
+The existing committed-input test-credit lane admits supported Git repositories
+with or without direct gitlinks. Its identity and typed wire remain unchanged:
 
 ```text
 source_id = "git-commit:" + full_root_commit_id
-recorded_tree = tree_of_that_commit
+wire_input = Commit { commit }
 ```
 
-The root commit identifies its tree and the pins recorded in that tree. Use
-full object ids validated against the repository's declared object format.
-The existing registered Commit lane admits only SHA-1 root repositories today:
-40 lowercase hex digits. A SHA-256 root repository (including a superproject)
-is refused with a named unsupported-format reason for commit-input credit until that lane is explicitly
-widened. Never truncate, rehash or silently accept its 64-digit id. Preserve
-format provenance; do not guess it from a permissive length check. Use the
-existing typed Git-input representation rather than introducing a second wire
-contract. Child object format and pin validation must agree with that basis.
+The root commit identifies its tree and the child pins recorded there. Do not
+hash child files into content-v1, introduce a second wire form, store a separate
+pin table or version the local run record for this extension. Two commits with
+equal trees are different inputs. Dirty or staged input earns no committed
+credit; an explicit committed-input refusal never falls back to content-v1.
+Automatic launcher selection may instead choose its existing plain run before
+registration, which earns no committed verification credit.
 
-Two commits with equal trees are not interchangeable. A new commit changes this
-identity even if its tree is unchanged. This lane requires clean committed
-input even when there are no gitlinks. `git-tree:` remains reserved for the
-staged lane, which commit-input v1 does not offer for gitlink repositories.
-Dirty or staged gitlink input gets no credit through a fallback content hash.
-Commit-input v1 compares the gitlink pins in the HEAD tree with those in the
-index; index-only additions, removals or pin changes make that lane ineligible,
-and it never falls back to content-v1. An explicitly requested content-v1
-capture retains today's index-based gitlink detection and existing behavior;
-this adds no HEAD-tree check or second new refusal to content-v1. A commit-input
-capture without a resolvable root commit is ineligible.
+Engram's registered Commit lane remains SHA-1 only: a full 40-digit lowercase
+object id. A SHA-256 root is refused with a named unsupported-format reason,
+never truncated or rehashed. This does not widen that wire domain.
 
 ### Eligibility at both boundaries
 
-Judge cleanliness through trusted Git using each repository's own
-`core.ignoreCase` and `core.fileMode`. Leave both settings unpinned; do not force
-either value to construct a different filesystem-spelling judgment. Retain the
-read-only runner restrictions above. On every cleanliness status call, in the
-root and in each child, pin these settings for that invocation without writing
-repository or global configuration:
+Use the existing trusted Git invocation and its unchanged budget. Retain each
+repository's own `core.ignoreCase` and `core.fileMode`; do not force a different
+filesystem-spelling judgment. The launcher and host retain their existing
+environment isolation, disabled fsmonitor, and null-device excludes/attributes
+overrides. The compiled host keeps its pinned external Git runner and existing
+transport, hook and deadline restrictions. There is no new per-child settings
+table and no repository or global configuration write.
 
-| Setting | Pinned value |
-| --- | --- |
-| `core.checkStat` | `default` |
-| `core.trustctime` | `true` |
-| `core.ignoreStat` | `false` |
-| `core.fsmonitor` | `false` |
-| `core.untrackedCache` | `false` |
-| `core.useReplaceRefs` | `false` |
-| `status.showUntrackedFiles` | `all` |
-| `status.showStash` | `false` |
-| `diff.ignoreSubmodules` | `none` |
-| `core.excludesFile` | The platform's null device |
-| `core.attributesFile` | The platform's null device |
+1. Require the root top level to equal the requested root, read its full
+   SHA-1 HEAD, and refuse configured root clean/smudge/process filters.
+2. Run `git submodule status --recursive`. Every reported row must start
+   with a space; `-`, `+`, `U` or a command failure refuses. Git owns pin,
+   initialization and mapping judgment. Clean nested pinned children are
+   allowed; there is no direct-child row-count comparison or separate pin table.
+3. For each child path from that output, refuse configured clean/smudge/process
+   filters before root status can run them. No root or child file/index list
+   is derived, passed or buffered; admission makes no `ls-files` call.
+4. Require this existing root status command to report no entries:
 
-These are invocation overrides, not reasons to refuse a repository whose
-configured values differ. The null device is `NUL` on Windows and `/dev/null`
-on Unix. Global and system ignore and attribute files remain disabled. A
-repository's own `.git/info/exclude`, in the root or a child, can still hide an
-untracked file and cannot be pinned away; this is a limit of the judgment,
-not a refusal condition. Repository-local `.git/info/attributes` also remains
-active and can affect line-ending judgment.
+   ```text
+   git -c status.showUntrackedFiles=all -c diff.ignoreSubmodules=none status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none
+   ```
 
-With those pins, the root and each child use this status command:
+   This is the only dirt check. Git's recursive root status reports tracked
+   and untracked child changes; child `ignore` settings cannot hide them.
+   The inherited `status.showUntrackedFiles=all` override prevents a child's
+   local configuration from hiding untracked input. The inherited
+   `diff.ignoreSubmodules=none` override also keeps nested dirt visible.
+   Do not add a child porcelain parser or discard a child-dirty root entry.
+5. Reread root HEAD and require it unchanged across the capture. The launcher
+   repeats this admission before and after execution and retains its existing
+   fingerprint recheck and real command outcome. Run the child guards before
+   execution-boundary fingerprint recursion. If a post-run guard refuses a
+   configured filter, omit that unsafe fingerprint and record ineligibility
+   while preserving the stage's actual outcome.
 
-```text
-git status --porcelain=v2 -z --no-renames --untracked-files=all --ignore-submodules=none
-```
+Tracked root or child changes, staged pins and untracked non-ignored output
+are ineligible when Git reports them. An edited assume-unchanged or skip-worktree
+file can be invisible to status and counts as clean: tests explicitly demonstrate
+this accepted limitation in root and child checkouts. This is Git cleanliness,
+not an assertion that every worktree byte was examined.
 
-The status result must be empty in the root and in every child. There is no
-exception for child dirtiness, a root tracked change, a staged pin, or untracked
-non-ignored output. Never discard submodule status.
+Git-ignored files are outside identity and cleanliness judgment in the root and
+children alike. Generated child output must be ignored by its repository or by
+a `.gitignore` the generating tool writes in its own output folder. That ignore
+file must itself be committed or covered by an ignore rule (a `*` covers it).
+There is no exception list.
 
-Every gitlink must be initialized with valid associated Git metadata and HEAD
-equal to its recorded pin. The index pin must agree with the root commit's tree;
-conflicted, duplicate, malformed or unsupported gitlinks refuse. Each child's
-own status must be empty. Untracked, non-ignored files reported by Git make
-the root or child ineligible. Git-ignored files are outside source identity and
-outside the cleanliness judgment, in the root and children alike; tracked
-changes still refuse. Nested gitlinks refuse; recursive dependency admission
-is outside v1.
-
-Generated output inside a child must be Git-ignored by the repository that
-holds it or by a `.gitignore` the generating tool writes into its own output
-folder. That `.gitignore` must itself be committed or covered by an ignore rule
-(a `*` pattern covers it), so status remains empty. There is no exception list.
-
-In the root and every child, refuse skip-worktree and assume-unchanged index
-flags, sparse or partial checkout, and clean or smudge filters including LFS.
-The status settings above are pinned rather than refused. Do not refresh an
-index to manufacture cleanliness. Disable replacement objects for every Git
-operation in the root and children, including status calls made by Git inside
-a submodule. Pin `core.useReplaceRefs=false` for those invocations; conformance
-must establish that replacement remains disabled through child-status calls.
-Unavailable or unsupported evidence is a named ineligibility reason, not a
-clean result.
-
-Record and compare the root commit, its tree and every child pin before and
-after the run. Root HEAD must be unchanged; every child must still be
-initialized at the same pin with unchanged HEAD and eligible status. Recheck
-all admission conditions. An uninitialized,
-mismatched, dirty or nested child makes the run ineligible with a named reason.
-Capture never initializes, fetches or repairs a child to make it eligible.
+The capture makes a small, bounded number of metadata calls per child and
+reuses the existing root status parser. Git also launches internal child
+commands: report those actual costs separately from outer call counts. Do not
+claim the process count is independent of the number of children. No budget or
+timeout increases, child initialization, fetching, repair or index refresh are
+part of capture. A failed or unavailable check names a reason, never a clean
+result or invented identity.
 
 ### Meaning and limits of the evidence
 
-Commit-input v1 credit means the exact Git commit and tree, judged clean by Git
+Committed-input credit means the exact Git commit and tree, judged clean by Git
 on this checkout. It does not mean a byte-identical or case-faithful checkout.
 A consumer whose build depends on case-sensitive paths or exact bytes must not
 treat this evidence as proof of those properties. There is no additional
@@ -315,7 +287,7 @@ in this committed-input lane. The separate content-v1 admission change
 does not turn Git cleanliness into proof of physical spelling.
 
 Git's stat-based verdict can miss a same-size, same-mtime edit, even with the
-settings above pinned. Ignored files can influence a run unseen, for example an
+existing settings. Ignored files can influence a run unseen, for example an
 ignored lockfile. Source identity therefore does not identify the dependency
 environment. Repository-local `.git/info/exclude` can also hide untracked input
 from this judgment, and `.git/info/attributes` can affect line-ending judgment;
@@ -345,7 +317,7 @@ unchanged. There is no new global object-format tag, gitlink payload or
 initialized/uninitialized state marker in this stream.
 
 For eligible committed input, with or without gitlinks, use
-`git-commit:<full commit id>` and record its tree as local admission evidence.
+`git-commit:<full commit id>`; that commit already identifies the tree and child pins.
 The existing typed wire form stays `Commit { commit }`; it gains no tree field
 or other extension. Do not wrap the commit in a new SHA256 or label it
 content-v1. Pins are already in the committed tree;
@@ -363,27 +335,25 @@ byte equality.
 The capture retains one shared deadline and bounded output/path reads. Current
 reference limits are 40 seconds, 128 MiB per bounded Git output/file read,
 512 MiB total ordinary file bytes and 200,000 listed ordinary paths. Submodule
-inspection is bounded as well, with at most 64 gitlinks, 200,000 listed child
-status entries and the same overall deadline. Exceeding any bound refuses the whole
-basis. Bounds affect availability, not identity values; never accept a
-truncated status or pin set. Recheck the commit, tree, pins and child eligibility
-before returning success.
+metadata reads share the existing Git deadline and output limits. There is no
+new child-count, child-status or per-child timeout policy in this extension.
+Exceeding an existing bound refuses the basis; it never admits truncated data.
+Repeat the same admission predicate at each execution boundary.
 
 ## Consumer migration and authority
 
-`ORDINARY_COMMIT_INPUT_DEFAULT` is false today; content-v1 remains the default
-basis for named roots, places and execution. `docs/test.md` (Ordinary
-committed-input runs) names candidate-commit availability as its condition for
-the default switch. This contract's own plan is to make the commit flow the
-default once gitlink repositories are admitted. Whether a future consumer may
-explicitly select content-v1 for a dirty checkout remains open and must be
-decided before that default change; capture and verification themselves never
-fall back between bases. Bases compare by exact string equality, so switching
-bases causes remeasurement, never a false match.
+The host's `ORDINARY_COMMIT_INPUT_DEFAULT` stays false, retaining content-v1
+for ordinary host source measurements. The launcher's independent automatic
+input selection is already enabled: clean admitted checkouts select the
+existing Commit lane, and dirty or unsupported checkouts select a plain run
+without verification credit. Explicit `--input commit` remains strict. This
+extension changes neither default. A later source-basis default change needs
+its own consumer migration and historical-record assessment. Schemes compare
+by exact string equality, so a switch cannot be treated as a false match.
 
 | Consumer | Source identity use | Additional facts retained |
 | --- | --- | --- |
-| Test credit, first | Content-v1 hash compatibility and relaxed spelling admission; the general typed git-commit lane uses commit-input v1 eligibility at both boundaries | Recorded tree, child pins/materialization/status, command/check identity, real execution/result, root/work/run/claim/fence and frozen input |
+| Test credit, first | Content-v1 hash compatibility and relaxed spelling admission; the existing typed git-commit lane checks the simple predicate at both boundaries | Root commit, command/check identity, real execution/result, root/work/run/claim/fence and frozen input |
 | TermAl review_freeze/review_identity, next | Reuse the appropriate scheme and admission result after explicit versioned consumer migration | Existing review scope, expected independent fingerprint, reviewer identity and any packaging components required by that consumer |
 | Engram freeze and launcher, later | Call the same capture contract, through a packaging route still to be chosen | HEAD, index, untracked/cleanliness components and before/after execution identity |
 
@@ -451,49 +421,31 @@ the uncovered behavior as tested.
    membership, deletions, file/directory/link changes, modes and line endings.
    Include sparse, conflicted and instrumented race cases to detect accidental
    tightening of the old no-gitlink path.
-2. Explicitly request `commit-input v1`. Verify independent eligible checkouts,
-   with and without gitlinks, of the
-   same commit have the same git-commit identity and recorded tree. Different commits with equal
-   trees must differ. Ordinary fixtures retain raw path ordering, Unicode
-   names without normalization, mode and line-ending semantics. Confirm that
-   repository core.ignoreCase/core.fileMode are retained for commit-input v1,
-   while every status setting listed above is pinned on both root and child
-   calls and global/system ignore and attribute files are disabled. Preserve
-   the stated limits of repository-local `.git/info/exclude` and
-   `.git/info/attributes`.
-   On a clean no-gitlink fixture eligible for both bases, assert that the
-   requested basis determines the returned scheme and that verification derives
-   the same basis from the expected scheme. Refusal in either basis must never
-   trigger a capture in the other basis.
-   Cover index-only gitlink additions, removals and pin changes: commit-input v1
-   is ineligible without fallback, while explicitly requested content-v1 retains
-   its existing index-based behavior. The latter gains no HEAD-tree refusal.
-3. Exercise initialized-at-pin children, wrong HEAD, absent children, nested
-   gitlinks, dirty root/child index or worktree, staged pins, malformed ids and
-   object-format mismatches and named SHA-256-superproject refusal. A missing
-   child may leave the commit id equal but
-   must make the run ineligible. Exercise skip-worktree, assume-unchanged,
-   sparse/partial state, filters including LFS, and disabled replacement objects
-   in both root and child. A replacement tree in the root or in a child must
-   not change the committed-input judgment; exercise both direct child status
-   and child status invoked by root Git to prove the control reaches each call.
-   Verify that differing configured status settings
-   receive the specified invocation pins rather than an ineligibility refusal.
-   Assert named ineligibility reasons for refused states, not invented identity
-   values or credit. Document Git's actual case/byte judgment without claiming
-   physical spelling or byte fidelity.
+2. Request the existing committed-input lane on independent eligible
+   checkouts, with and without gitlinks. Equal commits have equal identities;
+   different commits with equal trees differ. Preserve the no-gitlink path's
+   existing behavior and repository ignoreCase/fileMode semantics. An explicit
+   committed-input refusal never downgrades to a plain or content-v1 capture.
+   Check actual outer and internal Git call counts without a timeout increase.
+3. Exercise initialized pinned children, tracked and untracked child dirt,
+   wrong pins, deinitialization, root dirt, staged pins,
+   filters, clean nested pinned links and missing `.gitmodules` mappings with a clean
+   child still at its pin. Refusals name their reasons. Cover a named
+   SHA-256-superproject refusal, old-form directories and `.git` files, and
+   ensure a child's filter is refused before recursive status could execute it.
+   Do not claim byte or physical spelling fidelity from Git cleanliness.
 4. Exercise generated output inside a child: Git-ignored files remain outside
    the cleanliness judgment in both root and child, while untracked non-ignored
    output makes the input ineligible. Cover repository ignore rules and a
    generating tool's `.gitignore` inside its own output folder. Tracked changes
    still refuse. Include an ignored lockfile to show that dependency-environment
    identity is not proved.
-5. Compare root commit, tree and every child pin at both run boundaries, with
-   unchanged root/child HEAD and eligibility at each. Race HEAD, index, files
-   and child materialization; inject unavailable reads,
-   cancellation and budget exhaustion. Verification errors never become match
-   or mismatch. Prove capture leaves source, index, objects and configuration
-   unchanged and attempts no network, hook or filter execution.
+5. Repeat the same root/child predicate before and after execution. A new
+   root commit, child dirt, wrong pin or unavailable capture loses eligibility;
+   the actual command exit and outcome are preserved. Retain existing
+   fingerprint and final-HEAD checks and preserve failed original runs before
+   diagnosis. Capture does not initialize, fetch, repair or modify source,
+   index or configuration. Verification errors never become a match.
 6. Compare every later consumer's capture against the reference on the same
    fixtures and demonstrate that its distinct packaging, execution and authority
    checks remain enforced. Preserve historical and in-flight record bytes.
@@ -526,5 +478,5 @@ and it is not a new prerequisite for landing the implementation.
 The implementation must replace the draft content-v1 gitlink payload with the
 typed Git identity and end-to-end eligibility rules before it conforms. A clean
 status summary or equal commit string alone is insufficient. These are
-acceptance requirements, not claims that the docs-only draft ran or passed
+acceptance requirements, not claims that a documentation draft ran or passed
 those tests.

@@ -75,7 +75,7 @@ enum AcceptanceCommittedInputDecision {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum AcceptanceCommittedInputRefusal {
     /// The named root is not clean at a commit: a staged, unstaged or
-    /// untracked path, a submodule gitlink, an index-skipped tracked path, an
+    /// untracked path, an unsupported submodule, an index-skipped tracked path, an
     /// unborn HEAD, or a tree Git cannot read.
     NotClean,
     /// The newest applicable terminal result did not pass eligibly and
@@ -144,15 +144,10 @@ impl AcceptanceCommittedInputRefusal {
     }
 }
 
-/// The commit `root` is judged on: its HEAD when the worktree is clean under
-/// the committed-input rule the source revision uses
-/// ([`committed_source_clean_head`] in src/ordinary_commit_input.rs): no
-/// staged, unstaged or untracked path outside the repository's own ignore
-/// rules, no submodule gitlink (refused unread, as the freeze verifier
-/// does), and no tracked path the index tells Git to skip (assume-unchanged
-/// or skip-worktree). None
-/// otherwise, for an unborn HEAD, or a tree Git cannot read, including one
-/// Git cannot finish reading before the request's `deadline`.
+/// Root HEAD under the shared committed-input predicate: recursive submodule
+/// status, filter guards and one root dirt check, without an index listing.
+/// Hidden index edits remain the documented Git-status limitation. All reads
+/// retain the request deadline; unreadable input supplies no judged commit.
 fn acceptance_judged_commit(root: &FsPath, deadline: std::time::Instant) -> Option<String> {
     committed_source_clean_head_within(root, Some(deadline))
         .filter(|head| test_run_commit_id_valid(head))

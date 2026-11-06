@@ -18,6 +18,8 @@ mod inflight;
 mod policy_off;
 #[path = "engram_evaluation_matrix_runtime.rs"]
 mod runtime_events;
+#[path = "engram_committed_consumers_live.rs"]
+mod committed_consumers;
 use runtime_events::{CommandEvents, Provider};
 
 /// Pause one genuine closing sighting BEFORE it reaches the producer. The

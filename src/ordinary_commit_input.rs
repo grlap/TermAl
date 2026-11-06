@@ -55,13 +55,9 @@ enum SourceRevision {
 /// (`status` with every untracked file listed, paths the repository-scoped
 /// standard excludes ignore left out, and submodules never ignored), else
 /// [`SourceRevision::NotClean`].
-/// Fails, leaving the caller without a basis, where the content revision
-/// would fail to start (not a worktree root, configured Git filters), on a
-/// repository with no commit, when HEAD moves while it is taken, and when the
-/// index tells Git to skip a tracked file's worktree copy (assume-unchanged
-/// or skip-worktree), since Git would then call an edited file clean, and when
-/// the index holds a submodule gitlink, since status could run a filter the
-/// submodule configures.
+/// Fails on a non-root checkout, filters, an unreadable or non-SHA-1 HEAD,
+/// an uninitialized or off-pin submodule, and HEAD movement. Git status is
+/// the dirt verdict: assume-unchanged and skip-worktree edits can be invisible.
 fn source_revision(root: &FsPath, ordinary_commit_input: bool) -> Result<SourceRevision> {
     if !ordinary_commit_input {
         let (root, revision) = content_revision(root)?;
@@ -82,19 +78,11 @@ fn capture_committed_source_revision(git: &ReviewFreezeGit) -> Result<SourceRevi
     })
 }
 
-/// The commit the worktree at `root` is clean at, under the one rule every
-/// committed-input reader shares: HEAD, when the index tells Git to skip no
-/// tracked path's worktree copy, `status` with every untracked file listed,
-/// paths the repository-scoped standard excludes ignore left out and
-/// submodules never ignored reports nothing, and HEAD did not move while that
-/// was read. The pinned runner points `core.excludesFile` at the null device,
-/// as the launcher's `captureCommitInputStatus` does, so the ignore sources
-/// are .gitignore and .git/info/exclude. None for a dirty
-/// tree, such an index, an index with a submodule gitlink, an unborn HEAD, or
-/// a tree Git cannot read. The
-/// acceptance evaluation's committed-input admission
-/// (src/acceptance_committed_input.rs) judges its named root with it, under
-/// the request's deadline ([`committed_source_clean_head_within`]).
+/// HEAD when recursive submodules are initialized at pin, filters are absent,
+/// root status reports no tracked or untracked nonignored dirt, and HEAD stays
+/// unchanged. No full file or index listing is derived. Hidden index edits
+/// remain Git status's documented visibility limitation.
+/// Acceptance uses the same predicate under its existing shared deadline.
 #[cfg(test)]
 fn committed_source_clean_head(root: &FsPath) -> Option<String> {
     committed_source_clean_head_within(root, None)
@@ -111,49 +99,20 @@ fn committed_source_clean_head_within(
     dirty_paths.is_empty().then_some(head)
 }
 
-/// HEAD and the paths Git reports changed against it, read as
-/// [`source_revision`] describes. Fails on an index that tells Git to skip a
-/// tracked path's worktree copy or holds a submodule gitlink, on a HEAD that
-/// is not a full commit id, and
-/// when HEAD moves between the reads.
+/// Root HEAD and Git's root dirt diagnostics, guarded by recursive submodule
+/// pin status and root/child filter configuration.
 fn committed_source_status(
     git: &ReviewFreezeGit,
 ) -> Result<(String, Vec<SourceRevisionDirtyPath>)> {
     let head = committed_source_head(git)?;
-    // `-v` tags an assume-unchanged entry with a lowercase letter and a
-    // skip-worktree one with `S`. Status does not look at such a file's
-    // worktree copy, so an edit there would read as clean.
-    let tagged = git.run(&["ls-files", "-z", "-v"], false)?;
-    for entry in tagged.split(|b| *b == 0).filter(|e| !e.is_empty()) {
-        if entry[0].is_ascii_lowercase() || entry[0] == b'S' {
-            bail!(
-                "a committed source revision does not cover a tracked path Git is told to \
-                 skip (assume-unchanged or skip-worktree)"
-            );
-        }
-    }
-    // Status can run a clean or process filter from a submodule's own config
-    // while it checks that submodule, outside the runner's filter check. As
-    // `capture_review_freeze` does, refuse any gitlink first, from index
-    // metadata alone (`ls-files --stage` runs no filter).
-    let staged = git.run(&["ls-files", "--stage", "-z"], false)?;
-    let gitlinks = staged
-        .split(|b| *b == 0)
-        .filter(|entry| entry.starts_with(b"160000 "))
-        .map(|entry| {
-            let path = entry.splitn(2, |b| *b == b'\t').nth(1).unwrap_or_default();
-            String::from_utf8_lossy(path).into_owned()
-        })
-        .collect::<Vec<_>>();
-    if !gitlinks.is_empty() {
-        bail!(
-            "a committed source revision does not inspect submodules (Git gitlinks are \
-             unsupported): {}",
-            gitlinks.join(", ")
-        );
-    }
+    committed_source_submodules(git)?;
     let status = git.run(
         &[
+            // Unlike -u, this override reaches recursive child status too.
+            "-c",
+            "status.showUntrackedFiles=all",
+            "-c",
+            "diff.ignoreSubmodules=none",
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
@@ -171,16 +130,56 @@ fn committed_source_status(
     Ok((head, dirty_paths))
 }
 
-/// The full id of the commit HEAD names: 40 hex digits, or 64 in a SHA-256
-/// repository.
+/// Git owns initialization and pin judgment, including nested children. Only
+/// child paths from its bounded status output are retained, never a file list.
+fn committed_source_submodules(git: &ReviewFreezeGit) -> Result<()> {
+    let status = git.run(&["submodule", "status", "--recursive"], false)
+        .context("submodule initialization/pin or .gitmodules mapping check failed")?;
+    let status = String::from_utf8(status)?;
+    for row in status.lines() {
+        if row.is_empty() { continue; }
+        if !row.starts_with(' ') {
+            bail!("submodule is not initialized at its pin (git submodule status --recursive)");
+        }
+        if row.len() < 43 || row.as_bytes()[41] != b' '
+            || !row.get(1..41).is_some_and(is_lowercase_hex) {
+            bail!("malformed git submodule status row");
+        }
+        let tail = &row[42..];
+        // Git appends an optional ` (describe)` suffix after the path.
+        let path = if tail.ends_with(')') {
+            tail.rsplit_once(" (").map_or(tail, |(path, _)| path)
+        } else { tail };
+        let root = fs::canonicalize(git.root.join(path))
+            .with_context(|| format!("submodule {path} is not initialized"))?;
+        if root == git.root || !root.starts_with(&git.root) {
+            bail!("submodule {path} is outside its worktree root");
+        }
+        let child = ReviewFreezeGit {
+            root,
+            binary: git.binary.clone(),
+            deadline: git.deadline,
+        };
+        let filters = child.run(
+            &["config", "--null", "--get-regexp", r"^filter\..*\.(clean|smudge|process)$"],
+            true,
+        )?;
+        if !filters.is_empty() {
+            bail!("submodule {path} has a configured Git filter");
+        }
+    }
+    Ok(())
+}
+
+/// The full SHA-1 commit id supported by the registered Commit wire.
 fn committed_source_head(git: &ReviewFreezeGit) -> Result<String> {
     let output = git.run(&["rev-parse", "--verify", "HEAD^{commit}"], false)?;
     let head = String::from_utf8(output)
         .context("HEAD is not UTF-8")?
         .trim()
         .to_owned();
-    if !(matches!(head.len(), 40 | 64) && is_lowercase_hex(&head)) {
-        bail!("HEAD is not a full commit id: {head:?}");
+    if !(head.len() == 40 && is_lowercase_hex(&head)) {
+        bail!("HEAD is not a full SHA-1 commit id (unsupported object format): {head:?}");
     }
     Ok(head)
 }

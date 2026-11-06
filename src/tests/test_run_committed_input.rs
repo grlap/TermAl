@@ -150,9 +150,8 @@ fn each_committed_input_outcome_reads_as_recorded() {
         "kept in the wire form"
     );
 
-    // A submodule gitlink refuses the run unread: the launcher records the
-    // gitlinks beside the dirty paths, and one added during the run changes
-    // the input.
+    // Historical blanket gitlink refusals remain readable and ineligible;
+    // admitting supported children does not reinterpret old run records.
     let gitlinked_before = detail_of(
         &fixture,
         "test-committed-gitlinked-before",
@@ -317,7 +316,7 @@ fn a_malformed_committed_input_reads_as_none() {
                 "after": { "commit": COMMIT, "clean": true, "paths": [],
                            "filters": ["filter.fixture.clean"] },
                 "outcome": "clean", "eligible": true }),
-        // A submodule gitlink is never clean, and never only debris.
+        // Historical gitlink refusal fields cannot claim clean eligibility.
         json!({ "kind": "commit", "commit": COMMIT, "cleanBefore": true,
                 "gitlinks": ["sub"] }),
         json!({ "kind": "commit", "commit": COMMIT, "cleanBefore": true,

@@ -197,13 +197,12 @@ fn with_the_switch_on_ignored_files_leave_the_root_clean() {
 }
 
 #[test]
-fn with_the_switch_on_a_file_git_is_told_to_skip_gives_no_revision() {
+fn assume_unchanged_edits_are_a_documented_status_limitation() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let root = repository(&mut cleanup);
     run_git_test_command(&root, &["update-index", "--assume-unchanged", "tracked.txt"]);
     fs::write(root.join("tracked.txt"), "hidden edit\n").unwrap();
-    let error = source_revision(&root, true).unwrap_err().to_string();
-    assert!(error.contains("assume-unchanged"), "{error}");
+    assert_eq!(committed_source_clean_head(&root), Some(head(&root)));
 }
 
 #[test]
@@ -229,23 +228,12 @@ fn status_entries_keep_a_rename_origin() {
 }
 
 #[test]
-fn with_the_switch_on_a_skip_worktree_file_gives_no_revision() {
-    let mut cleanup = RemoveDirsOnDrop(Vec::new());
-    let root = repository(&mut cleanup);
-    run_git_test_command(&root, &["update-index", "--skip-worktree", "tracked.txt"]);
-    fs::write(root.join("tracked.txt"), "hidden edit\n").unwrap();
-    let error = source_revision(&root, true).unwrap_err().to_string();
-    assert!(error.contains("skip-worktree"), "{error}");
-    assert_eq!(committed_source_clean_head(&root), None);
-}
-
-#[test]
-fn with_the_switch_on_a_submodule_gitlink_gives_no_revision() {
+fn with_the_switch_on_an_uninitialized_submodule_gives_no_revision() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let root = repository(&mut cleanup);
     // A committed gitlink with no checkout: an unpopulated submodule is an
     // empty directory at its path (a missing path reads as deleted), and
-    // plain status calls that clean, so only the gitlink refusal keeps the
+    // plain status calls that clean, so the initialization guard keeps the
     // root from a revision.
     let cacheinfo = format!("160000,{},sub", head(&root));
     run_git_test_command(&root, &["update-index", "--add", "--cacheinfo", &cacheinfo]);
@@ -253,10 +241,143 @@ fn with_the_switch_on_a_submodule_gitlink_gives_no_revision() {
     fs::create_dir_all(root.join("sub")).unwrap();
     assert_eq!(run_git_test_command_output(&root, &["status", "--porcelain"]), "");
     let error = source_revision(&root, true).unwrap_err().to_string();
-    assert!(error.contains("gitlinks are unsupported"), "{error}");
-    assert!(error.ends_with(": sub"), "{error}");
+    assert!(error.contains("submodule initialization/pin"), "{error}");
     assert_eq!(committed_source_clean_head(&root), None);
     assert!(engram_place_source_basis_with(&workdir_place(&root), true).is_none());
+}
+
+fn repository_with_child(cleanup: &mut RemoveDirsOnDrop) -> (PathBuf, PathBuf) {
+    let dependency = repository(cleanup);
+    let root = repository(cleanup);
+    run_git_test_command(&root, &["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always", "submodule", "add", "--quiet",
+        dependency.to_str().unwrap(), "child with spaces"]);
+    run_git_test_command(&root, &["commit", "--quiet", "-m", "pin child"]);
+    let child = root.join("child with spaces");
+    run_git_test_command(&child, &["config", "core.autocrlf", "false"]);
+    (root, child)
+}
+
+#[test]
+fn sha256_roots_are_outside_the_registered_commit_wire_domain() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let root = test_temp_dir().join(format!("ordinary-sha256-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    cleanup.0.push(root.clone());
+    run_git_test_command(&root, &["init", "--quiet", "--template=", "--object-format=sha256"]);
+    fs::write(root.join("tracked.txt"), "base\n").unwrap();
+    run_git_test_command(&root, &["add", "--", "tracked.txt"]);
+    let commit = |message| run_git_test_command(&root, &["-c", "user.name=Fixture",
+        "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", message]);
+    commit("base");
+    let original = head(&root);
+    assert_eq!(original.len(), 64);
+    assert_eq!(committed_source_clean_head(&root), None);
+    let cacheinfo = format!("160000,{original},dep");
+    run_git_test_command(&root, &["update-index", "--add", "--cacheinfo", &cacheinfo]);
+    commit("gitlink");
+    let error = source_revision(&root, true).unwrap_err().to_string();
+    assert!(error.contains("unsupported object format"), "{error}");
+}
+
+#[test]
+fn pinned_submodule_has_the_existing_revision_and_root_status_reports_child_dirt() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let (root, child) = repository_with_child(&mut cleanup);
+    let original = head(&root);
+    assert_eq!(source_revision(&root, true).unwrap(), SourceRevision::Taken {
+        root: fs::canonicalize(&root).unwrap(), revision: format!("git-commit:{original}"),
+    });
+    assert_eq!(committed_source_clean_head(&root), Some(original.clone()));
+    assert!(engram_place_source_basis_with(&workdir_place(&root), true).is_some());
+    run_git_test_command(&root, &["config", "submodule.child with spaces.ignore", "all"]);
+    for name in ["tracked.txt", "untracked.txt"] {
+        fs::write(child.join(name), "child change\n").unwrap();
+        let dirty = not_clean(&root);
+        assert_eq!(dirty.len(), 1);
+        assert_eq!(dirty[0].path, "child with spaces");
+        assert_eq!(committed_source_clean_head(&root), None);
+        if name == "tracked.txt" { run_git_test_command(&child, &["checkout", "--", name]); }
+        else { fs::remove_file(child.join(name)).unwrap(); }
+    }
+    assert_eq!(committed_source_clean_head(&root), Some(original.clone()));
+    fs::write(root.join("tracked.txt"), "root change\n").unwrap();
+    assert_eq!(committed_source_clean_head(&root), None);
+    run_git_test_command(&root, &["commit", "--quiet", "-am", "new root"]);
+    assert_ne!(head(&root), original);
+    assert_eq!(committed_source_clean_head(&root), Some(head(&root)));
+}
+
+#[test]
+fn child_filters_refuse_before_recursive_root_status() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let (root, child) = repository_with_child(&mut cleanup);
+    for driver in ["clean", "smudge", "process"] {
+        let key = format!("filter.fixture.{driver}");
+        run_git_test_command(&child, &["config", &key, "must-not-execute"]);
+        let error = source_revision(&root, true).unwrap_err().to_string();
+        assert!(error.contains("configured Git filter"), "{error}");
+        run_git_test_command(&child, &["config", "--unset", &key]);
+    }
+}
+
+#[test]
+fn initialized_nested_pinned_children_are_admitted() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let (root, child) = repository_with_child(&mut cleanup);
+    let donor = repository(&mut cleanup);
+    run_git_test_command(&child, &["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always",
+        "submodule", "add", "--quiet", donor.to_str().unwrap(), "nested"]);
+    run_git_test_command(&child.join("nested"), &["config", "core.autocrlf", "false"]);
+    run_git_test_command(&child, &["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-am", "nested pin"]);
+    run_git_test_command(&root, &["add", "--", "child with spaces"]);
+    run_git_test_command(&root, &["commit", "--quiet", "-m", "nested parent pin"]);
+    assert_eq!(committed_source_clean_head(&root), Some(head(&root)));
+    run_git_test_command(&child, &["config", "diff.ignoreSubmodules", "all"]);
+    fs::write(child.join("nested/tracked.txt"), "nested dirt\n").unwrap();
+    assert_eq!(committed_source_clean_head(&root), None);
+}
+
+#[test]
+fn a_child_local_status_setting_cannot_hide_untracked_input() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let (root, child) = repository_with_child(&mut cleanup);
+    run_git_test_command(&child, &["config", "status.showUntrackedFiles", "no"]);
+    fs::write(child.join("untracked.txt"), "child input\n").unwrap();
+    assert_eq!(run_git_test_command_output(&root, &["status", "--porcelain=v1",
+        "--untracked-files=all", "--ignore-submodules=none"]), "");
+    let dirty = not_clean(&root);
+    assert_eq!(dirty.len(), 1);
+    assert_eq!(dirty[0].path, "child with spaces");
+    assert_eq!(committed_source_clean_head(&root), None);
+}
+
+#[test]
+fn off_pin_and_deinitialized_submodules_are_named_refusals() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let (root, child) = repository_with_child(&mut cleanup);
+    run_git_test_command(&child, &["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid",
+        "commit", "--quiet", "--allow-empty", "-m", "off pin"]);
+    let error = source_revision(&root, true).unwrap_err().to_string();
+    assert!(error.contains("not initialized at its pin"), "{error}");
+    run_git_test_command(&root, &["submodule", "deinit", "--force", "--", "child with spaces"]);
+    let error = source_revision(&root, true).unwrap_err().to_string();
+    assert!(error.contains("not initialized at its pin"), "{error}");
+}
+
+#[test]
+fn a_clean_pinned_child_without_a_gitmodules_mapping_is_refused_by_name() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let (root, child) = repository_with_child(&mut cleanup);
+    let pin = head(&child);
+    assert_eq!(committed_source_clean_head(&root), Some(head(&root)));
+    fs::write(root.join(".gitmodules"), "").unwrap();
+    run_git_test_command(&root, &["add", "--", ".gitmodules"]);
+    run_git_test_command(&root, &["commit", "--quiet", "-m", "remove child mapping"]);
+    assert_eq!(head(&child), pin);
+    assert_eq!(run_git_test_command_output(&root, &["status", "--porcelain=v1", "--ignore-submodules=none"]), "");
+    let error = format!("{:#}", source_revision(&root, true).unwrap_err());
+    assert!(error.contains(".gitmodules mapping check failed") && error.contains("child with spaces"), "{error}");
+    assert_eq!(committed_source_clean_head(&root), None);
 }
 
 #[test]

@@ -1065,8 +1065,8 @@ function validateInitialRequest(runDir, request, env) {
 
 // Whether a committed-input status (captureCommitInputStatus) is clean: no
 // status entry, no tracked path the index tells Git to skip, and no
-// configured Git filter or submodule gitlink (either refuses the status
-// unread).
+// configured Git filter. Supported initialized, pinned submodules have already
+// passed the child guards; unsupported children refuse the capture.
 export function commitInputStatusClean(status) {
   return status.entries.length === 0
     && (status.skipped ?? []).length === 0
@@ -1093,6 +1093,7 @@ function commitInputNotCleanReason(status) {
       ? [`${filters.length} configured Git filter(s) (${filters.join(", ")}), which the committed-input status does not run`]
       : []),
     ...(gitlinks.length
+      // Historical records used this field for blanket gitlink refusal.
       ? [`${gitlinks.length} submodule gitlink(s) (${gitlinks.join(", ")}), which the committed-input status does not inspect`]
       : []),
   ].join("; ");
@@ -1483,6 +1484,15 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       await probe("engram", binary, ["--version"]);
     }
     const expectedInput = readJson(join(runDir, "input.json"));
+    if (request.input === "commit") {
+      const status = await captureCommitInputStatus(request.root, childEnv);
+      if (!commitInputStatusClean(status)) {
+        throw new Error(`committed-input admission changed before execution: ${commitInputNotCleanReason(status)}; no stages run`);
+      }
+      if (status.commit !== result.input?.commit) {
+        throw new Error("committed-input HEAD moved before execution; no stages run");
+      }
+    }
     const before = await captureFingerprint(request.root, childEnv);
     if (before.fingerprint !== request.expectedFingerprint) {
       throw new Error(driftError("input drift before execution; no stages run", expectedInput, before));
@@ -1602,8 +1612,19 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     }
     let after, status;
     try {
-      after = await captureFingerprint(request.root, childEnv);
-      if (request.input === "commit") status = await captureCommitInputStatus(request.root, childEnv);
+      if (request.input === "commit") {
+        // A stage may have installed a child filter. Guard before fingerprint
+        // diff/status recursion, and retain the final admission reread too.
+        const guarded = await captureCommitInputStatus(request.root, childEnv);
+        if ((guarded.filters ?? []).length || (guarded.gitlinks ?? []).length) {
+          status = guarded;
+        } else {
+          after = await captureFingerprint(request.root, childEnv);
+          status = await captureCommitInputStatus(request.root, childEnv);
+        }
+      } else {
+        after = await captureFingerprint(request.root, childEnv);
+      }
     } catch (error) {
       if (request.input !== "commit") throw error;
       // No invented after identity or outcome: the legacy reader accepts an

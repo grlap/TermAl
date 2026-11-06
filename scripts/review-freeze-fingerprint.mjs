@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { spawn } from "node:child_process";
 import { devNull } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const fingerprintComponentNames = Object.freeze([
@@ -327,30 +327,12 @@ export async function captureFingerprint(requestedRoot = process.cwd(), sourceEn
   return { ...fields, fingerprint };
 }
 
-// The committed-input view of a checkout, under the one cleanliness rule the
-// host shares (`committed_source_status` in src/ordinary_commit_input.rs):
-// HEAD, and every entry `git status --porcelain=v1 --untracked-files=all
-// --ignore-submodules=none -z` reports: only the repository-scoped standard
-// excludes apply (.gitignore and .git/info/exclude), since every call here
-// points core.excludesFile and core.attributesFile at the null device as the
-// host's pinned runner does (which also keeps the XDG default ignore and
-// attributes files out; the repository's own .gitattributes still apply), and a submodule's
-// own `ignore` setting hides nothing. A rename or copy entry carries its origin
-// path as `origin`. `skipped` lists the tracked paths the index tells Git to
-// skip (`git ls-files -v`: a lowercase tag is assume-unchanged, `S` is
-// skip-worktree), as `{ tag, path }`: Git does not read their worktree copies,
-// so an edit there would look clean, and a checkout with any is not clean.
-// `filters` lists the configured clean, smudge or process filter keys
-// (`filter.<driver>.clean|smudge|process`): as `ReviewFreezeGit` in
-// src/review_freeze.rs, a repository with any is refused before status runs,
-// since status can run them; its status is returned with no entries and is
-// not clean. `gitlinks` lists the index's submodule paths (mode 160000, read
-// from `git ls-files --stage`, which runs no filter): as the freeze verifier
-// (`capture_review_freeze` in src/review_freeze.rs), a repository with any is
-// refused the same way, since status can run a submodule's own configured
-// filters. HEAD is read again last; a move between the reads throws. It
-// uses the same environment variables as captureFingerprint
-// (isolatedGitEnvironment) and the Git binary PATH resolves.
+// Commit admission uses recursive submodule status, root/child filter config,
+// one root porcelain dirt check and a root HEAD reread. No full file or index
+// listing is derived. Clean nested pinned children are supported. Git status
+// can miss edits to assume-unchanged/skip-worktree files; that is a documented
+// limitation. Empty skipped/gitlinks fields retain the existing record shape.
+// Child filters are checked before root status or execution-boundary fingerprints.
 export async function captureCommitInputStatus(requestedRoot = process.cwd(), sourceEnv = process.env) {
   const env = isolatedGitEnvironment(sourceEnv);
   const git = commitInputGitArgs;
@@ -372,26 +354,54 @@ export async function captureCommitInputStatus(requestedRoot = process.cwd(), so
     .split("\0")
     .filter((entry) => entry.length > 0)
     .map((entry) => entry.split("\n", 1)[0]);
-  // Index metadata only: ls-files runs no filter and reads no submodule.
-  const gitlinks = [];
-  for (const record of await nulSeparatedGitValues(git(["ls-files", "--stage", "-z"]), root, env)) {
-    if (record.subarray(0, 7).toString("utf8") === "160000 ") {
-      gitlinks.push(record.subarray(record.indexOf(9) + 1).toString("utf8"));
-    }
-  }
   const commit = await head();
-  if (filters.length || gitlinks.length) {
-    return { root, commit, entries: [], skipped: [], filters, gitlinks };
+  if (!/^[0-9a-f]{40}$/u.test(commit)) throw new Error("HEAD is not a full SHA-1 commit id (unsupported object format)");
+  if (realpathSync.native(root) !== realpathSync.native(requestedRoot)) throw new Error("committed-input cwd must be the worktree root");
+  if (filters.length) {
+    return { root, commit, entries: [], skipped: [], filters, gitlinks: [] };
   }
   const skipped = [];
-  for (const record of await nulSeparatedGitValues(git(["ls-files", "-z", "-v"]), root, env)) {
-    const tag = String.fromCharCode(record[0]);
-    if (/^[a-z]$/u.test(tag) || tag === "S") {
-      skipped.push({ tag, path: record.subarray(2).toString("utf8") });
+  {
+    let pins;
+    try {
+      pins = (await captureGit(git(["submodule", "status", "--recursive"]), root, env)).toString("utf8");
+    } catch (error) {
+      throw new Error(`submodule initialization/pin or .gitmodules mapping check failed: ${error.message}`, { cause: error });
     }
+    const rows = pins.split("\n").filter(Boolean);
+    if (rows.some((row) => row[0] !== " ")) {
+      throw new Error("submodule is not initialized at its pin (git submodule status --recursive)");
+    }
+    const canonicalRoot = realpathSync.native(root);
+    for (const row of rows) {
+      if (!/^ [0-9a-f]{40} .+/u.test(row)) throw new Error("malformed git submodule status row");
+      // Git appends an optional ` (describe)` suffix after the path.
+      const tail = row.slice(42);
+      const suffix = tail.endsWith(")") ? tail.lastIndexOf(" (") : -1;
+      const path = suffix === -1 ? tail : tail.slice(0, suffix);
+      let child;
+      // Git's successful clean-prefix row supplies initialization and pin
+      // judgment. Keep filter-config paths within this root.
+      try {
+        child = realpathSync.native(join(root, path));
+      } catch {
+        throw new Error(`submodule ${path} is not initialized`);
+      }
+      const fromRoot = relative(canonicalRoot, child);
+      if (!fromRoot || isAbsolute(fromRoot) || fromRoot.split(/[\\/]/u).includes("..")) {
+        throw new Error(`submodule ${path} is outside its worktree root`);
+      }
+      const childFilters = (await captureGit(
+        git(["config", "--null", "--get-regexp", "^filter\\..*\\.(clean|smudge|process)$"]), child, env, true,
+      )).toString("utf8").split("\0").filter(Boolean).map((record) => record.split("\n", 1)[0]);
+      filters.push(...childFilters.map((key) => `${path}: ${key}`));
+    }
+    if (filters.length || skipped.length) return { root, commit, entries: [], skipped, filters, gitlinks: [] };
   }
   const records = await nulSeparatedGitValues(
-    git(["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none", "-z"]),
+    // Command-line -u is not forwarded to recursive child status. A -c
+    // setting is inherited and overrides a child's status.showUntrackedFiles.
+    git(["-c", "status.showUntrackedFiles=all", "-c", "diff.ignoreSubmodules=none", "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none", "-z"]),
     root,
     env,
   );
@@ -414,7 +424,7 @@ export async function captureCommitInputStatus(requestedRoot = process.cwd(), so
   if (await head() !== commit) {
     throw new Error("HEAD moved while the committed-input status was captured");
   }
-  return { root, commit, entries, skipped, filters, gitlinks };
+  return { root, commit, entries, skipped, filters, gitlinks: [] };
 }
 
 // The arguments of every committed-input Git call, as `ReviewFreezeGit::command`

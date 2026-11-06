@@ -279,19 +279,20 @@ and the refusal of a repository with a configured Git filter
 (`filter.<driver>.clean`, `smudge` or `process`), which status could run. The
 launcher resolves `git` through `PATH` as it always has; the host's own runner
 pins a Git binary outside the reviewed tree and further `-c` settings. A
-submodule's `ignore` setting hides nothing. A repository whose index holds a
-submodule gitlink (mode 160000, read with `git ls-files --stage`, which runs
-no filter) is refused before status runs, as the freeze verifier refuses it,
-since status could run a filter the submodule's own config names. A tracked
-path the index tells Git to skip (`git ls-files -v`: a lowercase tag for
-assume-unchanged, `S` for skip-worktree) is never clean either, since Git does
-not read its worktree copy. If any entry, skipped path, configured filter or
-gitlink is found, the run is refused with no stage run: `results.json` is
-`failed` with
-`input: { kind: "commit", cleanBefore: false, dirtyPaths: [{ status, path }] }`,
-plus `skippedPaths: [{ tag, path }]`, `filters: [key]` or `gitlinks: [path]`
-when there are any, and the launcher exits non-zero; a filter or gitlink is
-named in the refusal's error as its own reason. Otherwise it records the full HEAD commit as
+submodule's `ignore` setting hides nothing. Recursive submodules are admitted
+when `git submodule status --recursive` reports every row at its pin with a
+space prefix. Nested pinned children are allowed. Root and child filter-config
+reads precede root status, which supplies all tracked/untracked dirt with
+inherited `-c status.showUntrackedFiles=all` and `-c diff.ignoreSubmodules=none`. No file/index list or child
+porcelain parser is used for admission.
+
+An edited assume-unchanged or skip-worktree file may be invisible to Git status
+and counts as clean. Tests demonstrate this documented limitation; admission
+does not inspect index flags. A configured filter or status entry refuses
+before any stage runs. Historical `skippedPaths` and `gitlinks` refusals remain
+readable. Initialization, pin and mapping failures name their capture error.
+Otherwise
+it records the full HEAD commit as
 `input: { kind: "commit", commit, cleanBefore: true }`, takes the fingerprint,
 and reads the status again: a change in that window refuses the run the same
 way, and a moved HEAD fails it, so an edit frozen into the fingerprint and
@@ -299,7 +300,7 @@ reverted after the stages cannot read as clean before and after. The existing
 before-execution fingerprint check still applies.
 
 After the stages it reads status and HEAD again into `input.after`
-(`{ commit, clean, paths }`, plus `skippedPaths` when there are any) and sets
+(`{ commit, clean, paths }`) and sets
 `input.outcome`:
 
 - `clean`: HEAD is unchanged and Git reports no entry.
@@ -307,7 +308,7 @@ After the stages it reads status and HEAD again into `input.after`
   untracked, non-ignored path (`??`). `input.disposition` is `null` until
   another component records what happens to that debris.
 - `input_changed`: HEAD moved, a tracked path was modified, added, deleted
-  or renamed, the index now tells Git to skip a tracked path, or a Git
+  or renamed, or a Git
   filter is now configured.
 
 In this flow a changed fingerprint after the stages does not fail the run:
@@ -339,10 +340,18 @@ omit that input kind and preserve their selection reason in
 Commit eligibility does not certify a byte-for-byte or case-faithful checkout.
 The registered producer wire remains `Commit { commit }`, bound through the
 existing claim, store and named-root registration. Content-v1 and schema-1
-review-freeze behavior are unchanged. A checkout with a submodule gitlink
-selects plain automatically: the existing committed-input producer refuses it
-unread. Explicit committed-input refusal never falls back; automatic plain
-selection earns no commit credit.
+review-freeze behavior are unchanged. Clean, initialized pinned recursive
+submodules use the existing committed-input record without a wire change.
+Each admission capture reads recursive submodule status and each reported
+child's filter config, then one root status and the unchanged HEAD boundary.
+Only full SHA-1 root commits are supported; no file/index list is an admission
+condition. Git itself launches additional child commands internally.
+Execution-boundary fingerprints are preceded by admission guards, and the
+post-run final admission reread remains. If a filter is refused, that unsafe
+fingerprint is omitted and the run loses eligibility while retaining its
+actual stage outcome. There
+is no timeout or budget increase. Explicit committed-input refusal never
+falls back; automatic plain selection earns no commit credit.
 
 Once a claim has a registered committed-input run that started on a clean
 checkout, whether selected automatically or by `--input commit`, and whatever

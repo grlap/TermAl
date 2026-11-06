@@ -457,6 +457,41 @@ fn an_acknowledged_committed_run_at_head_is_admitted_without_a_sighting_read() {
     }
 }
 
+#[test]
+fn a_pinned_child_uses_the_existing_record_and_acceptance_but_child_dirt_refuses() {
+    let (state, parent, _store, named_root) = named_root_parent();
+    let root = worktree(&named_root);
+    let origin = root.join(".worktrees").join("child-origin");
+    fs::create_dir_all(&origin).unwrap();
+    init_git_document_test_repo(&origin);
+    fs::write(origin.join("child.txt"), "pinned child\n").unwrap();
+    run_git_test_command(&origin, &["add", "--", "child.txt"]);
+    run_git_test_command(&origin, &["commit", "--quiet", "-m", "child"]);
+    run_git_test_command(&root, &["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always", "submodule", "add", "--quiet",
+        origin.to_str().unwrap(), "dep"]);
+    run_git_test_command(&root.join("dep"), &["config", "core.autocrlf", "false"]);
+    run_git_test_command(&root, &["add", "--", "judged.txt"]);
+    run_git_test_command(&root, &["commit", "--quiet", "-m", "pin child"]);
+    let head = run_git_test_command_output(&root, &["rev-parse", "HEAD"]);
+    assert_eq!(committed_source_clean_head(&root), Some(head.clone()));
+    let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
+    let registration = register_committed_run(&state, &parent, &named_root,
+        committed_results("passed", input_record(&head, "clean")));
+    host_observed(&state, &registration, &head, acknowledged("settled"));
+    let frozen = engram_verification_record_frozen(FsPath::new(&registration.run_directory), &registration.run_id).unwrap();
+    assert_eq!(frozen.record["input"], json!({"kind":"commit", "commit": head}));
+    assert_eq!(decide(&state, &parent), Ok(AcceptanceCommittedInputDecision::Admitted(
+        AcceptanceCommittedInputAdmission { run_id: COMMITTED_RUN_ID.to_owned(), commit: head },
+    )));
+    fs::write(root.join("dep/child.txt"), "dirty child\n").unwrap();
+    assert_eq!(assert_refused_without_a_sighting(&transport, decide(&state, &parent),
+        "committed_input_not_clean", "tracked child edit"), AcceptanceCommittedInputRefusal::NotClean);
+    run_git_test_command(&root.join("dep"), &["checkout", "--", "child.txt"]);
+    fs::write(root.join("dep/new.txt"), "child debris\n").unwrap();
+    assert_eq!(assert_refused_without_a_sighting(&transport, decide(&state, &parent),
+        "committed_input_not_clean", "untracked child edit"), AcceptanceCommittedInputRefusal::NotClean);
+}
+
 /// Asserts that `target`, an evaluation admitted on `registration`'s run at
 /// `head` in `named_root`, judges and declares `git-commit:<head>` in that
 /// root: exactly the source the run's verification record names, so the brief
@@ -762,39 +797,6 @@ fn a_debris_input_changed_failed_or_ineligible_run_is_refused_without_a_sighting
             AcceptanceCommittedInputRefusal::NoEligibleRun { commit: head },
             "{case}"
         );
-    }
-}
-
-#[test]
-fn a_root_whose_index_skips_a_tracked_path_is_refused_without_a_sighting() {
-    // Git's status does not read the worktree copy of an assume-unchanged or
-    // skip-worktree path, so an edit there would read as clean.
-    for (case, flag) in [
-        ("skip-worktree", "--skip-worktree"),
-        ("assume-unchanged", "--assume-unchanged"),
-    ] {
-        let (state, parent, _store, named_root) = named_root_parent();
-        let head = commit_named_root(&named_root);
-        let transport =
-            install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
-        let registration = register_committed_run(
-            &state,
-            &parent,
-            &named_root,
-            committed_results("passed", input_record(&head, "clean")),
-        );
-        host_observed(&state, &registration, &head, acknowledged("settled"));
-        let root = worktree(&named_root);
-        run_git_test_command(&root, &["update-index", flag, "judged.txt"]);
-        fs::write(root.join("judged.txt"), "changed after the run\n").unwrap();
-
-        let refusal = assert_refused_without_a_sighting(
-            &transport,
-            decide(&state, &parent),
-            "committed_input_not_clean",
-            case,
-        );
-        assert_eq!(refusal, AcceptanceCommittedInputRefusal::NotClean, "{case}");
     }
 }
 

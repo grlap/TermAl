@@ -318,6 +318,18 @@ fn live_root_fixture(
     suffix: &str,
     faults: impl IntoIterator<Item = BoundaryFault>,
 ) -> LiveRootFixture {
+    live_root_fixture_with_repository(suffix, faults, |_| {})
+}
+
+/// Test-only setup before any Engram store, session or source authority exists.
+/// The initializer may clone an exact real commit into the empty owned root.
+/// It must preserve a tracked project binding, or supply an ignored disposable
+/// one, and must leave the consumer's tracked files and HEAD unchanged.
+fn live_root_fixture_with_repository(
+    suffix: &str,
+    faults: impl IntoIterator<Item = BoundaryFault>,
+    initialize: impl FnOnce(&FsPath),
+) -> LiveRootFixture {
     let binary_path = live_engram_binary();
     let (state, receiver) =
         test_app_state_with_delegation_codex_runtime(&format!("engram-live-root-{suffix}"));
@@ -330,9 +342,15 @@ fn live_root_fixture(
     let home = base.join(format!("live-root-home-{suffix}"));
     fs::create_dir_all(&root).expect("live project root should exist");
     fs::create_dir_all(&home).expect("live Engram home should exist");
+    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| initialize(&root))) {
+        state.test_temp_root.as_ref().unwrap().retain_for_diagnosis();
+        std::panic::resume_unwind(panic);
+    }
     let project_file = root.join(".engram-project");
-    fs::write(&project_file, format!("termal-live-root-{suffix}\n"))
-        .expect("live Engram project identity should write");
+    if !project_file.exists() {
+        fs::write(&project_file, format!("termal-live-root-{suffix}\n"))
+            .expect("live Engram project identity should write");
+    }
 
     let init = Command::new(&binary_path)
         .args([

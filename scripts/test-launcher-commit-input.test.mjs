@@ -51,7 +51,7 @@ function fixtureEnv() {
   return env;
 }
 
-function gitRepository(t, files = {}, { full = false } = {}) {
+function gitRepository(t, files = {}, { full = false, objectFormat } = {}) {
   const directory = join(sourceRoot, ".tmp", "launcher-commit-input-fixtures");
   mkdirSync(directory, { recursive: true });
   const canonical = realpathSync.native(directory);
@@ -61,7 +61,7 @@ function gitRepository(t, files = {}, { full = false } = {}) {
   removeFixtureOnPass(t, root);
   const env = fixtureEnv();
   const git = (args) => execFileSync("git", args, { cwd: root, env, encoding: "utf8", windowsHide: true });
-  git(["init", "--quiet", "--template="]);
+  git(["init", "--quiet", "--template=", ...(objectFormat ? [`--object-format=${objectFormat}`] : [])]);
   for (const [key, value] of [
     ["user.name", "TermAl Test"], ["user.email", "test@example.invalid"],
     ["core.autocrlf", "false"],
@@ -280,10 +280,6 @@ for (const [name, dirty] of [
 }
 
 for (const [name, configure, reason] of [
-  ["skipped tracked input", ({ root, git }) => {
-    git(["update-index", "--skip-worktree", "tracked.txt"]);
-    writeFileSync(join(root, "tracked.txt"), "hidden ordinary work\n");
-  }, /Git is told to skip/u],
   ["unavailable admission", () => {}, /fixture admission unavailable/u],
 ]) {
   test(`automatic ${name} keeps the command and names the plain selection`, async (t) => {
@@ -304,24 +300,178 @@ for (const [name, configure, reason] of [
   });
 }
 
-test("a clean checkout with a gitlink runs plainly and explicit commit still refuses it", async (t) => {
+test("SHA-256 roots have a named unsupported-format refusal", async (t) => {
+  await hosted(t, async ({ root, env, git, head, admin }) => {
+    assert.equal(head.length, 64);
+    await assert.rejects(captureCommitInputStatus(root, env), /unsupported object format/u);
+    git(["update-index", "--add", "--cacheinfo", `160000,${head},dep`]);
+    git(["commit", "--quiet", "--no-gpg-sign", "-m", "add gitlink"]);
+    await assert.rejects(captureCommitInputStatus(root, env), /unsupported object format/u);
+    const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
+    const refused = await executeRun(runDir, env);
+    assert.equal(refused.state, "failed");
+    assert.match(refused.error, /unsupported object format/u);
+    assert.ok(refused.stages.every((entry) => entry.state === "unrun"));
+    assert.equal(executed(admin), false);
+  }, {}, { objectFormat: "sha256" });
+});
+
+test("initialized pinned clean submodules earn the existing automatic committed-input record", async (t) => {
   const dependency = gitRepository(t);
   await hosted(t, async ({ root, env, git, admin }) => {
     git(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "dep"]);
     git(["commit", "--quiet", "--no-gpg-sign", "-m", "pin dependency"]);
     assert.equal(git(["status", "--porcelain=v1", "--ignore-submodules=none"]), "");
     const runDir = await createRun({ root, automaticInput: true, stages: [markingStage(admin)] }, env);
-    assert.equal(Object.hasOwn(json(join(runDir, "request.json")), "input"), false);
+    assert.equal(json(join(runDir, "request.json")).input, "commit");
     const result = await executeRun(runDir, env);
     assert.equal(result.state, "passed", result.error);
     assert.ok(executed(admin));
-    assert.equal(result.input, undefined);
-    assert.match(await summarize(runDir), /^input: plain; no committed-input verification: 1 submodule gitlink\(s\) \(dep\)/mu);
-    const strictDir = await createRun({ root, input: "commit", stages: [stage("strict")] }, env);
-    const refused = await executeRun(strictDir, env);
-    assert.equal(refused.state, "failed");
-    assert.deepEqual(refused.input.gitlinks, ["dep"]);
-    assert.ok(refused.stages.every((entry) => entry.state === "unrun"));
+    assert.equal(result.input.outcome, "clean");
+    assert.equal(result.input.eligible, true);
+    assert.equal(result.before, result.after);
+    assert.match(await summarize(runDir), /^input: commit [0-9a-f]+ clean; eligible$/mu);
+  });
+});
+
+for (const change of ["tracked", "untracked", "off-pin", "uninitialized", "missing-mapping"]) {
+  test(`submodule ${change} refuses explicit commit before a stage starts`, async (t) => {
+    const dependency = gitRepository(t);
+    await hosted(t, async ({ root, env, git, admin }) => {
+      git(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "dep"]);
+      git(["commit", "--quiet", "--no-gpg-sign", "-m", "pin dependency"]);
+      const child = join(root, "dep");
+      const childGit = (args) => execFileSync("git", args, { cwd: child, env, encoding: "utf8", windowsHide: true });
+      assert.equal(commitInputStatusClean(await captureCommitInputStatus(root, env)), true);
+      if (change === "tracked") writeFileSync(join(child, "tracked.txt"), "dirty child\n");
+      if (change === "untracked") writeFileSync(join(child, "new.txt"), "new child file\n");
+      if (change === "off-pin") {
+        childGit(["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "off pin"]);
+      }
+      if (change === "uninitialized") git(["submodule", "deinit", "--force", "--", "dep"]);
+      if (change === "missing-mapping") {
+        git(["config", "--file", ".gitmodules", "--remove-section", "submodule.dep"]);
+        git(["add", "--", ".gitmodules"]);
+        git(["commit", "--quiet", "--no-gpg-sign", "-m", "remove child mapping"]);
+        assert.equal(childGit(["rev-parse", "HEAD"]).trim(), dependency.head, "child remains at its pin");
+        assert.equal(git(["status", "--porcelain=v1", "--ignore-submodules=none"]), "", "dirt alone does not refuse this unmapped child");
+        await assert.rejects(captureCommitInputStatus(root, env), /\.gitmodules mapping check failed/u);
+      }
+      const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
+      const result = await executeRun(runDir, env);
+      assert.equal(result.state, "failed", change);
+      assert.ok(result.stages.every((entry) => entry.state === "unrun"));
+      assert.equal(executed(admin), false);
+      const reason = change === "tracked" || change === "untracked" ? /path\(s\) reported by git status/u
+        : change === "missing-mapping" ? /\.gitmodules mapping check failed/u
+          : /not initialized at its pin/u;
+      assert.match(result.error, reason);
+    });
+  });
+}
+
+  test("a nested pinned submodule is admitted and nested dirt is rejected", async (t) => {
+    const dependency = gitRepository(t);
+    await hosted(t, async ({ root, env, git, admin }) => {
+      git(["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "dep"]);
+      git(["commit", "--quiet", "-m", "pin child"]);
+      const child = join(root, "dep");
+      const childGit = (args) => execFileSync("git", args, { cwd: child, env, encoding: "utf8", windowsHide: true });
+        childGit(["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "nested"]);
+        childGit(["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-am", "nested pin"]);
+        git(["add", "--", "dep"]);
+        git(["commit", "--quiet", "-m", "pin nested parent"]);
+      const status = await captureCommitInputStatus(root, env);
+      assert.equal(commitInputStatusClean(status), true);
+      const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
+      const result = await executeRun(runDir, env);
+      assert.equal(result.state, "passed", result.error);
+      assert.equal(result.input.eligible, true);
+      assert.equal(executed(admin), true);
+        writeFileSync(join(child, "nested", "tracked.txt"), "nested dirt\n");
+        childGit(["config", "diff.ignoreSubmodules", "all"]);
+        assert.equal(commitInputStatusClean(await captureCommitInputStatus(root, env)), false);
+    });
+  });
+
+test("a child's local status setting cannot hide untracked input", async (t) => {
+  const dependency = gitRepository(t);
+  await hosted(t, async ({ root, env, git, admin }) => {
+    git(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "dep"]);
+    git(["commit", "--quiet", "--no-gpg-sign", "-m", "pin dependency"]);
+    execFileSync("git", ["config", "status.showUntrackedFiles", "no"], { cwd: join(root, "dep"), env, windowsHide: true });
+    writeFileSync(join(root, "dep", "new.txt"), "untracked child input\n");
+    assert.equal(git(["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"]), "",
+      "the root's command-line untracked option does not override child configuration");
+    const status = await captureCommitInputStatus(root, env);
+    assert.equal(commitInputStatusClean(status), false);
+    assert.equal(status.entries[0].path, "dep");
+    const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "failed");
+    assert.equal(executed(admin), false);
+  });
+});
+
+for (const boundary of ["before execution", "after exit 0", "after exit 7"]) {
+  test(`a child filter installed ${boundary} is guarded before fingerprinting`, async (t) => {
+    const dependency = gitRepository(t);
+    writeFileSync(join(dependency.root, ".gitattributes"), "tracked.txt filter=mark\n");
+    dependency.git(["add", "--", ".gitattributes"]);
+    dependency.git(["commit", "--quiet", "--no-gpg-sign", "-m", "attribute without driver"]);
+    await hosted(t, async ({ root, env, git, admin }) => {
+      git(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "dep"]);
+      git(["commit", "--quiet", "--no-gpg-sign", "-m", "pin dependency"]);
+      const filterRan = join(admin, "child-filter-ran.marker");
+      const script = join(admin, "child-filter.cjs");
+      writeFileSync(script, `require('node:fs').appendFileSync(${JSON.stringify(filterRan)}, 'x');process.stdin.pipe(process.stdout);`);
+      const slash = (path) => path.replaceAll("\\", "/");
+      const command = `"${slash(process.execPath)}" "${slash(script)}"`;
+      const install = `require('node:child_process').execFileSync('git', ['-C', 'dep', 'config', 'filter.mark.clean', ${JSON.stringify(command)}]);`
+        + "const later = new Date(Date.now() + 120000);require('node:fs').utimesSync('dep/tracked.txt', later, later);";
+      const code = boundary === "after exit 7" ? 7 : 0;
+      const beforeExecution = boundary === "before execution";
+      const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin, "install-filter",
+        beforeExecution ? "" : `${install}process.exit(${code});`)] }, env);
+      if (beforeExecution) execFileSync(process.execPath, ["-e", install], { cwd: root, env, windowsHide: true });
+      const result = await executeRun(runDir, env);
+      assert.equal(existsSync(filterRan), false, "input observation must never execute the installed child filter");
+      assert.equal(result.input.eligible, false);
+      if (beforeExecution) {
+        assert.equal(result.state, "failed");
+        assert.equal(executed(admin), false);
+        assert.match(result.error, /filter\.mark\.clean/u);
+        assert.ok(result.stages.every((entry) => entry.state === "unrun"));
+      } else {
+        assert.equal(executed(admin), true);
+        assert.equal(result.state, code === 0 ? "passed" : "failed");
+        assert.equal(result.exitCode, code);
+        assert.equal(result.stages[0].code, code);
+        assert.equal(result.input.outcome, "input_changed");
+        assert.deepEqual(result.input.after.filters, ["dep: filter.mark.clean"]);
+        assert.equal(result.after, undefined, "unsafe fingerprint capture is omitted");
+      }
+    });
+  });
+}
+
+test("a child dirtied by an actual stage preserves its exit but loses committed eligibility", async (t) => {
+  const dependency = gitRepository(t);
+  await hosted(t, async ({ root, env, git, admin }) => {
+    git(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "dep"]);
+    git(["commit", "--quiet", "--no-gpg-sign", "-m", "pin dependency"]);
+    // Even a repository-level ignore=all must not conceal child dirt.
+    git(["config", "submodule.dep.ignore", "all"]);
+    const runDir = await createRun({ root, automaticInput: true, stages: [markingStage(admin, "dirty-child",
+      `require('node:fs').writeFileSync(${JSON.stringify(join(root, "dep", "new.txt"))}, 'child debris');`)] }, env);
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "passed", result.error);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.input.outcome, "input_changed");
+    assert.equal(result.input.eligible, false);
+    assert.equal(result.input.after.clean, false);
+    assert.equal(result.input.after.paths[0].path, "dep");
+    assert.match(await summarize(runDir), /^gate: not eligible; not a landing gate:/mu);
   });
 });
 
@@ -474,56 +624,6 @@ test("an XDG attributes file does not change the committed-input status", async 
   assert.equal(commitInputStatusClean(status), true);
 });
 
-for (const [flag, tag] of [["--skip-worktree", "S"], ["--assume-unchanged", "h"]]) {
-  test(`a tracked path marked ${flag} is not clean`, async (t) => {
-    const { root, env, git } = gitRepository(t);
-    git(["update-index", flag, "tracked.txt"]);
-    writeFileSync(join(root, "tracked.txt"), "edited behind the flag\n");
-    assert.equal(git(["status", "--porcelain=v1"]), "", "plain status calls the edit clean");
-    const status = await captureCommitInputStatus(root, env);
-    assert.deepEqual(status.entries, []);
-    assert.deepEqual(status.skipped, [{ tag, path: "tracked.txt" }]);
-    assert.equal(commitInputStatusClean(status), false);
-    assert.equal(commitInputOutcome(status.commit, status), "input_changed");
-  });
-}
-
-test("a skip-worktree path before the run is refused with the skipped path and no stage runs", async (t) => {
-  await hosted(t, async ({ root, env, git, admin }) => {
-    git(["update-index", "--skip-worktree", "tracked.txt"]);
-    writeFileSync(join(root, "tracked.txt"), "edited behind the flag\n");
-    const runDir = await createRun({ root, stages: [markingStage(admin)], input: "commit" }, env);
-    const refused = json(join(runDir, "results.json"));
-    assert.equal(refused.state, "failed");
-    assert.deepEqual(refused.input, {
-      kind: "commit", cleanBefore: false, dirtyPaths: [],
-      skippedPaths: [{ tag: "S", path: "tracked.txt" }],
-    });
-    assert.match(refused.error, /1 tracked path\(s\) Git is told to skip.*no stage ran/u);
-    const result = await executeRun(runDir, env);
-    assert.ok(result.stages.every((entry) => entry.state === "unrun"));
-    assert.equal(executed(admin), false);
-    assert.match(await summarize(runDir),
-      /^input: refused, not clean before the run: 0 path\(s\); 1 skipped tracked path\(s\)$/mu);
-  });
-});
-
-test("a stage that marks a tracked path skip-worktree changes the input", async (t) => {
-  await hosted(t, async ({ root, env, head }) => {
-    const runDir = await createRun({ root, input: "commit", stages: [stage("skips", [
-      "const { execFileSync } = require('node:child_process');",
-      "execFileSync('git', ['update-index', '--skip-worktree', 'tracked.txt']);",
-    ].join("\n"))] }, env);
-    const result = await executeRun(runDir, env);
-    assert.equal(result.state, "passed", result.error);
-    assert.equal(result.input.outcome, "input_changed");
-    assert.equal(result.input.eligible, false);
-    assert.deepEqual(result.input.after, {
-      commit: head, clean: false, paths: [], skippedPaths: [{ tag: "S", path: "tracked.txt" }],
-    });
-  });
-});
-
 test("a stage that configures a Git filter changes the input and records the filter", async (t) => {
   await hosted(t, async ({ root, env, head }) => {
     const runDir = await createRun({ root, input: "commit", stages: [stage("filters", [
@@ -592,7 +692,7 @@ test("a configured Git filter before the run is refused with its own reason and 
   });
 });
 
-test("a submodule gitlink is refused unread and its own filter never runs", async (t) => {
+test("a submodule's configured filter is refused before recursive status can run it", async (t) => {
   await hosted(t, async ({ root, env, git, admin }) => {
     // The submodule configures a clean filter in its own config, which the
     // superproject's filter check does not see; the filter leaves a marker.
@@ -617,6 +717,9 @@ test("a submodule gitlink is refused unread and its own filter never runs", asyn
     writeFileSync(join(root, ".gitmodules"), "[submodule \"sub\"]\n\tpath = sub\n\turl = ./sub\n");
     git(["-c", "advice.addEmbeddedRepo=false", "add", "--", ".gitmodules", "sub"]);
     git(["commit", "--quiet", "--no-gpg-sign", "-m", "submodule"]);
+    git(["config", "submodule.sub.url", "./sub"]);
+    assert.match(git(["submodule", "status", "--recursive"]), /^ [0-9a-f]{40} sub(?: |\r?\n|$)/u,
+      "the filter fixture must be initialized at its pin");
     assert.equal(git(["ls-files", "-s", "sub"]).slice(0, 6), "160000", "sub is a gitlink");
     // A new mtime makes Git hash the file again, through the filter.
     let seconds = 60;
@@ -632,7 +735,7 @@ test("a submodule gitlink is refused unread and its own filter never runs", asyn
 
     const status = await captureCommitInputStatus(root, env);
     assert.deepEqual(status.entries, []);
-    assert.deepEqual(status.gitlinks, ["sub"]);
+    assert.deepEqual(status.filters, ["sub: filter.mark.clean"]);
     assert.equal(commitInputStatusClean(status), false);
     assert.equal(commitInputOutcome(status.commit, status), "input_changed");
 
@@ -640,14 +743,14 @@ test("a submodule gitlink is refused unread and its own filter never runs", asyn
     const refused = json(join(runDir, "results.json"));
     assert.equal(refused.state, "failed");
     assert.deepEqual(refused.input, {
-      kind: "commit", cleanBefore: false, dirtyPaths: [], gitlinks: ["sub"],
+      kind: "commit", cleanBefore: false, dirtyPaths: [], filters: ["sub: filter.mark.clean"],
     });
-    assert.match(refused.error, /not clean before the run \(1 submodule gitlink\(s\) \(sub\).*\); no stage ran/u);
+    assert.match(refused.error, /not clean before the run \(1 configured Git filter\(s\) \(sub: filter.mark.clean\).*\); no stage ran/u);
     const result = await executeRun(runDir, env);
     assert.ok(result.stages.every((entry) => entry.state === "unrun"));
     assert.equal(executed(admin), false);
     assert.match(await summarize(runDir),
-      /^input: refused, not clean before the run: 0 path\(s\); 1 submodule gitlink\(s\)$/mu);
+      /^input: refused, not clean before the run: 0 path\(s\); 1 configured Git filter\(s\)$/mu);
     assert.equal(existsSync(filterRan), false, "the committed-input status never ran the filter");
   });
 });

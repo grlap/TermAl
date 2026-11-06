@@ -413,23 +413,11 @@ impl CompletionFixture {
 }
 
 pub(super) fn completion_fixture() -> CompletionFixture {
-    // Avoid nesting the compiler helper below the outer launcher's long temp
-    // path. Placement is local to this test thread, without changing env vars.
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let suffix = COMPLETION_SUFFIX;
-    let live = live_root_fixture(suffix, []);
-    let evidence = CompletionEvidenceRetention(live.state.test_temp_root.as_ref().unwrap().clone());
-    let base = live.state.test_temp_root.as_ref().unwrap().path();
-    let root = base.join(format!("live-root-project-{suffix}"));
-    let home = base.join(format!("live-root-home-{suffix}"));
-    let project_id = {
-        let inner = live.state.inner.lock().expect("state mutex poisoned");
-        inner.sessions[inner.find_session_index(&live.session_id).unwrap()]
-            .session
-            .project_id
-            .clone()
-            .unwrap()
-    };
+    let live = live_root_fixture(COMPLETION_SUFFIX, []);
+    let _setup_evidence = CompletionEvidenceRetention(live.state.test_temp_root.as_ref().unwrap().clone());
+    let root = live.state.test_temp_root.as_ref().unwrap().path()
+        .join(format!("live-root-project-{COMPLETION_SUFFIX}"));
     run_git_test_command(&root, &["init", "--quiet"]);
     run_git_test_command(&root, &["config", "user.email", "termal-tests@example.com"]);
     run_git_test_command(&root, &["config", "user.name", "TermAl tests"]);
@@ -462,6 +450,30 @@ pub(super) fn completion_fixture() -> CompletionFixture {
         ],
     );
     run_git_test_command(&root, &["commit", "--quiet", "-m", "initial fixture"]);
+    completion_fixture_from_live(live, COMPLETION_SUFFIX)
+}
+
+/// Reuse the real readiness/transport fixture on an exact consumer checkout.
+/// This never installs launcher files or commits changes in that checkout.
+fn completion_fixture_for_repository(initialize: impl FnOnce(&FsPath)) -> CompletionFixture {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let live = live_root_fixture_with_repository(COMPLETION_SUFFIX, [], initialize);
+    completion_fixture_from_live(live, COMPLETION_SUFFIX)
+}
+
+fn completion_fixture_from_live(live: LiveRootFixture, suffix: &str) -> CompletionFixture {
+    let evidence = CompletionEvidenceRetention(live.state.test_temp_root.as_ref().unwrap().clone());
+    let base = live.state.test_temp_root.as_ref().unwrap().path();
+    let root = base.join(format!("live-root-project-{suffix}"));
+    let home = base.join(format!("live-root-home-{suffix}"));
+    let project_id = {
+        let inner = live.state.inner.lock().expect("state mutex poisoned");
+        inner.sessions[inner.find_session_index(&live.session_id).unwrap()]
+            .session
+            .project_id
+            .clone()
+            .unwrap()
+    };
     {
         let mut inner = live.state.inner.lock().expect("state mutex poisoned");
         inner.preferences.engram.binary_path = live_engram_binary().to_string_lossy().into_owned();
