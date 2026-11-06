@@ -257,6 +257,163 @@ fn repository_with_child(cleanup: &mut RemoveDirsOnDrop) -> (PathBuf, PathBuf) {
     (root, child)
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_long_child_paths_are_measured_without_persistent_config_changes() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let (root, child) = repository_with_child(&mut cleanup);
+    // Fixture-local false overrides any developer-machine setting. Only the
+    // setup commands opt in; the production measurement must do so itself.
+    for directory in [&root, &child] {
+        run_git_test_command(directory, &["config", "core.longpaths", "false"]);
+    }
+    let mut relative = PathBuf::from("deep");
+    while child.join(&relative).join("tracked.txt").as_os_str().len() <= 280 {
+        relative.push("long-path-component");
+    }
+    fs::create_dir_all(child.join(&relative)).unwrap();
+    let tracked = child.join(&relative).join("tracked.txt");
+    fs::write(&tracked, "long-path baseline\n").unwrap();
+    let tracked_relative = relative.join("tracked.txt");
+    run_git_test_command(&child, &["-c", "core.longpaths=true", "add", "--", tracked_relative.to_str().unwrap()]);
+    run_git_test_command(&child, &["-c", "core.longpaths=true", "-c", "user.name=Fixture",
+        "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "long child path"]);
+    run_git_test_command(&root, &["-c", "core.longpaths=true", "add", "--", "child with spaces"]);
+    run_git_test_command(&root, &["-c", "core.longpaths=true", "commit", "--quiet", "-m", "pin long child"]);
+    let root_config = root.join(".git/config");
+    let child_config = PathBuf::from(run_git_test_command_output(&child,
+        &["rev-parse", "--absolute-git-dir"])).join("config");
+    let before = [fs::read(&root_config).unwrap(), fs::read(&child_config).unwrap()];
+    let original = head(&root);
+    assert_eq!(source_revision(&root, true).unwrap(), SourceRevision::Taken {
+        root: fs::canonicalize(&root).unwrap(), revision: format!("git-commit:{original}"),
+    }, "a clean child beyond MAX_PATH must not become apparent dirt");
+    assert_eq!(committed_source_clean_head(&root), Some(original.clone()));
+
+    fs::write(&tracked, "actual child change\n").unwrap();
+    assert_eq!(fs::read(&tracked).unwrap(), b"actual child change\n");
+    eprintln!("original long-path diagnostic relative_chars={} absolute_chars={} bytes={} modified={:?}",
+        tracked_relative.as_os_str().len(), tracked.as_os_str().len(), fs::metadata(&tracked).unwrap().len(),
+        fs::metadata(&tracked).unwrap().modified());
+    for (place, directory) in [("root", &root), ("child", &child)] {
+        let git = ReviewFreezeGit::new(directory).unwrap();
+        for setting in ["core.longpaths=false", "core.longpaths=true"] {
+            let mut command = git.command(&["-c", setting, "-c", "status.showUntrackedFiles=all",
+                "-c", "diff.ignoreSubmodules=none", "status", "--porcelain=v1",
+                "--untracked-files=all", "--ignore-submodules=none", "-z"]);
+            let output = run_bounded_read_command(&mut command, git.deadline, REVIEW_FREEZE_OUTPUT_LIMIT, false).unwrap();
+            eprintln!("original long-path diagnostic place={place} {setting} code={:?} stdout={:?} stderr={:?}",
+                output.status.code(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        }
+    }
+    let dirty = not_clean(&root);
+    assert_eq!(dirty.len(), 1);
+    assert_eq!(dirty[0].path, "child with spaces");
+    assert_eq!(committed_source_clean_head(&root), None);
+    fs::write(&tracked, "long-path baseline\n").unwrap();
+    assert_eq!(committed_source_clean_head(&root), Some(original.clone()));
+
+    let untracked = child.join(&relative).join("untracked.txt");
+    fs::write(&untracked, "untracked child input\n").unwrap();
+    assert_eq!(not_clean(&root)[0].path, "child with spaces");
+    assert_eq!(committed_source_clean_head(&root), None);
+    fs::remove_file(untracked).unwrap();
+    assert_eq!(committed_source_clean_head(&root), Some(original));
+    assert_eq!(fs::read(root_config).unwrap(), before[0]);
+    assert_eq!(fs::read(child_config).unwrap(), before[1]);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_long_path_status_diagnostic_distinguishes_config_from_stat_cache() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let (root, child) = repository_with_child(&mut cleanup);
+    for directory in [&root, &child] {
+        run_git_test_command(directory, &["config", "core.longpaths", "false"]);
+    }
+    let relative = PathBuf::from("a".repeat(96)).join("b".repeat(96)).join("c".repeat(96)).join("tracked.txt");
+    assert!(relative.as_os_str().len() > 260);
+    let tracked = child.join(&relative);
+    fs::create_dir_all(tracked.parent().unwrap()).unwrap();
+    fs::write(&tracked, "base\n").unwrap();
+    run_git_test_command(&child, &["-c", "core.longpaths=true", "add", "--", relative.to_str().unwrap()]);
+    run_git_test_command(&child, &["-c", "core.longpaths=true", "-c", "user.name=Fixture",
+        "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "long relative path"]);
+    run_git_test_command(&root, &["-c", "core.longpaths=true", "add", "--", "child with spaces"]);
+    run_git_test_command(&root, &["-c", "core.longpaths=true", "commit", "--quiet", "-m", "pin long relative path"]);
+    let mut measurements = Vec::new();
+    for (state, contents) in [("clean", "base\n"), ("dirty", "a visibly different-size child change\n")] {
+        fs::write(&tracked, contents).unwrap();
+        assert_eq!(fs::read(&tracked).unwrap(), contents.as_bytes());
+        eprintln!("long-path diagnostic state={state} relative_chars={} absolute_chars={} bytes={} modified={:?}",
+            relative.as_os_str().len(), tracked.as_os_str().len(), contents.len(), fs::metadata(&tracked).unwrap().modified());
+        for (place, directory) in [("root", &root), ("child", &child)] {
+            let git = ReviewFreezeGit::new(directory).unwrap();
+            for setting in ["core.longpaths=false", "core.longpaths=true"] {
+                let mut command = git.command(&["-c", setting, "-c", "status.showUntrackedFiles=all",
+                    "-c", "diff.ignoreSubmodules=none", "status", "--porcelain=v1",
+                    "--untracked-files=all", "--ignore-submodules=none", "-z"]);
+                let output = run_bounded_read_command(&mut command, git.deadline, REVIEW_FREEZE_OUTPUT_LIMIT, false).unwrap();
+                eprintln!("long-path diagnostic state={state} place={place} {setting} code={:?} stdout={:?} stderr={:?}",
+                    output.status.code(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+                if setting.ends_with("=true") {
+                    assert!(output.status.success(), "enabled Git must read the fixture");
+                    assert_eq!(output.stdout.is_empty(), state == "clean", "enabled {place} status must distinguish actual dirt");
+                    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+                } else {
+                    // Reproduce Git's exit-zero partial read. The raw control
+                    // deliberately overrides the production long-path option;
+                    // the existing checked reader must refuse the same read.
+                    assert!(output.status.success());
+                    assert!(output.stdout.is_empty());
+                    assert!(String::from_utf8_lossy(&output.stderr).contains("Filename too long"));
+                    let error = git.run(&["-c", setting, "status", "--porcelain=v1",
+                        "--untracked-files=all", "--ignore-submodules=none", "-z"], false)
+                        .unwrap_err().to_string();
+                    assert!(error.contains("long-path read failed"), "{error}");
+                    assert!(error.contains("shorten the worktree or child path"), "{error}");
+                    assert!(!error.contains('\n'), "the refusal is safe for a log line");
+                }
+            }
+        }
+        let measurement = source_revision(&root, true);
+        eprintln!("long-path diagnostic production state={state} outcome={measurement:?}");
+        measurements.push(measurement);
+    }
+    assert!(matches!(measurements[0].as_ref().unwrap(), SourceRevision::Taken { .. }),
+        "clean long child must measure clean: {:?}", measurements[0]);
+    assert!(matches!(measurements[1].as_ref().unwrap(), SourceRevision::NotClean { .. }),
+        "different-size child dirt must be observed: {:?}", measurements[1]);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_crlf_warnings_are_suppressed_without_ignoring_other_git_diagnostics() {
+    let mut cleanup = RemoveDirsOnDrop(Vec::new());
+    let root = repository(&mut cleanup);
+    let expected = head(&root);
+    let original_fingerprint = capture_review_freeze(&ReviewFreezeGit::new(&root).unwrap()).unwrap();
+    run_git_test_command(&root, &["config", "core.autocrlf", "true"]);
+    run_git_test_command(&root, &["config", "core.safecrlf", "warn"]);
+    let config_before = fs::read(root.join(".git/config")).unwrap();
+    fs::write(root.join("tracked.txt"), "a changed LF-only file\n").unwrap();
+    let git = ReviewFreezeGit::new(&root).unwrap();
+    // This is the real benign Windows warning, deliberately re-enabled only
+    // for the control. Residual stderr is never accepted by text matching.
+    let args = ["-c", "core.safecrlf=warn", "diff", "--no-ext-diff", "--no-textconv"];
+    let mut control = git.command(&args);
+    let output = run_bounded_read_command(&mut control, git.deadline, REVIEW_FREEZE_OUTPUT_LIMIT, false).unwrap();
+    assert!(output.status.success());
+    assert!(!output.stderr.is_empty(), "the control must actually emit the conversion warning");
+    let error = git.run(&args, false).unwrap_err().to_string();
+    assert!(error.contains("Git emitted stderr; source measurement refused"), "{error}");
+    assert!(!git.run(&["diff", "--no-ext-diff", "--no-textconv"], false).unwrap().is_empty());
+    fs::write(root.join("tracked.txt"), "base\n").unwrap();
+    assert_eq!(committed_source_clean_head(&root), Some(expected));
+    assert_eq!(capture_review_freeze(&ReviewFreezeGit::new(&root).unwrap()).unwrap(), original_fingerprint);
+    assert_eq!(fs::read(root.join(".git/config")).unwrap(), config_before);
+}
+
 #[test]
 fn sha256_roots_are_outside_the_registered_commit_wire_domain() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());

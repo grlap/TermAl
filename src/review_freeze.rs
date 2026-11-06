@@ -137,6 +137,11 @@ impl ReviewFreezeGit {
                 &format!("core.hooksPath={null}"),
                 "-c",
                 "diff.submodule=short",
+                // Conversion warnings are not source changes. Suppress them
+                // at Git's configuration boundary; every remaining diagnostic
+                // makes the read incomplete, even when Git exits successfully.
+                "-c",
+                "core.safecrlf=false",
             ])
             // Unset config still falls back to XDG/HOME ignore/attributes.
             // Pin these paths as well; repository .gitignore/.gitattributes
@@ -146,8 +151,12 @@ impl ReviewFreezeGit {
                 &format!("core.excludesFile={null}"),
                 "-c",
                 &format!("core.attributesFile={null}"),
-            ])
-            .args(args);
+            ]);
+        // Command-scoped configuration also reaches Git's submodule children.
+        // Never change repository, user or system configuration to measure it.
+        #[cfg(windows)]
+        command.args(["-c", "core.longpaths=true"]);
+        command.args(args);
         command
     }
 
@@ -165,11 +174,14 @@ impl ReviewFreezeGit {
         .map_err(|error| {
             review_freeze_git_failure(error, args, started.elapsed(), remaining_at_start)
         })?;
-        if !output.status.success() && !(allow_absent && output.status.code() == Some(1)) {
+        if !output.stderr.is_empty()
+            || (!output.status.success() && !(allow_absent && output.status.code() == Some(1)))
+        {
             return Err(review_freeze_git_failure(
                 anyhow!(
-                    "Git exited unsuccessfully: {}",
-                    String::from_utf8_lossy(&output.stderr[..output.stderr.len().min(4096)])
+                    "Git read refused (exit {:?}): {}",
+                    output.status.code(),
+                    review_freeze_git_diagnostic(&output.stderr)
                 ),
                 args,
                 started.elapsed(),
@@ -180,6 +192,25 @@ impl ReviewFreezeGit {
     }
 }
 
+fn review_freeze_git_diagnostic(stderr: &[u8]) -> String {
+    if [
+        "filename too long",
+        "file name too long",
+        "path too long",
+        "filename or extension is too long",
+    ].iter().any(|cause| stderr.windows(cause.len())
+        .any(|part| part.eq_ignore_ascii_case(cause.as_bytes()))) {
+        return "long-path read failed; shorten the worktree or child path, or check Git's Windows long-path support; no source revision was taken".to_owned();
+    }
+    let diagnostic = String::from_utf8_lossy(&stderr[..stderr.len().min(4096)]);
+    if diagnostic.is_empty() {
+        return "Git exited unsuccessfully without a diagnostic".to_owned();
+    }
+    let safe: String = diagnostic.chars().take(512)
+        .map(|c| if c.is_ascii() && !c.is_ascii_control() { c } else { '?' }).collect();
+    format!("Git emitted stderr; source measurement refused: {safe}")
+}
+
 fn review_freeze_git_failure(
     error: anyhow::Error,
     args: &[&str],
@@ -187,11 +218,12 @@ fn review_freeze_git_failure(
     remaining_at_start: Duration,
 ) -> anyhow::Error {
     let operation = args.first().copied().unwrap_or("<missing>");
-    error.context(format!(
+    let context = format!(
         "Git verification operation {operation:?} with arguments {args:?} failed after {elapsed:?} \
          (remaining shared budget at call start: {remaining_at_start:?}; total shared budget: \
-         {REVIEW_FREEZE_TIMEOUT:?})"
-    ))
+         {REVIEW_FREEZE_TIMEOUT:?}): {error}"
+    );
+    error.context(context)
 }
 
 fn review_freeze_file(path: &FsPath, limit: usize) -> Result<Vec<u8>> {

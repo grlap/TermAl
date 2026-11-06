@@ -877,6 +877,24 @@ fn review_freeze_git_failures_retain_operation_timing_budget_and_cause() {
 }
 
 #[test]
+fn review_freeze_git_diagnostics_are_bounded_and_safe_with_explicit_long_path_remedy() {
+    let diagnostic = review_freeze_git_diagnostic(&[b'\n', b'\r', 0, 27, 255]);
+    assert!(!diagnostic.chars().any(char::is_control), "{diagnostic:?}");
+    let large = review_freeze_git_diagnostic(&vec![b'x'; 8192]);
+    assert!(large.len() < 600);
+    for cause in ["Filename too long", "file name too long", "path too long",
+        "The filename or extension is too long"] {
+        let diagnostic = review_freeze_git_diagnostic(cause.as_bytes());
+        assert!(diagnostic.contains("long-path read failed"), "{diagnostic}");
+        assert!(diagnostic.contains("shorten the worktree or child path"), "{diagnostic}");
+        assert!(diagnostic.contains("no source revision was taken"), "{diagnostic}");
+    }
+    let beyond_display_bound = format!("{}: Filename too long", "x".repeat(8192));
+    assert!(review_freeze_git_diagnostic(beyond_display_bound.as_bytes())
+        .contains("long-path read failed"));
+}
+
+#[test]
 fn review_freeze_matches_independent_nonempty_engram_golden() {
     let root = TestTempRoot::create("review-golden");
     run_git_test_command(&root, &["init", "--object-format=sha1"]);
@@ -913,6 +931,28 @@ fn review_freeze_matches_independent_nonempty_engram_golden() {
     // scripts/review-freeze-fingerprint.mjs at 3f1348b2 (2026-09-13).
     // Expected hashes are never generated with capture_review_freeze.
     let git = ReviewFreezeGit::new(&root).unwrap();
+    // Compare the short-path bytes against the independent pre-override
+    // command above. The golden below was generated before either override;
+    // matching it also pins the complete fingerprint, not just these queries.
+    for args in [
+        vec!["rev-parse", "--verify", "HEAD"],
+        vec!["status", "--porcelain=v1", "--untracked-files=all", "-z"],
+        vec!["submodule", "status", "--recursive"],
+        vec!["ls-files", "--stage", "-z"],
+        vec!["ls-tree", "-r", "-z", "HEAD"],
+        vec!["diff", "--cached", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all"],
+        vec!["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all"],
+        vec!["ls-files", "--others", "--exclude-standard", "-z"],
+    ] {
+        let previous = git_command().current_dir(&root).args(&args).output().unwrap();
+        let mut command = git.command(&args);
+        let current = run_bounded_read_command(&mut command, git.deadline, REVIEW_FREEZE_OUTPUT_LIMIT, false).unwrap();
+        assert_eq!(previous.status.code(), current.status.code(), "{args:?}");
+        assert_eq!(previous.stdout, current.stdout, "{args:?}");
+        assert_eq!(previous.stderr, current.stderr, "{args:?}");
+        assert!(current.status.success());
+        assert!(current.stderr.is_empty());
+    }
     assert_eq!(
         capture_review_freeze(&git).unwrap(),
         "43a94b4421cb69c5844666467bbe984bfb3ebd44b8f552635106c94df200756f"
