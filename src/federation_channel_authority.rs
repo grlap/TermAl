@@ -139,7 +139,10 @@ impl FederationChannel {
     fn retire_recorded(&self, state: &mut FederationLinkState) {
         if let Some(incarnation) = state.recorded_incarnation.take() {
             if let Some(app) = &self.app {
-                app.federation_peer_disconnected(&self.transport_basis(), &incarnation);
+                // This receipt is used only by the exact removal CAS, never
+                // to admit work or adopt authority from a poisoned basis.
+                let basis = self.basis.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+                app.federation_peer_disconnected(&basis, &incarnation);
             }
         }
     }

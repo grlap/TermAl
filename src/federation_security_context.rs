@@ -148,17 +148,19 @@ impl FederationChannel {
     }
 
     fn fence_security(&self, owner: u64, incarnation: &str) {
-        let mut state = self.state.lock().expect("federation link mutex poisoned");
+        // Teardown can run during an earlier failure. Recover only to revoke
+        // this exact owner; leave poison set so admission cannot reuse it.
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if state
             .security
             .as_ref()
             .is_some_and(|context| context.owner == owner && context.incarnation == incarnation)
         {
-            self.retire_recorded(&mut state);
             state.incarnation = None;
             if let Some(context) = state.security.take() {
                 context.retire();
             }
+            self.retire_recorded(&mut state);
         }
     }
 }

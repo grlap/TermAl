@@ -214,6 +214,9 @@ pub(super) fn no_external_runtime(app: &AppState) -> FederationRuntime {
     start_federation_runtime_with_io(app.clone(), io)
 }
 
+#[path = "federation_shutdown_unwind.rs"]
+mod shutdown_unwind;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn federation_m4_round_four_host_signal_fences_receive_before_supervisor_joins() {
     let fixture = Fixture::new();
@@ -339,6 +342,7 @@ async fn federation_m4_round_four_past_writer_receive_commits_once_and_shutdown_
     let (entered_tx, entered) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let released = Mutex::new(released);
+    let mut release = shutdown_unwind::ReceiveRelease(Some(release));
     *signal.lifecycle_hook.lock().unwrap() = Some(Arc::new(move |event| {
         observed.lock().unwrap().push(event);
         if event == "receiveAuthorized" {
@@ -350,14 +354,15 @@ async fn federation_m4_round_four_past_writer_receive_commits_once_and_shutdown_
     let receiver = fixture.clone();
     let response = tokio::spawn(async move { receiver.receive_raw(&receiver.request).await });
     phase_sync::receive(&entered, "authenticated receive holds writer and authority");
-    let shutdown = tokio::spawn(runtime.shutdown());
-    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
-        while !signal.is_stopping() { tokio::task::yield_now().await; }
-    }).await.unwrap();
+    // Establish stop on this driver: both runtime workers can be waiting for
+    // StateInner held by the authorized receive. A spawned shutdown cannot
+    // make progress until we release it, so waiting for that task is circular.
+    let mut shutdown = Box::pin(runtime.shutdown());
+    assert_join_pending(shutdown.as_mut()).await;
+    assert!(signal.is_stopping());
     assert_eq!(*signal.receives.lock().unwrap(), 1);
-    assert!(!shutdown.is_finished());
-    release.send(()).unwrap();
-    shutdown.await.unwrap();
+    release.release();
+    shutdown.await;
     let response = response.await.unwrap();
     assert_eq!(response.0, StatusCode::ACCEPTED);
     assert_eq!(fixture.inbox().unwrap().stage, "received");

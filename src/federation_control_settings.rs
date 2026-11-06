@@ -59,6 +59,9 @@ struct FederationControlEnd<'a> {
 
 impl Drop for FederationControlEnd<'_> {
     fn drop(&mut self) {
+        // Like FederationWorkerReporter, diagnostics must not hide the first
+        // failure. The owning security guard still performs exact revocation.
+        if std::thread::panicking() { return; }
         self.channel
             .observe_terminal_detail(self.context, "control", self.reason, self.io_kind);
         self.channel.control.observe(self.reason, self.sequence);

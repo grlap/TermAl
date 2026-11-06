@@ -62,7 +62,10 @@ impl AppState {
         if expected.validate().is_err() {
             return false;
         }
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        // Revocation is also required when a guard drops during unwind.
+        // Recover only for the exact removal below; poison remains set and
+        // no peer, transport, membership or durable authority is installed.
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(peer) = inner.federation.peers.get(&expected.peer.host_id) else {
             return false;
         };

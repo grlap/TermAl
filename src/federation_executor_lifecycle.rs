@@ -10,8 +10,14 @@ struct FederationExecutorReceiveJob {
 
 impl Drop for FederationExecutorReceiveJob {
     fn drop(&mut self) {
-        let mut count = self.signal.receives.lock().expect("executor receive counter poisoned");
-        *count -= 1;
+        let mut count = self.signal.receives.lock().unwrap_or_else(|poisoned| {
+            // Cleanup releases ownership but cannot admit new work after an
+            // interrupted counter update. Do not call test observers on unwind.
+            self.signal.stopping.store(true, Ordering::Release);
+            self.signal.notify.notify_waiters();
+            poisoned.into_inner()
+        });
+        *count = count.saturating_sub(1);
         if *count == 0 { self.signal.receives_done.notify_all(); }
     }
 }
