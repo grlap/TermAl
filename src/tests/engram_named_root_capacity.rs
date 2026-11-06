@@ -437,7 +437,24 @@ fn a_root_whose_claim_is_bound_is_never_released_as_ones_own() {
         )
         .expect_err("a bound claim's root goes by clearing its name, not a release");
     assert_eq!(error.status, StatusCode::CONFLICT);
+    for expected in ["termal_name_source_root", "work set to", entry.short_ref.as_str(), "omit path"] {
+        assert!(error.message.contains(expected), "{}", error.message);
+    }
+    let operator_error = claimed
+        .state
+        .release_engram_named_root(Some("session-operator"), release_request(&entry, "not mine"))
+        .expect_err("another session's live claim keeps the original refusal");
+    assert_eq!(operator_error.status, StatusCode::CONFLICT);
+    assert_eq!(
+        operator_error.message,
+        format!(
+            "session {} holds a current binding for claim {}; a live claim's root is never \
+             released. Nothing was released",
+            claimed.session_id, entry.claim_id
+        )
+    );
     assert!(retained(&claimed, &entry));
+    assert!(audit(&claimed).is_empty());
 }
 
 // Contention: a bounded wait, or a definitive answer that nothing was applied.

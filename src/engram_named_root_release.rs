@@ -388,11 +388,19 @@ fn engram_named_root_release_route_for(
     own_session: Option<&str>,
 ) -> Result<EngramNamedRootReleaseRoute, ApiError> {
     if let Some(holder) = engram_named_root_claim_holder(inner, root) {
-        return Err(ApiError::conflict(format!(
+        let mut message = format!(
             "session {} holds a current binding for claim {}; a live claim's root is never \
              released. Nothing was released",
             holder.session.id, root.claim_id
-        )));
+        );
+        if own_session == Some(holder.session.id.as_str()) {
+            message.push_str(&format!(
+                ". To clear your own name, call termal_name_source_root with work set to {} \
+                 and omit path",
+                root.short_ref
+            ));
+        }
+        return Err(ApiError::conflict(message));
     }
     if engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
         .is_some_and(|journal| journal.pending.is_some())
