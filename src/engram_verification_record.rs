@@ -1550,6 +1550,29 @@ impl AppState {
         receipt: &EngramVerificationRecordReceipt,
         deadline: std::time::Instant,
     ) -> EngramVerificationRecordSettlement {
+        // Optional presentation must never spend the receipt's durability
+        // deadline. Finish settlement first, including all early outcomes,
+        // then queue the owned notice worker within the caller's remaining
+        // time and its presentation cap. Never extend a verification tick.
+        let settled = self.complete_engram_verification_record_state_until(
+            registration, body, receipt, deadline);
+        if std::time::Instant::now() < deadline
+            && !matches!(settled, EngramVerificationRecordSettlement::ReceiptMismatch { .. }
+                | EngramVerificationRecordSettlement::AcknowledgedBodyChanged
+                | EngramVerificationRecordSettlement::NotDurable { .. }) {
+            self.schedule_received_launcher_notice(registration,
+                deadline.min(std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET));
+        }
+        settled
+    }
+
+    fn complete_engram_verification_record_state_until(
+        &self,
+        registration: &TestRunRegistration,
+        body: &EngramVerificationRecordBody,
+        receipt: &EngramVerificationRecordReceipt,
+        deadline: std::time::Instant,
+    ) -> EngramVerificationRecordSettlement {
         // Only a receipt that answers exactly this body settles anything.
         if let Err(why) = engram_verification_record_receipt_check(body, receipt) {
             return EngramVerificationRecordSettlement::ReceiptMismatch { detail: why.to_owned() };

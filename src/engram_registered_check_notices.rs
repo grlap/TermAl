@@ -1,6 +1,7 @@
 // Ordinary-turn notice preparation. Reuses durable launcher registration and
 // the original tool's explicit artifact association; never verification authority.
 // All native path, artifact and process reads precede the terminal state lock.
+#[derive(Clone)]
 struct RegisteredCheckNotice {
     generation: u64,
     runtime: Option<String>,
@@ -8,6 +9,7 @@ struct RegisteredCheckNotice {
     observation: Option<TestRunCommandObservation>,
     runs: Vec<(TestRunRegistration, Option<TestRunState>)>,
     clean_commit_runs: Vec<String>,
+    received: Option<ReceivedCheckNotice>,
 }
 
 impl AppState {
@@ -19,6 +21,7 @@ impl AppState {
             let Some(trace) = record.engram.unadmitted_active_turn.as_ref() else { return Vec::new() };
             let checks = record.engram.active_turn_checks.iter().filter(|check|
                 check.host_turn_ref == trace.host_turn_ref
+                    && !check.runtime_output_cut
                     && EngramHost::launcher_arguments(&check.command).is_some()
             ).collect::<Vec<_>>();
             if checks.is_empty() { return Vec::new(); }
@@ -59,6 +62,7 @@ impl AppState {
                     check: check.clone(), observation,
                     runs: runs.into_iter().map(|run| (run, None)).collect(),
                     clean_commit_runs: Vec::new(),
+                    received: None,
                 }
             }).collect::<Vec<_>>()
         };
@@ -85,6 +89,27 @@ impl AppState {
         }
         prepared
     }
+
+    // Component tests can prepare the same source proof the owned observer
+    // reads. Terminal callers use only the cheap preparation above.
+    #[cfg(test)]
+    fn prepare_registered_check_notices_until(
+        &self, session_id: &str, deadline: std::time::Instant,
+    ) -> Vec<RegisteredCheckNotice> {
+        let mut prepared = self.prepare_registered_check_notices(session_id);
+        read_received_registered_check_notices_until(&mut prepared, deadline);
+        prepared
+    }
+}
+
+fn read_received_registered_check_notices_until(
+    prepared: &mut [RegisteredCheckNotice], deadline: std::time::Instant,
+) {
+    for notice in prepared {
+        let associated = notice.observation.as_ref().and_then(|row| row.artifact.as_ref());
+        notice.received = notice.runs.iter().find(|(run, _)| associated.is_some_and(|artifact|
+            artifact.run_id == run.run_id)).and_then(|(run, _)| ReceivedCheckNotice::read(run, deadline));
+    }
 }
 
 fn registered_check_notices_locked(
@@ -97,7 +122,7 @@ fn registered_check_notices_locked(
     for notice in prepared {
         if record.active_turn_generation != notice.generation || runtime != notice.runtime
             || !record.engram.active_turn_checks.iter().any(|check|
-                check.end.is_none() && check.host_turn_ref == notice.check.host_turn_ref
+                check.end.is_none() && !check.runtime_output_cut && check.host_turn_ref == notice.check.host_turn_ref
                     && check.sequence == notice.check.sequence && check.key == notice.check.key
                     && check.started_at == notice.check.started_at && check.command == notice.check.command
                     && check.target.root == notice.check.target.root)
@@ -115,14 +140,15 @@ fn registered_check_notices_locked(
                         && test_run_path_key(&artifact.run_directory) == test_run_path_key(&run.run_directory))
             });
         if let Some((run, Some(state @ (TestRunState::Running | TestRunState::Passed | TestRunState::Failed)))) = exact {
-            let status = match state {
-                TestRunState::Passed => "passed; consult its terminal result record",
-                TestRunState::Failed => "failed; consult its terminal result record",
-                _ => "still running; its outcome is pending",
-            };
-            notices.push(format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} registered launcher run {} is {status}. \
-                It is correlated with this command's explicit launcher locator. Native verification \
-                uses its own run record; do not start a duplicate run.", run.run_id));
+            let received = notice.received.as_ref().filter(|received|
+                received.is_current(inner) && received.registration.run_id == run.run_id
+                    && AppState::engram_source_root_target_locked(inner, &record.session.id)
+                        .ok().flatten().is_some_and(|target|
+                            target.settings.authority_store_key.as_ref() == run.authority_store.as_ref())
+                    && record.engram.work_binding.as_ref().is_some_and(|binding|
+                        inner.engram_work_source_roots.iter().any(|root|
+                            received.matches_root(root, binding))));
+            notices.push(received.map_or_else(|| registered_launcher_notice(run, state), ReceivedCheckNotice::line));
             correlated.push((notice.check.host_turn_ref.clone(), notice.check.sequence));
         } else if !rows.is_empty() {
             let ids = rows.iter().map(|(run, _)| run.run_id.as_str()).collect::<Vec<_>>().join(", ");

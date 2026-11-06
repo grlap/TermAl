@@ -86,8 +86,29 @@ unavailable. A result is published only while the original turn, runtime,
 work association, connection and named roots are still current, and no newer
 command feedback has superseded it. An absent, failed or stale read does not
 change the command's observed check or credit.
-The CLI read keeps its existing bounded timeout (at most six seconds); host
-shutdown may wait for that read and its child cleanup to finish.
+The placement read and any received-verification checks share one provisional
+eight-second notice budget. Its held-claim read uses the existing work-binding
+command timeout or the remaining budget, whichever is shorter. Host shutdown
+may wait for that read and its child cleanup to finish.
+
+An explicitly correlated launcher notice can name the verification records
+Engram received for that run after its association has settled durably. A
+reminder about another claim is withheld only when that claim has its own
+received record matching its current source and binding. These reads run
+outside the shared state lock. Turn close publishes
+the original correlated launcher notice without waiting for Git. The existing
+cancellable capture owner confirms source in an optional observer and replaces
+only that exact pending fragment; the shared provider reader does not wait for
+the source check. If source confirmation
+expires or cannot complete, the notice distinguishes the historical receipt
+from unconfirmed current input, grants no credit, and asks for no rerun.
+Changed source and invalid receipts remain separate refusal cases. Late
+receipt presentation runs after durability settlement, within the caller's
+remaining time and the notice cap; it cannot consume or extend the settlement
+deadline. An expired or failed durability settlement leaves the notice available
+for a later successful settlement to update. A failed optional held-claim read
+without any received-record candidate remains silent. Ordinary checks still
+supply no registered verification credit.
 
 The ordinary handoff prepares its opening source-root guidance locally.
 It also checks the local `.engram-project` declaration before composing

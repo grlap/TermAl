@@ -1014,12 +1014,48 @@ fn handle_shared_codex_app_server_notification(
                     turn_state.remote_compaction_progressed = true;
                 }
                 handle_codex_app_server_item_started(item, recorder)?;
+                if let (Some(key), Some(event_turn)) = (item.get("id").and_then(Value::as_str), event_turn_id)
+                    && item.get("type").and_then(Value::as_str) == Some("commandExecution")
+                    && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
+                    && turn_id.as_deref() == Some(event_turn)
+                    && turn_state.launcher_output.len() < ENGRAM_TURN_CHECK_LIMIT
+                    && let Some(output) = state.capture_codex_launcher_output(
+                        session_id, runtime_token, runtime_generation, key)
+                {
+                    match turn_state.launcher_output.entry(key.to_owned()) {
+                        std::collections::hash_map::Entry::Vacant(entry) => { entry.insert(output); }
+                        std::collections::hash_map::Entry::Occupied(mut entry) => {
+                            if !entry.get().same_start(&output.check) { entry.get_mut().invalid = true; }
+                        }
+                    }
+                }
+            }
+        }
+        "item/commandExecution/outputDelta" => {
+            if *turn_started
+                && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
+                && turn_id.is_some()
+                && shared_codex_event_turn_id(message) == turn_id.as_deref()
+                && let (Some(key), Some(delta)) = (
+                    message.pointer("/params/itemId").and_then(Value::as_str),
+                    message.pointer("/params/delta").and_then(Value::as_str))
+                && let Some(output) = turn_state.launcher_output.get_mut(key)
+            {
+                state.observe_codex_launcher_output(session_id, runtime_token, runtime_generation, output, delta);
             }
         }
         "item/completed" => {
             let Some(item) = message.get("params").and_then(|params| params.get("item")) else {
                 return Ok(());
             };
+            if let Some(key) = item.get("id").and_then(Value::as_str)
+                && item.get("type").and_then(Value::as_str) == Some("commandExecution")
+                && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
+                && turn_id.is_some() && shared_codex_event_turn_id(message) == turn_id.as_deref()
+                && EngramHost::codex_command_exit(item) != EngramCommandExit::NotFinished
+            {
+                turn_state.launcher_output.remove(key);
+            }
             // Manual compaction can have a different turn id; record the
             // completed boundary before filtering ordinary work-turn items.
             if item.get("type").and_then(Value::as_str) == Some("contextCompaction") {
@@ -1162,7 +1198,6 @@ fn handle_shared_codex_app_server_notification(
         "thread/status/changed"
         | "turn/diff/updated"
         | "turn/plan/updated"
-        | "item/commandExecution/outputDelta"
         | "item/commandExecution/terminalInteraction"
         | "item/fileChange/outputDelta"
         | "item/plan/delta"

@@ -735,6 +735,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
         completed_turn_id: Some("turn-0".to_owned()),
         turn_started: true,
         turn_state: CodexTurnState {
+            launcher_output: HashMap::new(),
             current_agent_message_id: Some("assistant-1".to_owned()),
             streamed_agent_message_text_by_item_id: HashMap::from([(
                 "item-1".to_owned(),

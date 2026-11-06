@@ -1,5 +1,6 @@
 include!("engram_registered_check_notices.rs");
 include!("engram_registered_closing_baseline.rs");
+include!("engram_received_check_notice.rs");
 
 // Shared observation lifecycle after the existing runtime/turn ownership fence.
 // Ordinary host-started turns and adopted runtime-started turns use the same
@@ -267,6 +268,12 @@ impl AppState {
         }
         record.engram.unadmitted_active_turn = None;
         record.engram.runtime_closed_turn_ref = Some(trace.host_turn_ref.clone());
+        // Only the checks accepted by this terminal's correlation fences may
+        // later upgrade their exact published fragments. The observer can
+        // start now, but its publication waits for this state lock to release.
+        let received = registered.iter().filter(|notice| correlated.iter().any(|(turn, sequence)|
+            turn == &notice.check.host_turn_ref && *sequence == notice.check.sequence)).cloned().collect();
+        self.schedule_received_launcher_notices(received);
         match scope {
             Ok(scope) => {
                 if !record

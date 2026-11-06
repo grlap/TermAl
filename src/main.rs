@@ -1201,6 +1201,7 @@ include!("codex.rs");
 include!("codex_engram_bootstrap.rs");
 include!("codex_thread_recovery.rs");
 include!("codex_events.rs");
+include!("codex_launcher_output.rs");
 include!("codex_terminal_ownership.rs");
 include!("codex_terminal_effects.rs");
 include!("codex_notices.rs");

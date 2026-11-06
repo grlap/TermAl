@@ -826,6 +826,7 @@ struct PendingSubagentResult {
 /// Tracks Codex turn state.
 #[derive(Default)]
 struct CodexTurnState {
+    launcher_output: HashMap<String, CodexLauncherOutput>,
     remote_compaction_progressed: bool,
     current_agent_message_id: Option<String>,
     streamed_agent_message_text_by_item_id: HashMap<String, String>,

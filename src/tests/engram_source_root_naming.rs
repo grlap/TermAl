@@ -5691,7 +5691,9 @@ fn other_root_notice_is_current_component_rejects_generation_work_and_connection
             let index = inner.find_session_index(&claimed.session_id).unwrap();
             EngramOtherRootNoticeRead::capture(&inner, index).unwrap()
         };
-        let held_roots = captured.read();
+        let (held_roots, received) = captured.read(std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET, false)
+            .expect("the fixture's current held-claim read succeeds within the notice batch");
+        assert!(received.is_empty());
         assert_eq!(held_roots.len(), 1);
         assert_eq!(held_roots[0].claim_id, other.claim_id);
         {

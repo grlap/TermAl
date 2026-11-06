@@ -41,6 +41,7 @@
 /// buffered subagent results, the assistant-output-started flag, and
 /// the visible-assistant-message anchor.
 fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
+    turn_state.launcher_output.clear();
     turn_state.remote_compaction_progressed = false;
     turn_state.current_agent_message_id = None;
     turn_state.streamed_agent_message_text_by_item_id.clear();

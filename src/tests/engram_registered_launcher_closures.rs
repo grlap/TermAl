@@ -4,6 +4,18 @@ use super::*;
 
 const COMMAND: &str = "node scripts/test-launcher.mjs focused -- node --test scripts/test-launcher.test.mjs";
 const KEY: &str = "live-launcher";
+const COMMITTED_COMMAND: &str = "node scripts/test-launcher.mjs focused --input commit -- node --test scripts/test-launcher.test.mjs";
+
+// Scoped protocol input, not a source cache. Real pinned-Git controls below
+// bypass it. Dropping a fixture removes its unique run's reply on every exit.
+struct NoticeSourceReply(String);
+
+impl Drop for NoticeSourceReply {
+    fn drop(&mut self) {
+        TEST_RECEIVED_NOTICE_SOURCE_RESULTS.lock().unwrap().remove(&self.0);
+        TEST_RECEIVED_NOTICE_SOURCE_READ.lock().unwrap().remove(&self.0);
+    }
+}
 
 struct RegisteredLauncherTurn {
     turn: EOCheckedTurn,
@@ -11,6 +23,8 @@ struct RegisteredLauncherTurn {
     run_id: String,
     directory: PathBuf,
     started: String,
+    command: String,
+    notice_source: std::cell::RefCell<Option<NoticeSourceReply>>,
 }
 
 impl RegisteredLauncherTurn {
@@ -23,6 +37,39 @@ impl RegisteredLauncherTurn {
         let cwd = turn.record(|record| record.engram.observed_source_root()
             .map(|root| root.root.clone()));
         recorder.command_started_in(KEY, COMMAND, Some(COMMAND), cwd.as_deref()).unwrap();
+        Self::after_start(turn, recorder)
+    }
+
+    fn after_start(turn: EOCheckedTurn, recorder: SessionRecorder) -> Self {
+        Self::after_start_with_input(turn, recorder, false)
+    }
+
+    fn committed() -> Self {
+        let turn = Self::committed_turn("received-launcher-notice");
+        let cwd = turn.record(|record| record.engram.observed_source_root().unwrap().root.clone());
+        let mut recorder = turn.recorder();
+        recorder.command_started_in(KEY, COMMITTED_COMMAND, Some(COMMITTED_COMMAND), Some(&cwd)).unwrap();
+        Self::after_start_with_input(turn, recorder, true)
+    }
+
+    fn committed_turn(label: &str) -> EOCheckedTurn {
+        let turn = EOCheckedTurn::idle(label, true);
+        // The production reader ignores global/system Git configuration.
+        // Pin fixture checkout conversion locally before creating the linked
+        // worktree, so a Windows system autocrlf setting cannot dirty its bytes
+        // when the pinned verifier reads them. Never change global config.
+        run_git_test_command(&turn.root, &["config", "core.autocrlf", "false"]);
+        let worktree = turn.root.join(".worktrees").join("wt");
+        run_git_test_command(&turn.root, &["worktree", "add", "--quiet", "-b", "wt", worktree.to_str().unwrap()]);
+        let binding = turn.record(|record| record.engram.work_binding.clone().unwrap());
+        turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
+            work:binding.work_id, path:Some(Some(worktree.to_string_lossy().into_owned())),
+        }).unwrap();
+        turn.begin("Run the committed checks.");
+        turn
+    }
+
+    fn after_start_with_input(turn: EOCheckedTurn, recorder: SessionRecorder, committed: bool) -> Self {
         turn.wait_for_snapshots();
         let open = turn.record(|record| record.engram.active_turn_checks.iter()
             .filter(|check| check.end.is_none()).count());
@@ -33,14 +80,18 @@ impl RegisteredLauncherTurn {
             .find(|check| check.key == KEY).unwrap().target.root.clone());
         let directory = EngramHost::run_artifact_directory(&root).unwrap().join(&run_id);
         fs::create_dir_all(&directory).unwrap();
-        fs::write(directory.join("request.json"), serde_json::to_vec(&json!({
+        let mut request = json!({
             "runId": run_id, "root": root.to_string_lossy(),
             "owner": turn.session_id, "creatorPid": std::process::id(),
             "started": started, "full": false, "detached": false,
             "stages": [{ "name": "focused", "command": "node",
                 "args": ["--test", "scripts/test-launcher.test.mjs"] }],
-        })).unwrap()).unwrap();
-        let fixture = Self { turn, recorder, run_id, directory, started };
+        });
+        if committed { request["input"] = json!("commit"); }
+        fs::write(directory.join("request.json"), serde_json::to_vec(&request).unwrap()).unwrap();
+        let command = if committed { COMMITTED_COMMAND } else { COMMAND }.to_owned();
+        let fixture = Self { turn, recorder, run_id, directory, started, command,
+            notice_source: std::cell::RefCell::new(None) };
         fixture.write_results("running");
         assert_eq!(TestRunDisk::read(&fixture.directory, None).unwrap().state(&|_, _| false),
             TestRunState::Running);
@@ -68,7 +119,7 @@ impl RegisteredLauncherTurn {
     fn background_reply(&mut self) {
         // The provider's real reply carries a locator and explicitly says the
         // process has not ended. No direct artifact-owner injection.
-        self.recorder.command_completed_with_exit(KEY, COMMAND,
+        self.recorder.command_completed_with_exit(KEY, &self.command,
             &format!("RUN {}", test_run_display_path(&self.directory)),
             CommandStatus::Running, EngramCommandExit::NotFinished).unwrap();
         let (associated, open) = {
@@ -87,6 +138,83 @@ impl RegisteredLauncherTurn {
         self.assert_unindexed();
     }
 
+    // Synthetic launcher/producer facts through the production body builder
+    // and receipt owner; no executed consumer credit is asserted by the fixture.
+    fn receive(&self, passed: bool) -> EngramVerificationRecordReceipt {
+        self.receive_until(passed, None).0
+    }
+
+    fn receive_until(&self, passed: bool, deadline: Option<std::time::Instant>)
+        -> (EngramVerificationRecordReceipt, EngramVerificationRecordSettlement) {
+        let registration = self.turn.state.inner.lock().unwrap()
+            .test_run_registrations[&self.run_id].clone();
+        let git = ReviewFreezeGit::new(FsPath::new(&registration.worktree))
+            .expect("fixture root must satisfy the pinned Git reader");
+        let (head, dirty) = committed_source_status(&git).expect("fixture Git reads must be complete");
+        assert!(dirty.is_empty(), "receipt fixture must be clean: {dirty:?}");
+        self.set_notice_source(TestReceivedNoticeSourceResult::Status(head.clone(), dirty));
+        let at = test_run_timestamp();
+        fs::write(self.directory.join("results.json"), serde_json::to_vec(&json!({
+            "runId":self.run_id, "state":if passed {"passed"} else {"failed"},
+            "started":self.started, "ended":at, "exitCode":if passed {0} else {1},
+            "stages":[{"name":"focused", "state":if passed {"passed"} else {"failed"},
+                "code":if passed {0} else {1}, "started":at, "ended":at}],
+            "input":{"kind":"commit", "commit":head, "cleanBefore":true,
+                "after":{"commit":head,"clean":true,"paths":[]}, "outcome":"clean","eligible":true}
+        })).unwrap()).unwrap();
+        let EngramVerificationRecordPrepared::Ready(frozen) = engram_verification_record_prepare(&registration)
+            else { panic!("clean committed fixture is ready"); };
+        let receipt = EngramVerificationRecordReceipt {
+            operation:"0123456789abcdef0123456789abcdef".into(),
+            producer:"0123456789abcdef0123456789abcdef".into(),
+            verifications:vec![EngramVerificationRecordVerification {
+                stage:"focused".into(), record_id:"fedcba9876543210fedcba9876543210".into() }],
+            run_outcome:frozen.body.run.outcome,
+        };
+        let settlement = self.turn.state.complete_engram_verification_record_until(
+            &registration, &frozen.body, &receipt,
+            deadline.unwrap_or_else(|| std::time::Instant::now() + DEADLOCK_GUARD));
+        self.wait_for_received_notices();
+        assert!(matches!(self.turn.state.inner.lock().unwrap().test_run_registrations[&self.run_id]
+            .verification_record, Some(TestRunVerificationAck::Received { .. } | TestRunVerificationAck::Settled { .. })));
+        (receipt, settlement)
+    }
+
+    fn set_notice_source(&self, result: TestReceivedNoticeSourceResult) {
+        TEST_RECEIVED_NOTICE_SOURCE_RESULTS.lock().unwrap().insert(self.run_id.clone(), result);
+        if self.notice_source.borrow().is_none() {
+            *self.notice_source.borrow_mut() = Some(NoticeSourceReply(self.run_id.clone()));
+        }
+    }
+
+    fn receive_not_durable(&mut self) -> EngramVerificationRecordReceipt {
+        let original_writer = self.turn.state.persist_tx.clone();
+        let (held_tx, held_writer) = mpsc::channel();
+        self.turn.state.persist_tx = held_tx;
+        let expired = self.turn.state.engram_budget_clock().now() - Duration::from_secs(1);
+        let (receipt, settlement) = self.receive_until(true, Some(expired));
+        assert!(matches!(settlement, EngramVerificationRecordSettlement::NotDurable { .. }));
+        self.turn.state.persist_tx = original_writer;
+        drop(held_writer);
+        let registration = self.turn.state.inner.lock().unwrap().test_run_registrations[&self.run_id].clone();
+        assert!(matches!(registration.verification_record, Some(TestRunVerificationAck::Received { .. })));
+        assert!(ReceivedCheckNotice::read(&registration,
+            std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET).is_none(),
+            "a held receipt cannot start presentation or renew its failed association fence");
+        receipt
+    }
+
+    fn capture_dirty_notice_source(&self) {
+        let registration = self.turn.state.inner.lock().unwrap()
+            .test_run_registrations[&self.run_id].clone();
+        // Predicate correctness uses the real pinned reader's default bound.
+        // Presentation then consumes this known Dirty result deterministically.
+        let git = ReviewFreezeGit::new(FsPath::new(&registration.worktree)).unwrap();
+        let (head, dirty) = committed_source_status(&git).unwrap();
+        assert!(dirty.iter().any(|path| path.path == "README.md"), "{dirty:?}");
+        self.set_notice_source(TestReceivedNoticeSourceResult::Status(head, dirty));
+    }
+
     fn assert_unindexed(&self) {
         let indexed = self.turn.state.inner.lock().unwrap().test_runs.find(&self.run_id).is_some();
         assert!(!indexed);
@@ -101,6 +229,7 @@ impl RegisteredLauncherTurn {
 
     fn finish(&self) -> (String, bool) {
         let observation = self.turn.finish();
+        self.wait_for_received_notices();
         assert_ordinary_observation_has_no_native_credit(&self.turn, &observation);
         let checks = observation["occurrence"]["observed_checks"].as_array().unwrap();
         assert_eq!(checks.len(), 1);
@@ -109,10 +238,711 @@ impl RegisteredLauncherTurn {
         self.line()
     }
 
+    fn wait_for_received_notices(&self) {
+        let captures = &self.turn.state.capture_lifetime;
+        let deadline = std::time::Instant::now() + DEADLOCK_GUARD;
+        let mut workers = captures.state.lock().unwrap();
+        while workers.workers.iter().any(|worker|
+            worker.thread.thread().name() == Some("termal-received-launcher-notice")
+                && !worker.done.load(std::sync::atomic::Ordering::Acquire)) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "owned received notice did not finish");
+            workers = captures.changed.wait_timeout(workers, remaining).unwrap().0;
+        }
+    }
+
     fn assert_advice(&self, line: &str) {
         assert!(line.contains(&self.run_id), "{line}");
         assert!(!line.to_ascii_lowercase().contains("run it again"), "{line}");
         assert!(!line.to_ascii_lowercase().contains("run the check again"), "{line}");
+    }
+}
+
+#[test]
+fn a_registered_launcher_locator_in_a_codex_output_delta_keeps_its_exact_notice() {
+    let (associated, closed, line) = codex_delta_locator_notice("matching");
+    assert!(associated && !closed && line.contains("correlated with")
+        && line.contains("registered launcher run") && !line.contains("closed with outcome Unknown"),
+        "an exact item's delta locator must survive turn close: associated={associated}, closed={closed}, {line}");
+}
+
+#[test]
+fn a_codex_delta_locator_keeps_native_identity_and_output_boundaries() {
+    for case in ["wrong-thread", "wrong-turn", "wrong-item", "missing-item", "partial", "oversized", "cleared", "conflicting", "generation", "runtime"] {
+        let (associated, closed, line) = codex_delta_locator_notice(case);
+        assert!(closed && !line.contains("correlated with") && line.contains("closed with outcome Unknown"),
+            "{case}: associated={associated}, closed={closed}, {line}");
+        assert_eq!(associated, case == "conflicting", "{case}: only an earlier valid locator remains historical");
+    }
+    let (associated, closed, line) = codex_delta_locator_notice("split");
+    assert!(associated && !closed && line.contains("correlated with"), "{line}");
+}
+
+fn codex_delta_locator_notice(case: &str) -> (bool, bool, String) {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let committed = case == "received-delta";
+    let turn = if committed { RegisteredLauncherTurn::committed_turn("received-launcher-output-delta") }
+        else { EOCheckedTurn::start("registered-launcher-output-delta", true) };
+    let command = if committed { COMMITTED_COMMAND } else { COMMAND };
+    let cwd = turn.record(|record| record.engram.observed_source_root()
+        .map(|root| root.root.clone()).unwrap_or_else(|| record.session.workdir.clone()));
+    let (runtime, generation) = turn.record(|record| {
+        let SessionRuntime::Codex(handle) = &record.runtime else { panic!("Codex fixture") };
+        (handle.shared_session.as_ref().unwrap().runtime.clone(), record.active_turn_generation)
+    });
+    let thread = "registered-launcher-delta-thread";
+    let native_turn = "registered-launcher-delta-turn";
+    runtime.sessions.lock().unwrap().insert(turn.session_id.clone(), SharedCodexSessionState {
+        thread_id: Some(thread.to_owned()),
+        turn_id: Some(native_turn.to_owned()),
+        turn_started: true,
+        active_turn_generation: Some(generation),
+        ..SharedCodexSessionState::default()
+    });
+    runtime.thread_sessions.lock().unwrap().insert(thread.to_owned(), turn.session_id.clone());
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let dispatch = |turn: &EOCheckedTurn, message: Value| {
+        handle_shared_codex_app_server_message(
+            &message, &turn.state, &runtime.runtime_id, &pending,
+            &runtime.sessions, &runtime.thread_sessions, &runtime.input_tx,
+        ).unwrap();
+    };
+    dispatch(&turn, json!({"method":"item/started", "params":{
+        "threadId":thread, "turnId":native_turn,
+        "item":{"type":"commandExecution", "id":KEY, "command":command,
+            "cwd":cwd, "status":"inProgress"}
+    }}));
+    let recorder = turn.recorder();
+    let fixture = RegisteredLauncherTurn::after_start_with_input(turn, recorder, committed);
+    let original_runtime = fixture.turn.record(|record| record.runtime.clone());
+    assert!(fixture.turn.state.inner.lock().unwrap().test_run_observations.values()
+        .all(|row| row.artifact.is_none()), "registration alone cannot associate a command");
+    let mut delta = json!({"method":"item/commandExecution/outputDelta", "params":{
+        "threadId":thread, "turnId":native_turn, "itemId":KEY,
+        "delta":format!("RUN {}\n", test_run_display_path(&fixture.directory))
+    }});
+    match case {
+        "wrong-thread" => delta["params"]["threadId"] = json!("another-thread"),
+        "wrong-turn" => delta["params"]["turnId"] = json!("another-turn"),
+        "wrong-item" => delta["params"]["itemId"] = json!("another-item"),
+        "missing-item" => { delta["params"].as_object_mut().unwrap().remove("itemId"); }
+        "partial" => delta["params"]["delta"] = json!("RUN "),
+        "oversized" => delta["params"]["delta"] = json!("x".repeat(256 * 1024 + 1)),
+        "cleared" => clear_codex_turn_state(&mut runtime.sessions.lock().unwrap()
+            .get_mut(&fixture.turn.session_id).unwrap().turn_state),
+        "generation" => fixture.turn.record_mut(|record| record.active_turn_generation += 1),
+        "runtime" => fixture.turn.record_mut(|record| record.runtime = SessionRuntime::None),
+        "split" => {
+            let rest = delta["params"]["delta"].as_str().unwrap()[2..].to_owned();
+            delta["params"]["delta"] = json!("RU");
+            dispatch(&fixture.turn, delta.clone());
+            delta["params"]["delta"] = json!(rest);
+        }
+        "matching" | "conflicting" | "running" | "received-delta" => {}
+        _ => panic!("unknown case {case}"),
+    }
+    dispatch(&fixture.turn, delta.clone());
+    if case == "generation" { fixture.turn.record_mut(|record| record.active_turn_generation = generation); }
+    if case == "runtime" { fixture.turn.record_mut(|record| record.runtime = original_runtime); }
+    if case == "conflicting" {
+        delta["params"]["delta"] = json!(format!("RUN {}\n", fixture.directory.with_file_name(format!("test-{}", Uuid::new_v4())).display()));
+        dispatch(&fixture.turn, delta);
+    }
+    let associated = fixture.turn.state.inner.lock().unwrap().test_run_observations.values().any(|row|
+        row.artifact.as_ref().is_some_and(|artifact| artifact.run_id == fixture.run_id));
+    if committed { fixture.receive(true); }
+    else if case != "running" { fixture.write_results("passed"); }
+    let request = fixture.turn.finish();
+    fixture.wait_for_received_notices();
+    assert_ordinary_observation_has_no_native_credit(&fixture.turn, &request);
+    let (line, closed) = fixture.line();
+    if !closed { assert!(line.contains(&fixture.run_id), "{line}"); }
+    if case == "running" {
+        assert!(fixture.turn.record(|record| record.engram.running_codex_tests.iter().any(|test| test.key == KEY)));
+        fixture.turn.begin("Run a successor check.");
+        let mut recorder = fixture.turn.recorder();
+        recorder.command_started("delta-successor", SIZE_TEST).unwrap();
+        assert!(fixture.turn.record(|record| record.engram.active_turn_checks.iter()
+            .any(|check| check.key == "delta-successor" && check.overlap_cause.is_some())),
+            "a locator cannot end a still-running writer");
+    }
+    (associated, closed, line)
+}
+
+#[test]
+fn a_codex_delta_locator_preserves_running_writer_custody() {
+    let (associated, closed, line) = codex_delta_locator_notice("running");
+    assert!(associated && !closed && line.contains("still running"), "{line}");
+}
+
+#[test]
+fn a_codex_delta_locator_names_the_same_commands_received_verification() {
+    let (associated, closed, line) = codex_delta_locator_notice("received-delta");
+    assert!(associated && !closed && line.contains("Engram received")
+        && line.contains("fedcba9876543210fedcba9876543210") && !line.contains("outcome Unknown"), "{line}");
+}
+
+#[test]
+fn registered_launcher_closures_discriminate_checkout_conversion_from_clean_source() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let turn = RegisteredLauncherTurn::committed_turn("receipt-checkout-conversion");
+    let clean = turn.record(|record| record.engram.observed_source_root().unwrap().root.clone());
+    assert!(committed_source_clean_head_within(FsPath::new(&clean), None).is_some());
+    let converted = turn.root.join(".worktrees").join("converted");
+    // Models the inherited Windows autocrlf=true checkout of the failed
+    // fixture, independently of the machine running this diagnostic.
+    run_git_test_command(&turn.root, &["-c", "core.autocrlf=true", "worktree", "add", "--quiet", "-b", "converted", converted.to_str().unwrap()]);
+    assert!(fs::read(converted.join("README.md")).unwrap().windows(2).any(|pair| pair == b"\r\n"));
+    assert!(run_git_test_command_output(&converted, &["-c", "core.autocrlf=true", "status", "--porcelain"]).is_empty(),
+        "conversion-aware fixture Git sees a clean checkout");
+    // Force a content reread instead of depending on Git's stat-cache age.
+    fs::OpenOptions::new().write(true).open(converted.join("README.md")).unwrap()
+        .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
+    let git = ReviewFreezeGit::new(&converted).unwrap();
+    let (_, dirty) = committed_source_status(&git).unwrap();
+    assert!(dirty.iter().any(|path| path.path == "README.md"), "{dirty:?}");
+    assert!(committed_source_clean_head_within(&converted, None).is_none(),
+        "the unchanged production predicate must reject conversion-dependent bytes");
+    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
+}
+
+#[test]
+fn a_received_registered_launcher_names_its_record_before_or_after_turn_close() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for late in [false, true] {
+        for passed in [false, true] {
+            let mut fixture = RegisteredLauncherTurn::committed();
+            fixture.background_reply();
+            if late { fixture.finish(); }
+            let receipt = fixture.receive(passed);
+            if !late { fixture.finish(); }
+            let (line, closed) = fixture.line();
+            assert!(!closed && line.contains(&fixture.run_id)
+                && line.contains(&receipt.verifications[0].record_id)
+                && line.contains("Engram received") && !line.contains("outcome Unknown"), "late={late} passed={passed}: {line}");
+            assert!(line.contains(if passed { "passed" } else { "failed" }), "{line}");
+            let prompt = fixture.turn.begin_prompt("Report the registered outcome.").prompt;
+            assert!(prompt.contains(&receipt.verifications[0].record_id) && !prompt.contains("outcome Unknown"), "{prompt}");
+        }
+    }
+}
+
+#[test]
+fn a_received_record_does_not_associate_an_unrelated_launcher_or_hide_dirty_source() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for correlated in [false, true] {
+        let mut fixture = RegisteredLauncherTurn::committed();
+        if correlated { fixture.background_reply(); }
+        let receipt = fixture.receive(true);
+        if correlated {
+            let root = fixture.turn.state.inner.lock().unwrap().test_run_registrations[&fixture.run_id].worktree.clone();
+            fs::write(FsPath::new(&root).join("README.md"), "changed after verification\n").unwrap();
+            fixture.capture_dirty_notice_source();
+        }
+        let (line, closed) = fixture.finish();
+        // This named-root fixture has no provider end. The pre-existing
+        // carry owner must keep its original writer/end-by-report custody;
+        // a native receipt (correlated or otherwise) cannot end that process.
+        assert!(!closed && fixture.turn.record(|record|
+            record.engram.running_codex_tests.iter().any(|test| test.key == KEY)
+                && record.engram.carried_checks.iter().any(|carry|
+                    carry.check.key == KEY && carry.ends_by_report && carry.check.end.is_none())), "{line}");
+        assert!(!line.contains(&receipt.verifications[0].record_id), "{line}");
+        if !correlated {
+            assert!(line.contains("relationship to this command is unconfirmed")
+                && !line.contains("correlated with this command") && !line.contains("Engram received"), "{line}");
+        }
+    }
+}
+
+#[test]
+fn a_late_received_notice_preserves_other_warnings_and_an_in_flight_delivery() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    fixture.turn.record_mut(|record| {
+        record.engram.set_pending_source_root_line(format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} unrelated check remains Unknown"));
+        record.engram.source_root_line_delivery = Some((record.engram.pending_source_root_line.clone().unwrap(), record.active_turn_generation));
+    });
+    let generation = fixture.turn.record(|record| record.active_turn_generation);
+    let feedback_revision = fixture.turn.record(|record| record.engram.uncredited_feedback_revision);
+    let receipt = fixture.receive(true);
+    assert_eq!(fixture.turn.record(|record| record.engram.uncredited_feedback_revision), feedback_revision,
+        "receipt presentation must not invalidate an in-flight other-command notice");
+    fixture.turn.state.acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+    let (line, closed) = fixture.line();
+    assert!(!closed && line.contains(&receipt.verifications[0].record_id)
+        && line.contains("unrelated check remains Unknown"), "{line}");
+}
+
+#[test]
+fn a_received_notice_waits_for_durability_and_can_upgrade_on_the_next_settlement() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    let before = fixture.line().0;
+    let (tx, held_writer) = mpsc::channel();
+    fixture.turn.state.persist_tx = tx;
+    // This fence uses the fixture's frozen Engram clock, not the physical
+    // clock advanced by the preceding Git work. Expire it in its own domain.
+    let expired = fixture.turn.state.engram_budget_clock().now() - Duration::from_secs(1);
+    let (receipt, settlement) = fixture.receive_until(true, Some(expired));
+    assert!(matches!(settlement, EngramVerificationRecordSettlement::NotDurable { .. }));
+    assert_eq!(fixture.line().0, before, "a failed durability wait cannot consume the one-shot notice upgrade");
+    assert!(!before.contains(&receipt.verifications[0].record_id));
+    drop(held_writer);
+    let registration = fixture.turn.state.inner.lock().unwrap().test_run_registrations[&fixture.run_id].clone();
+    let frozen = engram_verification_record_frozen(&fixture.directory, &fixture.run_id).unwrap();
+    assert_eq!(fixture.turn.state.complete_engram_verification_record_until(&registration,
+        &frozen.body, &receipt, std::time::Instant::now() + DEADLOCK_GUARD),
+        EngramVerificationRecordSettlement::Settled);
+    fixture.wait_for_received_notices();
+    assert!(fixture.line().0.contains(&receipt.verifications[0].record_id));
+    let prompt = fixture.turn.begin_prompt("Report the settled registered outcome.").prompt;
+    assert!(prompt.contains(&receipt.verifications[0].record_id), "{prompt}");
+}
+
+#[test]
+fn a_received_but_unsettled_record_cannot_upgrade_at_turn_close() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    let receipt = fixture.receive_not_durable();
+    let (line, closed) = fixture.finish();
+    assert!(!closed && line.contains("correlated with")
+        && !line.contains(&receipt.verifications[0].record_id), "{line}");
+    let registration = fixture.turn.state.inner.lock().unwrap().test_run_registrations[&fixture.run_id].clone();
+    assert!(matches!(registration.verification_record, Some(TestRunVerificationAck::Received { .. })),
+        "turn close must not perform or renew receipt settlement");
+    let frozen = engram_verification_record_frozen(&fixture.directory, &fixture.run_id).unwrap();
+    assert_eq!(fixture.turn.state.complete_engram_verification_record_until(&registration,
+        &frozen.body, &receipt, std::time::Instant::now() + DEADLOCK_GUARD),
+        EngramVerificationRecordSettlement::Settled);
+    fixture.wait_for_received_notices();
+    let prompt = fixture.turn.begin_prompt("Report the now settled outcome.").prompt;
+    assert!(prompt.contains(&receipt.verifications[0].record_id), "{prompt}");
+}
+
+#[test]
+fn failed_optional_claim_reads_explain_only_existing_receipt_candidates() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for received in [false, true] {
+        let mut fixture = RegisteredLauncherTurn::committed();
+        fixture.background_reply();
+        fixture.receive(true);
+        fixture.finish();
+        let (primary, binding) = {
+            let inner = fixture.turn.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
+            (inner.engram_work_source_roots[0].clone(), inner.sessions[index].engram.work_binding.clone().unwrap())
+        };
+        let other = test_control_work_binding("failed-optional-receipt", 1);
+        let held = EngramHeldClaims { items: [&binding, &other].into_iter().map(|binding| EngramHeldClaim {
+            work_id: binding.work_id.clone(), short_ref: binding.work_id.clone(), claim_id: binding.claim_id.clone(),
+            claim_fence: binding.claim_fence, focused: false, control_binding: Some(binding.clone()),
+        }).collect(), omitted: 0 };
+        fixture.turn.transport.register_named_root_run(&other);
+        fixture.turn.transport.replace_held_claims([Ok(held)]);
+        fixture.turn.state.name_engram_source_root(&fixture.turn.session_id, EngramSourceRootRequest {
+            work: other.work_id.clone(), path: Some(Some(primary.root.clone())),
+        }).unwrap();
+        fixture.turn.transport.enable_named_roots(&fixture.turn.session_id, &other);
+        fixture.turn.transport.set_current_work_binding(Some(other.clone()));
+        fixture.turn.begin("Observe the independent current claim.");
+        fixture.turn.record_mut(|record| record.engram.pending_source_root_line = None);
+        if !received {
+            fixture.turn.state.inner.lock().unwrap().test_run_registrations.update_unindexed_fields(
+                &fixture.run_id, |run| run.verification_record = None);
+        }
+        fixture.turn.transport.replace_held_claims([Err(EngramTransportError::transport("optional read unavailable"))]);
+        let mut recorder = fixture.turn.recorder();
+        recorder.command_started_in("optional-receipt-check", SIZE_TEST, Some(SIZE_TEST), Some(&primary.root)).unwrap();
+        fixture.turn.wait_for_other_root_notices();
+        let line = fixture.turn.record(|record| record.engram.pending_source_root_line.clone());
+        if received {
+            let line = line.as_deref().expect("an existing receipt gets a truthful unavailable explanation");
+            assert!(line.contains("Named-root claim confirmation is unavailable")
+                && line.contains("held-claim read unavailable")
+                && line.contains("confirms no current-input or ordinary-check credit")
+                && !line.contains("Make that item") && !line.contains("run it again"), "{line}");
+        } else {
+            assert_eq!(line, None, "the original failed optional-read silence contract is preserved");
+        }
+        assert_eq!(fixture.turn.record(|record| record.engram.active_turn_checks.len()), 1);
+        recorder.command_completed_with_exit("optional-receipt-check", SIZE_TEST,
+            "running 1 test\ntest result: ok. 1 passed", CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+        fixture.turn.wait_for_snapshots();
+        assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
+        let prompt = fixture.turn.begin_prompt("Report the current check.").prompt;
+        assert_eq!(prompt.contains("Named-root claim confirmation is unavailable"), received, "{prompt}");
+        assert!(!prompt.contains("Make that item"), "{prompt}");
+    }
+}
+
+#[test]
+fn received_notice_batch_expiry_is_typed_and_visible_without_rerun() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    let receipt = fixture.receive(true);
+    let expired = std::time::Instant::now() - Duration::from_secs(1);
+    let state = fixture.turn.state.clone();
+    TEST_RECEIVED_NOTICE_SOURCE_READ.lock().unwrap().insert(fixture.run_id.clone(), Box::new(move |deadline| {
+        assert_eq!(deadline, expired, "the batch deadline cannot be renewed per candidate");
+        assert!(state.inner.is_not_held_by_current_thread_for_test(), "source reads cannot hold the shared state lock");
+    }));
+    let prepared = fixture.turn.state.prepare_registered_check_notices_until(&fixture.turn.session_id, expired);
+    assert_eq!(prepared.len(), 1);
+    assert_eq!(prepared[0].received.as_ref().unwrap().source(),
+        ReceivedNoticeSource::SourceUnavailable(ReceivedNoticeSourceUnavailable::Deadline));
+    let (lines, correlated) = {
+        let mut inner = fixture.turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
+        registered_check_notices_locked(&mut inner, index, &prepared)
+    };
+    assert_eq!(correlated.len(), 1, "expiry cannot erase native correlation");
+    assert_eq!(lines.len(), 1);
+    let line = &lines[0];
+    assert!(line.contains(&receipt.verifications[0].record_id)
+        && line.contains("confirmation is unavailable") && line.contains("deadline elapsed")
+        && line.contains("confirms no current-input or ordinary-check credit")
+        && !line.contains("unchanged input") && !line.contains("run it again")
+        && !line.contains("Make that item"), "{line}");
+    assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
+}
+
+#[test]
+fn received_source_confirmation_is_owned_and_never_blocks_the_terminal_path() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for cancelled in [false, true] {
+        let mut fixture = RegisteredLauncherTurn::committed();
+        fixture.background_reply();
+        let receipt = fixture.receive(true);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        *fixture.turn.state.capture_lifetime.before_capture.lock().unwrap() = Some(Arc::new(move || {
+            if std::thread::current().name() != Some("termal-received-launcher-notice") { return; }
+            assert!(current_capture_cancellation().is_some(), "the proof inherits host cancellation");
+            entered_tx.send(()).unwrap();
+            release_rx.lock().unwrap().recv_timeout(DEADLOCK_GUARD).unwrap();
+        }));
+        // This is the real terminal close, intentionally without the fixture's
+        // presentation wait. It must return while its optional worker is parked.
+        let observation = fixture.turn.finish();
+        assert_ordinary_observation_has_no_native_credit(&fixture.turn, &observation);
+        entered_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
+        let before = fixture.line().0;
+        assert!(before.contains("correlated with")
+            && !before.contains(&receipt.verifications[0].record_id), "{before}");
+        assert!(fixture.turn.state.inner.is_not_held_by_current_thread_for_test());
+        assert!(fixture.turn.state.inner.lock().unwrap().find_session_index(&fixture.turn.session_id).is_some(),
+            "other runtime frames retain state access while source proof is parked");
+        if cancelled { fixture.turn.state.capture_lifetime.stop(); }
+        release_tx.send(()).unwrap();
+        fixture.wait_for_received_notices();
+        *fixture.turn.state.capture_lifetime.before_capture.lock().unwrap() = None;
+        if cancelled {
+            assert_eq!(fixture.line().0, before, "shutdown cannot publish a queued proof");
+        } else {
+            assert!(fixture.line().0.contains(&receipt.verifications[0].record_id));
+            let prompt = fixture.turn.begin_prompt("Report the received outcome.").prompt;
+            assert!(prompt.contains(&receipt.verifications[0].record_id), "{prompt}");
+        }
+    }
+}
+
+#[test]
+fn an_unavailable_notice_source_confirms_only_the_historical_receipt() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    let receipt = fixture.receive(true);
+    fixture.set_notice_source(TestReceivedNoticeSourceResult::Unavailable);
+    let (line, closed) = fixture.finish();
+    assert!(!closed && line.contains(&fixture.run_id)
+        && line.contains(&receipt.verifications[0].record_id)
+        && line.contains("source read unavailable")
+        && line.contains("confirms no current-input or ordinary-check credit")
+        && line.contains("No rerun is requested")
+        && !line.contains("unchanged input") && !line.contains("outcome Unknown"), "{line}");
+    let prompt = fixture.turn.begin_prompt("Report only the historical registered outcome.").prompt;
+    assert!(prompt.contains(&receipt.verifications[0].record_id)
+        && prompt.contains("source read unavailable")
+        && prompt.contains("confirms no current-input or ordinary-check credit")
+        && !prompt.contains("unchanged input") && !prompt.contains("Make that item"), "{prompt}");
+}
+
+#[test]
+fn received_notice_real_clean_reader_confirms_current_without_the_protocol_seam() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    let receipt = fixture.receive(true);
+    fixture.notice_source.borrow_mut().take();
+    let registration = fixture.turn.state.inner.lock().unwrap().test_run_registrations[&fixture.run_id].clone();
+    let notice = ReceivedCheckNotice::read(&registration,
+        std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT).expect("real pinned Git clean proof");
+    assert_eq!(notice.source(), ReceivedNoticeSource::Current);
+    assert!(notice.line().contains(&receipt.verifications[0].record_id)
+        && notice.line().contains("unchanged input"), "{}", notice.line());
+    assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
+    fixture.wait_for_received_notices();
+}
+
+#[test]
+fn received_notice_source_change_and_read_unavailability_stay_distinct() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for changed in [false, true] {
+        let mut fixture = RegisteredLauncherTurn::committed();
+        fixture.background_reply();
+        fixture.receive(true);
+        let registration = fixture.turn.state.inner.lock().unwrap().test_run_registrations[&fixture.run_id].clone();
+        // Independent real-reader control: no scripted protocol result.
+        fixture.notice_source.borrow_mut().take();
+        let root = FsPath::new(&registration.worktree);
+        if changed {
+            fs::write(root.join("README.md"), "changed after receipt\n").unwrap();
+        } else {
+            // This reader refuses configured filters before any source read.
+            // It cannot establish clean input or silently call that dirt.
+            run_git_test_command(root, &["config", "filter.notice.clean", "unreachable-filter"]);
+        }
+        // This is a predicate integration control, not the protocol's timed
+        // availability test: use the pinned reader's existing default bound.
+        let notice = ReceivedCheckNotice::read(&registration,
+            std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT);
+        if changed {
+            assert!(notice.is_none(), "changed source must not produce a received-current notice");
+        } else {
+            let notice = notice.expect("a valid historical receipt survives an unavailable source read");
+            assert_eq!(notice.source(), ReceivedNoticeSource::SourceUnavailable(ReceivedNoticeSourceUnavailable::Read));
+            assert!(notice.line().contains("source read unavailable") && !notice.line().contains("unchanged input"));
+            run_git_test_command(root, &["config", "--unset", "filter.notice.clean"]);
+        }
+        assert!(ReviewFreezeGit::new_with_deadline(root,
+            Some(std::time::Instant::now() - Duration::from_secs(1))).is_err(),
+            "the real pinned reader must refuse an expired deadline");
+        assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
+    }
+}
+
+#[test]
+fn received_notice_publication_never_renews_an_expired_source_proof() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.receive(true);
+    let mut prepared = fixture.turn.state.prepare_registered_check_notices_until(&fixture.turn.session_id,
+        std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET);
+    let notice = prepared[0].received.as_mut().unwrap();
+    assert_eq!(notice.source(), ReceivedNoticeSource::Current);
+    // Deterministically model the interval between off-lock read and locked
+    // publication, without a wall-clock sleep or a larger production bound.
+    notice.deadline = std::time::Instant::now() - Duration::from_secs(1);
+    let (lines, _) = {
+        let mut inner = fixture.turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
+        registered_check_notices_locked(&mut inner, index, &prepared)
+    };
+    assert!(lines[0].contains("confirmation is unavailable") && !lines[0].contains("unchanged input"));
+    assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
+}
+
+#[test]
+fn received_notice_authority_steps_share_the_remaining_batch_time() {
+    let maximum = ENGRAM_WORK_BINDING_COMMAND_TIMEOUT;
+    let short = std::time::Instant::now() + Duration::from_secs(1);
+    let remaining = received_notice_step_timeout(short, maximum);
+    assert!(remaining > Duration::ZERO && remaining <= Duration::from_secs(1));
+    assert_eq!(received_notice_step_timeout(std::time::Instant::now() - Duration::from_secs(1), maximum), Duration::ZERO);
+    assert_eq!(received_notice_step_timeout(std::time::Instant::now() + maximum + Duration::from_secs(20), maximum), maximum);
+}
+
+#[test]
+fn received_notice_other_root_read_cannot_restart_its_authority_deadline() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let fixture = RegisteredLauncherTurn::committed();
+    let read = {
+        let mut inner = fixture.turn.state.inner.lock().unwrap();
+        let mut other = inner.engram_work_source_roots[0].clone();
+        other.work_id.push_str("-other");
+        other.claim_id.push_str("-other");
+        inner.engram_work_source_roots.push(other);
+        let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
+        EngramOtherRootNoticeRead::capture(&inner, index).unwrap()
+    };
+    let before = fixture.turn.transport.held_claim_reads();
+    assert!(matches!(read.read(std::time::Instant::now() - Duration::from_secs(1), false),
+        Err(ReceivedNoticeSourceUnavailable::Deadline)));
+    assert_eq!(fixture.turn.transport.held_claim_reads(), before, "no authority process starts after expiry");
+    fixture.turn.transport.replace_held_claims([Ok(EngramHeldClaims { items: Vec::new(), omitted: 0 })]);
+    let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = observed.clone();
+    let state = fixture.turn.state.clone();
+    fixture.turn.transport.on_next_held_claim_read(move |timeout| {
+        assert!(timeout > Duration::ZERO && timeout <= Duration::from_secs(1), "{timeout:?}");
+        assert!(state.inner.is_not_held_by_current_thread_for_test(), "authority reads cannot hold the shared state lock");
+        seen.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    assert!(read.read(std::time::Instant::now() + Duration::from_secs(1), false).is_ok());
+    assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
+    fixture.turn.state.inner.lock().unwrap().engram_work_source_roots.pop();
+    assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
+}
+
+#[test]
+fn a_late_received_notice_reads_off_lock_after_durable_settlement() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = observed.clone();
+    let state = fixture.turn.state.clone();
+    let run_id = fixture.run_id.clone();
+    let directory = fixture.directory.clone();
+    TEST_RECEIVED_NOTICE_SOURCE_READ.lock().unwrap().insert(fixture.run_id.clone(), Box::new(move |deadline| {
+        assert!(deadline > std::time::Instant::now());
+        assert!(state.inner.is_not_held_by_current_thread_for_test(), "other sessions must retain access during a notice capture");
+        let inner = state.inner.lock().unwrap();
+        assert!(matches!(inner.test_run_registrations[&run_id].verification_record,
+            Some(TestRunVerificationAck::Settled { .. })), "presentation must not precede durable settlement");
+        drop(inner);
+        assert!(matches!(engram_verification_record_progress(&directory),
+            Some(EngramVerificationRecordProgress::Settled { .. })));
+        seen.store(true, std::sync::atomic::Ordering::SeqCst);
+    }));
+    let receipt = fixture.receive(true);
+    assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(fixture.line().0.contains(&receipt.verifications[0].record_id));
+}
+
+#[test]
+fn a_companion_root_reminder_uses_only_that_items_own_current_received_record() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for case in ["received", "not-durable", "primary-only", "dirty", "mirror-only", "generation", "binding"] {
+        let mut fixture = RegisteredLauncherTurn::committed();
+        fixture.background_reply();
+        let receipt = if case == "not-durable" { fixture.receive_not_durable() } else { fixture.receive(true) };
+        fixture.finish();
+        let (primary, binding) = {
+            let inner = fixture.turn.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
+            (inner.engram_work_source_roots[0].clone(), inner.sessions[index].engram.work_binding.clone().unwrap())
+        };
+        let other = test_control_work_binding("companion-notice", 1);
+        let other_short_ref = "companion-item".to_owned();
+        let held = EngramHeldClaims { items: [(&binding, &primary.short_ref), (&other, &other_short_ref)]
+            .into_iter().map(|(binding, short)| EngramHeldClaim {
+                work_id:binding.work_id.clone(), short_ref:short.clone(), claim_id:binding.claim_id.clone(),
+                claim_fence:binding.claim_fence, focused:false, control_binding:Some(binding.clone()),
+            }).collect(), omitted:0 };
+        fixture.turn.transport.register_named_root_run(&other);
+        fixture.turn.transport.replace_held_claims([Ok(held.clone())]);
+        fixture.turn.state.name_engram_source_root(&fixture.turn.session_id, EngramSourceRootRequest {
+            work:other.work_id.clone(), path:Some(Some(primary.root.clone())),
+        }).unwrap();
+        if case == "primary-only" {
+            fixture.turn.state.name_engram_source_root(&fixture.turn.session_id, EngramSourceRootRequest {
+                work:binding.work_id.clone(), path:Some(Some(primary.root.clone())),
+            }).unwrap();
+        }
+        if case == "dirty" {
+            fs::write(FsPath::new(&primary.root).join("README.md"), "changed\n").unwrap();
+            fixture.capture_dirty_notice_source();
+        }
+        if case == "mirror-only" || case == "generation" {
+            fixture.turn.state.inner.lock().unwrap().test_run_registrations.update_unindexed_fields(&fixture.run_id, |run| {
+                if case == "mirror-only" { run.verification_record = None; }
+                else { run.named_root.as_mut().unwrap().generation += 1; }
+            });
+        }
+        let mut held = held;
+        if case == "binding" { held.items[0].control_binding.as_mut().unwrap().work_revision += 1; }
+        fixture.turn.transport.replace_held_claims([Ok(held)]);
+        let selected = if case == "primary-only" { &binding } else { &other };
+        // Naming changes the host association; this scripted ordinary service
+        // also needs its canonical session selector moved to that association.
+        // Otherwise it correctly refuses the closing observation before the
+        // fixture's notice channel is sent.
+        fixture.turn.transport.enable_named_roots(&fixture.turn.session_id, selected);
+        fixture.turn.transport.set_current_work_binding(Some(selected.clone()));
+        fixture.turn.begin("Check another item independently.");
+        assert_eq!(fixture.turn.record(|record| record.engram.work_binding.clone()), Some(selected.clone()));
+        assert_eq!(fixture.turn.transport.named_roots.lock().unwrap().as_ref().unwrap()
+            .bindings.get(&fixture.turn.session_id), Some(&selected.claim_id));
+        fixture.turn.record_mut(|record| record.engram.pending_source_root_line = None);
+        let mut recorder = fixture.turn.recorder();
+        recorder.command_started_in("companion-check", SIZE_TEST, Some(SIZE_TEST), Some(&primary.root)).unwrap();
+        fixture.turn.wait_for_other_root_notices();
+        let line = fixture.turn.record(|record| record.engram.pending_source_root_line.clone().unwrap_or_default());
+        assert_eq!(line.contains("Make that item"), case != "received", "{case}: {line}");
+        if case == "not-durable" {
+            assert!(!line.contains(&receipt.verifications[0].record_id), "{line}");
+        }
+        assert!(fixture.turn.record(|record| record.engram.active_turn_checks.len() == 1), "primary admission is independent");
+        recorder.command_completed_with_exit("companion-check", SIZE_TEST,
+            "running 1 test\ntest result: ok. 1 passed", CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+        fixture.turn.wait_for_snapshots();
+        assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
+        let prompt = fixture.turn.begin_prompt("Report the current check.").prompt;
+        assert_eq!(prompt.contains("Make that item"), case != "received", "{case}: {prompt}");
+        if case == "not-durable" {
+            assert!(!prompt.contains(&receipt.verifications[0].record_id), "{prompt}");
+        }
+    }
+}
+
+#[test]
+fn a_test_in_another_root_does_not_request_a_duplicate_of_the_bound_items_received_run() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for received in [false, true] {
+        let mut fixture = RegisteredLauncherTurn::committed();
+        fixture.background_reply();
+        fixture.receive(true);
+        fixture.finish();
+        let (primary, binding) = {
+            let inner = fixture.turn.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
+            (inner.engram_work_source_roots[0].clone(), inner.sessions[index].engram.work_binding.clone().unwrap())
+        };
+        if !received {
+            fixture.turn.state.inner.lock().unwrap().test_run_registrations.update_unindexed_fields(
+                &fixture.run_id, |run| run.verification_record = None);
+        }
+        let other = test_control_work_binding("separate-companion-notice", 1);
+        let other_root = fixture.turn.root.join(".worktrees").join("companion");
+        run_git_test_command(&fixture.turn.root, &["worktree", "add", "--quiet", "-b", "companion", other_root.to_str().unwrap()]);
+        let held = EngramHeldClaims { items: [&binding, &other].into_iter().map(|binding| EngramHeldClaim {
+            work_id:binding.work_id.clone(), short_ref:binding.work_id.clone(), claim_id:binding.claim_id.clone(),
+            claim_fence:binding.claim_fence, focused:false, control_binding:Some(binding.clone()),
+        }).collect(), omitted:0 };
+        fixture.turn.transport.register_named_root_run(&other);
+        fixture.turn.transport.replace_held_claims([Ok(held.clone())]);
+        fixture.turn.state.name_engram_source_root(&fixture.turn.session_id, EngramSourceRootRequest {
+            work:other.work_id.clone(), path:Some(Some(other_root.to_string_lossy().into_owned())),
+        }).unwrap();
+        fixture.turn.state.name_engram_source_root(&fixture.turn.session_id, EngramSourceRootRequest {
+            work:binding.work_id.clone(), path:Some(Some(primary.root.clone())),
+        }).unwrap();
+        fixture.turn.transport.replace_held_claims([Ok(held)]);
+        fixture.turn.begin("Observe another root without moving evidence.");
+        fixture.turn.record_mut(|record| record.engram.pending_source_root_line = None);
+        let mut recorder = fixture.turn.recorder();
+        recorder.command_started_in("separate-companion", SIZE_TEST, Some(SIZE_TEST), Some(other_root.to_str().unwrap())).unwrap();
+        fixture.turn.wait_for_other_root_notices();
+        let line = fixture.turn.record(|record| record.engram.pending_source_root_line.clone().unwrap_or_default());
+        assert_eq!(line.contains("Make that item"), !received, "{line}");
+        assert!(fixture.turn.record(|record| record.engram.active_turn_checks.is_empty()),
+            "a receipt cannot admit an ordinary check from another root");
+        recorder.command_completed_with_exit("separate-companion", SIZE_TEST,
+            "running 1 test\ntest result: ok. 1 passed", CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+        assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
+        let prompt = fixture.turn.begin_prompt("Report the unrelated check.").prompt;
+        assert_eq!(prompt.contains("Make that item"), !received, "{prompt}");
     }
 }
 
