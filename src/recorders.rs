@@ -46,6 +46,11 @@
 /// Shared recorder surface that every agent runtime parser drives.
 /// Each method persists one event into the session transcript.
 trait TurnRecorder {
+    // Every provider tool kind participates in the native first-action rule.
+    fn native_tool_activity(&mut self, _key: Option<&str>, _is_command: bool) -> Result<()> { Ok(()) }
+    fn native_tool_start(&mut self, key: Option<&str>, is_command: bool, _frame: &Value) -> Result<()> {
+        self.native_tool_activity(key, is_command)
+    }
     /// Records the agent-native session/thread id discovered mid-turn so it can
     /// be associated with this termal session (for later reconnect / resume).
     fn note_external_session(&mut self, session_id: &str) -> Result<()>;
@@ -954,6 +959,9 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
     if status != CommandStatus::Running
         || EngramHost::is_nonterminal_launcher_reply(command, exit)
     {
+        let provenance = recorder.recorder_state_mut().native_tool_provenance.clone()
+            .unwrap_or_else(|| recorder.recorder_state_mut().observation_provenance.clone());
+        state.end_native_declared_run(&session_id, &provenance, key, exit, runtime_output_cut);
         recorder.observe(EngramRecorderObservation::CommandFinished {
             key,
             command,
@@ -1181,6 +1189,19 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
 // Wires `SessionRecorder` to the shared `TurnRecorder` surface by
 // delegating every method to the corresponding `recorder_*` free function.
 impl TurnRecorder for SessionRecorder {
+    fn native_tool_start(&mut self, key: Option<&str>, is_command: bool, frame: &Value) -> Result<()> {
+        self.native_tool_activity(key, is_command)?;
+        let provenance = self.recorder_state.native_tool_provenance.as_ref()
+            .unwrap_or(&self.recorder_state.observation_provenance).clone();
+        self.state.start_native_declared_run(&self.session_id, &provenance, key, is_command, frame);
+        Ok(())
+    }
+    fn native_tool_activity(&mut self, key: Option<&str>, is_command: bool) -> Result<()> {
+        let provenance = self.recorder_state.native_tool_provenance.as_ref()
+            .unwrap_or(&self.recorder_state.observation_provenance).clone();
+        self.state.observe_declared_tool_activity(&self.session_id, &provenance, key, is_command);
+        Ok(())
+    }
     /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         recorder_note_external_session(self, session_id)
@@ -1322,6 +1343,19 @@ impl TurnRecorder for SessionRecorder {
 // Wires `BorrowedSessionRecorder` to the shared `TurnRecorder` surface —
 // same delegation pattern as the `SessionRecorder` impl above.
 impl TurnRecorder for BorrowedSessionRecorder<'_> {
+    fn native_tool_start(&mut self, key: Option<&str>, is_command: bool, frame: &Value) -> Result<()> {
+        self.native_tool_activity(key, is_command)?;
+        let provenance = self.recorder_state.native_tool_provenance.as_ref()
+            .unwrap_or(&self.recorder_state.observation_provenance).clone();
+        self.state.start_native_declared_run(&self.session_id, &provenance, key, is_command, frame);
+        Ok(())
+    }
+    fn native_tool_activity(&mut self, key: Option<&str>, is_command: bool) -> Result<()> {
+        let provenance = self.recorder_state.native_tool_provenance.as_ref()
+            .unwrap_or(&self.recorder_state.observation_provenance).clone();
+        self.state.observe_declared_tool_activity(&self.session_id, &provenance, key, is_command);
+        Ok(())
+    }
     /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         recorder_note_external_session(self, session_id)

@@ -16,6 +16,9 @@ mod receipt_record_ids;
 #[path = "engram_verification_refusals.rs"]
 mod refusals;
 
+#[path = "engram_verification_declared.rs"]
+mod declared;
+
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const SESSION: &str = "session-record";
 const STARTED: &str = "2026-10-30T10:00:00.000Z";
@@ -194,6 +197,9 @@ fn record_run(fixture: &RunFixture, run_id: &str, request: Value, results: Value
         preset: TestRunPreset::Full,
         detached: Some(false),
         stage_names: STAGES.iter().map(|name| (*name).to_owned()).collect(),
+        declared: None,
+        declared_native: None,
+        declared_terminal: None,
         work_binding: Some(binding()),
         named_root: Some(TestRunNamedRoot {
             workspace_id: test_run_display_path(&fixture.root),
@@ -750,6 +756,17 @@ fn the_record_matches_the_producers_own_request_fixture() {
     // The sender builds the same request from the same run.
     let fixture = RunFixture::new("verification-record-producer-request");
     let (registration, request, results) = producer_fixture_run(&fixture, &producer);
+    if producer["checks"][0]["command"] == "fixture registered check" {
+        // This older frame is asserted protocol data, not execution evidence.
+        // Its raw shape still reads above, but a test label cannot classify
+        // an unsupported command without a host-captured declaration/artifact.
+        assert!(registration.declared.is_none());
+        assert_eq!(
+            engram_verification_record_body(&registration, &request, &results).unwrap_err(),
+            "stage focused is neither a test nor a build check"
+        );
+        continue;
+    }
     let built = engram_verification_record_body(&registration, &request, &results).expect("the run builds");
     let wire = serde_json::to_value(EngramControlRequest::VerificationRecord {
         operation_key: engram_verification_record_key(&registration.run_id),

@@ -48,10 +48,60 @@ fn review_freeze_chunk(hash: &mut Sha256, label: &str, bytes: &[u8]) {
     hash.update(bytes);
 }
 
+// Optional per-capture diagnostics. Names are host constants, never paths or
+// arguments. This observes the caller's existing deadline; it cannot renew it.
+#[derive(Debug, Default)]
+struct SourceReadTimings(Mutex<SourceReadTimingState>);
+
+#[derive(Debug, Default)]
+struct SourceReadTimingState {
+    finished: Vec<(&'static str, Duration)>,
+    active: Option<(u64, &'static str, std::time::Instant)>,
+    sequence: u64,
+    omitted: bool,
+}
+
+struct SourceReadTimingGuard { timings: Arc<SourceReadTimings>, sequence: u64 }
+
+impl SourceReadTimings {
+    fn begin(self: &Arc<Self>, name: &'static str) -> SourceReadTimingGuard {
+        let mut state = self.0.lock().expect("source timing mutex poisoned");
+        state.sequence += 1;
+        let sequence = state.sequence;
+        state.active = Some((sequence, name, std::time::Instant::now()));
+        SourceReadTimingGuard { timings: self.clone(), sequence }
+    }
+
+    fn summary(&self) -> String {
+        let state = self.0.lock().expect("source timing mutex poisoned");
+        let mut stages: Vec<_> = state.finished.iter().map(|(name, elapsed)|
+            format!("{name}:{}ms", elapsed.as_millis())).collect();
+        if let Some((_, name, started)) = state.active {
+            stages.push(format!("{name}:running:{}ms", started.elapsed().as_millis()));
+        }
+        if state.omitted { stages.push("earlier_stages_omitted".to_owned()); }
+        if stages.is_empty() { stages.push("not_started".to_owned()); }
+        stages.join(",").chars().take(2048).collect()
+    }
+}
+
+impl Drop for SourceReadTimingGuard {
+    fn drop(&mut self) {
+        let mut state = self.timings.0.lock().expect("source timing mutex poisoned");
+        if let Some((sequence, name, started)) = state.active {
+            if sequence != self.sequence { return; }
+            state.active = None;
+            if state.finished.len() == 32 { state.finished.remove(0); state.omitted = true; }
+            state.finished.push((name, started.elapsed()));
+        }
+    }
+}
+
 struct ReviewFreezeGit {
     root: PathBuf,
     binary: PathBuf,
     deadline: std::time::Instant,
+    timings: Option<Arc<SourceReadTimings>>,
 }
 
 impl ReviewFreezeGit {
@@ -60,6 +110,11 @@ impl ReviewFreezeGit {
     }
 
     fn new_with_deadline(cwd: &FsPath, deadline: Option<std::time::Instant>) -> Result<Self> {
+        Self::new_with_deadline_and_timings(cwd, deadline, None)
+    }
+
+    fn new_with_deadline_and_timings(cwd: &FsPath, deadline: Option<std::time::Instant>,
+        timings: Option<Arc<SourceReadTimings>>) -> Result<Self> {
         check_capture_cancellation()?;
         let root = fs::canonicalize(cwd)?;
         // Never allow Windows' current-directory executable search, a relative
@@ -74,6 +129,7 @@ impl ReviewFreezeGit {
             root,
             binary,
             deadline: capture_deadline(deadline.unwrap_or_else(||std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT)),
+            timings,
         };
         let top = git.run(&["rev-parse", "--show-toplevel"], false)?;
         if fs::canonicalize(String::from_utf8(top)?.trim())? != git.root {
@@ -161,10 +217,21 @@ impl ReviewFreezeGit {
     }
 
     fn run(&self, args: &[&str], allow_absent: bool) -> Result<Vec<u8>> {
+        let name = match args.first().copied() {
+            Some("rev-parse") => "git_rev_parse", Some("config") => "git_config",
+            Some("submodule") => "git_submodule", Some("status" | "-c") => "git_status",
+            Some("cat-file") => "git_cat_file", _ => "git_other",
+        };
+        let _timing = self.timings.as_ref().map(|timings| timings.begin(name));
         check_capture_cancellation()?;
         let mut command = self.command(args);
         let started = std::time::Instant::now();
         let remaining_at_start = self.deadline.saturating_duration_since(started);
+        #[cfg(test)]
+        if BOUNDED_READ_TIMING_DIAGNOSTIC.load(std::sync::atomic::Ordering::SeqCst) {
+            eprintln!("Git timing thread={:?} args={args:?} remaining_ms={}",
+                std::thread::current().id(), remaining_at_start.as_millis());
+        }
         let output = run_bounded_read_command(
             &mut command,
             self.deadline,

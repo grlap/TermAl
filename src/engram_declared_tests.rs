@@ -499,6 +499,27 @@ struct EngramDeclaredBinding {
     started: std::time::SystemTime,
 }
 
+// Reader fixtures only: generic launcher registrations cannot select native credit.
+#[cfg(test)]
+fn test_run_declared_binding(request: &Value, root: &FsPath) -> Option<EngramDeclaredBinding> {
+    if request.get("full").and_then(Value::as_bool) != Some(false)
+        || request.get("liveEngram").is_some_and(|value| !value.is_null())
+    {
+        return None;
+    }
+    let stages = request.get("stages")?.as_array()?;
+    let [stage] = stages.as_slice() else { return None };
+    if stage.get("name")?.as_str()? != "focused" { return None; }
+    let mut words = vec![stage.get("command")?.as_str()?.to_owned()];
+    words.extend(test_run_argv(stage.get("args"))?);
+    let cwd = stage.get("cwd").and_then(Value::as_str).unwrap_or(".");
+    if !engram_declared_path_inside(root, cwd, true) { return None; }
+    let target = EngramCheckTarget {
+        root: root.to_path_buf(), directory: root.join(cwd), common_dir_key: None,
+    };
+    engram_declared_bind(&words, &target).0
+}
+
 /// What a declared candidate found at `target`'s root: a binding when the
 /// candidate's `words`, run in `target.directory`, match exactly one entry;
 /// the host line to give when the declaration there is disabled; or neither.

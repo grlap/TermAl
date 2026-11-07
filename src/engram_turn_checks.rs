@@ -39,7 +39,6 @@ impl EngramVerificationKind {
 
 // Bounds shared by actual command facts and explicit registered verification.
 const ENGRAM_TURN_CHECK_LIMIT: usize = 16;
-#[cfg(test)]
 const ENGRAM_CHECK_SUMMARY_MAX_BYTES: usize = 4096;
 const ENGRAM_CHECK_REF_MAX_BYTES: usize = 1024;
 

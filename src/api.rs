@@ -421,6 +421,9 @@ fn handoff_prepared_turn_dispatch(
     state.prepare_ordinary_opening_root_before_handoff(
         &session_id, &runtime_token, active_turn_generation,
     );
+    state.prepare_declared_run_before_handoff(
+        &session_id, &runtime_token, active_turn_generation,
+    );
     let reject_federation = |error: ApiError| {
         if record_rejected_turn_dispatch_with_federation(state, &session_id, &error.message,
             mailbox_notification.as_ref(), &runtime_token, active_turn_generation,

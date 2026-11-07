@@ -555,6 +555,14 @@ impl PersistedState {
             engram_turn_basis_captures_live: Arc::default(),
             #[cfg(test)]
             test_engram_source_capture: None,
+            #[cfg(test)]
+            test_declared_run_snapshot: None,
+            #[cfg(test)]
+            test_declared_run_clock: None,
+            #[cfg(test)]
+            test_declared_run_source: None,
+            #[cfg(test)]
+            test_native_source_owner_metadata: None,
             engram_source_root_validations_live: Arc::default(),
             // An epoch loaded from disk is already durable.
             test_runs: TestRunIndex {

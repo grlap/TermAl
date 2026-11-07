@@ -337,6 +337,11 @@ fn handle_codex_app_server_item_started(
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     match item.get("type").and_then(Value::as_str) {
+        Some("agentMessage" | "userMessage" | "reasoning" | "plan") => {}
+        kind => recorder.native_tool_start(
+            item.get("id").and_then(Value::as_str), kind == Some("commandExecution"), item)?,
+    }
+    match item.get("type").and_then(Value::as_str) {
         Some("agentMessage") => {
             recorder.finish_streaming_text()?;
         }

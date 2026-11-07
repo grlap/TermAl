@@ -10,7 +10,6 @@ enum EngramDeclaredArtifactFormat {
     DartJson,
 }
 
-#[cfg(test)]
 fn engram_declared_counter_description(format: EngramDeclaredArtifactFormat, counters: &EngramTrxCounters) -> String {
     if format == EngramDeclaredArtifactFormat::Trx { return counters.describe(); }
     ["total", "executed", "passed", "failed", "error", "notExecuted"].iter()

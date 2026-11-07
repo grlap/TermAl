@@ -1219,6 +1219,13 @@ the run whose `results.json` its `results:` line names, its check ends
 Unknown. A carried run like that is dropped, never recorded. A
 run that failed at any stage, its first included, is still recorded failed.
 
+Registered verification classifies focused stages from their actual runner
+argv. The stage label `focused` alone no longer selects Test: an unsupported
+command produces an explicit unclassified-stage refusal. Declared native
+Flutter/.NET credit is reserved to the original host-observed native route;
+a generic focused launcher registration cannot adopt a declaration or a
+later artifact as that execution's evidence.
+
 A focused run, `node scripts/test-launcher.mjs focused -- COMMAND ARG...`,
 is a test check only when its wrapped command is itself one (a `cargo test`
 or a bounded native `node --test`, not a build or a `--no-run`). Its exit status alone says nothing about how

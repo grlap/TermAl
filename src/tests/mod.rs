@@ -105,6 +105,7 @@ mod engram_source_command;
 mod engram_source_id;
 mod engram_source_id_capture;
 mod engram_source_id_live;
+mod engram_declared_source_fixture;
 mod engram_source_owner;
 mod engram_unadmitted_capture_diagnostic;
 mod engram_verification_bind;
@@ -266,6 +267,7 @@ mod prompt_target_parity;
 
 #[derive(Default)]
 struct TestRecorder {
+    native_tool_activities: Vec<(Option<String>, bool)>,
     approvals: Vec<(String, String, String)>,
     codex_approvals: Vec<(String, String, String, CodexPendingApproval)>,
     codex_user_input_requests: Vec<(
@@ -422,6 +424,10 @@ fn shared_codex_bad_json_streak_failure_detail_trips_at_threshold() {
 }
 
 impl TurnRecorder for TestRecorder {
+    fn native_tool_activity(&mut self, key: Option<&str>, is_command: bool) -> Result<()> {
+        self.native_tool_activities.push((key.map(str::to_owned), is_command));
+        Ok(())
+    }
     fn note_external_session(&mut self, _session_id: &str) -> Result<()> {
         Ok(())
     }

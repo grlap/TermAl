@@ -1924,6 +1924,8 @@ struct EngramSessionState {
     work_binding: Option<EngramControlWorkBinding>,
     /// Command facts observed under the exact ordinary trace owner.
     active_turn_checks: Vec<EngramTurnCheck>,
+    // Pre-prompt native evidence is process-local. Restart never adopts it.
+    declared_run_turn: Option<DeclaredRunTurn>,
     /// Launcher full gates whose result marked only their launch, carried
     /// past the turn that launched them until they settle
     /// (`engram_carried_checks.rs`). In memory; a marker of each is persisted
@@ -2101,6 +2103,7 @@ impl Default for EngramSessionState {
             observation_delete_requested: false,
             work_binding: None,
             active_turn_checks: Vec::new(),
+            declared_run_turn: None,
             carried_checks: Vec::new(),
             running_codex_tests: Vec::new(),
             carried_consumed_runs: Vec::new(),

@@ -359,9 +359,11 @@ fn refresh_engram_source_root_prompt_locked(
         TurnDispatch::PersistentCodex { command, opening_prompt, .. } => (&mut command.prompt, opening_prompt),
         TurnDispatch::PersistentAcp { command, opening_prompt, .. } => (&mut command.prompt, opening_prompt),
     };
-    if notices.is_empty() && opening_unconfirmed.is_none() && slot.is_none() { return; }
+    let native_notice = declared_run_opening_notice(record);
+    if notices.is_empty() && opening_unconfirmed.is_none() && native_notice.is_none() && slot.is_none() { return; }
     let base = &slot.get_or_insert_with(|| EngramOpeningPrompt { base: prompt.clone() }).base;
     let mut lines: Vec<_> = notices.iter().map(|notice| notice.line().to_owned()).collect();
+    lines.extend(native_notice);
     if let Some(reason) = opening_unconfirmed {
         lines.push(format!(
             "[TermAl] This turn's source root is unconfirmed. Any shown path is the last acknowledged local selection. Source, check and evaluation evidence is withheld; the prompt proceeds. Refresh authority or name the worktree for a later turn. Reason: {}.",

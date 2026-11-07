@@ -2209,6 +2209,8 @@ fn register_claude_tool_use(
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
+    recorder.native_tool_start(content.get("id").and_then(Value::as_str),
+        content.get("name").and_then(Value::as_str) == Some("Bash"), content)?;
     let Some(tool_id) = content.get("id").and_then(Value::as_str) else {
         return Ok(());
     };

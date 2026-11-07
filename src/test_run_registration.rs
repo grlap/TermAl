@@ -61,6 +61,13 @@ struct TestRunRegistration {
     preset: TestRunPreset,
     detached: Option<bool>,
     stage_names: Vec<String>,
+    // Captured before execution by the host, never trusted from request.json.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    declared: Option<EngramDeclaredBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    declared_native: Option<DeclaredRunReservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    declared_terminal: Option<DeclaredRunTerminal>,
     // Captured by the host, never accepted from the launcher's payload. For
     // an ordinary committed-input run: the claim of the one root the
     // launching session named for this worktree (src/test_run_named_root.rs),
@@ -96,6 +103,7 @@ impl TestRunRegistration {
         }
         let mut identity = self.clone();
         identity.native_completion = None;
+        if expected.declared_terminal.is_none() { identity.declared_terminal = None; }
         &identity == expected
     }
 }
@@ -462,8 +470,17 @@ fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
     if let Some(input) = request.get("input") {
         immutable.insert("input", input.clone());
     }
+    if let Some(command) = request.get("observedCommand") {
+        immutable.insert("observedCommand", command.clone());
+    }
+    if let Some(execution) = request.get("nativeExecution") {
+        immutable.insert("nativeExecution", execution.clone());
+    }
     if let Some(pin) = request.get("sourceOwner") {
         immutable.insert("sourceOwner", pin.clone());
+    }
+    if let Some(source_id) = request.get("nativeSourceId") {
+        immutable.insert("nativeSourceId", source_id.clone());
     }
     let bytes = serde_json::to_vec(&immutable)
         .map_err(|_| ApiError::bad_request("invalid test run registration request"))?;
@@ -484,7 +501,14 @@ impl AppState {
         &self,
         session_id: &str,
         request: RegisterTestRunRequest,
-        mut diagnostics: TestRunRegistrationDiagnostics,
+        diagnostics: TestRunRegistrationDiagnostics,
+    ) -> Result<RegisterTestRunResponse, ApiError> {
+        self.register_test_run_reserved(session_id, request, diagnostics, None)
+    }
+
+    fn register_test_run_reserved(
+        &self, session_id: &str, request: RegisterTestRunRequest,
+        mut diagnostics: TestRunRegistrationDiagnostics, native: Option<&DeclaredRunReservation>,
     ) -> Result<RegisterTestRunResponse, ApiError> {
         let run_id = request.run_id.clone();
         if diagnostics.trace.is_none() {
@@ -492,7 +516,7 @@ impl AppState {
                 &diagnostics.operation_id, diagnostics.started));
         }
         diagnostics.enter("validate_request");
-        let mut result = self.register_test_run_inner(session_id, request, &mut diagnostics);
+        let mut result = self.register_test_run_inner(session_id, request, &mut diagnostics, native);
         if result.is_err() {
             diagnostics.failure_phase = Some((diagnostics.phase, diagnostics.phase_started.elapsed()));
             diagnostics.enter("failure_publication");
@@ -524,17 +548,35 @@ impl AppState {
         session_id: &str,
         request: RegisterTestRunRequest,
         diagnostics: &mut TestRunRegistrationDiagnostics,
+        native: Option<&DeclaredRunReservation>,
     ) -> Result<RegisterTestRunResponse, ApiError> {
-        self.register_test_run_inner_with_source_owner(session_id, request, diagnostics,
+        #[cfg(test)]
+        let verify = self.inner.lock().expect("state mutex poisoned").test_native_source_owner_metadata.clone();
+        #[cfg(test)]
+        if let Some(verify) = verify {
+            return self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, native,
+                |state, session, deadline| verify(state, session, deadline));
+        }
+        self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, native,
             |state, session, deadline| state.source_owner_metadata_snapshot_with(
                 session, deadline, engram_source_owner_run))
     }
 
+    #[cfg(test)]
     fn register_test_run_inner_with_source_owner(
         &self,
         session_id: &str,
         request: RegisterTestRunRequest,
         diagnostics: &mut TestRunRegistrationDiagnostics,
+        verify_source_owner: impl FnOnce(&AppState, &str, std::time::Instant)
+            -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>,
+    ) -> Result<RegisterTestRunResponse, ApiError> {
+        self.register_test_run_inner_with_source_owner_reserved(session_id, request, diagnostics, None, verify_source_owner)
+    }
+
+    fn register_test_run_inner_with_source_owner_reserved(
+        &self, session_id: &str, request: RegisterTestRunRequest,
+        diagnostics: &mut TestRunRegistrationDiagnostics, native: Option<&DeclaredRunReservation>,
         verify_source_owner: impl FnOnce(&AppState, &str, std::time::Instant)
             -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>,
     ) -> Result<RegisterTestRunResponse, ApiError> {
@@ -604,6 +646,20 @@ impl AppState {
             return Err(ApiError::bad_request("test run native locator identity is unavailable"));
         }
         let request_identity = test_run_registration_identity(&value)?;
+        if value.get("nativeExecution").is_some() && native.is_none() {
+            return Err(ApiError::conflict("native execution requires its host reservation"));
+        }
+        if let Some(start) = native {
+            let inner = diagnostics.lock(&self.inner);
+            if start.host_instance != self.server_instance_id || start.session_id != session_id
+                || start.run_id != request.run_id || start.request_identity != request_identity
+                || value.get("nativeExecution").and_then(Value::as_str) != Some(start.execution_id.as_str())
+                || inner.test_run_observations.get(&start.execution_id)
+                    .is_none_or(|row| row.declared_native.as_ref() != Some(start))
+            {
+                return Err(ApiError::conflict("native start reservation changed or is unavailable"));
+            }
+        }
         diagnostics.request_digest = Some(request_identity.clone());
         if disk.request_identity.as_ref() != Some(&request_identity) {
             return Err(ApiError::conflict(
@@ -615,10 +671,21 @@ impl AppState {
         if request_common != fs::canonicalize(&common).ok() {
             return Err(ApiError::bad_request("test run worktree is outside the configured project"));
         }
-        // Only an ordinary committed-input run (`input: "commit"`) is bound
-        // from the named root its worktree is; every other run keeps the
-        // session's binding as before. The root is read off the lock.
-        let committed_input = test_run_request_is_committed_input(&value);
+        // Committed launcher runs and original host-owned native runs bind
+        // through their named root. Every other run keeps the session's
+        // binding as before. The root is read off the lock.
+        let committed_input = native.is_some() || test_run_request_is_committed_input(&value);
+        // Only the original host-owned native reservation supplies a declared
+        // binding. A generic launcher request cannot opt into this route.
+        let prior = {
+            let inner = diagnostics.lock(&self.inner);
+            inner.test_run_registrations.get(&request.run_id)
+                .filter(|row| row.request_identity == request_identity).cloned()
+        };
+        let declared = match prior {
+            Some(prior) => prior.declared,
+            None => native.map(|start| start.declaration.clone()),
+        };
         let worktree_keys = committed_input
             .then(|| test_run_worktree_keys(FsPath::new(&disk.worktree)))
             .flatten();
@@ -691,6 +758,15 @@ impl AppState {
             } else {
                 (inner.sessions[index].engram.work_binding.clone(), None)
             };
+            if let Some(start) = native {
+                if work_binding.as_ref() != Some(&start.binding) || named_root.as_ref() != Some(&start.named)
+                    || authority_store.as_ref() != Some(&start.store)
+                    || inner.test_run_observations.get(&start.execution_id)
+                        .is_none_or(|row| row.declared_native.as_ref() != Some(start))
+                {
+                    return Err(ApiError::conflict("native source authority changed after its original start"));
+                }
+            }
             let registration = TestRunRegistration {
                 run_id: request.run_id.clone(),
                 native_completion: None,
@@ -713,7 +789,7 @@ impl AppState {
                 initiating_session_id: session_id.to_owned(),
                 owning_session_id: session_id.to_owned(),
                 creator_pid: disk.creator_pid,
-                registered_at: test_run_timestamp(),
+                registered_at: native.map_or_else(test_run_timestamp, |start| start.registered_at.clone()),
                 started_at: disk.started_at.clone(),
                 preset: disk.preset,
                 detached: disk.detached,
@@ -727,6 +803,9 @@ impl AppState {
                     .filter(|name| test_run_valid_stage_name(name))
                     .map(str::to_owned)
                     .collect(),
+                declared,
+                declared_native: native.cloned(),
+                declared_terminal: None,
                 work_binding,
                 named_root,
                 authority_store,

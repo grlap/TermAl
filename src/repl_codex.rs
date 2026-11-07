@@ -41,6 +41,12 @@ impl<'a> DynTurnRecorderRef<'a> {
 }
 
 impl TurnRecorder for DynTurnRecorderRef<'_> {
+    fn native_tool_activity(&mut self, key: Option<&str>, is_command: bool) -> Result<()> {
+        self.inner.native_tool_activity(key, is_command)
+    }
+    fn native_tool_start(&mut self, key: Option<&str>, is_command: bool, frame: &Value) -> Result<()> {
+        self.inner.native_tool_start(key, is_command, frame)
+    }
     /// Records external session.
     fn note_external_session(&mut self, session_id: &str) -> Result<()> {
         self.inner.note_external_session(session_id)

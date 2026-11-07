@@ -336,7 +336,10 @@ impl CompletionFixture {
                 refused.registration.host_run_id = format!("{}-{mismatch}", body.registration.host_run_id);
             }
             match mismatch {
-                "dirty-input" => refused.post_run.clean_before = false,
+                "dirty-input" => match &mut refused.post_run {
+                    EngramVerificationRecordPostRun::Commit(post_run) => post_run.clean_before = false,
+                    EngramVerificationRecordPostRun::SourceId(_) => panic!("this fixture exercises committed launcher input"),
+                },
                 "claim-fence" => refused.registration.binding.claim_fence += 1,
                 _ => refused.run.command.push_str(" --changed-body"),
             }

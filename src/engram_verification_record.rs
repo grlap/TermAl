@@ -112,9 +112,12 @@ enum EngramVerificationRecordRootState {
     Named,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum EngramVerificationRecordInput {
+    SourceId {
+        source_id: EngramSourceId,
+    },
     Commit {
         commit: String,
     },
@@ -125,6 +128,35 @@ enum EngramVerificationRecordInput {
         tree: String,
         base_commit: String,
     },
+}
+
+impl<'de> Deserialize<'de> for EngramVerificationRecordInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        if value.get("kind").and_then(Value::as_str) == Some("source_id") {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct SourceInput {
+                #[serde(rename = "kind")]
+                _kind: String,
+                source_id: EngramSourceId,
+            }
+            let input: SourceInput = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+            return Ok(Self::SourceId { source_id: input.source_id });
+        }
+        // Preserve the historical variants' decoding behavior. The new
+        // closed branch cannot fall through to a commit-only interpretation.
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum HistoricalInput {
+            Commit { commit: String },
+            StagedTree { tree: String, base_commit: String },
+        }
+        match serde_json::from_value(value).map_err(serde::de::Error::custom)? {
+            HistoricalInput::Commit { commit } => Ok(Self::Commit { commit }),
+            HistoricalInput::StagedTree { tree, base_commit } => Ok(Self::StagedTree { tree, base_commit }),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -185,7 +217,7 @@ enum EngramVerificationRecordCheckOutcome {
     Indeterminate,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 struct EngramVerificationRecordCheck {
     stage: String,
     check_kind: EngramVerificationRecordCheckKind,
@@ -211,8 +243,34 @@ struct EngramVerificationRecordCheck {
 /// The most count keys the producer admits on one check.
 const ENGRAM_VERIFICATION_RECORD_MAX_COUNTS: usize = 32;
 
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum EngramVerificationRecordPostRun {
+    SourceId(EngramVerificationRecordSourcePostRun),
+    Commit(EngramVerificationRecordCommitPostRun),
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct EngramVerificationRecordPostRun {
+#[serde(deny_unknown_fields)]
+struct EngramVerificationRecordSourcePostRun {
+    source_id: EngramSourceId,
+}
+
+impl<'de> Deserialize<'de> for EngramVerificationRecordPostRun {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        // A present new field selects strict decoding, including explicit
+        // null and mixed legacy fields. It never falls back to Commit.
+        if value.get("source_id").is_some() {
+            serde_json::from_value(value).map(Self::SourceId).map_err(serde::de::Error::custom)
+        } else {
+            serde_json::from_value(value).map(Self::Commit).map_err(serde::de::Error::custom)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+struct EngramVerificationRecordCommitPostRun {
     outcome: TestRunCommittedInputOutcome,
     clean_before: bool,
     clean_after: bool,
@@ -600,6 +658,11 @@ fn engram_verification_record_check_kind(
     if engram_verification_record_is_build(argv) {
         return Some(EngramVerificationKind::Build);
     }
+    // A focused command is not a native test because a client labels it one.
+    // Unsupported suites need the host's captured declaration and artifact.
+    if mode == EngramVerificationRecordMode::Focused && stage == "focused" {
+        return None;
+    }
     let stage_rule = test_stages.iter().any(|name| name == stage)
         || (mode == EngramVerificationRecordMode::Live && stage == "engram-live")
         || ENGRAM_VERIFICATION_RECORD_LAUNCHER_TEST_STAGES.contains(&stage);
@@ -648,6 +711,20 @@ fn engram_verification_record_unclassified_stages(request: &Value, results: &Val
         .collect()
 }
 
+fn engram_verification_record_registration_unclassified_stages(
+    registration: &TestRunRegistration,
+    request: &Value,
+    results: &Value,
+) -> Vec<String> {
+    let mut stages = engram_verification_record_unclassified_stages(request, results);
+    if registration.declared_native.is_some() && registration.declared_terminal.is_some() {
+        // The body builder separately checks the actual command against this
+        // captured binding. Merely having a focused stage is insufficient.
+        stages.retain(|stage| stage != "focused");
+    }
+    stages
+}
+
 /// The argv each stage was planned with in the request (`command` and
 /// `args`), by stage name: what an unrun stage would have run.
 fn engram_verification_record_planned_argv(request: &Value) -> HashMap<String, Vec<String>> {
@@ -679,6 +756,10 @@ fn engram_verification_record_mode(request: &Value) -> EngramVerificationRecordM
 /// or else request.json), when either records one. Today's launcher records
 /// none, so `engram_verification_record_run_command` reconstructs it.
 fn engram_verification_record_recorded_command(request: &Value, results: &Value) -> Option<Vec<String>> {
+    if let Some(command) = request.get("nativeExecution").and_then(Value::as_str)
+        .and_then(|_| test_run_argv(request.get("observedCommand"))).filter(|argv| !argv.is_empty()) {
+        return Some(command);
+    }
     [results, request]
         .into_iter()
         .find_map(|record| test_run_argv(record.get("command")).filter(|argv| !argv.is_empty()))
@@ -769,6 +850,92 @@ fn engram_verification_record_check(
     })
 }
 
+fn engram_verification_record_declared_check(
+    stage: &Value,
+    planned: &HashMap<String, Vec<String>>,
+    binding: &EngramDeclaredBinding,
+    exit: EngramCommandExit,
+) -> Result<EngramVerificationRecordCheck, String> {
+    let (name, argv) = engram_verification_record_stage_argv(stage, planned)?;
+    if engram_declared_words(&binding.entry.command).ok().as_ref() != Some(&argv) {
+        return Err("declared stage differs from the host's captured command".to_owned());
+    }
+    let command = engram_verification_record_check_command(&argv, EngramVerificationKind::Test)
+        .ok_or("declared stage has no native command")?;
+    if command.normalized.len() > 8192 {
+        return Err("declared native command exceeds the verification contract".to_owned());
+    }
+    let result = engram_declared_result(binding, exit);
+    let outcome = match test_run_stage_state(stage.get("state").and_then(Value::as_str)) {
+        TestRunStageState::Unrun => EngramVerificationRecordCheckOutcome::NotRun,
+        TestRunStageState::Running => EngramVerificationRecordCheckOutcome::Indeterminate,
+        TestRunStageState::Failed => EngramVerificationRecordCheckOutcome::Failed,
+        TestRunStageState::Passed => match &result.verdict {
+            EngramTrxVerdict::Pass => EngramVerificationRecordCheckOutcome::Passed,
+            EngramTrxVerdict::Fail(_) => EngramVerificationRecordCheckOutcome::Failed,
+            EngramTrxVerdict::Unknown(_) => EngramVerificationRecordCheckOutcome::Indeterminate,
+        },
+    };
+    let refs = engram_declared_refs(&command, Some(binding), exit, &result);
+    let safe = |text: &str| text == text.trim() && !text.chars().any(|c| {
+        c.is_control() || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    });
+    let summary = engram_declared_summary(&command, Some(binding), exit, &result);
+    if !safe(&command.normalized)
+        || summary.len() > ENGRAM_CHECK_SUMMARY_MAX_BYTES || !safe(&summary)
+        || refs.len() > 64
+        || refs.iter().any(|value| value.len() > ENGRAM_CHECK_REF_MAX_BYTES || !safe(value))
+    {
+        return Err("declared provenance is outside the verification text contract".to_owned());
+    }
+    let counts = result.counters.as_ref().map(|counters| {
+        counters.values.iter().cloned().collect::<BTreeMap<String, u64>>()
+    });
+    if counts.as_ref().is_some_and(|counts| counts.len() > 32 || counts.keys().any(|key| key.len() > 128 || !safe(key))) {
+        return Err("declared counters exceed the verification contract".to_owned());
+    }
+    Ok(EngramVerificationRecordCheck {
+        stage: name, check_kind: EngramVerificationRecordCheckKind::Test,
+        command: command.normalized.clone(),
+        check_fingerprint: EngramHost::check_fingerprint(&command),
+        started_at: test_run_str(stage, "started"), completed_at: test_run_str(stage, "ended"),
+        outcome, summary: Some(summary),
+        refs, counts,
+    })
+}
+
+// Producer-only terminal admission. Generic launcher disk parsing is unchanged.
+fn engram_verification_record_results_are_terminal(registration: &TestRunRegistration, results: &Value) -> bool {
+    let Some(start) = &registration.declared_native else { return test_run_results_are_terminal(results); };
+    let Some(terminal) = &registration.declared_terminal else { return false; };
+    // A native artifact verdict may be unknown or failed despite exit 0 or
+    // Claude ReportedSuccess. Only this host-owned terminal and exact digest
+    // admit it; generic launchers keep their existing numeric terminal rule.
+    let state = declared_run_result_state(&terminal.check);
+    let exit = results.get("exitCode");
+    if !(exit.and_then(Value::as_i64).is_some()
+            || (terminal.reported_success && exit == Some(&Value::Null)))
+        || registration.registered_at != start.registered_at
+        || registration.request_identity != start.request_identity
+        || registration.work_binding.as_ref() != Some(&start.binding)
+        || registration.named_root.as_ref() != Some(&start.named)
+        || registration.authority_store.as_ref() != Some(&start.store)
+        || results.get("runId").and_then(Value::as_str) != Some(start.run_id.as_str())
+        || results.get("state").and_then(Value::as_str) != Some(state)
+        || results.get("interrupted").and_then(Value::as_bool) != Some(false)
+        || !results.get("ended").and_then(Value::as_str).is_some_and(|ended| EngramHost::check_timestamp(ended).is_some())
+    { return false; }
+    let Some(stages) = results.get("stages").and_then(Value::as_array) else { return false; };
+    let [stage] = stages.as_slice() else { return false; };
+    stage.get("name").and_then(Value::as_str) == Some("focused")
+        && stage.get("state").and_then(Value::as_str) == Some(state)
+        && stage.get("reportedSuccess").and_then(Value::as_bool) == Some(terminal.reported_success)
+        && stage.get("code") == exit
+        && test_run_str(stage, "ended") == terminal.check.completed_at
+        && serde_json::to_vec_pretty(results).ok().is_some_and(|bytes|
+            file_content_hash(&bytes) == terminal.results_digest)
+}
+
 /// The record of a bound committed-input run, from its registration and its
 /// own request and terminal results; why not, when the run cannot emit one.
 fn engram_verification_record_body(
@@ -776,18 +943,13 @@ fn engram_verification_record_body(
     request: &Value,
     results: &Value,
 ) -> Result<EngramVerificationRecordBody, String> {
-    let binding = registration
-        .work_binding
-        .clone()
-        .ok_or_else(|| "the run is not bound to a claim".to_owned())?;
-    let root = registration
-        .named_root
-        .as_ref()
-        .ok_or_else(|| "the run names no root".to_owned())?;
+    if let Some(start) = registration.declared_native.as_ref() {
+        return engram_verification_record_native_body(registration, request, results, start);
+    }
     if !test_run_request_is_committed_input(request) {
         return Err("the run is not a committed-input run".to_owned());
     }
-    if !test_run_results_are_terminal(results) {
+    if !engram_verification_record_results_are_terminal(registration, results) {
         return Err("the run has no terminal result".to_owned());
     }
     let input = TestRunCommittedInput::read(results)
@@ -822,9 +984,84 @@ fn engram_verification_record_body(
     if checks.is_empty() {
         return Err("the run records no stage".to_owned());
     }
-    let run_outcome = if results.get("interrupted").and_then(Value::as_bool) == Some(true) {
+    engram_verification_record_envelope(registration, request, results,
+        EngramVerificationRecordInput::Commit { commit },
+        EngramVerificationRecordPostRun::Commit(EngramVerificationRecordCommitPostRun {
+            outcome, clean_before: input.clean_before, clean_after: after.clean,
+            dirty_paths: after.paths.iter().map(|path| path.path.clone()).collect(), disposition: None,
+        }), checks)
+}
+
+fn engram_verification_record_native_body(
+    registration: &TestRunRegistration, request: &Value, results: &Value,
+    start: &DeclaredRunReservation,
+) -> Result<EngramVerificationRecordBody, String> {
+    let terminal = registration.declared_terminal.as_ref()
+        .ok_or("the host has not confirmed the native terminal")?;
+    let after = terminal.source.as_ref().ok_or_else(|| format!("native source_id after the run is unavailable: {}",
+        terminal.source_refusal.as_deref().unwrap_or("owner measurement unavailable")))?;
+    let digest = serde_json::to_vec_pretty(results).map_err(|_| "native results cannot be encoded")?;
+    let input = EngramVerificationRecordInput::SourceId { source_id: start.source.source_id.clone() };
+    let post_run = EngramVerificationRecordPostRun::SourceId(EngramVerificationRecordSourcePostRun {
+        source_id: after.source_id.clone(),
+    });
+    if terminal.results_digest != file_content_hash(&digest)
+        || registration.registered_at != start.registered_at
+        || registration.work_binding.as_ref() != Some(&start.binding)
+        || registration.named_root.as_ref() != Some(&start.named)
+        || registration.authority_store.as_ref() != Some(&start.store)
+        || registration.source_owner.as_ref() != Some(&start.source.source_owner)
+        || registration.request_identity != start.request_identity
+        || test_run_registration_identity(request).ok().as_ref() != Some(&start.request_identity)
+        || request.get("input").and_then(Value::as_str) != Some("source_id")
+        || request.get("nativeSourceId") != Some(&json!(start.source.source_id))
+        || after.root != start.source.root || after.source_owner != start.source.source_owner
+        || after.source_id != start.source.source_id
+        || results.get("input") != Some(&serde_json::to_value(&input).map_err(|error| error.to_string())?)
+        || results.get("post_run") != Some(&serde_json::to_value(&post_run).map_err(|error| error.to_string())?)
+        || results.get("nativeEligible").and_then(Value::as_bool) != Some(true)
+    {
+        return Err("native terminal does not match its host reservation and equal full source_id endpoints".to_owned());
+    }
+    if !engram_verification_record_results_are_terminal(registration, results) {
+        return Err("the native run has no terminal result".to_owned());
+    }
+    if results.get("stages").and_then(Value::as_array).is_none_or(|stages|
+        stages.len() != 1 || stages[0].get("name").and_then(Value::as_str) != Some("focused")) {
+        return Err("the native run does not have its single original stage".to_owned());
+    }
+    let body = engram_verification_record_envelope(registration, request, results, input, post_run,
+        vec![terminal.check.clone()])?;
+    // Reuse the control transport's existing frame bound. Keep the full
+    // identity and a named refusal instead of sending a shortened record or
+    // letting a permanent oversize frame become a transport retry.
+    let frame = EngramControlRequest::VerificationRecord {
+        operation_key: engram_verification_record_key(&registration.run_id),
+        record: serde_json::to_value(&body).map_err(|error| error.to_string())?,
+    };
+    let bytes = serde_json::to_vec(&frame).map_err(|error| error.to_string())?;
+    if bytes.len() > ENGRAM_CONTROL_MAX_FRAME_BYTES {
+        return Err(format!("native_verification_frame_too_large: {} bytes exceeds the existing {} byte control frame",
+            bytes.len(), ENGRAM_CONTROL_MAX_FRAME_BYTES));
+    }
+    Ok(body)
+}
+
+fn engram_verification_record_envelope(
+    registration: &TestRunRegistration, request: &Value, results: &Value,
+    input: EngramVerificationRecordInput, post_run: EngramVerificationRecordPostRun,
+    checks: Vec<EngramVerificationRecordCheck>,
+) -> Result<EngramVerificationRecordBody, String> {
+    let binding = registration.work_binding.clone().ok_or("the run is not bound to a claim")?;
+    let root = registration.named_root.as_ref().ok_or("the run names no root")?;
+    let mode = engram_verification_record_mode(request);
+    let run_outcome = if results.get("interrupted").and_then(Value::as_bool) == Some(true)
+        || checks.iter().any(|check| check.outcome == EngramVerificationRecordCheckOutcome::Indeterminate)
+    {
         EngramVerificationRecordRunOutcome::Indeterminate
-    } else if results.get("state").and_then(Value::as_str) == Some("passed") {
+    } else if results.get("state").and_then(Value::as_str) == Some("passed")
+        && checks.iter().all(|check| check.outcome == EngramVerificationRecordCheckOutcome::Passed)
+    {
         EngramVerificationRecordRunOutcome::Passed
     } else {
         EngramVerificationRecordRunOutcome::Failed
@@ -846,7 +1083,7 @@ fn engram_verification_record_body(
                 state: EngramVerificationRecordRootState::Named,
             },
         },
-        input: EngramVerificationRecordInput::Commit { commit },
+        input,
         run: EngramVerificationRecordRun {
             mode,
             command: engram_verification_record_command_text(
@@ -861,13 +1098,7 @@ fn engram_verification_record_body(
             outcome: run_outcome,
         },
         checks,
-        post_run: EngramVerificationRecordPostRun {
-            outcome,
-            clean_before: input.clean_before,
-            clean_after: after.clean,
-            dirty_paths: after.paths.iter().map(|path| path.path.clone()).collect(),
-            disposition: None,
-        },
+        post_run,
     })
 }
 
@@ -1105,20 +1336,24 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
         let TestRunJson::Parsed(request, _, _) = test_run_read_json(&run_dir.join("request.json")) else {
             return Err(Prepared::NotEligible);
         };
-        if !test_run_request_is_committed_input(&request) {
+        if !test_run_request_is_committed_input(&request) && registration.declared_native.is_none() {
             return Err(Prepared::NotEligible);
         }
         if test_run_registration_identity(&request).ok().as_ref() != Some(&registration.request_identity) {
             return Err(Prepared::NotEligible);
         }
         let results = match test_run_read_json(&run_dir.join("results.json")) {
-            TestRunJson::Parsed(results, _, _) if test_run_results_are_terminal(&results) => results,
+            TestRunJson::Parsed(results, _, _) if engram_verification_record_results_are_terminal(registration, &results) => results,
+            TestRunJson::TooLarge if registration.declared_native.is_some() => return Err(pending(
+                EngramVerificationRecordPending::BodyNotBuilt {
+                    detail: format!("native_results_too_large: exceeds the existing {TEST_RUN_JSON_MAX_BYTES} byte run JSON bound"),
+                })),
             _ => return Err(Prepared::Waiting),
         };
         // A run whose results hold no committed-input record never emits;
         // only a record that cannot be built from a present one is held
         // pending.
-        if TestRunCommittedInput::read(&results).is_none() {
+        if registration.declared_native.is_none() && TestRunCommittedInput::read(&results).is_none() {
             return Err(Prepared::NotEligible);
         }
         Ok((request, results))
@@ -1152,7 +1387,7 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
         Ok(inputs) => inputs,
         Err(prepared) => return prepared,
     };
-    let stages = engram_verification_record_unclassified_stages(&request, &results);
+    let stages = engram_verification_record_registration_unclassified_stages(registration, &request, &results);
     let refusal = if stages.is_empty() {
         engram_verification_record_producer_refusal(registration, &results)
     } else {

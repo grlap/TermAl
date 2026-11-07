@@ -77,6 +77,85 @@ for consumer repositories; that requires separate registered verification.
 Other source refusals and temporary capture failures keep their existing
 reporting and retry behavior.
 
+## Declared native source verification
+
+Native declared test credit uses endpoint evidence. Before sending a fresh
+turn's prompt to Codex or Claude, the host completes an opening snapshot
+`S0`: the full `source_id`, the committed declaration and its hash,
+and the declared artifacts' pre-images. A matching declared command must be
+the first tool activity of that turn. An earlier read, edit, MCP call or
+other tool call makes it ineligible. The agent still runs its ordinary exact
+declared command, with no manual launcher or wrapper. Other runtime forms
+are unsupported by this credit route.
+
+When S0 is unavailable, the notice includes bounded stage names and elapsed
+milliseconds, including an operation still running when the caller stopped
+waiting. These timings also appear in the host diagnostic; a successful
+opening retains its stage summary in the native run request. They contain
+no paths, Git arguments or file contents, and do not extend the eight-second
+opening budget. They identify where time was spent, not why it was slow.
+
+The host associates only the original execution newly originating in that
+turn; it never adopts an earlier or background execution. `R` is the real,
+persisted first **host-observed start**, recorded as `registered_at` and
+`check.started_at`. It is not an OS spawn timestamp. Any original provider
+timestamp is retained separately. The exact named-root binding must already
+exist before `R`; the current session, claim/fence, revision, store,
+workspace and root generation remain subject to the registered producer's
+existing checks. A delayed acknowledgement never changes `R`.
+
+At the original END callback, before returning to provider-event processing,
+the host freezes the actual TRX or Dart JSON artifact judgment. Asynchronous
+registration and retries consume that immutable judgment. A later artifact
+cannot certify the original execution. Claude's successful tool result is
+preserved as reported success, with no invented numeric OS exit; reported
+success still requires an artifact PASS. Missing, malformed, failing or
+unreadable artifacts cannot inherit a successful command result. Truncated
+provider output currently withholds native credit even with an exact exit.
+
+The post-run full `source_id` must equal S0, with the declaration unchanged.
+Native verification includes local changes and initialized submodules in
+these independent source endpoints. Ordinary turn closing observations
+retain their configured source scheme, including content observations of
+source left dirty; they are not relabelled as native commit evidence. The
+existing local registered producer sends verification. Generic launcher
+focused registrations cannot opt into declared native credit by supplying a
+declaration, stage label or artifact. Missing or uncertain execution, opening
+snapshot, authority or artifact evidence leaves the real command result
+visible and earns no credit.
+
+### Canonical source_id and EO credit
+
+The shared source contract is quoted below. See also the
+[source-identity reference](source-identity.md#canonical-native-source-id-and-credit).
+
+> source_id = ONE object describing the source state, produced only by `engram source` (Engram owns it):
+> - root: commit (HEAD) and tree;
+> - submodules: path and actual HEAD for each, from `git submodule status --recursive`; expected pins come from the root commit;
+> - changes[]: only the local delta, from `git status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none`, with path, status, origin (for renames), mode or type, and the Git blob id from `git hash-object --stdin-paths` (default filters, no -w), computed over the dirty paths only. Deletions are tombstones. Untracked non-ignored files are included. Ignored files are excluded absolutely. Only dirty or off-pin submodules recurse; an uninitialized or conflicted submodule makes the result unavailable. Clean means changes = [].
+> Bounds (Greg accepted: „mysle, ze to rozsadne ograniczenie w wiekszosci przypadkow, git diff jest pusty”): at most 1 MiB of JSON and 8 s; overflow, timeout, drift seen by a stat-and-status recheck, filters, or any error means unavailable. A partial result is never returned.
+> Never: watcher events, hashing anything in the .git directory, or a full repository or index listing.
+> EO credit (Greg: „to jest wystarczajacy warunek ... mysle, ze i tak jest za silny, ale zacznijmy od tego”): the full source_id at S0 (before the prompt is dispatched) equals the full source_id after the declared test; local changes are allowed. The declared test must be the turn's first tool action; the result goes out as the existing verification_record_v1, with the existing artifact, identity and claim checks. There is no clean-repository requirement and no watcher. Clean is only a landing policy.
+> Accepted, documented limits: a change fully reverted between S0 and the after capture; anything git status does not report (hidden index flags, edits inside .git); changes to ignored files.
+> Rollout: `engram source` gains the new fields in its existing JSON (no v2); TermAl's and Engram's strict readers are updated in the same window. Consumers then move off content-v1 one at a time. Old records stay readable as stored.
+> Rule: no new conditions, mechanisms or gates without Greg's explicit word.
+
+A credited declared test runs as the first tool action of a fresh turn.
+
+The opening capture measures the already-authorized named worktree once.
+That same validated owner observation supplies its executable pin, source schema
+and full `source_id`. The host rechecks its project, configuration, session and
+named-root fence before publication. A metadata GET for the project root cannot
+supply the named worktree's opening evidence; a later capture uses the retained
+pin and a fresh measurement.
+
+This native start-time meaning differs from a launcher's pre-spawn
+registration. Native records use the `source_id` input and post-run branch of
+`verification_record_v1`; launcher Commit/StagedTree records, chronology guards
+and ordinary content identity retain their existing form. The source transport
+must be installed before this native producer is enabled. An old server's
+unknown-kind refusal is retained; it never triggers a commit-only fallback.
+
 ## Delivery and context preparation
 
 When a recognised test starts, an optional placement notice can explain that

@@ -220,6 +220,35 @@ never truncated or rehashed. This does not widen that wire domain.
 
 ### Eligibility at both boundaries
 
+For an automatically observed declared native test, the opening boundary is
+the host's completed pre-prompt snapshot, not a capture started after the
+command notification. Only the originating turn's first tool activity can
+use it. The closing boundary repeats the full `source_id` capture and must
+find the same source state, including local changes. Both snapshots and the committed declaration and
+artifact pre-image belong to the host; a launcher's claimed input never
+substitutes for them. This supports initialized pinned submodules without
+extending `content-v1` or changing its default.
+
+### Canonical native source_id and credit
+
+The shared source contract is quoted below. See also the
+[native verification contract](execution-observability.md#canonical-source-id-and-eo-credit).
+
+> source_id = ONE object describing the source state, produced only by `engram source` (Engram owns it):
+> - root: commit (HEAD) and tree;
+> - submodules: path and actual HEAD for each, from `git submodule status --recursive`; expected pins come from the root commit;
+> - changes[]: only the local delta, from `git status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none`, with path, status, origin (for renames), mode or type, and the Git blob id from `git hash-object --stdin-paths` (default filters, no -w), computed over the dirty paths only. Deletions are tombstones. Untracked non-ignored files are included. Ignored files are excluded absolutely. Only dirty or off-pin submodules recurse; an uninitialized or conflicted submodule makes the result unavailable. Clean means changes = [].
+> Bounds (Greg accepted: „mysle, ze to rozsadne ograniczenie w wiekszosci przypadkow, git diff jest pusty”): at most 1 MiB of JSON and 8 s; overflow, timeout, drift seen by a stat-and-status recheck, filters, or any error means unavailable. A partial result is never returned.
+> Never: watcher events, hashing anything in the .git directory, or a full repository or index listing.
+> EO credit (Greg: „to jest wystarczajacy warunek ... mysle, ze i tak jest za silny, ale zacznijmy od tego”): the full source_id at S0 (before the prompt is dispatched) equals the full source_id after the declared test; local changes are allowed. The declared test must be the turn's first tool action; the result goes out as the existing verification_record_v1, with the existing artifact, identity and claim checks. There is no clean-repository requirement and no watcher. Clean is only a landing policy.
+> Accepted, documented limits: a change fully reverted between S0 and the after capture; anything git status does not report (hidden index flags, edits inside .git); changes to ignored files.
+> Rollout: `engram source` gains the new fields in its existing JSON (no v2); TermAl's and Engram's strict readers are updated in the same window. Consumers then move off content-v1 one at a time. Old records stay readable as stored.
+> Rule: no new conditions, mechanisms or gates without Greg's explicit word.
+
+Native `registered_at` and check start name the persisted first
+host-observed start, not the OS spawn time; any provider timestamp is kept
+separately. See [the native verification contract](execution-observability.md#declared-native-source-verification).
+
 Use the existing trusted Git invocation and its unchanged budget. Retain each
 repository's own `core.ignoreCase` and `core.fileMode`; do not force a different
 filesystem-spelling judgment. The launcher and host retain their existing

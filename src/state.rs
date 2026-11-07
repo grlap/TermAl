@@ -1867,6 +1867,14 @@ struct StateInner {
     /// Never persisted; production always uses the bounded filesystem owner.
     #[cfg(test)]
     test_engram_source_capture: Option<Arc<dyn Fn(&EngramBasisPlace, Duration) -> EngramSourceCapture + Send + Sync>>,
+    #[cfg(test)]
+    test_declared_run_snapshot: Option<Arc<dyn Fn(&FsPath, std::time::Instant) -> Result<DeclaredRunSnapshot> + Send + Sync>>,
+    #[cfg(test)]
+    test_declared_run_clock: Option<Arc<dyn Fn() -> std::time::Instant + Send + Sync>>,
+    #[cfg(test)]
+    test_declared_run_source: Option<Arc<dyn Fn(&EngramDeclaredBinding, &EngramSourceOwnerPin, std::time::Instant) -> Result<DeclaredRunSource> + Send + Sync>>,
+    #[cfg(test)]
+    test_native_source_owner_metadata: Option<Arc<dyn Fn(&AppState, &str, std::time::Instant) -> std::result::Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError> + Send + Sync>>,
     /// Threads checking a path named as a work's source root that are still
     /// alive, abandoned ones included (`engram_run_source_root_validation_within`).
     /// Memory only, one count for the host.
@@ -1989,6 +1997,14 @@ impl StateInner {
             engram_turn_basis_captures_live: Arc::default(),
             #[cfg(test)]
             test_engram_source_capture: None,
+            #[cfg(test)]
+            test_declared_run_snapshot: None,
+            #[cfg(test)]
+            test_declared_run_clock: None,
+            #[cfg(test)]
+            test_declared_run_source: None,
+            #[cfg(test)]
+            test_native_source_owner_metadata: None,
             engram_source_root_validations_live: Arc::default(),
             test_runs: TestRunIndex::default(),
             test_run_registrations: TestRunRegistrationStore::default(),

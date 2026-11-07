@@ -75,6 +75,8 @@ enum PersistFenceTarget {
     TestRunCardsEpoch(String),
     TestRunRegistration(TestRunRegistration),
     TestRunObservation(Box<TestRunCommandObservation>),
+    // Later terminal fields may change while the immutable start is flushed.
+    DeclaredRunReservation(Box<DeclaredRunReservation>),
     TestRunCompaction(Box<TestRunCompacted>),
     /// A held queued prompt: its hold's nonce and the exact entry, both read
     /// back from the durable session row (`queued_prompt_durability.rs`).
@@ -169,6 +171,9 @@ impl PersistFenceTarget {
                     .get(&expected.execution_id)
                     == Some(expected.as_ref())
             }
+            Self::DeclaredRunReservation(expected) => delta.metadata.test_run_observations
+                .get(&expected.execution_id)
+                .is_some_and(|row| row.declared_native.as_ref() == Some(expected.as_ref())),
             Self::TestRunCompaction(expected) => {
                 delta
                     .metadata
@@ -378,6 +383,11 @@ impl PersistFenceTarget {
                 metadata.test_run_observations.get(&expected.execution_id)
                     == Some(expected.as_ref())
             })),
+            Self::DeclaredRunReservation(expected) => Ok(read_metadata_for_fence(
+                connection, &["testRunObservations"],
+            )?.is_some_and(|metadata| metadata.test_run_observations
+                .get(&expected.execution_id)
+                .is_some_and(|row| row.declared_native.as_ref() == Some(expected.as_ref())))),
             Self::TestRunCompaction(expected) => Ok(read_metadata_for_fence(
                 connection,
                 &["testRunCompacted"],

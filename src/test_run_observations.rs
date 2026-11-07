@@ -46,6 +46,8 @@ struct TestRunCommandObservation {
     artifact: Option<TestRunObservedArtifact>,
     #[serde(default)]
     declared_artifact: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    declared_native: Option<DeclaredRunReservation>,
     /// A successful command result acknowledged only a detached/background launch.
     #[serde(default)]
     launch_only: bool,
@@ -595,6 +597,14 @@ impl AppState {
         started_at: &str,
         declared: Option<&EngramDeclaredBinding>,
     ) {
+        self.observe_test_command_start_with_native(origin, command, worktree, started_at, declared, None);
+    }
+
+    fn observe_test_command_start_with_native(
+        &self, origin: TestRunCommandOrigin, command: &EngramCheckCommand,
+        worktree: &str, started_at: &str, declared: Option<&EngramDeclaredBinding>,
+        native: Option<DeclaredRunReservation>,
+    ) {
         if command.kind != EngramVerificationKind::Test {
             return;
         }
@@ -636,7 +646,11 @@ impl AppState {
             monitoring_interrupted_at: None,
             final_unbound_proof: None,
             evidence: Vec::new(),
-            artifact: None,
+            artifact: native.as_ref().map(|start| TestRunObservedArtifact {
+                run_id: start.run_id.clone(), run_directory: start.run_directory.clone(),
+                request_identity: Some(start.request_identity.clone()), terminal_digest: None,
+            }),
+            declared_native: native,
             declared_artifact: declared
                 .map(|binding| test_run_display_path(FsPath::new(&binding.artifact_canonical))),
             launch_only: EngramHost::is_launch_only(command, EngramCommandExit::Code(0)),

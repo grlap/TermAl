@@ -117,6 +117,9 @@ mod batch_failure_deltas;
 #[path = "test_run_registration_named_root.rs"]
 mod named_root;
 
+#[path = "engram_declared_native.rs"]
+mod declared_native;
+
 #[path = "test_run_registration_native_origin.rs"]
 mod native_origin;
 

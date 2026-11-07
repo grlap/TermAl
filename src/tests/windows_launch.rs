@@ -4,6 +4,80 @@ use std::time::Instant;
 
 const GUARD: Duration = Duration::from_secs(30);
 
+fn expired_read_cleanup_control(withhold_certificate: bool) {
+    let root_lease = Arc::new(crate::TestTempRoot::create("termal-expired-read-cleanup"));
+    let directory = root_lease.path().to_owned();
+    let cleaned = root_lease.observe_cleanup();
+    let lifetime = Arc::new(crate::CaptureLifetime::with_test_root(Some(root_lease)));
+    let probe = capture_job::CleanupProbe::blocked();
+    if !withhold_certificate { probe.release(); }
+    let worker_probe = probe.clone();
+    let marker = directory.join("ready.json");
+    let (members_tx, members_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    lifetime.spawn("expired-read-cleanup-control", move || {
+        let mut spec = node_spec("root-independent");
+        spec.arg(&marker).current_dir(directory);
+        spec.capture_cleanup_probe = Some(worker_probe);
+        let error = crate::run_bounded_read_windows_with_setup(
+            &mut spec, Instant::now() + GUARD, 4096, |process| {
+                let members = identities(&ready(&marker, process), creation(process.handle.as_raw_handle()));
+                // Expire only after the real member handles are held. No
+                // launch-speed margin or sleeping determines this failure.
+                let expired = Instant::now() - Duration::from_secs(1);
+                crate::TEST_BOUNDED_READ_DEADLINE_AFTER_SETUP.with(|deadline| deadline.set(Some(expired)));
+                members_tx.send((members, expired)).unwrap();
+                Ok(())
+            },
+        ).unwrap_err();
+        done_tx.send(format!("{error:#}")).unwrap();
+    }).unwrap();
+    let (members, expired) = members_rx.recv_timeout(GUARD).unwrap();
+    let error = done_rx.recv_timeout(GUARD).unwrap();
+    let entries = probe.finish_entries();
+    if withhold_certificate {
+        lifetime.expire_shutdown.store(true, std::sync::atomic::Ordering::Release);
+    }
+    let joined = lifetime.stop_and_join();
+    drop(lifetime);
+    let retained = withhold_certificate
+        && matches!(cleaned.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
+    // Always release the injected unknown and retire exact held objects
+    // before asserting. No RED case abandons a descendant or retained root.
+    probe.release();
+    for member in &members {
+        if unsafe { WaitForSingleObject(member.handle.as_raw_handle(), 0) } == WAIT_TIMEOUT {
+            unsafe { TerminateProcess(member.handle.as_raw_handle(), 1); }
+        }
+        member.assert_ended();
+    }
+    drop(members);
+    cleaned.recv_timeout(GUARD).unwrap().unwrap();
+    assert!(error.contains("kind=TimedOut"), "expired capture cannot become a late success: {error}");
+    assert!(error.contains("read_expired_at_return=Some(true)"), "{error}");
+    let cleanup_deadline = entries.first().and_then(|entry| entry.0).expect("cleanup was observed");
+    assert!(cleanup_deadline > expired, "cleanup must not inherit the expired read deadline: {entries:?}");
+    assert!(entries.iter().filter_map(|entry| entry.0).all(|deadline| deadline == cleanup_deadline),
+        "error cleanup must not renew its allowance: {entries:?}");
+    if withhold_certificate {
+        assert!(error.contains("cleanup_certified=Some(false)"), "{error}");
+        assert!(!joined && retained, "an uncertified job must keep root custody");
+    } else {
+        assert!(error.contains("cleanup_certified=Some(true)"), "{error}");
+        assert!(joined, "a certified expired read must retire without pending custody");
+    }
+}
+
+#[test]
+fn native_windows_expired_read_gets_cleanup_allowance_without_late_success() {
+    expired_read_cleanup_control(false);
+}
+
+#[test]
+fn native_windows_expired_read_unknown_certificate_keeps_root_custody() {
+    expired_read_cleanup_control(true);
+}
+
 #[test]
 fn native_windows_capture_waits_for_descendant_completion_not_job_close() {
     let root_lease = Arc::new(crate::TestTempRoot::create("termal-capture-job"));

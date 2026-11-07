@@ -553,7 +553,7 @@ fn handle_shared_codex_app_server_message(
         turn_started_watchdog_cancel_tx: _,
         turn_started_before_response,
         turn_id_provisional,
-        active_turn_generation: _,
+        active_turn_generation,
         recorder: recorder_state,
         thread_id,
         turn_id,
@@ -624,6 +624,11 @@ fn handle_shared_codex_app_server_message(
         *completed_turn_id = None;
         *turn_started = false;
     }
+    recorder_state.native_tool_provenance = (matches!(method, "item/started" | "item/completed") && *turn_started
+        && !*turn_id_provisional && event_turn_id.is_some() && event_turn_id == turn_id.as_deref())
+        .then_some(*active_turn_generation).flatten().map(|turn_generation| EngramObservationProvenance::Runtime {
+            token: runtime_token.clone(), turn_generation,
+        });
     let mut recorder = BorrowedSessionRecorder::new(state, &session_id, recorder_state);
     trace_shared_codex_event(
         "route",

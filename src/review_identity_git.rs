@@ -147,6 +147,7 @@ impl ReviewIdentityGit {
             root: root.clone(),
             binary: self.runner.binary.clone(),
             deadline: self.runner.deadline,
+            timings: self.runner.timings.clone(),
         };
         let mut child = Self {
             root,

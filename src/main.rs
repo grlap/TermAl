@@ -1132,6 +1132,8 @@ include!("work_visualizer_detail.rs");
 include!("work_memories.rs");
 include!("test_runs.rs");
 include!("test_run_registration.rs");
+include!("declared_run_source.rs");
+include!("declared_run_observer.rs");
 mod native_test_completion;
 include!("test_run_native_completion.rs");
 include!("test_run_named_root.rs");
