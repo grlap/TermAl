@@ -84,7 +84,17 @@ The integration owner lands a candidate only by fast-forwarding master to
 exactly that gated commit, when the standing rule's three conditions hold, and
 pushing it without force. If master has moved, the change is committed afresh
 as a new candidate whose parent is the current master, which is frozen, gated
-and reviewed as its own input. A candidate that fails is superseded by a new candidate commit, never
+and reviewed as its own input, unless its contribution, its diff against its
+parent, is byte-identical to the contribution of a candidate already reviewed
+with no outstanding Medium-or-higher finding (both change the same paths, and
+every changed path has equal pre-image and post-image blob ids, status and
+mode, compared without rename detection): then it is frozen and gated as its
+own input and adopts that review pair. Any change to the contribution needs a
+new review. The full gate, and for authority text the Step 7 audit, still run
+on the new candidate, and the integration owner still assesses its
+dependencies and conflicts (the Commit and push sections of CLAUDE.md and
+AGENTS.md give Greg's word).
+A candidate that fails is superseded by a new candidate commit, never
 amended, rebased or force-pushed. Each new candidate is committed on a new
 branch or a detached HEAD at the current master, and the earlier candidate is
 left as it is. Review of staged, unstaged and untracked changes, as above,
@@ -330,7 +340,9 @@ by the gate and the review pair, not by the audit.
 A passage of authority text that no recorded concurrence quotes whole is
 concurred, word for word, or taken out before the landing. A change of the
 input, such as taking a passage out, needs a new freeze, gate, review pair
-and audit. A concurrence recorded after the freeze leaves the input
+and audit. A candidate committed afresh with an identical contribution adopts
+the review pair under the Commit and push sections, and still needs its own
+freeze, gate and audit. A concurrence recorded after the freeze leaves the input
 unchanged: it needs no new freeze, gate or review pair, but the audit is
 repeated, and the conditions of the Commit and push section hold for that
 wording as for any other.

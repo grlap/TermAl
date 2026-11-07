@@ -129,7 +129,10 @@ in Engram::Advisor's session, recorded verbatim):
      breaks shown as ' / ': 'claude will soon run of tokens / we need to
      use Kimi as replacement / and focus on simple cleanup / we have
      enormous backlog') has no outstanding in-scope finding of Medium or
-     higher on the reviewed input, and every in-scope finding of Medium or
+     higher on the reviewed input (for a candidate committed afresh with an
+     identical contribution, the input whose review pair it adopts under
+     the candidate-commits bullet below), and every in-scope finding of
+     Medium or
      higher from earlier rounds was fixed and reviewed again; a Low or a
      Note need not be fixed before the landing, and a Low left unfixed is
      filed as its own item (Greg, 2026-09-30, in Engram::Opus's session:
@@ -167,7 +170,24 @@ in Engram::Advisor's session, recorded verbatim):
   owner lands it only by fast-forwarding master to exactly that gated
   commit, when the standing rule's three conditions above hold. If master has
   moved, the change is committed afresh as a new candidate whose parent is
-  the current master, and gated again. A candidate that fails is superseded
+  the current master, and gated again. If its contribution, its diff
+  against its parent, is byte-identical to the contribution of a candidate
+  already reviewed with no outstanding Medium-or-higher finding (both
+  change the same paths, and every changed path has equal pre-image and
+  post-image blob ids, status and mode, compared without rename
+  detection), the new candidate is frozen and gated as its own input and
+  adopts that review pair, which serves as its review evidence; any change
+  to the contribution needs a new review. The full gate, and for a change
+  that conditions (a), (b) and (c) below cover the final-diff audit, still
+  run on the new candidate, and the integration owner still assesses its
+  dependencies and conflicts (Greg, 2026-11-06, relayed by Engram::Asistant
+  in TermAl mailbox 588693a8 #626: 'Tak. Upraszczamy.', answering the
+  wording sent to him in #625: 'Jeśli master się przesunął, a wkład
+  kandydata (jego diff względem rodzica) jest identyczny bajt w bajt z
+  wkładem kandydata już zrecenzowanego bez otwartych uwag Medium lub
+  wyższych, nowy kandydat jest zamrażany i bramkowany jako własne wejście
+  i przejmuje tamtą recenzję. Każda zmiana wkładu wymaga nowej recenzji.').
+  A candidate that fails is superseded
   by a new candidate commit, never amended, rebased or force-pushed. Each
   new candidate is committed on a new branch or a detached HEAD at the
   current master, and the earlier candidate is left as it is. The
@@ -182,10 +202,13 @@ in Engram::Advisor's session, recorded verbatim):
 - Before every push under this rule, including for a commit made directly
   on master, the integration owner must verify that master's tip is the
   reviewed and gated commit, that `origin/master` still matches the reviewed
-  integration base, and that the push is a fast-forward. For a change that
+  integration base, and that the push is a fast-forward; for a candidate
+  that adopts a review pair, the gated commit is its own and the
+  integration base is the master it was committed on. For a change that
   conditions (a), (b) and (c) below cover, the integration owner also
   verifies that the final-diff audit recorded on the item passed and that
-  it names the input fingerprint of the reviewed and gated input. If any
+  it names the input fingerprint of the reviewed and gated input (for a
+  candidate that adopts a review pair, of its own gated input). If any
   check fails, do not push: coordinate integration and validate and review
   the resulting input before publishing. Push from the master checkout,
   then verify that the remote contains that commit. Never rebase or
