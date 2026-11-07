@@ -1,5 +1,6 @@
+import { sourceIdsEqual, captureCommitInputStatus as captureOwnerStatus } from "./test-launcher-input.mjs";
 // Automatic launcher input selection, explicit plain/commit, and post-run
-// qualification using the existing committed-input status and fingerprints.
+// qualification using the owner source_id and separate committed-input policy.
 // Disposable Git repositories live under this worktree's .tmp/; stages are
 // plain Node commands, so no product or Cargo test runs.
 import assert from "node:assert/strict";
@@ -115,7 +116,7 @@ test("a clean commit records its commit, stays clean and is eligible when stages
     assert.equal(result.input.outcome, "clean");
     assert.equal(result.input.eligible, true);
     assert.deepEqual(result.input.after, { commit: head, clean: true, paths: [] });
-    assert.equal(result.before, result.after);
+    assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true);
     assert.match(await summarize(runDir), new RegExp(`^input: commit ${head} clean; eligible$`, "mu"));
   });
 });
@@ -126,9 +127,9 @@ for (const full of [false, true]) {
     await registrationHost(async (host) => {
       let captures = 0;
       const runDir = await createRun({ root, full, stages: [markingStage(admin)], automaticInput: true,
-        commitInputStatus: (...args) => { captures += 1; return captureCommitInputStatus(...args); } },
+        commitInputStatus: (...args) => { captures += 1; return captureOwnerStatus(...args); } },
         { ...env, TERMAL_BASE_URL: host.url });
-      assert.equal(captures, 2, "selection reuses the initial status; only the final recheck follows it");
+      assert.equal(captures, 1, "selection retains the same complete admitted owner observation");
       const runId = json(join(runDir, "request.json")).runId;
       assert.equal(host.registrations.get(runId).request.input, "commit");
       const result = await executeRun(runDir, { ...env, TERMAL_BASE_URL: host.url }, { diskSpace: capacity });
@@ -136,7 +137,7 @@ for (const full of [false, true]) {
       assert.equal(result.state, "passed", result.error);
       assert.equal(result.input.commit, head);
       assert.equal(result.input.eligible, true);
-      assert.equal(result.before, result.after);
+      assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true);
       assert.doesNotMatch(await summarize(runDir), /^gate: not eligible/mu);
       assert.ok(executed(admin));
     }, { autoAcknowledge: true });
@@ -160,14 +161,14 @@ for (const [full, code] of [[false, 0], [true, 0], [false, 7], [true, 7]]) {
         assert.ok(executed(admin), "the command must actually run");
         assert.equal(result.stages[0].state, code === 0 ? "passed" : "failed");
         assert.equal(result.stages[0].code, code);
-        assert.equal(result.state, code === 0 ? "passed" : "failed", result.error);
-        assert.equal(result.exitCode, code);
+        assert.equal(result.state, "failed", result.error);
+        assert.equal(result.exitCode, code || 1);
         assert.equal(result.input.commit, head);
         assert.equal(result.input.outcome, undefined);
         assert.equal(result.input.eligible, false);
         assert.equal(result.input.after, undefined);
-        assert.equal(result.after, undefined);
-        assert.match(result.input.unavailableReason, /post-run input unavailable: git /u);
+        assert.equal(result.sourceIdAfter, null);
+        assert.match(result.input.unavailableReason, /post-run source_id unavailable:/u);
         assert.deepEqual(json(join(runDir, "results.json")).input, result.input);
         assert.match(await summarize(runDir), /no post-run input recorded; not eligible/u);
         assert.match(await summarize(runDir), /^gate: not eligible; not a landing gate: .+$/mu);
@@ -227,14 +228,15 @@ for (const code of [0, 7]) {
       assert.ok(executed(admin));
       assert.equal(result.stages[0].code, code);
       assert.equal(result.stages[0].state, code === 0 ? "passed" : "failed");
-      assert.equal(result.state, code === 0 ? "passed" : "failed");
-      assert.equal(result.exitCode, code);
+      assert.equal(result.state, "failed");
+      assert.equal(result.exitCode, code || 1);
       assert.equal(result.input.outcome, "input_changed");
       assert.equal(result.input.eligible, false);
-      assert.notEqual(result.before, result.after);
+      assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), false);
       const summary = await summarize(runDir);
-      assert.match(summary, new RegExp(`^${code === 0 ? "PASS" : "FAIL"} .+ exit=${code}$`, "mu"));
-      assert.match(summary, /^gate: not eligible; not a landing gate: 1 path\(s\) reported by git status$/mu);
+      assert.match(summary, new RegExp(`^FAIL .+ exit=${code || 1}$`, "mu"));
+      assert.match(summary, /^gate: not eligible; not a landing gate: /mu);
+      assert.equal(result.stages[0].code, code, "source refusal cannot change the original command outcome");
     }, {}, { full: true });
   });
 }
@@ -273,7 +275,7 @@ for (const [name, dirty] of [
         assert.equal(result.inputSelection.kind, "plain");
         assert.ok(result.inputSelection.reason);
         assert.match(await summarize(runDir), /^input: plain; no committed-input verification: /mu);
-        assert.equal(result.before, result.after, "stable dirty input keeps the existing fingerprint guard");
+        assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true, "unchanged dirty input compares as a complete value");
       }, { autoAcknowledge: true });
     });
   }
@@ -282,7 +284,7 @@ for (const [name, dirty] of [
 for (const [name, configure, reason] of [
   ["unavailable admission", () => {}, /fixture admission unavailable/u],
 ]) {
-  test(`automatic ${name} keeps the command and names the plain selection`, async (t) => {
+  test(`automatic ${name} refuses without a partial identity or a command pass`, async (t) => {
     await hosted(t, async (repository) => {
       const { root, env, admin, head } = repository;
       configure(repository);
@@ -290,9 +292,10 @@ for (const [name, configure, reason] of [
         ...(name === "unavailable admission" ? { commitInputStatus: async () => { throw new Error("fixture admission unavailable"); } } : {}) }, env);
       assert.equal(Object.hasOwn(json(join(runDir, "request.json")), "input"), false);
       const result = await executeRun(runDir, env);
-      assert.ok(executed(admin));
-      assert.equal(result.state, "passed", result.error);
-      assert.equal(result.exitCode, 0);
+      assert.equal(executed(admin), false);
+      assert.equal(result.state, "failed");
+      assert.equal(result.exitCode, 1);
+      assert.ok(result.stages.every((entry) => entry.state === "unrun"));
       assert.equal(result.input, undefined);
       assert.match(result.inputSelection.reason, reason);
       assert.match(await summarize(runDir), reason);
@@ -310,7 +313,7 @@ test("SHA-256 roots have a named unsupported-format refusal", async (t) => {
     const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
     const refused = await executeRun(runDir, env);
     assert.equal(refused.state, "failed");
-    assert.match(refused.error, /unsupported object format/u);
+    assert.match(refused.error, /SHA-256 repositories are unsupported/u);
     assert.ok(refused.stages.every((entry) => entry.state === "unrun"));
     assert.equal(executed(admin), false);
   }, {}, { objectFormat: "sha256" });
@@ -329,7 +332,7 @@ test("initialized pinned clean submodules earn the existing automatic committed-
     assert.ok(executed(admin));
     assert.equal(result.input.outcome, "clean");
     assert.equal(result.input.eligible, true);
-    assert.equal(result.before, result.after);
+    assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true);
     assert.match(await summarize(runDir), /^input: commit [0-9a-f]+ clean; eligible$/mu);
   });
 });
@@ -362,9 +365,9 @@ for (const change of ["tracked", "untracked", "off-pin", "uninitialized", "missi
       assert.equal(result.state, "failed", change);
       assert.ok(result.stages.every((entry) => entry.state === "unrun"));
       assert.equal(executed(admin), false);
-      const reason = change === "tracked" || change === "untracked" ? /path\(s\) reported by git status/u
-        : change === "missing-mapping" ? /\.gitmodules mapping check failed/u
-          : /not initialized at its pin/u;
+      const reason = ["tracked", "untracked", "off-pin"].includes(change) ? /path\(s\) reported by git status/u
+        : change === "missing-mapping" ? /submodule|mapping/u
+          : /uninitialized/u;
       assert.match(result.error, reason);
     });
   });
@@ -414,7 +417,7 @@ test("a child's local status setting cannot hide untracked input", async (t) => 
 });
 
 for (const boundary of ["before execution", "after exit 0", "after exit 7"]) {
-  test(`a child filter installed ${boundary} is guarded before fingerprinting`, async (t) => {
+  test(`a child filter installed ${boundary} is refused by the source owner before observation`, async (t) => {
     const dependency = gitRepository(t);
     writeFileSync(join(dependency.root, ".gitattributes"), "tracked.txt filter=mark\n");
     dependency.git(["add", "--", ".gitattributes"]);
@@ -440,16 +443,17 @@ for (const boundary of ["before execution", "after exit 0", "after exit 7"]) {
       if (beforeExecution) {
         assert.equal(result.state, "failed");
         assert.equal(executed(admin), false);
-        assert.match(result.error, /filter\.mark\.clean/u);
+        assert.match(result.error, /configured Git filters/u);
         assert.ok(result.stages.every((entry) => entry.state === "unrun"));
       } else {
         assert.equal(executed(admin), true);
-        assert.equal(result.state, code === 0 ? "passed" : "failed");
-        assert.equal(result.exitCode, code);
+        assert.equal(result.state, "failed");
+        assert.equal(result.exitCode, code || 1);
         assert.equal(result.stages[0].code, code);
-        assert.equal(result.input.outcome, "input_changed");
-        assert.deepEqual(result.input.after.filters, ["dep: filter.mark.clean"]);
-        assert.equal(result.after, undefined, "unsafe fingerprint capture is omitted");
+        assert.equal(result.input.outcome, undefined);
+        assert.equal(result.input.after, undefined, "an unavailable owner supplies no partial source input");
+        assert.match(result.input.unavailableReason, /configured Git filters/u);
+        assert.equal(result.sourceIdAfter, null);
       }
     });
   });
@@ -465,8 +469,9 @@ test("a child dirtied by an actual stage preserves its exit but loses committed 
     const runDir = await createRun({ root, automaticInput: true, stages: [markingStage(admin, "dirty-child",
       `require('node:fs').writeFileSync(${JSON.stringify(join(root, "dep", "new.txt"))}, 'child debris');`)] }, env);
     const result = await executeRun(runDir, env);
-    assert.equal(result.state, "passed", result.error);
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.state, "failed");
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stages[0].code, 0);
     assert.equal(result.input.outcome, "input_changed");
     assert.equal(result.input.eligible, false);
     assert.equal(result.input.after.clean, false);
@@ -484,7 +489,7 @@ test("automatic fallback does not bypass plain's readable HEAD precondition", as
       assert.equal(Object.hasOwn(json(join(runDir, "request.json")), "input"), false);
       const result = await executeRun(runDir, env);
       assert.equal(result.state, "failed");
-      assert.match(result.error, /HEAD/u);
+      assert.match(result.error, /committed input unavailable.*input_unavailable/u);
       assert.equal(executed(admin), false);
       assert.ok(result.stages.every((entry) => entry.state === "unrun"));
     } finally {
@@ -493,7 +498,7 @@ test("automatic fallback does not bypass plain's readable HEAD precondition", as
   });
 });
 
-test("an automatic plain run retains the existing post-run fingerprint guard", async (t) => {
+test("an automatic plain run compares the full post-run source_id", async (t) => {
   await hosted(t, async ({ root, env, admin }) => {
     writeFileSync(join(root, "tracked.txt"), "dirty before\n");
     const edit = `require('node:fs').writeFileSync(${JSON.stringify(join(root, "tracked.txt"))}, 'changed during');`;
@@ -503,7 +508,7 @@ test("an automatic plain run retains the existing post-run fingerprint guard", a
     assert.equal(result.stages[0].state, "passed");
     assert.equal(result.stages[0].code, 0);
     assert.equal(result.state, "failed");
-    assert.match(result.error, /input drift/u);
+    assert.match(result.error, /source_id changed during execution/u);
     assert.equal(result.input, undefined);
   });
 });
@@ -624,19 +629,20 @@ test("an XDG attributes file does not change the committed-input status", async 
   assert.equal(commitInputStatusClean(status), true);
 });
 
-test("a stage that configures a Git filter changes the input and records the filter", async (t) => {
-  await hosted(t, async ({ root, env, head }) => {
+test("a stage that configures a Git filter retains its command pass but has no after source", async (t) => {
+  await hosted(t, async ({ root, env }) => {
     const runDir = await createRun({ root, input: "commit", stages: [stage("filters", [
       "const { execFileSync } = require('node:child_process');",
       "execFileSync('git', ['config', 'filter.fixture.clean', 'cat']);",
     ].join("\n"))] }, env);
     const result = await executeRun(runDir, env);
-    assert.equal(result.state, "passed", result.error);
-    assert.equal(result.input.outcome, "input_changed");
+    assert.equal(result.state, "failed");
+    assert.equal(result.stages[0].code, 0);
+    assert.equal(result.stages[0].state, "passed");
+    assert.equal(result.sourceIdAfter, null);
     assert.equal(result.input.eligible, false);
-    assert.deepEqual(result.input.after, {
-      commit: head, clean: false, paths: [], filters: ["filter.fixture.clean"],
-    });
+    assert.equal(result.input.after, undefined);
+    assert.match(result.input.unavailableReason, /filter/u);
   });
 });
 
@@ -679,16 +685,13 @@ test("a configured Git filter before the run is refused with its own reason and 
     const runDir = await createRun({ root, stages: [markingStage(admin)], input: "commit" }, env);
     const refused = json(join(runDir, "results.json"));
     assert.equal(refused.state, "failed");
-    assert.deepEqual(refused.input, {
-      kind: "commit", cleanBefore: false, dirtyPaths: [], filters: ["filter.fixture.process"],
-    });
-    assert.match(refused.error,
-      /not clean before the run \(1 configured Git filter\(s\) \(filter\.fixture\.process\).*\); no stage ran/u);
+    assert.equal(refused.input, undefined);
+    assert.equal(refused.sourceIdBefore, null);
+    assert.match(refused.error, /filter/u);
     const result = await executeRun(runDir, env);
     assert.ok(result.stages.every((entry) => entry.state === "unrun"));
     assert.equal(executed(admin), false);
-    assert.match(await summarize(runDir),
-      /^input: refused, not clean before the run: 0 path\(s\); 1 configured Git filter\(s\)$/mu);
+    assert.match(await summarize(runDir), /^input: unknown; source_id;/mu);
   });
 });
 
@@ -742,63 +745,56 @@ test("a submodule's configured filter is refused before recursive status can run
     const runDir = await createRun({ root, stages: [markingStage(admin)], input: "commit" }, env);
     const refused = json(join(runDir, "results.json"));
     assert.equal(refused.state, "failed");
-    assert.deepEqual(refused.input, {
-      kind: "commit", cleanBefore: false, dirtyPaths: [], filters: ["sub: filter.mark.clean"],
-    });
-    assert.match(refused.error, /not clean before the run \(1 configured Git filter\(s\) \(sub: filter.mark.clean\).*\); no stage ran/u);
+    assert.equal(refused.input, undefined);
+    assert.equal(refused.sourceIdBefore, null);
+    assert.match(refused.error, /filter/u);
     const result = await executeRun(runDir, env);
     assert.ok(result.stages.every((entry) => entry.state === "unrun"));
     assert.equal(executed(admin), false);
-    assert.match(await summarize(runDir),
-      /^input: refused, not clean before the run: 0 path\(s\); 1 configured Git filter\(s\)$/mu);
+    assert.match(await summarize(runDir), /^input: unknown; source_id;/mu);
     assert.equal(existsSync(filterRan), false, "the committed-input status never ran the filter");
   });
 });
 
-test("an edit made while the input is captured refuses the run as not clean before it", async (t) => {
+test("an edit after admitted capture is refused before any stage", async (t) => {
   await hosted(t, async ({ root, env, admin }) => {
     let calls = 0;
     const commitInputStatus = async (...args) => {
       calls += 1;
-      const status = await captureCommitInputStatus(...args);
-      // The edit lands after the first read, before the fingerprint.
-      if (calls === 1) writeFileSync(join(root, "tracked.txt"), "edited in the window\n");
-      return status;
+      const observed = captureOwnerStatus(...args);
+      writeFileSync(join(root, "tracked.txt"), "edited after admission\n");
+      return observed;
     };
     const runDir = await createRun(
       { root, stages: [markingStage(admin)], input: "commit", commitInputStatus }, env);
-    assert.equal(calls, 2, "the status is read again after the fingerprint");
-    const refused = json(join(runDir, "results.json"));
-    assert.equal(refused.state, "failed");
-    assert.deepEqual(refused.input, {
-      kind: "commit", cleanBefore: false, dirtyPaths: [{ status: " M", path: "tracked.txt" }],
-    });
-    assert.match(refused.error, /changed while the input was captured.*no stage ran/u);
-    // Reverting the edit afterwards does not revive the run.
-    writeFileSync(join(root, "tracked.txt"), "baseline\n");
+    assert.equal(calls, 1);
     const result = await executeRun(runDir, env);
     assert.equal(result.state, "failed");
+    assert.match(result.error, /source_id changed before execution/u);
     assert.ok(result.stages.every((entry) => entry.state === "unrun"));
     assert.equal(executed(admin), false);
+    writeFileSync(join(root, "tracked.txt"), "baseline\n");
+    assert.equal(json(join(runDir, "results.json")).state, "failed", "later source restoration cannot rewrite the original refusal");
   });
 });
 
-test("a stage that leaves a new untracked file is debris pending disposition, not eligible", async (t) => {
+test("a stage that leaves a new untracked file changes source input without a debris exception", async (t) => {
   await hosted(t, async ({ root, env, head, admin }) => {
     const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin, "fixture",
       "require('node:fs').writeFileSync('debris.txt', 'left behind'); require('node:fs').writeFileSync('ignored-debris.log', 'ignored');")] }, env);
     const result = await executeRun(runDir, env);
-    assert.equal(result.state, "passed", result.error);
+    assert.equal(result.state, "failed");
     assert.equal(result.stages[0].state, "passed");
-    assert.equal(result.error, undefined);
-    assert.notEqual(result.after, result.before, "the fingerprint still records the drift");
-    assert.equal(result.input.outcome, "debris_pending_disposition");
-    assert.equal(result.input.disposition, null);
+    assert.equal(result.stages[0].code, 0);
+    assert.match(result.error, /source_id changed during execution/u);
+    assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), false);
+    assert.equal(result.input.outcome, "input_changed");
+    assert.equal("disposition" in result.input, false);
     assert.equal(result.input.eligible, false);
     assert.deepEqual(result.input.after, { commit: head, clean: false, paths: [{ status: "??", path: "debris.txt" }] });
     assert.deepEqual(json(join(runDir, "results.json")).input, result.input);
     assert.match(await summarize(runDir),
-      new RegExp(`^input: commit ${head} debris \\(pending disposition\\): 1 new untracked path\\(s\\); not eligible$`, "mu"));
+      new RegExp(`^input: commit ${head} input changed; not eligible$`, "mu"));
   });
 });
 
@@ -809,9 +805,9 @@ test("a stage that edits a tracked file changes the input, keeps stage results a
       stage("second"),
     ] }, env);
     const result = await executeRun(runDir, env);
-    assert.equal(result.state, "passed", "the run's own state is kept");
+    assert.equal(result.state, "failed");
     assert.deepEqual(result.stages.map(({ state }) => state), ["passed", "passed"]);
-    assert.equal(result.error, undefined);
+    assert.match(result.error, /source_id changed during execution/u);
     assert.equal(result.input.outcome, "input_changed");
     assert.equal(result.input.eligible, false);
     assert.equal("disposition" in result.input, false);
@@ -828,7 +824,7 @@ test("a stage that commits moves HEAD and changes the input", async (t) => {
       "execFileSync('git', ['commit', '--quiet', '--no-gpg-sign', '-am', 'during']);",
     ].join("\n"))] }, env);
     const result = await executeRun(runDir, env);
-    assert.equal(result.state, "passed", result.error);
+    assert.equal(result.state, "failed");
     assert.equal(result.input.outcome, "input_changed");
     assert.notEqual(result.input.after.commit, head);
     assert.equal(result.input.after.clean, true);
@@ -847,7 +843,7 @@ test("a failing stage on a clean commit is clean but not eligible", async (t) =>
   });
 });
 
-test("without the selection the staged lane is unchanged and drift still throws", async (t) => {
+test("an unchanged dirty source qualifies but later source changes refuse a plain run", async (t) => {
   await hosted(t, async ({ root, env }) => {
     writeFileSync(join(root, "new.txt"), "untracked inputs belong to the staged lane\n");
     const runDir = await createRun({ root, stages: [stage(
@@ -857,9 +853,9 @@ test("without the selection the staged lane is unchanged and drift still throws"
     assert.equal("input" in json(join(runDir, "request.json")), false);
     const result = await executeRun(runDir, env);
     assert.equal(result.state, "failed");
-    assert.match(result.error, /input drift: results do not validate the current source/u);
+    assert.match(result.error, /source_id changed during execution/u);
     assert.equal(result.input, undefined);
-    assert.doesNotMatch(await summarize(runDir), /^input:/mu);
+    assert.match(await summarize(runDir), /^input: mismatch; source_id;/mu);
   });
 });
 
@@ -878,7 +874,7 @@ test("status entries and outcomes classify renames, staged additions and debris"
   ]);
   assert.equal(commitInputOutcome(head, status), "input_changed");
   assert.equal(commitInputOutcome(head, { commit: head, entries: [{ status: "??", path: "x" }] }),
-    "debris_pending_disposition");
+    "input_changed");
   assert.equal(commitInputOutcome(head, { commit: head, entries: [] }), "clean");
   assert.equal(commitInputOutcome(head, { commit: "0".repeat(40), entries: [] }), "input_changed");
   assert.equal(commitInputOutcome(head, {

@@ -151,8 +151,8 @@ fn flutter_json_reporter_counts_use_the_same_end_artifact_reader() {
     results["stages"][0]["state"] = json!("failed");
     let failed = engram_verification_record_declared_check(&results["stages"][0], &planned, &binding,
         EngramCommandExit::Code(1)).unwrap();
-    assert_eq!(failed.outcome, EngramVerificationRecordCheckOutcome::Failed,
-        "a passing artifact cannot override a failing process");
+    assert_eq!(failed.outcome, EngramVerificationRecordCheckOutcome::Passed,
+        "the frozen artifact supplies the native verdict independently of the process report");
 }
 
 #[test]

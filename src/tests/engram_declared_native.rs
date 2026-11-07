@@ -102,7 +102,8 @@ fn native_opening_expiry_notice_is_turn_scoped_for_both_providers() {
 
 #[test]
 fn native_opening_publication_and_expiry_use_a_controlled_clock() {
-    for expired in [false, true] {
+    for elapsed_seconds in [9, 34, 36] {
+        let expired = elapsed_seconds == 36;
         let native = NativeFixture::new("native-controlled-opening", false);
         // Exercise native snapshot assembly with the scripted shared owner,
         // separately from dispatch availability or real-producer latency.
@@ -116,7 +117,9 @@ fn native_opening_publication_and_expiry_use_a_controlled_clock() {
         native.fixture.state.inner.lock().unwrap().test_declared_run_snapshot = Some(Arc::new(move |_, _| {
             // Controlled ordering: capture completes before publication, with
             // logical time either still valid or beyond the original deadline.
-            if expired { *clock.lock().unwrap() = initial + NATIVE_S0_CAPTURE_BUDGET + Duration::from_nanos(1); }
+            // Nine seconds exceeds the former bound; 34 includes time for
+            // opening stages around source; 36 exceeds the combined deadline.
+            *clock.lock().unwrap() = initial + Duration::from_secs(elapsed_seconds);
             Ok(snapshot.clone())
         }));
         native.fixture.state.prepare_declared_run_before_handoff(&native.session, &native.token, 1);
@@ -393,6 +396,10 @@ impl NativeFixture {
 
     fn finish(&self, recorder: &mut SessionRecorder, exit: i64) -> (DeclaredRunReservation, TestRunRegistration, Value, Value) {
         self.end(recorder, exit);
+        self.finished()
+    }
+
+    fn finished(&self) -> (DeclaredRunReservation, TestRunRegistration, Value, Value) {
         let start = self.wait();
         let inner = self.fixture.state.inner.lock().unwrap();
         let registration = inner.test_run_registrations[&start.run_id].clone();
@@ -405,6 +412,36 @@ impl NativeFixture {
     fn artifact(&self, text: &str) {
         fs::create_dir_all(self.fixture.root.join(".tmp")).unwrap();
         fs::write(self.fixture.root.join(".tmp/test.trx"), text).unwrap();
+    }
+
+    fn later_prompt(&self) {
+        let mut inner = self.fixture.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&self.session).unwrap();
+        inner.sessions[index].active_turn_generation += 1;
+        inner.sessions[index].engram.declared_run_turn = None;
+    }
+
+    fn task_end(&self) {
+        let work = claude_frame_work(&json!({"type":"system","subtype":"task_notification",
+            "status":"completed","tool_use_id":"native-tool"}), false);
+        self.fixture.state.settle_claude_frame(&self.session, &self.token, &work);
+    }
+
+    fn original_results(&self, start: &DeclaredRunReservation) -> (TestRunRegistration, Value, Value) {
+        let directory = PathBuf::from(&start.run_directory);
+        let deadline = std::time::Instant::now() + crate::TEST_PHASE_DEADLOCK_GUARD;
+        loop {
+            let registration = self.fixture.state.inner.lock().unwrap()
+                .test_run_registrations.get(&start.run_id).cloned();
+            if let Some(registration) = registration
+                && let TestRunJson::Parsed(results, _, _) = test_run_read_json(&directory.join("results.json"))
+                && engram_verification_record_results_are_terminal(&registration, &results) {
+                let request = serde_json::from_slice(&fs::read(directory.join("request.json")).unwrap()).unwrap();
+                return (registration, request, results);
+            }
+            assert!(std::time::Instant::now() < deadline, "original task terminal was not frozen");
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 }
 
@@ -649,10 +686,10 @@ fn native_credit_compares_endpoints_independently_of_workspace_events() {
 }
 
 #[test]
-fn native_no_snapshot_prior_activity_wrong_cwd_ambient_or_background_never_reserves() {
+fn native_no_snapshot_prior_activity_wrong_cwd_or_ambient_never_reserves() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    for case in ["no-snapshot", "prior-read", "wrong-cwd", "ambient", "background", "late-description"] {
-        let fixture = NativeFixture::new(case, case == "background");
+    for case in ["no-snapshot", "prior-read", "wrong-cwd", "ambient", "late-description"] {
+        let fixture = NativeFixture::new(case, false);
         let mut recorder = fixture.recorder();
         if case != "no-snapshot" { fixture.prepare(); }
         if case == "prior-read" { recorder.native_tool_start(Some("earlier"), false, &json!({"name":"Read"})).unwrap(); }
@@ -662,7 +699,6 @@ fn native_no_snapshot_prior_activity_wrong_cwd_ambient_or_background_never_reser
         }
         let mut frame = fixture.frame();
         if case == "wrong-cwd" { frame["cwd"] = json!(fixture.fixture.root.parent().unwrap().to_string_lossy()); }
-        if case == "background" { frame["input"]["run_in_background"] = json!(true); }
         if case == "late-description" { frame["command"] = Value::Null; }
         recorder.native_tool_start(Some("native-tool"), true, &frame).unwrap();
         if case == "late-description" { recorder.native_tool_start(Some("native-tool"), true, &fixture.frame()).unwrap(); }
@@ -771,15 +807,16 @@ fn native_full_source_overflow_is_named_without_truncation_or_a_commit_fallback(
 }
 
 #[test]
-fn native_artifact_unknown_failed_exit_and_changed_source_cannot_inherit_a_pass() {
+fn native_artifact_failure_and_changed_source_cannot_inherit_a_pass() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    for case in ["missing-artifact", "failed-exit", "dirty-after", "owner-unavailable", "changed-root", "changed-claim"] {
+    for case in ["missing-artifact", "failing-artifact", "dirty-after", "owner-unavailable", "changed-root", "changed-claim"] {
         let fixture = NativeFixture::new(case, false);
         fixture.prepare();
         let mut recorder = fixture.recorder();
         fixture.start(&mut recorder);
         fixture.wait();
-        if case != "missing-artifact" { fixture.artifact(include_str!("fixtures/declared-trx/pass.trx")); }
+        if case == "failing-artifact" { fixture.artifact(include_str!("fixtures/declared-trx/fail.trx")); }
+        else if case != "missing-artifact" { fixture.artifact(include_str!("fixtures/declared-trx/pass.trx")); }
         if case == "dirty-after" {
             fs::write(fixture.fixture.root.join("new-source"), "dirty").unwrap();
             fixture.record_change("new-source", "??");
@@ -793,11 +830,11 @@ fn native_artifact_unknown_failed_exit_and_changed_source_cannot_inherit_a_pass(
             inner.engram_work_source_roots[0].generation += 1;
         }
         if case == "changed-claim" { fixture.held_revision(4); }
-        let (_, registration, request, results) = fixture.finish(&mut recorder, if case == "failed-exit" {1} else {0});
+        let (_, registration, request, results) = fixture.finish(&mut recorder, 0);
         let body = engram_verification_record_body(&registration, &request, &results);
         match case {
             "missing-artifact" => assert_eq!(body.unwrap().run.outcome, EngramVerificationRecordRunOutcome::Indeterminate),
-            "failed-exit" => assert_eq!(body.unwrap().run.outcome, EngramVerificationRecordRunOutcome::Failed),
+            "failing-artifact" => assert_eq!(body.unwrap().run.outcome, EngramVerificationRecordRunOutcome::Failed),
             "owner-unavailable" => {
                 assert_eq!(results["state"], "passed");
                 assert!(results["post_run"]["source_id"].is_null());
@@ -838,4 +875,269 @@ fn native_metadata_admission_precedes_writes_and_refuses_a_redirect() {
     start.run_directory = test_run_display_path(&link.join(&start.run_id));
     assert!(declared_run_prepare_directory(&start).is_err(), "resolved redirect is outside Git metadata");
     assert_eq!(fs::read_dir(&outside).unwrap().count(), 0, "neither request nor results was written through the redirect");
+}
+
+#[test]
+fn native_artifact_verdict_does_not_depend_on_provider_console_or_exit() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for case in ["cut", "no-preview", "background", "moved", "no-exit", "nonzero", "killed", "missing", "failing"] {
+        let fixture = NativeFixture::new(case, true);
+        fixture.held_revision(4);
+        fixture.prepare();
+        let mut recorder = fixture.recorder();
+        let mut frame = fixture.frame();
+        if case == "background" { frame["input"]["run_in_background"] = json!(true); }
+        register_claude_tool_use(&frame, &mut fixture.claude_state.lock().unwrap(), &mut recorder).unwrap();
+        fixture.wait();
+        match case {
+            "missing" => {},
+            "failing" => fixture.artifact(include_str!("fixtures/declared-trx/fail.trx")),
+            _ => fixture.artifact(include_str!("fixtures/declared-trx/pass.trx")),
+        }
+        let mut result = json!({"stdout":"preview contains no test verdict"});
+        if case == "cut" {
+            result["persistedOutputPath"] = json!("/a/provider/path/that/must/not/be/opened");
+            result["persistedOutputSize"] = json!(1_500_000);
+        }
+        if case == "no-preview" { result = json!({}); }
+        if case == "moved" { result["backgroundTaskId"] = json!("original-task"); }
+        if case == "killed" { result["interrupted"] = json!(true); }
+        handle_claude_tool_result(&json!({"tool_use_result":result,"message":{"content":[{
+            "type":"tool_result","tool_use_id":"native-tool",
+            "is_error":matches!(case, "no-exit" | "nonzero" | "killed"),
+            "content":if case == "nonzero" {"Exit code 1"} else {""},
+        }]}}), &mut fixture.claude_state.lock().unwrap(), &mut recorder).unwrap();
+        if matches!(case, "background" | "moved") {
+            assert!(fixture.execution().unwrap().lock().unwrap().end.is_none(), "launch acknowledgement is not END");
+            let work = claude_frame_work(&json!({"type":"system","subtype":"task_notification",
+                "status":"completed","tool_use_id":"native-tool"}), false);
+            fixture.fixture.state.settle_claude_frame(&fixture.session, &fixture.token, &work);
+        }
+        let (start, registration, request, results) = fixture.finished();
+        let body = engram_verification_record_body(&registration, &request, &results).unwrap();
+        let expected = match case {
+            "killed" | "missing" => EngramVerificationRecordRunOutcome::Indeterminate,
+            "failing" => EngramVerificationRecordRunOutcome::Failed,
+            _ => EngramVerificationRecordRunOutcome::Passed,
+        };
+        assert_eq!(body.run.outcome, expected, "{case}");
+        assert_eq!(results["interrupted"], case == "killed", "{case}: only actual interruption");
+        assert!(matches!(engram_verification_record_prepare(&registration), EngramVerificationRecordPrepared::Ready(_)), "{case}");
+        let inner = fixture.fixture.state.inner.lock().unwrap();
+        let row = &inner.test_run_observations[&start.execution_id];
+        assert!(row.summary.ended_at.is_some(), "{case}");
+        assert_eq!(row.summary.state == TestRunState::Passed, expected == EngramVerificationRecordRunOutcome::Passed, "{case}");
+    }
+}
+
+#[test]
+fn native_background_task_uses_its_original_reservation_after_a_later_prompt() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for interrupted in [false, true] {
+        let fixture = NativeFixture::new("native-task-end", true);
+        fixture.held_revision(4);
+        fixture.prepare();
+        let mut recorder = fixture.recorder();
+        fixture.start(&mut recorder);
+        let start = fixture.wait();
+        handle_claude_tool_result(&json!({"tool_use_result":{"backgroundTaskId":"task"},
+            "message":{"content":[{"type":"tool_result","tool_use_id":"native-tool","is_error":false,"content":""}]}}),
+            &mut fixture.claude_state.lock().unwrap(), &mut recorder).unwrap();
+        assert!(fixture.execution().unwrap().lock().unwrap().end.is_none(), "launch alone has no artifact END");
+        {
+            let mut inner = fixture.fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.session).unwrap();
+            inner.sessions[index].active_turn_generation += 1;
+            inner.sessions[index].engram.declared_run_turn = None;
+        }
+        fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+        let work = claude_frame_work(&json!({"type":"system","subtype":"task_notification",
+            "status":if interrupted {"killed"} else {"completed"},"tool_use_id":"native-tool"}), false);
+        fixture.fixture.state.settle_claude_frame(&fixture.session, &fixture.token, &work);
+        let deadline = std::time::Instant::now() + crate::TEST_PHASE_DEADLOCK_GUARD;
+        let registration = loop {
+            let current = fixture.fixture.state.inner.lock().unwrap().test_run_registrations[&start.run_id].clone();
+            if let TestRunJson::Parsed(results, _, _) = test_run_read_json(&PathBuf::from(&start.run_directory).join("results.json"))
+                && engram_verification_record_results_are_terminal(&current, &results) { break current; }
+            assert!(std::time::Instant::now() < deadline, "original task terminal was not frozen");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        let request = serde_json::from_slice(&fs::read(PathBuf::from(&start.run_directory).join("request.json")).unwrap()).unwrap();
+        let results = serde_json::from_slice(&fs::read(PathBuf::from(&start.run_directory).join("results.json")).unwrap()).unwrap();
+        let body = engram_verification_record_body(&registration, &request, &results).unwrap();
+        assert_eq!(body.run.outcome, if interrupted { EngramVerificationRecordRunOutcome::Indeterminate } else { EngramVerificationRecordRunOutcome::Passed });
+        assert_eq!(registration.declared_native.as_ref(), Some(&start));
+        let inner = fixture.fixture.state.inner.lock().unwrap();
+        let row = &inner.test_run_observations[&start.execution_id];
+        assert!(row.summary.error.is_none(), "a valid native artifact must not receive the no-verdict task notice");
+        assert_eq!(row.summary.state == TestRunState::Passed, !interrupted);
+    }
+}
+
+#[test]
+fn native_background_ack_with_a_complete_artifact_waits_for_after_run_source() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for background in [false, true] {
+        for changed in [false, true] {
+            let fixture = NativeFixture::new("native-background-after-source", true);
+            fixture.held_revision(4);
+            fixture.prepare();
+            let captures = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let observed = captures.clone();
+            let owner = fixture.source_owner.clone();
+            fixture.fixture.state.inner.lock().unwrap().test_declared_run_source = Some(Arc::new(move |binding, _, deadline| {
+                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                owner.source(binding, deadline)
+            }));
+            let mut recorder = fixture.recorder();
+            let mut frame = fixture.frame();
+            if background { frame["input"]["run_in_background"] = json!(true); }
+            register_claude_tool_use(&frame, &mut fixture.claude_state.lock().unwrap(), &mut recorder).unwrap();
+            let start = fixture.wait();
+            fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+            handle_claude_tool_result(&json!({"tool_use_result":if background { json!({}) } else { json!({"backgroundTaskId":"task"}) },
+                "message":{"content":[{"type":"tool_result","tool_use_id":"native-tool","is_error":false,"content":""}]}}),
+                &mut fixture.claude_state.lock().unwrap(), &mut recorder).unwrap();
+            assert_eq!(captures.load(std::sync::atomic::Ordering::SeqCst), 0, "launch ACK cannot capture after-run source");
+            assert!(fixture.execution().unwrap().lock().unwrap().end.is_none());
+            assert!(fixture.fixture.state.inner.lock().unwrap().test_run_registrations[&start.run_id]
+                .declared_terminal.is_none(), "complete artifact alone cannot publish a terminal");
+            if changed {
+                fs::write(fixture.fixture.root.join("during-background.txt"), "changed after launch ACK\n").unwrap();
+                fixture.record_change("during-background.txt", "??");
+            }
+            fixture.task_end();
+            let (registration, request, results) = fixture.original_results(&start);
+            assert_eq!(captures.load(std::sync::atomic::Ordering::SeqCst), 1);
+            let body = engram_verification_record_body(&registration, &request, &results);
+            if changed { assert!(body.is_err(), "source changed before original task completion"); }
+            else { assert_eq!(body.unwrap().run.outcome, EngramVerificationRecordRunOutcome::Passed); }
+        }
+    }
+}
+
+#[test]
+fn native_task_completion_after_a_later_prompt_preserves_original_refusal_and_failure() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for capacity_failure in [false, true] {
+        let fixture = NativeFixture::new("native-task-original-refusal", true);
+        fixture.held_revision(4);
+        fixture.prepare();
+        let slots = fixture.fixture.state.inner.lock().unwrap().engram_turn_basis_captures_live.clone();
+        let mut recorder = fixture.recorder();
+        if capacity_failure { slots.fetch_add(ENGRAM_TURN_BASIS_CAPTURE_LIMIT, std::sync::atomic::Ordering::SeqCst); }
+        fixture.start(&mut recorder);
+        if capacity_failure { slots.fetch_sub(ENGRAM_TURN_BASIS_CAPTURE_LIMIT, std::sync::atomic::Ordering::SeqCst); }
+        else { fixture.wait(); }
+        let execution = fixture.execution().unwrap();
+        let start = execution.lock().unwrap().reservation.clone();
+        if !capacity_failure {
+            let mut contradictory = fixture.frame();
+            contradictory["input"]["command"] = json!("dotnet test --different-command");
+            recorder.native_tool_start(Some("native-tool"), true, &contradictory).unwrap();
+        }
+        handle_claude_tool_result(&json!({"tool_use_result":{"backgroundTaskId":"task"},
+            "message":{"content":[{"type":"tool_result","tool_use_id":"native-tool","is_error":false,"content":""}]}}),
+            &mut fixture.claude_state.lock().unwrap(), &mut recorder).unwrap();
+        fixture.later_prompt();
+        fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+        fixture.task_end();
+        let job = execution.lock().unwrap();
+        assert!(if capacity_failure { job.failure.is_some() } else { job.verification_refusal.is_some() });
+        assert!(!job.worker_active, "task END must not start a replacement worker for a refused execution");
+        drop(job);
+        let inner = fixture.fixture.state.inner.lock().unwrap();
+        let row = &inner.test_run_observations[&start.execution_id];
+        assert!(row.summary.ended_at.is_some(), "the actual task END remains observed");
+        assert!(inner.test_run_registrations.get(&start.run_id)
+            .is_none_or(|registration| registration.declared_terminal.is_none()),
+            "a later prompt cannot revive native credit");
+        if capacity_failure { assert!(!inner.test_run_registrations.contains_key(&start.run_id)); }
+    }
+}
+
+#[test]
+fn native_task_end_during_pending_registration_keeps_the_original_worker_across_prompts() {
+    struct Release(Option<std::sync::mpsc::Sender<()>>);
+    impl Drop for Release {
+        fn drop(&mut self) { if let Some(sender) = self.0.take() { let _ = sender.send(()); } }
+    }
+    let fixture = NativeFixture::new("native-task-pending-registration", true);
+    fixture.held_revision(4);
+    fixture.prepare();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let mut release = Release(Some(release_tx));
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *fixture.fixture.state.capture_lifetime.before_capture.lock().unwrap() = Some(Arc::new(move || {
+        if std::thread::current().name() == Some("native-declared-run")
+            && !blocked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            ready_tx.send(()).unwrap();
+            release_rx.lock().unwrap().recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
+        }
+    }));
+    let mut recorder = fixture.recorder();
+    fixture.start(&mut recorder);
+    ready_rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
+    let execution = fixture.execution().unwrap();
+    let start = execution.lock().unwrap().reservation.clone();
+    fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+    handle_claude_tool_result(&json!({"tool_use_result":{"backgroundTaskId":"task"},
+        "message":{"content":[{"type":"tool_result","tool_use_id":"native-tool","is_error":false,"content":""}]}}),
+        &mut fixture.claude_state.lock().unwrap(), &mut recorder).unwrap();
+    fixture.later_prompt();
+    fixture.task_end();
+    {
+        let job = execution.lock().unwrap();
+        assert!(job.end.is_some(), "original task END freezes while registration waits");
+        assert!(job.worker_active && !job.registered);
+    }
+    assert!(!fixture.fixture.state.inner.lock().unwrap().test_run_registrations.contains_key(&start.run_id));
+    release.0.take().unwrap().send(()).unwrap();
+    let (registration, request, results) = fixture.original_results(&start);
+    assert_eq!(registration.declared_native.as_ref(), Some(&start));
+    assert_eq!(engram_verification_record_body(&registration, &request, &results).unwrap().run.outcome,
+        EngramVerificationRecordRunOutcome::Passed);
+}
+
+#[test]
+fn native_declared_known_runners_and_prebuilt_options_use_their_artifact() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for command in ["cargo test", "dotnet test --no-build", "dotnet test bin/Tests.dll"] {
+        let fixture = NativeFixture::new("native-declared-options", false);
+        fs::write(fixture.fixture.root.join(ENGRAM_DECLARATION_FILE),
+            format!("[[test]]\ncommand = {command:?}\ncwd = \".\"\nartifact = \".tmp/test.trx\"\n")).unwrap();
+        run_git_test_command(&fixture.fixture.root, &["add", "--", ENGRAM_DECLARATION_FILE]);
+        run_git_test_command(&fixture.fixture.root, &["-c","user.name=Fixture","-c","user.email=fixture@example.invalid", "commit","--quiet","--no-gpg-sign","-m","declared runner fixture"]);
+        fixture.held_revision(4);
+        fixture.prepare();
+        let mut recorder = fixture.recorder();
+        let mut frame = fixture.frame();
+        frame["command"] = json!(command);
+        recorder.native_tool_start(Some("native-tool"), true, &frame).unwrap();
+        fixture.wait();
+        fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+        recorder.command_completed_with_exit("native-tool", command, "", CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+        let (_, registration, request, results) = fixture.finished();
+        assert_eq!(engram_verification_record_body(&registration, &request, &results).unwrap().run.outcome, EngramVerificationRecordRunOutcome::Passed, "{command}");
+    }
+}
+
+#[test]
+fn a_valid_native_artifact_larger_than_four_mib_retains_its_verdict_and_counts() {
+    let fixture = NativeFixture::new("native-large-artifact", false);
+    fixture.held_revision(4);
+    fixture.prepare();
+    let mut recorder = fixture.recorder();
+    fixture.start(&mut recorder);
+    fixture.wait();
+    let artifact = include_str!("fixtures/declared-trx/pass.trx")
+        .replace("</TestRun>", &format!("<!--{}--></TestRun>", "x".repeat(5 * 1024 * 1024)));
+    assert!(artifact.len() > 4 * 1024 * 1024);
+    fixture.artifact(&artifact);
+    let (_, registration, request, results) = fixture.finish(&mut recorder, 0);
+    let body = engram_verification_record_body(&registration, &request, &results).unwrap();
+    assert_eq!(body.run.outcome, EngramVerificationRecordRunOutcome::Passed);
+    assert!(body.checks[0].counts.as_ref().is_some_and(|counts| counts["passed"] > 0));
 }

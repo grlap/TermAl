@@ -192,7 +192,7 @@ export function focusedTestThreads({
   return { source: "libtest-default", threads: null, availableParallelism };
 }
 
-/** The summary lines that report a focused stage's counts and the run's input fingerprint. */
+/** The summary lines that report focused counts; old digests remain attributed history. */
 export function focusedCountSummaryLines(result) {
   const focused = result.stages?.find((stage) => stage.name === "focused");
   if (!focused) return [];
@@ -211,7 +211,9 @@ export function focusedCountSummaryLines(result) {
           : `test threads: ${threads ?? "not a valid count"} (${source})`,
     );
   }
-  const fingerprint = result.after ?? result.before ?? result.expectedFingerprint;
-  if (fingerprint) lines.push(`input fingerprint: ${fingerprint}`);
+  if (!Object.hasOwn(result, "sourceIdBefore") && !Object.hasOwn(result, "sourceIdAfter")) {
+    const fingerprint = result.after ?? result.before ?? result.expectedFingerprint;
+    if (fingerprint) lines.push(`historical input fingerprint: ${fingerprint}`);
+  }
   return lines;
 }

@@ -49,8 +49,6 @@ struct TestRunWaitRunLabel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     request_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    expected_fingerprint: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     locator_identity: Option<String>,
     /// Admitted from durable registration while the artifact index lagged.
     #[serde(default)]
@@ -300,9 +298,6 @@ fn test_run_wait_run_section(
     if let Some(identity) = &label.request_identity {
         lines.push(format!("- Request identity: `{identity}`"));
     }
-    if let Some(fingerprint) = &label.expected_fingerprint {
-        lines.push(format!("- Frozen input fingerprint: `{fingerprint}`"));
-    }
     let totals = |counts: Option<[usize; 6]>| counts.map_or_else(
         || "unknown (results unavailable)".to_owned(),
         |[passed, failed, interrupted, running, unrun, unknown]| format!(
@@ -311,8 +306,8 @@ fn test_run_wait_run_section(
     );
     lines.push(format!("- Stage totals: {}", totals(evidence.and_then(|value| value.stages))));
     lines.push(format!("- Preflight totals: {}", totals(evidence.and_then(|value| value.preflight))));
-    lines.push(format!("- Before/after fingerprint: {}",
-        evidence.map_or("unknown", |value| value.fingerprint_comparison)));
+    lines.push(format!("- Before/after source_id: {} (boundary comparison only, not host check credit)",
+        evidence.map_or("unknown", |value| value.source_comparison)));
     match verdict {
         Some(TestRunWaitVerdict::Fail) => {
             // The read names a preflight check or a stage past the summary's
@@ -511,8 +506,8 @@ fn test_run_wait_summaries<'a>(
 }
 
 fn test_run_wait_identity_matches(label: &TestRunWaitRunLabel, disk: &TestRunDisk) -> bool {
-    // Legacy waits have no content fence. New waits never accept a copied or
-    // replaced request, locator or known frozen input under the same run id.
+    // Keep the run/request/locator fence. Source equality uses the launcher's
+    // own observations, without an independent parent-held expected value.
     label
         .request_identity
         .as_ref()
@@ -521,10 +516,6 @@ fn test_run_wait_identity_matches(label: &TestRunWaitRunLabel, disk: &TestRunDis
                 && label.locator_identity.is_some()
                 && label.locator_identity == disk.locator_identity
         })
-        && label
-            .expected_fingerprint
-            .as_ref()
-            .is_none_or(|fingerprint| disk.expected_fingerprint.as_ref() == Some(fingerprint))
 }
 
 /// The durable launch that supplied this label must still be the same one.
@@ -730,7 +721,6 @@ impl AppState {
                             owner_session_id: Some(row.owning_session_id.clone()),
                             started_at: row.started_at.clone(),
                             request_identity: Some(row.request_identity.clone()),
-                            expected_fingerprint: None,
                             locator_identity: row.locator_identity.clone(),
                             registration_backed: true,
                             registration_progress: TestRunWaitRegistrationProgress::default(),
@@ -767,7 +757,6 @@ impl AppState {
                     owner_session_id: summary.owner_session_id.clone(),
                     started_at: summary.started_at.clone(),
                     request_identity: entry.disk.request_identity.clone(),
-                    expected_fingerprint: entry.disk.expected_fingerprint.clone(),
                     locator_identity: entry.disk.locator_identity.clone(),
                     registration_backed: false,
                     registration_progress: TestRunWaitRegistrationProgress::default(),

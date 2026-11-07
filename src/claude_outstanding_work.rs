@@ -556,7 +556,7 @@ struct ClaudeFrameWork {
     /// now runs in the background.
     results: Vec<(String, bool)>,
     /// Background tasks that reached a terminal status, by tool-use id.
-    ended: Vec<String>,
+    ended: Vec<(String, bool)>,
 }
 
 impl ClaudeFrameWork {
@@ -652,7 +652,9 @@ fn claude_frame_work(message: &Value, nested: bool) -> ClaudeFrameWork {
                 .and_then(Value::as_str)
                 .is_some_and(claude_task_status_is_terminal);
             if terminal && let Some(key) = message.get("tool_use_id").and_then(Value::as_str) {
-                work.ended.push(key.to_owned());
+                let interrupted = message.get("status").and_then(Value::as_str)
+                    .is_some_and(|status| matches!(status, "killed" | "stopped" | "cancelled" | "canceled"));
+                work.ended.push((key.to_owned(), interrupted));
             }
         }
         _ => {}
@@ -755,6 +757,12 @@ impl AppState {
         if work.results.is_empty() && work.ended.is_empty() {
             return;
         }
+        // Freeze the declared artifact outside StateInner before retiring the
+        // original task. Its reservation owns the turn, even after a later
+        // prompt; the notification supplies completion, not a verdict.
+        for (key, interrupted) in &work.ended {
+            self.end_native_declared_task(session_id, token, key, *interrupted);
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return;
@@ -773,7 +781,7 @@ impl AppState {
             token: token.clone(),
             origin: ClaudeWorkOrigin::Unattributed,
         });
-        for key in &work.ended {
+        for (key, _) in &work.ended {
             inner.sessions[index].claude_outstanding.task_ended(token, key);
             self.observe_test_command_end_locked(
                 &mut inner,

@@ -148,6 +148,12 @@ struct TestRunPreflight {
 struct TestRunDetail {
     stages: Vec<TestRunStageDetail>,
     preflight: Vec<TestRunPreflight>,
+    source_id: Option<EngramSourceId>,
+    source_id_before: Option<EngramSourceId>,
+    source_id_after: Option<EngramSourceId>,
+    source_comparison: Option<String>,
+    // Historical artifacts remain readable; these fields never qualify a
+    // new full-source run or become a parent-held expected value.
     expected_fingerprint: Option<String>,
     before: Option<String>,
     after: Option<String>,
@@ -308,6 +314,10 @@ struct TestRunIndex {
     observation_persistence: TestRunObservationPersistence,
     lifecycle_revalidated: HashSet<(String, String)>,
     unclassified_commands: HashMap<String, TestRunUnclassifiedCommand>,
+    // Original native executions that may outlive their prompt. Retain the
+    // same job (including identity refusal and pending registration), never
+    // reconstruct an execution from a later task notification.
+    declared_executions: HashMap<String, Arc<Mutex<DeclaredRunExecution>>>,
     entries: TestRunEntries,
     /// Every run directory the last rescan parsed, listed or aged out, so a
     /// run whose files did not change is never parsed again. Aged-out runs

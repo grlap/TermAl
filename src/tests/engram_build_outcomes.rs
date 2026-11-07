@@ -207,7 +207,7 @@ fn engram_build_outcome_interval_rejection_retains_native_exit() {
 
 #[test]
 fn engram_build_outcome_input_rejection_retains_native_exit() {
-    focused_rejection("input", |f| f.input["fingerprint"] = json!("a".repeat(64)));
+    focused_rejection("input", |f| f.results["sourceIdAfter"]["tree"] = json!("a".repeat(40)));
 }
 
 #[test]

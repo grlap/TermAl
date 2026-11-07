@@ -12,7 +12,7 @@
 // module beside `engram_declared_tests.rs`.
 
 /// A larger artifact is UNKNOWN, at the start or at the end.
-const ENGRAM_ARTIFACT_MAX_BYTES: usize = 4 * 1024 * 1024;
+const ENGRAM_ARTIFACT_MAX_BYTES: usize = 64 * 1024 * 1024;
 /// How much older than the check's start an artifact's modification time may
 /// read and still count as written at or after it: a file system stamps
 /// times from a coarser clock than the host's (FAT keeps two seconds), so a
@@ -625,6 +625,29 @@ fn engram_declared_result(
     binding: &EngramDeclaredBinding,
     exit: EngramCommandExit,
 ) -> EngramDeclaredResult {
+    let mut result = engram_declared_artifact_result(binding);
+    if !engram_declaration_unchanged(binding) {
+        result.verdict = EngramTrxVerdict::Unknown("the declaration changed while the command ran".to_owned());
+        return result;
+    }
+    match exit {
+        EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess => {},
+        EngramCommandExit::Code(code) => {
+            result.verdict = EngramTrxVerdict::Fail(format!("the command exited {code}"));
+        },
+        EngramCommandExit::Unknown | EngramCommandExit::NotFinished => {
+            result.verdict = EngramTrxVerdict::Unknown("the command ended without an exit status".to_owned());
+            result.artifact = None;
+            result.outcome = None;
+            result.counters = None;
+        },
+    }
+    result
+}
+
+// Native verification freezes this artifact verdict at the original END.
+// Provider exit and console delivery remain observations, not verdicts.
+fn engram_declared_artifact_result(binding: &EngramDeclaredBinding) -> EngramDeclaredResult {
     let result = |verdict, artifact| EngramDeclaredResult {
         verdict,
         format: EngramDeclaredArtifactFormat::Trx,
@@ -639,28 +662,6 @@ fn engram_declared_result(
         );
     }
     let inspected = engram_inspect_artifact(binding);
-    match exit {
-        EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess => {}
-        EngramCommandExit::Code(code) => {
-            let (artifact, reading) = match inspected {
-                Ok((facts, bytes)) => (Some(facts), Some(engram_read_declared_artifact(&bytes))),
-                Err(_) => (None, None),
-            };
-            return EngramDeclaredResult {
-                verdict: EngramTrxVerdict::Fail(format!("the command exited {code}")),
-                format: reading.as_ref().map_or(EngramDeclaredArtifactFormat::Trx, |(format, _)| *format),
-                artifact,
-                outcome: reading.as_ref().and_then(|(_, reading)| reading.outcome.clone()),
-                counters: reading.and_then(|(_, reading)| reading.counters),
-            };
-        }
-        EngramCommandExit::Unknown | EngramCommandExit::NotFinished => {
-            return result(
-                EngramTrxVerdict::Unknown("the command ended without an exit status".to_owned()),
-                None,
-            );
-        }
-    }
     let (facts, bytes) = match inspected {
         Ok(inspected) => inspected,
         Err(reason) => return result(EngramTrxVerdict::Unknown(reason.to_owned()), None),
@@ -714,7 +715,7 @@ fn engram_inspect_artifact(
         return Err("the artifact is not a regular file");
     }
     if before.len() > ENGRAM_ARTIFACT_MAX_BYTES as u64 {
-        return Err("the artifact is too large");
+        return Err("the artifact is too large for the 64 MiB bounded reader");
     }
     let mut bytes = Vec::new();
     (&mut file)
@@ -722,7 +723,7 @@ fn engram_inspect_artifact(
         .read_to_end(&mut bytes)
         .map_err(|_| "the artifact cannot be read")?;
     if bytes.len() > ENGRAM_ARTIFACT_MAX_BYTES {
-        return Err("the artifact is too large");
+        return Err("the artifact is too large for the 64 MiB bounded reader");
     }
     let after = file.metadata().map_err(|_| "the artifact cannot be read")?;
     let modified = after.modified().map_err(|_| "the artifact cannot be read")?;

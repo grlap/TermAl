@@ -41,7 +41,7 @@ fn source_owner_registration_persists_verified_pin_and_replays_the_original_iden
             registration_request(id, &directory),
             &mut TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id),
             |state, session, deadline| {
-                assert!(deadline <= std::time::Instant::now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
+                assert!(deadline <= std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
                 observed_owner(state, session, deadline)
             }).unwrap();
         assert!(response.registered);

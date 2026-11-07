@@ -110,7 +110,7 @@ fn linked_unbound_launch_cannot_lend_its_run(description_only: bool) {
     let request = serde_json::to_vec(&json!({
         "runId": run_id, "root": cwd, "owner": turn.session_id,
         "full": true, "detached": true, "started": at(1),
-        "expectedFingerprint": "f".repeat(64),
+        "sourceId": launcher_source_id_fixture(),
         "stages": [{ "name": "rust-tests", "kind": "test" }],
     })).unwrap();
     fs::write(run.join("request.json"), &request).unwrap();
@@ -175,8 +175,8 @@ fn linked_unbound_launch_cannot_lend_its_run(description_only: bool) {
     fs::write(run.join("results.json"), serde_json::to_vec(&json!({
         "runId": run_id, "state": "passed", "started": at(1),
         "ended": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        "expectedFingerprint": "f".repeat(64), "before": "f".repeat(64),
-        "after": "f".repeat(64), "exitCode": 0,
+        "sourceIdBefore": launcher_source_id_fixture(),
+        "sourceIdAfter": launcher_source_id_fixture(), "exitCode": 0,
         "stages": [{ "name": "rust-tests", "state": "passed", "code": 0 }],
     })).unwrap()).unwrap();
     let digest = engram_terminal_record_digest(&run).unwrap();
@@ -221,7 +221,7 @@ fn assert_carried_artifact_custody(turn: &EOCheckedTurn, run: &FsPath, passed: b
     let verdict = engram_read_carried_run(run, &digest).expect("the artifact validates independently");
     assert_eq!(verdict.passed, passed);
     assert_eq!(verdict.exit_code, if passed { 0 } else { 101 });
-    assert_eq!(verdict.fingerprint, "f".repeat(64));
+    assert_eq!(serde_json::to_value(verdict.source_id).unwrap(), launcher_source_id_fixture());
     turn.state.poll_engram_carried_runs();
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
@@ -531,7 +531,8 @@ fn exited_process() -> (std::process::Child, u32) {
 
 /// A run directory named `run_id` under `runs`, with a request for `root`
 /// started at `started` and a terminal record: `state`, its stages each
-/// `stage_state`, and fingerprints expected `fingerprint`, after `after`.
+/// `stage_state`. The legacy `after` fixture token selects equal or drifted
+/// complete owner values; it is never an input digest consumed by the reader.
 fn write_run(
     runs: &FsPath,
     run_id: &str,
@@ -549,7 +550,11 @@ fn write_run(
         "rust-tests",
         "vitest",
     ];
-    let fingerprint = "f".repeat(64);
+    let source_id = launcher_source_id_fixture();
+    let mut source_after = source_id.clone();
+    // Existing callers use this fixture token to request changed input. It
+    // is never written as an input fingerprint; records carry full objects.
+    if after != "f".repeat(64) { source_after["tree"] = json!("e".repeat(40)); }
     fs::write(
         directory.join("request.json"),
         serde_json::to_vec(&json!({
@@ -559,7 +564,7 @@ fn write_run(
             "full": true,
             "detached": false,
             "started": started,
-            "expectedFingerprint": fingerprint,
+            "sourceId": source_id,
         }))
         .expect("the request serializes"),
     )
@@ -583,9 +588,8 @@ fn write_run(
                     })
                 })
                 .collect::<Vec<_>>(),
-            "expectedFingerprint": fingerprint,
-            "before": fingerprint,
-            "after": after,
+            "sourceIdBefore": source_id,
+            "sourceIdAfter": source_after,
             "exitCode": if passed { 0 } else { 101 },
             "ended": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         }))
@@ -614,7 +618,7 @@ fn a_run_record_is_credited_only_as_it_was_first_read_and_consistent() {
     assert!(verdict.passed);
     assert_eq!(verdict.exit_code, 0);
     assert_eq!(verdict.stages.len(), 5);
-    assert_eq!(verdict.fingerprint, fingerprint);
+    assert_eq!(serde_json::to_value(verdict.source_id).unwrap(), launcher_source_id_fixture());
     assert_eq!(
         engram_read_carried_run(&passed, &"0".repeat(64)),
         Err("its terminal record changed after the host first read it as terminal")
@@ -644,10 +648,10 @@ fn a_run_record_is_credited_only_as_it_was_first_read_and_consistent() {
     let digest = engram_terminal_record_digest(&drifted).expect("a terminal record");
     assert_eq!(
         engram_read_carried_run(&drifted, &digest),
-        Err("its input fingerprint after the run differs from the one before")
+        Err("its complete source_id input is unavailable, malformed or changed")
     );
 
-    // A record with no fingerprint from before or after its stages (a run
+    // A record with no source_id from before or after its stages (a run
     // that ended in its preflight) cannot say what input it tested.
     let unmeasured = write_run(
         temp.path(),
@@ -659,8 +663,8 @@ fn a_run_record_is_credited_only_as_it_was_first_read_and_consistent() {
     );
     let mut record: Value =
         serde_json::from_slice(&fs::read(unmeasured.join("results.json")).unwrap()).unwrap();
-    record.as_object_mut().unwrap().remove("before");
-    record.as_object_mut().unwrap().remove("after");
+    record.as_object_mut().unwrap().remove("sourceIdBefore");
+    record.as_object_mut().unwrap().remove("sourceIdAfter");
     fs::write(
         unmeasured.join("results.json"),
         serde_json::to_vec(&record).unwrap(),
@@ -669,7 +673,7 @@ fn a_run_record_is_credited_only_as_it_was_first_read_and_consistent() {
     let digest = engram_terminal_record_digest(&unmeasured).expect("a terminal record");
     assert!(
         engram_read_carried_run(&unmeasured, &digest)
-            .is_err_and(|why| why.contains("no input fingerprint from before or after")),
+            .is_err_and(|why| why.contains("source_id input is unavailable")),
     );
 
     // A record that says passed while a stage it requested did not.
@@ -1535,12 +1539,12 @@ fn an_unreported_source_change_is_measured_separately_from_a_carried_artifact() 
 }
 
 #[test]
-fn an_input_fingerprint_that_changed_during_the_run_refuses_the_gate() {
+fn a_complete_source_id_changed_during_the_run_refuses_the_gate() {
     let (turn, worktree) = ordinary_carried_turn("carried-drifted");
     ordinary_launch_gate(&turn, &worktree, false);
     let run = finish_run(&worktree, "passed", &"e".repeat(64));
     assert_carried_artifact_rejected(&turn, &run,
-        "its input fingerprint after the run differs from the one before",
+        "its complete source_id input is unavailable, malformed or changed",
     );
 }
 

@@ -35,7 +35,7 @@ pub(super) struct NativeResult {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Input {
+pub(super) struct LegacyInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) commit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,6 +44,57 @@ pub(super) struct Input {
     pub(super) before_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) after_fingerprint: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(super) enum SourceInputKind {
+    #[serde(rename = "source_id")]
+    SourceId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SourceInput {
+    pub(super) kind: SourceInputKind,
+    #[serde(deserialize_with = "required_nullable")]
+    pub(super) source_id_before: Option<EngramSourceId>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub(super) source_id_after: Option<EngramSourceId>,
+}
+
+/// Historical records retain their exact legacy representation. The closed
+/// alternatives reject a malformed tagged value rather than trying digests.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub(super) enum Input {
+    SourceId(SourceInput),
+    Legacy(LegacyInput),
+}
+
+impl Default for Input {
+    fn default() -> Self { Self::Legacy(LegacyInput::default()) }
+}
+
+impl Input {
+    fn valid(&self) -> bool {
+        match self {
+            Self::SourceId(input) => {
+                let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
+                [&input.source_id_before, &input.source_id_after].iter()
+                    .filter_map(|value| value.as_ref())
+                    .all(|source| serde_json::to_vec(source).is_ok_and(|bytes| bytes.len() <= ENGRAM_SOURCE_JSON_LIMIT)
+                        && source.validate(deadline).is_ok())
+            }
+            Self::Legacy(input) => {
+                [&input.commit, &input.tree].iter().filter_map(|value| value.as_ref())
+                    .all(|id| test_run_commit_id_valid(id))
+                    && [&input.before_fingerprint, &input.after_fingerprint].iter()
+                        .filter_map(|value| value.as_ref()).all(|value|
+                            value.len() == 64 && value.bytes().all(|byte|
+                                byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -75,9 +126,7 @@ impl Completion {
             || self.result.reason.is_empty() || self.result.reason.len() > 1024
             || self.finished_at.as_ref().is_some_and(|at| at.len() > 128)
             || self.finished_at.as_deref().is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_err())
-            || [&self.input.commit, &self.input.tree].iter().filter_map(|value| value.as_ref()).any(|id| !test_run_commit_id_valid(id))
-            || [&self.input.before_fingerprint, &self.input.after_fingerprint].iter().filter_map(|value| value.as_ref())
-                .any(|value| value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+            || !self.input.valid()
         {
             return Err(ApiError::bad_request("invalid_request: malformed native test completion"));
         }

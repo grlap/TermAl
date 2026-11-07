@@ -5,11 +5,12 @@
 // Git/artifact reads hold neither. S0 publishes only before prompt handoff,
 // R never moves, and END freezes artifact judgment before later tool events.
 
-// Provisional source-opening capacity, distinct from registration durability.
-// Quiet owner-source observations were 1.0–1.4 s for Questly and 2.2–3.1 s
-// for Phoenix; 8 s also matches the owner's maximum caller bound. These are
-// not worst-case complete-S0 measurements. Expiry withholds credit, not dispatch.
-const NATIVE_S0_CAPTURE_BUDGET: Duration = Duration::from_secs(8);
+// The owner may use 30 s to capture source. Opening also reserves the existing
+// authority-read budget for declaration/preimage and publication stages;
+// registration durability itself is unchanged. Expiry withholds credit,
+// not dispatch. Every source stage derives its cap from the same budget.
+const NATIVE_S0_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_COMMAND_BUDGET;
+const NATIVE_S0_AUTHORITY_MARGIN: Duration = TEST_RUN_REGISTRATION_DURABILITY_BUDGET;
 
 fn native_opening_authority_deadline(clock: &EngramBudgetClock, capture_deadline: std::time::Instant,
     requested: std::time::Instant) -> std::time::Instant {
@@ -54,7 +55,7 @@ struct DeclaredRunObservedEnd {
     ended_at: String,
     exit: Option<i64>,
     reported_success: bool,
-    uncertain: bool,
+    interrupted: bool,
     check: EngramVerificationRecordCheck,
 }
 
@@ -121,7 +122,6 @@ fn declared_run_frame_match(turn: &DeclaredRunTurn, frame: &Value, workdir: &str
         RuntimeToken::Codex(_) => (frame.get("command")?.as_str()?, FsPath::new(frame.get("cwd")?.as_str()?)),
         RuntimeToken::Claude(_) => {
             let input = frame.get("input")?;
-            if input.get("run_in_background").and_then(Value::as_bool) == Some(true) { return None; }
             let ran = input.get("command")?.as_str()?;
             if engram_declared_candidate(ran)?.0.directory.as_deref()
                 .is_none_or(|path| !FsPath::new(path).is_absolute()) { return None; }
@@ -235,39 +235,31 @@ impl AppState {
     }
 
     fn native_declared_scope_current(&self, start: &DeclaredRunReservation) -> bool {
+        let Some(keys) = test_run_worktree_keys(&start.source.root) else { return false; };
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(&start.session_id) else { return false; };
-        let record = &inner.sessions[index];
-        let Some(turn) = record.engram.declared_run_turn.as_ref() else { return false; };
-        let keys = &turn.keys;
+        if inner.find_session_index(&start.session_id).is_none() { return false; }
+        if let Some(execution) = inner.test_runs.declared_executions.get(&start.run_id) {
+            let job = execution.lock().expect("native execution mutex poisoned");
+            if job.reservation == *start && (job.failure.is_some() || job.verification_refusal.is_some()) { return false; }
+        }
         let (named_binding, named) = match test_run_registration_named_binding(
-            &inner, &start.session_id, Some(&start.store), Some(keys)) {
+            &inner, &start.session_id, Some(&start.store), Some(&keys)) {
             Ok(binding) => binding,
             Err(error) => {
                 eprintln!("[termal] native named-root scope refused: {error:?}");
                 return false;
             }
         };
-        start.host_instance == self.server_instance_id
-            && record.runtime.matches_runtime_token(&turn.runtime)
-            && record.active_turn_generation == turn.generation && !record.runtime_stop_in_progress
-            && turn.store == start.store && turn.named == start.named
-            && turn.keys.common_dir == start.common_dir
-            && turn.execution.as_ref().is_some_and(|execution| {
-                let job = execution.lock().expect("native execution mutex poisoned");
-                job.reservation == *start && job.failure.is_none() && job.verification_refusal.is_none()
-            })
-            && turn.binding == start.binding && named.as_ref() == Some(&start.named)
+        keys.common_dir == start.common_dir && named.as_ref() == Some(&start.named)
             && named_binding.as_ref().is_some_and(|named| engram_same_recovery_run(named, &start.binding))
             && test_run_named_root_fence(&inner, &start.session_id, Some(&start.store), Some(&start.named))
                 == Some(start.binding.claim_fence)
             && inner.test_run_observations.get(&start.execution_id)
-                .is_some_and(|row| row.declared_native.as_ref() == Some(start)
-                    && row.monitoring_interrupted_at.is_none() && !row.launch_only)
+                .is_some_and(|row| row.declared_native.as_ref() == Some(start))
     }
 
     fn finish_native_declared_run(&self, start: &DeclaredRunReservation, request: &Value,
-        end: &DeclaredRunObservedEnd) -> Result<()> {
+        end: &DeclaredRunObservedEnd, execution: &Arc<Mutex<DeclaredRunExecution>>) -> Result<()> {
         let state = declared_run_result_state(&end.check);
         let stage = json!({"name":"focused", "state":state, "code":end.exit,
             "reportedSuccess":end.reported_success,
@@ -300,7 +292,7 @@ impl AppState {
         };
         let endpoint_matches = after.as_ref().is_some_and(|after|
             after.root == start.source.root && after.source_id == start.source.source_id);
-        let mut eligible = !end.uncertain && endpoint_matches && self.native_declared_scope_current(start);
+        let mut eligible = endpoint_matches && self.native_declared_scope_current(start);
         if eligible {
             let clock = self.engram_budget_clock();
             let deadline = test_run_registration_deadline(&clock, std::time::Instant::now());
@@ -317,9 +309,13 @@ impl AppState {
             });
         }
         eligible &= self.native_declared_scope_current(start);
+        eligible &= {
+            let job = execution.lock().expect("native execution mutex poisoned");
+            job.reservation == *start && job.failure.is_none() && job.verification_refusal.is_none()
+        };
         let results = json!({
             "runId":start.run_id,"state":state,"exitCode":end.exit,
-            "started":start.registered_at,"ended":test_run_timestamp(),"interrupted":end.uncertain,
+            "started":start.registered_at,"ended":test_run_timestamp(),"interrupted":end.interrupted,
             "stages":[stage],
             "input":{"kind":"source_id","source_id":start.source.source_id},
             "post_run":{"source_id":after.as_ref().map(|source| &source.source_id)},
@@ -376,8 +372,8 @@ impl AppState {
                     && (!turn.native_start_attempted || turn.execution.is_some())) else { return; };
             let captured = (turn.clone(), TestRunCommandOrigin::capture(&inner, index, provenance, key),
                 record.session.workdir.clone());
-            // An incomplete first frame cannot be adopted later when its
-            // description arrives. Duplicates may only replay an existing R.
+            // An incomplete first frame cannot move the original R to a
+            // later description. Duplicates only replay an existing R.
             inner.sessions[index].engram.declared_run_turn.as_mut().unwrap().native_start_attempted = true;
             captured
         };
@@ -391,7 +387,6 @@ impl AppState {
             return;
         }
         let Some((command, declaration)) = matched else { return; };
-        if EngramHost::is_launch_only(&command, EngramCommandExit::Code(0)) { return; }
         let Ok(argv) = engram_declared_words(&declaration.entry.command) else { return; };
         let Some(program) = argv.first() else { return; };
         let run_id = format!("test-{}", Uuid::new_v4());
@@ -439,6 +434,8 @@ impl AppState {
         }
         self.observe_test_command_start_with_native(origin, &command, &reservation.named.workspace_id,
             &reservation.registered_at, Some(&declaration), Some(reservation.clone()));
+        self.inner.lock().expect("state mutex poisoned").test_runs.declared_executions
+            .insert(reservation.run_id.clone(), execution.clone());
         self.spawn_native_declared_worker(execution);
     }
 
@@ -477,6 +474,9 @@ impl AppState {
     fn drive_native_declared_run(&self, execution: &Arc<Mutex<DeclaredRunExecution>>) -> Result<()> {
         let (start, request, registered) = {
             let job = execution.lock().expect("native execution mutex poisoned");
+            if job.failure.is_some() || job.verification_refusal.is_some() {
+                anyhow::bail!("original native execution was refused: {:?} {:?}", job.failure, job.verification_refusal);
+            }
             (job.reservation.clone(), job.request.clone(), job.registered)
         };
         let directory = PathBuf::from(&start.run_directory);
@@ -514,35 +514,40 @@ impl AppState {
             let Some(end) = job.end.clone() else { job.worker_active = false; return Ok(()); };
             end
         };
-        self.finish_native_declared_run(&start, &request, &end)?;
+        self.finish_native_declared_run(&start, &request, &end, execution)?;
         execution.lock().expect("native execution mutex poisoned").worker_active = false;
+        self.inner.lock().expect("state mutex poisoned").test_runs.declared_executions.remove(&start.run_id);
         Ok(())
     }
 
     fn end_native_declared_run(&self, session_id: &str, provenance: &EngramObservationProvenance,
-        key: &str, exit: Option<EngramCommandExit>, output_cut: bool) {
-        let ended_at = test_run_timestamp();
+        key: &str, exit: Option<EngramCommandExit>, interrupted: bool) {
         let execution = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else { return; };
             let record = &inner.sessions[index];
             let Some(turn) = record.engram.declared_run_turn.as_ref().filter(|turn|
-                turn.is_current(record) && declared_run_original_turn(record, provenance)) else { return; };
+                turn.generation == record.active_turn_generation
+                    && record.runtime.matches_runtime_token(&turn.runtime)
+                    && declared_run_original_turn(record, provenance)) else { return; };
             let Some(execution) = turn.execution.clone() else { return; };
             let expected = TestRunCommandOrigin::capture(&inner, index, provenance, key).execution_id();
             if execution.lock().expect("native execution mutex poisoned").reservation.execution_id != expected { return; }
             execution
         };
-        // Preserve actual original-process facts in the existing observation,
-        // including unknown/background outcomes which cannot earn credit.
-        let ended_test_runs = self.observe_test_command_end(session_id, provenance, key, exit);
+        self.freeze_native_declared_end(session_id, provenance, key, execution, exit, interrupted);
+    }
+
+    fn freeze_native_declared_end(&self, session_id: &str, provenance: &EngramObservationProvenance,
+        key: &str, execution: Arc<Mutex<DeclaredRunExecution>>, exit: Option<EngramCommandExit>, interrupted: bool) {
+        // An acknowledgement of an ongoing command is never END, even if
+        // its result artifact is already complete. The original task's END
+        // freezes the artifact and only then permits the after-run capture.
+        if !interrupted && exit == Some(EngramCommandExit::NotFinished) { return; }
+        let ended_at = test_run_timestamp();
         let (start, request) = {
             let mut job = execution.lock().expect("native execution mutex poisoned");
             if job.end_capture_started || job.end.is_some() { return; }
-            if exit == Some(EngramCommandExit::NotFinished) {
-                job.failure = Some("native terminal identity or exit is uncertain/background".to_owned());
-                return;
-            }
             job.end_capture_started = true;
             (job.reservation.clone(), job.request.clone())
         };
@@ -557,9 +562,15 @@ impl AppState {
         // Bounded artifact inspection occurs off both state/execution locks,
         // synchronously at the original END boundary, before another tool can
         // replace the artifact while registration is waiting on durability.
-        let check = engram_verification_record_declared_check(&stage,
+        let mut check = engram_verification_record_declared_check(&stage,
             &engram_verification_record_planned_argv(&request), &start.declaration,
             exit.unwrap_or(EngramCommandExit::Unknown));
+        if interrupted && let Ok(check) = &mut check {
+            check.outcome = EngramVerificationRecordCheckOutcome::Indeterminate;
+            check.summary = Some("The process was interrupted before its artifact END was frozen.".to_owned());
+        }
+        let ended_test_runs = self.observe_test_command_end(session_id, provenance, key,
+            if exit == Some(EngramCommandExit::NotFinished) { None } else { exit });
         let outcome = check.as_ref().ok().map(|check| match check.outcome {
             EngramVerificationRecordCheckOutcome::Passed => EngramExecutionOutcome::Succeeded,
             EngramVerificationRecordCheckOutcome::Failed => EngramExecutionOutcome::Failed,
@@ -572,16 +583,41 @@ impl AppState {
         self.apply_declared_verdict_to_test_run(&ended_test_runs, outcome);
         let spawn = {
             let mut job = execution.lock().expect("native execution mutex poisoned");
-            if job.failure.is_some() { return; }
+            if job.failure.is_some() || job.verification_refusal.is_some() { return; }
             let check = match check {
                 Ok(check) => check,
                 Err(error) => { job.failure = Some(format!("native END artifact refused: {error}")); return; }
             };
             job.end = Some(DeclaredRunObservedEnd { ended_at, exit: code, reported_success,
-                uncertain: output_cut || (code.is_none() && !reported_success), check });
+                interrupted, check });
             if job.worker_active { false } else { job.worker_active = true; true }
         };
         if spawn { self.spawn_native_declared_worker(execution); }
+    }
+
+    fn end_native_declared_task(&self, session_id: &str, token: &RuntimeToken, key: &str, interrupted: bool) {
+        let provenance = EngramObservationProvenance::Claude(ClaudeObservationProvenance {
+            token: token.clone(), origin: ClaudeWorkOrigin::Unattributed,
+        });
+        let execution = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let record = &inner.sessions[index];
+            if !record.runtime.matches_runtime_token(token) { return; }
+            let runtime = test_run_runtime_identity(record, &provenance);
+            let tool = sha256_hex(key.as_bytes());
+            let mut matching = inner.test_run_observations.values().filter(|row|
+                row.summary.owner_session_id.as_deref() == Some(session_id)
+                    && row.runtime_identity == runtime && row.tool_identity == tool
+                    && row.summary.ended_at.is_none() && row.declared_native.is_some());
+            let (Some(row), None) = (matching.next(), matching.next()) else { return; };
+            let start = row.declared_native.as_ref().unwrap();
+            let Some(execution) = inner.test_runs.declared_executions.get(&start.run_id)
+                .filter(|job| job.lock().expect("native execution mutex poisoned").reservation == *start)
+                .cloned() else { return; };
+            execution
+        };
+        self.freeze_native_declared_end(session_id, &provenance, key, execution, None, interrupted);
     }
 
     // Off-lock and before either provider receives this prompt. Failure only
@@ -657,7 +693,7 @@ impl AppState {
             return;
         }
         let clock = self.engram_budget_clock();
-        let deadline = now() + NATIVE_S0_CAPTURE_BUDGET;
+        let deadline = now() + NATIVE_S0_CAPTURE_BUDGET + NATIVE_S0_AUTHORITY_MARGIN;
         let live = self.inner.lock().expect("state mutex poisoned").engram_turn_basis_captures_live.clone();
         let expected_keys = pending.keys.clone();
         let capture_state = self.clone();

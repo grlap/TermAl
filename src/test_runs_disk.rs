@@ -9,6 +9,26 @@
 
 /// The most `request.json` or `results.json` bytes read for one run.
 const TEST_RUN_JSON_MAX_BYTES: usize = 1024 * 1024;
+
+/// Read the owner's complete value through the shared closed validator. A
+/// missing, partial or oversized value is unavailable, including null/null.
+fn test_run_source_id(value: Option<&Value>) -> Option<EngramSourceId> {
+    let value = value?;
+    if serde_json::to_vec(value).ok()?.len() > ENGRAM_SOURCE_JSON_LIMIT { return None; }
+    let source: EngramSourceId = serde_json::from_value(value.clone()).ok()?;
+    source.validate(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET).ok()?;
+    Some(source)
+}
+
+fn test_run_source_endpoints(results: &Value) -> Option<(EngramSourceId, EngramSourceId)> {
+    Some((test_run_source_id(results.get("sourceIdBefore"))?,
+        test_run_source_id(results.get("sourceIdAfter"))?))
+}
+
+fn test_run_source_input_matches(request: &Value, results: &Value) -> bool {
+    let Some(admitted) = test_run_source_id(request.get("sourceId")) else { return false; };
+    test_run_source_endpoints(results).is_some_and(|(before, after)| admitted == before && before == after)
+}
 /// A focused command in a summary keeps at most this many arguments...
 const TEST_RUN_COMMAND_MAX_ITEMS: usize = 32;
 /// ...and at most this many bytes in total.
@@ -301,7 +321,7 @@ fn test_run_pid(value: &Value, key: &str) -> Option<u32> {
 struct TestRunWaitEvidence {
     stages: Option<[usize; 6]>,
     preflight: Option<[usize; 6]>,
-    fingerprint_comparison: &'static str,
+    source_comparison: &'static str,
 }
 
 impl TestRunWaitEvidence {
@@ -333,17 +353,15 @@ impl TestRunWaitEvidence {
                 counts
             })
         };
-        let fingerprint = |key| results.get(key).and_then(Value::as_str)
-            .filter(|text| !text.trim().is_empty() && text.len() <= TEST_RUN_TEXT_MAX_BYTES);
-        let fingerprint_comparison = match (fingerprint("before"), fingerprint("after")) {
-            (Some(before), Some(after)) if before == after => "matched",
-            (Some(_), Some(_)) => "mismatched",
+        let source_comparison = match test_run_source_endpoints(results) {
+            Some((before, after)) if before == after => "matched",
+            Some(_) => "mismatched",
             _ => "unknown",
         };
         Self {
             stages: totals("stages", false),
             preflight: totals("preflight", true),
-            fingerprint_comparison,
+            source_comparison,
         }
     }
 
@@ -353,7 +371,7 @@ impl TestRunWaitEvidence {
         Self {
             stages: Some([usize::MAX; 6]),
             preflight: Some([usize::MAX; 6]),
-            fingerprint_comparison: "mismatched",
+            source_comparison: "mismatched",
         }
     }
 }
@@ -496,9 +514,6 @@ impl TestRunRead {
 struct TestRunDisk {
     run_id: String,
     request_identity: Option<String>,
-    // Added by launcher preflight after durable registration; deliberately
-    // separate from the immutable registration request digest.
-    expected_fingerprint: Option<String>,
     locator_identity: Option<String>,
     run_dir: PathBuf,
     request_stamp: TestRunFileStamp,
@@ -720,11 +735,6 @@ impl TestRunDisk {
         TestRunRead::Run(Self {
             run_id,
             request_identity: test_run_registration_identity(&request).ok(),
-            expected_fingerprint: request
-                .get("expectedFingerprint")
-                .and_then(Value::as_str)
-                .filter(|value| test_run_object_id_valid(value))
-                .map(str::to_owned),
             locator_identity: test_run_locator_identity(run_dir),
             run_dir: run_dir.to_path_buf(),
             request_stamp,
@@ -905,6 +915,21 @@ fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
         TestRunJson::Failed => return Err(test_run_results_unreadable()),
         TestRunJson::TooLarge => return Err(test_run_results_too_large()),
     };
+    let request = match test_run_read_json(&run_dir.join("request.json")) {
+        TestRunJson::Parsed(request, _, _) => request,
+        _ => Value::Null,
+    };
+    let source_id = test_run_source_id(request.get("sourceId"));
+    let source_id_before = test_run_source_id(results.get("sourceIdBefore"));
+    let source_id_after = test_run_source_id(results.get("sourceIdAfter"));
+    let source_comparison = (request.get("sourceId").is_some()
+        || results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some()).then(|| {
+        match (&source_id, &source_id_before, &source_id_after) {
+            (Some(admitted), Some(before), Some(after)) if admitted == before && before == after => "matched",
+            (Some(_), Some(_), Some(_)) => "mismatched",
+            _ => "unknown",
+        }.to_owned()
+    });
     let stages = results
         .get("stages")
         .and_then(Value::as_array)
@@ -946,6 +971,10 @@ fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
     Ok(TestRunDetail {
         stages,
         preflight,
+        source_id,
+        source_id_before,
+        source_id_after,
+        source_comparison,
         expected_fingerprint: test_run_str(&results, "expectedFingerprint"),
         before: test_run_str(&results, "before"),
         after: test_run_str(&results, "after"),

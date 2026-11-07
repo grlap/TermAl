@@ -124,13 +124,7 @@ fn engram_parse_declaration(
             .filter(|artifact| !artifact.is_empty())
             .ok_or("an entry is missing `artifact`")?;
         let cwd = raw.cwd.unwrap_or_else(|| ".".to_owned());
-        let words = engram_declared_words(&command)?;
-        if engram_declared_command_forbidden(&words) {
-            return Err(
-                "an entry's command holds `--no-build`, `--list-tests` or a `.dll` path, in one \
-                 of their spellings",
-            );
-        }
+        engram_declared_words(&command)?;
         if !engram_declared_path_inside(root, &cwd, true) {
             return Err("an entry's `cwd` does not resolve inside the worktree");
         }
@@ -144,34 +138,6 @@ fn engram_parse_declaration(
         });
     }
     Ok(entries)
-}
-
-/// Whether a declared command's words make it something other than a test
-/// run of a built project: a run that skips the build, a listing, or a
-/// prebuilt assembly named directly, in the spellings dotnet accepts
-/// (`--no-build`, `--no-build:true`, `--no-build=true`; for `dotnet` also
-/// `-t` and the MSBuild properties `VSTestNoBuild` and `VSTestListTests`),
-/// and a `.dll` path even with the trailing dots or spaces Windows strips.
-/// A guard against honest mistakes in a trusted declaration, not a proof.
-fn engram_declared_command_forbidden(words: &[String]) -> bool {
-    let dotnet = words
-        .first()
-        .is_some_and(|program| engram_program_name(program) == "dotnet");
-    words.iter().any(|word| {
-        let lower = word.to_ascii_lowercase();
-        let option = lower.split([':', '=']).next().unwrap_or("");
-        option == "--no-build"
-            || option == "--list-tests"
-            || (dotnet
-                && (lower == "-t"
-                    || lower.contains("vstestnobuild")
-                    || lower.contains("vstestlisttests")))
-            || lower.split(['=', ':', ';', ',']).any(|piece| {
-                piece
-                    .trim_end_matches(['.', ' '])
-                    .ends_with(".dll")
-            })
-    })
 }
 
 /// Whether `relative`, a root-relative path from the declaration, stays

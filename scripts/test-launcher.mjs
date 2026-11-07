@@ -21,16 +21,16 @@ import fs, {
 import nodePath, { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
-import {
-  captureCommitInputStatus,
-  captureFingerprint,
-  fingerprintComponentNames,
-  isolatedGitEnvironment,
-} from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { captureCommitInputStatus, sourceBinaryPath, sourceIdsEqual, sourceIdDifference,
+  sourceOwnerPinValid, sourceIdLimitations, encodeRunRecord, encodeTerminalRunResult,
+  refuseRunSource } from "./test-launcher-input.mjs";
 import { processMayBeAlive } from "./test-temp-root.mjs";
-import { registerTestRun, validateRunRegistration, validateRegistrationContext, boundedStateLockEvidence } from "./test-run-registration.mjs";
+import { registerTestRun, validateRunRegistration, validateRegistrationContext, boundedStateLockEvidence, sourceOwnerMetadata } from "./test-run-registration.mjs";
 import {
   durationReportKinds,
+  durationBudgetMs,
+  slowFileBudgetMs,
   durationReportPlan,
   durationSummaryLines,
   nodeDurationReporterFile,
@@ -46,12 +46,12 @@ import {
   resolveCategory,
 } from "./test-categories-plan.mjs";
 import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
-import { runOwnedCommand } from "./test-process-owner.mjs";
+import { runOwnedCommand, OWNER_RESPONSE_CHARACTER_LIMIT, OWNER_STDERR_CHARACTER_LIMIT } from "./test-process-owner.mjs";
 import { watchCommandProgress } from "./test-command-progress.mjs";
 import { bootstrapUiDependencies } from "./test-ui-bootstrap.mjs";
 import {
-  bindSourceToInput,
   captureSourceMetadata,
+  sourceMetadataFromIdentity,
   cargoConfigSelectsRustc,
   compilerWrapperInEnvironment,
   parseRustupActiveToolchain,
@@ -79,6 +79,7 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-launcher-panic-journal.test.mjs",
   "scripts/test-launcher-plan.test.mjs",
   "scripts/test-launcher-source.test.mjs",
+  "scripts/test-launcher-input.test.mjs",
   "scripts/test-ui-bootstrap.test.mjs",
   "scripts/test-launcher-git-path.test.mjs",
   "scripts/test-launcher-commit-input.test.mjs",
@@ -105,6 +106,8 @@ export const helperTestArgs = Object.freeze([
 ]);
 // Also consumed by real-launcher fixtures that copy the runtime helpers.
 export const helperSupportFiles = Object.freeze([
+  "scripts/source-id-budget.mjs",
+  "scripts/source-id-budget-ms.json",
   "scripts/cleanup-report.mjs",
   "scripts/export-review-attempt.mjs",
   nodeDurationReporterFile,
@@ -115,6 +118,7 @@ export const helperSupportFiles = Object.freeze([
   "scripts/test-fixture-cleanup.mjs",
   "scripts/test-launcher.mjs",
   "scripts/test-launcher-source.mjs",
+  "scripts/test-launcher-input.mjs",
   "scripts/test-launcher-registration-fixtures.mjs",
   "scripts/test-launcher-lifecycle-tests.mjs",
   "scripts/test-process-owner.mjs",
@@ -176,9 +180,25 @@ export function replaceAtomically(temporary, path, {
 }
 
 export function save(path, value, replace = {}) {
+  const artifact = basename(path);
+  let sourceRefusal;
+  if (artifact === "results.json" && value.state === "running" && value.sourceIdBefore) {
+    try { reserveResultSource(value, dirname(path), value.sourceIdBefore); }
+    catch (error) {
+      if (error.code !== "RUN_RECORD_OUTPUT_LIMIT") throw error;
+      sourceRefusal = error;
+      refuseRunSource(value, artifact);
+      value.ended = new Date().toISOString();
+      attachFailureInvestigation(value, dirname(path));
+    }
+  }
+  const bytes = artifact === "results.json" && isTerminal(value)
+    ? encodeTerminalRunResult(value)
+    : ["request.json", "input.json", "results.json"].includes(artifact)
+      ? encodeRunRecord(value, artifact) : Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(temporary, bytes, { flag: "wx" });
     replaceAtomically(temporary, path, replace);
   } finally {
     try {
@@ -187,6 +207,8 @@ export function save(path, value, replace = {}) {
       if (error.code !== "ENOENT") throw error;
     }
   }
+  // Persist the bounded refusal before stopping setup or the stage loop.
+  if (sourceRefusal) throw sourceRefusal;
 }
 
 // A result is terminal once it records how the run ended; anything else is
@@ -208,6 +230,99 @@ function failureInvestigation(runDir) {
 function attachFailureInvestigation(result, runDir) {
   if (result.state === "failed" && !result.failureInvestigation) {
     result.failureInvestigation = failureInvestigation(runDir);
+  }
+}
+
+// Reserve the known two-observation shape and bounded terminal refusal fields.
+// Future stage metadata is checked again when it is actually known; this is
+// not a new source-size quota or a claim to bound metadata-only overflow.
+function reserveResultSource(result, runDir, sourceId) {
+  const projected = { ...result, sourceIdBefore: sourceId, sourceIdAfter: sourceId,
+    ...(result.input ? { input: { ...result.input } } : {}),
+    ended: new Date().toISOString(), state: "failed", exitCode: 1 };
+  refuseRunSource(projected, "results.json");
+  // refuseRunSource marks an unavailable endpoint. Reserve the matching full
+  // endpoint as well, so a normal equal completion can be persisted.
+  projected.sourceIdAfter = sourceId;
+  projected.error = "\0".repeat(diagnosticLimit);
+  if (result.input) projected.input = { ...result.input, eligible: false,
+    unavailableReason: "\0".repeat(diagnosticLimit) };
+  attachFailureInvestigation(projected, runDir);
+  encodeRunRecord(projected, "results.json");
+}
+
+function boundedRunError(message, runDir) {
+  const text = String(message);
+  if (text.length <= diagnosticLimit) return text;
+  // A stage's raw output is never a launcher diagnostic destination. Each
+  // exclusive private file is owned by this write, and failure is evidence
+  // about the diagnostic only; it cannot suppress core terminal publication.
+  const name = `launcher.diagnostic-${randomUUID()}.log`;
+  let suffix;
+  try {
+    writeFileSync(join(runDir, name), `${text}\n`, { flag: "wx", mode: 0o600 });
+    suffix = ` [full diagnostic in ${name}]`;
+  } catch (error) {
+    const code = typeof error?.code === "string" && /^[A-Z0-9_]{1,32}$/u.test(error.code)
+      ? error.code : "write_failed";
+    suffix = ` [full diagnostic unavailable: ${code}]`;
+  }
+  return text.slice(0, diagnosticLimit - suffix.length) + suffix;
+}
+
+function unavailableDuration(report) {
+  const { kind, budgetMs, fileBudgetMs, artifact } = report;
+  return { kind, budgetMs, fileBudgetMs, ...(artifact ? { artifact } : {}), status: "unavailable",
+    reason: "results.json: output_limit; duration summary unavailable; complete raw duration artifact retained" };
+}
+
+// Project existing bounded command facts before spawn. No projected value is
+// persisted: unknown numbers and diagnostic text use their longest JSON form.
+// Optional duration lists are handled from their actual artifact after close;
+// verdict-affecting accounting is never removed by this reservation.
+function reserveCommandResult(result, entry, field, index, runDir, sourceId, { owned = false, report } = {}) {
+  const integer = -Number.MAX_VALUE;
+  const diagnostic = "\0".repeat(diagnosticLimit);
+  const completed = { ...entry, state: "failed", ended: new Date().toISOString(), code: integer,
+    signal: "SIGRTMAX+2147483647", interrupted: true, error: diagnostic,
+    diagnostics: { text: diagnostic, truncated: true, fallback: "no recognized diagnostic; bounded failure tail" },
+    tests: { runner: "cargo-libtest", passed: integer, failed: integer, ignored: integer },
+    testThreads: { source: "scripts/test-rust.sh", threads: integer, availableParallelism: integer } };
+  if (report) completed.durations = unavailableDuration({ kind: report.kind, artifact: report.artifact,
+    budgetMs: durationBudgetMs, fileBudgetMs: slowFileBudgetMs });
+  if (owned) {
+    const log = entry.log;
+    const ledger = `${log}.owner-result.json`;
+    Object.assign(completed, {
+      nonce: randomUUID(), pid: integer, ownerPid: integer, bootstrapPid: integer, ownerLedger: ledger,
+      processOwner: { pid: integer, ledger, nonce: randomUUID(), bootstrapPid: integer },
+      ownerDiagnostics: { code: integer, signal: "SIGRTMAX+2147483647",
+        stderr: "\0".repeat(OWNER_STDERR_CHARACTER_LIMIT) },
+      stall: { state: "unknown", runId: result.runId, stage: entry.name, pid: integer, log,
+        inactiveMs: integer, episode: integer, error: diagnostic, observedAt: new Date().toISOString() },
+    });
+    if (process.platform === "win32") {
+      // The native owner JSON line is admitted under a UTF-16 character cap.
+      // Its UTF-8 image costs at most three bytes per code unit. Serialization
+      // keeps the same closed fields and escaping; parent-only fields above
+      // are reserved separately. This also covers its variable job PID list.
+      completed.cleanup = { wireReservation: "x".repeat(3 * OWNER_RESPONSE_CHARACTER_LIMIT) };
+    } else {
+      completed.cleanup = { state: "unresolved", trigger: "\0".repeat(512 + "interrupt: ".length),
+        pids: [integer], pidScope: "command root only", ownership: "posix-process-group" };
+    }
+  }
+  const entries = [...result[field]];
+  entries[index] = completed;
+  reserveResultSource({ ...result, [field]: entries, interrupted: true }, runDir, sourceId);
+}
+
+function fitDurationReport(result, entry, runDir, sourceId) {
+  if (!entry.durations) return;
+  try { reserveResultSource(result, runDir, sourceId); }
+  catch (error) {
+    if (error.code !== "RUN_RECORD_OUTPUT_LIMIT") throw error;
+    entry.durations = unavailableDuration(entry.durations);
   }
 }
 
@@ -558,19 +673,25 @@ export async function createRun({
     validateRegistrationContext(env);
     throw error;
   }
+  const sourceOwner = await sourceOwnerMetadata(env);
+  const sourceBinary = sourceOwner?.binaryPath ?? sourceBinaryPath(env);
+  const sourceEnv = { ...env, ENGRAM_SOURCE_BINARY: sourceBinary };
+  const captureInput = () => commitInputStatus(normalizedRoot, sourceEnv, { pin: sourceOwner });
   let commitInput;
+  let inputFailure;
   let plainInputReason = runInput === "plain" ? "explicit --input plain" : undefined;
   if (automaticInput && runInput === undefined) {
     try {
-      const observed = await commitInputStatus(normalizedRoot, gitEnv);
+      const observed = await captureInput();
+      commitInput = observed;
       if (commitInputStatusClean(observed)) {
         runInput = "commit";
-        commitInput = observed;
       } else {
         plainInputReason = boundedInputReason(commitInputNotCleanReason(observed));
       }
     } catch (error) {
-      // Plain execution still applies its existing root/HEAD/fingerprint checks.
+      // Plain execution still requires available, equal complete source values.
+      inputFailure = error;
       plainInputReason = boundedInputReason(`committed-input admission unavailable: ${error.message}`);
     }
   }
@@ -581,6 +702,8 @@ export async function createRun({
   const request = {
     runId,
     root: normalizedRoot,
+    sourceBinary,
+    ...(sourceOwner ? { sourceOwner } : {}),
     stages,
     notifyTo: notification?.notifyTo,
     requiredBinaryEnv,
@@ -606,9 +729,10 @@ export async function createRun({
     runId,
     state: "running",
     started: request.started,
-    // Measured with the input fingerprint below; until then it identifies
-    // nothing.
+    // The admitted source value is measured below, before any stage.
     source: unknownSource("not_yet_measured"),
+    sourceIdBefore: null,
+    sourceIdAfter: null,
     ...(plainInputReason ? { inputSelection: { kind: "plain", reason: plainInputReason } } : {}),
     preflight: [],
     ...(scope ? { scope } : {}),
@@ -642,6 +766,7 @@ export async function createRun({
     throw failure;
   }
   try {
+    if (inputFailure) throw inputFailure;
     // Refuses the run as not clean before it: no stage runs.
     const refuseNotClean = (status, when) => {
       const result = readJson(join(runDir, "results.json"));
@@ -667,39 +792,25 @@ export async function createRun({
       return runDir;
     };
     if (request.input === "commit") {
-      commitInput ??= await commitInputStatus(normalizedRoot, gitEnv);
+      commitInput ??= await captureInput();
       if (!commitInputStatusClean(commitInput)) return refuseNotClean(commitInput, "");
       const result = readJson(join(runDir, "results.json"));
       result.input = { kind: "commit", commit: commitInput.commit, cleanBefore: true };
       save(join(runDir, "results.json"), result);
     }
-    const input = await captureFingerprint(normalizedRoot, gitEnv);
-    if (commitInput && input.headCommit !== commitInput.commit) {
-      throw new Error("committed-input run refused: HEAD moved while the input was captured; no stage ran");
-    }
-    if (commitInput) {
-      // An edit made between the first status and the fingerprint would be
-      // frozen into the fingerprint and could be reverted after the stages,
-      // reading as clean before and after. The checkout must still be clean,
-      // at the same HEAD, once the fingerprint is taken.
-      const again = await commitInputStatus(normalizedRoot, gitEnv);
-      if (again.commit !== commitInput.commit) {
-        throw new Error("committed-input run refused: HEAD moved while the input was captured; no stage ran");
-      }
-      if (!commitInputStatusClean(again)) {
-        return refuseNotClean(again, " (it changed while the input was captured)");
-      }
-    }
-    save(join(runDir, "input.json"), input);
-    request.expectedFingerprint = input.fingerprint;
-    save(join(runDir, "request.json"), request);
-    // What the run started from, bound to the fingerprint every stage is
-    // checked against: measured right after it, and kept only when it
-    // describes the same HEAD and the same clean or dirty status. It is then
-    // never changed.
-    const measured = await captureSourceMetadata(normalizedRoot, env);
+    const input = commitInput ?? await captureInput();
+    if (!sourceIdsEqual(input.sourceId, input.sourceId)) throw new Error("source_id is unavailable or malformed; no stage ran");
     const initial = readJson(join(runDir, "results.json"));
-    initial.source = bindSourceToInput(measured, input);
+    initial.source = sourceMetadataFromIdentity(normalizedRoot, input, env);
+    // Check all copies before publishing a source-bound request. In particular,
+    // a one-copy request fit alone does not establish a two-copy result fit.
+    encodeRunRecord({ ...request, sourceId: input.sourceId }, "request.json");
+    const inputRecord = { root: input.root, sourceId: input.sourceId };
+    encodeRunRecord(inputRecord, "input.json");
+    reserveResultSource(initial, runDir, input.sourceId);
+    save(join(runDir, "input.json"), inputRecord);
+    request.sourceId = input.sourceId;
+    save(join(runDir, "request.json"), request);
     save(join(runDir, "results.json"), initial);
   } catch (error) {
     const result = readJson(join(runDir, "results.json"));
@@ -709,6 +820,7 @@ export async function createRun({
       ended: new Date().toISOString(),
       error: error.message,
     });
+    if (error.code === "RUN_RECORD_OUTPUT_LIMIT") refuseRunSource(result, error.artifact);
     attachFailureInvestigation(result, runDir);
     save(join(runDir, "results.json"), result);
   }
@@ -997,15 +1109,8 @@ export async function diagnostics(log, failed) {
   };
 }
 
-function changedFingerprintComponents(expected, observed) {
-  const changed = fingerprintComponentNames.filter(
-    (name) => expected?.[name] !== observed?.[name],
-  );
-  return changed.length > 0 ? changed : ["compositeFingerprint"];
-}
-
 function driftError(prefix, expected, observed) {
-  return `${prefix}; changed fingerprint components: ${changedFingerprintComponents(expected, observed).join(", ")}`;
+  return `${prefix}; ${sourceIdDifference(expected, observed)}`;
 }
 
 function normalizedSessionAddress(value, label) {
@@ -1060,6 +1165,11 @@ function validateInitialRequest(runDir, request, env) {
   if (request.input !== undefined && request.input !== "commit") {
     throw new Error("worker request names an unsupported input");
   }
+  if (typeof request.sourceBinary !== "string" || !isAbsolute(request.sourceBinary)
+      || (request.sourceOwner !== undefined && (!sourceOwnerPinValid(request.sourceOwner)
+        || request.sourceBinary !== request.sourceOwner.binaryPath))) {
+    throw new Error("worker request has no matching absolute source owner");
+  }
   if (request.notifyTo !== undefined) validateNotification(request, env);
 }
 
@@ -1108,8 +1218,7 @@ export function commitInputOutcome(beforeCommit, after) {
   if ((after.skipped ?? []).length) return "input_changed";
   if ((after.filters ?? []).length) return "input_changed";
   if ((after.gitlinks ?? []).length) return "input_changed";
-  if (after.entries.some((entry) => entry.status !== "??")) return "input_changed";
-  return after.entries.length ? "debris_pending_disposition" : "clean";
+  return after.entries.length ? "input_changed" : "clean";
 }
 
 // One summary line for the committed-input flow; none for the staged lane.
@@ -1144,7 +1253,7 @@ export function commitInputSummaryLine(result) {
 function commitInputGateSummaryLine(result) {
   const input = result.input;
   if (input?.kind !== "commit" || !isTerminal(result) ||
-      (input.eligible === true && typeof result.before === "string" && result.before === result.after)) return undefined;
+      (input.eligible === true && sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter))) return undefined;
   const after = input.after;
   let reason = input.unavailableReason || result.error;
   if (!reason && (input.outcome === "input_changed" || input.outcome === "debris_pending_disposition")) {
@@ -1152,7 +1261,7 @@ function commitInputGateSummaryLine(result) {
       filters: after?.filters, gitlinks: after?.gitlinks }) || "committed-input identity changed";
   }
   reason ||= result.state === "failed" ? "one or more stages failed or were interrupted"
-    : result.before !== result.after ? "input fingerprints differ" : "no eligible post-run input recorded";
+    : !sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter) ? "source_id differs or is unavailable" : "no eligible post-run input recorded";
   return `gate: not eligible; not a landing gate: ${boundedInputReason(reason)}`;
 }
 
@@ -1163,8 +1272,8 @@ function validateInitialResult(request, result) {
       result.stages.some((stage, index) => stage?.name !== request.stages[index].name)) {
     throw new Error("invalid initial worker results");
   }
-  if (result.state === "running" && !/^[a-f0-9]{64}$/u.test(request.expectedFingerprint ?? "")) {
-    throw new Error("worker request has no valid source fingerprint");
+  if (result.state === "running" && !sourceIdsEqual(request.sourceId, request.sourceId)) {
+    throw new Error("worker request has no valid complete source_id");
   }
 }
 
@@ -1207,7 +1316,9 @@ function startupFailureResult(runDir, request, result, error, notificationEligib
 // A failed observation must not leak into a later, unrelated result save.
 export function saveProgressObservation(resultPath, result, entry, observation, saveResult = save) {
   const previous = entry.stall;
-  entry.stall = { ...observation, observedAt: new Date().toISOString() };
+  entry.stall = { ...observation, ...(observation.error
+    ? { error: boundedRunError(observation.error, dirname(resultPath)) } : {}),
+    observedAt: new Date().toISOString() };
   try { saveResult(resultPath, result); }
   catch (error) {
     if (previous === undefined) delete entry.stall;
@@ -1259,17 +1370,17 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
   // no failure reader treats as the run's failure.
   const probe = async (name, command, args, entries = result.preflight) => {
     const log = join(runDir, `preflight-${name}.log`);
+    const entry = { name, command: [command, ...args], cwd: request.root, log };
+    const field = entries === result.preflight ? "preflight" : "toolchainProbes";
+    reserveCommandResult(result, entry, field, entries.length, runDir, request.sourceId);
     const outcome = await runCommand(command, args, {
       cwd: request.root,
       env: childEnv,
       log,
     });
-    entries.push({
-      name,
-      command: [command, ...args],
-      cwd: request.root,
+    entries.push({ ...entry,
       ...outcome,
-      log,
+      ...(outcome.error ? { error: boundedRunError(outcome.error, runDir) } : {}),
       diagnostics: await diagnostics(log, outcome.code !== 0 || Boolean(outcome.error)),
     });
     save(resultPath, result);
@@ -1383,15 +1494,26 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
           // Injection is limited to API fixtures; the CLI always uses the
           // maintained owned runner and native npm discovery.
           ...uiSetup,
-          run: uiSetup?.run ?? ((command, args, options) => runOwnedCommand(command, args, {
-            ...options, signal,
-            onOwner: (owner) => { setupEntry.processOwner = owner; save(resultPath, result); },
-            onStart: (pid) => { setupEntry.pid = pid; save(resultPath, result); },
-          })),
+          run: (command, args, options) => {
+            reserveCommandResult(result, setupEntry, "preflight", result.preflight.indexOf(setupEntry),
+              runDir, request.sourceId, { owned: true });
+            return (uiSetup?.run ?? ((program, arguments_, settings) => runOwnedCommand(program, arguments_, {
+              ...settings, signal,
+              onOwner: (owner) => { setupEntry.processOwner = owner; save(resultPath, result); },
+              onStart: (pid) => { setupEntry.pid = pid; save(resultPath, result); },
+            })))(command, args, options);
+          },
           observe: (entry) => {
-            if (!setupEntry) result.preflight.push(entry);
-            setupEntry = entry;
-            save(resultPath, result);
+            const observed = { ...setupEntry, ...entry,
+              ...(entry.error ? { error: boundedRunError(entry.error, runDir) } : {}) };
+            const index = setupEntry ? result.preflight.indexOf(setupEntry) : result.preflight.length;
+            const preflight = [...result.preflight];
+            preflight[index] = observed;
+            const proposed = { ...result, preflight };
+            reserveResultSource(proposed, runDir, request.sourceId);
+            save(resultPath, proposed);
+            result.preflight = preflight;
+            setupEntry = observed;
           },
         });
       } finally {
@@ -1441,7 +1563,9 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         : executable(stage.command, stage.cwd, childEnv);
       executables[stage.name] = stage.command;
     }
-    result.hostBindings = { executables, durationReporterUrl: nodeDurationReporterUrl };
+    const hostBindings = { executables, durationReporterUrl: nodeDurationReporterUrl };
+    reserveResultSource({ ...result, hostBindings }, runDir, request.sourceId);
+    result.hostBindings = hostBindings;
     save(resultPath, result);
     if (request.notifyTo) validateNotification(request, env);
     for (const name of request.requiredBinaryEnv ?? []) {
@@ -1483,30 +1607,22 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       childEnv.TERMAL_TEST_LIVE_ENGRAM_SHA256 = expectedSha256;
       await probe("engram", binary, ["--version"]);
     }
-    const expectedInput = readJson(join(runDir, "input.json"));
-    if (request.input === "commit") {
-      const status = await captureCommitInputStatus(request.root, childEnv);
-      if (!commitInputStatusClean(status)) {
-        throw new Error(`committed-input admission changed before execution: ${commitInputNotCleanReason(status)}; no stages run`);
-      }
-      if (status.commit !== result.input?.commit) {
-        throw new Error("committed-input HEAD moved before execution; no stages run");
-      }
-    }
-    const before = await captureFingerprint(request.root, childEnv);
-    if (before.fingerprint !== request.expectedFingerprint) {
-      throw new Error(driftError("input drift before execution; no stages run", expectedInput, before));
+    childEnv.ENGRAM_SOURCE_BINARY = request.sourceBinary;
+    const before = await captureCommitInputStatus(request.root, childEnv, { pin: request.sourceOwner });
+    result.sourceIdBefore = before.sourceId;
+    if (!sourceIdsEqual(request.sourceId, result.sourceIdBefore)) {
+      result.reason = "input-changed";
+      throw new Error(driftError("source_id changed before execution; no stages run", request.sourceId, before.sourceId));
     }
     if (request.input === "commit" && (result.input?.kind !== "commit" ||
-        result.input.cleanBefore !== true || result.input.commit !== before.headCommit)) {
+        !commitInputStatusClean(before) || result.input.cleanBefore !== true || result.input.commit !== before.commit)) {
       throw new Error("committed-input run has no recorded clean commit matching HEAD; no stages run");
     }
-    result.expectedFingerprint = request.expectedFingerprint;
-    result.before = before.fingerprint;
-    if (process.platform === "win32") {
-      result.limitations = "Windows: untracked executable modes and filesystem symlink properties are unverified.";
-    }
+    result.limitations = sourceIdLimitations().join(" ");
     save(resultPath, result);
+    if (result.sourceInputReason === "input-unverified") {
+      throw new Error(result.sourceUnavailableReason);
+    }
     // A full gate's detached STARTED receipt means setup and preflight have
     // succeeded. Setup failure closes with durable evidence, never READY.
     if (request.full) {
@@ -1520,14 +1636,20 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       // stage's own output; it never decides the stage's state.
       const report = durationReportPlan(stage, runDir);
       const args = report ? [...report.prefix, ...stage.args, ...report.suffix] : stage.args;
-      Object.assign(entry, {
+      const running = { ...entry,
         state: "running",
         started: new Date().toISOString(),
         command: [stage.command, ...args],
         cwd: stage.cwd,
         log: join(runDir, `${stage.name}.log`),
-      });
-      save(resultPath, result);
+      };
+      reserveCommandResult(result, running, "stages", index, runDir, request.sourceId,
+        { owned: stage.name === "focused" && !request.full, report });
+      const proposed = { ...result, stages: result.stages.map((value, position) => position === index ? running : value) };
+      save(resultPath, proposed);
+      // Only adopt running after the durable proposed record fits. Refusal
+      // before this point leaves this unspawned stage unrun.
+      Object.assign(entry, running);
       let outcome;
       if (stage.name === "focused" && !request.full) {
         let stopProgress;
@@ -1569,6 +1691,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         ended: new Date().toISOString(),
         state: outcome.code === 0 && !outcome.error ? "passed" : "failed",
       });
+      if (entry.error) entry.error = boundedRunError(entry.error, runDir);
       if (report) entry.durations = readDurationReport(report, stage.cwd);
       // A focused run's exit says nothing about how many tests ran; its
       // wrapped runner's own result lines do (scripts/test-counts.mjs).
@@ -1606,45 +1729,28 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
           entry.error = `UI project accounting ${entry.accounting.status}: ${entry.accounting.reason ?? "no reason recorded"}`;
         }
       }
+      if (entry.error) entry.error = boundedRunError(entry.error, runDir);
       entry.diagnostics = await diagnostics(entry.log, entry.state === "failed");
+      fitDurationReport(result, entry, runDir, request.sourceId);
       save(resultPath, result);
       if (entry.state === "failed") break;
     }
-    let after, status;
+    let status, sourceRefusal;
     try {
-      if (request.input === "commit") {
-        // A stage may have installed a child filter. Guard before fingerprint
-        // diff/status recursion, and retain the final admission reread too.
-        const guarded = await captureCommitInputStatus(request.root, childEnv);
-        if ((guarded.filters ?? []).length || (guarded.gitlinks ?? []).length) {
-          status = guarded;
-        } else {
-          after = await captureFingerprint(request.root, childEnv);
-          status = await captureCommitInputStatus(request.root, childEnv);
-        }
-      } else {
-        after = await captureFingerprint(request.root, childEnv);
-      }
+      status = await captureCommitInputStatus(request.root, childEnv, { pin: request.sourceOwner });
     } catch (error) {
-      if (request.input !== "commit") throw error;
-      // No invented after identity or outcome: the legacy reader accepts an
-      // absent post-run observation, but it can never admit it as eligible.
-      result.input.unavailableReason = boundedInputReason(`post-run input unavailable: ${error.message}`);
+      sourceRefusal = boundedInputReason(`post-run source_id unavailable: ${error.message}`);
+      if (result.input?.kind === "commit") result.input.unavailableReason = sourceRefusal;
     }
-    if (after) result.after = after.fingerprint;
+    result.sourceIdAfter = status?.sourceId ?? null;
+    if (sourceRefusal) result.sourceUnavailableReason = sourceRefusal;
     if (request.input === "commit" && status) {
       result.input.after = {
         commit: status.commit,
         clean: commitInputStatusClean(status),
         paths: status.entries,
-        ...(status.skipped.length ? { skippedPaths: status.skipped } : {}),
-        ...((status.filters ?? []).length ? { filters: status.filters } : {}),
-        ...((status.gitlinks ?? []).length ? { gitlinks: status.gitlinks } : {}),
       };
       result.input.outcome = commitInputOutcome(result.input.commit, status);
-      if (result.input.outcome === "debris_pending_disposition") result.input.disposition = null;
-    } else if (request.input !== "commit" && result.after !== result.expectedFingerprint) {
-      throw new Error(driftError("input drift: results do not validate the current source", expectedInput, after));
     }
     result.state = result.stages.every((stage) => stage.state === "passed") ? "passed" : "failed";
     if (signal?.aborted) {
@@ -1655,14 +1761,29 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     // A stage failed by its accounting exited 0 itself; the run still fails.
     const failedStage = result.stages.find((stage) => stage.state === "failed");
     result.exitCode = failedStage ? failedStage.code || 1 : result.state === "passed" ? 0 : 1;
+    const sourceMatches = sourceIdsEqual(request.sourceId, result.sourceIdBefore)
+      && sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter);
+    if (!sourceMatches) {
+      const sourceReason = sourceRefusal ? "input-unverified" : "input-changed";
+      result.sourceInputReason = sourceReason;
+      result.error ??= sourceRefusal ?? driftError("source_id changed during execution", result.sourceIdBefore, result.sourceIdAfter);
+      // Keep an actual command failure and its code. A passed stage alone
+      // cannot turn missing or changed source evidence into a passing run.
+      if (result.state === "passed") {
+        result.state = "failed"; result.exitCode = 1; result.reason = sourceReason;
+      } else { result.reason ??= sourceReason; }
+      if (result.input?.kind === "commit" && status) result.input.outcome = "input_changed";
+    }
     if (result.input?.kind === "commit") {
       result.input.eligible = result.input.outcome === "clean" && result.state === "passed"
-        && result.before === result.after;
+        && sourceMatches;
     }
   } catch (error) {
     result.state = "failed";
-    result.exitCode = 1;
-    result.error = error.message;
+    const failedStage = result.stages.find((stage) => stage.state === "failed");
+    result.exitCode = failedStage?.code || 1;
+    result.error = boundedRunError(error.message, runDir);
+    if (error.code === "RUN_RECORD_OUTPUT_LIMIT") refuseRunSource(result, error.artifact);
     if (result.input?.kind === "commit") result.input.eligible = false;
     if (signal?.aborted || error.interrupted) {
       result.interrupted = true;
@@ -1671,11 +1792,12 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     for (const stage of result.stages) {
       if (stage.state === "running") {
         stage.state = "failed";
-        stage.error = error.message;
+        stage.error = boundedRunError(error.message, runDir);
       }
     }
   }
   attachFailureInvestigation(result, runDir);
+  if (result.error) result.error = boundedRunError(result.error, runDir);
   result.ended = new Date().toISOString();
   save(resultPath, result);
   return result;
@@ -1693,6 +1815,17 @@ export async function summarize(runDir) {
   }
   const inputLine = commitInputSummaryLine(result);
   if (inputLine) lines.push(inputLine);
+  if (Object.hasOwn(result, "sourceIdBefore") || Object.hasOwn(result, "sourceIdAfter")) {
+    let request;
+    try { request = readJson(join(runDir, "request.json")); } catch { /* Missing input is unknown. */ }
+    const complete = sourceIdsEqual(request?.sourceId, request?.sourceId)
+      && sourceIdsEqual(result.sourceIdBefore, result.sourceIdBefore)
+      && sourceIdsEqual(result.sourceIdAfter, result.sourceIdAfter);
+    const comparison = !complete ? "unknown"
+      : sourceIdsEqual(request.sourceId, result.sourceIdBefore)
+        && sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter) ? "matched" : "mismatch";
+    lines.push(`input: ${comparison}; source_id; boundary comparison only, not host check credit`);
+  }
   // The host writes this separately after launcher completion. Reading it
   // reports delivery status; it never changes the run's native verdict.
   try {
@@ -2257,7 +2390,7 @@ async function main(args) {
   // No inherited terminal handles: process lifetime is independent of the turn.
   // STARTED is printed only after the child owns admission and validates state.
   const detached = await startDetachedRun(runDir);
-  console.log(`STARTED ${runDir}\npid=${detached.pid} completion=mailbox:${options.notifyTo.trim()}\nEnd your turn; do not poll. Missing terminal results mean running/interrupted, not PASS.`);
+  console.log(`STARTED ${runDir}\npid=${detached.pid} completion=mailbox:${options.notifyTo.trim()} basis=source_id input=${join(runDir, "input.json")}\nEnd your turn; do not poll. Missing terminal results mean running/interrupted, not PASS.`);
 }
 
 // Node resolves this module's own path through links (macOS /var is a link

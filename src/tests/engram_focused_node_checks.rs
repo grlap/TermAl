@@ -411,15 +411,15 @@ impl FocusedNodeFixture {
         let directory = engram_git_run_directory(&turn.root).unwrap().join(&run);
         fs::create_dir_all(&directory).unwrap();
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let fingerprint = "f".repeat(64);
+        let source_id = launcher_source_id_fixture();
         let state = if native == 0 { "passed" } else { "failed" };
         let request = json!({"runId":run,"root":turn.root,"owner":turn.session_id,
-            "started":now,"full":false,"detached":false,"expectedFingerprint":fingerprint,
+            "started":now,"full":false,"detached":false,"sourceId":source_id,
             "stages":[{"name":"focused","command":"node","args":args}]});
         let mut stage_command = vec![json!(turn.root.join("node.exe"))];
         stage_command.extend(args.iter().map(|arg| json!(arg)));
         let results = json!({"runId":run,"owner":turn.session_id,"started":now,"ended":now,
-            "state":state,"exitCode":native,"expectedFingerprint":fingerprint,"before":fingerprint,"after":fingerprint,
+            "state":state,"exitCode":native,"sourceIdBefore":source_id,"sourceIdAfter":source_id,
             "stages":[{"name":"focused","state":state,"code":native,"started":now,"ended":now,
                 "cwd":turn.root,"command":stage_command,
                 "tests":{"runner":"node-test","passed":u32::from(native == 0),"failed":u32::from(native != 0),"ignored":0}}]});
@@ -435,7 +435,7 @@ impl FocusedNodeFixture {
             directory,
             request,
             results,
-            input: json!({"fingerprint":fingerprint}),
+            input: json!({"sourceId":source_id}),
             output,
         }
     }
@@ -674,8 +674,8 @@ fn engram_node_invalid_artifacts_cannot_be_rescued_by_summary_or_counts() {
         ("argv", |f| {
             f.results["stages"][0]["command"][2] = json!("--help")
         }),
-        ("fingerprint", |f| {
-            f.results["after"] = json!("a".repeat(64))
+        ("source-input", |f| {
+            f.results["sourceIdAfter"]["tree"] = json!("c".repeat(40))
         }),
         ("stale", |f| {
             f.request["started"] = json!("2000-01-01T00:00:00.000Z")

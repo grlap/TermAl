@@ -245,6 +245,19 @@ The shared source contract is quoted below. See also the
 > Rollout: `engram source` gains the new fields in its existing JSON (no v2); TermAl's and Engram's strict readers are updated in the same window. Consumers then move off content-v1 one at a time. Old records stay readable as stored.
 > Rule: no new conditions, mechanisms or gates without Greg's explicit word.
 
+The quoted 8 s bound is historical. On 2026-11-07 Greg changed the source
+capture bound to 30 s (Asistant #734): „8 sekund jest za mało. Podnieśc do
+30 sec. Takie sztywne limity bardzo duzo nas kosztuja poprawek i marnowanego
+czasu.” The 1 MiB output bound is unchanged. TermAl's source-owner operations
+share the 30 s budget, including byte-pin checks, execution and parsing, while
+preserving any shorter caller deadline. S0 opening also reserves the existing
+5 s for surrounding stages. The host and launcher derive source deadlines from
+`scripts/source-id-budget-ms.json`. Process delivery adds 2 s and metadata
+HTTP adds 5 s; pinned registration reserves the source budget before its
+existing ACK/claim/durability allowances. Those allowances and reclamation
+budgets remain unchanged. The paired Engram build must accept `--timeout-ms 30000`
+before this host change is activated.
+
 Native `registered_at` and check start name the persisted first
 host-observed start, not the OS spawn time; any provider timestamp is kept
 separately. See [the native verification contract](execution-observability.md#declared-native-source-verification).
@@ -279,16 +292,15 @@ table and no repository or global configuration write.
    `diff.ignoreSubmodules=none` override also keeps nested dirt visible.
    Do not add a child porcelain parser or discard a child-dirty root entry.
 5. Reread root HEAD and require it unchanged across the capture. The launcher
-   repeats this admission before and after execution and retains its existing
-   fingerprint recheck and real command outcome. Run the child guards before
-   execution-boundary fingerprint recursion. If a post-run guard refuses a
-   configured filter, omit that unsafe fingerprint and record ineligibility
-   while preserving the stage's actual outcome.
+   uses the complete owner source_id at its admitted, before and after
+   boundaries, with no automatic fingerprint. An unavailable measurement
+   supplies no partial value and loses eligibility. Stage states and command
+   exits remain recorded even when the input comparison refuses the run.
 
 Tracked root or child changes, staged pins and untracked non-ignored output
 are ineligible when Git reports them. An edited assume-unchanged or skip-worktree
-file can be invisible to status and counts as clean: tests explicitly demonstrate
-this accepted limitation in root and child checkouts. This is Git cleanliness,
+file can be invisible to status and counts as clean. One root unit test
+demonstrates the accepted Git-status limitation, which also applies to children. This is Git cleanliness,
 not an assertion that every worktree byte was examined.
 
 Git-ignored files are outside identity and cleanliness judgment in the root and
@@ -379,6 +391,15 @@ without verification credit. Explicit `--input commit` remains strict. This
 extension changes neither default. A later source-basis default change needs
 its own consumer migration and historical-record assessment. Schemes compare
 by exact string equality, so a switch cannot be treated as a false match.
+
+Automatic launcher input and its host readers use only the existing complete
+`request.sourceId`, `results.sourceIdBefore` and `results.sourceIdAfter`.
+Equal dirty values qualify for this comparison; any difference, including a
+newly untracked file, cannot qualify. Missing or invalid objects never compare
+as equal. Waits retain request/locator identity and authority guards without a
+parent-held source copy. Detail and remote completion carry actual observations
+within existing bounds. Historical fingerprints stay attributed history;
+review-freeze identity remains deferred. See [the launcher contract](../test.md#ordinary-committed-input-runs---input-commit).
 
 | Consumer | Source identity use | Additional facts retained |
 | --- | --- | --- |

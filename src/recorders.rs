@@ -171,6 +171,7 @@ trait TurnRecorder {
         status: CommandStatus,
         exit: EngramCommandExit,
         _runtime_output_cut: bool,
+        _runtime_interrupted: bool,
     ) -> Result<()> {
         self.command_completed_with_exit(key, command, output, status, exit)
     }
@@ -268,7 +269,7 @@ impl SessionRecorder {
         exit: EngramCommandExit,
     ) -> Result<()> {
         recorder_command_completed_reported(
-            self, key, command, reported_command, output, status, Some(exit), false,
+            self, key, command, reported_command, output, status, Some(exit), false, false,
         )
     }
 
@@ -925,9 +926,10 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
     status: CommandStatus,
     exit: Option<EngramCommandExit>,
     runtime_output_cut: bool,
+    runtime_interrupted: bool,
 ) -> Result<()> {
     recorder_command_completed_reported(
-        recorder, key, command, Some(command), output, status, exit, runtime_output_cut,
+        recorder, key, command, Some(command), output, status, exit, runtime_output_cut, runtime_interrupted,
     )
 }
 
@@ -941,6 +943,7 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
     status: CommandStatus,
     exit: Option<EngramCommandExit>,
     runtime_output_cut: bool,
+    runtime_interrupted: bool,
 ) -> Result<()> {
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
@@ -961,7 +964,7 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
     {
         let provenance = recorder.recorder_state_mut().native_tool_provenance.clone()
             .unwrap_or_else(|| recorder.recorder_state_mut().observation_provenance.clone());
-        state.end_native_declared_run(&session_id, &provenance, key, exit, runtime_output_cut);
+        state.end_native_declared_run(&session_id, &provenance, key, exit, runtime_interrupted);
         recorder.observe(EngramRecorderObservation::CommandFinished {
             key,
             command,
@@ -1293,7 +1296,7 @@ impl TurnRecorder for SessionRecorder {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status, None, false)
+        recorder_command_completed(self, key, command, output, status, None, false, false)
     }
 
     fn command_completed_with_exit(
@@ -1304,7 +1307,7 @@ impl TurnRecorder for SessionRecorder {
         status: CommandStatus,
         exit: EngramCommandExit,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status, Some(exit), false)
+        recorder_command_completed(self, key, command, output, status, Some(exit), false, false)
     }
 
     fn command_completed_with_capture(
@@ -1315,9 +1318,10 @@ impl TurnRecorder for SessionRecorder {
         status: CommandStatus,
         exit: EngramCommandExit,
         runtime_output_cut: bool,
+        runtime_interrupted: bool,
     ) -> Result<()> {
         recorder_command_completed(
-            self, key, command, output, status, Some(exit), runtime_output_cut,
+            self, key, command, output, status, Some(exit), runtime_output_cut, runtime_interrupted,
         )
     }
 
@@ -1447,7 +1451,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status, None, false)
+        recorder_command_completed(self, key, command, output, status, None, false, false)
     }
 
     fn command_completed_with_exit(
@@ -1458,7 +1462,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         status: CommandStatus,
         exit: EngramCommandExit,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status, Some(exit), false)
+        recorder_command_completed(self, key, command, output, status, Some(exit), false, false)
     }
 
     fn command_completed_with_capture(
@@ -1469,9 +1473,10 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         status: CommandStatus,
         exit: EngramCommandExit,
         runtime_output_cut: bool,
+        runtime_interrupted: bool,
     ) -> Result<()> {
         recorder_command_completed(
-            self, key, command, output, status, Some(exit), runtime_output_cut,
+            self, key, command, output, status, Some(exit), runtime_output_cut, runtime_interrupted,
         )
     }
 

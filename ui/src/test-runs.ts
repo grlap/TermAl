@@ -76,6 +76,10 @@ export interface TestRunPreflight {
 export interface TestRunDetail {
   stages: TestRunStageDetail[];
   preflight: TestRunPreflight[];
+  sourceId?: unknown;
+  sourceIdBefore?: unknown;
+  sourceIdAfter?: unknown;
+  sourceComparison?: "matched" | "mismatched" | "unknown" | null;
   expectedFingerprint: string | null;
   before: string | null;
   after: string | null;

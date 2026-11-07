@@ -3,7 +3,9 @@
 // authority, the content revision, or the run/review fingerprint algorithms.
 
 const ENGRAM_SOURCE_JSON_LIMIT: usize = 1024 * 1024;
-const ENGRAM_SOURCE_COMMAND_BUDGET: Duration = Duration::from_secs(8);
+// The same scalar configures the launcher's source process and metadata GET.
+const ENGRAM_SOURCE_COMMAND_BUDGET: Duration =
+    Duration::from_millis(include!("../scripts/source-id-budget-ms.json"));
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -171,7 +173,7 @@ fn parse_engram_source_observation(
 fn engram_source_command_args(root: &FsPath, deadline: std::time::Instant) -> Result<Vec<String>> {
     engram_source_before_deadline(deadline)?;
     let remaining = deadline.saturating_duration_since(std::time::Instant::now())
-        .as_millis().min(8000);
+        .as_millis().min(ENGRAM_SOURCE_COMMAND_BUDGET.as_millis());
     if remaining == 0 { bail!("Engram source deadline exceeded"); }
     Ok(vec!["source".into(), "--root".into(),
         normalize_user_facing_path(root).to_str()

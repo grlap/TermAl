@@ -22,7 +22,24 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+      - name: Checkout the compatible source owner
+        uses: actions/checkout@v4
+        with:
+          repository: grlap/Engram
+          ref: 54a5250a5f724657f46aed196fd9d7db69e2069e
+          path: target/engram-source
+          persist-credentials: false
+      - name: Setup Rust for the source-owner fixture dependency
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build the pinned source owner before launcher tests
+        run: cargo build --locked --manifest-path target/engram-source/Cargo.toml --target-dir target/engram-source-target --bin engram
+      - name: Select the explicit fixture source executable
+        shell: bash
+        run: |
+          owner="$GITHUB_WORKSPACE/target/engram-source-target/debug/engram"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then owner="${owner}.exe"; fi
+          echo "ENGRAM_SOURCE_BINARY=$owner" >> "$GITHUB_ENV"
       # The launcher suite preflights `cargo` from PATH and, on Windows, Git
       # Bash at its default Program Files path; GitHub-hosted images have both.
       - name: Test review integrity helpers
-        run: node --test --test-force-exit --test-timeout=600000 scripts/cleanup-report.test.mjs scripts/export-review-attempt.test.mjs scripts/review-freeze-fingerprint.test.mjs scripts/test-categories-plan.test.mjs scripts/test-durations.test.mjs scripts/test-launcher.test.mjs scripts/test-launcher-panic-journal.test.mjs scripts/test-launcher-plan.test.mjs scripts/test-launcher-source.test.mjs scripts/test-ui-bootstrap.test.mjs scripts/test-launcher-git-path.test.mjs scripts/test-launcher-commit-input.test.mjs scripts/test-temp-root.test.mjs scripts/vitest-resource-preflight.test.mjs
+        run: node --test --test-force-exit --test-timeout=600000 scripts/cleanup-report.test.mjs scripts/export-review-attempt.test.mjs scripts/review-freeze-fingerprint.test.mjs scripts/test-categories-plan.test.mjs scripts/test-durations.test.mjs scripts/test-launcher.test.mjs scripts/test-launcher-panic-journal.test.mjs scripts/test-launcher-plan.test.mjs scripts/test-launcher-source.test.mjs scripts/test-launcher-input.test.mjs scripts/test-ui-bootstrap.test.mjs scripts/test-launcher-git-path.test.mjs scripts/test-launcher-commit-input.test.mjs scripts/test-temp-root.test.mjs scripts/vitest-resource-preflight.test.mjs

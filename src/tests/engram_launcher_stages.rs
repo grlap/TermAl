@@ -45,7 +45,7 @@ fn request(run_id: &str, stages: &[(&str, Option<&str>)]) -> Value {
             .collect::<Vec<_>>(),
         "full": true,
         "started": "2026-10-01T00:00:00.000Z",
-        "expectedFingerprint": "f".repeat(64),
+        "sourceId": launcher_source_id_fixture(),
     })
 }
 
@@ -65,7 +65,7 @@ fn write_run(
         serde_json::to_vec(&request(run_id, stages)).expect("the request serializes"),
     )
     .expect("the request should write");
-    let fingerprint = "f".repeat(64);
+    let source_id = launcher_source_id_fixture();
     let passed = state == "passed";
     fs::write(
         directory.join("results.json"),
@@ -83,9 +83,8 @@ fn write_run(
                     })
                 })
                 .collect::<Vec<_>>(),
-            "expectedFingerprint": fingerprint,
-            "before": fingerprint,
-            "after": fingerprint,
+            "sourceIdBefore": source_id,
+            "sourceIdAfter": source_id,
             "exitCode": if passed { 0 } else { 1 },
             "ended": "2026-10-01T00:05:00.000Z",
         }))

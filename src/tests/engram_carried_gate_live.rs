@@ -263,7 +263,7 @@ fn finish_live_run(gate: &LiveCarriedGate) {
         "rust-tests",
         "vitest",
     ];
-    let fingerprint = "f".repeat(64);
+    let source_id = launcher_source_id_fixture();
     let now = || chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let started = now();
     fs::write(
@@ -274,7 +274,7 @@ fn finish_live_run(gate: &LiveCarriedGate) {
             "stages": stages.iter().map(|name| json!({ "name": name })).collect::<Vec<_>>(),
             "full": true,
             "started": started,
-            "expectedFingerprint": fingerprint,
+            "sourceId": source_id,
         }))
         .unwrap(),
     )
@@ -289,9 +289,8 @@ fn finish_live_run(gate: &LiveCarriedGate) {
                 .iter()
                 .map(|name| json!({ "name": name, "state": "passed", "code": 0 }))
                 .collect::<Vec<_>>(),
-            "expectedFingerprint": fingerprint,
-            "before": fingerprint,
-            "after": fingerprint,
+            "sourceIdBefore": source_id,
+            "sourceIdAfter": source_id,
             "exitCode": 0,
             "ended": now(),
         }))

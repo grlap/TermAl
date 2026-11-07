@@ -117,7 +117,7 @@ const FULL_STAGES: [&str; 5] = ["cargo-check", "typescript", "fingerprint-tests"
 fn write_failed_run(parent: &FsPath, run: &str, states: [&str; 5]) -> PathBuf {
     let directory = parent.join(run);
     fs::create_dir_all(&directory).expect("the run directory should be created");
-    let fingerprint = "f".repeat(64);
+    let source_id = launcher_source_id_fixture();
     let started = "2026-10-20T00:00:00.000Z";
     fs::write(
         directory.join("request.json"),
@@ -127,7 +127,7 @@ fn write_failed_run(parent: &FsPath, run: &str, states: [&str; 5]) -> PathBuf {
             "full": true,
             "detached": false,
             "started": started,
-            "expectedFingerprint": fingerprint,
+            "sourceId": source_id,
             "stages": FULL_STAGES.iter().map(|name| json!({ "name": name })).collect::<Vec<_>>(),
         }))
         .unwrap(),
@@ -141,9 +141,8 @@ fn write_failed_run(parent: &FsPath, run: &str, states: [&str; 5]) -> PathBuf {
             "started": started,
             "ended": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             "exitCode": 1,
-            "expectedFingerprint": fingerprint,
-            "before": fingerprint,
-            "after": fingerprint,
+            "sourceIdBefore": source_id,
+            "sourceIdAfter": source_id,
             "stages": FULL_STAGES
                 .iter()
                 .zip(states)

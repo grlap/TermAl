@@ -67,6 +67,15 @@ fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+fn declare_disabled(turn: &EOCheckedTurn, content_marker: &str) {
+    declare(turn, DECLARED_TEST, DECLARED_ARTIFACT);
+    let path = turn.root.join("termal-tests.toml");
+    let declaration = fs::read_to_string(&path).unwrap();
+    fs::write(&path, format!("{declaration}unsupported = {}\n", toml_string(content_marker))).unwrap();
+    run_git_test_command(&turn.root, &["add", "--", "termal-tests.toml"]);
+    run_git_test_command(&turn.root, &["commit", "--quiet", "-m", "invalid declaration fixture"]);
+}
+
 /// Writes the result file the declared command produces, as the command
 /// would while it runs.
 pub(super) fn write_artifact(turn: &EOCheckedTurn, content: &[u8]) {
@@ -245,10 +254,10 @@ fn a_command_that_differs_from_its_declaration_is_not_a_check() {
 #[test]
 fn a_disabled_declaration_is_told_in_a_host_line_and_recognises_nothing() {
     let turn = EOCheckedTurn::start("declared-disabled", true);
-    declare(&turn, "dotnet test --no-build", DECLARED_ARTIFACT);
+    declare_disabled(&turn, "first");
     turn.run(
         "check-1",
-        "dotnet test --no-build",
+        DECLARED_TEST,
         EngramCommandExit::Code(0),
         || {
             write_artifact(&turn, PASSING_TRX);
@@ -268,7 +277,7 @@ fn a_disabled_declaration_is_told_in_a_host_line_and_recognises_nothing() {
     assert!(
         line.contains("termal-tests.toml in")
             && line.contains("is disabled")
-            && line.contains("--no-build"),
+            && line.contains("does not parse"),
         "{line}"
     );
 }
@@ -445,18 +454,6 @@ fn a_declaration_that_breaks_a_load_rule_is_disabled_with_its_reason() {
         (
             format!("{}color = \"red\"\n", entry(DECLARED_TEST, None, artifact)),
             "does not parse",
-        ),
-        (
-            entry("dotnet test --no-build", None, artifact),
-            "--no-build",
-        ),
-        (
-            entry("dotnet test --list-tests", None, artifact),
-            "--no-build",
-        ),
-        (
-            entry("dotnet test bin/Orders.Tests.dll", None, artifact),
-            "--no-build",
         ),
         (entry("dotnet test x | tee", None, artifact), "shell syntax"),
         (
@@ -1247,13 +1244,13 @@ fn a_passing_summary_names_inconclusive_tests() {
 #[test]
 fn a_disabled_declaration_is_told_once_per_content() {
     let turn = EOCheckedTurn::start("declared-disabled-once", true);
-    declare(&turn, "dotnet test --no-build", DECLARED_ARTIFACT);
+    declare_disabled(&turn, "first");
     let pending = || turn.record(|record| record.engram.pending_source_root_line.clone());
     let clear = || turn.record_mut(|record| record.engram.pending_source_root_line = None);
 
     turn.run(
         "first",
-        "dotnet test --no-build",
+        DECLARED_TEST,
         EngramCommandExit::Code(0),
         || {},
     );
@@ -1261,7 +1258,7 @@ fn a_disabled_declaration_is_told_once_per_content() {
     clear();
     turn.run(
         "second",
-        "dotnet test --no-build",
+        DECLARED_TEST,
         EngramCommandExit::Code(0),
         || {},
     );
@@ -1269,10 +1266,10 @@ fn a_disabled_declaration_is_told_once_per_content() {
         !pending().is_some_and(|line| line.contains("is disabled")),
         "the same content is told once"
     );
-    declare(&turn, "dotnet test --list-tests", DECLARED_ARTIFACT);
+    declare_disabled(&turn, "different content");
     turn.run(
         "third",
-        "dotnet test --list-tests",
+        DECLARED_TEST,
         EngramCommandExit::Code(0),
         || {},
     );
@@ -1567,7 +1564,7 @@ fn cmd_is_never_a_declared_program_at_any_wrapper_level() {
 }
 
 #[test]
-fn forbidden_words_are_caught_in_their_other_spellings() {
+fn declared_runner_options_do_not_override_artifact_validation() {
     let artifact = DECLARED_ARTIFACT;
     for command in [
         "dotnet test --no-build:true",
@@ -1578,8 +1575,9 @@ fn forbidden_words_are_caught_in_their_other_spellings() {
         "dotnet test /p:VSTestListTests=true",
         "dotnet test bin/Orders.Tests.dll.",
     ] {
-        let reason = disabled_reason(&entry(command, None, artifact));
-        assert!(reason.contains("--no-build"), "{command}: {reason}");
+        let root = declared_root("declared-runner-options");
+        assert!(matches!(load(&root, &entry(command, None, artifact)), EngramDeclaration::Loaded { .. }), "{command}");
+        assert!(bind(&root, command).is_some(), "{command}: the artifact decides the result");
     }
     // `-t` belongs to dotnet test: another program may use it freely.
     let root = declared_root("declared-other-t");

@@ -334,7 +334,6 @@ fn engram_validated_focused_stage_result(
     }
     let request = read("request.json")?;
     let results = read("results.json")?;
-    let input = read("input.json")?;
     let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
     for record in [&request, &results] {
         if text(record, "runId").as_deref() != Some(run) {
@@ -476,18 +475,7 @@ fn engram_validated_focused_stage_result(
     if let Some(comparison) = failed_comparison {
         return Err(Rejected::Interval(comparison));
     }
-    let fingerprint = text(&request, "expectedFingerprint").ok_or(Rejected::Input)?;
-    if fingerprint.len() != 64
-        || !is_lowercase_hex(&fingerprint)
-        || [
-            &results["expectedFingerprint"],
-            &results["before"],
-            &results["after"],
-            &input["fingerprint"],
-        ]
-        .iter()
-        .any(|value| value.as_str() != Some(fingerprint.as_str()))
-    {
+    if !test_run_source_input_matches(&request, &results) {
         return Err(Rejected::Input);
     }
     let (verdict, verdict_run, verdict_exit) =

@@ -92,8 +92,10 @@ When S0 is unavailable, the notice includes bounded stage names and elapsed
 milliseconds, including an operation still running when the caller stopped
 waiting. These timings also appear in the host diagnostic; a successful
 opening retains its stage summary in the native run request. They contain
-no paths, Git arguments or file contents, and do not extend the eight-second
-opening budget. They identify where time was spent, not why it was slow.
+no paths, Git arguments or file contents, and do not extend the opening budget.
+Source capture allows 30 s; opening reserves another 5 s for its existing
+declaration, preimage and authority stages. The source adapter still caps its
+own work at 30 s. Timings identify where time was spent, not why it was slow.
 
 The host associates only the original execution newly originating in that
 turn; it never adopts an earlier or background execution. `R` is the real,
@@ -140,6 +142,12 @@ The shared source contract is quoted below. See also the
 > Rollout: `engram source` gains the new fields in its existing JSON (no v2); TermAl's and Engram's strict readers are updated in the same window. Consumers then move off content-v1 one at a time. Old records stay readable as stored.
 > Rule: no new conditions, mechanisms or gates without Greg's explicit word.
 
+The quoted 8 s bound is historical. On 2026-11-07 Greg changed the source
+capture bound to 30 s (Asistant #734): „8 sekund jest za mało. Podnieśc do
+30 sec. Takie sztywne limity bardzo duzo nas kosztuja poprawek i marnowanego
+czasu.” The 1 MiB output bound is unchanged. This applies to S0, after-run
+and received-notice source capture, including the owner's `--timeout-ms`.
+
 A credited declared test runs as the first tool action of a fresh turn.
 
 The opening capture measures the already-authorized named worktree once.
@@ -165,8 +173,8 @@ unavailable. A result is published only while the original turn, runtime,
 work association, connection and named roots are still current, and no newer
 command feedback has superseded it. An absent, failed or stale read does not
 change the command's observed check or credit.
-The placement read and any received-verification checks share one provisional
-eight-second notice budget. Its held-claim read uses the existing work-binding
+The placement read and any received-verification checks share one
+thirty-second notice budget. Its held-claim read uses the existing work-binding
 command timeout or the remaining budget, whichever is shorter. Host shutdown
 may wait for that read and its child cleanup to finish.
 

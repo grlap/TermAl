@@ -170,16 +170,12 @@ fn a_settled_record_id_is_not_replaced_by_a_conflicting_receipt() {
 }
 
 #[test]
-fn expected_fingerprint_still_needs_64_hex_digits() {
-    let fixture = RunFixture::new("receipt-ids-expected-fingerprint");
-    for (run_id, fingerprint, kept) in [
-        ("test-fingerprint-64", sha256_hex(b"fingerprint content"), true),
-        ("test-fingerprint-32", record_identifier(32), false),
-    ] {
-        let mut request = commit_request(&fixture.root);
-        request["expectedFingerprint"] = json!(fingerprint);
-        let directory = write_run(&fixture.runs_dir(), run_id, request, Some(commit_results()));
-        let disk = TestRunDisk::read(&directory, None).unwrap();
-        assert_eq!(disk.expected_fingerprint.is_some(), kept, "{run_id}");
+fn source_ids_keep_complete_git_object_ids() {
+    for (length, valid) in [(40, true), (32, false), (64, false)] {
+        let mut source = launcher_source_id_fixture();
+        source["commit"] = json!("a".repeat(length));
+        let request = json!({"sourceId":source});
+        let results = json!({"sourceIdBefore":source,"sourceIdAfter":source});
+        assert_eq!(test_run_source_input_matches(&request, &results), valid);
     }
 }

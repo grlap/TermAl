@@ -16,7 +16,7 @@ Related: [Test Runs](test-runs.md) (the launcher's runs and cards), [Engram host
 | `cwd` | Directory the command runs in, relative to the repository root. Default `"."`. Must resolve inside the worktree. |
 | `artifact` | The one result file the command writes, relative to the repository root. The file content selects TRX (a `TestRun` XML root) or the Dart test JSON reporter (newline-delimited JSON objects), regardless of filename. JUnit XML (`testsuites`/`testsuite` root) is not read yet, see below. |
 
-A file that does not parse, exceeds the size or entry caps, an entry missing `command` or `artifact`, a `cwd` or `artifact` resolving outside the worktree, a `command` the route cannot read (above), or one that skips the build, lists tests or names an assembly disables the whole file; TermAl says so once in a host line. The last are matched by spelling: `--no-build` and `--list-tests` alone or with a `:` or `=` value, for `dotnet` also `-t` and the MSBuild properties `VSTestNoBuild` and `VSTestListTests`, and a `.dll` path, even with trailing dots or spaces. This guards against honest mistakes in a trusted declaration, not against a determined one.
+A file that does not parse, exceeds the size or entry caps, an entry missing `command` or `artifact`, a `cwd` or `artifact` resolving outside the worktree, or a `command` the route cannot read (above) disables the whole file; TermAl says so once in a host line. Runner options such as `--no-build`, `--list-tests` and assembly paths do not disable a declaration: the validated result artifact must establish that tests actually ran.
 
 ## Exact match
 
@@ -28,13 +28,21 @@ When the command starts, TermAl looks at the declared path and records what is t
 
 - a file artifact must be a regular file at the same canonical path, different by hash from the start image if one was recorded, and modified at or after the start, with 2 seconds of slack: file-system timestamps come from a coarser clock than the host's (FAT keeps two seconds), so a file written just after the start can read as just before it;
 - the artifact path must be untracked and git-ignored at its canonical in-root target, judged in the same Git context TermAl uses for the source basis (a tracked file counts as source even when an ignore pattern matches; a link must not lead from an ignored path to a tracked file);
-- the file is at most 4 MiB and is read once as one image; it is hashed from that image.
+- the file is at most 64 MiB and is read once as one image; it is hashed from that image. A larger file gets a named bounded-reader refusal; this limit is separate from the source identity JSON bound.
 
 With exit status 0, anything else is UNKNOWN with an observed reason: start inspection failed, unchanged since the start, missing at the end, not ignored or tracked, outside the worktree, too large, changed during read, not a regular file. The modification-time rule is an additional heuristic, never proof; this is correlation, not proof that the command produced the file. An unchanged file means the completed artifact has the same bytes as the start image; the host cannot distinguish reuse from a byte-identical rerun (a TRX file carries a per-run id and timestamps, so this is not a realistic outcome of a real rerun).
 
 Why git-ignored: TermAl measures a turn's source by the content of every tracked and untracked-not-ignored path. A result file that is not ignored would change the source revision of the very run that wrote it, and the check would be voided as "source changed". Add the result directory to `.gitignore` (for example `.termal-results/`).
 
-## Outcomes
+## Native verification
+
+For registered native verification, the declared command must be the turn's first tool action. Its frozen result artifact supplies the verdict, including for commands that also have built-in console recognition. Full source identity before the prompt and after the run must match; identical local changes are allowed. Existing execution identity, claim, root, store and artifact checks still apply. Workspace watcher events do not decide native verification.
+
+Provider output persistence or truncation, a background launch or move, a missing exit code, and a task-completion notice without a verdict do not override a valid artifact. The host does not read provider console spill files for native verification. A background launch waits for its original task's completion before freezing the artifact and capturing after-run source, even when the artifact is already complete; a process killed before its artifact END is frozen cannot earn PASS. The original task keeps its reservation and any identity refusal when a later prompt begins.
+
+The following exit-based rules describe the legacy observed-check route. Native verification uses the artifact's PASS, FAIL or UNKNOWN directly and preserves the exit only as an observation.
+
+## Legacy observed-check outcomes
 
 TRX: TermAl reads one complete `TestRun` document and its direct `ResultSummary` and `Counters` with the quick-xml reader, with no DTD or external-entity resolution, and checks: one root and closed elements with matching end tags; XML characters only, and XML Names for elements, attributes and processing-instruction targets (not `xml`); unique, quoted, whitespace-separated attributes without `<`; only the predefined entities and valid character references; no `--` in comments and no `]]>` in text; an XML declaration, if any, first and with its version (UTF-8 only); only XML whitespace, comments and processing instructions outside the root; and the counter consistency below. It is not a complete XML 1.0 validator, and it is not a security boundary: the declared command is trusted, and it can always write a well-formed passing file.
 - **PASS**: the command's exit status is 0; `ResultSummary` has a recognised completed non-failure outcome with no run-level error or abort; `executed >= 1`, `passed >= 1`; `failed`, `error`, `timeout`, `aborted`, `passedButRunAborted` are all 0; the counters are consistent as real TRX files are (derived from captured files, including a mixed pass/skip run); no counter with unknown meaning is non-zero.

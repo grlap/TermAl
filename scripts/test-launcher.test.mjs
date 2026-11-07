@@ -53,6 +53,7 @@ import {
   startDetachedRun,
   summarize,
 } from "./test-launcher.mjs";
+import { sourceIdsEqual, RUN_RECORD_JSON_BYTES } from "./test-launcher-input.mjs";
 import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
 import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
@@ -88,7 +89,8 @@ const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 // Private launcher copies must include its complete runtime dependency
 // closure, including the native helpers selected only when a stage executes.
 const copiedLauncherFiles = Object.freeze([
-  "test-launcher.mjs", "test-launcher-source.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
+  "test-launcher.mjs", "test-launcher-source.mjs", "test-launcher-input.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
+  "source-id-budget.mjs", "source-id-budget-ms.json",
   "review-freeze-fingerprint.mjs",
   "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
   "test-categories-plan.mjs", "test-counts.mjs", "test-process-owner.mjs",
@@ -1236,8 +1238,8 @@ test("a fresh worktree gets its ignored Cargo build directory before any stage",
     // stage, and the frozen input still matches before and after.
     const result = await run(true);
     assert.equal(result.state, "passed");
-    assert.equal(result.before, result.expectedFingerprint);
-    assert.equal(result.after, result.expectedFingerprint);
+    assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true);
+    assert.ok(result.sourceIdBefore.commit);
     assert.match(
       readFileSync(join(root, "target", "CACHEDIR.TAG"), "utf8"),
       /^Signature: 8a477f597d28d172789f06886806bc55\n/u,
@@ -1893,10 +1895,9 @@ test("source drift before and during execution cannot pass", async (t) => {
     writeFileSync(join(root, "tracked.txt"), "changed before execution\n");
     const refused = await executeRun(before, registrationFixtureEnv);
     assert.equal(refused.stages[0].state, "unrun");
-    assert.match(refused.error, /drift.*changed fingerprint components:/u);
-    assert.match(refused.error, /trackedHeadDiffSha256/u);
-    assert.match(refused.error, /statusSha256/u);
-    assert.doesNotMatch(refused.error, /tracked\.txt/u);
+    assert.match(refused.error, /source_id changed before execution/u);
+    assert.match(refused.error, /tracked\.txt/u);
+    assert.match(refused.error, /sourceIdBefore\/sourceIdAfter/u);
 
     writeFileSync(join(root, "tracked.txt"), "baseline\n");
     const during = await createRun({ root, stages: [stage(
@@ -1905,11 +1906,226 @@ test("source drift before and during execution cannot pass", async (t) => {
     )] }, registrationFixtureEnv);
     const result = await executeRun(during, registrationFixtureEnv);
     assert.equal(result.state, "failed");
-    assert.match(result.error, /drift.*changed fingerprint components:/u);
-    assert.match(result.error, /trackedHeadDiffSha256/u);
-    assert.match(result.error, /statusSha256/u);
-    assert.doesNotMatch(result.error, /tracked\.txt/u);
+    assert.match(result.error, /source_id changed during execution/u);
+    assert.match(result.error, /tracked\.txt/u);
+    assert.match(result.error, /sourceIdBefore\/sourceIdAfter/u);
   });
+});
+
+test("source admission checks the one-copy request and two-copy completion before publishing either", async (t) => {
+  await repository(t, async (root, env) => {
+    for (const artifact of ["request.json", "results.json"]) {
+      const sourceId = { commit: "a".repeat(40), tree: "b".repeat(40), submodules: [],
+        changes: [{ path: "x", status: "??", origin: null, blob: "c".repeat(40), mode: "100644" }] };
+      sourceId.changes[0].path = "x".repeat(artifact === "request.json"
+        ? RUN_RECORD_JSON_BYTES - Buffer.byteLength(JSON.stringify(sourceId)) - 50 : 600_000);
+      assert.equal(sourceIdsEqual(sourceId, sourceId), true, "the complete owner value itself is supported");
+      const runDir = await createRun({ root, input: "plain", stages: [stage("must-not-run")],
+        commitInputStatus: () => ({ root, commit: sourceId.commit, tree: sourceId.tree,
+          sourceId, status: "not_clean", entries: [{ path: sourceId.changes[0].path, status: "??" }] }),
+      }, env);
+      const result = json(join(runDir, "results.json"));
+      assert.equal(result.state, "failed");
+      assert.equal(result.sourceInputReason, "input-unverified");
+      assert.match(result.sourceUnavailableReason, new RegExp(`${artifact.replace(".", "\\.")}: output_limit`, "u"));
+      assert.equal(result.sourceIdAfter, null);
+      assert.equal(json(join(runDir, "request.json")).sourceId, undefined);
+      assert.equal(existsSync(join(runDir, "input.json")), false);
+      assert.deepEqual(result.stages.map(({ state }) => state), ["unrun"]);
+      assert.ok(statSync(join(runDir, "request.json")).size <= RUN_RECORD_JSON_BYTES);
+      assert.ok(statSync(join(runDir, "results.json")).size <= RUN_RECORD_JSON_BYTES);
+    }
+  });
+});
+
+test("command expansion refuses before spawn and retains earlier completed stages", async (t) => {
+  await repository(t, async (root, env) => {
+    const marker = join(root, ".git", "must-not-spawn");
+    const longCommand = `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'spawned');/*${"x".repeat(1_020_000)}*/`;
+    const runDir = await createRun({ root, input: "commit", stages: [
+      stage("earlier", "console.log('earlier completed')"), stage("oversized", longCommand),
+    ] }, env);
+    assert.equal(json(join(runDir, "results.json")).state, "running", "the one-copy request is admitted");
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "failed");
+    assert.equal(result.sourceInputReason, "input-unverified");
+    assert.deepEqual(result.stages.map(({ state }) => state), ["passed", "unrun"]);
+    assert.equal(result.stages[0].code, 0);
+    assert.equal(result.stages[1].started, undefined);
+    assert.equal(result.input.eligible, false);
+    assert.match(result.input.unavailableReason, /output_limit/u);
+    assert.equal(result.input.after, undefined);
+    assert.equal(result.input.outcome, undefined);
+    assert.equal(existsSync(marker), false);
+    const persisted = json(join(runDir, "results.json"));
+    assert.equal(persisted.state, "failed");
+    assert.deepEqual(persisted.stages, result.stages);
+    assert.ok(statSync(join(runDir, "results.json")).size <= RUN_RECORD_JSON_BYTES);
+  });
+});
+
+test("accumulated warning facts remain durable when the next bounded outcome cannot fit", async (t) => {
+  await repository(t, async (root, env) => {
+    const marker = join(root, ".git", "completed-warning-stages");
+    const stages = Array.from({ length: 20 }, (_, index) => stage(`warning-${index}`,
+      `require('node:fs').appendFileSync(${JSON.stringify(marker)}, '${index}\\n');console.error('warning: '+'x'.repeat(2400))`));
+    const runDir = await createRun({ root, input: "plain", stages,
+      scope: { kind: "fixture", padding: "x".repeat(970_000) } }, env);
+    const result = await executeRun(runDir, env);
+    const completed = result.stages.filter(({ state }) => state === "passed");
+    assert.ok(completed.length > 0 && completed.length < stages.length);
+    assert.ok(result.stages.every(({ state }) => state === "passed" || state === "unrun"));
+    assert.equal(readFileSync(marker, "utf8").trim().split("\n").length, completed.length);
+    for (const entry of completed) {
+      assert.equal(entry.code, 0);
+      assert.ok(entry.ended);
+      assert.equal(entry.diagnostics.text.length, 2400);
+      assert.match(readFileSync(entry.log, "utf8"), /warning:/u);
+    }
+    assert.equal(result.state, "failed");
+    assert.equal(result.sourceInputReason, "input-unverified");
+    const persisted = json(join(runDir, "results.json"));
+    assert.equal(persisted.state, "failed");
+    assert.ok(persisted.ended);
+    assert.deepEqual(persisted.stages, result.stages);
+    assert.ok(statSync(join(runDir, "results.json")).size <= RUN_RECORD_JSON_BYTES);
+  });
+});
+
+test("an oversized optional duration summary keeps the complete raw artifact and passing stage facts", async (t) => {
+  await repository(t, async (root, env) => {
+    writeFileSync(join(root, "large-duration.mjs"), [
+      "import { writeFileSync } from 'node:fs';",
+      "const target=process.argv.find(x=>x.startsWith('--outputFile.json='));",
+      "const testResults=Array.from({length:200},(_,i)=>({name:process.cwd()+'/'+i+'界'.repeat(295),",
+      "startTime:0,endTime:20000,assertionResults:[{fullName:'界'.repeat(300),status:'passed',duration:3000}]}));",
+      "writeFileSync(target.slice('--outputFile.json='.length),JSON.stringify({testResults}));",
+      "console.log('all duration fixture tests passed');",
+    ].join("\n"));
+    const runDir = await createRun({ root, input: "plain",
+      scope: { kind: "fixture", padding: "x".repeat(600_000) },
+      stages: [{ name: "duration", command: process.execPath, args: ["large-duration.mjs"],
+        durationReport: "vitest-json" }] }, env);
+    const result = await executeRun(runDir, env);
+    const entry = result.stages[0];
+    assert.equal(result.state, "passed");
+    assert.equal(result.exitCode, 0);
+    assert.equal(entry.state, "passed");
+    assert.equal(entry.code, 0);
+    assert.ok(entry.started && entry.ended);
+    assert.equal(entry.durations.status, "unavailable");
+    assert.match(entry.durations.reason, /results.json: output_limit/u);
+    assert.equal(entry.durations.kind, "vitest-json");
+    assert.equal(entry.durations.overBudget, undefined);
+    assert.equal(json(entry.durations.artifact).testResults.length, 200);
+    assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true);
+    assert.ok(statSync(join(runDir, "results.json")).size <= RUN_RECORD_JSON_BYTES);
+  });
+});
+
+// Only the closing owner response is scripted: real stages, result writes,
+// source validation and terminal publication still run. This fixture does not
+// claim that its synthetic changed paths came from a Git producer.
+async function terminalDiagnosticFixture(t, { writeError } = {}) {
+  await repository(t, async (root, env) => {
+    const workerOutput = "worker stage output\n";
+    const failedOutput = "test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n";
+    const runDir = await createRun({ root, input: "commit", stages: [
+      stage("worker", `process.stdout.write(${JSON.stringify(workerOutput)})`),
+      stage("focused", `process.stdout.write(${JSON.stringify(failedOutput)}); process.exitCode = 7`),
+    ] }, env);
+    const request = json(join(runDir, "request.json"));
+    const changes = Array.from({ length: 12 }, (_, index) => ({
+      path: `${String(index).padStart(2, "0")}-${"x".repeat(150)}`,
+      status: "??", origin: null, blob: "c".repeat(40), mode: "100644",
+    }));
+    const sourceId = { ...request.sourceId, changes };
+    const observation = { version: 1, status: "not_clean", root: request.root,
+      source: `git-commit:${sourceId.commit}`, tree: sourceId.tree,
+      entries: changes.map(({ path, status }) => ({ path, status })),
+      refusal: null, source_id: sourceId };
+    const originalSpawn = childProcess.spawnSync;
+    const originalWrite = fs.writeFileSync;
+    let sourceCalls = 0;
+    const diagnostics = [];
+    const spawnMock = t.mock.method(childProcess, "spawnSync", (command, args, options) => {
+      if (args[0] === "source" && args[2] === request.root && ++sourceCalls === 2) {
+        return { status: 0, signal: null, stdout: Buffer.from(JSON.stringify(observation)), stderr: Buffer.alloc(0) };
+      }
+      return originalSpawn(command, args, options);
+    });
+    const writeMock = t.mock.method(fs, "writeFileSync", (path, data, options) => {
+      if (typeof path === "string" && dirname(path) === runDir && basename(path).startsWith("launcher.diagnostic-")) {
+        diagnostics.push({ path, data, options });
+        if (writeError) throw Object.assign(new Error("diagnostic storage refused"), { code: writeError });
+      }
+      return originalWrite(path, data, options);
+    });
+    syncBuiltinESMExports();
+    let result;
+    try {
+      result = await executeRun(runDir, env);
+    } finally {
+      spawnMock.mock.restore();
+      writeMock.mock.restore();
+      syncBuiltinESMExports();
+    }
+    assert.equal(sourceCalls, 2);
+    assert.equal(result.state, "failed");
+    assert.equal(result.exitCode, 7, "source drift and diagnostic storage cannot replace the command's exit");
+    assert.ok(result.ended);
+    assert.equal(result.sourceInputReason, "input-changed");
+    assert.equal(result.input.eligible, false);
+    assert.equal(result.input.outcome, "input_changed");
+    assert.deepEqual(result.sourceIdAfter, sourceId);
+    assert.deepEqual(result.stages.map(({ state, code }) => ({ state, code })), [
+      { state: "passed", code: 0 }, { state: "failed", code: 7 },
+    ]);
+    assert.deepEqual(result.stages[1].tests, { runner: "cargo-libtest", passed: 1, failed: 1, ignored: 0 });
+    assert.equal(readFileSync(logPath(runDir, result.stages[0]), "utf8"), workerOutput);
+    assert.equal(readFileSync(logPath(runDir, result.stages[1]), "utf8"), failedOutput);
+    const persisted = json(join(runDir, "results.json"));
+    assert.equal(persisted.state, "failed");
+    assert.equal(persisted.exitCode, 7);
+    assert.equal(persisted.ended, result.ended);
+    assert.equal(persisted.sourceInputReason, "input-changed");
+    assert.equal(persisted.input.eligible, false);
+    assert.equal(persisted.input.outcome, "input_changed");
+    assert.deepEqual(persisted.sourceIdBefore, request.sourceId);
+    assert.deepEqual(persisted.sourceIdAfter, sourceId);
+    assert.deepEqual(persisted.stages.map(({ name, state, code }) => ({ name, state, code })), [
+      { name: "worker", state: "passed", code: 0 }, { name: "focused", state: "failed", code: 7 },
+    ]);
+    assert.deepEqual(persisted.stages[1].tests, { runner: "cargo-libtest", passed: 1, failed: 1, ignored: 0 });
+    assert.equal(persisted.error, result.error);
+    assert.ok(statSync(join(runDir, "results.json")).size <= RUN_RECORD_JSON_BYTES);
+    assert.match(await summarize(runDir), /^FAIL .*exit=7/mu);
+    assert.equal(diagnostics.length, 1, "the long source mismatch reaches diagnostic persistence");
+    const diagnostic = diagnostics[0];
+    assert.ok(diagnostic.data.length > 2400);
+    assert.match(diagnostic.data, /source_id changed during execution/u);
+    assert.ok(result.error.length <= 2400);
+    if (writeError) {
+      assert.ok(result.error.endsWith(`[full diagnostic unavailable: ${writeError}]`));
+      assert.equal(result.error.includes("[full diagnostic in "), false);
+      assert.equal(existsSync(diagnostic.path), false);
+    } else {
+      assert.ok(result.error.endsWith(`[full diagnostic in ${basename(diagnostic.path)}]`));
+      assert.deepEqual(diagnostic.options, { flag: "wx", mode: 0o600 });
+      assert.equal(readFileSync(diagnostic.path, "utf8"), diagnostic.data);
+      assert.notEqual(diagnostic.path, logPath(runDir, result.stages[0]));
+    }
+  });
+}
+
+test("terminal facts survive a failed long-diagnostic write", async (t) => {
+  for (const writeError of ["EACCES", "EBUSY", "EISDIR"]) {
+    await t.test(writeError, async (t) => terminalDiagnosticFixture(t, { writeError }));
+  }
+});
+
+test("long launcher diagnostics retain their own file without changing a worker stage log", async (t) => {
+  await terminalDiagnosticFixture(t);
 });
 
 test("incomplete runs report UNKNOWN and cannot notify", async (t) => {
@@ -2575,7 +2791,7 @@ test("a foreground run prints its run receipt before any stage completes", async
       // cannot race the launcher's own replacement of it.
       assert.doesNotMatch(stdout, /^(?:PASS|FAIL) /mu, stdout);
       // RUN follows the initial atomic request write. These identity fields
-      // already exist; registration and expectedFingerprint are added later.
+      // already exist; registration and admitted sourceId are added later.
       const request = json(join(runDir, "request.json"));
       assert.equal(request.detached, false);
       assert.equal(request.creatorPid, child.pid, "the foreground launcher runs its own stages");
@@ -2873,6 +3089,73 @@ test("CI runs every maintained helper test suite on each platform, under the gat
 // process holds stands for another process's reader, such as the host's.
 const windowsSharing = process.platform === "win32" ? false : "Windows file-sharing semantics";
 
+test("ordinary artifact saves count exact compact UTF-8 bytes before atomic publication", (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-bound-"));
+  removeFixtureOnPass(t, directory);
+  for (const name of ["request.json", "input.json", "results.json"]) {
+    const target = join(directory, name);
+    const value = { text: "é😀" };
+    value.text += "x".repeat(RUN_RECORD_JSON_BYTES - Buffer.byteLength(`${JSON.stringify(value)}\n`));
+    save(target, value);
+    const original = readFileSync(target);
+    assert.equal(original.length, RUN_RECORD_JSON_BYTES);
+    assert.deepEqual(JSON.parse(original), value);
+    value.text += "x";
+    assert.throws(() => save(target, value), /output_limit/u);
+    assert.deepEqual(readFileSync(target), original, "over-limit bytes cannot replace the readable artifact");
+  }
+  assert.deepEqual(readdirSync(directory).sort(), ["input.json", "request.json", "results.json"]);
+});
+
+test("the terminal writer retains stage exit and counts when the closing source cannot fit", (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "launcher-source-overflow-"));
+  removeFixtureOnPass(t, directory);
+  const source = { commit: "a".repeat(40), tree: "b".repeat(40), submodules: [], changes: [] };
+  for (const code of [0, 7]) {
+    const result = { state: code === 0 ? "passed" : "failed", exitCode: code,
+      ended: new Date().toISOString(), sourceIdBefore: source,
+      sourceIdAfter: { ...source, changes: [{ path: "é".repeat(300_000), status: "??",
+        origin: null, blob: "c".repeat(40), mode: "100644" }] },
+      metadata: "x".repeat(500_000),
+      stages: [{ name: "focused", state: code === 0 ? "passed" : "failed", code,
+        tests: { passed: 5, failed: code === 0 ? 0 : 1 }, log: "actual-stage.log" }] };
+    const stages = structuredClone(result.stages);
+    const target = join(directory, "results.json");
+    save(target, result);
+    const persisted = json(target);
+    assert.ok(statSync(target).size <= RUN_RECORD_JSON_BYTES);
+    assert.deepEqual(persisted.stages, stages);
+    assert.equal(persisted.exitCode, code || 1);
+    assert.equal(persisted.state, "failed");
+    assert.deepEqual(persisted.sourceIdBefore, source);
+    assert.equal(persisted.sourceIdAfter, null);
+    assert.equal(persisted.sourceInputReason, "input-unverified");
+  }
+});
+
+test("running result saves recheck matching-source capacity after actual metadata changes", (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "launcher-source-reserve-"));
+  removeFixtureOnPass(t, directory);
+  const target = join(directory, "results.json");
+  const source = { commit: "a".repeat(40), tree: "b".repeat(40), submodules: [],
+    changes: [{ path: "x".repeat(500_000), status: "??", origin: null,
+      blob: "c".repeat(40), mode: "100644" }] };
+  const result = { state: "running", sourceIdBefore: source, sourceIdAfter: null,
+    stages: [{ name: "focused", state: "failed", code: 7, tests: { failed: 1 } }] };
+  save(target, result);
+  assert.equal(json(target).state, "running");
+  const stages = structuredClone(result.stages);
+  result.metadata = "x".repeat(60_000);
+  assert.throws(() => save(target, result), /results.json: output_limit/u);
+  const persisted = json(target);
+  assert.equal(persisted.state, "failed");
+  assert.equal(persisted.exitCode, 7);
+  assert.deepEqual(persisted.stages, stages);
+  assert.deepEqual(persisted.sourceIdBefore, source);
+  assert.equal(persisted.sourceIdAfter, null);
+  assert.ok(statSync(target).size <= RUN_RECORD_JSON_BYTES);
+});
+
 test("save() replaces a results file another handle holds open once that handle closes", { skip: windowsSharing }, (t) => {
   const directory = mkdtempSync(join(testTempDirectory(), "launcher-save-"));
   removeFixtureOnPass(t, directory);
@@ -3020,7 +3303,7 @@ test("focused counts sum every libtest binary and ignore other output", () => {
   assert.equal(focusedTestCounts(""), undefined);
 });
 
-test("a focused run records its runner's counts and prints them with the input fingerprint", async (t) => {
+test("a focused run records its runner's counts and prints them with the source input comparison", async (t) => {
   await repository(t, async (root, registrationFixtureEnv) => {
     const output = [
       "test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 3863 filtered out; finished in 0.00s",
@@ -3040,7 +3323,7 @@ test("a focused run records its runner's counts and prints them with the input f
     });
     const summary = await summarize(runDir);
     assert.match(summary, /^tests: passed=41 failed=0 ignored=1$/mu);
-    assert.match(summary, new RegExp(`^input fingerprint: ${result.after}$`, "mu"));
+    assert.match(summary, /^input: matched; source_id; boundary comparison only, not host check credit$/mu);
   });
 });
 
@@ -3253,7 +3536,7 @@ test("focused native Node launcher writes real TAP/spec success and failure coun
         assert.equal(result.state, failed ? "failed" : "passed");
         assert.deepEqual(json(join(runDir, "results.json")).stages[0].tests,
           { runner: "node-test", passed: failed ? 0 : 1, failed: failed ? 1 : 0, ignored: 0 });
-        assert.equal(result.before, result.after);
+        assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true);
       }, fixtureEnv, directory);
     }
   }

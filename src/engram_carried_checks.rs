@@ -900,7 +900,7 @@ struct EngramCarriedRunVerdict {
     exit_code: i64,
     ended: String,
     run_id: String,
-    fingerprint: String,
+    source_id: EngramSourceId,
     stages: Vec<String>,
     /// Each stage of the terminal record in the launcher's own line,
     /// `NAME: STATE exit=CODE`, which the host reads as the launcher's
@@ -916,8 +916,7 @@ struct EngramCarriedRunVerdict {
 /// record (`engram_launcher_test_stages`), as a foreground gate needs; a
 /// failed one is recorded failed, whichever stage failed, unless it ran no
 /// stage at all (`ENGRAM_CARRIED_RUN_NO_STAGE_RAN`). Either way the
-/// expected, before and after input fingerprints must agree, and so must the
-/// request's.
+/// launcher's admitted, before and after complete source_id objects must agree.
 #[cfg(test)]
 fn engram_read_carried_run(
     directory: &FsPath,
@@ -952,20 +951,8 @@ fn engram_read_carried_run(
     {
         return Err("its records do not name the run directory they are in");
     }
-    let expected = text(&record, "expectedFingerprint")
-        .ok_or("its terminal record has no input fingerprint")?;
-    if text(&record, "before").is_none() || text(&record, "after").is_none() {
-        return Err(concat!(
-            "its terminal record has no input fingerprint from before or after its stages ",
-            "(the run ended before the launcher measured its input), so it is neither ",
-            "credited nor recorded"
-        ));
-    }
-    let consistent = text(&request, "expectedFingerprint").as_deref() == Some(expected.as_str())
-        && text(&record, "before").as_deref() == Some(expected.as_str())
-        && text(&record, "after").as_deref() == Some(expected.as_str());
-    if !consistent {
-        return Err("its input fingerprint after the run differs from the one before");
+    if !test_run_source_input_matches(&request, &record) {
+        return Err("its complete source_id input is unavailable, malformed or changed");
     }
     let ended = text(&record, "ended").ok_or("its terminal record has no end time")?;
     let exit_code = record
@@ -1034,7 +1021,8 @@ fn engram_read_carried_run(
         exit_code,
         ended,
         run_id,
-        fingerprint: expected,
+        source_id: test_run_source_id(request.get("sourceId"))
+            .ok_or("its admitted source_id is unavailable")?,
         stages: requested,
         stage_lines,
     })

@@ -28,6 +28,27 @@ function selectRun(id = "test-one") {
 }
 
 describe("Test Runs panel", () => {
+  it("shows actual source observations separately from legacy fingerprint history and credit", async () => {
+    const run = makeTestRun({ state: "failed", exitCode: 1 });
+    const source = { commit: "a".repeat(40), tree: "b".repeat(40), submodules: [], changes: [] };
+    const after = { ...source, changes: [{ path: "new.txt", status: "??", origin: null,
+      blob: "c".repeat(40), mode: "100644" }] };
+    vi.mocked(api.readTestRun).mockResolvedValue({ run, detail: makeTestRunDetail({
+      sourceId: source, sourceIdBefore: source, sourceIdAfter: after, sourceComparison: "mismatched",
+      expectedFingerprint: "legacy-value-that-cannot-prove-source", before: "old", after: "old",
+    }) });
+    render(view([run]));
+    selectRun();
+    const summary = await screen.findByText("Source input: mismatched");
+    const sourceDetails = summary.closest("details")!;
+    sourceDetails.open = true;
+    expect(sourceDetails).toHaveTextContent("new.txt");
+    expect(sourceDetails).toHaveTextContent(source.commit);
+    expect(sourceDetails).toHaveTextContent("does not establish host check credit");
+    expect(screen.queryByText("Historical fingerprint")).not.toBeInTheDocument();
+    expect(screen.queryByText("legacy-value-that-cannot-prove-source")).not.toBeInTheDocument();
+  });
+
   it("filters by state and either session role, without execution controls", () => {
     render(view([makeTestRun(), makeTestRun({ runId: "test-other", state: "passed", ownerSessionId: "other", notifySessionId: null })], "session-coordinator"));
     expect(screen.queryByText("test-other")).not.toBeInTheDocument();

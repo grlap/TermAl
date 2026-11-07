@@ -40,9 +40,8 @@ fn declared_run_snapshot_with_owner(root: &FsPath, pin: &EngramSourceOwnerPin, d
         if std::time::Instant::now() >= deadline {
             anyhow::bail!("native opening snapshot deadline elapsed");
         }
-        // Built-in commands retain their existing route. Capture all other
-        // declared entries now; matching later never rereads a start image.
-        if EngramHost::recognized_check(&entry.command).is_some() { continue; }
+        // Every declared command uses its artifact, including commands the
+        // legacy console recognizer also knows. Matching never rereads S0.
         let started = std::time::SystemTime::now();
         let artifact_start = engram_artifact_start_image(&root, &entry.artifact);
         let artifact_canonical = engram_exact_path_key(&engram_canonical_path(&root.join(&entry.artifact)));

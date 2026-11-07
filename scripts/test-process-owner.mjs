@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 export const PROCESS_CLEANUP_BUDGET_MS = 5000;
+export const OWNER_RESPONSE_CHARACTER_LIMIT = 262144;
+export const OWNER_STDERR_CHARACTER_LIMIT = 2400;
 const interruptReason = (signal) => `interrupt: ${String(signal.reason ?? "requested").slice(0, 512)}`;
 
 export async function runOwnedCommand(command, args, { cwd, env, log, signal, onStart, onOwner }, {
@@ -82,7 +84,7 @@ export async function runOwnedCommand(command, args, { cwd, env, log, signal, on
     };
     if (windows) owner.stdout.on("data", (chunk) => {
       buffer += chunk;
-      if (buffer.length > 262144) { protocolError ??= "process owner response exceeded limit"; requestStop("interrupt: invalid owner response"); return; }
+      if (buffer.length > OWNER_RESPONSE_CHARACTER_LIMIT) { protocolError ??= "process owner response exceeded limit"; requestStop("interrupt: invalid owner response"); return; }
       let newline;
       while ((newline = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, newline).trim(); buffer = buffer.slice(newline + 1);
@@ -92,7 +94,7 @@ export async function runOwnedCommand(command, args, { cwd, env, log, signal, on
       }
     });
     else owner.on("message", receive);
-    owner.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-2400); });
+    owner.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-OWNER_STDERR_CHARACTER_LIMIT); });
     owner.once("error", (error) => { protocolError ??= error.message; });
     owner.once("close", (code, closeSignal) => {
       signal?.removeEventListener("abort", abort);

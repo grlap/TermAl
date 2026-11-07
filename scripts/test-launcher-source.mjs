@@ -62,6 +62,18 @@ export function unknownSource(reason) {
   };
 }
 
+// Source provenance comes from the owner's actual admitted observation. Only
+// the launcher's immutable blob is looked up separately; it is not an input
+// predicate and a missing blob cannot stand in for source equality.
+export function sourceMetadataFromIdentity(root, observed, env = process.env) {
+  const { unknownReason: _none, ...source } = unknownSource(null);
+  const launcher = git(root, isolatedGitEnvironment(env),
+    ["rev-parse", "--verify", "--quiet", `${observed.sourceId.commit}:${launcherPath}`]);
+  return { ...source, commit: observed.sourceId.commit, tree: observed.sourceId.tree,
+    clean: observed.status === "clean",
+    launcherVersion: launcher.stdout === undefined ? null : objectId(launcher.stdout) };
+}
+
 // The SHA-256 of no output: a `git status` that lists nothing.
 const emptySha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 

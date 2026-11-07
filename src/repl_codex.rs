@@ -157,9 +157,10 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         status: CommandStatus,
         exit: EngramCommandExit,
         runtime_output_cut: bool,
+        runtime_interrupted: bool,
     ) -> Result<()> {
         self.inner.command_completed_with_capture(
-            key, command, output, status, exit, runtime_output_cut,
+            key, command, output, status, exit, runtime_output_cut, runtime_interrupted,
         )
     }
 

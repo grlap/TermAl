@@ -128,15 +128,10 @@ node -e "const r=require('node:child_process').spawnSync('git',['rev-parse','--a
 ### Source metadata, host bindings and raw results
 
 Every run's `results.json` carries a `source` block
-(`scripts/test-launcher-source.mjs`). Git runs from `PATH` under the
-launcher's isolated configuration (no system or global Git config). The block
-is measured right after the input fingerprint (`input.json`) and kept only
-when it describes the same `HEAD` and the same clean or dirty `git status` as
-that fingerprint; the worker checks it before execution and captures it again
-after the stages. A plain run fails on drift; a committed-input run keeps the
-stages' actual outcome but loses eligibility. A mismatched source record says
-`source_changed_during_measure`. Until then it records `not_yet_measured`.
-It is never changed afterwards:
+(`scripts/test-launcher-source.mjs`) derived from the same admitted owner
+observation as `request.sourceId`. It is display metadata, not a second input
+identity. `launcherVersion` is read from the measured commit. Until measurement
+succeeds the block records `not_yet_measured`.
 
 - `sourceSchema` (1), `commit` and `tree` (`HEAD` and its tree), and `clean`:
   true only when `git status` lists nothing, untracked files included.
@@ -237,121 +232,77 @@ these bytes; it uses the producing host's own retained copy.
 
 ### Ordinary committed-input runs (`--input commit`)
 
-By default the launcher selects its input before immutable run registration.
-A checkout admitted as clean by the committed-input producer selects commit
-input. Any other checkout selects a plain run without a committed-input
-verification record, and the summary names the reason. A plain run tests
-whatever the checkout holds, including tracked changes and untracked files;
-its existing review-freeze fingerprints and drift guards remain in force.
-Its own preconditions, including a readable root and HEAD, also remain: an
-unborn repository or unavailable Git input can still fail that plain preflight.
-Ordinary command failures keep their actual exit code.
+The launcher measures input through `engram source --root ROOT --json`.
+It stores the complete admitted value in `request.sourceId` and `input.json`,
+then records actual execution-boundary observations in
+`results.sourceIdBefore` and `results.sourceIdAfter`. These closed objects
+include root commit/tree, recursive child commits, and root/child local changes.
+The shared validator checks shape, bounds and producer ordering; comparison
+uses the entire object. No automatic input fingerprint or `.git/info` image is
+computed. Explicit review-freeze identity remains separate and unchanged.
 
-For a committed-input run, unavailable post-run admission preserves the actual
-stage outcome but makes the run ineligible for a verification record. Capture
-failures before execution still stop the run before any command starts.
+In a native TermAl context, the launcher first gets the existing session
+`source-owner` metadata pin. The pin supplies executable provenance, not source
+input: the launcher still measures its own root. The complete pin stays in the
+request's existing immutable registration identity, and executable bytes are
+checked around each observation. A refused GET, malformed pin or byte mismatch
+stops admission; there is no hostless fallback. A partial `TERMAL_*` context
+also cannot become standalone.
 
-Use `--input plain` to choose the existing plain run explicitly, even on a
-clean checkout. It registers without `input: "commit"` and earns no committed-input
-verification; its summary names the explicit selection. This flag does not
-bypass the plain run's existing preconditions or fingerprint guards.
+For an explicitly hostless run, select an absolute `ENGRAM_SOURCE_BINARY`, or
+use the executable under an absolute `CARGO_HOME/bin` (the default is
+`~/.cargo/bin`). The launcher never searches PATH or builds Engram. The owner
+must implement the complete source_id envelope. Unavailable, malformed or
+oversized output is not a partial identity or equality.
 
-`full`, `focused`, `live` and `category` also accept explicit `--input commit`.
-That selection is strict: an unadmitted checkout refuses before any stage:
+By default a clean owner observation selects `input: "commit"` before immutable
+registration. A dirty observation selects a plain run and records its reason
+in `results.inputSelection`. Equal dirty source values qualify for the input
+comparison, including unchanged child changes; plain runs still earn no
+committed-input verification. `--input plain` explicitly chooses this lane.
+Both lanes require the admitted, before and after complete objects to agree.
+
+`full`, `focused`, `live` and `category` also accept strict `--input commit`:
 
 ```bash
 node scripts/test-launcher.mjs full --input commit
 ```
 
-The request records `input: "commit"`. Before any stage, the launcher reads
-the checkout under the one cleanliness rule the host's committed source
-revision and acceptance admission share (src/ordinary_commit_input.rs):
-`git status --porcelain=v1 --untracked-files=all --ignore-submodules=none -z`
-with repository-scoped standard excludes (.gitignore and .git/info/exclude).
-What it shares with the host's pinned Git runner (`ReviewFreezeGit` in
-src/review_freeze.rs) is exactly this: the fingerprint's environment
-variables (every inherited `GIT_*` variable removed; global and system
-config, system attributes, optional locks and terminal prompts off), the
-`-c core.fsmonitor=false`, `-c core.excludesFile=NUL` and
-`-c core.attributesFile=NUL` arguments on every call (`/dev/null` off
-Windows, which also keeps the XDG default ignore and attributes files out),
-and the refusal of a repository with a configured Git filter
-(`filter.<driver>.clean`, `smudge` or `process`), which status could run. The
-launcher resolves `git` through `PATH` as it always has; the host's own runner
-pins a Git binary outside the reviewed tree and further `-c` settings. A
-submodule's `ignore` setting hides nothing. Recursive submodules are admitted
-when `git submodule status --recursive` reports every row at its pin with a
-space prefix. Nested pinned children are allowed. Root and child filter-config
-reads precede root status, which supplies all tracked/untracked dirt with
-inherited `-c status.showUntrackedFiles=all` and `-c diff.ignoreSubmodules=none`. No file/index list or child
-porcelain parser is used for admission.
+This selection requires clean input and keeps the existing claim, store,
+named-root and registration guards. The owner's Git normalization, ignored-path
+policy and filter refusals apply. Initialized pinned recursive submodules are
+supported. An assume-unchanged or skip-worktree edit that Git status hides is a
+documented limitation; boundary equality also cannot detect a transient edit
+that is reverted between observations. No raw-byte or case-faithful checkout
+claim is made.
 
-An edited assume-unchanged or skip-worktree file may be invisible to Git status
-and counts as clean. Tests demonstrate this documented limitation; admission
-does not inspect index flags. A configured filter or status entry refuses
-before any stage runs. Historical `skippedPaths` and `gitlinks` refusals remain
-readable. Initialization, pin and mapping failures name their capture error.
-Otherwise
-it records the full HEAD commit as
-`input: { kind: "commit", commit, cleanBefore: true }`, takes the fingerprint,
-and reads the status again: a change in that window refuses the run the same
-way, and a moved HEAD fails it, so an edit frozen into the fingerprint and
-reverted after the stages cannot read as clean before and after. The existing
-before-execution fingerprint check still applies.
+A clean committed run records
+`input: { kind: "commit", commit, cleanBefore: true }`. After execution,
+`input.after` retains `{ commit, clean, paths }` when available, and the outcome
+is `clean` or `input_changed`. A newly untracked path is a change, with no new-run
+debris/disposition exception. Historical debris records remain readable.
+`input.eligible` requires clean committed input, a passing run and equality of
+all three complete source values.
 
-After the stages it reads status and HEAD again into `input.after`
-(`{ commit, clean, paths }`) and sets
-`input.outcome`:
+A changed or unavailable post-run source cannot produce a passing run or
+eligible input. Actual stage states and exit codes stay recorded; an existing
+command failure keeps its original failure and exit code. A stage that passed
+but changed source leaves a failed, ineligible run. Capture failures before
+execution leave stages unrun. Post-run unavailability records a null endpoint
+and a bounded reason, never an invented commit or digest.
 
-- `clean`: HEAD is unchanged and Git reports no entry.
-- `debris_pending_disposition`: HEAD is unchanged and every entry is a new
-  untracked, non-ignored path (`??`). `input.disposition` is `null` until
-  another component records what happens to that debris.
-- `input_changed`: HEAD moved, a tracked path was modified, added, deleted
-  or renamed, or a Git
-  filter is now configured.
+Summaries show the actual source comparison (`matched`, `mismatch`, or
+`unknown`) separately from the stage verdict and gate eligibility. This is
+boundary comparison only, not host check credit. A terminal committed run
+without eligible input adds `gate: not eligible; not a landing gate: <reason>`.
+Exit 0 alone is insufficient for a landing gate.
 
-In this flow a changed fingerprint after the stages does not fail the run:
-the stage results, the run's own `state` and `after` are kept as recorded.
-`input.eligible` is true only when the outcome is `clean`, the run passed, and
-the before and after fingerprints are equal. If a post-run capture throws,
-`input.after` and `input.outcome` stay absent, `input.eligible` is false, and
-`input.unavailableReason` keeps a bounded reason; no commit identity is invented.
-The stages retain their actual outcome and exit code. Every terminal committed
-run without eligible input and equal fingerprints adds its own summary line:
-`gate: not eligible; not a landing gate: <reason>`. Exit 0 alone is insufficient
-for a landing gate. Plain runs keep their existing fingerprint failures.
-Only an eligible run of this flow counts as committed-input evidence; debris is
-not eligible until a disposition is recorded, and `input_changed` never is. The
-printed summary, and `summary RUN_DIRECTORY`, shows one `input:` line, for
-example `input: commit <sha> clean; eligible`,
-`input: commit <sha> debris (pending disposition): 1 new untracked path(s); not eligible`,
-`input: commit <sha> input changed; not eligible` or
-`input: refused, not clean before the run: 2 path(s)`.
-
-The launcher enables automatic selection with
-`ORDINARY_COMMIT_INPUT_DEFAULT=true`. The host's independent switch remains
-`false`, retaining content-v1 for ordinary host source measurements. Run
-registration and verification select the committed flow from the run's
-`input: "commit"`, independently of that host switch. Automatic plain runs
-omit that input kind and preserve their selection reason in
-`results.json.inputSelection`; for example, the summary reads
-`input: plain; no committed-input verification: 1 path(s) reported by git status`.
-Commit eligibility does not certify a byte-for-byte or case-faithful checkout.
-The registered producer wire remains `Commit { commit }`, bound through the
-existing claim, store and named-root registration. Content-v1 and schema-1
-review-freeze behavior are unchanged. Clean, initialized pinned recursive
-submodules use the existing committed-input record without a wire change.
-Each admission capture reads recursive submodule status and each reported
-child's filter config, then one root status and the unchanged HEAD boundary.
-Only full SHA-1 root commits are supported; no file/index list is an admission
-condition. Git itself launches additional child commands internally.
-Execution-boundary fingerprints are preceded by admission guards, and the
-post-run final admission reread remains. If a filter is refused, that unsafe
-fingerprint is omitted and the run loses eligibility while retaining its
-actual stage outcome. There
-is no timeout or budget increase. Explicit committed-input refusal never
-falls back; automatic plain selection earns no commit credit.
+The launcher's automatic-selection default remains enabled. The host's
+independent ordinary-source switch remains false, retaining content-v1 for
+ordinary host measurements. The registered committed producer wire remains
+`Commit { commit }`; full-source native declared credit and remote completion
+are distinct existing contracts. No evaluation, registration or landing policy
+is changed by the input comparison.
 
 Once a claim has a registered committed-input run that started on a clean
 checkout, whether selected automatically or by `--input commit`, and whatever
@@ -477,7 +428,7 @@ Foreground and detached launches print `RUN RUN_DIRECTORY` after the initial
 request write, before registration or any stage executes, so an
 interrupted host wait can still inspect or settle the run without rerunning it.
 In a TermAl session, the launcher requires a versioned durable registration ACK
-and an exact host query before fingerprint capture, preflight, Cargo bootstrap
+and an exact host query before admitted source capture, preflight, Cargo bootstrap
 or stages, then prints `TRACKED RUN_ID`. A detached worker rechecks its receipt,
 immutable request and host visibility before preflight. Registration failure
 ends the launch with a nonzero result and an explicit error. Ambiguous lost POST
@@ -497,7 +448,7 @@ and host stderr alone does not provide retained history after a lost response.
 Only an invocation with none of `TERMAL_BASE_URL`, `TERMAL_SESSION_ID` and
 `TERMAL_CLI` may run standalone and print `UNTRACKED RUN_ID` with a reason.
 A partial context cannot downgrade to standalone. The `RUN` receipt identifies
-the initial request, whose registration and source fingerprint are added later;
+the initial request, whose registration and admitted source_id are added later;
 neither `RUN` nor `TRACKED` is a passing test result.
 
 The host also exposes read-only `GET /api/sessions/{id}/source-owner` for a
@@ -508,8 +459,9 @@ Engram executable, its measured digest and actual version, and the source JSON
 schema validated from an `engram source --root <project-root> --json` response.
 It returns no source verdict or store details. A well-formed unavailable source
 response can establish schema support; it cannot establish clean-source evidence.
-The hash, version and schema probes share an aggregate eight-second budget,
-including parsing. The host resolves a configured native command in its own
+The hash, version and schema probes share an aggregate thirty-second budget,
+including parsing. The metadata GET's client allowance is that budget plus
+five seconds for HTTP delivery (35 s). The host resolves a configured native command in its own
 absolute PATH directories, rejects distinct competing programs, and returns an
 absolute pin. It never searches cwd, relative PATH entries or batch shims;
 the launcher performs no PATH discovery. Missing or relative path configuration, changed bytes, malformed
@@ -520,8 +472,11 @@ An optional `sourceOwner` object with those same four fields in `request.json`
 joins the immutable request identity. The host independently verifies it against
 the initiating session's project configuration before registration, rechecks
 configuration and executable bytes before publication, and persists the pin
-without changing historical registrations. This consumes the existing host
-registration budget. Omitting the field preserves legacy identity and behavior;
+without changing historical registrations. This source probe has the shared
+30 s source budget; the outer host deadline adds the existing 5 s claim/durability
+allowance. Claim/durability still receive at most 5 s after probing, within that
+outer deadline. Pinned registration's client deadline adds the existing 8 s
+ACK allowance to the source budget (38 s). Omitting the field preserves legacy identity and behavior;
 the outer registration POST remains `runId` plus `runDirectory`.
 Pinned registration requires a visible native local root session, including on
 replay. An ACK retry also requires the configured executable still to match its
@@ -564,7 +519,7 @@ establishes the pin's source schema, rather than issuing a second full read.
 It retains that invocation's root and observation time; a separate GET or later
 capture cannot relabel it as fresh evidence. Subsequent measurements reuse only
 the executable pin and perform a fresh source capture. Each observation has its
-own maximum eight-second deadline, including its byte checks and parsing;
+own maximum thirty-second deadline, including its byte checks and parsing;
 an intentionally shorter outer caller deadline is preserved.
 Fixture construction uses the existing finite Git setup budget. Run this test
 only in an authorized focused slot; it is not part of the default FULL suite.
@@ -583,8 +538,15 @@ successful fixtures are removed normally.
 The host's `engram_source_id_until` takes an explicit executable pin, an
 already-authorized root and the caller's absolute deadline. It returns
 the complete typed value, including local changes, after byte-pin checks,
-bounded execution and strict parsing. The maximum eight-second budget is
+bounded execution and strict parsing. The maximum thirty-second budget is
 shared by those operations; a shorter caller deadline stays shorter.
+The owner receives `--timeout-ms` up to `30000`. Activate this host change
+with an Engram build that accepts that bound; there is no version-dependent
+fallback. Source deadlines derive from `scripts/source-id-budget-ms.json`.
+Outer process delivery adds 2 s, metadata HTTP adds 5 s, and pinned registration
+adds its existing ACK/durability allowances as described above. The ACK
+allowance remains 8 s, host claim/durability remains 5 s, and named-root
+reclamation keeps its separate 8 s budget.
 JSON is limited to one MiB, with one trailing LF allowed outside that limit.
 Unavailable, incoherent, oversized or late input is an error with no fallback.
 Equality compares every field of this object, excluding the envelope's
@@ -630,7 +592,7 @@ coordinator as the fallback for older hosts or unavailable completion delivery
 Keep the runner's original inherited `TERMAL_SESSION_ID`; do not create a
 registration on another host or relaunch the run to make it appear in that index.
 
-`request.json` records the exact plan and captured source fingerprint, plus
+`request.json` records the exact plan and complete admitted `sourceId`, plus
 `detached` and the creating process's `creatorPid`, which TermAl's test-run
 index reads (see [test runs](features/test-runs.md)); `results.json` records
 actual process exits, explicit unrun stages, timestamps,
@@ -641,39 +603,15 @@ it waits for the reader within a 2 s budget, retrying only the rename of the
 complete temporary file, and fails with the original error once the budget is
 spent.
 Diagnostic extraction is bounded and does not decide success. A missing
-terminal result is `UNKNOWN`, never a pass. Source/index drift before execution
-stops the command. Post-run drift fails a plain run; a committed-input run keeps
-the command outcome but is ineligible, as the separate gate line explains.
-`execution.lock` prevents rerunning the same plan.
+terminal result is `UNKNOWN`, never a pass. Source drift before execution
+stops the command. Post-run drift or unavailability prevents a passing run;
+actual command failures keep their outcome and exit code. `execution.lock`
+prevents rerunning the same plan.
 
-The fingerprint's own Git calls ignore system and global Git configuration
-(`GIT_CONFIG_NOSYSTEM`, and `GIT_CONFIG_GLOBAL` pointing at the null device), so
-the same working tree always hashes the same way whatever the machine's Git
-settings. Two consequences follow. A file ignored only through a global
-`core.excludesFile` still counts as untracked source, so creating or changing it
-during a run is drift. And the recorded index and working-tree state are those
-the isolated Git reports, which can differ from an ordinary `git status` where
-system settings such as `core.autocrlf` apply. A drift error names the changed
-fingerprint components, not the paths within them.
-
-The launcher retains the CLI field name `trackedIndexDiffSha256`, but now hashes
-the raw `git ls-files --stage -z` output: each index entry's mode, full blob id,
-stage number and NUL-terminated path. This identifies the entire staged index,
-independently of checkout line endings or absent files in a no-checkout worktree.
-Previously it hashed `git diff --cached HEAD --binary` patch text. Git can reuse
-stat-clean checkout files to render that patch, and with no inherited autocrlf
-setting, CRLF checkout bytes can produce a different patch than the staged LF
-blob. Older staged-field hashes and launcher composite fingerprints are not
-comparable with the new format; CLI field names and ordering stay unchanged.
-Existing run artifacts retain their original recorded fingerprints.
-
-`trackedHeadDiffSha256` still hashes `git diff HEAD --binary` and records the
-tracked checkout state. It intentionally remains sensitive to checkout line
-endings and missing tracked files; an LF checkout, a CRLF checkout and a
-no-checkout worktree can share the staged-field hash while differing in this
-field. The launcher composite also includes the root, HEAD, status and untracked
-content, so equality of staged content alone does not imply composite equality.
-This launcher format is separate from Engram's schema-1 review freeze.
+Old artifacts retain their recorded fingerprints as attributed history. They
+are never accepted as proof for a new source_id run. Explicit review-freeze
+commands, reviewer identities, test-ref names and Review-Freeze trailers keep
+their existing fingerprint format; this cutover does not change them.
 
 <a id="detached-gate-delivery"></a>
 
@@ -1234,7 +1172,7 @@ cargo's `test result:` lines summed across test binaries or one complete,
 coherent native Node TAP/spec totals block, records them
 on the focused stage of `results.json` as `tests` (`passed`, `failed`,
 `ignored`), and prints them in its summary as `tests: passed=N failed=M
-ignored=K` beside `input fingerprint: …`. A runner it does not recognise gets
+ignored=K` beside the source_id boundary comparison. A runner it does not recognise gets
 no counts. A focused run earns credit only as registered verification with
 committed input, selected automatically or with `--input commit` as above;
 otherwise the host reports it as
@@ -1254,8 +1192,9 @@ the next TermAl restart. Native Node recognition and unsupported-form feedback
 also require that updated running host; declarations alone cannot add them.
 
 Native Node focused checks additionally match owner, repository root, exact
-inner argv, execution interval, native terminal exit and unchanged input
-fingerprints through the same local artifact validator as focused Build.
+inner argv, execution interval, native terminal exit and equal complete
+admitted/before/after source_id values through the same local artifact validator
+as focused Build.
 Missing, partial, duplicate or inconsistent totals are not reported as passed;
 skipped/TODO tests are ignored rather than executed passes, and cancellation
 counts as failure. Valid matching failing evidence reports a failed test;

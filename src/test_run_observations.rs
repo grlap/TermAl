@@ -632,6 +632,7 @@ impl AppState {
         {
             return;
         }
+        let launch_only = native.is_none() && EngramHost::is_launch_only(command, EngramCommandExit::Code(0));
         let observation = TestRunCommandObservation {
             execution_id: execution_id.clone(),
             runtime_identity,
@@ -653,7 +654,7 @@ impl AppState {
             declared_native: native,
             declared_artifact: declared
                 .map(|binding| test_run_display_path(FsPath::new(&binding.artifact_canonical))),
-            launch_only: EngramHost::is_launch_only(command, EngramCommandExit::Code(0)),
+            launch_only,
             summary: TestRunSummary {
                 registration: TestRunRegistrationView::default(),
                 run_id: execution_id.clone(),
@@ -1057,6 +1058,21 @@ impl AppState {
             .collect();
         for id in obsolete {
             inner.test_runs.unclassified_commands.remove(&id);
+        }
+        // Keep original native jobs across prompt changes, only while their
+        // original runtime can still report END. Workers retain their own Arc.
+        let obsolete: Vec<_> = inner.test_runs.declared_executions.iter()
+            .filter(|(_, execution)| {
+                let job = execution.lock().expect("native execution mutex poisoned");
+                inner.test_run_observations.get(&job.reservation.execution_id)
+                    .is_none_or(|row| row.summary.ended_at.is_some()
+                        || inner.find_session_index(&job.reservation.session_id)
+                            .and_then(|index| test_run_runtime_identity(&inner.sessions[index],
+                                &EngramObservationProvenance::Ambient)) != row.runtime_identity)
+            })
+            .map(|(id, _)| id.clone()).collect();
+        for id in obsolete {
+            inner.test_runs.declared_executions.remove(&id);
         }
         // A launch acknowledgement may already be Unknown while its provider
         // is still monitored. Record exact runtime loss once, without claiming

@@ -26,6 +26,9 @@ mod scan_projection;
 #[path = "test_run_committed_input.rs"]
 mod committed_input;
 
+#[path = "test_run_source_input.rs"]
+mod source_input;
+
 #[path = "engram_verification_record.rs"]
 mod engram_verification_record;
 

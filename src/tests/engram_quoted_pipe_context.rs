@@ -145,7 +145,7 @@ fn corrupt_artifact(fixture: &mut FocusedNodeFixture, defect: &str) {
             fixture.results["stages"][0]["ended"] = json!("2000-01-01T00:00:01.000Z");
         }
         "argv" => fixture.request["stages"][0]["args"][2] = json!("other.test.mjs"),
-        "input" => fixture.input["fingerprint"] = json!("e".repeat(64)),
+        "input" => fixture.results["sourceIdAfter"]["tree"] = json!("e".repeat(40)),
         _ => panic!("unknown fixture corruption"),
     }
 }

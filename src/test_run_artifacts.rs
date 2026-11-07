@@ -165,6 +165,10 @@ impl AppState {
             }
             row
         };
+        // Native runs already own their original reservation and artifact.
+        // Console locators, previews and persisted-output metadata cannot
+        // replace that association.
+        if row.declared_native.is_some() { return; }
         let mut locators = std::collections::BTreeSet::new();
         for line in output.lines() {
             let line = line.trim();

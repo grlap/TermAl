@@ -101,6 +101,10 @@ mod engram_retry_hold_projection;
 // under engram_host_adapter's turn_observations module, whose ClaimedRoot
 // fixture they share.
 mod engram_source_roots;
+
+fn launcher_source_id_fixture() -> Value {
+    json!({"commit":"a".repeat(40),"tree":"b".repeat(40),"submodules":[],"changes":[]})
+}
 mod engram_source_command;
 mod engram_source_id;
 mod engram_source_id_capture;
@@ -1966,7 +1970,6 @@ fn test_run_wait_record(id: &str, session_id: &str) -> TestRunWaitRecord {
             owner_session_id: None,
             started_at: None,
             request_identity: None,
-            expected_fingerprint: None,
             locator_identity: None,
             registration_backed: false,
             registration_progress: TestRunWaitRegistrationProgress::default(),

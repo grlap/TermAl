@@ -28,7 +28,7 @@ impl GateWaitFixture {
         request["creatorPid"] = json!(std::process::id());
         request["detached"] = json!(true);
         request["notifyTo"] = json!(notify);
-        request["expectedFingerprint"] = json!("a".repeat(64));
+        request["sourceId"] = launcher_source_id_fixture();
         let directory = write_run(
             &runs.runs_dir(), &run_id, request, Some(running_results(Some(std::process::id()))),
         );
@@ -64,9 +64,8 @@ impl GateWaitFixture {
     fn pass(&self) {
         let mut results = passed_results();
         results["runId"] = json!(self.run_id);
-        results["expectedFingerprint"] = json!("a".repeat(64));
-        results["before"] = json!("a".repeat(64));
-        results["after"] = json!("a".repeat(64));
+        results["sourceIdBefore"] = launcher_source_id_fixture();
+        results["sourceIdAfter"] = launcher_source_id_fixture();
         fs::write(self.directory.join("results.json"), results.to_string()).unwrap();
         self.runs.refresh(&[]);
         self.runs.state.refresh_test_run_waits();
@@ -82,7 +81,6 @@ fn registered_gate_wait_belongs_to_merger_not_overlapping_project_or_notify_targ
     assert_eq!(run.notify_session_id.as_deref(), Some(fixture.notify.as_str()));
     let response = fixture.wait(&fixture.merger).unwrap();
     assert!(response.wait.runs[0].request_identity.is_some());
-    assert_eq!(response.wait.runs[0].expected_fingerprint, Some("a".repeat(64)));
     assert!(!response.resume_prompt_queued);
     // Notification delivery itself is irrelevant: no mailbox wake is invoked.
     fixture.pass();
@@ -90,7 +88,7 @@ fn registered_gate_wait_belongs_to_merger_not_overlapping_project_or_notify_targ
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].contains("- Verdict: PASS"));
     assert!(prompts[0].contains(&fixture.run_id));
-    assert!(prompts[0].contains(&format!("Frozen input fingerprint: `{}`", "a".repeat(64))));
+    assert!(prompts[0].contains("Before/after source_id: matched"));
     assert!(fixture.prompts(&fixture.notify).is_empty());
     fixture.runs.state.refresh_test_run_waits();
     assert_eq!(fixture.prompts(&fixture.merger), prompts, "consume once per wait");
@@ -132,8 +130,8 @@ fn only_exact_durable_registration_overrides_discovered_project() {
 }
 
 #[test]
-fn a_substituted_request_or_frozen_input_cannot_settle_the_original_wait_as_passed() {
-    for field in ["expectedFingerprint", "started"] {
+fn a_substituted_immutable_request_cannot_settle_the_original_wait_as_passed() {
+    for field in ["owner", "started"] {
         let fixture = GateWaitFixture::new(&format!("gate-wait-substitute-{field}"));
         let response = fixture.wait(&fixture.merger).unwrap();
         let mut request: Value = serde_json::from_slice(
@@ -142,7 +140,7 @@ fn a_substituted_request_or_frozen_input_cannot_settle_the_original_wait_as_pass
         request[field] = if field == "started" {
             json!("2026-10-24T23:00:00.000Z")
         } else {
-            json!("b".repeat(64))
+            json!("another-session")
         };
         fs::write(fixture.directory.join("request.json"), request.to_string()).unwrap();
         fixture.pass();
@@ -151,8 +149,31 @@ fn a_substituted_request_or_frozen_input_cannot_settle_the_original_wait_as_pass
         assert!(prompts[0].contains("UNKNOWN"));
         assert!(!prompts[0].contains("- Verdict: PASS"));
         assert!(prompts[0].contains(response.wait.runs[0].request_identity.as_ref().unwrap()));
-        assert!(prompts[0].contains(&"a".repeat(64)), "keep original frozen input");
     }
+}
+
+#[test]
+fn a_wait_reports_actual_source_changes_without_an_independent_expected_source_fence() {
+    let fixture = GateWaitFixture::new("gate-wait-source-observation");
+    fixture.wait(&fixture.merger).unwrap();
+    let mut request: Value = serde_json::from_slice(
+        &fs::read(fixture.directory.join("request.json")).unwrap(),
+    ).unwrap();
+    request["sourceId"]["tree"] = json!("c".repeat(40));
+    fs::write(fixture.directory.join("request.json"), request.to_string()).unwrap();
+    let mut results = passed_results();
+    results["runId"] = json!(fixture.run_id);
+    results["sourceIdBefore"] = launcher_source_id_fixture();
+    results["sourceIdAfter"] = launcher_source_id_fixture();
+    results["sourceIdAfter"]["tree"] = json!("c".repeat(40));
+    fs::write(fixture.directory.join("results.json"), results.to_string()).unwrap();
+    fixture.runs.refresh(&[]);
+    fixture.runs.state.refresh_test_run_waits();
+    let prompts = fixture.prompts(&fixture.merger);
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("- Verdict: PASS"), "the wait reports the recorded terminal verdict");
+    assert!(prompts[0].contains("Before/after source_id: mismatched"));
+    assert!(prompts[0].contains("not host check credit"));
 }
 
 #[test]
@@ -172,7 +193,7 @@ fn linked_worktree_wait_keeps_its_identity_when_the_main_scan_project_is_removed
     let mut request = full_request(&runs.root, "2026-10-24T22:00:00.000Z");
     request["owner"] = json!(merger);
     request["creatorPid"] = json!(std::process::id());
-    request["expectedFingerprint"] = json!("a".repeat(64));
+    request["sourceId"] = launcher_source_id_fixture();
     let directory = write_run(&runs.runs_dir(), &run_id, request,
         Some(running_results(Some(std::process::id()))));
     runs.state.register_test_run(&merger, registration_request(&run_id, &directory)).unwrap();
@@ -258,7 +279,6 @@ fn assert_copied_locator_is_rejected(label: &str, unix_alias: bool) {
         request, Some(passed_results()));
     let copied_disk = TestRunDisk::read(&copied, None).unwrap();
     assert_eq!(copied_disk.request_identity, response.wait.runs[0].request_identity);
-    assert_eq!(copied_disk.expected_fingerprint, response.wait.runs[0].expected_fingerprint);
     assert_ne!(copied_disk.locator_identity, response.wait.runs[0].locator_identity);
     if unix_alias {
         assert_eq!(test_run_path_key(&test_run_display_path(&fixture.directory)),

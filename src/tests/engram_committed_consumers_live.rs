@@ -220,7 +220,10 @@ fn launch_consumer(matrix: &Matrix, commit: &str, children: &[(&str, &str)]) -> 
     let mut check = matrix.actual_check_output(output);
     assert_eq!(check.exit, 0, "{}", check.output);
     assert_eq!(check.results["input"]["eligible"], true);
-    assert_eq!(check.results["before"], check.results["after"]);
+    let (before, after) = test_run_source_endpoints(&check.results)
+        .expect("the real launcher retained complete owner source endpoints");
+    assert_eq!(before, after);
+    assert_eq!(before.commit, commit);
     assert_eq!(check.results["input"]["commit"], commit);
     assert_eq!(check.results["stages"][0]["tests"]["passed"], 1);
     matrix.receive_unplaced_check(events, &mut check);

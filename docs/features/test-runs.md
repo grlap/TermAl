@@ -119,7 +119,7 @@ existing trace ring; it grants no verification and changes no admission,
 state authority, persistence or test execution.
 
 The production launcher requires this versioned ACK and an exact durable run
-query before fingerprint capture, preflight, Cargo bootstrap or any stage.
+query before admitted source capture, preflight, Cargo bootstrap or any stage.
 Foreground and detached launches fail with an explicit registration error when
 the host configuration, acknowledgement or query cannot be confirmed. A lost
 POST reply may be retried with the same run identity and immutable request;
@@ -127,7 +127,9 @@ definitive refusals and malformed ACKs are not retried. A detached worker checks
 the saved receipt, immutable request and host visibility again before preflight.
 Each exact confirmation GET permits at most one reissue when the transport
 reports `ECONNRESET` before `fetch` delivers a response. Both attempts share the
-original abort signal and eight-second total deadline; the GET cannot replay
+original abort signal and total deadline (8 s, or source budget plus 8 s for a
+pinned registration); the separate preflight confirmation keeps its 8 s budget.
+The GET cannot replay
 the registration POST. HTTP status, response-body, identity and abort failures
 remain terminal, as does a second reset. Diagnostics retain `queryAttempt` and
 `transportResets`, including when the second read succeeds. This is an
@@ -267,8 +269,8 @@ These hold in every slice. TermAl relies on them and never weakens them.
 
 - Success comes only from real process exits. A missing terminal result is
   `UNKNOWN`, never a pass.
-- The input fingerprint is checked before and after the stages. Drift fails the
-  run.
+- Complete source_id observations are checked against the admitted request and
+  each other. Changed or unavailable input cannot produce a passing run.
 - The first failing stage stops the run; later stages stay `unrun`.
 - Each run owns one directory below Git's `review-runs` metadata directory:
   `request.json`, `input.json`, `results.json` and one log per stage.
@@ -334,6 +336,23 @@ Remote projects are not indexed in slice 1.
 
 - `request.json` and `results.json` are read with a size bound (1 MiB each).
   All fields are optional, and unknown fields are ignored.
+- The launcher writes ordinary request, input and result records as compact
+  UTF-8 JSON with a final newline, counting that newline against the 1 MiB
+  per-file limit. Before publishing a source-bound request it checks the
+  one-copy request and two-copy completion shapes, including known terminal
+  refusal fields, and repeats the result check as metadata becomes available.
+  Before each command starts, its bounded exit, count, diagnostic and cleanup
+  facts are reserved too. A command refused before spawn stays unrun, and
+  earlier completed stages remain recorded.
+  If a complete closing source observation cannot fit, the run fails with
+  `input-unverified` and an artifact-specific `output_limit` reason; that whole
+  observation becomes null. The opening observation is retained if it fits.
+  Stage outcomes, counts and actual failure codes survive this refusal.
+  An optional duration summary that cannot fit uses its existing unavailable
+  status and keeps the complete raw duration artifact; this alone does not
+  change the stage verdict. Verdict-affecting accounting is retained.
+  This handles source-related overflow; metadata that exceeds the file limit
+  even without source observations remains unsupported rather than a pass.
 - A directory without a readable `request.json` is skipped.
 - The index keeps every non-terminal run, plus the newest 50 terminal runs per
   project. From slice 2 it also keeps any terminal run that a pending wait
@@ -602,7 +621,8 @@ tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
 - **Run detail.** Every stage with state, exit code and duration.
   - `unrun` and interrupted stages are shown explicitly.
   - It shows the first failure's diagnostics, the run directory with a copy
-    button, and the fingerprint.
+    button, and the actual full source_id comparison. Old fingerprints remain
+    visible as historical evidence.
   - A stage-log tail is available, with a refresh button.
   - The detail refetches on `testRunChanged` for its run.
 - **Session markers.** Derived client-side from runs whose `state` is
@@ -1007,7 +1027,11 @@ of the reviewed `/review-changes` contract.
     `producer_unsupported` reason while remote verification admission is
     unavailable; qualification and destination association belong to that
     separate admission contract. The completion uses the existing v1 native
-    result/input shape and imposes no fingerprint qualification on a wait.
+    result shape. New input is tagged `source_id` with required nullable
+    `source_id_before` and `source_id_after` fields containing the actual full
+    observations. Null or unequal endpoints cannot earn remote credit; malformed
+    or mixed legacy/tagged payloads are invalid. Historical four-field input
+    remains a separate representation. A wait itself grants no credit.
     Focused and full native completions are supported; a live-preset run or
     legacy registration without original native provenance remains pending.
     Retaining a completion does not replace the acknowledged registration:
@@ -1020,15 +1044,13 @@ of the reviewed `/review-changes` contract.
     so a large mixed wait may need fewer than sixteen references.
   - The caller need not be the owner: a coordinator may wait on a run it did
     not start.
-  - Each new wait pins the request identity and a digest of the canonical native
-    run directory, plus the frozen
-    input fingerprint if launcher preflight has already published it. The
-    request identity and fingerprint appear in the resume prompt. A replaced
-    request, locator or
-    pinned fingerprint cannot supply a PASS for that wait; it settles UNKNOWN
-    because the original identity is no longer indexed. A matching completed
-    run can be consumed through a new wait even if completion mail went to
-    another session. Project isolation still applies.
+  - Each new wait pins the existing immutable request identity and canonical
+    native run-directory locator. It holds no independent expected source copy
+    or source-value fence. Replacing the request or locator settles UNKNOWN;
+    current actual source endpoints are reported as boundary diagnostics, not
+    host check credit. A matching completed run can be consumed through a new
+    wait even if completion mail went to another session. Project isolation
+    still applies.
   - A durable registration admits the wait before the artifact index catches up,
     using its request and native-locator identity. Index lag alone stays pending;
     the existing background refresh delivers the matching indexed result, with
@@ -1091,7 +1113,7 @@ A run that left the index after the wait was registered settles as `UNKNOWN
   repository.
 
 For a fenced wait, a readable replacement also settles UNKNOWN: a changed
-run ID, request digest, canonical native locator or pinned fingerprint, or
+run ID, request digest or canonical native locator, or
 an unsupported request, cannot stand in for the original. A same-ID index
 entry with a mismatched identity likewise settles UNKNOWN.
 
@@ -1229,8 +1251,8 @@ cap is 64 KiB. For each run it contains:
   running, unrun and unknown entries, including entries beyond the stage
   summary's display limit. Unavailable results or a missing collection are
   stated as unknown; an available empty collection has zero totals;
-- the recorded before/after fingerprint comparison: `matched`, `mismatched`
-  or `unknown` when either fingerprint is unavailable. This describes the
+- the complete actual before/after source_id comparison: `matched`, `mismatched`
+  or `unknown` when either object is unavailable or malformed. This describes the
   observed results and does not change the verdict or grant verification credit;
 - for `FAIL`, the first failing stage or preflight check with its
   diagnostics excerpt (`First failing: stage NAME` or `First failing:

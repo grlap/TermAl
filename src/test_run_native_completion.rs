@@ -10,6 +10,13 @@ struct TestRunNativeCompletion {
 }
 
 fn test_run_native_input(results: &Value) -> native_test_completion::Input {
+    if results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some() {
+        return native_test_completion::Input::SourceId(native_test_completion::SourceInput {
+            kind: native_test_completion::SourceInputKind::SourceId,
+            source_id_before: test_run_source_id(results.get("sourceIdBefore")),
+            source_id_after: test_run_source_id(results.get("sourceIdAfter")),
+        });
+    }
     let input = TestRunCommittedInput::read(results).filter(TestRunCommittedInput::coherent);
     let commit = input.and_then(|input| input.commit);
     let optional = |value: Option<&Value>, git: bool| {
@@ -23,11 +30,11 @@ fn test_run_native_input(results: &Value) -> native_test_completion::Input {
     // fact. A plain/staged run does not acquire a committed-input identity.
     let tree = (commit.is_some() && results["source"]["commit"].as_str() == commit.as_deref())
         .then(|| optional(results.get("source").and_then(|source| source.get("tree")), true)).flatten();
-    native_test_completion::Input {
+    native_test_completion::Input::Legacy(native_test_completion::LegacyInput {
         commit, tree,
         before_fingerprint: optional(results.get("before"), false),
         after_fingerprint: optional(results.get("after"), false),
-    }
+    })
 }
 
 fn test_run_native_completion_from_settlement(

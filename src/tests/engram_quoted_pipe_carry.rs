@@ -36,7 +36,7 @@ fn assert_matched_artifact_is_not_verification(turn: &EOCheckedTurn, run: &FsPat
     let verdict = engram_read_carried_run(run, &digest).expect("the exact artifact validates");
     assert!(verdict.passed);
     assert_eq!(verdict.exit_code, 0);
-    assert_eq!(verdict.fingerprint, "f".repeat(64));
+    assert_eq!(serde_json::to_value(verdict.source_id).unwrap(), launcher_source_id_fixture());
     turn.state.poll_engram_carried_runs();
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);

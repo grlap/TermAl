@@ -11,6 +11,25 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createRun, executeRun, startDetachedRun } from "./test-launcher.mjs";
 import { registerTestRun, validateRunRegistration, boundedStateLockEvidence } from "./test-run-registration.mjs";
+import { sourceBinaryPath } from "./test-launcher-input.mjs";
+import { sourceIdBudgetMs } from "./source-id-budget.mjs";
+
+// Fixture host metadata uses the test process's explicitly selected owner, not
+// per-case Cargo homes containing fake compilers. Production never resolves a
+// second executable after the host's metadata endpoint refuses.
+let fixtureSourceOwner;
+function sourceOwnerFixture() {
+  if (!fixtureSourceOwner) {
+    const binaryPath = realpathSync.native(sourceBinaryPath(process.env));
+    const binaryVersion = execFileSync(binaryPath, ["--version"], {
+      encoding: "utf8", windowsHide: true, timeout: 8_000,
+    }).trim();
+    fixtureSourceOwner = { binaryPath,
+      sha256: createHash("sha256").update(readFileSync(binaryPath)).digest("hex"),
+      binaryVersion, sourceVersion: 1 };
+  }
+  return fixtureSourceOwner;
+}
 
 function stateLockEvidenceFixture() {
   return {
@@ -77,6 +96,11 @@ export async function registrationHost(callback, {
   if (autoAcknowledge) acknowledge.release();
   const server = createServer(async (request, response) => {
     try {
+      if (request.method === "GET" && /^\/api\/sessions\/[^/]+\/source-owner$/u.test(request.url)) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(sourceOwnerFixture()));
+        return;
+      }
       if (request.method === "GET") {
         queries.push(request.url);
         const runId = decodeURIComponent(request.url.slice("/api/test-runs/".length));
@@ -162,7 +186,7 @@ function assertNoExecution(root, runDir) {
   assert.ok(result.stages.every((entry) => entry.state === "unrun"));
 }
 
-async function refusedLaunch(root, env, detached, workerExit) {
+async function refusedLaunch(root, env, detached, workerExit, expectedReason = /registration/iu) {
   let runDir;
   const executed = join(root, "stage-after-registration-error");
   let error;
@@ -182,7 +206,7 @@ async function refusedLaunch(root, env, detached, workerExit) {
     }
   } catch (failure) { error = failure; }
   assert.ok(error, "the launch must be refused before any executor is admitted");
-  assert.match(error.message, /registration/iu);
+  assert.match(error.message, expectedReason);
   assertNoExecution(root, runDir);
 }
 
@@ -287,6 +311,8 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
       : value && typeof value === "object"
         ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, ordered(value[key])])) : value;
     const immutable = Object.fromEntries(fields.map((key) => [key, request[key] ?? null]));
+    if (request.input !== undefined) immutable.input = request.input;
+    if (request.sourceOwner !== undefined) immutable.sourceOwner = request.sourceOwner;
     return {
       error: "Durability is pending; retry the unchanged original request.",
       contract: "termal-durability-pending", version: 1, code: "durability_pending", outcome: "pending",
@@ -394,6 +420,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
       await registrationHost(async (host) => {
         const originalFetch = globalThis.fetch;
         t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+          if (String(url).endsWith("/source-owner")) return originalFetch(url, options);
           const response = await originalFetch(url, options);
           if ((options.method ?? "GET") !== "GET") return response;
           await response.body.cancel();
@@ -559,6 +586,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
           const diagnostics = [];
           t.mock.method(console, "log", (...values) => diagnostics.push(values.join(" ")));
           t.mock.method(globalThis, "fetch", (url, options = {}) => {
+            if (String(url).endsWith("/source-owner")) return originalFetch(url, options);
             if ((options.method ?? "GET") !== "GET") return originalFetch(url, options);
             queries.push({ url: String(url), options });
             if (queries.length === 1) {
@@ -596,10 +624,12 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             if (boundary === "preflight_confirmation") runDir = await createRun(plan, env);
             const originalFetch = globalThis.fetch;
             const originalNow = Date.now;
+            const budgetMs = 8_000 + (boundary === "registration" ? sourceIdBudgetMs : 0);
             let expired = false;
             let queries = 0;
-            if (fault === "expired budget") t.mock.method(Date, "now", () => originalNow() + (expired ? 8001 : 0));
+            if (fault === "expired budget") t.mock.method(Date, "now", () => originalNow() + (expired ? budgetMs + 1 : 0));
             t.mock.method(globalThis, "fetch", (url, options = {}) => {
+              if (String(url).endsWith("/source-owner")) return originalFetch(url, options);
               if ((options.method ?? "GET") !== "GET") return originalFetch(url, options);
               queries += 1;
               expired = fault === "expired budget";
@@ -623,7 +653,8 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             if (fault === "persistent reset") {
               assert.match(failure.message, /queryAttempt=2; transportResets=2;/u);
             }
-            if (fault === "expired budget") assert.match(failure.message, /budgetMs=8000;.*remainingMs=0;/u);
+            if (fault === "expired budget") assert.match(failure.message,
+              new RegExp(`budgetMs=${budgetMs};.*remainingMs=0;`, "u"));
             if (fault === "abort") assert.match(failure.message, /category=aborted;/u);
             const saved = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
             assert.ok(saved.stages.every(({ state }) => state === "unrun"));
@@ -642,6 +673,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             const originalFetch = globalThis.fetch;
             let faults = 0;
             t.mock.method(globalThis, "fetch", (url, options = {}) => {
+              if (String(url).endsWith("/source-owner")) return originalFetch(url, options);
               const method = options.method ?? "GET";
               if (method !== phase) return originalFetch(url, options);
               faults += 1;
@@ -685,6 +717,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
             const originalFetch = globalThis.fetch;
             let faults = 0;
             t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+              if (String(url).endsWith("/source-owner")) return originalFetch(url, options);
               const response = await originalFetch(url, options);
               if ((options.method ?? "GET") !== phase) return response;
               faults += 1;
@@ -727,6 +760,7 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
           await registrationHost(async (host) => {
             const originalFetch = globalThis.fetch;
             t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+              if (String(url).endsWith("/source-owner")) return originalFetch(url, options);
               const response = await originalFetch(url, options);
               if ((options.method ?? "GET") !== phase) return response;
               await response.body.cancel();
@@ -1116,7 +1150,8 @@ export function registerLauncherRegistrationTests({ repository, isolatedDetached
 
     test(`host registration ${mode} rejects unavailable host without execution`, async (t) => {
       await fixture(t, async (root, originalEnv) => {
-        await refusedLaunch(root, { ...originalEnv, TERMAL_BASE_URL: "http://127.0.0.1:0" }, detached, workerExit);
+        await refusedLaunch(root, { ...originalEnv, TERMAL_BASE_URL: "http://127.0.0.1:0" }, detached, workerExit,
+          /source owner metadata unavailable/iu);
       });
     });
 

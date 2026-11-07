@@ -2571,6 +2571,7 @@ fn handle_claude_bash_result(
         status,
         exit,
         runtime_output_cut,
+        interrupted && !moved_to_background,
     )
 }
 

@@ -80,10 +80,15 @@ export function TestRunDetails(props: { run: TestRunSummary } | { runId: string;
           {check.diagnostics ? <pre>{check.diagnostics.text}{check.diagnostics.truncated ? "\n[diagnostics truncated]" : ""}</pre> : null}
         </section>)}
       </details>
-      <details><summary>Fingerprint</summary><dl>
+      {detail.sourceComparison ? <details><summary>Source input: {detail.sourceComparison}</summary>
+        <p>Boundary comparison only; this does not establish host check credit.</p>
+        <dl><dt>Admitted</dt><dd><pre>{JSON.stringify(detail.sourceId ?? null, null, 2)}</pre></dd>
+          <dt>Before</dt><dd><pre>{JSON.stringify(detail.sourceIdBefore ?? null, null, 2)}</pre></dd>
+          <dt>After</dt><dd><pre>{JSON.stringify(detail.sourceIdAfter ?? null, null, 2)}</pre></dd></dl>
+      </details> : detail.expectedFingerprint || detail.before || detail.after ? <details><summary>Historical fingerprint</summary><dl>
         <dt>Expected</dt><dd>{detail.expectedFingerprint ?? "not recorded"}</dd>
         <dt>Before</dt><dd>{detail.before ?? "not recorded"}</dd><dt>After</dt><dd>{detail.after ?? "not recorded"}</dd>
-      </dl></details>
+      </dl></details> : <p>Source input not recorded.</p>}
       {detail.limitations ? <p>{detail.limitations}</p> : null}
     </> : null}
     {stageName ? <TestRunLog key={`${run.runId}:${stageName}`} runId={run.runId} stage={stageName} /> : null}

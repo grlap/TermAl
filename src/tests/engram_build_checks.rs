@@ -348,17 +348,17 @@ impl FocusedBuildFixture {
         let directory = engram_git_run_directory(&turn.root).unwrap().join(&run);
         fs::create_dir_all(&directory).unwrap();
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let fingerprint = "f".repeat(64);
+        let source_id = launcher_source_id_fixture();
         let state = if code == 0 { "passed" } else { "failed" };
         let request = json!({"runId":run,"root":turn.root,"owner":turn.session_id,
-            "started":now,"full":false,"detached":false,"expectedFingerprint":fingerprint,
+            "started":now,"full":false,"detached":false,"sourceId":source_id,
             "stages":[{"name":"focused","command":"cargo","args":["build","--offline"]}]});
         let results = json!({"runId":run,"owner":turn.session_id,"started":now,"ended":now,
-            "state":state,"exitCode":code,"expectedFingerprint":fingerprint,
-            "before":fingerprint,"after":fingerprint,"stages":[{"name":"focused","state":state,
+            "state":state,"exitCode":code,"sourceIdBefore":source_id,
+            "sourceIdAfter":source_id,"stages":[{"name":"focused","state":state,
                 "code":code,"started":now,"ended":now,"cwd":turn.root,
                 "command":[turn.root.join("cargo.exe"),"build","--offline"]}]});
-        let input = json!({"fingerprint":fingerprint});
+        let input = json!({"root":turn.root,"sourceId":source_id});
         let output = format!(
             "{} {run} exit={code}\nfocused: {state}\nresults: {}\n",
             if code == 0 { "PASS" } else { "FAIL" },
@@ -520,10 +520,10 @@ fn engram_build_focused_rejects_stale_foreign_and_mismatched_artifacts() {
             f.results["stages"][0]["code"] = json!(101)
         }),
         ("outer-code", |f| f.results["exitCode"] = json!(1)),
-        ("input", |f| f.input["fingerprint"] = json!("a".repeat(64))),
-        ("drift", |f| f.results["after"] = json!("a".repeat(64))),
-        ("malformed-fingerprint", |f| {
-            f.request["expectedFingerprint"] = json!("bad")
+        ("input", |f| f.request["sourceId"]["tree"] = json!("c".repeat(40))),
+        ("drift", |f| f.results["sourceIdAfter"]["commit"] = json!("c".repeat(40))),
+        ("malformed-source", |f| {
+            f.request["sourceId"] = json!("bad")
         }),
         ("summary-run", |f| {
             f.output = f.output.replacen("PASS test-", "PASS test-other-", 1)

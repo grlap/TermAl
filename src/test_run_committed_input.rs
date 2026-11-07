@@ -23,9 +23,9 @@ enum TestRunCommittedInputKind {
 enum TestRunCommittedInputOutcome {
     /// HEAD unchanged and Git reports nothing.
     Clean,
-    /// HEAD unchanged and Git reports only new untracked paths.
+    /// Historical classification: HEAD unchanged and only new untracked paths.
     DebrisPendingDisposition,
-    /// HEAD moved, or a tracked path changed.
+    /// HEAD moved, or a tracked or untracked path changed.
     InputChanged,
 }
 
@@ -174,7 +174,7 @@ impl TestRunCommittedInput {
                     || !after.skipped_paths.is_empty()
                     || !after.filters.is_empty()
                     || !after.gitlinks.is_empty()
-                    || after.paths.iter().any(|path| path.status != "??")
+                    || !after.paths.is_empty()
             }
         };
         after_ok

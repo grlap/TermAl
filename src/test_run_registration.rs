@@ -181,6 +181,7 @@ fn test_run_diagnostic_id(value: &str) -> String {
     value.chars().filter(|ch| ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_')).take(128).collect()
 }
 
+// Claim/durability allowance, not a source-capture budget.
 const TEST_RUN_REGISTRATION_DURABILITY_BUDGET: Duration = Duration::from_secs(5);
 
 /// The shared claim-read and durability deadline. On real time it is measured
@@ -691,21 +692,24 @@ impl AppState {
             .flatten();
         let requested = std::time::Instant::now();
         let clock = self.engram_budget_clock();
-        let deadline = test_run_registration_deadline(&clock, requested);
+        let source_owner = test_run_request_source_owner(&value)?;
+        let source_budget = source_owner.as_ref().map_or(Duration::ZERO, |_| ENGRAM_SOURCE_COMMAND_BUDGET);
+        let deadline = test_run_registration_deadline(&clock, requested) + source_budget;
         diagnostics.fence_deadline = Some(deadline);
         diagnostics.fence_clock = clock.clone();
-        let source_owner = test_run_request_source_owner(&value)?;
         let source_owner_authority = if let Some(expected) = &source_owner {
             diagnostics.enter("verify_source_owner");
-            // This probe consumes the existing registration deadline; it does
-            // not add a new eight-second allowance before the claim read.
+            // Source gets the shared capture budget. Claim/durability retain
+            // their own allowance within the derived outer deadline.
             let (actual, authority) = verify_source_owner(self, session_id,
-                requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET)?;
+                requested + ENGRAM_SOURCE_COMMAND_BUDGET)?;
             if &actual != expected {
                 return Err(ApiError::conflict("test run source owner pin does not match the configured executable"));
             }
             Some(authority)
         } else { None };
+        let deadline = deadline.min(test_run_registration_deadline(&clock, std::time::Instant::now()));
+        diagnostics.fence_deadline = Some(deadline);
         let current_named_binding = if committed_input {
             diagnostics.enter("read_current_claim");
             Some(self.read_test_run_current_named_binding(session_id, &request.run_id,
@@ -717,7 +721,7 @@ impl AppState {
             // The off-lock held-claim read is another scheduling boundary.
             // Recheck program bytes before publication, retaining the same
             // deadline and doing no filesystem IO under StateInner.
-            engram_source_owner_verify_bytes(pin, requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET)
+            engram_source_owner_verify_bytes(pin, requested + source_budget + TEST_RUN_REGISTRATION_DURABILITY_BUDGET)
                 .map_err(engram_source_owner_error)?;
         }
         if let Some(trace) = &diagnostics.trace { trace.mark("validated"); }

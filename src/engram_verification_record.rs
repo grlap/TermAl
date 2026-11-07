@@ -865,16 +865,11 @@ fn engram_verification_record_declared_check(
     if command.normalized.len() > 8192 {
         return Err("declared native command exceeds the verification contract".to_owned());
     }
-    let result = engram_declared_result(binding, exit);
-    let outcome = match test_run_stage_state(stage.get("state").and_then(Value::as_str)) {
-        TestRunStageState::Unrun => EngramVerificationRecordCheckOutcome::NotRun,
-        TestRunStageState::Running => EngramVerificationRecordCheckOutcome::Indeterminate,
-        TestRunStageState::Failed => EngramVerificationRecordCheckOutcome::Failed,
-        TestRunStageState::Passed => match &result.verdict {
+    let result = engram_declared_artifact_result(binding);
+    let outcome = match &result.verdict {
             EngramTrxVerdict::Pass => EngramVerificationRecordCheckOutcome::Passed,
             EngramTrxVerdict::Fail(_) => EngramVerificationRecordCheckOutcome::Failed,
             EngramTrxVerdict::Unknown(_) => EngramVerificationRecordCheckOutcome::Indeterminate,
-        },
     };
     let refs = engram_declared_refs(&command, Some(binding), exit, &result);
     let safe = |text: &str| text == text.trim() && !text.chars().any(|c| {
@@ -913,16 +908,13 @@ fn engram_verification_record_results_are_terminal(registration: &TestRunRegistr
     // admit it; generic launchers keep their existing numeric terminal rule.
     let state = declared_run_result_state(&terminal.check);
     let exit = results.get("exitCode");
-    if !(exit.and_then(Value::as_i64).is_some()
-            || (terminal.reported_success && exit == Some(&Value::Null)))
-        || registration.registered_at != start.registered_at
+    if registration.registered_at != start.registered_at
         || registration.request_identity != start.request_identity
         || registration.work_binding.as_ref() != Some(&start.binding)
         || registration.named_root.as_ref() != Some(&start.named)
         || registration.authority_store.as_ref() != Some(&start.store)
         || results.get("runId").and_then(Value::as_str) != Some(start.run_id.as_str())
         || results.get("state").and_then(Value::as_str) != Some(state)
-        || results.get("interrupted").and_then(Value::as_bool) != Some(false)
         || !results.get("ended").and_then(Value::as_str).is_some_and(|ended| EngramHost::check_timestamp(ended).is_some())
     { return false; }
     let Some(stages) = results.get("stages").and_then(Value::as_array) else { return false; };

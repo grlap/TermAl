@@ -1,4 +1,4 @@
-//! Per-run result totals and fingerprint diagnostics in native resumes.
+//! Per-run result totals and source identity diagnostics in native resumes.
 //! Uses disposable real index/wait fixtures, without launcher or live stores.
 use super::*;
 
@@ -23,8 +23,8 @@ fn resume_evidence_regression_counts_all_states_and_stages_beyond_the_summary_ca
         {"name":"running", "state":"running"}, {"name":"unrun", "state":"unrun"},
         {}, {"name":"future", "state":"future", "code":0}
     ]);
-    results["before"] = json!("a".repeat(64));
-    results["after"] = results["before"].clone();
+    results["sourceIdBefore"] = launcher_source_id_fixture();
+    results["sourceIdAfter"] = results["sourceIdBefore"].clone();
     fixture.write("test-totals", Some(results));
     fixture.scan(&[]);
     fixture.busy();
@@ -33,7 +33,7 @@ fn resume_evidence_regression_counts_all_states_and_stages_beyond_the_summary_ca
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].contains("Stage totals: passed 65, failed 1, interrupted 1, running 1, unrun 1, unknown 2"), "{}", prompts[0]);
     assert!(prompts[0].contains("Preflight totals: passed 1, failed 1, interrupted 1, running 1, unrun 1, unknown 2"));
-    assert!(prompts[0].contains("Before/after fingerprint: matched"));
+    assert!(prompts[0].contains("Before/after source_id: matched"));
     assert!(prompts[0].contains("- `test-totals`: PASS"), "diagnostics do not redefine the verdict");
     fixture.state.refresh_test_run_waits();
     assert_eq!(fixture.queued_prompts(), prompts);
@@ -41,26 +41,29 @@ fn resume_evidence_regression_counts_all_states_and_stages_beyond_the_summary_ca
 
 #[test]
 fn resume_evidence_regression_compares_before_and_after_conservatively() {
+    let source = launcher_source_id_fixture();
+    let mut changed = source.clone();
+    changed["tree"] = json!("c".repeat(40));
     for (before, after, expected) in [
-        (json!("a".repeat(64)), json!("a".repeat(64)), "matched"),
-        (json!("a".repeat(64)), json!("b".repeat(64)), "mismatched"),
-        (Value::Null, json!("b".repeat(64)), "unknown"),
-        (json!("a".repeat(64)), Value::Null, "unknown"),
+        (source.clone(), source.clone(), "matched"),
+        (source.clone(), changed, "mismatched"),
+        (Value::Null, source.clone(), "unknown"),
+        (source, Value::Null, "unknown"),
         (json!(""), json!(""), "unknown"),
     ] {
-        let fixture = WaitFixture::new("prompt-fingerprints");
+        let fixture = WaitFixture::new("prompt-source-input");
         let mut results = passed();
-        results["before"] = before;
-        results["after"] = after;
+        results["sourceIdBefore"] = before;
+        results["sourceIdAfter"] = after;
         results["preflight"] = json!([]);
-        fixture.write("test-fingerprint", Some(results));
+        fixture.write("test-source-input", Some(results));
         fixture.scan(&[]);
         fixture.busy();
-        fixture.register(&["test-fingerprint"], "all").unwrap();
+        fixture.register(&["test-source-input"], "all").unwrap();
         let prompt = fixture.queued_prompts().pop().unwrap();
-        assert!(prompt.contains(&format!("Before/after fingerprint: {expected}")), "{prompt}");
+        assert!(prompt.contains(&format!("Before/after source_id: {expected}")), "{prompt}");
         assert!(prompt.contains("Preflight totals: passed 0, failed 0, interrupted 0, running 0, unrun 0, unknown 0"));
-        assert!(prompt.contains("- `test-fingerprint`: PASS"));
+        assert!(prompt.contains("- `test-source-input`: PASS"));
     }
 }
 
@@ -83,7 +86,7 @@ fn resume_evidence_regression_unavailable_results_do_not_invent_zero_totals() {
             .split("### Run `test-done`").next().unwrap();
         assert!(section.contains("Stage totals: unknown (results unavailable)"), "{prompt}");
         assert!(section.contains("Preflight totals: unknown (results unavailable)"));
-        assert!(section.contains("Before/after fingerprint: unknown"));
+        assert!(section.contains("Before/after source_id: unknown"));
         assert!(!section.contains("passed 0"));
         assert!(prompt.contains("- `test-done`: PASS"));
     }
@@ -96,8 +99,9 @@ fn resume_evidence_regression_keeps_all_run_totals_with_bounded_failure_excerpts
     for id in &ids {
         let mut results = failed(&"x".repeat(TEST_RUN_WAIT_EXCERPT_MAX_BYTES));
         results["preflight"] = json!([]);
-        results["before"] = json!("a".repeat(64));
-        results["after"] = json!("b".repeat(64));
+        results["sourceIdBefore"] = launcher_source_id_fixture();
+        results["sourceIdAfter"] = launcher_source_id_fixture();
+        results["sourceIdAfter"]["tree"] = json!("c".repeat(40));
         fixture.write(id, Some(results));
     }
     fixture.scan(&[]);
@@ -108,7 +112,7 @@ fn resume_evidence_regression_keeps_all_run_totals_with_bounded_failure_excerpts
     assert!(!prompt.contains(DELEGATION_WAIT_RESUME_TRUNCATED_MARKER));
     assert_eq!(prompt.matches("Stage totals: passed 0, failed 1").count(), 16);
     assert_eq!(prompt.matches("Preflight totals: passed 0, failed 0").count(), 16);
-    assert_eq!(prompt.matches("Before/after fingerprint: mismatched").count(), 16);
+    assert_eq!(prompt.matches("Before/after source_id: mismatched").count(), 16);
     for id in &ids {
         assert!(prompt.contains(&format!("### Run `{id}` (full)")));
     }

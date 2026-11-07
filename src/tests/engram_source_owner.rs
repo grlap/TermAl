@@ -17,7 +17,7 @@ pub(super) fn source_owner_reply(args: &[String]) -> std::process::Output {
         assert_eq!(args[1], "--root");
         assert_eq!(args[3], "--json");
         assert_eq!(args[4], "--timeout-ms");
-        assert!((1..=8000).contains(&args[5].parse::<u64>().unwrap()));
+        assert!((1..=30000).contains(&args[5].parse::<u64>().unwrap()));
         source_owner_output(1, serde_json::to_vec(&json!({
             "version":1, "status":"unavailable", "root":args[2], "source":null, "tree":null,
             "entries":[], "refusal":{"code":"input_unavailable","message":"fixture is not a repository"},

@@ -2,9 +2,12 @@
 // bounded host registration handshake, not execution, credit or restart policy.
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
+import { sourceOwnerPinValid } from "./test-launcher-input.mjs";
+import { sourceIdBudgetMs, sourceMetadataHttpBudgetMs } from "./source-id-budget.mjs";
 
 const contextVariables = ["TERMAL_BASE_URL", "TERMAL_SESSION_ID", "TERMAL_CLI"];
-const registrationBudgetMs = 8_000;
+const registrationBudgetMs = 8_000; // POST/confirmation ACK, never a source observation.
+const sourceRegistrationBudgetMs = sourceIdBudgetMs + registrationBudgetMs;
 const responseByteLimit = 65_536;
 const contract = "termal-durable-test-run-registration";
 const version = 1;
@@ -67,6 +70,27 @@ export function validateRegistrationContext(env) {
   if (hasTermalContext(env)) hostConfiguration(env);
 }
 
+export async function sourceOwnerMetadata(env = process.env) {
+  if (!hasTermalContext(env)) return null;
+  const { session, base } = hostConfiguration(env);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), sourceMetadataHttpBudgetMs);
+  try {
+    const url = new URL(`/api/sessions/${encodeURIComponent(session)}/source-owner`, base);
+    const response = await fetch(url, { signal: controller.signal, redirect: "error" });
+    if (!response.ok) throw new Error(`source owner metadata refused (${response.status}); no tests started`);
+    const pin = await readResponse(response);
+    if (!sourceOwnerPinValid(pin)) throw new Error("source owner metadata is malformed or unsupported; no tests started");
+    return pin;
+  } catch (error) {
+    if (error?.message?.startsWith("source owner metadata")) throw error;
+    // Metadata admission has its own boundary. Keep transport failures named
+    // without copying exception messages, credentials or response bodies.
+    throw new Error(`source owner metadata unavailable (${failureCategory(error, controller.signal)}; ${transportCode(error)}); no tests started`,
+      { cause: error });
+  } finally { clearTimeout(timeout); }
+}
+
 async function readResponse(response) {
   if (!response.body) throw responseFailure("missing_response", "host response has no body");
   let length = 0;
@@ -108,7 +132,7 @@ function transportCode(error) {
 // Advisory timings only. The original Date.now deadline, exact request bytes,
 // ACK predicates and retry decisions remain the execution boundary.
 class RegistrationDiagnostics {
-  constructor(request, deadline, operation = "registration") {
+  constructor(request, deadline, operation = "registration", budgetMs = registrationBudgetMs) {
     this.started = performance.now();
     this.runId = request.runId;
     this.requestDigest = requestIdentity(request);
@@ -116,6 +140,7 @@ class RegistrationDiagnostics {
     this.operationId = randomUUID();
     this.operation = operation;
     this.deadline = deadline;
+    this.budgetMs = budgetMs;
     this.phaseStarted = this.started;
     this.phase = "operation_start";
     this.method = "POST";
@@ -140,7 +165,7 @@ class RegistrationDiagnostics {
     return `phase=${this.phase}; category=${category}; runId=${this.runId}; attempt=${this.attempt}; httpStatus=${this.status}; `
       + `operationId=${this.operationId}; operation=${this.operation}; requestDigest=${this.requestDigest}; `
       + `elapsedMs=${(now - this.started).toFixed(1)}; phaseElapsedMs=${(now - this.phaseStarted).toFixed(1)}; `
-      + `budgetMs=${registrationBudgetMs}; deadlineEpochMs=${this.deadline}; remainingMs=${Math.max(0, this.deadline - Date.now())}; `
+      + `budgetMs=${this.budgetMs}; deadlineEpochMs=${this.deadline}; remainingMs=${Math.max(0, this.deadline - Date.now())}; `
       + `queryAttempt=${this.queryAttempt}; transportResets=${this.transportResets}; spans=${this.spans.join(",").slice(0, 224)}`;
   }
 
@@ -343,8 +368,9 @@ export async function registerTestRun(request, runDirectory, env = process.env) 
   // run or change the immutable request while the outcome is unresolved.
   const body = JSON.stringify({ runId: request.runId, runDirectory });
   const identity = requestIdentity(request);
-  const deadline = Date.now() + registrationBudgetMs;
-  const diagnostics = new RegistrationDiagnostics(request, deadline);
+  const budgetMs = request.sourceOwner === undefined ? registrationBudgetMs : sourceRegistrationBudgetMs;
+  const deadline = Date.now() + budgetMs;
+  const diagnostics = new RegistrationDiagnostics(request, deadline, "registration", budgetMs);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     diagnostics.attempt = attempt + 1;
     diagnostics.enter("post_headers", "unavailable");

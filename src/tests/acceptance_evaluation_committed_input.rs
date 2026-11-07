@@ -1433,6 +1433,28 @@ await withHostedRegistrationFixture(root,env,async hosted=>{
         assert!(frame["plainRequest"].get("input").is_none());
         assert_eq!(frame["second"]["state"], "passed");
         assert!(frame["second"].get("input").is_none());
+        // Keep the real launcher's immutable native pin, but script the Rust
+        // metadata subprocess boundary as the registration unit tests do. This
+        // test observes run/claim behavior, not the installed source CLI version.
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let project_id = engram_project_for_session_locked(&inner, &parent).unwrap().id.clone();
+            inner.projects.iter_mut().find(|project| project.id == project_id).unwrap()
+                .engram.as_mut().unwrap().binary_path = Some(
+                    frame["automaticRequest"]["sourceOwner"]["binaryPath"].as_str().unwrap().to_owned(),
+                );
+            let version = frame["automaticRequest"]["sourceOwner"]["binaryVersion"]
+                .as_str().unwrap().to_owned();
+            inner.test_native_source_owner_metadata = Some(Arc::new(move |state, session, deadline| {
+                state.source_owner_metadata_snapshot_with(session, deadline, |_, _, args, _, _| {
+                    let mut reply = crate::tests::engram_source_owner::source_owner_reply(args);
+                    if args == ["--version"] {
+                        reply.stdout = format!("{version}\n").into_bytes();
+                    }
+                    Ok(reply)
+                })
+            }));
+        }
         // Register the actual immutable requests and results through the host
         // seam, bound to the same claim, fence and naming generation.
         for (directory, request) in [("automatic", "automaticRequest"), ("plain", "plainRequest")] {

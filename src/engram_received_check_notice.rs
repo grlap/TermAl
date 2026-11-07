@@ -2,10 +2,9 @@
 // nor an ordinary check can supply this authority. All disk/Git work is off-lock.
 // EngramOtherRootNoticeRead moved here from engram_turn_checks.rs, extended
 // with receipt presentation; its existing owned-observer lifecycle is reused.
-// Provisional whole-batch capacity: Windows recursive submodule status alone
-// measured 1.9–2.75 s; the former 2 s caller bound expired during that read.
-// This is not a worst-case source-proof bound or a durability budget.
-const RECEIVED_NOTICE_CAPTURE_BUDGET: Duration = Duration::from_secs(8);
+// Source observations share the owner's 30 s bound. This does not extend
+// registration durability or allow a partial observation after expiry.
+const RECEIVED_NOTICE_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_COMMAND_BUDGET;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReceivedNoticeSource {
