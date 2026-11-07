@@ -115,6 +115,22 @@ impl ReviewFreezeGit {
 
     fn new_with_deadline_and_timings(cwd: &FsPath, deadline: Option<std::time::Instant>,
         timings: Option<Arc<SourceReadTimings>>) -> Result<Self> {
+        let git = Self::for_ignore_query(cwd, deadline, timings)?;
+        let top = git.run(&["rev-parse", "--show-toplevel"], false)?;
+        if fs::canonicalize(String::from_utf8(top)?.trim())? != git.root {
+            bail!("review cwd must be the worktree root");
+        }
+        // Git diff can invoke filters. Ignore classification does not run
+        // diff, filters or hooks and needs only the shared pinned transport.
+        let filters = git.run(&["config", "--null", "--get-regexp", r"^filter\..*\.(clean|smudge|process)$"], true)?;
+        if !filters.is_empty() { return Err(SourceBasisRefusal::ConfiguredGitFilters.into()); }
+        Ok(git)
+    }
+
+    // Transport setup only; never a source-identity admission. This is used
+    // solely for bounded check-ignore queries on supplied notification paths.
+    fn for_ignore_query(cwd: &FsPath, deadline: Option<std::time::Instant>,
+        timings: Option<Arc<SourceReadTimings>>) -> Result<Self> {
         check_capture_cancellation()?;
         let root = fs::canonicalize(cwd)?;
         // Never allow Windows' current-directory executable search, a relative
@@ -131,24 +147,6 @@ impl ReviewFreezeGit {
             deadline: capture_deadline(deadline.unwrap_or_else(||std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT)),
             timings,
         };
-        let top = git.run(&["rev-parse", "--show-toplevel"], false)?;
-        if fs::canonicalize(String::from_utf8(top)?.trim())? != git.root {
-            bail!("review cwd must be the worktree root");
-        }
-        // Git diff can invoke a clean/process filter even with --no-ext-diff.
-        // Reject such repositories rather than running their configured code.
-        let filters = git.run(
-            &[
-                "config",
-                "--null",
-                "--get-regexp",
-                r"^filter\..*\.(clean|smudge|process)$",
-            ],
-            true,
-        )?;
-        if !filters.is_empty() {
-            return Err(SourceBasisRefusal::ConfiguredGitFilters.into());
-        }
         Ok(git)
     }
 

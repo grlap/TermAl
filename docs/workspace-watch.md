@@ -28,7 +28,45 @@ both old and new paths; directory deletion remains a covering invalidation even
 after the directory disappears. No directory traversal reconstructs child paths.
 Scope routing uses the delivered path, not a cached source-authority grant.
 
+Before turn attribution and UI publication, the worker classifies supplied
+paths with batched, bounded `git check-ignore` reads. It does not enumerate
+the tree or launch Git per event. The index is honored for exact-path
+notifications, so a force-tracked file matching an ignore pattern still
+refreshes for those notifications. An ignored covering directory marker does
+not inspect the index for tracked descendants. The deepest known workspace
+gets its own classification; a parent ignoring `.worktrees/` does not hide
+source changes in an independently active worktree there. A workdir below its
+known project root can discover that project's repository; an independent
+project or workspace stops discovery at its own boundary. Git global excludes
+are disabled by the trusted transport; repository and index policies apply.
+Failed classification
+is unknown and keeps conservative refresh coverage. These reads run off the
+notify callback and state mutex; identical attribution roots share a query
+within a batch. Queries use the existing review-freeze transport budget. A
+slow query synchronously delays later watcher publications for up to that
+budget per relevant root, while callback ingress stays bounded. No polling
+or ignore-cache lifecycle is added.
+
+Transport and turn storage have separate display limits: at most 32 entries
+and 8 KiB of path/scope text. Larger sets become up to 16 sampled entries plus
+a covering subtree marker. The covering marker preserves refreshes outside
+the sample; disjoint roots or an oversized covering path use global coverage.
+SSE carries `summary.observedChanges` and `summary.sampledPaths`. Counts refer
+to delivered notification records, not an enumerated count of distinct files
+or the number of files underneath a subtree marker. Turn titles likewise
+label accumulated notification counts explicitly. The limits also apply to
+late and unresolved turn summaries, across successive generations. Repeated
+notifications for the same file do not imply a bounded sample. A late card's
+notification count excludes the card published at turn completion.
+Engram receives the original ordered observations before display filtering
+and coalescing, so display limits do not narrow check-credit coverage.
+
 ## Consumers
+
+Git-ignored paths do not reach these display consumers, even when an editor
+already has such a file open. Those tabs and expanded ignored directories do
+not receive external-change refreshes from this stream. Known nested roots
+retain their own covering refresh when an ignored ancestor absorbs their facts.
 
 | Consumer | Owner and handling |
 | --- | --- |
@@ -37,7 +75,8 @@ Scope routing uses the delivered path, not a cached source-authority grant.
 | Git diff previews | `git-diff-refresh.ts`, `workspaceFilesChangedEventTouchesGitDiffTab`: refresh covered open requests, including old paths for renames. |
 | Git status | `panels/GitStatusPanel.tsx` is not a file-event consumer. It reads Git status on its existing focus/visibility and ten-second polling schedule; Git diff previews above consume notifications. |
 | File tree | `panels/FileSystemPanel.tsx`, same root predicate: refresh Git decorations and expanded directory entries. |
-| Turn attribution | `file_event_attribution.rs`: match overlap with the captured source root/workdir off-lock, then revalidate ownership; preserve subtree markers in summaries instead of inventing child paths. A global marker keeps its coverage when workdir and source root differ. Bounding accumulation across successive generations is separate work. |
+| Turn attribution | `file_event_attribution.rs`: match overlap and ignore policy with the captured source root/workdir off-lock, then revalidate ownership; bound retained samples and preserve covering markers across generations. A global marker keeps its coverage when workdir and source root differ. |
+| Delegation workspace observations | `delegations.rs` and `delegation_worker_handoff.rs` derive informational path lists from these filtered, bounded turn summaries. Writes to Git-ignored paths are absent; samples and covering markers are not an exhaustive list of writes. |
 | Engram carried/launching fences | `engram_carried_checks.rs`, `note_engram_observed_workspace_file_changes`: a marker inside a root follows that path's worktree routing, own-scratch exemption and Cargo-sibling candidate handling. Independently it reaches checks rooted under the marker, including nested repositories within a parent's scratch. A global marker reaches all checks. |
 | SSE recovery | `api_sse.rs`: a lagged file-event receiver gets a global subtree invalidation. `workspace-file-events.ts` keeps that marker through UI buffering, replacing older exact hints it covers. |
 

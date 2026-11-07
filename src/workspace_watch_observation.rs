@@ -81,6 +81,7 @@ fn take_workspace_watch_diagnostics() -> Vec<String> {
 
 impl AppState {
     fn process_workspace_dirty_batch(&self, batch: Vec<(PathBuf, WorkspaceDirtyFact)>) -> Vec<WorkspaceFileChangeEvent> {
+        if batch.is_empty() { return Vec::new(); }
         let processed = engram_interference_tick();
         let started_at = std::time::Instant::now();
         let mut publication = Vec::new();
@@ -110,6 +111,7 @@ impl AppState {
                 .observed_workspace_files_changed(&changes, &facts, Some(fact.last));
             publication.extend(changes);
         }
+        let publication = self.filter_workspace_publication(publication);
         self.record_active_turn_file_changes(&publication);
         self.publish_workspace_files_changed(publication.clone());
         publication

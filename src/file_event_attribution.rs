@@ -17,6 +17,8 @@ struct FileChangeTrackingLifetime {
 struct FileChangeTrackingPublication {
     completed: bool,
     late_summary_id: Option<String>,
+    observed_changes: usize,
+    bounded: bool,
 }
 
 impl FileChangeTrackingLifetime {
@@ -135,7 +137,14 @@ fn prepare_file_change_capture(
     changes: &[WorkspaceFileChangeEvent],
     scoped_paths: &HashSet<String>,
     normalized: &mut HashMap<String, PathBuf>,
+    ignore_cache: &mut HashMap<String, HashSet<String>>,
+    project_roots: &[PathBuf],
 ) -> PreparedFileChangeCapture {
+    let ignored_workdir = ignore_cache.entry(owner.workdir.clone())
+        .or_insert_with(|| workspace_ignored_changes(&owner.workdir, changes, project_roots)).clone();
+    let ignored_source = owner.source_root.as_ref()
+        .map(|root| ignore_cache.entry(root.root.clone())
+            .or_insert_with(|| workspace_ignored_changes(&root.root, changes, project_roots)).clone()).unwrap_or_default();
     let root_key = owner
         .source_root
         .as_ref()
@@ -162,7 +171,7 @@ fn prepare_file_change_capture(
             continue;
         }
         let matches = if in_root {
-            true
+            !ignored_source.contains(path)
         } else {
             let root = normalized
                 .entry(owner.workdir.clone())
@@ -171,9 +180,9 @@ fn prepare_file_change_capture(
             let candidate = normalized
                 .entry(path.to_owned())
                 .or_insert_with(|| normalize_path_best_effort(FsPath::new(path)));
-            *candidate == root
+            !ignored_workdir.contains(path) && (*candidate == root
                 || candidate.starts_with(&root)
-                || subtree && (path.is_empty() || root.starts_with(&*candidate))
+                || subtree && (path.is_empty() || root.starts_with(&*candidate)))
         };
         prepared.push(PreparedFileChange {
             // An empty subtree covers both the captured workdir and source
@@ -193,7 +202,7 @@ fn prepare_file_change_capture(
 fn merge_captured_file_changes(
     target: &mut BTreeMap<String, WorkspaceFileChangeKind>,
     captured: BTreeMap<String, WorkspaceFileChangeKind>,
-) {
+) -> bool {
     for (path, kind) in captured {
         if target.iter().any(|(known, kind)| {
             *kind == WorkspaceFileChangeKind::Subtree
@@ -211,6 +220,16 @@ fn merge_captured_file_changes(
             })
             .or_insert(kind);
     }
+    let oversized = target.len() > WORKSPACE_PUBLICATION_ENTRIES
+        || target.keys().map(String::len).sum::<usize>() > WORKSPACE_PUBLICATION_PATH_BYTES;
+    if oversized {
+        let changes = std::mem::take(target).into_iter().map(|(path, kind)| WorkspaceFileChangeEvent {
+            path, kind, root_path: None, session_id: None, mtime_ms: None, size_bytes: None,
+        }).collect();
+        let (bounded, _) = bound_workspace_publication(changes);
+        target.extend(bounded.into_iter().map(|change| (change.path, change.kind)));
+    }
+    oversized
 }
 
 fn amend_late_file_change_summary(
@@ -232,21 +251,15 @@ fn amend_late_file_change_summary(
         .iter()
         .map(|entry| (entry.path.clone(), entry.kind))
         .collect();
-    merge_captured_file_changes(&mut merged, captured);
+    let bounded = merge_captured_file_changes(&mut merged, captured);
+    if let Some(tracking) = &record.file_change_tracking {
+        tracking.publication.lock().expect("file tracking mutex poisoned").bounded |= bounded;
+    }
     *files = merged
         .into_iter()
         .map(|(path, kind)| FileChangeSummaryEntry { path, kind })
         .collect();
-    *title = if files
-        .iter()
-        .any(|file| file.kind == WorkspaceFileChangeKind::Subtree)
-    {
-        "Workspace changes during turn (includes directory markers)".to_owned()
-    } else if files.len() == 1 {
-        "1 file changed during turn".to_owned()
-    } else {
-        format!("{} files changed during turn", files.len())
-    };
+    *title = file_change_summary_title(&record.file_change_tracking, files);
     record.mark_body_changed(id);
     true
 }
@@ -257,6 +270,8 @@ fn publish_unresolved_file_change_capture(
     owner: &FileChangeOwnerCapture,
     captured: &BTreeMap<String, WorkspaceFileChangeKind>,
 ) {
+    let mut bounded = BTreeMap::new();
+    merge_captured_file_changes(&mut bounded, captured.clone());
     // Internal prompt/lifetime identifiers and runtime credentials stay off
     // the wire; the captured generation and scope identify retained evidence.
     let evidence = serde_json::json!({
@@ -265,7 +280,8 @@ fn publish_unresolved_file_change_capture(
         "sourceRoot": owner.source_root.as_ref().map(|root| &root.root),
         "capturedDuring": if owner.start_count.is_some() { "active turn" } else { "completion grace window" },
         "graceRemainingMs": owner.grace_deadline.map(|deadline| deadline.saturating_duration_since(owner.captured_at).as_millis()),
-        "files": captured,
+        "files": bounded,
+        "observedChanges": captured.len(),
     });
     push_message_on_record(
         record,
@@ -309,6 +325,8 @@ impl AppState {
         let scan_started = std::time::Instant::now();
         let now = std::time::Instant::now();
         let mut owners = Vec::new();
+        let project_roots = inner.projects.iter().filter(|project| project.remote_id == LOCAL_REMOTE_ID)
+            .map(|project| normalize_user_facing_path(FsPath::new(&project.root_path))).collect::<Vec<_>>();
         for record in &mut inner.sessions {
             diagnostic.visited_sessions += 1;
             if !record.is_local_session() || record.hidden {
@@ -332,10 +350,11 @@ impl AppState {
 
         let preparation_started = std::time::Instant::now();
         let mut normalized = HashMap::new();
+        let mut ignore_cache = HashMap::new();
         let captures = owners
             .into_iter()
             .map(|owner| {
-                prepare_file_change_capture(owner, changes, &scoped_paths, &mut normalized)
+                prepare_file_change_capture(owner, changes, &scoped_paths, &mut normalized, &mut ignore_cache, &project_roots)
             })
             .collect::<Vec<_>>();
         diagnostic.preparation += preparation_started.elapsed();
@@ -382,10 +401,18 @@ impl AppState {
                 continue;
             };
             let record = &mut inner.sessions[index];
-            if !owner.still_owns(record) {
+            let still_owns = owner.still_owns(record);
+            if still_owns {
+                if let Some(tracking) = &record.file_change_tracking {
+                    let mut publication = tracking.publication.lock().expect("file tracking mutex poisoned");
+                    publication.observed_changes = publication.observed_changes.saturating_add(matched.len());
+                }
+            }
+            if !still_owns {
                 publications.push((index, owner, matched, false));
             } else if record.active_turn_start_message_count.is_some() {
-                merge_captured_file_changes(&mut record.active_turn_file_changes, matched);
+                let bounded = merge_captured_file_changes(&mut record.active_turn_file_changes, matched);
+                owner.tracking.publication.lock().expect("file tracking mutex poisoned").bounded |= bounded;
             } else {
                 // Eligibility was fixed at capture, not at delayed apply. A
                 // concurrent capture may have consumed grace in the meantime.
@@ -409,7 +436,8 @@ impl AppState {
                     .late_summary_id
                     .clone();
                 if late && previous.is_none() {
-                    merge_captured_file_changes(&mut record.active_turn_file_changes, matched);
+                    let bounded = merge_captured_file_changes(&mut record.active_turn_file_changes, matched);
+                    owner.tracking.publication.lock().expect("file tracking mutex poisoned").bounded |= bounded;
                     if push_active_turn_file_changes_on_record(record, message_id) {
                         diagnostic.late_summary_count += 1;
                     }

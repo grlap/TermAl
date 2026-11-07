@@ -122,6 +122,8 @@ struct WorkspaceFileChangeEvent {
 struct WorkspaceFilesChangedEvent {
     revision: u64,
     changes: Vec<WorkspaceFileChangeEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    summary: Option<WorkspacePublicationSummary>,
 }
 
 fn fallback_state_events_response(
@@ -436,6 +438,7 @@ async fn state_events(
                             // rather than an apparently quiet workspace.
                             let recovery = WorkspaceFilesChangedEvent {
                                 revision: state.file_events_revision.load(Ordering::Relaxed),
+                                summary: None,
                                 changes: vec![WorkspaceFileChangeEvent {
                                     path: String::new(), kind: WorkspaceFileChangeKind::Subtree,
                                     root_path: None, session_id: None, mtime_ms: None, size_bytes: None,

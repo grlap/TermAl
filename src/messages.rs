@@ -641,6 +641,22 @@ fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
     record.active_turn_file_change_grace_deadline = None;
 }
 
+fn file_change_summary_title(tracking: &Option<Arc<FileChangeTrackingLifetime>>, files: &[FileChangeSummaryEntry]) -> String {
+    let (observed, bounded) = tracking.as_ref().map(|tracking| {
+        let publication = tracking.publication.lock().expect("file tracking mutex poisoned");
+        (publication.observed_changes, publication.bounded)
+    }).unwrap_or((files.len(), false));
+    if bounded {
+        format!("{observed} workspace change notifications during turn (bounded sample and directory markers)")
+    } else if files.iter().any(|file| file.kind == WorkspaceFileChangeKind::Subtree) {
+        "Workspace changes during turn (includes directory markers)".to_owned()
+    } else if files.len() == 1 {
+        "1 file changed during turn".to_owned()
+    } else {
+        format!("{} files changed during turn", files.len())
+    }
+}
+
 /// Pushes the active turn file-change summary on record.
 fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_id: String) -> bool {
     if record.active_turn_file_changes.is_empty() {
@@ -651,7 +667,6 @@ fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_i
         .into_iter()
         .map(|(path, kind)| FileChangeSummaryEntry { path, kind })
         .collect::<Vec<_>>();
-    let count = files.len();
     if record.active_turn_start_message_count.is_none()
         && let Some(tracking) = &record.file_change_tracking
     {
@@ -661,13 +676,16 @@ fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_i
             .expect("file tracking mutex poisoned")
             .late_summary_id = Some(message_id.clone());
     }
-    let title = if files.iter().any(|file| file.kind == WorkspaceFileChangeKind::Subtree) {
-        "Workspace changes during turn (includes directory markers)".to_owned()
-    } else if count == 1 {
-        "1 file changed during turn".to_owned()
-    } else {
-        format!("{count} files changed during turn")
-    };
+    let title = file_change_summary_title(&record.file_change_tracking, &files);
+    if record.active_turn_start_message_count.is_some()
+        && let Some(tracking) = &record.file_change_tracking
+    {
+        // The first late card has its own notifications and bounding state.
+        // Subsequent captures may amend that card without recounting this one.
+        let mut publication = tracking.publication.lock().expect("file tracking mutex poisoned");
+        publication.observed_changes = 0;
+        publication.bounded = false;
+    }
     push_message_on_record(
         record,
         Message::FileChanges {

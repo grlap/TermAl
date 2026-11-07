@@ -15,6 +15,57 @@
 
 include!("workspace_watch_observation.rs");
 include!("workspace_watch_pending.rs");
+include!("workspace_watch_ignore.rs");
+
+// Display/transport limits are independent of the pending generation's
+// storage budget. Authority observers receive the original facts first.
+const WORKSPACE_PUBLICATION_ENTRIES: usize = 32;
+const WORKSPACE_PUBLICATION_SAMPLE: usize = 16;
+const WORKSPACE_PUBLICATION_PATH_BYTES: usize = 8 * 1024;
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePublicationSummary {
+    observed_changes: usize,
+    sampled_paths: usize,
+}
+
+fn bound_workspace_publication(
+    changes: Vec<WorkspaceFileChangeEvent>,
+) -> (Vec<WorkspaceFileChangeEvent>, Option<WorkspacePublicationSummary>) {
+    let path_bytes = changes.iter().map(|change| change.path.len()
+        + change.root_path.as_ref().map_or(0, String::len)
+        + change.session_id.as_ref().map_or(0, String::len)).sum::<usize>();
+    if changes.len() <= WORKSPACE_PUBLICATION_ENTRIES && path_bytes <= WORKSPACE_PUBLICATION_PATH_BYTES {
+        return (changes, None);
+    }
+    let observed_changes = changes.len();
+    let mut covering = changes.first().and_then(|change| FsPath::new(&change.path).parent())
+        .map(FsPath::to_path_buf).unwrap_or_default();
+    for change in &changes {
+        while !covering.as_os_str().is_empty() && !FsPath::new(&change.path).starts_with(&covering) {
+            if !covering.pop() { covering.clear(); }
+        }
+    }
+    // Very long prefixes and disjoint roots use the existing global marker.
+    if covering.as_os_str().len() > 1024 { covering.clear(); }
+    let mut bytes = covering.as_os_str().len();
+    let mut sample = Vec::new();
+    for change in changes {
+        let cost = change.path.len() + change.root_path.as_ref().map_or(0, String::len)
+            + change.session_id.as_ref().map_or(0, String::len);
+        if sample.len() < WORKSPACE_PUBLICATION_SAMPLE && bytes + cost <= WORKSPACE_PUBLICATION_PATH_BYTES {
+            bytes += cost;
+            sample.push(change);
+        }
+    }
+    let sampled_paths = sample.len();
+    sample.push(WorkspaceFileChangeEvent {
+        path: covering.to_string_lossy().into_owned(), kind: WorkspaceFileChangeKind::Subtree,
+        root_path: None, session_id: None, mtime_ms: None, size_bytes: None,
+    });
+    (sample, Some(WorkspacePublicationSummary { observed_changes, sampled_paths }))
+}
 
 #[cfg(not(test))]
 const WORKSPACE_FILE_WATCH_ROOT_REFRESH_MS: Duration = Duration::from_secs(2);

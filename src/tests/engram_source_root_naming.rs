@@ -4923,8 +4923,9 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
         )],
         "counted once, whichever scope carried it"
     );
-    // The watcher cannot tell who made the edit, so the session whose scope
-    // carried it counts it as well: the edit is attributed to both.
+    // The carrier session is the parent repository, whose ignore policy
+    // excludes .worktrees. Keep the measured named-root edit, but do not
+    // turn a nested checkout's contents into parent-session changes.
     let other_paths = {
         let inner = claimed.state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -4936,7 +4937,29 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
             .cloned()
             .collect::<Vec<_>>()
     };
-    assert_eq!(other_paths, [edited.to_string_lossy().into_owned()]);
+    assert!(other_paths.is_empty(), "the parent ignores the nested checkout");
+    // The old direct attribution path above is insufficient: real ingress
+    // also goes through publication filtering. A named source root must be
+    // a known workspace there even when the owner's workdir is elsewhere.
+    let mut pending = WorkspacePendingChanges::default();
+    pending.ingest(
+        Ok(NotifyEvent::new(NotifyEventKind::Modify(notify::event::ModifyKind::Any))
+            .add_path(canonical_edited.clone())),
+        EngramHost::watcher_arrival_now(),
+        std::time::Instant::now(),
+    );
+    let publication = claimed.state.process_workspace_dirty_batch(pending.take());
+    assert!(publication.iter().any(|event| event.path == edited.to_string_lossy()),
+        "the named source root must survive publication filtering");
+    claimed.record_mut(|record| {
+        assert_eq!(record.active_turn_file_changes.len(), 1);
+        assert!(record.active_turn_file_changes.contains_key(&edited.to_string_lossy().into_owned()));
+    });
+    {
+        let inner = claimed.state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&other).unwrap();
+        assert!(inner.sessions[index].active_turn_file_changes.is_empty());
+    }
     // A sibling sharing the root's text prefix is still outside the root.
     let outside = canonical.with_file_name("wt-outside").join("README.md");
     let outside_events =

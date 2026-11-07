@@ -1415,6 +1415,7 @@ export type WorkspaceFileChange = {
 };
 
 export type WorkspaceFilesChangedEvent = {
+  summary?: { observedChanges: number; sampledPaths: number };
   revision: number;
   changes: WorkspaceFileChange[];
 };

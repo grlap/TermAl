@@ -745,9 +745,11 @@ impl AppState {
             return;
         }
 
+        let (changes, summary) = bound_workspace_publication(changes);
         let event = WorkspaceFilesChangedEvent {
             revision: self.file_events_revision.fetch_add(1, Ordering::Relaxed) + 1,
             changes,
+            summary,
         };
         if let Ok(payload) = serde_json::to_string(&event) {
             let _ = self.file_events.send(payload);
