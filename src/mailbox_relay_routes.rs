@@ -758,7 +758,20 @@ impl AppState {
                 .map_err(mailbox_api_error)
         })
         .await?
-        .ok_or_else(|| ApiError::not_found("native mailbox association not found"))?;
+        .ok_or_else(|| {
+            if locator.home.host == actor.host {
+                // The locator and receipt do not reconstruct membership. Keep
+                // this distinct from an existing association's owner denial.
+                ApiError::conflict(
+                    "native mailbox association is missing at its local home; \
+                     re-resolve the exact mailbox locator from the latest mailbox list or notification \
+                     and retry with the unchanged receipt; if the same locator is still refused, \
+                     report the missing association metadata; no acknowledgement was recorded",
+                )
+            } else {
+                ApiError::not_found("native mailbox association not found")
+            }
+        })?;
         conversation.require_home(&locator.home)?;
         let summary: MailboxSummary = self
             .call_native_mailbox_home(

@@ -4,6 +4,9 @@
 // controls in relay.rs or the revocation holds in relay_review*.rs.
 use super::*;
 
+#[path = "relay_ack_association.rs"]
+mod ack_association;
+
 pub(super) struct ProxySend {
     caller: String,
     _proxy: String,
