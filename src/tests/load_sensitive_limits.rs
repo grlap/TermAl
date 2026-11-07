@@ -87,58 +87,6 @@ fn a_delegation_wait_never_sleeps_past_its_deadline() {
 }
 
 #[test]
-fn the_docs_state_the_derived_limits() {
-    // The prose states values the code derives; a change to one fails here.
-    let doc = |path: &str| {
-        fs::read_to_string(FsPath::new(env!("CARGO_MANIFEST_DIR")).join(path))
-            .unwrap_or_else(|error| panic!("{path}: {error}"))
-    };
-    let naming = ENGRAM_SOURCE_ROOT_NAMING_BUDGET.as_secs();
-    assert!(
-        doc("docs/features/engram-host-adapter.md")
-            .contains(&format!("One budget of {naming} seconds")),
-        "the naming budget"
-    );
-    assert!(
-        doc("docs/architecture.md").contains(&format!(
-            "naming took longer than its {naming} s budget, so nothing was named; name it again"
-        )),
-        "the naming refusal"
-    );
-    let bridge = TermalDelegationMcpBridge::new(
-        "session-parent".to_owned(),
-        "http://127.0.0.1:1".to_owned(),
-    )
-    .unwrap();
-    let followup = bridge.allowance(DelegationLongCall::Followup).as_secs();
-    assert!(
-        doc("docs/features/agent-delegation-sessions.md")
-            .contains(&format!("request overhead (30 s): {followup} seconds")),
-        "the follow-up allowance"
-    );
-    let freeze = REVIEW_FREEZE_TIMEOUT.as_secs();
-    let observer = (REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE).as_secs();
-    assert!(
-        doc("docs/features/review-freeze-verification.md").contains(&format!(
-            "({freeze} seconds internally, {observer} seconds for the"
-        )),
-        "the freeze budget"
-    );
-    let span = termal_delegation_default_wait_span().as_secs();
-    let cut =
-        (termal_delegation_default_wait_span() + TERMAL_DELEGATION_MCP_CODEX_TOOL_MARGIN).as_secs();
-    let delegation_doc = doc("docs/features/agent-delegation-sessions.md");
-    assert!(
-        delegation_doc.contains(&format!("may take {span} seconds: the wait")),
-        "the default wait's span"
-    );
-    assert!(
-        delegation_doc.contains(&format!("at least {cut} seconds")),
-        "the Codex tool timeout"
-    );
-}
-
-#[test]
 fn the_long_calls_wait_out_the_server_work_they_cover() {
     let bridge = TermalDelegationMcpBridge::new(
         "session-parent".to_owned(),

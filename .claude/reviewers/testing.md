@@ -27,6 +27,24 @@ Focus: Test coverage for changes, test quality, Vitest patterns.
    - No flaky tests (time-dependent, order-dependent)
    - Tests are independent (don't rely on shared mutable state between tests)
    - Flag `expect(result).toBeTruthy()` when a specific value check is possible
+   - Flag as a finding any test that reads one of this repository's Markdown
+     files and asserts that it contains given phrases, table rows or markers.
+     General-purpose checks that process Markdown uniformly, such as link
+     validation or review input fingerprinting, are not such tests
+   - Flag as a finding any test that reads, pins or compares the content of
+     AGENTS.md, CLAUDE.md or other agent instruction files (`.claude/commands/`,
+     `.claude/reviewers/`, skills); a test of the product's handling of such
+     files uses fixtures it creates itself
+   - Flag as a finding any tautological test: one that only pins text or
+     mirrors the implementation, so every change needs a second edit to the
+     test without any behaviour being verified
+   - Report each of these three at Medium, and recommend deleting the test.
+     Never request such a test as a fix. Ask for a test of observable
+     behaviour where one is needed (Greg, 2026-11-07, relayed by
+     Engram::Asistant in TermAl mailbox 588693a8 #652, #654, #656 and #658,
+     the last: 'Poprawic reviewers aby nigdy to nie wróciło.'; the rule and
+     the other three quotes are in AGENTS.md and CLAUDE.md, "No tautological
+     tests")
 
 4. **React component tests** (Vitest + React Testing Library):
    - Test user interactions, not implementation details

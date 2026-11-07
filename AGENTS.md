@@ -380,6 +380,26 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
+## No tautological tests
+
+Greg's words (2026-11-07, relayed by Engram::Asistant as #652, #654 and #656
+and by Termal::Fable2 in TermAl mailbox 03723eab #5217, #5219 and #5220):
+'USUNAC TESTY sprawdzajace claud.md czy agents.md Natychmiast!! Nigdy ich
+niedodawac'; 'Zero tautologi. Tak marnujemy cykle. Te testy nic nie wnosza.
+Teraz kazda zmiana wymusza zmiane testow. Czyli edycja 2 razy. O ile zlapiemy
+to odrazu. Absurd! Nigdy wiecej.'; and 'Nie ma testów czytających pliki md i
+sprawdzania czy mają okreslone frazy. Usunąć natychmiast.'
+
+- No test reads this repository's Markdown files and checks them for phrases.
+- No test reads, pins or compares the content of this repository's AGENTS.md,
+  CLAUDE.md or other agent instruction files, such as `.claude/commands/` and
+  `.claude/reviewers/`. A test of the product's own handling of such files uses
+  fixtures it creates itself.
+- No tautological tests: a test that only pins text or mirrors the
+  implementation, so that every change needs a second edit to the test without
+  any behaviour being verified, is not written. Where a test is needed, it
+  checks observable behaviour.
+
 ## Shared test launcher
 
 Use `node scripts/test-launcher.mjs full` for the maintained five-stage gate and

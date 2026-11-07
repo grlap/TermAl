@@ -1,29 +1,6 @@
 use super::delegation_mcp_tests::spawn_test_mcp_http_server;
 use super::*;
 
-#[test]
-fn durability_pending_documentation_links_the_contract_and_its_consumers() {
-    let contract = include_str!("../docs/features/durability-pending.md");
-    assert!(contract.contains("[Engram host adapter](engram-host-adapter.md)"));
-    assert!(contract.contains("[test plan and launcher](../test.md)"));
-    assert!(
-        include_str!("../docs/features/engram-host-adapter.md")
-            .contains("[Durability pending](durability-pending.md)")
-    );
-    assert!(
-        include_str!("../docs/test.md")
-            .contains("[durability-pending contract](features/durability-pending.md)")
-    );
-    for operation in [
-        "test_run_registration",
-        "acceptance_evaluation_submission",
-        "named_root_naming",
-        "named_root_release",
-    ] {
-        assert!(contract.contains(operation), "{operation}");
-    }
-}
-
 fn pending_bridge_envelope(operation: &str, identity: Value) -> Value {
     json!({
         "error": "the enqueued operation may still commit; retry the unchanged original request",

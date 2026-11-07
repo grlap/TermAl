@@ -1,9 +1,9 @@
 // Windows Codex source-read and writable-shell guidance in delegation prompts.
 //
 // Owns: tests that a Windows, Codex, read-only delegation's prompt carries the
-// Unicode-safe native source-read guidance, that no other delegation's prompt
-// does, and that the /review-code command carries the same text. Also covers
-// parser and encoding guidance for every writable Codex delegation mode.
+// Unicode-safe native source-read guidance and that no other delegation's
+// prompt does. Also covers parser and encoding guidance for every writable
+// Codex delegation mode.
 // Does not own: the rest of the delegation prompt, whose tests stay in
 // delegations.rs, delegation_child_links.rs and kimi_read_only.rs.
 
@@ -12,9 +12,6 @@ use super::*;
 /// The guidance's opening words.
 const CODEX_READ_GUIDANCE_START: &str = "Windows read-only Codex inspection:";
 const CODEX_WRITE_GUIDANCE_START: &str = "Windows Codex writable-child shell:";
-
-/// The /review-code command, which carries the same guidance for reviewers.
-const REVIEW_CODE_COMMAND: &str = include_str!("../../.claude/commands/review-code.md");
 
 fn delegation_record(agent: Agent, write_policy: DelegationWritePolicy) -> DelegationRecord {
     DelegationRecord {
@@ -212,17 +209,4 @@ fn the_guidance_asks_for_inspection_unavailable_rather_than_claiming_fidelity() 
     ));
     assert!(WINDOWS_CODEX_READ_ONLY_SOURCE_READS
         .contains("nonterminating errors can still leave exit code 0"));
-}
-
-/// The /review-code command carries the same text, word for word.
-#[test]
-fn the_review_code_command_carries_the_same_guidance() {
-    let normalized = REVIEW_CODE_COMMAND.replace("\r\n", "\n");
-
-    assert!(
-        normalized
-            .lines()
-            .any(|line| line == WINDOWS_CODEX_READ_ONLY_SOURCE_READS),
-        "the command's guidance line differs from the prompt's"
-    );
 }

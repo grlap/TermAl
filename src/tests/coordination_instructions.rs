@@ -338,11 +338,6 @@ fn mailbox_guidance_existing_surfaces_share_agent_neutral_body() {
     for field in ["TERMAL_CLI", "TERMAL_SESSION_ID", "TERMAL_BASE_URL"] {
         assert!(TERMAL_MAILBOX_GUIDANCE.contains(field));
     }
-    assert!(
-        include_str!("../../docs/features/agent-mailboxes.md")
-            .replace("\r\n", "\n")
-            .contains(TERMAL_MAILBOX_GUIDANCE)
-    );
 }
 
 #[test]
@@ -372,8 +367,4 @@ fn mailbox_coverage_guidance_is_shared_bounded_and_explicit_about_later_replies(
             "{required}"
         );
     }
-    assert!(
-        include_str!("../../docs/features/agent-mailboxes.md")
-            .contains(TERMAL_MAILBOX_COVERAGE_GUIDANCE)
-    );
 }

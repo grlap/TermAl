@@ -237,23 +237,6 @@ fn nofile_satisfied_inherited_limit_is_quiet() {
 }
 
 #[test]
-fn nofile_docs_cross_link_runtime_harness_and_shared_codex_policies() {
-    let architecture = include_str!("../docs/architecture.md");
-    let tests = include_str!("../docs/test.md");
-    let shared = include_str!("../docs/features/shared-codex-app-server.md");
-    assert!(architecture.contains("1,048,576") || architecture.contains("1048576"));
-    assert!(architecture.contains("TERMAL_TEST_FD_LIMIT"));
-    assert!(architecture.contains("features/shared-codex-app-server.md"));
-    assert!(architecture.contains("test.md"));
-    assert!(tests.contains("TERMAL_NOFILE_LIMIT"));
-    assert!(tests.contains("architecture.md#process-descriptor-capacity"));
-    assert!(tests.contains("features/shared-codex-app-server.md"));
-    assert!(shared.contains("TERMAL_NOFILE_LIMIT"));
-    assert!(shared.contains("../architecture.md#process-descriptor-capacity"));
-    assert!(shared.contains("../test.md"));
-}
-
-#[test]
 fn nofile_hidden_kernel_ceiling_search_finds_best_lift_without_lowering() {
     let mut effective = 256;
     let mut writes = Vec::new();
