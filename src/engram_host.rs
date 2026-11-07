@@ -67,6 +67,16 @@ pub(crate) enum EngramRecorderObservation<'a> {
 }
 
 impl EngramHost<'_> {
+    /// Presents a native run's withheld-credit diagnostic under the state lock.
+    pub(crate) fn native_run_withheld(record: &mut SessionRecord, line: String) {
+        engram_publish_check_notice(
+            &record.session.id,
+            &mut record.engram,
+            line,
+            &mut std::io::stderr(),
+        );
+    }
+
     /// Reports what a recorder saw in `session_id`, produced as `provenance`
     /// says. Command locations and edits still mark interference with other
     /// checks. Each handler validates runtime and turn provenance under the

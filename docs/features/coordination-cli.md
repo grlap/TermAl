@@ -164,6 +164,14 @@ invoke it as `& $env:TERMAL_CLI`; on POSIX shells use `"$TERMAL_CLI"`. This
 avoids PATH ambiguity and lets an MCP-locked runtime coordinate without
 hardcoding its session id or server address.
 
+On Linux, an existing executable file keeps its ordinary path. If an install
+has unlinked the running image, new runtimes receive `/proc/<host PID>/exe`
+instead, so they can still use that image until the host exits. This fallback
+requires the host's PID namespace and does not survive a host restart. An old
+fallback must not be reused after restart: its PID can disappear or be reused
+by another process. Detached workers started with the ordinary path retain
+their existing behavior across restarts.
+
 ## Examples
 
 ```

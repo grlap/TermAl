@@ -9,7 +9,6 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
-  bindSourceToInput,
   cargoConfigSelectsRustc,
   compilerWrapperInEnvironment,
   parseRustupActiveToolchain,
@@ -48,28 +47,6 @@ test("preflight version: the tool's own version line, never other output", () =>
   assert.equal(preflightVersion("rustc 1.98.1\n", "cargo"), null);
   assert.equal(preflightVersion(" \n\t\n"), null);
   assert.equal(preflightVersion(undefined, "cargo"), null);
-});
-
-test("source bound to the input: kept only for the fingerprint's own HEAD and status", () => {
-  const empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-  const commit = "a".repeat(40);
-  const { unknownReason: _none, ...base } = unknownSource(null);
-  const source = { ...base, commit, tree: "b".repeat(40), clean: true };
-  assert.equal(bindSourceToInput(source, { headCommit: commit, statusSha256: empty }), source);
-  const dirty = { ...source, clean: false };
-  assert.equal(bindSourceToInput(dirty, { headCommit: commit, statusSha256: "c".repeat(64) }), dirty);
-  for (const input of [
-    { headCommit: "d".repeat(40), statusSha256: empty },
-    { headCommit: commit, statusSha256: "c".repeat(64) },
-    undefined,
-  ]) {
-    const bound = bindSourceToInput(source, input);
-    assert.equal(bound.unknownReason, "source_changed_during_measure");
-    assert.equal(bound.clean, null);
-    assert.equal(bound.commit, null);
-  }
-  const unknown = unknownSource("git_unavailable");
-  assert.equal(bindSourceToInput(unknown, { headCommit: commit, statusSha256: empty }), unknown);
 });
 
 test("unknown source: identifies nothing, is never clean, and says why", () => {

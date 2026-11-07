@@ -74,24 +74,6 @@ export function sourceMetadataFromIdentity(root, observed, env = process.env) {
     launcherVersion: launcher.stdout === undefined ? null : objectId(launcher.stdout) };
 }
 
-// The SHA-256 of no output: a `git status` that lists nothing.
-const emptySha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-/**
- * Keeps `source` only when it describes the input the run's fingerprint
- * froze (review-freeze-fingerprint.mjs `captureFingerprint`): the same HEAD,
- * and clean exactly when the fingerprint's own `git status` listed nothing.
- * Otherwise the checkout changed between the two measurements, and the
- * record identifies nothing.
- */
-export function bindSourceToInput(source, input) {
-  if (source?.unknownReason) return source;
-  const inputClean = input?.statusSha256 === emptySha256;
-  return source && source.commit === input?.headCommit && source.clean === inputClean
-    ? source
-    : unknownSource("source_changed_during_measure");
-}
-
 /**
  * The source a run starts from, measured once with Git under the launcher's
  * isolated configuration (no system or global Git config) before any stage. `clean` is true only when `git status` lists nothing, untracked

@@ -140,6 +140,10 @@ struct DeclaredRunTurn {
     store: EngramAuthorityStoreKey,
     binding: EngramControlWorkBinding,
     named: TestRunNamedRoot,
+    // The name may have been refreshed after its retained proof was recorded.
+    // Recheck the selected root's fence here; the existing held-claim read
+    // validates and refreshes the binding before publishing S0.
+    root_claim_fence: i64,
     snapshot: Option<DeclaredRunSnapshot>,
     opening_refusal: Option<String>,
     opening_refusal_code: Option<&'static str>,
@@ -175,7 +179,8 @@ fn declared_run_opening_authority_locked(
     if !pending.is_current(record) || current.runtime != pending.runtime
         || current.generation != pending.generation || current.keys != pending.keys
         || current.store != pending.store || current.binding != pending.binding
-        || current.named != pending.named || current.snapshot.is_some()
+        || current.named != pending.named || current.root_claim_fence != pending.root_claim_fence
+        || current.snapshot.is_some()
         || current.first_tool != DeclaredRunFirstTool::Waiting
     {
         anyhow::bail!("native opening reservation changed during capture");
@@ -188,7 +193,7 @@ fn declared_run_opening_authority_locked(
     if authority.settings.authority_store_key.as_ref() != Some(&pending.store)
         || binding.as_ref() != Some(&pending.binding) || named.as_ref() != Some(&pending.named)
         || test_run_named_root_fence(inner, session_id, Some(&pending.store), named.as_ref())
-            != Some(pending.binding.claim_fence)
+            != Some(pending.root_claim_fence)
     {
         anyhow::bail!("native opening named-root authority changed during capture");
     }
@@ -292,6 +297,9 @@ impl AppState {
         };
         let endpoint_matches = after.as_ref().is_some_and(|after|
             after.root == start.source.root && after.source_id == start.source.source_id);
+        let source_change = after.as_ref().filter(|after| after.root == start.source.root
+            && after.source_owner == start.source.source_owner && after.source_id != start.source.source_id)
+            .map(|after| engram_source_id_change_detail(&engram_source_id_differences(&start.source.source_id, &after.source_id)));
         let mut eligible = endpoint_matches && self.native_declared_scope_current(start);
         if eligible {
             let clock = self.engram_budget_clock();
@@ -355,6 +363,13 @@ impl AppState {
             waiter.wait().map_err(|error| anyhow!("native terminal was not durably confirmed: {error:?}"))?;
         }
         engram_verification_record_write(&PathBuf::from(&start.run_directory).join("results.json"), &bytes)?;
+        if let Some(detail) = source_change {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(&start.session_id) {
+                EngramHost::native_run_withheld(&mut inner.sessions[index],
+                    format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} native run {} received no credit: {detail}.", start.run_id));
+            }
+        }
         Ok(())
     }
 
@@ -667,8 +682,10 @@ impl AppState {
                 }
             };
             let (Some(binding), Some(named)) = named else { return; };
+            let Some(root_claim_fence) = test_run_named_root_fence(
+                &inner, session_id, Some(&store), Some(&named)) else { return; };
             let pending = DeclaredRunTurn {
-                runtime: runtime.clone(), generation, keys, store, binding, named,
+                runtime: runtime.clone(), generation, keys, store, binding, named, root_claim_fence,
                 snapshot: None, opening_refusal: None, opening_refusal_code: None,
                 first_tool: DeclaredRunFirstTool::default(),
                 timings: Arc::default(),

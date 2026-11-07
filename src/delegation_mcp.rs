@@ -257,10 +257,16 @@ fn termal_delegation_mcp_stdio_config_with_command(
 }
 
 fn termal_delegation_mcp_current_exe() -> Result<String> {
-    Ok(std::env::current_exe()
-        .context("failed to resolve TermAl executable for delegation MCP")?
-        .to_string_lossy()
-        .into_owned())
+    let executable = std::env::current_exe()
+        .context("failed to resolve TermAl executable for delegation MCP")?;
+    // Preserve the ordinary path for clients that can outlive a host restart.
+    // After a Linux install unlinks this image, /proc keeps it runnable only
+    // while this host lives. Use its PID, not the executing client's "self".
+    #[cfg(target_os = "linux")]
+    if !executable.is_file() {
+        return Ok(format!("/proc/{}/exe", std::process::id()));
+    }
+    Ok(executable.to_string_lossy().into_owned())
 }
 
 fn termal_agent_process_env_with_command(

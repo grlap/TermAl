@@ -355,6 +355,8 @@ enum EngramVerificationRecordPending {
     /// registration, request and results (`detail` says why); nothing is
     /// frozen or sent.
     BodyNotBuilt { detail: String },
+    /// Full owner observations differ; the artifact verdict is unchanged.
+    SourceChanged { detail: String, changes: Vec<EngramSourceIdDifference> },
     /// The call failed without an answer from Engram; it is sent again.
     TransportFailed { error_kind: String },
 }
@@ -1008,12 +1010,16 @@ fn engram_verification_record_native_body(
         || request.get("input").and_then(Value::as_str) != Some("source_id")
         || request.get("nativeSourceId") != Some(&json!(start.source.source_id))
         || after.root != start.source.root || after.source_owner != start.source.source_owner
-        || after.source_id != start.source.source_id
         || results.get("input") != Some(&serde_json::to_value(&input).map_err(|error| error.to_string())?)
         || results.get("post_run") != Some(&serde_json::to_value(&post_run).map_err(|error| error.to_string())?)
-        || results.get("nativeEligible").and_then(Value::as_bool) != Some(true)
     {
-        return Err("native terminal does not match its host reservation and equal full source_id endpoints".to_owned());
+        return Err("native terminal does not match its host reservation".to_owned());
+    }
+    if after.source_id != start.source.source_id {
+        return Err(engram_source_id_change_detail(&engram_source_id_differences(&start.source.source_id, &after.source_id)));
+    }
+    if results.get("nativeEligible").and_then(Value::as_bool) != Some(true) {
+        return Err("native run is ineligible under its host authority checks".to_owned());
     }
     if !engram_verification_record_results_are_terminal(registration, results) {
         return Err("the native run has no terminal result".to_owned());
@@ -1392,7 +1398,16 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
         .and_then(|body| engram_verification_record_text(&body).map(|text| (body, text)));
     let (rebuilt, rebuilt_text) = match built {
         Ok(built) => built,
-        Err(detail) => return pending(EngramVerificationRecordPending::BodyNotBuilt { detail }),
+        Err(detail) => {
+            let changes = registration.declared_native.as_ref().zip(registration.declared_terminal.as_ref())
+                .and_then(|(start, terminal)| terminal.source.as_ref().map(|after|
+                    engram_source_id_differences(&start.source.source_id, &after.source_id)));
+            if let Some(changes) = changes.filter(|changes| !changes.is_empty()
+                && engram_source_id_change_detail(changes) == detail) {
+                return pending(EngramVerificationRecordPending::SourceChanged { detail, changes });
+            }
+            return pending(EngramVerificationRecordPending::BodyNotBuilt { detail });
+        }
     };
     let body_path = run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
     let text = match fs::read_to_string(&body_path) {

@@ -590,6 +590,15 @@ fn engram_publish_check_notice(
     log: &mut impl std::io::Write,
 ) {
     let _ = writeln!(log, "engram> session={session_id} {line}");
+    // A first credit line bypasses merge truncation. Retain the complete
+    // diagnostic above, but apply the same prompt budget before publication.
+    let line = if line.starts_with(ENGRAM_CHECK_CREDIT_LINE_PREFIX)
+        && line.len() > ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES {
+        let suffix = " ... (remaining details in the host log)";
+        let mut end = ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES.saturating_sub(suffix.len());
+        while !line.is_char_boundary(end) { end -= 1; }
+        format!("{}{suffix}", &line[..end])
+    } else { line };
     engram.set_pending_source_root_line(line);
 }
 

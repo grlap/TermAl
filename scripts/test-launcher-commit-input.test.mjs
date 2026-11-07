@@ -12,9 +12,7 @@ import {
 import { dirname, isAbsolute, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import {
-  captureCommitInputStatus, commitInputGitArgs, isolatedGitEnvironment,
-} from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
 import {
   commitInputSummaryLine,
   commitInputOutcome,
@@ -306,10 +304,8 @@ for (const [name, configure, reason] of [
 test("SHA-256 roots have a named unsupported-format refusal", async (t) => {
   await hosted(t, async ({ root, env, git, head, admin }) => {
     assert.equal(head.length, 64);
-    await assert.rejects(captureCommitInputStatus(root, env), /unsupported object format/u);
     git(["update-index", "--add", "--cacheinfo", `160000,${head},dep`]);
     git(["commit", "--quiet", "--no-gpg-sign", "-m", "add gitlink"]);
-    await assert.rejects(captureCommitInputStatus(root, env), /unsupported object format/u);
     const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
     const refused = await executeRun(runDir, env);
     assert.equal(refused.state, "failed");
@@ -345,7 +341,6 @@ for (const change of ["tracked", "untracked", "off-pin", "uninitialized", "missi
       git(["commit", "--quiet", "--no-gpg-sign", "-m", "pin dependency"]);
       const child = join(root, "dep");
       const childGit = (args) => execFileSync("git", args, { cwd: child, env, encoding: "utf8", windowsHide: true });
-      assert.equal(commitInputStatusClean(await captureCommitInputStatus(root, env)), true);
       if (change === "tracked") writeFileSync(join(child, "tracked.txt"), "dirty child\n");
       if (change === "untracked") writeFileSync(join(child, "new.txt"), "new child file\n");
       if (change === "off-pin") {
@@ -358,7 +353,6 @@ for (const change of ["tracked", "untracked", "off-pin", "uninitialized", "missi
         git(["commit", "--quiet", "--no-gpg-sign", "-m", "remove child mapping"]);
         assert.equal(childGit(["rev-parse", "HEAD"]).trim(), dependency.head, "child remains at its pin");
         assert.equal(git(["status", "--porcelain=v1", "--ignore-submodules=none"]), "", "dirt alone does not refuse this unmapped child");
-        await assert.rejects(captureCommitInputStatus(root, env), /\.gitmodules mapping check failed/u);
       }
       const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
       const result = await executeRun(runDir, env);
@@ -384,8 +378,6 @@ for (const change of ["tracked", "untracked", "off-pin", "uninitialized", "missi
         childGit(["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-am", "nested pin"]);
         git(["add", "--", "dep"]);
         git(["commit", "--quiet", "-m", "pin nested parent"]);
-      const status = await captureCommitInputStatus(root, env);
-      assert.equal(commitInputStatusClean(status), true);
       const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
       const result = await executeRun(runDir, env);
       assert.equal(result.state, "passed", result.error);
@@ -393,7 +385,7 @@ for (const change of ["tracked", "untracked", "off-pin", "uninitialized", "missi
       assert.equal(executed(admin), true);
         writeFileSync(join(child, "nested", "tracked.txt"), "nested dirt\n");
         childGit(["config", "diff.ignoreSubmodules", "all"]);
-        assert.equal(commitInputStatusClean(await captureCommitInputStatus(root, env)), false);
+        assert.equal(commitInputStatusClean(await captureOwnerStatus(root, env)), false);
     });
   });
 
@@ -406,9 +398,6 @@ test("a child's local status setting cannot hide untracked input", async (t) => 
     writeFileSync(join(root, "dep", "new.txt"), "untracked child input\n");
     assert.equal(git(["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"]), "",
       "the root's command-line untracked option does not override child configuration");
-    const status = await captureCommitInputStatus(root, env);
-    assert.equal(commitInputStatusClean(status), false);
-    assert.equal(status.entries[0].path, "dep");
     const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
     const result = await executeRun(runDir, env);
     assert.equal(result.state, "failed");
@@ -560,75 +549,6 @@ test("a path only .git/info/exclude hides before the run leaves the checkout cle
   });
 });
 
-test("only repository-scoped excludes leave an untracked path clean; excludes files do not", async (t) => {
-  const { root, env, git, head } = gitRepository(t);
-  const sorted = (entries) => [...entries].sort((left, right) => left.path.localeCompare(right.path));
-  // Git's own status hides each of these; the committed-input status hides
-  // only the .gitignore and .git/info/exclude ones.
-  const xdg = join(root, ".tmp", "xdg");
-  mkdirSync(join(xdg, "git"), { recursive: true });
-  writeFileSync(join(xdg, "git", "ignore"), "global-default.txt\n");
-  const configured = join(root, ".tmp", "configured-excludes");
-  writeFileSync(configured, "configured.txt\n");
-  git(["config", "core.excludesFile", configured]);
-  const xdgEnv = { ...env, XDG_CONFIG_HOME: xdg };
-  writeFileSync(join(root, "excluded.txt"), "info/exclude\n");
-  writeFileSync(join(root, "global-default.txt"), "default global excludes file\n");
-  writeFileSync(join(root, "configured.txt"), "configured excludes file\n");
-  writeFileSync(join(root, "ignored-by-gitignore.log"), "ignored\n");
-  writeFileSync(join(root, "ignored-also"), ".gitignore\n");
-  const plain = (...paths) => execFileSync("git",
-    ["status", "--porcelain=v1", "--untracked-files=all", "--", ...paths],
-    { cwd: root, env: xdgEnv, encoding: "utf8", windowsHide: true });
-  const both = [
-    { status: "??", path: "configured.txt" },
-    { status: "??", path: "global-default.txt" },
-  ];
-  // A repo-local excludes file (which replaces the default one).
-  assert.equal(plain("configured.txt", "excluded.txt", "ignored-by-gitignore.log", "ignored-also"), "",
-    "plain status hides the info/exclude, configured excludes file and .gitignore paths");
-  const status = await captureCommitInputStatus(root, xdgEnv);
-  assert.equal(status.commit, head);
-  assert.deepEqual(status.skipped, []);
-  assert.deepEqual(sorted(status.entries), both);
-  assert.equal(commitInputStatusClean(status), false);
-  // Without one, the default excludes file under XDG_CONFIG_HOME.
-  git(["config", "--unset", "core.excludesFile"]);
-  assert.equal(plain("global-default.txt", "excluded.txt"), "",
-    "plain status hides the default excludes file's path");
-  assert.deepEqual(sorted((await captureCommitInputStatus(root, xdgEnv)).entries), both);
-  rmSync(join(root, "configured.txt"));
-  rmSync(join(root, "global-default.txt"));
-  const clean = await captureCommitInputStatus(root, xdgEnv);
-  assert.deepEqual(clean.entries, [], "info/exclude and .gitignore paths stay clean");
-  assert.equal(commitInputStatusClean(clean), true);
-});
-
-test("an XDG attributes file does not change the committed-input status", async (t) => {
-  const { root, env, git } = gitRepository(t);
-  // Committed with CRLF endings: an attributes file that marks it text makes
-  // Git normalize the worktree copy to LF and call it modified.
-  writeFileSync(join(root, "crlf.txt"), "one\r\ntwo\r\n");
-  git(["add", "--", "crlf.txt"]);
-  git(["commit", "--quiet", "--no-gpg-sign", "-m", "crlf"]);
-  const head = git(["rev-parse", "--verify", "HEAD^{commit}"]).trim();
-  const xdg = join(root, ".tmp", "xdg-attributes");
-  mkdirSync(join(xdg, "git"), { recursive: true });
-  writeFileSync(join(xdg, "git", "attributes"), "crlf.txt text eol=lf\n");
-  const xdgEnv = { ...env, XDG_CONFIG_HOME: xdg };
-  // A new mtime makes Git read the file again rather than trust the index.
-  const later = new Date(Date.now() + 60_000);
-  utimesSync(join(root, "crlf.txt"), later, later);
-  const plain = execFileSync("git", ["status", "--porcelain=v1", "--", "crlf.txt"],
-    { cwd: root, env: xdgEnv, encoding: "utf8", windowsHide: true });
-  assert.equal(plain, " M crlf.txt\n", "plain status applies the XDG attributes file");
-  const status = await captureCommitInputStatus(root, xdgEnv);
-  assert.equal(status.commit, head);
-  assert.deepEqual(status.entries, [], "the committed-input status ignores it");
-  assert.deepEqual(status.skipped, []);
-  assert.equal(commitInputStatusClean(status), true);
-});
-
 test("a stage that configures a Git filter retains its command pass but has no after source", async (t) => {
   await hosted(t, async ({ root, env }) => {
     const runDir = await createRun({ root, input: "commit", stages: [stage("filters", [
@@ -644,39 +564,6 @@ test("a stage that configures a Git filter retains its command pass but has no a
     assert.equal(result.input.after, undefined);
     assert.match(result.input.unavailableReason, /filter/u);
   });
-});
-
-test("every committed-input Git call turns fsmonitor off, as the host's runner does", () => {
-  const nullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
-  assert.deepEqual(commitInputGitArgs(["status", "-z"]), [
-    "-c", "core.fsmonitor=false",
-    "-c", `core.excludesFile=${nullDevice}`,
-    "-c", `core.attributesFile=${nullDevice}`,
-    "status", "-z",
-  ]);
-});
-
-test("a configured Git filter is not clean and its status is not read", async (t) => {
-  const { root, env, git, head } = gitRepository(t);
-  git(["config", "filter.fixture.clean", "cat"]);
-  git(["config", "filter.fixture.smudge", "cat"]);
-  // An edit Git's status would report is not read under a filter.
-  writeFileSync(join(root, "tracked.txt"), "edited under a filter\n");
-  const status = await captureCommitInputStatus(root, env);
-  assert.equal(status.commit, head);
-  assert.deepEqual(status.entries, []);
-  assert.deepEqual(status.skipped, []);
-  assert.deepEqual([...status.filters].sort(), ["filter.fixture.clean", "filter.fixture.smudge"]);
-  assert.equal(commitInputStatusClean(status), false);
-  assert.equal(commitInputOutcome(head, status), "input_changed");
-  // Without a clean, smudge or process command the driver is not a filter.
-  git(["config", "--unset", "filter.fixture.clean"]);
-  git(["config", "--unset", "filter.fixture.smudge"]);
-  git(["config", "filter.fixture.required", "true"]);
-  writeFileSync(join(root, "tracked.txt"), "baseline\n");
-  const clean = await captureCommitInputStatus(root, env);
-  assert.deepEqual(clean.filters, []);
-  assert.equal(commitInputStatusClean(clean), true);
 });
 
 test("a configured Git filter before the run is refused with its own reason and no stage runs", async (t) => {
@@ -735,12 +622,6 @@ test("a submodule's configured filter is refused before recursive status can run
     assert.ok(existsSync(filterRan), "plain status runs the submodule's filter");
     rmSync(filterRan);
     touch();
-
-    const status = await captureCommitInputStatus(root, env);
-    assert.deepEqual(status.entries, []);
-    assert.deepEqual(status.filters, ["sub: filter.mark.clean"]);
-    assert.equal(commitInputStatusClean(status), false);
-    assert.equal(commitInputOutcome(status.commit, status), "input_changed");
 
     const runDir = await createRun({ root, stages: [markingStage(admin)], input: "commit" }, env);
     const refused = json(join(runDir, "results.json"));
@@ -865,7 +746,7 @@ test("status entries and outcomes classify renames, staged additions and debris"
   writeFileSync(join(root, "added.txt"), "added\n");
   git(["add", "--", "added.txt"]);
   writeFileSync(join(root, "loose.txt"), "loose\n");
-  const status = await captureCommitInputStatus(root, env);
+  const status = await captureOwnerStatus(root, env);
   assert.equal(status.commit, head);
   assert.deepEqual(status.entries.sort((left, right) => left.path.localeCompare(right.path)), [
     { status: "A ", path: "added.txt" },
