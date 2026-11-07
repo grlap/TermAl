@@ -101,6 +101,11 @@ mod engram_retry_hold_projection;
 // under engram_host_adapter's turn_observations module, whose ClaimedRoot
 // fixture they share.
 mod engram_source_roots;
+mod engram_source_command;
+mod engram_source_id;
+mod engram_source_id_capture;
+mod engram_source_id_live;
+mod engram_source_owner;
 mod engram_unadmitted_capture_diagnostic;
 mod engram_verification_bind;
 mod evaluator_tool_access;

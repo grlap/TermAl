@@ -187,6 +187,39 @@ async function refusedLaunch(root, env, detached, workerExit) {
 }
 
 export function registerLauncherRegistrationTests({ repository, isolatedDetachedRepository, stage, workerExit, copiedLauncherFiles }) {
+  test("optional source owner provenance joins registration identity without changing legacy requests", async (t) => {
+    await repository(t, async (root, env) => {
+      await registrationHost(async (host) => {
+        const runDir = join(root, ".git", "review-runs", "test-source-owner-identity");
+        mkdirSync(runDir, { recursive: true });
+        const request = { runId: "test-source-owner-identity", root, owner: env.TERMAL_SESSION_ID,
+          creatorPid: process.pid, detached: false, started: "2026-11-06T13:00:00.000Z",
+          stages: [{ name: "focused" }] };
+        const runEnv = { ...env, TERMAL_BASE_URL: host.url };
+        const register = async () => {
+          writeFileSync(join(runDir, "request.json"), JSON.stringify(request));
+          return (await registerTestRun(request, runDir, runEnv)).requestIdentity;
+        };
+        const legacy = await register();
+        assert.equal(await register(), legacy);
+        request.sourceOwner = { binaryPath: process.execPath, sha256: "a".repeat(64),
+          binaryVersion: "engram fixture", sourceVersion: 1 };
+        const pinned = await register();
+        assert.notEqual(pinned, legacy);
+        for (const [field, value] of [["binaryPath", `${process.execPath}.other`],
+          ["sha256", "b".repeat(64)], ["binaryVersion", "engram other"], ["sourceVersion", 2]]) {
+          const original = request.sourceOwner[field];
+          request.sourceOwner[field] = value;
+          assert.notEqual(await register(), pinned, field);
+          request.sourceOwner[field] = original;
+          assert.equal(await register(), pinned);
+        }
+        delete request.sourceOwner;
+        assert.equal(await register(), legacy);
+      }, { autoAcknowledge: true });
+    });
+  });
+
   test("ambiguous named roots print both identities and refuse the committed launcher before execution", async (t) => {
     await repository(t, async (root, env) => {
       const scripts = join(root, "scripts");

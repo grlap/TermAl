@@ -120,6 +120,9 @@ mod named_root;
 #[path = "test_run_registration_native_origin.rs"]
 mod native_origin;
 
+#[path = "test_run_registration_source_owner.rs"]
+mod source_owner;
+
 #[path = "test_run_native_completion.rs"]
 mod native_completion;
 

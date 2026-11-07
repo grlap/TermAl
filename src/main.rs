@@ -482,6 +482,7 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/sessions/{id}/test-runs",
             post(register_session_test_run),
         )
+        .route("/api/sessions/{id}/source-owner", get(get_session_source_owner))
         .route("/api/test-runs/{run_id}", get(get_test_run))
         .route(
             "/api/test-runs/{run_id}/interrupt-monitoring",
@@ -1086,6 +1087,9 @@ include!("review_freeze.rs");
 include!("capture_lifetime.rs");
 include!("content_revision.rs");
 include!("ordinary_commit_input.rs");
+include!("engram_source_id.rs");
+include!("engram_source_command.rs");
+include!("engram_source_owner.rs");
 include!("engram_source_roots.rs");
 include!("engram_named_root_binding.rs");
 include!("engram_root_capture_reason.rs");

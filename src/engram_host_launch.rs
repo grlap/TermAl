@@ -13,6 +13,52 @@ fn engram_host_workdir(persistence_path: &FsPath) -> std::io::Result<PathBuf> {
         .ok_or_else(|| std::io::Error::other("TermAl persistence path has no parent directory"))
 }
 
+// Source metadata is the host's bootstrap for a client that must never search
+// PATH. Resolve only the configured native command in absolute host PATH
+// directories, not cwd, a relative PATH entry, a batch shim, or the project.
+// Unlike ordinary command search, multiple distinct programs refuse rather
+// than silently selecting whichever happens to come first.
+fn resolve_engram_source_program(
+    configured: &FsPath, project_root: &FsPath, deadline: std::time::Instant,
+) -> Result<PathBuf> {
+    let directories = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>()).unwrap_or_default();
+    resolve_engram_source_program_in(configured, project_root, &directories, deadline)
+}
+
+fn resolve_engram_source_program_in(
+    configured: &FsPath, project_root: &FsPath, directories: &[PathBuf], deadline: std::time::Instant,
+) -> Result<PathBuf> {
+    engram_source_before_deadline(deadline)?;
+    if configured.is_absolute() { return engram_source_binary(configured, deadline); }
+    let name = configured.to_str().context("Engram source owner command is not UTF-8")?;
+    if name.is_empty() || configured.components().count() != 1
+        || name.contains(['/', '\\', ':']) || name.chars().any(char::is_control)
+        || matches!(name, "." | "..")
+    {
+        bail!("Engram source owner command must be a native name or an absolute executable path");
+    }
+    let project = fs::canonicalize(project_root).context("Engram source owner project root is unavailable")?;
+    let mut found = BTreeMap::new();
+    for directory in directories.iter().filter(|directory| directory.is_absolute()) {
+        engram_source_before_deadline(deadline)?;
+        let candidate = directory.join(configured);
+        #[cfg(windows)]
+        let candidate = if configured.extension().is_none() { candidate.with_extension("exe") } else { candidate };
+        if !candidate.is_file() { continue; }
+        let binary = engram_source_binary(&candidate, deadline)?;
+        if binary.starts_with(&project) {
+            bail!("Engram source owner command resolved inside the project; configure an explicit trusted executable");
+        }
+        found.insert(engram_exact_path_key(&binary), binary);
+    }
+    match found.len() {
+        1 => Ok(found.into_values().next().context("Engram source owner executable is unavailable")?),
+        0 => bail!("Engram source owner command was not found in absolute host PATH directories"),
+        _ => bail!("Engram source owner command is ambiguous; configure its absolute executable path"),
+    }
+}
+
 #[cfg(windows)]
 #[derive(Debug, PartialEq, Eq)]
 enum EngramHostProgramKind {

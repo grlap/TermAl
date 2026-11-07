@@ -167,6 +167,7 @@ fn seed_model(root: &FsPath) -> (PathBuf, Vec<String>) {
                 run_id,
                 native_origin: None,
                 native_completion: None,
+                source_owner: None,
                 project_id: project_id.clone(),
                 run_directory: root
                     .join(format!("modeled-runs/{n}"))

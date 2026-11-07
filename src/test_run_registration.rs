@@ -41,6 +41,10 @@ struct TestRunRegistration {
     native_origin: Option<TestRunNativeOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     native_completion: Option<TestRunNativeCompletion>,
+    // Host-verified executable provenance, immutable with the request. Legacy
+    // registrations do not acquire a pin from a later project configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_owner: Option<EngramSourceOwnerPin>,
     #[serde(default)]
     project_id: Option<String>,
     run_directory: String,
@@ -458,6 +462,9 @@ fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
     if let Some(input) = request.get("input") {
         immutable.insert("input", input.clone());
     }
+    if let Some(pin) = request.get("sourceOwner") {
+        immutable.insert("sourceOwner", pin.clone());
+    }
     let bytes = serde_json::to_vec(&immutable)
         .map_err(|_| ApiError::bad_request("invalid test run registration request"))?;
     Ok(sha256_hex(&bytes))
@@ -517,6 +524,19 @@ impl AppState {
         session_id: &str,
         request: RegisterTestRunRequest,
         diagnostics: &mut TestRunRegistrationDiagnostics,
+    ) -> Result<RegisterTestRunResponse, ApiError> {
+        self.register_test_run_inner_with_source_owner(session_id, request, diagnostics,
+            |state, session, deadline| state.source_owner_metadata_snapshot_with(
+                session, deadline, engram_source_owner_run))
+    }
+
+    fn register_test_run_inner_with_source_owner(
+        &self,
+        session_id: &str,
+        request: RegisterTestRunRequest,
+        diagnostics: &mut TestRunRegistrationDiagnostics,
+        verify_source_owner: impl FnOnce(&AppState, &str, std::time::Instant)
+            -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>,
     ) -> Result<RegisterTestRunResponse, ApiError> {
         if !request.run_id.starts_with("test-")
             || request.run_id.len() > 128
@@ -607,6 +627,18 @@ impl AppState {
         let deadline = test_run_registration_deadline(&clock, requested);
         diagnostics.fence_deadline = Some(deadline);
         diagnostics.fence_clock = clock.clone();
+        let source_owner = test_run_request_source_owner(&value)?;
+        let source_owner_authority = if let Some(expected) = &source_owner {
+            diagnostics.enter("verify_source_owner");
+            // This probe consumes the existing registration deadline; it does
+            // not add a new eight-second allowance before the claim read.
+            let (actual, authority) = verify_source_owner(self, session_id,
+                requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET)?;
+            if &actual != expected {
+                return Err(ApiError::conflict("test run source owner pin does not match the configured executable"));
+            }
+            Some(authority)
+        } else { None };
         let current_named_binding = if committed_input {
             diagnostics.enter("read_current_claim");
             Some(self.read_test_run_current_named_binding(session_id, &request.run_id,
@@ -614,6 +646,13 @@ impl AppState {
         } else {
             None
         };
+        if let Some(pin) = &source_owner {
+            // The off-lock held-claim read is another scheduling boundary.
+            // Recheck program bytes before publication, retaining the same
+            // deadline and doing no filesystem IO under StateInner.
+            engram_source_owner_verify_bytes(pin, requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET)
+                .map_err(engram_source_owner_error)?;
+        }
         if let Some(trace) = &diagnostics.trace { trace.mark("validated"); }
         diagnostics.enter("capture_registration");
         let (expected, dispatch) = {
@@ -636,6 +675,12 @@ impl AppState {
                 .engram
                 .as_ref()
                 .and_then(|settings| settings.authority_store_key.clone());
+            if let Some(expected) = &source_owner_authority {
+                let current = engram_source_owner_authority_locked(&inner, session_id)?;
+                if &current != expected {
+                    return Err(ApiError::conflict("test run source owner configuration changed before publication"));
+                }
+            }
             let (work_binding, named_root) = if committed_input {
                 current_named_binding.as_ref().expect("committed input claim read").resolve_locked(
                     &inner,
@@ -649,6 +694,7 @@ impl AppState {
             let registration = TestRunRegistration {
                 run_id: request.run_id.clone(),
                 native_completion: None,
+                source_owner,
                 native_origin: inner.federation.local.as_ref()
                     .filter(|host| host.validate().is_ok())
                     .filter(|_| mailbox_relay_uuid(&inner.sessions[index].federation_native_creation_id))

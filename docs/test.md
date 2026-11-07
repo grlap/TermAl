@@ -500,6 +500,99 @@ A partial context cannot downgrade to standalone. The `RUN` receipt identifies
 the initial request, whose registration and source fingerprint are added later;
 neither `RUN` nor `TRACKED` is a passing test result.
 
+The host also exposes read-only `GET /api/sessions/{id}/source-owner` for a
+visible native local root session. It derives the project itself and accepts
+no query or body parameters. Its closed response contains `binaryPath`,
+`sha256`, `binaryVersion` and `sourceVersion`: the canonical configured native
+Engram executable, its measured digest and actual version, and the source JSON
+schema validated from an `engram source --root <project-root> --json` response.
+It returns no source verdict or store details. A well-formed unavailable source
+response can establish schema support; it cannot establish clean-source evidence.
+The hash, version and schema probes share an aggregate eight-second budget,
+including parsing. The host resolves a configured native command in its own
+absolute PATH directories, rejects distinct competing programs, and returns an
+absolute pin. It never searches cwd, relative PATH entries or batch shims;
+the launcher performs no PATH discovery. Missing or relative path configuration, changed bytes, malformed
+output, unsupported schema, stderr, process failure and expiry refuse the probe.
+No user/global configuration change is involved.
+
+An optional `sourceOwner` object with those same four fields in `request.json`
+joins the immutable request identity. The host independently verifies it against
+the initiating session's project configuration before registration, rechecks
+configuration and executable bytes before publication, and persists the pin
+without changing historical registrations. This consumes the existing host
+registration budget. Omitting the field preserves legacy identity and behavior;
+the outer registration POST remains `runId` plus `runDirectory`.
+Pinned registration requires a visible native local root session, including on
+replay. An ACK retry also requires the configured executable still to match its
+saved pin; upgrading or replacing it refuses the retry instead of relabelling
+the historical registration. The GET endpoint has its own two-permit
+limiter, independent of review-freeze verification capacity. On Unix, script
+wrappers are refused before probing: the configured file needs a native ELF
+or Mach-O header as well as successful bounded version/schema probes.
+This additive bootstrap does not yet make the launcher call the endpoint or
+switch the committed-input predicate. The later switch requires the endpoint
+to be present in the running host. Installing a build does not change the
+running host; the established restart procedure still applies.
+
+The source command's additive v1 response includes a required `source_id`.
+On a complete measurement it is a closed object with `commit`, `tree`,
+`submodules` and `changes`. Each submodule has its root-relative `path`,
+actual `commit` and repo-relative `changes`; expected pins are implied by
+the committed parent tree. Each change requires `path`, `status`, `origin`,
+`blob` and `mode`. Origin is null except for a rename or copy. Blob and mode
+are null for an absent path; a staged deletion whose path still exists
+contains its current blob and mode. Modes are strings `100644`, `100755`
+or `120000`. Ignored files and gitlink placeholders are excluded from the
+file changes. Arrays retain the owner's UTF-8 byte order; two porcelain
+records for one path, such as `??` followed by `D `, remain separate.
+An unavailable measurement has `source_id: null`, never a partial value.
+
+The ignored Rust test
+`source_owner_live_shared_fixtures_preserve_complete_producer_identity` runs the
+real pinned owner through the host adapter against the producer's shared
+`sourceCases` and `createSourceFixture` library. Set
+`TERMAL_TEST_LIVE_ENGRAM_BINARY` and `TERMAL_TEST_LIVE_ENGRAM_SHA256` to the
+candidate's recorded absolute path and digest, and `TERMAL_TEST_SOURCE_FIXTURES`
+to an absolute module exported from that same owner candidate's
+`scripts/source-input-fixtures.mjs`. Keep that module and fixture scratch inside
+the TermAl repository. The test honors the owner's platform skips, creates
+repository-local disposable roots, compares the entire runtime-derived
+`fixture.sourceId`, and prints actual identities with their case names.
+The first measurement consumes the same validated source observation that
+establishes the pin's source schema, rather than issuing a second full read.
+It retains that invocation's root and observation time; a separate GET or later
+capture cannot relabel it as fresh evidence. Subsequent measurements reuse only
+the executable pin and perform a fresh source capture. Each observation has its
+own maximum eight-second deadline, including its byte checks and parsing;
+an intentionally shorter outer caller deadline is preserved.
+Fixture construction uses the existing finite Git setup budget. Run this test
+only in an authorized focused slot; it is not part of the default FULL suite.
+Each measurement prints bounded operation timings and its remaining budget.
+The separately ignored
+`source_owner_live_child_fixture_reports_observation_costs` test uses the same
+module and binary/digest variables to create exactly one fresh `child-dirty`
+fixture through the owner's factory. It measures the first and subsequent
+observations once each against that fixture's complete expected identity. This
+is a new measurement, not recovery of a missing failed fixture or its timings.
+There is no failed-capture retry, producer timeout change or performance
+threshold. Both tests retain their actual fixture parent on panic through the
+existing test-root retention mechanism and print its path for investigation;
+successful fixtures are removed normally.
+
+The host's `engram_source_id_until` takes an explicit executable pin, an
+already-authorized root and the caller's absolute deadline. It returns
+the complete typed value, including local changes, after byte-pin checks,
+bounded execution and strict parsing. The maximum eight-second budget is
+shared by those operations; a shorter caller deadline stays shorter.
+JSON is limited to one MiB, with one trailing LF allowed outside that limit.
+Unavailable, incoherent, oversized or late input is an error with no fallback.
+Equality compares every field of this object, excluding the envelope's
+root path, status and provenance metadata. This addition does not switch
+the launcher or credit consumers, rewrite stored records, add a watcher,
+or change the launcher's current clean-commit policy. The host and owner
+changes are integrated together before this extended response is used.
+
 For an approved independent clone, create or select a local project for that
 clone **on the runner's host**, and start the native runner session in that
 project. Registration checks the session's configured project Git common

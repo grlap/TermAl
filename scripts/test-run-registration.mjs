@@ -27,6 +27,9 @@ function requestIdentity(request) {
   // request without it keeps exactly the identity it always had. This must
   // match the host's test_run_registration_identity.
   if (request.input !== undefined) immutable.input = request.input;
+  // Optional executable provenance is immutable too. Omitting it preserves
+  // every legacy request's identity; this additive lane starts no owner call.
+  if (request.sourceOwner !== undefined) immutable.sourceOwner = request.sourceOwner;
   return createHash("sha256").update(JSON.stringify(ordered(immutable))).digest("hex");
 }
 
