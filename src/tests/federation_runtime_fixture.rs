@@ -19,6 +19,7 @@ struct FakeSsh {
     exited: mpsc::Receiver<()>,
     events: tokio::sync::mpsc::UnboundedSender<Event>,
     cleanup_unknown: Arc<AtomicBool>,
+    reaped: bool,
 }
 
 impl FederationSshChild for FakeSsh {
@@ -31,12 +32,15 @@ impl FederationSshChild for FakeSsh {
         Ok(false)
     }
 
-    fn shutdown(self: Box<Self>) -> Result<(), ApiError> {
-        self.stop.send_replace(true);
-        self.exited
-            .recv_timeout(phase_sync::DEADLOCK_GUARD)
-            .unwrap();
-        let _ = self.events.send(Event::Reaped);
+    fn shutdown(&mut self) -> Result<(), ApiError> {
+        if !self.reaped {
+            self.stop.send_replace(true);
+            self.exited
+                .recv_timeout(phase_sync::DEADLOCK_GUARD)
+                .unwrap();
+            let _ = self.events.send(Event::Reaped);
+            self.reaped = true;
+        }
         if self.cleanup_unknown.load(Ordering::SeqCst) {
             return Err(ApiError::internal("fake cleanup unresolved")
                 .with_kind(ApiErrorKind::FederationSshCleanupUnknown));
@@ -121,7 +125,7 @@ impl Fixture {
             std::net::TcpListener::bind("127.0.0.1:0").unwrap(),
         )));
         let reserved_forward = forward_listener.clone();
-        let ssh: FederationSshStarter = Arc::new(move |_, port, _| {
+        let ssh: FederationSshStarter = Arc::new(move |_, port, _, owned| {
             let _entered = handle.enter();
             let socket = reserved_forward
                 .lock()
@@ -184,13 +188,15 @@ impl Fixture {
                 let _ = exit_tx.send(());
             });
             let _ = events_tx.send(Event::Started);
-            Ok(Box::new(FakeSsh {
+            *owned = Some(Box::new(FakeSsh {
                 control: Some(Box::new(control)),
                 stop,
                 exited,
                 events: events_tx.clone(),
                 cleanup_unknown: ssh_cleanup.clone(),
-            }))
+                reaped: false,
+            }));
+            Ok(())
         });
         drop(central_port);
         Self {

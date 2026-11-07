@@ -16,8 +16,8 @@
 // terminal result refuse; coherent unfinished runs are skipped. A scan that
 // exhausts its bound without selecting a result, or reaches its deadline,
 // decides neither flow and is refused. Owns reading the judged
-// commit of the named root (HEAD, only when it is clean under the
-// committed-input rule of src/ordinary_commit_input.rs), finding the claim's
+// commit of the named root (only when the pinned source owner reports it
+// clean), finding the claim's
 // committed-input runs among the registrations, reading whether Engram
 // acknowledged a run's record, the decision itself, and the committed source
 // revision (`git-commit:<commit>`) an admitted evaluation judges, declares and
@@ -74,9 +74,8 @@ enum AcceptanceCommittedInputDecision {
 /// never read in its place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum AcceptanceCommittedInputRefusal {
-    /// The named root is not clean at a commit: a staged, unstaged or
-    /// untracked path, an unsupported submodule, an index-skipped tracked path, an
-    /// unborn HEAD, or a tree Git cannot read.
+    /// The owner cannot establish the named root as clean at a commit.
+    /// Dirty or unavailable input and unavailable ownership all refuse.
     NotClean,
     /// The newest applicable terminal result did not pass eligibly and
     /// cleanly on HEAD `commit`, or no terminal result matches that commit.
@@ -144,13 +143,45 @@ impl AcceptanceCommittedInputRefusal {
     }
 }
 
-/// Root HEAD under the shared committed-input predicate: recursive submodule
-/// status, filter guards and one root dirt check, without an index listing.
-/// Hidden index edits remain the documented Git-status limitation. All reads
-/// retain the request deadline; unreadable input supplies no judged commit.
-fn acceptance_judged_commit(root: &FsPath, deadline: std::time::Instant) -> Option<String> {
-    committed_source_clean_head_within(root, Some(deadline))
-        .filter(|head| test_run_commit_id_valid(head))
+impl AppState {
+    /// Acceptance retains its clean-commit policy; the initiating project's
+    /// pinned owner supplies that verdict. Unavailable ownership or input
+    /// supplies no judged commit, without a local Git fallback.
+    fn acceptance_judged_commit(&self, session: &str, root: &FsPath,
+        deadline: std::time::Instant) -> Option<String>
+    {
+        let deadline = deadline.min(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
+        #[cfg(test)]
+        let metadata = self.inner.lock().expect("state mutex poisoned")
+            .test_native_source_owner_metadata.clone();
+        #[cfg(test)]
+        let measured = match metadata {
+            Some(measure) => measure(self, session, deadline),
+            None => self.source_owner_metadata_snapshot_with(session, deadline, engram_source_owner_run),
+        };
+        #[cfg(not(test))]
+        let measured = self.source_owner_metadata_snapshot_with(session, deadline, engram_source_owner_run);
+        let (pin, authority) = measured.ok()?;
+        #[cfg(test)]
+        let capture = self.inner.lock().expect("state mutex poisoned")
+            .test_acceptance_source_owner_capture.clone();
+        #[cfg(test)]
+        let observed = engram_source_observation_with(&pin, root, deadline,
+            |binary, cwd, args, until, limit| match &capture {
+                Some(capture) => capture(binary, cwd, args, until, limit),
+                None => engram_source_owner_run(binary, cwd, args, until, limit),
+            }).ok()?;
+        #[cfg(not(test))]
+        let observed = engram_source_observation_with(&pin, root, deadline, engram_source_owner_run).ok()?;
+        if engram_source_owner_authority_locked(
+            &self.inner.lock().expect("state mutex poisoned"), session).ok()? != authority
+            || observed.status != EngramSourceStatus::Clean
+        {
+            return None;
+        }
+        let source = observed.into_source_id(deadline).ok()?;
+        test_run_commit_id_valid(&source.commit).then_some(source.commit)
+    }
 }
 
 /// Reads a run's `results.json`; the one read of a run's results this
@@ -649,7 +680,7 @@ impl AppState {
                 Err(Refusal::ScanIncomplete)
             };
         }
-        let commit = match acceptance_judged_commit(FsPath::new(&root.root), deadline) {
+        let commit = match self.acceptance_judged_commit(parent_session_id, FsPath::new(&root.root), deadline) {
             Some(commit) => commit,
             None if now() >= deadline => return Err(Refusal::ScanIncomplete),
             None => return Err(Refusal::NotClean),
@@ -704,7 +735,7 @@ impl AppState {
                 step();
             }
         });
-        if acceptance_judged_commit(FsPath::new(&root.root), deadline).as_deref()
+        if self.acceptance_judged_commit(parent_session_id, FsPath::new(&root.root), deadline).as_deref()
             != Some(commit.as_str())
         {
             return Err(if now() >= deadline {

@@ -192,6 +192,14 @@ fn engram_source_id_with(
     mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize)
         -> Result<std::process::Output>,
 ) -> Result<EngramSourceId> {
+    engram_source_observation_with(pin, root, deadline, &mut run)?.into_source_id(deadline)
+}
+
+fn engram_source_observation_with(
+    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: std::time::Instant,
+    mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize)
+        -> Result<std::process::Output>,
+) -> Result<EngramSourceObservation> {
     let deadline = deadline.min(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
     let binary = engram_source_owner_verify_bytes(pin, deadline)?;
     let root = fs::canonicalize(root).context("Engram source root is unavailable")?;
@@ -203,7 +211,7 @@ fn engram_source_id_with(
     }
     let observed = parse_engram_source_observation(&output.stdout, output.status.code(), &root, deadline)?;
     engram_source_owner_verify_bytes(pin, deadline)?;
-    observed.into_source_id(deadline)
+    Ok(observed)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

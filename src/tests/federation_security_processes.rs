@@ -135,7 +135,7 @@ impl FederationSshChild for SpyChild {
         Ok(false)
     }
 
-    fn shutdown(mut self: Box<Self>) -> Result<(), ApiError> {
+    fn shutdown(&mut self) -> Result<(), ApiError> {
         assert!(
             self.0.take().unwrap().finish(),
             "diagnostic pipes must not carry the pair key"
@@ -164,11 +164,12 @@ async fn adversarial_process(relay: bool) {
         Ok(port)
     });
     let pair = Pair::with_starter(
-        Arc::new(move |_, port, _| {
+        Arc::new(move |_, port, _, owned| {
             let (owned_port, process) = prepared.lock().unwrap().take().unwrap();
             assert_eq!(owned_port, port);
             child_started.store(true, Ordering::SeqCst);
-            Ok(Box::new(SpyChild(Some(process))))
+            *owned = Some(Box::new(SpyChild(Some(process))));
+            Ok(())
         }),
         prepare,
     )

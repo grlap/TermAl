@@ -975,6 +975,7 @@ impl TermalDelegationMcpBridge {
             }
             "termal_send_to_session" => self.tool_send_to_session(arguments),
             "termal_list_sessions" => self.tool_list_sessions(arguments),
+            "termal_federation_status" => self.tool_federation_status(arguments),
             "termal_list_mailboxes" => self.tool_list_mailboxes(arguments),
             "termal_read_mailbox" => self.tool_read_mailbox(arguments),
             "termal_read_mailbox_message" => self.tool_read_mailbox_message(arguments),
@@ -2467,6 +2468,7 @@ fn tool_requires_root_session(name: &str) -> bool {
         name,
         "termal_send_to_session"
             | "termal_list_sessions"
+            | "termal_federation_status"
             | "termal_list_mailboxes"
             | "termal_read_mailbox"
             | "termal_read_mailbox_message"
@@ -2853,6 +2855,11 @@ fn mcp_tools_list_result() -> Value {
     // `json!` recursion limit, and these definitions belong to their module.
     insert_mcp_tool_after(
         &mut result,
+        "termal_list_sessions",
+        federation_status_tool_definition(),
+    );
+    insert_mcp_tool_after(
+        &mut result,
         TERMAL_REVIEW_FREEZE_TOOL_NAME,
         review_identity_tool_definition(),
     );
@@ -3206,3 +3213,4 @@ fn is_terminal_delegation_status(status: &str) -> bool {
 mod delegation_mcp_tests;
 
 include!("delegation_mcp_projection.rs");
+include!("delegation_mcp_federation.rs");

@@ -2027,17 +2027,26 @@ impl AppState {
         // walk, so a root removed meanwhile cannot measure the main checkout;
         // and it is refused if the work's root has changed since, a first
         // name included, whether or not a revision was taken at the request.
-        let place = {
+        let (place, source_owner_session) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(change) = acceptance_evaluation_root_change_locked(&inner, target) {
                 return Err(acceptance_evaluation_submission_root_refusal_locked(&inner, target, change));
             }
-            match &target.source_root {
+            let place = match &target.source_root {
                 Some(source_root) => Some(source_root.place()),
                 None => inner.find_session_index(child).map(|index| {
                     EngramBasisPlace::Workdir(inner.sessions[index].session.workdir.clone())
                 }),
-            }
+            };
+            // Independent evaluators retain their initiating parent on the
+            // delegation record; sub-agent briefs carry it on the target.
+            // A same-session evaluation uses that native session itself.
+            let owner = target.parent_session.clone().or_else(||
+                inner.find_delegation_index_by_child_session_id(child)
+                    .map(|index| inner.delegations[index].parent_session_id.clone()))
+                .or_else(|| (target.mode == AcceptanceEvaluationMode::SameSession)
+                    .then(|| child.to_owned()));
+            (place, owner)
         };
         // Without a revision taken at the request there is nothing to compare.
         let Some(requested) = target.source_fingerprint.as_deref() else {
@@ -2052,10 +2061,9 @@ impl AppState {
             target.source_root.as_ref(),
             acceptance_committed_revision_commit(requested),
         ) {
-            let current = acceptance_judged_commit(
-                FsPath::new(&source_root.root),
-                std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
-            );
+            let current = source_owner_session.as_deref().and_then(|parent|
+                self.acceptance_judged_commit(parent, FsPath::new(&source_root.root),
+                    std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT));
             if current.as_deref() == Some(commit) {
                 return Ok(declared);
             }

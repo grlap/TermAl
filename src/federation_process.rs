@@ -9,24 +9,39 @@ struct FederationSshProcess {
 }
 
 impl FederationSshProcess {
-    fn from_child(mut child: Child) -> Result<Self, ApiError> {
+    fn from_child(child: Child) -> Result<Self, ApiError> {
         let diagnostic = Arc::new(Mutex::new(FederationSshDiagnostic::default()));
-        let input = child.stdin.take();
-        let output = child.stdout.take();
-        let stderr = child.stderr.take();
-        let process = Self {
+        let mut process = Self::retain_child(child, diagnostic);
+        process.attach_stdio();
+        Ok(process)
+    }
+
+    fn retain_child(child: Child, diagnostic: FederationSshDiagnostics) -> Self {
+        Self {
             child: Some(child),
-            input,
-            output,
-            diagnostic: diagnostic.clone(),
-        };
+            input: None,
+            output: None,
+            diagnostic,
+        }
+    }
+
+    fn attach_stdio(&mut self) {
+        let child = self.child.as_mut().expect("owned SSH child before stdio setup");
+        self.input = child.stdin.take();
+        self.output = child.stdout.take();
+        let stderr = child.stderr.take();
+        let diagnostic = self.diagnostic.clone();
         if let Some(stderr) = stderr {
-            std::thread::Builder::new()
+            if std::thread::Builder::new()
                 .name("federation-stderr".to_owned())
                 .spawn(move || federation_read_ssh_diagnostics(stderr, &diagnostic))
-                .map_err(|_| federation_transport_unavailable())?;
+                .is_err() {
+                    // The child already exists. Return its owned guard even
+                    // when diagnostic-thread creation fails, so cleanup stays
+                    // with the worker rather than becoming a no-child error.
+                    eprintln!("federation SSH diagnostic reader unavailable");
+                }
         }
-        Ok(process)
     }
 
     fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
@@ -83,7 +98,7 @@ impl FederationSshProcess {
             let status = child.wait().map_err(|error| {
                 eprintln!("federation SSH cleanup could not reap owned child: {error}");
                 ApiError::internal(
-                    "federation SSH cleanup unresolved; operator reconciliation required",
+                    "federation SSH cleanup pending; retaining owned child for retry",
                 )
                 .with_kind(ApiErrorKind::FederationSshCleanupUnknown)
             })?;
@@ -111,7 +126,8 @@ fn start_federation_ssh(
     snapshot: &FederationPeerSnapshot,
     forward_port: u16,
     known_hosts: &FsPath,
-) -> Result<FederationSshProcess, ApiError> {
+    owned: &mut Option<Box<dyn FederationSshChild>>,
+) -> Result<(), ApiError> {
     if snapshot.local_role != FederationRole::Central {
         return Err(federation_stale_link());
     }
@@ -141,8 +157,12 @@ fn start_federation_ssh(
         .stderr(Stdio::piped());
     #[cfg(windows)]
     command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    // Allocate diagnostics before spawn. Once spawn returns, publish the exact
+    // guard before stdio setup, thread creation or other post-spawn work.
+    let diagnostic = Arc::new(Mutex::new(FederationSshDiagnostic::default()));
     let child = command
         .spawn()
         .map_err(|_| federation_transport_unavailable())?;
-    FederationSshProcess::from_child(child)
+    *owned = Some(Box::new(FederationSshProcess::retain_child(child, diagnostic)));
+    owned.as_mut().expect("published SSH guard").prepare_control()
 }

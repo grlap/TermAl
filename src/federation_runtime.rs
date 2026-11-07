@@ -22,6 +22,7 @@ impl AppState {
 
 struct FederationWorker {
     basis: Arc<FederationTransportBasis>,
+    os: Arc<FederationOsAccount>,
     stop: tokio::sync::watch::Sender<bool>,
     task: tokio::task::JoinHandle<()>,
     joined: bool,
@@ -114,6 +115,15 @@ async fn federation_supervise(
             break;
         }
         durability.tick(&app);
+        // Even a removed/reconfigured peer keeps its original operation until
+        // it has returned and the exact child is reaped. Retry returned errors
+        // here, never alongside a running start/kill/wait.
+        for (id, worker) in &workers {
+            worker.os.tick();
+            if !worker.os.pending() {
+                quarantined.lock().expect("federation quarantine mutex poisoned").remove(id);
+            }
+        }
         executor.tick(&app).await;
         wake_drain.tick(&app);
         activation.tick(&app, true).await;
@@ -153,7 +163,7 @@ async fn federation_supervise(
             .filter(|(id, worker)| {
                 // Detached connection completion owns this marker even after
                 // the caller or peer handle is gone. Check before task state.
-                if worker.basis.is_settling() {
+                if worker.basis.is_settling() || worker.os.pending() {
                     return false;
                 }
                 if worker.joined || worker.task.is_finished() {
@@ -202,7 +212,7 @@ async fn federation_supervise(
                 // A read can acquire its guard AFTER the removal cut but
                 // BEFORE observing stop. Keep this joined worker as the
                 // replacement fence until its detached operation settles.
-                if worker.basis.is_settling() {
+                if worker.basis.is_settling() || worker.os.pending() {
                     continue;
                 }
                 workers.remove(&id);
@@ -219,9 +229,11 @@ async fn federation_supervise(
             }
             let (peer_stop, peer_stop_rx) = tokio::sync::watch::channel(false);
             let basis = Arc::new(FederationTransportBasis::new(snapshot));
+            let os = Arc::new(FederationOsAccount::default());
             let task = tokio::spawn(federation_run_peer(
                 app.clone(),
                 basis.clone(),
+                os.clone(),
                 peers.clone(),
                 quarantined.clone(),
                 peer_stop_rx,
@@ -231,6 +243,7 @@ async fn federation_supervise(
                 id,
                 FederationWorker {
                     basis,
+                    os,
                     stop: peer_stop,
                     task,
                     joined: false,
@@ -312,13 +325,14 @@ async fn federation_wait_supervisor_tick(
 async fn federation_run_peer(
     app: AppState,
     basis: Arc<FederationTransportBasis>,
+    os: Arc<FederationOsAccount>,
     peers: FederationPeerHandles,
     quarantined: FederationQuarantinedPeers,
     mut stop: tokio::sync::watch::Receiver<bool>,
     io: FederationRuntimeIo,
 ) {
     let mut retry = FederationBackoff::default();
-    let mut attempt = FederationAttemptState::default();
+    let mut attempt = FederationAttemptState { os, ..Default::default() };
     attempt.reporter = Some(FederationWorkerReporter::new(app.clone(), basis.clone()));
     loop {
         if *stop.borrow() {
@@ -353,6 +367,8 @@ async fn federation_run_peer(
             }
             Err(error) => Err(error),
         };
+        #[cfg(test)]
+        let mut reported = false;
         if let Err(ref error) = result {
             // Do not log request bodies, raw SSH stderr, secret references or
             // externally supplied error bodies. Typed status is sufficient.
@@ -362,32 +378,35 @@ async fn federation_run_peer(
             );
             let cleanup_unknown =
                 matches!(error.kind, Some(ApiErrorKind::FederationSshCleanupUnknown));
-            if cleanup_unknown || attempt.unresolved.load(Ordering::SeqCst) {
+            if cleanup_unknown || attempt.os.pending() {
                 if let Some(reporter) = &attempt.reporter { reporter.stage("runtimeQuarantine"); }
                 quarantined
                     .lock()
                     .expect("federation quarantine mutex poisoned")
                     .insert(expected.peer.host_id.clone());
                 eprintln!(
-                    "federation peer {} quarantined for this runtime: owned OS operation unresolved",
+                    "federation peer {} recovery pending: retaining owned OS operation",
                     expected.peer.host_id
                 );
-            }
-            if cleanup_unknown
-                || attempt.unresolved.load(Ordering::SeqCst)
-                || attempt.material_changed
-            {
-                if attempt.material_changed {
-                    if !cleanup_unknown && !attempt.unresolved.load(Ordering::SeqCst) {
-                        if let Some(reporter) = &attempt.reporter { reporter.stage("materialChanged"); }
-                    }
-                    eprintln!(
-                        "federation peer {} paused: enrolled credential material changed",
-                        expected.peer.host_id
-                    );
-                }
                 #[cfg(test)]
-                (io.attempt_finished)(&result);
+                { (io.attempt_finished)(&result); reported = true; }
+            }
+            while attempt.os.pending() {
+                attempt.os.tick();
+                if !attempt.os.pending() { break; }
+                if let Some(reporter) = &attempt.reporter { reporter.stage(attempt.os.stage()); }
+                tokio::select! {
+                    _ = federation_wait_stop(&mut stop) => return,
+                    _ = tokio::time::sleep(io.reconcile_interval) => {},
+                }
+            }
+            quarantined.lock().expect("federation quarantine mutex poisoned")
+                .remove(&expected.peer.host_id);
+            if attempt.material_changed {
+                if let Some(reporter) = &attempt.reporter { reporter.stage("materialChanged"); }
+                eprintln!("federation peer {} paused: enrolled credential material changed", expected.peer.host_id);
+                #[cfg(test)]
+                if !reported { (io.attempt_finished)(&result); }
                 // Only locally proven hard fences park. Remote 409/403 and
                 // temporary durability holds remain bounded retry outcomes.
                 federation_wait_stop(&mut stop).await;
@@ -396,14 +415,14 @@ async fn federation_run_peer(
         }
         if *stop.borrow() {
             #[cfg(test)]
-            if result.is_err() { (io.attempt_finished)(&result); }
+            if result.is_err() && !reported { (io.attempt_finished)(&result); }
             return;
         }
         let delay = retry.next_delay();
         retry.record_failure();
         if let Some(reporter) = &attempt.reporter { reporter.retry(delay); }
         #[cfg(test)]
-        if result.is_err() { (io.attempt_finished)(&result); }
+        if result.is_err() && !reported { (io.attempt_finished)(&result); }
         tokio::select! {
             _ = federation_wait_stop(&mut stop) => return,
             _ = tokio::time::sleep(delay) => {}

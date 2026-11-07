@@ -18,7 +18,7 @@ impl FederationSshChild for DelayedChild {
     fn child_exited(&mut self) -> Result<bool, ApiError> {
         Ok(false)
     }
-    fn shutdown(self: Box<Self>) -> Result<(), ApiError> {
+    fn shutdown(&mut self) -> Result<(), ApiError> {
         self.stop.send_replace(true);
         self.ended.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap()
     }
@@ -51,7 +51,7 @@ async fn federation_startup_can_reach_first_frame_after_five_seconds_before_atte
     let start = io.ssh.clone();
     let handle = tokio::runtime::Handle::current();
     let (connected, mut connection_events) = tokio::sync::mpsc::unbounded_channel();
-    io.ssh = Arc::new(move |snapshot, port, pin| {
+    io.ssh = Arc::new(move |snapshot, port, pin, owned| {
         let (central, mut bridge) = tokio::io::duplex(FEDERATION_FRAME_LIMIT);
         let (stop, mut stopped) = tokio::sync::watch::channel(false);
         let (finished, ended) = mpsc::channel();
@@ -66,7 +66,11 @@ async fn federation_startup_can_reach_first_frame_after_five_seconds_before_atte
                 _ = federation_wait_stop(&mut stopped) => { let _=finished.send(Ok(())); return; },
                 _ = tokio::time::sleep(Duration::from_secs(6)) => {},
             }
-            let started = tokio::task::spawn_blocking(move || start(&snapshot, port, &pin))
+            let started = tokio::task::spawn_blocking(move || {
+                let mut owned = None;
+                start(&snapshot, port, &pin, &mut owned)?;
+                owned.ok_or_else(federation_transport_unavailable)
+            })
                 .await
                 .unwrap();
             let mut child = match started {
@@ -88,11 +92,12 @@ async fn federation_startup_can_reach_first_frame_after_five_seconds_before_atte
                 .unwrap();
             let _ = finished.send(result);
         });
-        Ok(Box::new(DelayedChild {
+        *owned = Some(Box::new(DelayedChild {
             control: Some(Box::new(central)),
             stop,
             ended,
-        }))
+        }));
+        Ok(())
     });
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
     let (done, mut completion) = tokio::sync::oneshot::channel();

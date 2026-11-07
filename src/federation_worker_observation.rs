@@ -21,7 +21,13 @@ impl FederationWorkerObservation {
             "currentBasis":self.enrollment == peer.enrollment_generation && self.transport == peer.transport_generation,
             "startedAt":self.started_at, "updatedAt":self.updated_at, "stage":self.stage,
             "retryAfterMs":self.retry_after_ms,
-            "quarantinedForRuntime":self.stage == "runtimeQuarantine",
+            "quarantinedForRuntime":matches!(self.stage, "runtimeQuarantine" | "sshStartSettlement" | "sshCleanupPending" | "sshCleanupRetry"),
+            "recoveryReason":match self.stage {
+                "runtimeQuarantine" | "sshStartSettlement" => Some("ownedSshOperationPending"),
+                "sshCleanupPending" => Some("ownedSshCleanupPending"),
+                "sshCleanupRetry" => Some("ownedSshCleanupRetry"),
+                _ => None,
+            },
             "ssh":self.ssh.as_ref().map(|ssh| ssh.lock().unwrap_or_else(std::sync::PoisonError::into_inner).project())})
     }
 }
@@ -133,7 +139,7 @@ impl Drop for FederationWorkerReporter {
             return;
         }
         self.update(false, |worker, _| {
-            if !matches!(worker.stage, "runtimeQuarantine" | "materialChanged") {
+            if !matches!(worker.stage, "runtimeQuarantine" | "materialChanged" | "sshStartSettlement" | "sshCleanupPending" | "sshCleanupRetry") {
                 worker.stage = "stopped";
                 worker.retry_after_ms = None;
             }

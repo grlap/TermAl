@@ -23,7 +23,7 @@ async fn federation_central_monitor(
     let started = tokio::time::Instant::now();
     if let Some(reporter) = &attempt.reporter { reporter.stage("sshSpawn"); }
     let mut process = federation_os_operation(
-        move || {
+        move |owned| {
             if *start_stop.borrow()
                 || start_stop.has_changed().is_err()
                 || start_channel
@@ -34,10 +34,10 @@ async fn federation_central_monitor(
                 return Err(federation_stale_link());
             }
             start_channel.current_authority()?;
-            start(&process_snapshot, forward_port, &known_hosts)
+            start(&process_snapshot, forward_port, &known_hosts, owned)
         },
         Some(stop),
-        attempt.unresolved.clone(),
+        attempt.os.clone(),
         io.operation_timeout,
     )
     .await
@@ -129,15 +129,13 @@ async fn federation_central_monitor(
     }.await;
     client.channel.invalidate();
     if let Some(reporter) = &attempt.reporter { reporter.stage("sshCleanup"); }
-    if let Err(error) = federation_os_operation(
-        move || process.shutdown(),
-        None,
-        attempt.unresolved.clone(),
+    if let Err(error) = federation_os_cleanup(
+        process,
+        attempt.os.clone(),
         io.operation_timeout,
     )
     .await
     {
-        attempt.unresolved.store(true, Ordering::SeqCst);
         return Err(error);
     }
     outcome

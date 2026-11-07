@@ -6,6 +6,12 @@ include!("federation_runtime_fixture.rs");
 #[path = "federation_worker_io.rs"]
 mod worker_io;
 
+#[path = "federation_ssh_recovery.rs"]
+mod ssh_recovery;
+
+#[path = "federation_ssh_supervisor_recovery.rs"]
+mod ssh_supervisor_recovery;
+
 #[path = "federation_credential_settlement.rs"]
 mod credential_settlement;
 
@@ -94,7 +100,7 @@ async fn federation_disabled_and_standalone_start_without_os_effects() {
             reader_touched.store(true, Ordering::SeqCst);
             Err(federation_credential_error())
         }),
-        ssh: Arc::new(move |_, _, _| {
+        ssh: Arc::new(move |_, _, _, _owned| {
             ssh_touched.store(true, Ordering::SeqCst);
             Err(federation_transport_unavailable())
         }),
@@ -242,7 +248,7 @@ async fn federation_transport_replacement_reaps_old_child_first() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn federation_unknown_cleanup_quarantines_instead_of_replacing() {
+async fn federation_unknown_cleanup_retains_the_child_instead_of_replacing() {
     let mut fixture = Fixture::new().await;
     let runtime = start_federation_runtime_with_io(fixture.app.clone(), fixture.io.clone());
     assert!(fixture.event(|e| matches!(e, Event::Response(path, status) if path.ends_with("health") && status.is_success())).await);
@@ -262,6 +268,7 @@ async fn federation_unknown_cleanup_quarantines_instead_of_replacing() {
         .find(|peer| peer["host"]["hostId"] == id).unwrap()["attestation"]["worker"];
     assert!(classified);
     assert!(quarantined.lock().unwrap().contains(&id));
-    assert_eq!(worker["stage"], "runtimeQuarantine");
+    assert!(matches!(worker["stage"].as_str(), Some("sshCleanupPending" | "sshCleanupRetry")));
+    assert!(matches!(worker["recoveryReason"].as_str(), Some("ownedSshCleanupPending" | "ownedSshCleanupRetry")));
     assert_eq!(worker["quarantinedForRuntime"], true);
 }

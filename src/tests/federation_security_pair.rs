@@ -94,14 +94,15 @@ impl Pair {
                     material_fingerprint: [1; 32],
                 })
             }),
-            ssh: Arc::new(move |_, port, _| {
+            ssh: Arc::new(move |_, port, _, owned| {
                 let socket = reserved_forward
                     .lock()
                     .unwrap()
                     .take()
                     .expect("reserved forward socket");
                 assert_eq!(socket.local_addr().unwrap().port(), port);
-                TestChild::start(&runtime_handle, start_relay.clone(), socket, s_number)
+                *owned = Some(TestChild::start(&runtime_handle, start_relay.clone(), socket, s_number)?);
+                Ok(())
             }),
             reconcile_interval: Duration::from_millis(20),
             // Explicit RPCs drive the assertions; control heartbeats retain

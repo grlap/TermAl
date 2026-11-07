@@ -1,5 +1,8 @@
 # Federation link foundation
 
+Agents can inspect the existing status through the read-only
+[federation status MCP tool and CLI](agent-federation-status.md).
+
 This foundation connects a central TermAl host to each enrolled satellite host.
 It is disabled by default through the federation settings. Standalone and
 disabled hosts create no federation listeners, credential lookups or SSH children.

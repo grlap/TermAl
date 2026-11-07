@@ -29,6 +29,9 @@ mod latest;
 #[path = "acceptance_committed_input_selection_edges.rs"]
 mod selection_edges;
 
+#[path = "acceptance_committed_source_owner.rs"]
+mod source_owner;
+
 /// The run every case registers.
 const COMMITTED_RUN_ID: &str = "test-committed-input-admission";
 
@@ -40,6 +43,53 @@ const RECORD_PRODUCER: &str = "5f0c2b6e8d4a4e1f9a3b7c6d5e4f3a2b";
 /// is not given.
 fn worktree(named_root: &str) -> PathBuf {
     normalize_user_facing_path(FsPath::new(named_root))
+}
+
+// Explicit owner replies are fixture inputs. These tests exercise acceptance
+// admission and its owner boundary, not a second implementation of Git's
+// clean predicate. Git mutations below are paired with the owner's new reply.
+fn acceptance_owner_reports(state: &AppState, parent: &str, named_root: &str,
+    changes: Vec<EngramSourceIdChange>, submodules: Vec<EngramSourceIdSubmodule>)
+{
+    use crate::tests::engram_source_owner::{source_owner_fixture_binary, source_owner_output, source_owner_reply};
+    let root = worktree(named_root);
+    let directory = root.join(".worktrees/acceptance-source-owner");
+    fs::create_dir_all(&directory).unwrap();
+    let binary = source_owner_fixture_binary(&directory);
+    let identity = EngramSourceId {
+        commit: run_git_test_command_output(&root, &["rev-parse", "HEAD"]),
+        tree: run_git_test_command_output(&root, &["show", "-s", "--format=%T", "HEAD"]),
+        changes, submodules,
+    };
+    let mut entries: Vec<Value> = identity.changes.iter().map(|change|
+        json!({"path":change.path,"status":change.status,"origin":change.origin})).collect();
+    entries.extend(identity.submodules.iter().filter(|child| !child.changes.is_empty())
+        .map(|child| json!({"path":child.path,"status":" M"})));
+    let envelope = serde_json::to_vec(&json!({"version":1,
+        "status":if entries.is_empty() {"clean"} else {"not_clean"},
+        "root":engram_exact_path_key(&root),"source":format!("git-commit:{}",identity.commit),
+        "tree":identity.tree,"entries":entries,"refusal":null,"source_id":identity})).unwrap();
+    let mut inner = state.inner.lock().unwrap();
+    let project = engram_project_for_session_locked(&inner, parent).unwrap().id.clone();
+    inner.projects.iter_mut().find(|row| row.id == project).unwrap()
+        .engram.as_mut().unwrap().binary_path = Some(binary.to_string_lossy().into_owned());
+    inner.test_native_source_owner_metadata = Some(Arc::new(|state, session, deadline|
+        state.source_owner_metadata_snapshot_with(session, deadline,
+            |_, _, args, _, _| Ok(source_owner_reply(args)))));
+    let expected_root = fs::canonicalize(root).unwrap();
+    inner.test_acceptance_source_owner_capture = Some(Arc::new(move |_, cwd, args, _, _| {
+        assert_eq!(fs::canonicalize(cwd).unwrap(), expected_root,
+            "capture uses the named root, not the initiating project's root");
+        assert_eq!(args[0], "source");
+        Ok(source_owner_output(0, envelope.clone()))
+    }));
+}
+
+fn acceptance_owner_reports_dirty(state: &AppState, parent: &str, named_root: &str, path: &str) {
+    acceptance_owner_reports(state, parent, named_root, vec![EngramSourceIdChange {
+        path:path.into(), status:" M".into(), origin:None,
+        blob:Some("d".repeat(40)), mode:Some(EngramSourceIdMode::Regular),
+    }], Vec::new());
 }
 
 /// Commits the fixture's untracked file in the named root, which leaves it
@@ -127,6 +177,9 @@ fn try_register_committed_run_as(
     run_id: &str,
     results: Value,
 ) -> Result<TestRunRegistration, ApiError> {
+    if state.inner.lock().unwrap().test_acceptance_source_owner_capture.is_none() {
+        acceptance_owner_reports(state, parent, named_root, Vec::new(), Vec::new());
+    }
     let root = worktree(named_root);
     let common = test_runs_git_common_dir(&root)
         .and_then(|common| fs::canonicalize(common).ok())
@@ -443,6 +496,7 @@ fn an_acknowledged_committed_run_at_head_is_admitted_without_a_sighting_read() {
         // A root no longer clean at that commit is the changed worktree.
         fs::write(worktree(&named_root).join("judged.txt"), "changed after the request\n")
             .unwrap();
+        acceptance_owner_reports_dirty(&state, &parent, &named_root, "judged.txt");
         let error = state
             .acceptance_evaluation_declared_target(&record.child_session_id, &target)
             .expect_err("a root no longer clean at the admitted commit is refused");
@@ -484,10 +538,20 @@ fn a_pinned_child_uses_the_existing_record_and_acceptance_but_child_dirt_refuses
         AcceptanceCommittedInputAdmission { run_id: COMMITTED_RUN_ID.to_owned(), commit: head },
     )));
     fs::write(root.join("dep/child.txt"), "dirty child\n").unwrap();
+    let child_change = EngramSourceIdChange { path:"child.txt".into(), status:" M".into(),
+        origin:None, blob:Some("d".repeat(40)), mode:Some(EngramSourceIdMode::Regular) };
+    acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), vec![EngramSourceIdSubmodule {
+        path:"dep".into(), commit:run_git_test_command_output(&root.join("dep"), &["rev-parse", "HEAD"]),
+        changes:vec![child_change.clone()],
+    }]);
     assert_eq!(assert_refused_without_a_sighting(&transport, decide(&state, &parent),
         "committed_input_not_clean", "tracked child edit"), AcceptanceCommittedInputRefusal::NotClean);
     run_git_test_command(&root.join("dep"), &["checkout", "--", "child.txt"]);
     fs::write(root.join("dep/new.txt"), "child debris\n").unwrap();
+    acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), vec![EngramSourceIdSubmodule {
+        path:"dep".into(), commit:run_git_test_command_output(&root.join("dep"), &["rev-parse", "HEAD"]),
+        changes:vec![EngramSourceIdChange {path:"new.txt".into(),status:"??".into(),..child_change}],
+    }]);
     assert_eq!(assert_refused_without_a_sighting(&transport, decide(&state, &parent),
         "committed_input_not_clean", "untracked child edit"), AcceptanceCommittedInputRefusal::NotClean);
 }
@@ -747,6 +811,7 @@ fn a_dirty_root_is_refused_without_a_sighting() {
         );
         host_observed(&state, &registration, &head, acknowledged("settled"));
         fs::write(worktree(&named_root).join(dirty), "changed after the run\n").unwrap();
+        acceptance_owner_reports_dirty(&state, &parent, &named_root, dirty);
 
         let refusal = assert_refused_without_a_sighting(
             &transport,
@@ -859,6 +924,7 @@ fn an_acknowledged_record_rewritten_with_its_results_to_another_commit_is_not_ad
     let root = worktree(&named_root);
     run_git_test_command(&root, &["commit", "--allow-empty", "--quiet", "-m", "untested"]);
     let untested = run_git_test_command_output(&root, &["rev-parse", "HEAD"]);
+    acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
     fs::write(
         PathBuf::from(&registration.run_directory).join("results.json"),
         committed_results("passed", input_record(&untested, "clean")).to_string(),
@@ -1084,12 +1150,17 @@ fn a_root_that_moves_while_the_run_is_read_is_refused_as_changed() {
         // read, the root moves on or is written to.
         let root = worktree(&named_root);
         let dirty = case == "a dirty worktree";
+        let owner_state = state.clone();
+        let owner_parent = parent.clone();
+        let owner_root = named_root.clone();
         TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_RECHECK.with(|slot| {
             *slot.borrow_mut() = Some(Box::new(move || {
                 if dirty {
                     fs::write(root.join("judged.txt"), "changed during the check\n").unwrap();
+                    acceptance_owner_reports_dirty(&owner_state, &owner_parent, &owner_root, "judged.txt");
                 } else {
                     run_git_test_command(&root, &["commit", "--allow-empty", "--quiet", "-m", "moved on"]);
+                    acceptance_owner_reports(&owner_state, &owner_parent, &owner_root, Vec::new(), Vec::new());
                 }
             }));
         });
@@ -1473,6 +1544,7 @@ await withHostedRegistrationFixture(root,env,async hosted=>{
             assert!(inner.test_runs.registered.contains(run_id));
             assert_eq!(registration.work_binding.as_ref().unwrap().work_id, SIGHTED_WORK_ID);
         }
+        acceptance_owner_reports_dirty(&state, &parent, &named_root, "judged.txt");
         assert_eq!(
             assert_refused_without_a_sighting(
                 &transport,

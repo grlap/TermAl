@@ -8,6 +8,7 @@ impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> FederationC
 type FederationControlIo = Box<dyn FederationControlStream>;
 
 trait FederationSshChild: Send {
+    fn prepare_control(&mut self) -> Result<(), ApiError> { Ok(()) }
     #[cfg_attr(not(test), allow(dead_code))]
     fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
         Err(ApiError::from_status(
@@ -17,10 +18,11 @@ trait FederationSshChild: Send {
     }
     fn child_exited(&mut self) -> Result<bool, ApiError>;
     fn diagnostics(&self) -> Option<FederationSshDiagnostics> { None }
-    fn shutdown(self: Box<Self>) -> Result<(), ApiError>;
+    fn shutdown(&mut self) -> Result<(), ApiError>;
 }
 
 impl FederationSshChild for FederationSshProcess {
+    fn prepare_control(&mut self) -> Result<(), ApiError> { self.attach_stdio(); Ok(()) }
     fn diagnostics(&self) -> Option<FederationSshDiagnostics> { Some(self.diagnostic.clone()) }
     fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
         FederationSshProcess::take_control_stream(self)
@@ -29,8 +31,8 @@ impl FederationSshChild for FederationSshProcess {
         FederationSshProcess::child_exited(self)
     }
 
-    fn shutdown(self: Box<Self>) -> Result<(), ApiError> {
-        FederationSshProcess::shutdown(*self)
+    fn shutdown(&mut self) -> Result<(), ApiError> {
+        self.reap()
     }
 }
 
@@ -40,7 +42,7 @@ type FederationCredentialReader = Arc<
         + Sync,
 >;
 type FederationSshStarter = Arc<
-    dyn Fn(&FederationPeerSnapshot, u16, &FsPath) -> Result<Box<dyn FederationSshChild>, ApiError>
+    dyn Fn(&FederationPeerSnapshot, u16, &FsPath, &mut Option<Box<dyn FederationSshChild>>) -> Result<(), ApiError>
         + Send
         + Sync,
 >;
@@ -83,9 +85,8 @@ impl Default for FederationRuntimeIo {
             #[cfg(test)]
             forward_listener: None,
             credentials: Arc::new(resolve_federation_credentials),
-            ssh: Arc::new(|snapshot, port, known_hosts| {
-                start_federation_ssh(snapshot, port, known_hosts)
-                    .map(|child| Box::new(child) as Box<dyn FederationSshChild>)
+            ssh: Arc::new(|snapshot, port, known_hosts, owned| {
+                start_federation_ssh(snapshot, port, known_hosts, owned)
             }),
             reconcile_interval: Duration::from_secs(15),
             probe_interval: Duration::from_secs(15),
@@ -120,7 +121,7 @@ impl Default for FederationRuntimeIo {
 struct FederationAttemptState {
     material: Option<[u8; 32]>,
     material_changed: bool,
-    unresolved: Arc<AtomicBool>,
+    os: Arc<FederationOsAccount>,
     reporter: Option<FederationWorkerReporter>,
 }
 
@@ -137,47 +138,5 @@ impl FederationAttemptState {
             }
             Some(_) => Ok(()),
         }
-    }
-}
-
-// A dedicated owned thread prevents an uninterruptible OS keyring/reap call
-// from keeping Tokio's blocking pool (and therefore host shutdown) alive.
-// Timeout/cancellation fences the peer until this runtime ends; no replacement
-// child may start while the previous operation's outcome is unresolved.
-async fn federation_os_operation<T: Send + 'static>(
-    operation: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
-    stop: Option<&mut tokio::sync::watch::Receiver<bool>>,
-    unresolved: Arc<AtomicBool>,
-    timeout: Duration,
-) -> Result<T, ApiError> {
-    let (send, receive) = tokio::sync::oneshot::channel();
-    std::thread::Builder::new()
-        .name("federation-io".to_owned())
-        .spawn(move || {
-            // A late returned child stays owned: send failure drops its RAII
-            // process guard here, where it still performs its exact cleanup.
-            let _ = send.send(operation());
-        })
-        .map_err(|_| federation_transport_unavailable())?;
-    let stopped = async {
-        if let Some(stop) = stop {
-            federation_wait_stop(stop).await;
-        } else {
-            std::future::pending::<()>().await;
-        }
-    };
-    tokio::select! {
-        result = receive => result.map_err(|_| {
-            unresolved.store(true, Ordering::SeqCst);
-            federation_transport_unavailable()
-        })?,
-        _ = stopped => {
-            unresolved.store(true, Ordering::SeqCst);
-            Err(federation_transport_unavailable())
-        },
-        _ = tokio::time::sleep(timeout) => {
-            unresolved.store(true, Ordering::SeqCst);
-            Err(federation_transport_unavailable())
-        },
     }
 }

@@ -848,7 +848,7 @@ impl Mode {
                 args.len() == 2 && tail_requests_help()
             }
             // These parsers distinguish options from consumed data values.
-            Some("sessions" | "mailbox" | "delegation-mcp") | None => false,
+            Some("sessions" | "mailbox" | "federation" | "delegation-mcp") | None => false,
             Some("server" | "repl" | "cli" | "--agent" | "telegram" | "telegram-bot") => {
                 tail_requests_help()
             }
@@ -861,7 +861,7 @@ impl Mode {
             None | Some("server") => Ok(Self::Server),
             Some("review-freeze-check") => Ok(Self::ReviewFreeze(args)),
             Some("review-identity") => Ok(Self::ReviewIdentity(args)),
-            Some("sessions") | Some("mailbox") => {
+            Some("sessions") | Some("mailbox") | Some("federation") => {
                 Ok(Self::CoordinationCli(parse_coordination_cli_args(args)?))
             }
             // Legacy standalone Telegram aliases are intentionally rejected:
@@ -1000,6 +1000,7 @@ include!("federation_credentials.rs");
 include!("federation_ssh_diagnostics.rs");
 include!("federation_process.rs");
 include!("federation_runtime_io.rs");
+include!("federation_ssh_settlement.rs");
 include!("federation_credential_read.rs");
 include!("federation_control_clock.rs");
 include!("federation_recovery.rs");

@@ -94,8 +94,11 @@ home store; the exact handle or the normal metadata wake supplies that location.
 A remote page read returns 503 `mailbox page unavailable` when its configured
 home connection is missing or changes, or the transport returns no usable
 answer. The read does not reconnect the peer; retry after the connection
-recovers. When the mailbox's home is this host, missing association metadata
-returns 409 and names that local cause: retrying the read alone cannot restore it. Recovery accepts
+recovers. When the mailbox's home is this host and its exact locator is not
+recognized for the caller, the read returns 404 with
+`unknown_native_mailbox_locator`. This does not establish that a mailbox was
+deleted or that association metadata was lost. Copy `mailboxId` exactly from
+the list or original host wake; do not reconstruct or retype it. Recovery accepts
 only the configured central home and current native membership. A busy local
 association writer retains its separate storage error and safe-replay advice;
 it does not imply that the home or connection is unavailable.

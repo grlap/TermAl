@@ -563,6 +563,8 @@ impl PersistedState {
             test_declared_run_source: None,
             #[cfg(test)]
             test_native_source_owner_metadata: None,
+            #[cfg(test)]
+            test_acceptance_source_owner_capture: None,
             engram_source_root_validations_live: Arc::default(),
             // An epoch loaded from disk is already durable.
             test_runs: TestRunIndex {

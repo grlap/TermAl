@@ -210,7 +210,7 @@ async fn federation_m4_round_four_receiver_recovery_is_joined_and_stops_between_
 pub(super) fn no_external_runtime(app: &AppState) -> FederationRuntime {
     let mut io = FederationRuntimeIo::default();
     io.credentials = Arc::new(|_| Err(ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE, "fixture has no external credentials")));
-    io.ssh = Arc::new(|_, _, _| panic!("no SSH in lifecycle fixture"));
+    io.ssh = Arc::new(|_, _, _, _| panic!("no SSH in lifecycle fixture"));
     start_federation_runtime_with_io(app.clone(), io)
 }
 

@@ -133,7 +133,7 @@ async fn stale_read_blocks_successor_across_reenrollment_and_disable_enable() {
         });
         let starts = Arc::new(AtomicUsize::new(0));
         let ssh_starts = starts.clone();
-        fixture.io.ssh = Arc::new(move |_, _, _| {
+        fixture.io.ssh = Arc::new(move |_, _, _, _owned| {
             ssh_starts.fetch_add(1, Ordering::SeqCst);
             Err(federation_transport_unavailable())
         });
@@ -569,9 +569,9 @@ async fn pending_material_change_preserves_the_installed_material_fence() {
     let starts = Arc::new(AtomicUsize::new(0));
     let ssh_starts = starts.clone();
     let start = fixture.io.ssh.clone();
-    fixture.io.ssh = Arc::new(move |snapshot, port, pin| {
+    fixture.io.ssh = Arc::new(move |snapshot, port, pin, owned| {
         ssh_starts.fetch_add(1, Ordering::SeqCst);
-        start(snapshot, port, pin)
+        start(snapshot, port, pin, owned)
     });
     let mut pending = pending_events(&mut fixture.io);
     let runtime = start_federation_runtime_with_io(fixture.app.clone(), fixture.io.clone());
@@ -662,6 +662,7 @@ async fn guard_acquired_after_removal_cut_survives_worker_join_and_shutdown() {
     });
     let mut worker = FederationWorker {
         basis: basis.clone(),
+        os: Arc::new(FederationOsAccount::default()),
         stop,
         task,
         joined: false,

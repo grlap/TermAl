@@ -28,7 +28,7 @@ async fn untrusted_forward(relay: bool) {
     let began_server = began.clone();
     let handle = tokio::runtime::Handle::current();
     let reserved = fixture.io.forward_listener.clone().unwrap();
-    fixture.io.ssh = Arc::new(move |_, port, _| {
+    fixture.io.ssh = Arc::new(move |_, port, _, owned| {
         // This endpoint is an unrelated local listener, even when it relays
         // valid responses from the genuine satellite. Child liveness alone
         // therefore cannot establish ownership of this TCP connection.
@@ -89,13 +89,15 @@ async fn untrusted_forward(relay: bool) {
         });
         began_server.store(true, Ordering::SeqCst);
         let (events, _) = tokio::sync::mpsc::unbounded_channel();
-        Ok(Box::new(FakeSsh {
+        *owned = Some(Box::new(FakeSsh {
             control: None,
             stop,
             exited,
             events,
             cleanup_unknown: Arc::new(AtomicBool::new(false)),
-        }))
+            reaped: false,
+        }));
+        Ok(())
     });
     let runtime = start_federation_runtime_with_io(fixture.app.clone(), fixture.io.clone());
     let observed = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, observation_rx)

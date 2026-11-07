@@ -213,7 +213,7 @@ impl FederationSshChild for DiagnosticSsh {
     fn diagnostics(&self) -> Option<FederationSshDiagnostics> {
         Some(self.diagnostic.clone())
     }
-    fn shutdown(self: Box<Self>) -> Result<(), ApiError> {
+    fn shutdown(&mut self) -> Result<(), ApiError> {
         self.child.shutdown()
     }
 }
@@ -224,11 +224,13 @@ async fn federation_worker_monitor_attaches_owned_ssh_diagnostics_to_registry_vi
     let diagnostic = Arc::new(Mutex::new(FederationSshDiagnostic::default()));
     let attached = diagnostic.clone();
     let start = fixture.io.ssh.clone();
-    fixture.io.ssh = Arc::new(move |snapshot, port, pin| {
-        Ok(Box::new(DiagnosticSsh {
-            child: start(snapshot, port, pin)?,
+    fixture.io.ssh = Arc::new(move |snapshot, port, pin, owned| {
+        start(snapshot, port, pin, owned)?;
+        *owned = Some(Box::new(DiagnosticSsh {
+            child: owned.take().unwrap(),
             diagnostic: attached.clone(),
-        }))
+        }));
+        Ok(())
     });
     let runtime = start_federation_runtime_with_io(fixture.app.clone(), fixture.io.clone());
     let healthy = fixture

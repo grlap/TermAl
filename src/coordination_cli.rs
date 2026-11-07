@@ -17,6 +17,7 @@
  */
 
 const COORDINATION_CLI_USAGE: &str = "usage:
+  termal federation status [--as-session <id>] [--json] [--base-url <url>]
   termal sessions list [--as-session <id>] [--json] [--base-url <url>]
   termal mailbox list [--as-session <id>] [--json] [--base-url <url>]
   termal mailbox send [--as-session <id>] --to <session-id-or-name>
@@ -134,6 +135,7 @@ enum CoordinationCliMessageSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum CoordinationCliCommand {
     Help,
+    FederationStatus { as_session: String },
     SessionsList {
         as_session: Option<String>,
     },
@@ -393,6 +395,9 @@ fn parse_coordination_cli_args_with_default_session_id(
 
     let command_label = format!("{group} {verb}");
     let command = match (group.as_str(), verb.as_str()) {
+        ("federation", "status") => CoordinationCliCommand::FederationStatus {
+            as_session: take_coordination_cli_session_id(&mut flags, default_session_id.as_deref())?,
+        },
         ("sessions", "list") => CoordinationCliCommand::SessionsList {
             as_session: take_optional_coordination_cli_session_id(
                 &mut flags,
@@ -487,7 +492,7 @@ fn parse_coordination_cli_args_with_default_session_id(
             expected_processed_through: flags.take_required_u64("--expected")?,
             processed_through: flags.take_required_u64("--through")?,
         },
-        ("sessions", "") | ("mailbox", "") => {
+        ("sessions", "") | ("mailbox", "") | ("federation", "") => {
             return Err(coordination_cli_usage_error(format!(
                 "`termal {group}` needs a subcommand"
             )));
@@ -617,6 +622,14 @@ fn validate_coordination_cli_output(
     let unusable = |detail: String| anyhow!("the server returned an unusable response: {detail}");
     match command {
         CoordinationCliCommand::Help => Ok(()),
+        CoordinationCliCommand::FederationStatus { .. } => {
+            if output.get("federation").and_then(Value::as_object).is_none()
+                || output.get("hostUtilization").is_none()
+                || !matches!(output.get("hostUtilizationStatus"), Some(Value::Null | Value::Number(_))) {
+                bail!("unusable federation status response");
+            }
+            Ok(())
+        }
         CoordinationCliCommand::SessionsList { .. } => {
             let sessions = output
                 .get("sessions")
@@ -748,6 +761,9 @@ fn coordination_cli_error_is_broken_pipe(err: &anyhow::Error) -> bool {
 fn execute_coordination_cli(command: &CoordinationCliCommand, base_url: &str) -> Result<Value> {
     match command {
         CoordinationCliCommand::Help => Ok(json!({ "usage": coordination_cli_usage() })),
+        CoordinationCliCommand::FederationStatus { as_session } => {
+            coordination_cli_authorized_bridge(as_session, base_url)?.tool_federation_status(json!({}))
+        }
         CoordinationCliCommand::SessionsList { as_session } => {
             let caller = as_session
                 .as_deref()
@@ -999,6 +1015,9 @@ fn render_coordination_cli_output(
 ) -> Result<()> {
     match command {
         CoordinationCliCommand::Help => writeln!(out, "{}", coordination_cli_usage())?,
+        CoordinationCliCommand::FederationStatus { .. } => {
+            writeln!(out, "{}", serde_json::to_string_pretty(output)?)?;
+        }
         CoordinationCliCommand::SessionsList { .. } => {
             let sessions = output
                 .get("sessions")

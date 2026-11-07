@@ -120,7 +120,7 @@ impl FederationSshChild for TestChild {
     fn child_exited(&mut self) -> Result<bool, ApiError> {
         Ok(false)
     }
-    fn shutdown(self: Box<Self>) -> Result<(), ApiError> {
+    fn shutdown(&mut self) -> Result<(), ApiError> {
         self.stop.send_replace(true);
         self.exited
             .recv_timeout(phase_sync::DEADLOCK_GUARD)

@@ -579,10 +579,10 @@ impl AppState {
         &self, actor: &MailboxRelayPrincipal, locator: &MailboxRelayLocator,
     ) -> Result<MailboxRelayConversation, ApiError> {
         if locator.home.host == actor.host {
-            return Err(ApiError::conflict(
-                "native mailbox has no saved association for this caller and mailbox \
-                 (home=local); local association metadata is not repaired by this read; \
-                 retry alone will not restore it",
+            return Err(ApiError::not_found(
+                "unknown_native_mailbox_locator: native mailbox locator is not recognized \
+                 at this local home for this caller; copy mailboxId exactly from \
+                 termal_list_mailboxes or the original host wake; do not reconstruct or retype it",
             ));
         }
         // A locator alone grants no new topology or membership. Distinguish an

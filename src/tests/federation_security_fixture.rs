@@ -49,7 +49,7 @@ impl Satellite {
                     material_fingerprint: [1; 32],
                 })
             }),
-            ssh: Arc::new(|_, _, _| panic!("a satellite never launches SSH")),
+            ssh: Arc::new(|_, _, _, _| panic!("a satellite never launches SSH")),
             reconcile_interval: Duration::from_millis(20),
             // Reverse RPC probing is not the heartbeat under test. Leave it
             // outside the control deadline, so a failed reverse TCP probe

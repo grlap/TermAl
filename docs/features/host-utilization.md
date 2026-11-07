@@ -1,5 +1,8 @@
 # Host utilization over federation
 
+The read-only [agent federation status facade](agent-federation-status.md)
+exposes a path-free subset of this roster through MCP and the CLI.
+
 Central can read whole-host CPU, memory, configured-volume capacity and network
 counters without an SSH command. These are observations: they grant no test,
 executor, placement or process-control authority. Collection never starts,

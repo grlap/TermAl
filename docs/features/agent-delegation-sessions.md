@@ -1292,6 +1292,7 @@ termal_submit_review_result
 termal_submit_acceptance_evaluation
 termal_send_to_session
 termal_list_sessions
+termal_federation_status
 termal_list_mailboxes
 termal_read_mailbox
 termal_read_mailbox_message
@@ -1299,6 +1300,9 @@ termal_acknowledge_mailbox
 ```
 
 The MCP tools map to the existing command/API semantics:
+
+For the read-only federation and resource projection, see
+[agent federation status](agent-federation-status.md).
 
 ```text
 termal_spawn_session(request) -> SpawnDelegationCommandResult
@@ -1316,6 +1320,7 @@ termal_evaluate_acceptance({ workRef, agent?, model?, criterionEvidence?: [{ cri
 termal_submit_acceptance_evaluation({ schemaVersion, verdicts: [{ criterion, verdict, basis?, rationale, evidence? }] }) -> { schemaVersion, delegationId, workRef, mode, attemptKey, recordedAt, receipt, receiptTruncated? }
 termal_send_to_session({ sessionId, message, idempotencyKey, topic?, stateStamp?, class? }) -> { sessionId, resolvedFrom, mailboxId, messageId, sequence, unreadDepth, notificationDisposition, duplicate }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
+termal_federation_status() -> { federation, hostUtilization, hostUtilizationStatus, hostUtilizationReason }
 termal_list_mailboxes() -> { mailboxes: [{ id, participants, latestSequence, unreadCount, latestMessagePreview, latestMessageAt }] }
 termal_read_mailbox({ mailboxId, afterSequence?, limit? }) -> { mailboxId, messages, afterSequence, processedThrough, receipt, hasMore, nextAfterSequence }
 termal_read_mailbox_message({ messageId }) -> MailboxMessage

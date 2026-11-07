@@ -442,7 +442,7 @@ fn retired_while_named(label: &str, reason: &str, message: &str)
 #[test]
 fn removing_the_naming_session_after_a_retirement_does_not_reopen_its_journal() {
     let (claimed, store, original) =
-        retired_while_named("retire-then-remove", "run_unknown", "the run is unknown in this store");
+        retired_while_named("rrm", "run_unknown", "the run is unknown in this store");
     let mut inner = claimed.state.inner.lock().unwrap();
     let index = inner.find_session_index(&claimed.session_id).unwrap();
     inner.remove_session_at(index);
@@ -456,7 +456,7 @@ fn removing_the_naming_session_after_a_retirement_does_not_reopen_its_journal() 
 #[test]
 fn a_reopened_journal_of_a_retired_run_is_settled_by_the_next_recovery_pass() {
     for live_reporter in [false, true] {
-        let label = format!("retired-journal-reopened-{live_reporter}");
+        let label = format!("rrj-{live_reporter}");
         let (claimed, store, original) = retired_while_named(
             &label, "claim_not_current_for_run", "the claim does not belong to the run");
         {
@@ -493,12 +493,11 @@ fn a_reopened_journal_of_a_retired_run_is_settled_by_the_next_recovery_pass() {
 
 #[test]
 fn a_retired_runs_root_is_disposed_of_and_never_planned_for_a_read() {
-    for (reason, message, wording) in [
-        ("run_unknown", "the run is unknown in this store", "definitively refused its run"),
-        ("claim_not_current_for_run", "the claim does not belong to the run", "no longer counts its claim"),
+    for (label, reason, message, wording) in [
+        ("rrd-u", "run_unknown", "the run is unknown in this store", "definitively refused its run"),
+        ("rrd-c", "claim_not_current_for_run", "the claim does not belong to the run", "no longer counts its claim"),
     ] {
-        let label = format!("retired-root-disposition-{reason}");
-        let (claimed, store, original) = retired_while_named(&label, reason, message);
+        let (claimed, store, original) = retired_while_named(label, reason, message);
         // The fixture's clock reads the state, so it is read before the guard.
         let now = claimed.state.engram_budget_clock().now();
         let root = {

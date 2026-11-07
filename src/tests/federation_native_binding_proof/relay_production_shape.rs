@@ -708,7 +708,7 @@ async fn mailbox_relay_recovery_rejects_a_different_home_identity_without_metada
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mailbox_relay_missing_association_local_home_names_the_missing_metadata() {
+async fn mailbox_relay_unknown_local_locator_names_the_exact_handle_source() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::production_shape().await;
     let caller = test_session_id(&fixture.central, Agent::Codex);
@@ -724,14 +724,68 @@ async fn mailbox_relay_missing_association_local_home_names_the_missing_metadata
 
     assert!(missing && no_handle, "the local home has no saved association or peer handle");
     let error = result.err().expect("an unowned mailbox locator cannot create membership");
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("no saved association"), "{}", error.message);
-    assert!(error.message.contains("home=local"), "{}", error.message);
-    assert!(!error.message.contains("peer_handle"), "local metadata loss is not a remote connection failure");
-    assert!(error.message.contains("not repaired by this read"), "{}", error.message);
-    assert!(error.message.contains("retry alone will not restore it"), "{}", error.message);
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert!(error.message.starts_with("unknown_native_mailbox_locator:"), "{}", error.message);
+    assert!(error.message.contains("this local home for this caller"), "{}", error.message);
+    assert!(error.message.contains("copy mailboxId exactly"), "{}", error.message);
+    assert!(error.message.contains("termal_list_mailboxes or the original host wake"), "{}", error.message);
+    assert!(error.message.contains("do not reconstruct or retype"), "{}", error.message);
+    assert!(!error.message.contains("association metadata"), "an unknown id does not establish metadata loss");
     assert!(!error.message.contains(&actor.participant_key()), "no extra actor identity");
     assert!(!error.message.contains(&home.store_id), "no extra store identity");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_relay_corrupted_local_locator_does_not_change_the_original_mailbox() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "corrupted-local-locator").await;
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    let actor = fixture.central.native_mailbox_relay_descriptor(&proxy.caller).unwrap().principal;
+    let unread = read_relay_page(&fixture.central, &proxy.caller, &sent.mailbox_id).await;
+    // The caught-up sender has already processed its own append. Inspect history
+    // explicitly so this control checks message retention rather than unread mail.
+    let read_original = || read_mailbox(
+        AxumPath((proxy.caller.clone(), sent.mailbox_id.clone())),
+        State(fixture.central.clone()),
+        Json(ReadMailboxRequest {
+            after_sequence: Some(0), limit: 20, issue_receipt: false, read_key: None,
+        }),
+    );
+    let before = read_original().await.map(|page| page.0);
+    let original_tail = locator.id.chars().last().unwrap();
+    let mut refused = Vec::new();
+    for tail in ['0', '1', '2'].into_iter().filter(|tail| *tail != original_tail).take(2) {
+        let mut corrupted = locator.clone();
+        corrupted.id.pop();
+        corrupted.id.push(tail);
+        let encoded = MailboxRelayLocator::encode(&corrupted.home, &corrupted.id, false).unwrap();
+        let result = read_relay_page(&fixture.central, &proxy.caller, &encoded).await;
+        let association = fixture.central.mailbox_store.mailbox_relay_association(&actor, &corrupted.id).unwrap();
+        refused.push((result, association));
+    }
+    let after = read_original().await.map(|page| page.0);
+    proxy.finish().await;
+    fixture.finish().await;
+
+    assert!(sent.sender_cursor_advanced);
+    assert_eq!(sent.sender_processed_through, sent.sequence);
+    let unread = unread.unwrap();
+    assert_eq!(unread.processed_through, sent.sequence);
+    assert!(!unread.messages.iter().any(|message| message.id == sent.message_id));
+    assert!(before.unwrap().messages.iter().any(|message| message.id == sent.message_id));
+    assert_eq!(refused.len(), 2);
+    for (result, association) in refused {
+        let error = result.err().expect("a corrupted locator must not select the original mailbox");
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+        assert!(error.message.starts_with("unknown_native_mailbox_locator:"), "{}", error.message);
+        assert!(association.is_none(), "a rejected locator must not create an association");
+        let error: anyhow::Error = TermalDelegationApiError { status: error.status, message: error.message }.into();
+        assert!(!termal_delegation_outcome_is_unknown(&error));
+        assert!(!error_is_safe_replay_service_unavailable(&error));
+    }
+    assert!(after.unwrap().messages.iter().any(|message| message.id == sent.message_id));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

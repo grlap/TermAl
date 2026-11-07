@@ -1875,6 +1875,8 @@ struct StateInner {
     test_declared_run_source: Option<Arc<dyn Fn(&EngramDeclaredBinding, &EngramSourceOwnerPin, std::time::Instant) -> Result<DeclaredRunSource> + Send + Sync>>,
     #[cfg(test)]
     test_native_source_owner_metadata: Option<Arc<dyn Fn(&AppState, &str, std::time::Instant) -> std::result::Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError> + Send + Sync>>,
+    #[cfg(test)]
+    test_acceptance_source_owner_capture: Option<Arc<dyn Fn(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output> + Send + Sync>>,
     /// Threads checking a path named as a work's source root that are still
     /// alive, abandoned ones included (`engram_run_source_root_validation_within`).
     /// Memory only, one count for the host.
@@ -2005,6 +2007,8 @@ impl StateInner {
             test_declared_run_source: None,
             #[cfg(test)]
             test_native_source_owner_metadata: None,
+            #[cfg(test)]
+            test_acceptance_source_owner_capture: None,
             engram_source_root_validations_live: Arc::default(),
             test_runs: TestRunIndex::default(),
             test_run_registrations: TestRunRegistrationStore::default(),

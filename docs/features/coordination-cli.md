@@ -18,8 +18,12 @@ not re-implementations. The CLI never opens `termal.sqlite` or
 
 ## Commands
 
+For read-only federation state and CPU/memory/disk observations, see the
+[agent federation status facade](agent-federation-status.md).
+
 ```
 termal sessions list [--as-session <id>] [--json] [--base-url <url>]
+termal federation status [--as-session <id>] [--json] [--base-url <url>]
 termal mailbox list [--as-session <id>] [--json] [--base-url <url>]
 termal mailbox send [--as-session <id>] --to <session-id-or-name>
                     (--message <text> | --message-file <path or ->)
