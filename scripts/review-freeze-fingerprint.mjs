@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { spawn } from "node:child_process";
 import { devNull } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const fingerprintComponentNames = Object.freeze([
@@ -325,121 +325,6 @@ export async function captureFingerprint(requestedRoot = process.cwd(), sourceEn
   };
   const fingerprint = compositeFingerprint(fields);
   return { ...fields, fingerprint };
-}
-
-// Commit admission uses recursive submodule status, root/child filter config,
-// one root porcelain dirt check and a root HEAD reread. No full file or index
-// listing is derived. Clean nested pinned children are supported. Git status
-// can miss edits to assume-unchanged/skip-worktree files; that is a documented
-// limitation. Empty skipped/gitlinks fields retain the existing record shape.
-// Child filters are checked before root status or execution-boundary fingerprints.
-export async function captureCommitInputStatus(requestedRoot = process.cwd(), sourceEnv = process.env) {
-  const env = isolatedGitEnvironment(sourceEnv);
-  const git = commitInputGitArgs;
-  const root = (await captureGit(git(["rev-parse", "--show-toplevel"]), requestedRoot, env))
-    .toString("utf8")
-    .trim();
-  const head = async () => (
-    await captureGit(git(["rev-parse", "--verify", "HEAD^{commit}"]), root, env)
-  )
-    .toString("utf8")
-    .trim();
-  const filters = (await captureGit(
-    git(["config", "--null", "--get-regexp", "^filter\\..*\\.(clean|smudge|process)$"]),
-    root,
-    env,
-    true,
-  ))
-    .toString("utf8")
-    .split("\0")
-    .filter((entry) => entry.length > 0)
-    .map((entry) => entry.split("\n", 1)[0]);
-  const commit = await head();
-  if (!/^[0-9a-f]{40}$/u.test(commit)) throw new Error("HEAD is not a full SHA-1 commit id (unsupported object format)");
-  if (realpathSync.native(root) !== realpathSync.native(requestedRoot)) throw new Error("committed-input cwd must be the worktree root");
-  if (filters.length) {
-    return { root, commit, entries: [], skipped: [], filters, gitlinks: [] };
-  }
-  const skipped = [];
-  {
-    let pins;
-    try {
-      pins = (await captureGit(git(["submodule", "status", "--recursive"]), root, env)).toString("utf8");
-    } catch (error) {
-      throw new Error(`submodule initialization/pin or .gitmodules mapping check failed: ${error.message}`, { cause: error });
-    }
-    const rows = pins.split("\n").filter(Boolean);
-    if (rows.some((row) => row[0] !== " ")) {
-      throw new Error("submodule is not initialized at its pin (git submodule status --recursive)");
-    }
-    const canonicalRoot = realpathSync.native(root);
-    for (const row of rows) {
-      if (!/^ [0-9a-f]{40} .+/u.test(row)) throw new Error("malformed git submodule status row");
-      // Git appends an optional ` (describe)` suffix after the path.
-      const tail = row.slice(42);
-      const suffix = tail.endsWith(")") ? tail.lastIndexOf(" (") : -1;
-      const path = suffix === -1 ? tail : tail.slice(0, suffix);
-      let child;
-      // Git's successful clean-prefix row supplies initialization and pin
-      // judgment. Keep filter-config paths within this root.
-      try {
-        child = realpathSync.native(join(root, path));
-      } catch {
-        throw new Error(`submodule ${path} is not initialized`);
-      }
-      const fromRoot = relative(canonicalRoot, child);
-      if (!fromRoot || isAbsolute(fromRoot) || fromRoot.split(/[\\/]/u).includes("..")) {
-        throw new Error(`submodule ${path} is outside its worktree root`);
-      }
-      const childFilters = (await captureGit(
-        git(["config", "--null", "--get-regexp", "^filter\\..*\\.(clean|smudge|process)$"]), child, env, true,
-      )).toString("utf8").split("\0").filter(Boolean).map((record) => record.split("\n", 1)[0]);
-      filters.push(...childFilters.map((key) => `${path}: ${key}`));
-    }
-    if (filters.length || skipped.length) return { root, commit, entries: [], skipped, filters, gitlinks: [] };
-  }
-  const records = await nulSeparatedGitValues(
-    // Command-line -u is not forwarded to recursive child status. A -c
-    // setting is inherited and overrides a child's status.showUntrackedFiles.
-    git(["-c", "status.showUntrackedFiles=all", "-c", "diff.ignoreSubmodules=none", "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none", "-z"]),
-    root,
-    env,
-  );
-  const entries = [];
-  for (let index = 0; index < records.length; index += 1) {
-    const record = records[index].toString("utf8");
-    if (record.length < 4 || record[2] !== " ") {
-      throw new Error("git status returned a malformed porcelain entry");
-    }
-    const entry = { status: record.slice(0, 2), path: record.slice(3) };
-    if (/[RC]/u.test(entry.status)) {
-      index += 1;
-      if (index >= records.length) {
-        throw new Error("git status returned a rename or copy without its origin path");
-      }
-      entry.origin = records[index].toString("utf8");
-    }
-    entries.push(entry);
-  }
-  if (await head() !== commit) {
-    throw new Error("HEAD moved while the committed-input status was captured");
-  }
-  return { root, commit, entries, skipped, filters, gitlinks: [] };
-}
-
-// The arguments of every committed-input Git call, as `ReviewFreezeGit::command`
-// in src/review_freeze.rs pins them: no fsmonitor hook or daemon is consulted
-// (it could report a changed path as unchanged), and both the excludes and the
-// attributes file at the null device (NUL on Windows, /dev/null elsewhere), so
-// neither XDG default changes what is clean.
-export function commitInputGitArgs(args) {
-  const nullDevice = process.platform === "win32" ? "NUL" : devNull;
-  return [
-    "-c", "core.fsmonitor=false",
-    "-c", `core.excludesFile=${nullDevice}`,
-    "-c", `core.attributesFile=${nullDevice}`,
-    ...args,
-  ];
 }
 
 export async function main() {

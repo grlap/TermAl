@@ -1,5 +1,6 @@
 // Owns the producer's complete source_id value and its closed wire admission.
 // Split from the source-command envelope adapter in engram_source_command.rs;
+// Also presents diagnostic differences without changing source equality.
 // Git measurement, executable trust and consumer policy remain their owners.
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -30,6 +31,72 @@ struct EngramSourceIdChange {
     blob: Option<String>,
     #[serde(deserialize_with = "engram_source_required_nullable")]
     mode: Option<EngramSourceIdMode>,
+}
+
+// Presentation of differences between two complete owner observations. This
+// never participates in identity equality or source admission.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+struct EngramSourceIdDifference {
+    path: String,
+    kind: String,
+    before: Value,
+    after: Value,
+}
+
+fn engram_source_id_differences(before: &EngramSourceId, after: &EngramSourceId) -> Vec<EngramSourceIdDifference> {
+    fn files(prefix: &str, before: &[EngramSourceIdChange], after: &[EngramSourceIdChange], out: &mut Vec<EngramSourceIdDifference>) {
+        let group = |entries: &[EngramSourceIdChange]| {
+            let mut grouped = BTreeMap::<String, Vec<EngramSourceIdChange>>::new();
+            for entry in entries { grouped.entry(entry.path.clone()).or_default().push(entry.clone()); }
+            grouped
+        };
+        let old_entries = group(before);
+        let new_entries = group(after);
+        let paths: std::collections::BTreeSet<_> = old_entries.keys().chain(new_entries.keys()).collect();
+        for path in paths {
+            let old = old_entries.get(path).map_or(&[][..], Vec::as_slice);
+            let new = new_entries.get(path).map_or(&[][..], Vec::as_slice);
+            if old == new { continue; }
+            out.push(EngramSourceIdDifference {
+                path: format!("{prefix}{path}"),
+                kind: if old.iter().chain(new).any(|entry| entry.status == "??") { "untracked_file" } else { "tracked_file" }.into(),
+                before: json!(old), after: json!(new),
+            });
+        }
+    }
+    let mut out = Vec::new();
+    for (kind, old, new) in [("root_commit", &before.commit, &after.commit), ("root_tree", &before.tree, &after.tree)] {
+        if old != new { out.push(EngramSourceIdDifference { path:".".into(),kind:kind.into(),before:json!(old),after:json!(new) }); }
+    }
+    files("", &before.changes, &after.changes, &mut out);
+    let old_children: BTreeMap<_, _> = before.submodules.iter().map(|child| (&child.path, child)).collect();
+    let new_children: BTreeMap<_, _> = after.submodules.iter().map(|child| (&child.path, child)).collect();
+    let paths: std::collections::BTreeSet<_> = old_children.keys().chain(new_children.keys()).copied().collect();
+    for path in paths {
+        let old = old_children.get(path).copied();
+        let new = new_children.get(path).copied();
+        if old.map(|child| &child.commit) != new.map(|child| &child.commit) {
+            out.push(EngramSourceIdDifference { path:path.clone(),kind:"submodule_head".into(),
+                before:json!(old.map(|child| &child.commit)),after:json!(new.map(|child| &child.commit)) });
+        }
+        files(&format!("{path}/"), old.map_or(&[], |child| child.changes.as_slice()),
+            new.map_or(&[], |child| child.changes.as_slice()), &mut out);
+    }
+    out
+}
+
+fn engram_source_id_change_detail(changes: &[EngramSourceIdDifference]) -> String {
+    let entries = changes.iter().map(|change| {
+        let kind = match change.kind.as_str() {
+            "untracked_file" => "changed non-ignored untracked file",
+            "tracked_file" => "edited tracked file",
+            "submodule_head" => "changed submodule HEAD",
+            "root_commit" => "changed root commit",
+            _ => "changed root tree",
+        };
+        format!("{kind} {:?}", change.path)
+    }).collect::<Vec<_>>().join("; ");
+    format!("source changed during the run: {entries}")
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

@@ -665,9 +665,10 @@ fn native_credit_compares_endpoints_independently_of_workspace_events() {
         fixture.wait();
         fs::write(&path, "changed\n").unwrap();
         if reported {
-            let event = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
-                .add_path(path.clone());
-            let changes = workspace_file_changes_from_notify_event(&event, &[]);
+            // Exercise the consumer with a normalized incoming event. The
+            // fixture itself may live under target, which the watch adapter
+            // deliberately excludes before producing such events.
+            let changes = workspace_file_changes_from_path(&path, WorkspaceFileChangeKind::Modified, &[]);
             assert!(!changes.is_empty());
             fixture.fixture.state.note_engram_workspace_file_changes(&changes);
         }
@@ -778,6 +779,113 @@ fn native_credit_compares_the_complete_child_object_without_requiring_a_clean_ch
             file_content_hash(&serde_json::to_vec_pretty(&changed_results).unwrap());
         assert!(engram_verification_record_body(&changed, &request, &changed_results).is_err(),
             "a changed child {field} cannot borrow the equal root commit");
+    }
+}
+
+#[test]
+fn native_source_change_reason_reaches_withheld_record_and_turn_notice() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for kind in ["tracked_file", "untracked_file", "untracked_removed", "untracked_staged", "submodule_head", "many", "equal"] {
+        let fixture = NativeFixture::new("native-source-change-reason", false);
+        let path = match kind { "submodule_head" => "child/nested", "many" => "entry-0000-é.txt", _ => "source.txt" };
+        if matches!(kind, "untracked_removed" | "untracked_staged") {
+            fs::write(fixture.fixture.root.join(path), "untracked before\n").unwrap();
+            fixture.record_change(path, "??");
+        }
+        if kind == "tracked_file" {
+            fs::write(fixture.fixture.root.join(path), "before\n").unwrap();
+            run_git_test_command(&fixture.fixture.root, &["add", "--", path]);
+            run_git_test_command(&fixture.fixture.root, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--quiet", "--no-gpg-sign", "-m", "tracked source fixture"]);
+            fixture.source_owner.refresh_commit();
+        }
+        if kind == "submodule_head" {
+            let mut source = fixture.source_owner.identity();
+            source.submodules.push(EngramSourceIdSubmodule { path:path.into(),commit:"1".repeat(40),changes:Vec::new() });
+            fixture.source_owner.replace(source);
+        }
+        fixture.held_revision(4);
+        fixture.prepare();
+        let mut recorder = fixture.recorder();
+        fixture.start(&mut recorder);
+        fixture.wait();
+        match kind {
+            "tracked_file" | "untracked_file" => {
+                fs::write(fixture.fixture.root.join(path), "after\n").unwrap();
+                fixture.record_change(path, if kind == "untracked_file" { "??" } else { " M" });
+            }
+            "submodule_head" => {
+                let mut source = fixture.source_owner.identity();
+                source.submodules[0].commit = "2".repeat(40);
+                fixture.source_owner.replace(source);
+            }
+            "untracked_removed" => {
+                fs::remove_file(fixture.fixture.root.join(path)).unwrap();
+                let mut source = fixture.source_owner.identity();
+                source.changes.clear();
+                fixture.source_owner.replace(source);
+            }
+            "untracked_staged" => fixture.record_change(path, "A "),
+            "many" => {
+                let mut source = fixture.source_owner.identity();
+                source.changes = (0..128).map(|index| EngramSourceIdChange {
+                    path:format!("entry-{index:04}-é.txt"),status:"??".into(),origin:None,
+                    blob:Some(source.commit.clone()),mode:Some(EngramSourceIdMode::Regular),
+                }).collect();
+                fixture.source_owner.replace(source);
+            }
+            _ => {}
+        }
+        fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+        let (_, registration, request, results) = fixture.finish(&mut recorder, 0);
+        let prepared = engram_verification_record_prepare(&registration);
+        if kind == "equal" {
+            assert!(matches!(prepared, EngramVerificationRecordPrepared::Ready(_)));
+            assert_eq!(engram_verification_record_body(&registration, &request, &results).unwrap().run.outcome,
+                EngramVerificationRecordRunOutcome::Passed);
+            let inner = fixture.fixture.state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
+            assert!(!record.engram.pending_source_root_line.as_deref().unwrap_or("").contains("source changed during the run"));
+            continue;
+        }
+        assert_eq!(results["state"], "passed", "the artifact verdict stays factual");
+        assert_eq!(results["nativeEligible"], false);
+        let EngramVerificationRecordPrepared::Pending(EngramVerificationRecordPending::SourceChanged { detail, changes }) = prepared
+            else { panic!("expected a specific source-change reason: {prepared:?}"); };
+        assert!(detail.contains("source changed during the run") && detail.contains(path));
+        let expected_kind = if kind.starts_with("untracked") || kind == "many" { "untracked_file" } else { kind };
+        assert!(changes.iter().any(|change| change.kind == expected_kind && change.path == path && change.before != change.after));
+        let progress = engram_verification_record_progress(FsPath::new(&registration.run_directory)).unwrap();
+        let progress = serde_json::to_value(progress).unwrap();
+        assert_eq!(progress["reason"]["kind"], "source_changed");
+        if kind == "many" {
+            assert_eq!(progress["reason"]["changes"].as_array().unwrap().len(), 128, "persist every changed entry");
+            assert!(progress["reason"]["detail"].as_str().unwrap().contains("entry-0127-é.txt"));
+        }
+        assert!(!PathBuf::from(&registration.run_directory).join(ENGRAM_VERIFICATION_RECORD_BODY_FILE).exists(),
+            "source drift still emits no verification body");
+        let inner = fixture.fixture.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
+        let notice = record.engram.pending_source_root_line.as_deref().unwrap();
+        assert!(notice.contains("source changed during the run") && notice.contains(path), "{notice}");
+        assert!(notice.len() <= ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES, "bounded first credit line");
+        drop(inner);
+        if kind == "many" {
+            let mut inner = fixture.fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.session).unwrap();
+            let engram = &mut inner.sessions[index].engram;
+            engram.pending_source_root_line = None;
+            let mut log = Vec::new();
+            engram_publish_check_notice(&fixture.session, engram,
+                format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} {detail}"), &mut log);
+            assert!(String::from_utf8(log).unwrap().contains("entry-0127-é.txt"), "complete diagnostic reaches host log");
+            assert!(engram.pending_source_root_line.as_ref().unwrap().len() <= ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES);
+        }
+        let mut wrong_request = request.clone();
+        wrong_request["nativeSourceId"] = Value::Null;
+        let refusal = engram_verification_record_body(&registration, &wrong_request, &results).unwrap_err();
+        assert!(refusal.contains("host reservation") && !refusal.contains("source changed"),
+            "reservation mismatch remains distinct: {refusal}");
     }
 }
 

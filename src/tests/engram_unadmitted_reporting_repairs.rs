@@ -885,6 +885,9 @@ fn retirement_joins_post_check_capture_and_delivery_installs_before_restore() {
             inner.stamp_session_at_index(index);
             restarted.commit_locked(&mut inner).unwrap();
         }
+        // Post-listen recovery may still deliver this host's own reports.
+        // Retire those installers before freezing the old-host comparison.
+        restarted.trigger_shutdown_signal();
         restarted.shutdown_persist_blocking();
         let before = stored_session(&restarted, &fixture.turn.session_id);
         assert!(before.contains(&format!("restored-host-{phase}")));

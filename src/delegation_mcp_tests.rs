@@ -745,6 +745,116 @@ fn delegation_mcp_configs_bind_parent_session_and_base_url() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn delegation_mcp_and_cli_remain_runnable_after_host_executable_replacement() {
+    const CHILD_ENV: &str = "TERMAL_TEST_REPLACED_EXECUTABLE_CHILD";
+    const SOURCE_ENV: &str = "TERMAL_TEST_SOURCE_EXECUTABLE";
+    const REPLACE_ENV: &str = "TERMAL_TEST_REPLACE_EXECUTABLE";
+    const CLI_MARKER: &str = "TERMAL_TEST_RESOLVED_CLI=";
+    let test_name = std::thread::current()
+        .name()
+        .expect("libtest names the test thread")
+        .to_owned();
+    if let Some(expected_copy) = std::env::var_os(CHILD_ENV) {
+        let original = std::env::current_exe().expect("fixture executable path");
+        let source_executable = fs::canonicalize(PathBuf::from(
+            std::env::var_os(SOURCE_ENV).expect("parent identifies the original test image"),
+        ))
+        .unwrap();
+        let fixture_directory = original.parent().unwrap().parent().unwrap();
+        assert_eq!(original, PathBuf::from(expected_copy));
+        assert_ne!(original, source_executable);
+        assert_eq!(fixture_directory.parent(), source_executable.parent());
+        assert!(fs::symlink_metadata(fixture_directory).unwrap().is_dir());
+        let fixture_id = fixture_directory
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .strip_prefix("termal-replaced-executable-")
+            .expect("fixture directory has its dedicated prefix");
+        assert!(Uuid::parse_str(fixture_id).is_ok());
+        assert_eq!(original.file_name().unwrap(), "termal-test-host");
+        if std::env::var_os(REPLACE_ENV).as_deref() == Some(std::ffi::OsStr::new("1")) {
+            fs::remove_file(&original).expect("unlink only the running fixture link");
+            fs::write(&original, b"a different installed image")
+                .expect("replace the fixture's old executable path");
+            assert!(
+                !std::env::current_exe().unwrap().exists(),
+                "Linux reports the unlinked running image with a deleted path"
+            );
+        }
+
+        let command = termal_delegation_mcp_current_exe().unwrap();
+        let codex = termal_delegation_mcp_codex_config_with_command(
+            &command,
+            "session-fixture",
+            "http://127.0.0.1:9999",
+        );
+        let shell_env =
+            termal_agent_process_env("session-fixture", "http://127.0.0.1:9999").unwrap();
+        println!("{CLI_MARKER}{}", shell_env[TERMAL_CLI_ENV]);
+        for executable in [
+            codex["mcp_servers"][TERMAL_DELEGATION_MCP_SERVER_NAME]["command"]
+                .as_str()
+                .unwrap(),
+            shell_env[TERMAL_CLI_ENV].as_str(),
+        ] {
+            // A provider is a different executable from the host. Launch through
+            // sh so /proc/self/exe would incorrectly select sh, not our image.
+            let output = crate::host_command::Command::new("/bin/sh")
+                .args(["-c", "exec \"$1\" --list", "termal-client", executable])
+                .output()
+                .expect("configured command should remain executable");
+            assert!(output.status.success(), "{output:?}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains(test_name.as_str()));
+        }
+        return;
+    }
+
+    let source_executable = std::env::current_exe().unwrap();
+    // Cargo may put its output on another filesystem. An adjacent fresh
+    // directory keeps the hard link on that filesystem without copying bytes.
+    let directory = source_executable
+        .parent()
+        .unwrap()
+        .join(format!("termal-replaced-executable-{}", Uuid::new_v4()));
+    fs::create_dir(&directory).unwrap();
+    let root = TestTempRoot::own(directory);
+    for replace in [false, true] {
+        let directory = root.join(if replace { "replaced" } else { "ordinary" });
+        fs::create_dir(&directory).unwrap();
+        let fixture_executable = directory.join("termal-test-host");
+        // No writable executable descriptor for another test's fork to inherit.
+        fs::hard_link(&source_executable, &fixture_executable)
+            .expect("link the test image without changing the real host");
+        let output = crate::host_command::Command::new(&fixture_executable)
+            .args(["--exact", test_name.as_str(), "--nocapture"])
+            .env(CHILD_ENV, &fixture_executable)
+            .env(SOURCE_ENV, &source_executable)
+            .env(REPLACE_ENV, if replace { "1" } else { "0" })
+            .output()
+            .expect("start the disposable host image");
+        assert!(output.status.success(), "{output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("1 passed"));
+        if !replace {
+            let command = stdout
+                .lines()
+                .find_map(|line| line.split_once(CLI_MARKER).map(|(_, path)| path))
+                .expect("fixture reports its actual CLI command");
+            // The resolver process has exited; an ordinary CLI must still run.
+            let output = crate::host_command::Command::new("/bin/sh")
+                .args(["-c", "exec \"$1\" --list", "termal-client", command])
+                .output()
+                .expect("ordinary CLI should outlive its resolving host");
+            assert!(output.status.success(), "{output:?}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains(test_name.as_str()));
+        }
+    }
+}
+
 #[test]
 fn delegation_mcp_acp_server_emits_spec_env_variable_array() {
     let server = TermalDelegationMcpStdioConfig {

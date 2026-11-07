@@ -2,6 +2,101 @@
 //! it preserves the name and every registration already made under it.
 use super::*;
 
+#[test]
+fn native_opening_after_claim_recovery_reaches_source_capture() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for sequence in ["fresh", "renewed", "retired-recovered", "retired-new-claim"] {
+        let label = format!("native-opening-{sequence}");
+        let turn = EOCheckedTurn::idle(&label, true);
+        let path = naming_worktree(&turn.root);
+        let original = naming_claim(&label);
+        let first = request_naming(&turn, &label, Some(&path), vec![original.clone()]).unwrap();
+        let mut held = original.clone();
+        if sequence.starts_with("retired-") {
+            let mut proof = {
+                let inner = turn.state.inner.lock().unwrap();
+                inner.engram_work_naming_history[0].proofs[0].read.clone()
+            };
+            proof.claim = Some(EngramNamedRootReadClaim {
+                state: "active".into(), holder: Some(turn.session_id.clone()),
+                expires_at: Some((chrono::Utc::now() - chrono::Duration::hours(3)).to_rfc3339()),
+                revision: Some(original.items[0].control_binding.as_ref().unwrap().work_revision),
+                fence: Some(original.items[0].claim_fence),
+            });
+            // A restored session no longer has a live work association. Feed
+            // the canonical expired claim through the production retirement
+            // pass, rather than deleting its root or naming history in place.
+            turn.record_mut(|record| record.engram.work_binding = None);
+            turn.transport.set_current_work_binding(None);
+            turn.transport.replace_held_claims([Ok(no_held_claims())]);
+            turn.transport.named_roots.lock().unwrap().as_mut().unwrap()
+                .root_reads.insert(proof.claim_id.clone(), serde_json::to_value(&proof).unwrap());
+            let plan = engram_root_reclamation_plan_locked(
+                &turn.state.inner.lock().unwrap(), std::time::Instant::now());
+            turn.state.run_engram_root_reclamation_pass(plan);
+            assert!(turn.state.inner.lock().unwrap().engram_work_source_roots.is_empty(),
+                "{sequence}: the expired generation must actually retire");
+            turn.transport.named_roots.lock().unwrap().as_mut().unwrap()
+                .root_reads.remove(&proof.claim_id);
+        }
+        if sequence != "fresh" {
+            let claim = &mut held.items[0];
+            claim.claim_fence += 1;
+            let binding = claim.control_binding.as_mut().unwrap();
+            binding.claim_fence = claim.claim_fence;
+            binding.work_revision += 1;
+            if sequence == "retired-new-claim" {
+                binding.claim_id.push_str("-reclaimed");
+                binding.run_id.push_str("-reclaimed");
+                binding.root_execution_id.push_str("-reclaimed");
+                claim.claim_id = binding.claim_id.clone();
+            }
+            turn.transport.set_current_work_binding(Some(binding.clone()));
+            turn.transport.enable_named_roots(&turn.session_id, binding);
+            turn.transport.named_roots.lock().unwrap().as_mut().unwrap()
+                .claim_fences.insert(claim.claim_id.clone(), claim.claim_fence);
+            turn.record_mut(|record| record.engram.work_binding = Some(binding.clone()));
+            let second = request_naming(&turn, &label, Some(&path), vec![held.clone()]).unwrap();
+            if sequence.starts_with("retired-") {
+                assert!(second.generation > first.generation, "{sequence}");
+            } else {
+                assert_eq!(second.generation, first.generation, "same-root refresh keeps its name");
+            }
+        }
+        let (entry_fence, proof_fence) = {
+            let inner = turn.state.inner.lock().unwrap();
+            let entry = &inner.engram_work_source_roots[0];
+            let binding = engram_named_root_claim_binding(&inner.engram_work_naming_history, entry).unwrap();
+            (entry.claim_fence, binding.claim_fence)
+        };
+        fs::write(path.join("termal-tests.toml"),
+            "[[test]]\ncommand = \"dotnet test\"\ncwd = \".\"\nartifact = \".tmp/test.trx\"\n").unwrap();
+        run_git_test_command(&path, &["add", "--", "termal-tests.toml"]);
+        run_git_test_command(&path, &["commit", "--quiet", "-m", "Declare fixture command"]);
+        let owner = crate::tests::engram_declared_source_fixture::NativeSourceOwner::new(&path);
+        let project = turn.record(|record| record.session.project_id.clone().unwrap());
+        owner.install(&turn.state, &project);
+        let expected_source = owner.identity();
+        let captures = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = captures.clone();
+        turn.state.inner.lock().unwrap().test_declared_run_snapshot = Some(Arc::new(move |_, until| {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            owner.snapshot(until, None)
+        }));
+        turn.begin("Native opening authority diagnostic");
+        let opening = turn.record(|record| record.engram.declared_run_turn.clone()).unwrap();
+        eprintln!("native opening sequence={sequence} root_fence={entry_fence} proof_fence={proof_fence} refusal={:?}",
+            opening.opening_refusal);
+        assert_eq!(captures.load(std::sync::atomic::Ordering::SeqCst), 1,
+            "{sequence}: valid current naming must reach source capture, refusal={:?}", opening.opening_refusal);
+        assert_eq!(opening.snapshot.as_ref().map(|snapshot| &snapshot.source.source_id), Some(&expected_source),
+            "{sequence}: S0 must publish only after the held claim is validated, refusal={:?}", opening.opening_refusal);
+        assert_eq!(&opening.binding, held.items[0].control_binding.as_ref().unwrap(),
+            "{sequence}: S0 must publish with the refreshed held binding");
+        assert_eq!(opening.root_claim_fence, held.items[0].claim_fence);
+    }
+}
+
 fn registration_request_for(
     turn: &EOCheckedTurn,
     root: &FsPath,
