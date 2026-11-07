@@ -3,6 +3,56 @@
 use super::*;
 use super::regressions::public_send;
 
+#[tokio::test]
+async fn unbound_central_native_sends_bypass_unavailable_domain_authority() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for unavailable in ["durability", "continuity", "quarantine"] {
+        let state = federation_mailboxes::central_store();
+        let sender = native(&state, "Local sender");
+        let target = native(&state, "Local recipient");
+        let host = state.inner.lock().unwrap().federation.local.clone().unwrap();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            match unavailable {
+                "durability" => inner.federation_durable = false,
+                "continuity" => inner.federation_continuity_lost = true,
+                "quarantine" => inner.federation.admission_quarantine = Some(FederationQuarantineReason::DeclaredRestore),
+                _ => unreachable!(),
+            }
+        }
+        // A display alias selects domain discovery even when both roots are
+        // local and unbound. Explicit native locators require no domain join.
+        let refused = public_send(&state, &sender, "Local recipient", "alias-attempt", "local report")
+            .await.unwrap_err();
+        assert_eq!(refused.status, StatusCode::CONFLICT, "{unavailable}");
+        assert!(refused.message.contains(FEDERATION_STALE_AUTHORITY), "{unavailable}: {}", refused.message);
+        let expected_reason = match unavailable {
+            "durability" => "not durable",
+            "continuity" => "continuity is lost",
+            "quarantine" => "quarantined",
+            _ => unreachable!(),
+        };
+        assert!(refused.message.contains(expected_reason), "{unavailable}: {}", refused.message);
+        let sent = public_send(&state, &sender, &target, "alias-attempt", "local report")
+            .await.unwrap_or_else(|error| panic!("{unavailable}: {}", error.message));
+        assert!(!sent.duplicate);
+        let replay = public_send(&state, &sender, &target, "alias-attempt", "local report").await.unwrap();
+        assert!(replay.duplicate);
+        assert_eq!(replay.message_id, sent.message_id);
+        let qualified = format!("host:{}::{target}", host.host_id);
+        let second = public_send(&state, &sender, &qualified, "qualified-local", "another report").await.unwrap();
+        assert_ne!(second.message_id, sent.message_id);
+        let inner = state.inner.lock().unwrap();
+        for id in [&sender, &target] {
+            assert!(federation_mailbox_root_locked(&inner, id).unwrap().mailbox_binding().is_none(), "{unavailable}");
+        }
+        drop(inner);
+        let connection = state.mailbox_store.connection().unwrap();
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM mailbox_messages", [], |row| row.get::<_, u64>(0)).unwrap(), 2);
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM federation_mailbox_intents", [], |row| row.get::<_, u64>(0)).unwrap(), 0);
+    }
+}
+
 pub(super) async fn acknowledge_native(state: &AppState, recipient: &str, sent: &MailboxAppendReceipt) {
     let page = read_mailbox(AxumPath((recipient.into(), sent.mailbox_id.clone())), State(state.clone()),
         Json(ReadMailboxRequest { after_sequence: None, limit: 20, issue_receipt: true, read_key: None }))

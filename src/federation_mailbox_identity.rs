@@ -5,14 +5,25 @@
 fn federation_mailbox_central_locked(
     inner: &StateInner,
 ) -> Result<FederationHostIdentity, ApiError> {
-    if !inner.preferences.federation.enabled
-        || inner.preferences.federation.role != FederationRole::Central
-        || !inner.federation_durable
-        || inner.federation_continuity_lost
-        || inner.federation.admission_quarantine.is_some()
-        || inner.federation.local.as_ref() != inner.preferences.federation.central.as_ref()
-    {
-        return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+    let unavailable = if !inner.preferences.federation.enabled {
+        Some("central mailbox domain is disabled")
+    } else if inner.preferences.federation.role != FederationRole::Central {
+        Some("this host is not the central mailbox authority")
+    } else if !inner.federation_durable {
+        Some("central mailbox authority is not durable")
+    } else if inner.federation_continuity_lost {
+        Some("central mailbox authority continuity is lost")
+    } else if inner.federation.admission_quarantine.is_some() {
+        Some("central mailbox authority is quarantined")
+    } else if inner.federation.local.as_ref() != inner.preferences.federation.central.as_ref() {
+        Some("local host identity differs from the configured central mailbox binding")
+    } else if inner.federation.local.is_none() {
+        Some("central mailbox host identity is missing")
+    } else {
+        None
+    };
+    if let Some(reason) = unavailable {
+        return Err(ApiError::conflict(format!("{FEDERATION_STALE_AUTHORITY}: {reason}")));
     }
     inner
         .federation

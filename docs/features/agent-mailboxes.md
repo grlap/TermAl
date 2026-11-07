@@ -25,6 +25,20 @@ recorded in the [handoff ledger](handoffs.md) instead.
 `termal_send_to_session` accepts a peer session id or name, a message body, and
 a required sender-supplied `idempotencyKey`.
 
+Names and domain participant IDs require the current central mailbox authority,
+even when the intended peer is on the same host. A refusal at the central
+authority check states whether that authority is not durable, has lost continuity, is
+quarantined, or has a different configured central binding. It does not mean
+that either native root necessarily has a domain binding.
+
+For a known local root, use its exact `session-…` ID or
+`host:<local host UUID>::<native session ID>` to select local delivery. This
+works without refreshing federation enrollment or restarting the host. Keep
+the same message and idempotency key: an existing retained intent still owns
+its original route and cannot be bypassed by changing the target spelling.
+If the local ID is unknown, restore directory availability before resolving
+the name; do not guess a recipient or change federation configuration.
+
 HTTP send receipts, `termal_send_to_session`, and CLI `mailbox send` also
 return `senderProcessedThrough` and `senderCursorAdvanced`. The first is the
 sender's durable cursor snapshot resulting from this operation; the second
