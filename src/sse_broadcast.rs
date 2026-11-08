@@ -666,6 +666,20 @@ impl AppState {
             "delta enqueue requires the commit lock"
         );
         event.normalize_body_sequence_pair();
+        if matches!(&event, DeltaEvent::TestRunChanged { .. } | DeltaEvent::TestRunRemoved { .. }) {
+            if inner.test_runs.transport_batch_pending {
+                // The original lifecycle callback is still observable for
+                // custody tests. It is not a public transport snapshot.
+                #[cfg(test)]
+                if let Ok(payload) = serde_json::to_string(&event) {
+                    let _ = self.state_broadcast_senders.delta_events.send(payload);
+                }
+                return;
+            }
+            let source = self.test_run_history_projection_locked(inner);
+            self.publish_test_run_invalidation_locked(inner, source, Some(event));
+            return;
+        }
         if let Some(mailbox) = &self.state_broadcast_mailbox {
             // Stopped can change only under this same StateInner mutex.
             if !mailbox.is_stopped() {
@@ -673,9 +687,26 @@ impl AppState {
                 return;
             }
         }
-        if let Ok(payload) = serde_json::to_string(&event) {
-            self.state_broadcast_senders.send_delta(payload);
-        }
+        self.state_broadcast_senders.send_delta_event(&event);
+    }
+
+    fn publish_test_run_invalidation_locked(
+        &self,
+        inner: &StateInner,
+        source: Arc<TestRunHistoryProjection>,
+        original: Option<DeltaEvent>,
+    ) {
+        inner.test_runs.transport_version.store(source.version, Ordering::Relaxed);
+        #[cfg(not(test))]
+        drop(original);
+        self.publish_delta_locked(inner, DeltaEvent::TestRunsInvalidated {
+            revision: inner.revision,
+            server_instance_id: self.server_instance_id.clone(),
+            overview: TestRunOverviewSnapshot::captured(source.clone()),
+            activity: TestRunActivitiesSnapshot { source: Some(source), wire: BTreeMap::new() },
+            #[cfg(test)]
+            internal: original.map(Box::new),
+        });
     }
 
     /// Publishes a `SessionCreated` delta for the remote-proxy

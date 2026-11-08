@@ -182,10 +182,12 @@ Unresolved discoveries retain their identity even when their artifacts disappear
 
 `GET /api/test-runs` returns one bounded page: `limit` defaults to 100 and
 is capped at 200; zero, negative or malformed limits return HTTP 400. Optional
-`projectId` filtering happens before pagination. Responses contain `runs`, the
-effective `limit`, and `nextCursor` (null at the end). Pass a non-null cursor as
-`after`, with the same project filter, to request the next page explicitly.
-Malformed cursors or a changed project filter return HTTP 400. Cursors are opaque;
+`projectId`, `sessionId` (owner or notification recipient), `state`, and
+`view=history|active|attention` filtering happens before pagination. Responses
+contain `runs`, the effective `limit`, `nextCursor` (null at the end), filtered
+`total`, `revision` and `serverInstanceId`. Pass a non-null cursor as `after`,
+with the same filters, to request the next page explicitly.
+Malformed cursors or changed filters return HTTP 400. Cursors are opaque;
 clients must not automatically drain the whole history.
 
 Pages retain the existing order: `startedAt` descending (missing timestamps last),
@@ -193,7 +195,7 @@ then `runId` ascending. Continuation uses this stable key rather than an offset,
 so new runs ahead of the cursor do not shift later pages. The list is live;
 concurrent updates may move a run between pages. Refresh the first page for the
 latest state. Exact-ID detail/log GETs remain independent of the page cap, as do
-the live state snapshot and deltas that keep all active runs visible. Launcher
+the aggregate live state snapshot and invalidations. Launcher
 registration continues to query its exact run ID; it never lists the history.
 The UI listing helper requests a single 100-row page and follows a continuation
 only when its caller explicitly supplies one.
@@ -556,10 +558,28 @@ or log content.
 
 ### Snapshot and delta
 
-- `StateResponse.testRuns: TestRunSummary[]`, in list order. The field is
-  omitted when empty, like `delegationWaits`.
-- `DeltaEvent` `testRunChanged { revision, run: TestRunSummary }` is sent when
-  the run's summary changes, including the host verdict and `detailVersion`.
+- `StateResponse.testRunOverview` contains canonical total, execution-state,
+  attention and evidence-risk counters, per-project buckets (including an
+  unassigned bucket), readiness and an opaque version. Global snapshots and
+  state diffs carry no run-summary array. Each session summary may carry
+  fixed-shape `testRunActivity` counts and single-run stage labels for owned,
+  foreground, background and notification-only work.
+- Public `testRunsInvalidated { revision, serverInstanceId, overview, activity }`
+  carries absolute counters and a complete replacement of running-session
+  activity. An absent activity entry means zero activity. The existing revision
+  and server-instance admission applies. No run IDs or historical rows accumulate
+  in global UI state. Internal run lifecycle events remain with their owners.
+  Scanner batches instead publish through the existing cumulative state-cut
+  producer: a cut covers hidden lifecycle revisions before public card deltas,
+  and a final cut carries changed card/attention inputs even at the last card's
+  revision. Clients use their existing state-diff baseline; no skipped or
+  reused global-delta revision is introduced.
+- Open history panels read the existing filtered pages; Load older is explicit.
+  Invalidations refresh the first and visible loaded pages and selected exact-ID
+  detail. Closed panels fetch nothing. Older responses are aborted or rejected;
+  a new server instance resets the panel reader. Alias replacement is read from
+  canonical pages, with no persistent client tombstones.
+- Exact-ID summaries retain the host verdict and `detailVersion`.
   `detailVersion` is an opaque digest of the `results.json` bytes the summary
   was read from, and the detail is built from the same file. It is stable
   across rescans and host restarts while the file's content is unchanged.
@@ -570,10 +590,8 @@ or log content.
   detail refetches it when the run's `detailVersion` differs from the one it
   fetched against, whether the summary came in a delta or in a snapshot. So a
   snapshot that consumed the delta's revision cannot hide a stale detail.
-- `DeltaEvent` `testRunRemoved { revision, runId }` is sent when a run leaves
-  the index: its directory was removed, or it aged out of the newest 50.
-- Deltas use the same revision rules as every other state delta. A snapshot
-  received on connect or resync replaces the whole `testRuns` list.
+- Complete canonical pages include minimal retained compact identities. This
+  transport change deletes no run record, artifact, proof or association.
 
 ## Slice 1: HTTP
 
@@ -624,9 +642,10 @@ tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
     button, and the actual full source_id comparison. Old fingerprints remain
     visible as historical evidence.
   - A stage-log tail is available, with a refresh button.
-  - The detail refetches on `testRunChanged` for its run.
-- **Session markers.** Derived client-side from runs whose `state` is
-  `running`, in three roles:
+  - Selected detail refetches when the admitted overview version changes;
+    older hosts retain their per-run `testRunChanged` fallback.
+- **Session markers.** Presented from bounded running-activity counts in
+  session summaries or aggregate invalidations, in three roles:
   1. owner of a run with `detached: false`: "running tests";
   2. owner of a run with `detached: true` or `null`: "test run in background";
   3. `notifySessionId` of a run: "test run will notify this session". This
@@ -667,8 +686,8 @@ tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
     is part of the turn; a run without a detach mode counts as background
     in the breakdown. An idle
     row with background work shows a busy badge, not the idle one.
-  - A run-only change (`testRunChanged`, `testRunRemoved` or a snapshot)
-    updates the counts, filters and badges without a session update.
+  - An admitted aggregate invalidation or cumulative cut updates counts,
+    filters and badges without requiring run-summary rows or transcript reads.
   - Only runs this index knows count: a detached build that was never
     registered as a run is not seen.
 - The prototype linked on the tm-ncc6 epic is the visual reference.
@@ -1044,6 +1063,27 @@ of the reviewed `/review-changes` contract.
     so a large mixed wait may need fewer than sixteen references.
   - The caller need not be the owner: a coordinator may wait on a run it did
     not start.
+  - Host-assigned `observed-…` execution ids use the same wait, without a
+    launcher directory or index entry. The wait pins the exact observation's
+    origin and project, refreshes from its live or retained state, and queues
+    one resume at terminal state. Unknown and foreign ids are refused. A
+    terminal UNKNOWN is delivered as UNKNOWN without inventing an exit code
+    or verification credit. The wait reports the row's settled verdict; it
+    does not independently judge or correct a producer's artifact handling.
+    A declared producer's END can precede its artifact
+    verdict application: the wait remains pending through that settlement
+    phase, even if the provider's exit was 0. The artifact owner applies the
+    verdict before the wait consumes it; a restart interrupting settlement
+    yields UNKNOWN. A late Codex completion uses only an exact retained
+    original artifact binding. If that owner is no longer retained, the row
+    ends UNKNOWN with a named missing-owner reason; the host does not rebuild
+    the binding from current declaration files or treat exit zero as PASS.
+    In particular, a background declared task whose
+    producer has not applied its artifact verdict can still end UNKNOWN;
+    the wait does not judge or repair that artifact. An interrupted or
+    unavailable observation likewise resumes with an explicit UNKNOWN reason.
+    Observed sections link to the existing exact-id API, rather than suggesting
+    launcher summary or recovery commands for an absent run directory.
   - Each new wait pins the existing immutable request identity and canonical
     native run-directory locator. It holds no independent expected source copy
     or source-value fence. Replacing the request or locator settles UNKNOWN;
@@ -1376,10 +1416,11 @@ and a run that has left the index shows "not indexed" and no elapsed time.
 - The live-region announcement leaves out the elapsed time, so screen readers
   are not re-told every second. The visible text and its tooltip keep it
   current.
-- While the run is in `testRuns`, the indicator joins that run's live summary
-  for its state, current stage and elapsed time. After the run leaves the
-  index, it falls back to the wait's `runs` label. So a waiter that does not
-  own the run, and therefore has no card, is still labelled.
+- A mounted idle wait reads its exact run IDs on demand and refreshes them on
+  invalidation. It uses the recorded wait labels while status is loading or
+  unavailable; omission from global state is never called "not indexed".
+  Hidden waits fetch nothing. A waiter that does not own the run, and therefore
+  has no card, is still labelled. Reading status never settles or resumes a wait.
 
 ## Slice 3: decisions and contract
 

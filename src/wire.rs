@@ -907,6 +907,8 @@ impl Session {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StateSessionSummary {
+    #[serde(default, skip_serializing_if = "SessionTestRunActivitySnapshot::is_empty")]
+    test_run_activity: SessionTestRunActivitySnapshot,
     /// Display/routing hint only; every domain operation validates its binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mailbox_participant_id: Option<String>,
@@ -3033,9 +3035,9 @@ struct StateResponse {
     delegations: Vec<DelegationStateSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegation_waits: Vec<DelegationWaitRecord>,
-    /// The test launcher's runs, in list order (docs/features/test-runs.md).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    test_runs: Vec<TestRunSummary>,
+    /// Revision-coherent counters, never a global catalogue of run rows.
+    #[serde(default)]
+    test_run_overview: TestRunOverviewSnapshot,
     /// Pending run waits only (docs/features/test-runs.md, run waits).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     test_run_waits: Vec<TestRunWaitRecord>,
@@ -3818,6 +3820,18 @@ enum DeltaEvent {
     TestRunChanged { revision: u64, run: TestRunSummary },
     /// A test run left the index.
     TestRunRemoved { revision: u64, run_id: String },
+    /// Public run updates invalidate on-demand views without accumulating
+    /// run summaries in every client. Activity is a complete replacement of
+    /// running-session counters; absent sessions have zero activity.
+    TestRunsInvalidated {
+        revision: u64,
+        server_instance_id: String,
+        overview: TestRunOverviewSnapshot,
+        activity: TestRunActivitiesSnapshot,
+        #[cfg(test)]
+        #[serde(skip)]
+        internal: Option<Box<DeltaEvent>>,
+    },
     /// A run wait was registered (`test_run_waits.rs`).
     TestRunWaitCreated {
         revision: u64,
@@ -3874,6 +3888,7 @@ impl DeltaEvent {
             | Self::DelegationCanceled { revision, .. }
             | Self::TestRunChanged { revision, .. }
             | Self::TestRunRemoved { revision, .. }
+            | Self::TestRunsInvalidated { revision, .. }
             | Self::TestRunWaitCreated { revision, .. }
             | Self::TestRunWaitConsumed { revision, .. }
             | Self::TestRunWaitResumeDispatchFailed { revision, .. } => *revision,

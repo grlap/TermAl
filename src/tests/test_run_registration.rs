@@ -1376,7 +1376,7 @@ fn late_command_description_keeps_the_original_start_owner_without_retroactive_c
 }
 
 #[test]
-fn live_durability_delta_has_a_revision_after_the_preceding_persistence_snapshot() {
+fn live_durability_invalidation_has_a_revision_after_the_preceding_persistence_snapshot() {
     let fixture = RunFixture::new("registration-durability-stream");
     let session = running_owner(&fixture, "registry-durability-stream-runtime");
     let mut receiver = fixture.state.subscribe_stream_events();
@@ -1388,7 +1388,7 @@ fn live_durability_delta_has_a_revision_after_the_preceding_persistence_snapshot
         Some(&fixture.root.to_string_lossy()),
     );
     let mut preceding_revision = 0;
-    let mut saw_durable = false;
+    let mut saw_invalidation = false;
     while let Ok(event) = receiver.try_recv() {
         match event {
             SseStreamEvent::State(body) => {
@@ -1397,14 +1397,13 @@ fn live_durability_delta_has_a_revision_after_the_preceding_persistence_snapshot
             }
             SseStreamEvent::Delta(body) => {
                 let delta: Value = serde_json::from_str(&body).unwrap();
-                if delta["type"] == "testRunChanged"
-                    && delta["run"]["trackingDurability"] == "durable"
-                {
+                if delta["type"] == "testRunsInvalidated" {
                     assert!(
                         delta["revision"].as_u64().unwrap() > preceding_revision,
                         "the client's revision gate must accept the durability update"
                     );
-                    saw_durable = true;
+                    assert_eq!(delta["overview"]["running"], 1);
+                    saw_invalidation = true;
                 }
             }
             SseStreamEvent::Lagged => panic!("the bounded fixture must not lose events"),
@@ -1413,7 +1412,12 @@ fn live_durability_delta_has_a_revision_after_the_preceding_persistence_snapshot
             }
         }
     }
-    assert!(saw_durable);
+    assert!(saw_invalidation);
+    let id = fixture.summaries()[0].run_id.clone();
+    let mut diagnostics = TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
+    let Json(detail) = get_test_run_observed(fixture.state.clone(), &id, &mut diagnostics).unwrap();
+    assert_eq!(detail.run.registration.tracking_durability.as_deref(), Some("durable"));
+    assert!(detail.run.registration.verification_record_ids.is_empty());
 }
 
 #[test]

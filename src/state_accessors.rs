@@ -252,6 +252,7 @@ mod visible_session_hydration_error_tests {
             .expect("local session should be created")
             .session_id;
         let remote_session = StateSessionSummary {
+            test_run_activity: SessionTestRunActivitySnapshot::default(),
             mailbox_participant_id: None,
             body_seq: None,
             body_seq_epoch: None,
@@ -765,6 +766,7 @@ impl AppState {
         });
         let session = &record.session;
         let mut summary = StateSessionSummary {
+            test_run_activity: SessionTestRunActivitySnapshot::default(),
             mailbox_participant_id: record.mailbox_binding().map(FederationMailboxBinding::participant_key),
             id: session.id.clone(),
             name: session.name.clone(),
@@ -1466,8 +1468,12 @@ impl AppState {
 
     fn snapshot_header_from_inner(
         &self, inner: &StateInner, agent_readiness: Vec<AgentReadiness>,
-        sessions: Vec<StateSessionSummary>,
+        mut sessions: Vec<StateSessionSummary>,
     ) -> StateResponse {
+        let projection = self.test_run_history_projection_locked(inner);
+        for session in &mut sessions {
+            session.test_run_activity = SessionTestRunActivitySnapshot::captured(projection.clone(), &session.id);
+        }
         StateResponse {
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
@@ -1484,7 +1490,7 @@ impl AppState {
                 .map(delegation_state_summary_from_record)
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
-            test_runs: test_run_summaries_locked(inner),
+            test_run_overview: TestRunOverviewSnapshot::captured(projection),
             test_run_waits: inner.test_run_waits.clone(),
             pending_engram_mcp_revocation_session_ids:
                 Self::pending_engram_mcp_revocation_session_ids(inner),

@@ -709,7 +709,27 @@ impl AppState {
         output: &str,
         exit: EngramCommandExit,
     ) -> bool {
-        self.observe_test_command_end(session_id, &EngramObservationProvenance::Ambient, key, Some(exit));
+        self.note_engram_reported_end_with_settlement(
+            session_id, key, command, output, exit,
+            #[cfg(test)]
+            || {},
+        )
+    }
+
+    fn note_engram_reported_end_with_settlement(
+        &self,
+        session_id: &str,
+        key: &str,
+        command: &str,
+        output: &str,
+        exit: EngramCommandExit,
+        #[cfg(test)] after_observation_end: impl FnOnce(),
+    ) -> bool {
+        self.settle_reported_test_observation(
+            session_id, key, command, exit,
+            #[cfg(test)]
+            after_observation_end,
+        );
         self.observe_test_command_artifact(
             session_id,
             &EngramObservationProvenance::Ambient,

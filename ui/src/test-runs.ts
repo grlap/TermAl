@@ -1,5 +1,6 @@
 // Read-only launcher discovery contract and presentation rules. Does not own
 // execution, notification delivery, or agent lifecycle state.
+import { activityFromRuns, testRunActivityLabel } from "./test-run-overview";
 export type TestRunState = "running" | "passed" | "failed" | "unknown";
 export type TestRunUnknownReason = "processGone" | "resultsUnreadable" | "noPid" | "heartbeatStale";
 export type TestRunStageState = "unrun" | "running" | "passed" | "failed";
@@ -146,19 +147,7 @@ export function testRunMatchesSession(run: TestRunSummary, sessionId: string) {
   return run.ownerSessionId === sessionId || run.notifySessionId === sessionId;
 }
 export function testRunSessionMarker(runs: readonly TestRunSummary[], sessionId: string) {
-  const relevant = runs.filter(run => run.state === "running" && testRunMatchesSession(run, sessionId));
-  if (!relevant.length) return null;
-  const foreground = relevant.some(run => run.ownerSessionId === sessionId && run.detached === false);
-  const owned = relevant.some(run => run.ownerSessionId === sessionId);
-  const observedWithoutDetach = relevant.some(run => run.ownerSessionId === sessionId
-    && testRunDetachModeUnobserved(run));
-  const label = foreground ? "running tests" : owned ? observedWithoutDetach ? "test running" : "test run in background" : "test run will notify this session";
-  const roleRuns = relevant.filter(run => foreground
-    ? run.ownerSessionId === sessionId && run.detached === false
-    : owned ? run.ownerSessionId === sessionId : run.notifySessionId === sessionId);
-  if (roleRuns.length > 1) return `${label} (${roleRuns.length})`;
-  const suffix = roleRuns[0].currentStage;
-  return suffix ? `${label} · ${suffix}` : label;
+  return testRunActivityLabel(activityFromRuns(runs, sessionId));
 }
 export function testRunStageLabel(run: TestRunSummary, stage: TestRunStageSummary) {
   return stage.state === "running" && (run.state === "unknown" || run.interrupted) ? "interrupted" : stage.state;

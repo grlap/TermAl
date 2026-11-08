@@ -16,6 +16,9 @@ use phase_sync::receive_result as recv_within_guard;
 use std::io::Read as _;
 use tower::util::ServiceExt;
 
+mod fixture_timings;
+use fixture_timings::{FixtureTimings, fixture_phase, timed_fixture_state_mutex};
+
 mod workspace_pending_memory;
 
 mod acceptance_evaluation;
@@ -1038,7 +1041,7 @@ pub(crate) fn test_app_state() -> AppState {
         )),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
-        inner: Arc::new(StateMutex::new_for_instance(inner, &server_instance_id)),
+        inner: Arc::new(timed_fixture_state_mutex(inner, &server_instance_id)),
         test_temp_root: Some(test_temp_root),
     }
 }
@@ -1528,7 +1531,7 @@ fn sample_remote_orchestrator_state(
             sessions: Vec::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
-            test_runs: Vec::new(),
+            test_run_overview: TestRunOverviewSnapshot::default(),
             test_run_waits: Vec::new(),
             pending_engram_mcp_revocation_session_ids: Vec::new(),
         },
@@ -1537,6 +1540,7 @@ fn sample_remote_orchestrator_state(
 
 fn test_state_session_summary_from_session(session: &Session) -> StateSessionSummary {
     StateSessionSummary {
+        test_run_activity: SessionTestRunActivitySnapshot::default(),
         mailbox_participant_id: None,
         body_seq: session.body_seq,
         body_seq_epoch: session.body_seq_epoch.clone(),
@@ -1963,6 +1967,7 @@ fn test_run_wait_record(id: &str, session_id: &str) -> TestRunWaitRecord {
         created_at: stamp_now(),
         title: None,
         runs: vec![TestRunWaitRunLabel {
+            observation: None,
             remote: None,
             run_id: "test-seeded".to_owned(),
             run_dir: "/repo/.git/review-runs/test-seeded".to_owned(),

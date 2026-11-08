@@ -85,6 +85,7 @@ import {
 import { resolveAdoptedStateSlices } from "./state-adoption";
 import { useStableEvent } from "./panels/use-stable-event";
 import { applyTestRunDelta, reconcileTestRunSnapshot, type TestRunSummary } from "./test-runs";
+import { NO_TEST_RUN_ACTIVITIES, type TestRunActivities, type TestRunOverview, type TestRunViewRevision } from "./test-run-overview";
 import { applyTestRunWaitDelta, type TestRunWaitRecord } from "./test-run-waits";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import {
@@ -284,6 +285,24 @@ export function useAppLiveState(
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const [testRuns, setTestRuns] = useState<TestRunSummary[]>([]);
+  const [testRunOverview, setTestRunOverview] = useState<TestRunOverview>();
+  const [testRunActivities, setTestRunActivities] = useState<TestRunActivities>(NO_TEST_RUN_ACTIVITIES);
+  const [testRunViewRevision, setTestRunViewRevision] = useState<TestRunViewRevision>();
+  const testRunViewRevisionRef = useRef<TestRunViewRevision | undefined>(undefined);
+
+  // Called only after the existing global revision/instance admission. Keep
+  // unrelated state publications from invalidating every open history reader.
+  function adoptTestRunOverview(overview: TestRunOverview | undefined, serverInstanceId: string, revision: number,
+    activity: TestRunActivities | ((previous: TestRunActivities) => TestRunActivities)) {
+    const previous = testRunViewRevisionRef.current;
+    if (overview && previous?.serverInstanceId === serverInstanceId && previous.version === overview.version) return;
+    const next = overview ? { serverInstanceId, revision, version: overview.version } : undefined;
+    testRunViewRevisionRef.current = next;
+    setTestRunViewRevision(next);
+    setTestRunOverview(overview);
+    setTestRunActivities(overview ? activity : NO_TEST_RUN_ACTIVITIES);
+    if (overview) setTestRuns(current => current.length ? [] : current);
+  }
   const [testRunWaits, setTestRunWaits] = useState<readonly TestRunWaitRecord[]>([]);
   const [testRunWaitFailures, setTestRunWaitFailures] = useState<import("./test-run-waits").TestRunWaitFailures>({});
   const seenTestRunWaitFailuresRef = useRef(new Map<string, import("./test-run-waits").TestRunWaitFailure>());
@@ -1532,7 +1551,10 @@ export function useAppLiveState(
         return Object.keys(kept).length === Object.keys(current).length ? current : kept;
       });
     }
-    setTestRuns(current => reconcileTestRunSnapshot(current, nextState.testRuns ?? []));
+    adoptTestRunOverview(nextState.testRunOverview, nextState.serverInstanceId, nextState.revision,
+      Object.fromEntries(nextState.sessions.filter(session => session.testRunActivity)
+        .map(session => [session.id, session.testRunActivity!])));
+    if (!nextState.testRunOverview) setTestRuns(current => reconcileTestRunSnapshot(current, nextState.testRuns ?? []));
     adoptTestRunWaitsFromState(nextState);
     setHasAdoptedStateSnapshot(true);
     if (nextState.serverInstanceId) {
@@ -1748,9 +1770,17 @@ export function useAppLiveState(
       sessions: [],
       delegations,
     };
-    setTestRuns(current => reconcileTestRunSnapshot(
-      current,
-      mergeStateDiffRows(current, diff.testRuns, (run) => run.runId),
+    adoptTestRunOverview(diff.header.testRunOverview, diff.serverInstanceId, diff.revision, previous => {
+      const next = { ...previous };
+      for (const id of diff.sessions.removed) delete next[id];
+      for (const session of diff.sessions.changed) {
+        if (session.testRunActivity) next[session.id] = session.testRunActivity;
+        else delete next[session.id];
+      }
+      return next;
+    });
+    if (!diff.header.testRunOverview && diff.testRuns) setTestRuns(current => reconcileTestRunSnapshot(
+      current, mergeStateDiffRows(current, diff.testRuns!, (run) => run.runId),
     ));
     adoptTestRunWaitsFromState(nextState);
     hydrationMismatchSessionIdsRef.current.clear();
@@ -1798,8 +1828,10 @@ export function useAppLiveState(
     requestSessionTailRead,
     visibleHydrationSessionIdsRef,
     applyTestRunDeltaLocally: delta => {
-      if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
-        setTestRuns(current => applyTestRunDelta(current, delta));
+      if (delta.type === "testRunsInvalidated") {
+        adoptTestRunOverview(delta.overview, delta.serverInstanceId, delta.revision, delta.activity);
+      } else if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
+        if (!testRunViewRevisionRef.current) setTestRuns(current => applyTestRunDelta(current, delta));
       } else if (delta.type === "testRunWaitResumeDispatchFailed") {
         if (
           classifyDeltaServerIdentity(
@@ -1901,6 +1933,9 @@ export function useAppLiveState(
   return {
     adoptState,
     testRuns,
+    testRunOverview,
+    testRunActivities,
+    testRunViewRevision,
     testRunWaits,
     testRunWaitFailures,
     dismissTestRunWaitFailure,

@@ -86,6 +86,7 @@ fn remote_test_run_wait_label(
         detail: "association_stale: awaiting authenticated native origin facts".to_owned(),
     };
     Ok(TestRunWaitRunLabel {
+        observation: None,
         remote: Some(remote), run_id: reference.to_owned(), run_dir: String::new(),
         preset: TestRunPreset::Focused, worktree: String::new(), owner_session_id: None,
         started_at: None, request_identity: None,

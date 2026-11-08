@@ -899,6 +899,9 @@ export default function App() {
   const {
     adoptState,
     testRuns,
+    testRunOverview,
+    testRunActivities,
+    testRunViewRevision,
     testRunWaits,
     testRunWaitFailures,
     dismissTestRunWaitFailure,
@@ -994,7 +997,8 @@ export default function App() {
   });
   // One index of each session's running owned launcher work, shared by the
   // docked and standalone Sessions lists.
-  const testRunsByOwner = useMemo(() => runningRunsByOwner(testRuns), [testRuns]);
+  const testRunsByOwner = useMemo(() => testRunOverview
+    ? new Map(Object.entries(testRunActivities)) : runningRunsByOwner(testRuns), [testRuns, testRunOverview, testRunActivities]);
 
   const selectedProject =
     selectedProjectId === ALL_PROJECTS_FILTER_ID
@@ -2129,7 +2133,8 @@ export default function App() {
   }
 
   return (
-    <TestRunsProvider runs={testRuns} waits={testRunWaits} failures={testRunWaitFailures}
+    <TestRunsProvider runs={testRuns} overview={testRunOverview} activity={testRunActivities} viewRevision={testRunViewRevision}
+      waits={testRunWaits} failures={testRunWaitFailures}
       dismissFailure={dismissTestRunWaitFailure} snapshotReady={hasAdoptedStateSnapshot} open={(sessionId = null, target, allProjects = false) => {
       setWorkspace(current => applyControlPanelLayout(openTestRunsInWorkspaceState(
         current, current.activePaneId, sessionId ?? activeSession?.id ?? null,

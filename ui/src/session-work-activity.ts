@@ -6,7 +6,8 @@
 // index knows about count; a build that was never registered there is not
 // seen.
 // New file; not split from an existing one.
-import { testRunDetachModeUnobserved, type RunningRunsByOwner } from "./test-runs";
+import { testRunDetachModeUnobserved } from "./test-runs";
+import type { SessionWorkByOwner, SessionTestRunActivity } from "./test-run-overview";
 import type { Session } from "./types";
 
 export type SessionWorkActivity = {
@@ -26,10 +27,16 @@ export function hasForegroundTurn(session: Session): boolean {
 
 export function sessionWorkActivity(
   session: Session,
-  runsByOwner: RunningRunsByOwner | undefined,
+  runsByOwner: SessionWorkByOwner | undefined,
 ): SessionWorkActivity {
   const foreground = hasForegroundTurn(session);
   const owned = runsByOwner?.get(session.id) ?? [];
+  if (!Array.isArray(owned)) {
+    const activity = owned as SessionTestRunActivity;
+    return { foreground,
+      background: (foreground ? activity.backgroundRunning : activity.ownedRunning) > 0,
+      modeUnknown: foreground && activity.backgroundRunning > 0 && activity.modeUnknownRunning === activity.backgroundRunning };
+  }
   // During a turn, a run the turn itself started in the foreground is part of
   // that turn. Without a turn, any running owned run is background work,
   // whatever its detach mode.

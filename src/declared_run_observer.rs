@@ -5,6 +5,8 @@
 // Git/artifact reads hold neither. S0 publishes only before prompt handoff,
 // R never moves, and END freezes artifact judgment before later tool events.
 
+include!("declared_run_task_end.rs");
+
 // The owner may use 30 s to capture source. Opening also reserves the existing
 // authority-read budget for declaration/preimage and publication stages;
 // registration durability itself is unchanged. Expiry withholds credit,
@@ -584,7 +586,7 @@ impl AppState {
             check.outcome = EngramVerificationRecordCheckOutcome::Indeterminate;
             check.summary = Some("The process was interrupted before its artifact END was frozen.".to_owned());
         }
-        let ended_test_runs = self.observe_test_command_end(session_id, provenance, key,
+        let ended_test_runs = self.observe_test_command_end_awaiting_declared_verdict(session_id, provenance, key,
             if exit == Some(EngramCommandExit::NotFinished) { None } else { exit });
         let outcome = check.as_ref().ok().map(|check| match check.outcome {
             EngramVerificationRecordCheckOutcome::Passed => EngramExecutionOutcome::Succeeded,

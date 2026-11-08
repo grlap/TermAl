@@ -10,6 +10,10 @@ use super::super::delegation_support::install_required_review_delegation;
 use super::super::run_git_test_command;
 use super::*;
 
+#[path = "eo_repository_seed.rs"]
+mod repository_seed;
+use repository_seed::{EORepositorySeedScope, prepare_eo_repository};
+
 #[path = "engram_ordinary_opening.rs"]
 mod ordinary_opening;
 
@@ -828,6 +832,7 @@ impl EOCheckedTurn {
         named: bool,
         real_clock: bool,
     ) -> Self {
+        let _timing = fixture_phase("host_fixture");
         use_toolchain_label(Some(FIXTURE_TOOLCHAIN));
         let (state, runtime_rx) =
             test_app_state_with_delegation_codex_runtime(&format!("eo-check-{label}"));
@@ -842,12 +847,9 @@ impl EOCheckedTurn {
         let root = state.test_temp_root.as_ref().unwrap().path()
             .join(format!("eo-check-{label}-project"));
         fs::create_dir_all(&root).unwrap();
-        run_git_test_command(&root, &["init", "--quiet"]);
-        run_git_test_command(&root, &["config", "user.email", "termal-tests@example.com"]);
-        run_git_test_command(&root, &["config", "user.name", "TermAl tests"]);
-        fs::write(root.join("README.md"), "checked\n").unwrap();
-        run_git_test_command(&root, &["add", "README.md"]);
-        run_git_test_command(&root, &["commit", "--quiet", "-m", "checked"]);
+        let git_timing = fixture_phase("git_fixture");
+        prepare_eo_repository(&root);
+        drop(git_timing);
         let project = create_test_project(&state, &root, "Execution Observability checks");
         let workdir = subdirectory.map_or_else(|| root.clone(), |part| root.join(part));
         fs::create_dir_all(&workdir).unwrap();
@@ -980,6 +982,7 @@ impl EOCheckedTurn {
     }
 
     pub(super) fn wait_for_snapshots(&self) {
+        let _timing = fixture_phase("snapshot_wait");
         let captures = self.record(|record| record.engram.active_turn_checks.iter()
             .flat_map(|check| std::iter::once(check.start_basis.clone())
                 .chain(check.end.as_ref().map(|end| end.end_basis.clone())))

@@ -6,7 +6,7 @@ import * as api from "./api";
 import { useAppLiveState } from "./app-live-state";
 import { withLiveSessionAuthority, type TestLiveStateParams } from "./session-publication-test-fixtures";
 import type { UseAppLiveStateParams } from "./app-live-state-types";
-import { makeTestRun, makeTestRunCard, makeTestRunDetail, makeTestRunWait } from "./test-runs-fixtures";
+import { makeTestRun, makeTestRunCard, makeTestRunDetail, makeTestRunWait, makeTestRunOverview, makeTestRunActivity } from "./test-runs-fixtures";
 import type { Session, TestRunCardMessage } from "./types";
 import * as runsApi from "./test-runs-api";
 import { TestRunsProvider } from "./test-runs-context";
@@ -910,4 +910,120 @@ it("requests a snapshot on a global revision gap without applying partial run st
   await waitFor(() => expect(fetchState.mock.calls.length).toBe(callsBefore + 1));
   await act(async () => resolve(snapshot(4, [makeTestRun()])));
   expect(hook.result.current.testRuns).toHaveLength(1);
+});
+
+it("adopts counters and bounded activity without accumulating run rows, and revision-gates invalidations and reconnects", () => {
+  vi.stubGlobal("EventSource", Stream);
+  vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
+  const options = params();
+  const hook = renderHook(() => useAppLiveState(options));
+  const activity = makeTestRunActivity({ ownedRunning: 257, backgroundRunning: 257 });
+  const summary: api.StateResponse["sessions"][number] = { id: "owner", name: "Owner", emoji: "x", agent: "Codex",
+    workdir: "/repo", model: "default", status: "idle", preview: "", messageCount: 0, queuePaused: false, testRunActivity: activity };
+  const overview = makeTestRunOverview({ total: 257, running: 257, needsAttention: 257 });
+  act(() => hook.result.current.adoptState({ ...snapshot(1, [makeTestRun()]), testRunOverview: overview, sessions: [summary] },
+    { allowUnknownServerInstance: true }));
+  expect(hook.result.current.testRuns).toEqual([]);
+  expect(hook.result.current.testRunOverview?.running).toBe(257);
+  expect(hook.result.current.testRunActivities.owner).toEqual(activity);
+  const token = hook.result.current.testRunViewRevision;
+  act(() => hook.result.current.adoptState({ ...snapshot(2), testRunOverview: overview, sessions: [summary] }));
+  expect(hook.result.current.testRunViewRevision).toBe(token);
+  const ended = makeTestRunOverview({ version: 2, total: 257, passed: 257 });
+  act(() => Stream.latest.emit({ type: "testRunsInvalidated", revision: 3, serverInstanceId: "test-server", overview: ended, activity: {} }));
+  expect(hook.result.current.testRunOverview).toEqual(ended);
+  expect(hook.result.current.testRunActivities).toEqual({});
+  act(() => Stream.latest.emit({ type: "testRunsInvalidated", revision: 2, serverInstanceId: "test-server", overview, activity: { owner: activity } }));
+  expect(hook.result.current.testRunOverview).toEqual(ended);
+  // A restarted server's lower version is valid only through a full adoption.
+  act(() => hook.result.current.adoptState({ ...snapshot(1), serverInstanceId: "new-server", testRunOverview: overview, sessions: [summary] },
+    { allowUnknownServerInstance: true }));
+  expect(hook.result.current.testRunOverview?.running).toBe(257);
+  act(() => Stream.latest.emit({ type: "testRunsInvalidated", revision: 4, serverInstanceId: "test-server", overview: ended, activity: {} }));
+  expect(hook.result.current.testRunOverview?.running).toBe(257);
+  expect(hook.result.current.testRuns).toEqual([]);
+});
+
+it("rejects a retired-server invalidation at the next revision without changing reader identity or liveness", () => {
+  vi.stubGlobal("EventSource", Stream);
+  const fetch = vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
+  const options = params();
+  const hook = renderHook(() => useAppLiveState(options));
+  act(() => hook.result.current.adoptState(snapshot(10), { allowUnknownServerInstance: true }));
+  const overview = makeTestRunOverview({ total: 2, running: 2 });
+  act(() => hook.result.current.adoptState({ ...snapshot(1), serverInstanceId: "server-b", testRunOverview: overview },
+    { allowUnknownServerInstance: true }));
+  const token = hook.result.current.testRunViewRevision;
+  const before = fetch.mock.calls.length;
+  vi.mocked(options.clearRecoveredBackendRequestError).mockClear();
+  act(() => Stream.latest.emit({ type: "testRunsInvalidated", revision: 2, serverInstanceId: "test-server",
+    overview: makeTestRunOverview({ version: 99, total: 99, passed: 99 }), activity: { wrong: makeTestRunActivity() } }));
+  expect(hook.result.current.testRunOverview).toEqual(overview);
+  expect(hook.result.current.testRunActivities).toEqual({});
+  expect(hook.result.current.testRunViewRevision).toBe(token);
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(1);
+  expect(options.adoptionRefs.lastSeenServerInstanceIdRef.current).toBe("server-b");
+  expect(options.clearRecoveredBackendRequestError).not.toHaveBeenCalled();
+  expect(fetch).toHaveBeenCalledTimes(before);
+  const ended = makeTestRunOverview({ version: 2, total: 2, passed: 2 });
+  act(() => Stream.latest.emit({ type: "testRunsInvalidated", revision: 2, serverInstanceId: "server-b", overview: ended, activity: {} }));
+  expect(hook.result.current.testRunOverview).toEqual(ended);
+  expect(hook.result.current.testRunViewRevision?.serverInstanceId).toBe("server-b");
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(2);
+});
+
+it.each(["unknown-server", undefined, ""])("repairs an unproven next-revision invalidation from %s through a snapshot", async serverInstanceId => {
+  vi.stubGlobal("EventSource", Stream);
+  let resolve!: (state: api.StateResponse) => void;
+  const fetch = vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(done => { resolve = done; }));
+  const options = params();
+  const hook = renderHook(() => useAppLiveState(options));
+  const overview = makeTestRunOverview({ total: 2, running: 2 });
+  act(() => hook.result.current.adoptState({ ...snapshot(1), testRunOverview: overview }, { allowUnknownServerInstance: true }));
+  const token = hook.result.current.testRunViewRevision;
+  const before = fetch.mock.calls.length;
+  vi.mocked(options.clearRecoveredBackendRequestError).mockClear();
+  act(() => Stream.latest.emit({ type: "testRunsInvalidated", revision: 2, serverInstanceId,
+    overview: makeTestRunOverview({ version: 99, total: 99, passed: 99 }), activity: { wrong: makeTestRunActivity() } }));
+  expect(hook.result.current.testRunOverview).toEqual(overview);
+  expect(hook.result.current.testRunActivities).toEqual({});
+  expect(hook.result.current.testRunViewRevision).toBe(token);
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(1);
+  expect(options.clearRecoveredBackendRequestError).not.toHaveBeenCalled();
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(before + 1));
+  const repaired = makeTestRunOverview({ version: 2, total: 2, passed: 2 });
+  const responseServer = serverInstanceId || "test-server";
+  await act(async () => resolve({ ...snapshot(1), serverInstanceId: responseServer, testRunOverview: repaired }));
+  expect(hook.result.current.testRunOverview).toEqual(repaired);
+  expect(hook.result.current.testRunViewRevision?.serverInstanceId).toBe(responseServer);
+  expect(options.adoptionRefs.lastSeenServerInstanceIdRef.current).toBe(responseServer);
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(1);
+});
+
+it("adopts scanner cumulative cuts across hidden revisions and at an already-applied public revision without HTTP repair", () => {
+  vi.stubGlobal("EventSource", Stream);
+  const fetch = vi.spyOn(api, "fetchState").mockImplementation(() => new Promise(() => {}));
+  const options = params();
+  const hook = renderHook(() => useAppLiveState(options));
+  const running = makeTestRunOverview({ version: 1, total: 2, running: 2 });
+  act(() => hook.result.current.adoptState({ ...snapshot(1), testRunOverview: running },
+    { allowUnknownServerInstance: true, stateDiffBase: true }));
+  const before = fetch.mock.calls.length;
+  const completed = makeTestRunOverview({ version: 2, total: 2, passed: 2 });
+  const emitCut = (baseRevision: number, revision: number, testRunOverview: typeof running) => {
+    Stream.latest.dispatchEvent(new MessageEvent("stateDiff", { data: JSON.stringify({
+      baseRevision, revision, serverInstanceId: "test-server",
+      header: { ...snapshot(revision), testRunOverview, testRunWaits: [], delegationWaits: [], pendingEngramMcpRevocationSessionIds: [] },
+      sessions: { changed: [], removed: [] }, delegations: { changed: [], removed: [] },
+    }) }));
+  };
+  act(() => emitCut(1, 3, completed));
+  expect(hook.result.current.testRunOverview).toEqual(completed);
+  expect(options.adoptionRefs.latestStateRevisionRef.current).toBe(3);
+  act(() => Stream.latest.emit({ type: "codexUpdated", revision: 4, codex: {} }));
+  const settled = { ...completed, version: 3, needsAttention: 0 };
+  act(() => emitCut(3, 4, settled));
+  expect(hook.result.current.testRunOverview).toEqual(settled);
+  expect(fetch).toHaveBeenCalledTimes(before);
+  expect(hook.result.current.testRuns).toEqual([]);
 });

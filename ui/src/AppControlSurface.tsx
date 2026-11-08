@@ -73,7 +73,7 @@ import {
   WorkingSessionsBreakdownDescription,
   WorkingSessionsChipLabel,
 } from "./working-sessions-chip";
-import type { RunningRunsByOwner } from "./test-runs";
+import type { SessionWorkByOwner as RunningRunsByOwner } from "./test-run-overview";
 import type { SessionListSearchResult } from "./session-find";
 import type {
   OrchestratorRuntimeAction,

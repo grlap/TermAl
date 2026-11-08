@@ -215,7 +215,8 @@ fn test_run_compaction_eligible_with(
     ids.iter()
         .filter_map(|id| inner.test_run_observations.get(*id))
         .all(|row| {
-            index.observations_durable.contains(&row.execution_id)
+            !row.declared_verdict_pending
+                && index.observations_durable.contains(&row.execution_id)
                 && !index.observations_failed.contains(&row.execution_id)
                 && !pending.contains_key(&row.execution_id)
         })
@@ -242,13 +243,21 @@ fn test_run_compact_artifact_matches(row: &TestRunCompacted, disk: &TestRunDisk)
 }
 
 fn test_run_history_locked(inner: &StateInner, project: Option<&str>) -> TestRunHistory {
+    test_run_history_from_projection(inner, &test_run_summaries_locked(inner), project)
+}
+
+fn test_run_history_from_projection(
+    inner: &impl TestRunProjectionSource,
+    runs: &[TestRunSummary],
+    project: Option<&str>,
+) -> TestRunHistory {
     let included = |summary: &TestRunSummary| {
         project.is_none_or(|id| summary.project_id.as_deref() == Some(id))
     };
     let mut compacted_count = 0;
     let mut omitted_count = 0;
-    let indexed = test_run_indexed_ids(&inner.test_runs);
-    for row in inner.test_run_compacted.values().filter(|row| {
+    let indexed = test_run_indexed_ids(inner.projection_index());
+    for row in inner.projection_compacted().values().filter(|row| {
         row.compacted
             && test_run_compact_is_installed_with(inner, row, |id| indexed.contains(id))
             && included(&row.summary)
@@ -261,7 +270,7 @@ fn test_run_history_locked(inner: &StateInner, project: Option<&str>) -> TestRun
                 == Some(false),
         );
     }
-    let unresolved_backlog = test_run_summaries_locked(inner)
+    let unresolved_backlog = runs
         .iter()
         .filter(|run| included(run) && run.registration.restart_would_void_evidence != Some(false))
         .count();

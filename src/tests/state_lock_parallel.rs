@@ -289,9 +289,13 @@ async fn model_round_boundary(barrier: &tokio::sync::Barrier) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
+    let timings = FixtureTimings::start("parallel_model");
+    timings.phase("fixture_setup");
     let _temp_scope = TestTempRootDirectoryScope::repository_local();
     let root = TestTempRoot::create("modeled-state-parallel");
+    timings.phase("seed_model");
     let (path, ids) = seed_model(root.path());
+    timings.phase("boot_and_mailbox_setup");
     let origin = std::time::Instant::now();
     let phase_number = Arc::new(AtomicUsize::new(1));
     let holds = Arc::new(Mutex::new(Vec::<HoldSample>::new()));
@@ -409,6 +413,7 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
     let mut receiver = tick_rx;
     let mut warm_started = None;
     for (phase_index, phase, iterations) in [(1, "cold", 10), (2, "warm", MODEL_WARM_ROUNDS)] {
+        timings.phase(if phase_index == 1 { "cold_operations" } else { "warm_operations" });
         phase_number.store(phase_index, Ordering::SeqCst);
         if phase_index == 2 {
             warm_started = Some(std::time::Instant::now());
@@ -532,7 +537,9 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
     // affected paths exercised during the cold and warm workload.
     let teardown_started = std::time::Instant::now();
     phase_number.store(3, Ordering::SeqCst);
+    timings.phase("worker_shutdown");
     drop(workers);
+    timings.phase("report_and_assertions");
     state.persist_observer.test_tick_sink.lock().unwrap().take();
     all_ticks.extend(receiver.try_iter());
     let mut holds = holds.lock().unwrap().clone();
@@ -787,4 +794,5 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
         (edited_messages..=edits).contains(&warm_messages),
         "{warm_messages} warm messages written for {edits} edits of {edited_messages} messages",
     );
+    timings.phase("scope_cleanup");
 }

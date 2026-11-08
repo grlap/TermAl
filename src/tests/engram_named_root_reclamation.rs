@@ -43,6 +43,10 @@ mod capacity {
     include!("engram_named_root_capacity.rs");
 }
 
+mod completion_clear {
+    include!("engram_named_root_completion_clear.rs");
+}
+
 
 // Compose the existing EO state/work-service owner with a real Git worktree.
 pub(super) fn root_fixture(label: &str) -> (EOCheckedTurn, PathBuf) {

@@ -4,6 +4,8 @@
 // their existing adapters. A native exit never constitutes verification.
 
 include!("test_run_projection.rs");
+include!("test_run_declared_settlement.rs");
+include!("test_run_untraced_declared.rs");
 
 #[cfg(test)]
 thread_local! {
@@ -46,6 +48,10 @@ struct TestRunCommandObservation {
     artifact: Option<TestRunObservedArtifact>,
     #[serde(default)]
     declared_artifact: Option<String>,
+    // Original declaration and artifact start image, retained for the task's
+    // ordinary END even when no native verification reservation was admitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    declared_binding: Option<EngramDeclaredBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     declared_native: Option<DeclaredRunReservation>,
     /// A successful command result acknowledged only a detached/background launch.
@@ -55,6 +61,10 @@ struct TestRunCommandObservation {
     // after positive host checks of both binding and reporting absence.
     #[serde(default)]
     final_unbound_proof: Option<TestRunFinalUnboundProof>,
+    // The provider ended, but its declared artifact verdict is still being
+    // applied by the producer. This is a settlement phase, not credit.
+    #[serde(default)]
+    declared_verdict_pending: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -132,9 +142,9 @@ fn test_run_can_finalize_unbound(
 }
 
 fn test_run_observation_boot(row: &mut TestRunCommandObservation) {
-    // A known terminal execution is a durable fact. Only outstanding
-    // execution/reporting monitoring acquires a new interruption marker.
-    if row.summary.ended_at.is_none() {
+    // A known terminal execution is a durable fact. An ended provider row
+    // whose declared verdict was not yet applied is still outstanding.
+    if row.summary.ended_at.is_none() || row.declared_verdict_pending {
         row.monitoring_interrupted_at
             .get_or_insert_with(test_run_timestamp);
         row.summary.state = TestRunState::Unknown;
@@ -646,12 +656,14 @@ impl AppState {
             validated_unbound,
             monitoring_interrupted_at: None,
             final_unbound_proof: None,
+            declared_verdict_pending: false,
             evidence: Vec::new(),
             artifact: native.as_ref().map(|start| TestRunObservedArtifact {
                 run_id: start.run_id.clone(), run_directory: start.run_directory.clone(),
                 request_identity: Some(start.request_identity.clone()), terminal_digest: None,
             }),
             declared_native: native,
+            declared_binding: declared.cloned(),
             declared_artifact: declared
                 .map(|binding| test_run_display_path(FsPath::new(&binding.artifact_canonical))),
             launch_only,
@@ -718,6 +730,20 @@ impl AppState {
         exit: Option<EngramCommandExit>,
         unknown_detail: Option<&str>,
     ) -> Vec<String> {
+        self.observe_test_command_end_locked_with_declared_phase(
+            inner, session_id, provenance, key, exit, unknown_detail, false)
+    }
+
+    fn observe_test_command_end_locked_with_declared_phase(
+        &self,
+        inner: &mut StateInner,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        exit: Option<EngramCommandExit>,
+        unknown_detail: Option<&str>,
+        declared_verdict_pending: bool,
+    ) -> Vec<String> {
         let Some(index) = inner.find_session_index(session_id) else {
             return Vec::new();
         };
@@ -776,6 +802,9 @@ impl AppState {
                     return Some(row.clone());
                 }
                 row.summary.ended_at = Some(test_run_timestamp());
+                row.declared_verdict_pending = declared_verdict_pending
+                    && matches.len() == 1
+                    && row.declared_artifact.is_some();
                 transitioned = true;
                 row.summary.state = if matches.len() != 1 {
                     TestRunState::Unknown
@@ -1081,9 +1110,9 @@ impl AppState {
             .test_run_observations
             .values()
             .filter(|row| {
-                (row.summary.state == TestRunState::Running
+                (((row.summary.state == TestRunState::Running
                     || (row.launch_only && row.summary.state == TestRunState::Unknown))
-                    && row.summary.ended_at.is_none()
+                    && row.summary.ended_at.is_none()) || row.declared_verdict_pending)
                     && !row.summary.interrupted
                     && inner
                         .find_session_index(row.summary.owner_session_id.as_deref().unwrap_or(""))
@@ -1131,18 +1160,26 @@ impl AppState {
             self.persist_test_command_observation_locked(&mut inner, row);
         }
         let pending = inner.test_runs.observation_persistence.clone();
-        let mut pending = pending.0.lock().expect("test observation mutex poisoned");
-        let completed: Vec<_> = pending
-            .iter()
-            .filter_map(|(id, (expected, waiter))| {
-                // Poll on the clock the fence's deadline is measured on.
-                waiter
-                    .wait_until(waiter.now())
-                    .map(|result| (id.clone(), expected.clone(), result))
-            })
-            .collect();
+        let completed: Vec<_> = {
+            let pending = pending.0.lock().expect("test observation mutex poisoned");
+            pending
+                .iter()
+                .filter_map(|(id, (expected, waiter))| {
+                    // Poll on the clock the fence's deadline is measured on.
+                    waiter
+                        .wait_until(waiter.now())
+                        .map(|result| (id.clone(), expected.clone(), result))
+                })
+                .collect()
+        };
         for (id, expected, result) in completed {
-            pending.remove(&id);
+            // Publication captures pending attention as part of its immutable
+            // cut. Release this guard before that path reads the same mutex.
+            pending
+                .0
+                .lock()
+                .expect("test observation mutex poisoned")
+                .remove(&id);
             if inner.test_run_observations.get(&id) != Some(&expected) {
                 continue;
             }
@@ -1441,17 +1478,17 @@ fn test_run_artifact_fallback(inner: &StateInner, run_id: &str) -> Option<TestRu
 /// `indexed(run_id)` answers whether the run is an indexed entry, as
 /// `test_run_compact_is_installed_with` takes it.
 fn test_run_artifact_fallback_from_observations<'a>(
-    inner: &StateInner,
+    inner: &impl TestRunProjectionSource,
     run_id: &str,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
     indexed: impl FnOnce(&str) -> bool,
 ) -> Option<TestRunSummary> {
-    let run = if let Some(row) = inner.test_run_registrations.get(run_id) {
+    let run = if let Some(row) = inner.projection_registrations().get(run_id) {
         test_run_registered_fallback_from_observations(inner, row, observations)
     } else {
-        let row = inner.test_run_compacted.get(run_id)?;
+        let row = inner.projection_compacted().get(run_id)?;
         if (row.compacted && test_run_compact_is_installed_with(inner, row, indexed))
-            || inner.test_run_observations.contains_key(run_id)
+            || inner.projection_has_observation(run_id)
         {
             return None;
         }
@@ -1516,10 +1553,17 @@ fn test_run_compaction_summary(inner: &StateInner, run_id: &str) -> Option<TestR
 }
 
 fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
+    test_run_project_history(inner, false)
+}
+
+// Shared canonical merge for internal consumers and complete on-demand
+// history. The complete view includes installed minimal retained identities
+// before association merging, so their execution aliases cannot reappear.
+fn test_run_project_history(inner: &impl TestRunProjectionSource, complete: bool) -> Vec<TestRunSummary> {
     #[cfg(test)]
     TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.set(count.get() + 1));
     let projection = TestRunProjection::new(inner);
-    let mut runs = inner.test_runs.summaries();
+    let mut runs = inner.projection_index().summaries();
     // Cached summaries cannot serve an old 'safe' value after lifecycle changes.
     for run in &mut runs {
         if let Some(entry) = projection.entries.get(run.run_id.as_str()) {
@@ -1530,12 +1574,20 @@ fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
         }
     }
     let retained: std::collections::BTreeSet<_> = inner
-        .test_run_registrations
+        .projection_registrations()
         .keys()
-        .chain(inner.test_run_compacted.keys())
+        .chain(inner.projection_compacted().keys())
         .collect();
     runs.extend(retained.into_iter().filter_map(|id| {
         if !projection.entries.contains_key(id.as_str()) {
+            if complete {
+                if let Some(row) = inner.projection_compacted().get(id)
+                    .filter(|row| test_run_compact_is_installed_with(inner, row, |id| {
+                        projection.entries.contains_key(id)
+                    })) {
+                    return Some(test_run_compacted_summary(inner, row));
+                }
+            }
             test_run_artifact_fallback_from_observations(
                 inner,
                 id,
@@ -1558,7 +1610,7 @@ fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
     }
     runs.extend(
         inner
-            .test_run_observations
+            .projection_observations()
             .values()
             .filter(|row| !merged.contains(&row.execution_id))
             .map(|row| test_run_observation_summary(inner, row)),

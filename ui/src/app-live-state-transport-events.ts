@@ -556,13 +556,14 @@ export function createAppLiveStateTransportEventHandlers(
         }
       }
       if (delta.type === "testRunWaitCreated" || delta.type === "testRunWaitConsumed" ||
-          delta.type === "delegationWaitCreated" || delta.type === "delegationWaitConsumed") {
+          delta.type === "delegationWaitCreated" || delta.type === "delegationWaitConsumed" ||
+          delta.type === "testRunsInvalidated") {
         const identity = classifyDeltaServerIdentity(
           delta.serverInstanceId, lastSeenServerInstanceIdRef.current, seenServerInstanceIdsRef.current,
         );
         if (identity !== "current") {
-          // A retired server cannot mutate a replacement's waits or request
-          // repair at its old revision. Unknown/missing identity needs a
+          // A retired server cannot mutate a replacement's waits or run index,
+          // or request repair at its old revision. Unknown/missing identity needs a
           // snapshot; never compare that delta's revision to the current one.
           if (identity === "unproven") {
             requestStateResync({
@@ -822,7 +823,7 @@ export function createAppLiveStateTransportEventHandlers(
 
       // Each test-run index delta has a commit of its own, so it may move the
       // revision. Wait deltas take the authoritative-repair branch above.
-      if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
+      if (delta.type === "testRunChanged" || delta.type === "testRunRemoved" || delta.type === "testRunsInvalidated") {
         if (!applyTestRunDeltaLocally) {
           requestStateResync({ rearmOnFailure: true });
           return;

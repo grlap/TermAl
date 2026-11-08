@@ -1675,6 +1675,7 @@ impl AppState {
             | DeltaEvent::DelegationCanceled { .. }
             | DeltaEvent::TestRunChanged { .. }
             | DeltaEvent::TestRunRemoved { .. }
+            | DeltaEvent::TestRunsInvalidated { .. }
             | DeltaEvent::TestRunWaitCreated { .. }
             | DeltaEvent::TestRunWaitConsumed { .. }
             | DeltaEvent::TestRunWaitResumeDispatchFailed { .. } => {

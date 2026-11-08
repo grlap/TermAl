@@ -384,6 +384,54 @@ fn engram_named_root_retired_by<'a>(
         .find(|notice| notice.selection == *root && notice.owner.as_deref() == Some(owner))
 }
 
+/// A completed binding may already have been retired by maintenance. Reading
+/// that exact published result grants no naming or producer-write authority.
+fn engram_completed_own_root_clear_locked(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+    session_id: &str,
+    work: &str,
+) -> Option<EngramSourceRootResponse> {
+    let history = inner.engram_work_naming_history.iter().find(|history| {
+        &history.store == store
+            && (history.work_id == work || history.retirements.iter().any(|notice| {
+                notice.selection.short_ref == work
+            }))
+    })?;
+    if engram_authority_work_unresolved(inner, store, &history.work_id)
+        || inner.engram_work_source_roots.iter().any(|root| {
+            &root.store == store && root.work_id == history.work_id
+        })
+    {
+        return None;
+    }
+    let owner = history.transition.as_ref()?;
+    let notice = history.retirements.iter().rev().find(|notice| {
+        notice.published
+            && notice.selection.store == *store
+            && notice.selection.work_id == history.work_id
+            && notice.selection.named_by_session == session_id
+            && notice.read.run.state == "completed"
+            && notice.owner.as_deref() == Some(owner.id.as_str())
+            && engram_same_recovery_run(&notice.binding, &owner.binding)
+    })?;
+    // A newer locally held claim cannot inherit the old completion result.
+    if inner.sessions.iter().any(|record| {
+        record.engram.work_binding.as_ref().is_some_and(|binding| {
+            binding.work_id == history.work_id && binding.claim_id != notice.selection.claim_id
+        })
+    }) {
+        return None;
+    }
+    Some(EngramSourceRootResponse {
+        work_ref: notice.selection.short_ref.clone(), work_id: history.work_id.clone(), root: None,
+        source_revision: None, unmeasured: None, generation: 0, sealed: None,
+        evaluation_notice: None,
+        notice: format!("`{}`: already ended by completion; no name was changed and no producer event was created.",
+            notice.selection.short_ref),
+    })
+}
+
 fn engram_named_root_capacity(inner: &StateInner) -> usize {
     inner.engram_work_source_roots.len()
         + inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
@@ -827,14 +875,30 @@ impl AppState {
         deadline: std::time::Instant,
     ) -> Result<EngramSourceRootResponse, ApiError> {
         if !self.recover_one_engram_root_until(root,
-            &EngramRootReclamationRoute::OwnClear(session_id.to_owned()), deadline)?
+            &EngramRootReclamationRoute::OwnClear(session_id.to_owned()), deadline)
+            .map_err(|mut error| {
+                if error.status == StatusCode::CONFLICT
+                    && error.message == ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR
+                {
+                    error.message = format!(
+                        "retained_name_release_unconfirmed: {}; completion alone does not confirm this local clear. Refresh authority in the original store and read the current named-root status before another release; no producer mutation was authorized",
+                        error.message);
+                }
+                error
+            })?
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let reason = inner.engram_work_naming_history.iter()
                 .find(|history| history.store == root.store && history.work_id == root.work_id)
                 .and_then(|history| history.recovery_reason.as_deref())
                 .unwrap_or("the canonical run and binding remain open, or the read is older than this selection");
-            return Err(ApiError::conflict(format!("retained name was not cleared: {reason}; no obsolete-binding proof was acknowledged")));
+            return Err(ApiError::conflict(format!("retained name was not cleared: {reason}; no obsolete-binding proof was acknowledged. Read the current named-root status and keep the entry until canonical run or claim closure is confirmed")));
+        }
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        if let Some(completed) = engram_completed_own_root_clear_locked(
+            &inner, &root.store, session_id, &root.work_id,
+        ) {
+            return Ok(completed);
         }
         Ok(EngramSourceRootResponse {
             work_ref: root.short_ref.clone(), work_id: root.work_id.clone(), root: None,

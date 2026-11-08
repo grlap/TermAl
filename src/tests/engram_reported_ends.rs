@@ -26,6 +26,9 @@ mod claim_deferral {
     include!("engram_reported_claim_deferral.rs");
 }
 
+#[path = "engram_reported_declared_waits.rs"]
+mod declared_waits;
+
 /// The Codex item id the test's command runs under.
 const ITEM: &str = "exec-late-item";
 /// The Codex item id a second test, in the next turn, runs under.

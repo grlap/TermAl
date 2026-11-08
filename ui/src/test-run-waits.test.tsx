@@ -1,17 +1,68 @@
 // Registered-wait projection and pane/board visibility, not launcher liveness.
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { makeTestRun, makeTestRunWait } from "./test-runs-fixtures";
 import { applyTestRunWaitDelta, testRunWaitPrompt } from "./test-run-waits";
 import { TestRunsProvider } from "./test-runs-context";
 import {
-  TestRunWaitIndicator, TestRunWaitFailureNotice, TestRunWaitsContext, useHasPendingTestRunWait,
+  TestRunWaitIndicator, TestRunWaitFailureNotice, TestRunWaitsContext, useHasPendingTestRunWait, useTestRunWaitAnnouncement,
 } from "./test-run-waits-context";
 import { useContext } from "react";
 import { SessionActivityStrip } from "./panels/session-activity-cards";
 import { isSessionDeltaEvent } from "./app-live-state-delta-events";
+import * as runsApi from "./test-runs-api";
+import { makeTestRunDetail, makeTestRunOverview } from "./test-runs-fixtures";
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
+
+it("reads only visible wait identities and rejects replies from an earlier invalidation", async () => {
+  const wait = makeTestRunWait();
+  let resolveOld!: (result: Awaited<ReturnType<typeof runsApi.readTestRun>>) => void;
+  const read = vi.spyOn(runsApi, "readTestRun").mockImplementationOnce(() => new Promise(done => { resolveOld = done; }))
+    .mockResolvedValueOnce({ run: makeTestRun({ state: "unknown", unknownReason: "noPid" }), detail: makeTestRunDetail() });
+  const first = { serverInstanceId: "server", revision: 1, version: 1 };
+  const second = { ...first, revision: 2, version: 2 };
+  const view = (status: "active" | "idle", revision = first) => <TestRunsProvider snapshotReady runs={[]} waits={[wait]}
+    overview={makeTestRunOverview()} viewRevision={revision} open={vi.fn()}>
+    <TestRunWaitIndicator sessionId={wait.sessionId} status={status} />
+  </TestRunsProvider>;
+  const rendered = render(view("active"));
+  expect(read).not.toHaveBeenCalled();
+  rendered.rerender(view("idle"));
+  expect(screen.getByText(/loading status/)).toBeVisible();
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+  const oldSignal = read.mock.calls[0][1];
+  rendered.rerender(view("idle", second));
+  expect(await screen.findByText(/executor not published/)).toBeVisible();
+  expect(oldSignal?.aborted).toBe(true);
+  await act(async () => resolveOld({ run: makeTestRun({ state: "passed" }), detail: makeTestRunDetail() }));
+  expect(screen.getByText(/wait remains pending/)).toBeVisible();
+  expect(screen.queryByText(/not indexed|passed/)).not.toBeInTheDocument();
+  expect(read.mock.calls.map(call => call[0])).toEqual([wait.runIds[0], wait.runIds[0]]);
+});
+
+it("retains admitted uncertainty and the live announcement while an invalidation refresh is pending", async () => {
+  const wait = makeTestRunWait();
+  let finish!: (value: Awaited<ReturnType<typeof runsApi.readTestRun>>) => void;
+  const result = { run: makeTestRun({ state: "unknown", unknownReason: "noPid" }), detail: makeTestRunDetail() };
+  const read = vi.spyOn(runsApi, "readTestRun").mockResolvedValueOnce(result)
+    .mockImplementationOnce(() => new Promise(done => { finish = done; }));
+  function Announcement() {
+    return <p role="status">{useTestRunWaitAnnouncement(wait.sessionId, "idle")}</p>;
+  }
+  const first = { serverInstanceId: "server", revision: 1, version: 1 };
+  const view = (revision = first) => <TestRunsProvider snapshotReady runs={[]} waits={[wait]}
+    viewRevision={revision} open={vi.fn()}><Announcement /></TestRunsProvider>;
+  const rendered = render(view());
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("executor not published"));
+  const announcement = screen.getByRole("status").textContent;
+  rendered.rerender(view({ ...first, revision: 2, version: 2 }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("status").textContent).toBe(announcement);
+  expect(screen.queryByText(/loading status/)).not.toBeInTheDocument();
+  await act(async () => finish(result));
+  expect(screen.getByRole("status").textContent).toBe(announcement);
+});
 
 it.each(["noPid", "heartbeatStale"] as const)("shows %s uncertainty in a pending wait status", unknownReason => {
   const wait = makeTestRunWait();

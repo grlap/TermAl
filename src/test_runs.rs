@@ -173,6 +173,9 @@ struct TestRunLogTail {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TestRunListResponse {
+    revision: u64,
+    server_instance_id: String,
+    total: usize,
     runs: Vec<TestRunSummary>,
     limit: usize,
     next_cursor: Option<String>,
@@ -300,6 +303,11 @@ impl<'a> IntoIterator for &'a TestRunEntries {
 /// mirrors disk and is never persisted.
 #[derive(Clone, Debug, Default)]
 struct TestRunIndex {
+    // Only the scanner holds this transient batch under StateInner. Its
+    // internal lifecycle events precede index installation; public counters
+    // are emitted once after installation at the final committed revision.
+    transport_batch_pending: bool,
+    transport_version: Arc<AtomicU64>,
     /// Scheduling hint only. Proof predicates are always recomputed when
     /// selection runs; mutation writers and rescans also select explicitly.
     compaction_examined_revision: Option<u64>,
@@ -482,7 +490,7 @@ fn test_run_registered_project_id(inner: &impl TestRunProjectionSource, disk: &T
 
 // Registration can become durable between scans. Read/wait boundaries must
 // derive authority from that current proof, not the scanner's older summary.
-fn test_run_effective_project_id(inner: &StateInner, entry: &TestRunEntry) -> Option<String> {
+fn test_run_effective_project_id(inner: &impl TestRunProjectionSource, entry: &TestRunEntry) -> Option<String> {
     test_run_registered_project_id(inner, &entry.disk)
         .or_else(|| entry.discovered_project_id.clone())
 }
@@ -1049,6 +1057,8 @@ impl AppState {
         let mut unsent_removed = Vec::new();
         let mut unsent_changed = HashSet::new();
         let mut published_changed = HashSet::new();
+        let transport_revision = inner.revision;
+        inner.test_runs.transport_batch_pending = true;
         // Restore first: a publication failure then retains the old artifact
         // entry so its alias transition is retried on the next scan.
         for run in restored {
@@ -1107,13 +1117,37 @@ impl AppState {
         } else {
             entries
         };
-        // Cards follow the summaries clients were told about.
-        self.sync_test_run_cards_locked(&mut inner, &entries, &published_changed, &failures, publish);
-        inner.test_runs.entries = entries.into();
+        // Install the settled index before capturing its public counters.
+        // A cumulative cut covers the revisions of suppressed lifecycle
+        // events before any public card delta spends the next revision.
+        inner.test_runs.entries = entries.clone().into();
         self.retain_test_command_artifact_terminals_locked(&mut inner);
         // Run waits may settle from here on (`refresh_test_run_waits`).
         inner.test_runs.scanned_once = true;
+        if inner.revision != transport_revision {
+            let projection = self.test_run_history_projection_locked(&inner);
+            inner.test_runs.transport_version.store(projection.version, Ordering::Relaxed);
+            self.publish_state_locked(&inner);
+        }
+        // The cut precedes these body deltas in the existing broadcaster
+        // mailbox. Their revisions therefore remain directly admissible.
+        self.sync_test_run_cards_locked(&mut inner, &entries, &published_changed, &failures, publish);
         self.compact_test_runs_locked(&mut inner);
+        inner.test_runs.transport_batch_pending = false;
+        let projection = self.test_run_history_projection_locked(&inner);
+        if projection.version != inner.test_runs.transport_version.load(Ordering::Relaxed) {
+            // A first empty scan (or a durability-only input change) still
+            // needs an advancing revision for ready/counter consumers.
+            let can_publish = inner.revision != transport_revision
+                || (!failed && self.commit_delta_locked(&mut inner).is_ok());
+            if can_publish {
+                inner.test_runs.transport_version.store(projection.version, Ordering::Relaxed);
+                // Card/attention changes may share the last card revision.
+                // The existing stateDiff admission accepts a cumulative cut
+                // at that revision, unlike an equal-revision global delta.
+                self.publish_state_locked(&inner);
+            }
+        }
         trace.mark("published");
         inner.test_runs.any_running()
     }

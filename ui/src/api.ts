@@ -55,6 +55,7 @@ import {
 export type StateResponse = {
   testRunWaits?: import("./test-run-waits").TestRunWaitRecord[];
   testRuns?: import("./test-runs").TestRunSummary[];
+  testRunOverview?: import("./test-run-overview").TestRunOverview;
   revision: number;
   /**
    * Per-process UUID generated at `AppState::new_with_paths` boot on

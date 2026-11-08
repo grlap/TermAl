@@ -81,8 +81,8 @@ async fn test_run_listing_is_bounded_and_continues_without_hiding_exact_ids() {
     assert_eq!(status, StatusCode::OK, "{detail}");
     assert_eq!(detail["run"]["runId"], "test-page-204");
     assert_eq!(detail["run"]["state"], "running");
-    // Paging changes only this route, not live active-run visibility.
-    assert_eq!(fixture.state.snapshot().test_runs.len(), 206);
+    // Paging cannot hide active work from the global counters.
+    assert_eq!(fixture.state.snapshot().test_run_overview.get().counts.total, 206);
 }
 
 #[tokio::test]

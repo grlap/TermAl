@@ -24,7 +24,6 @@ struct EmittedStateCut {
     server_instance_id: String,
     sessions: Vec<Arc<StateSessionSummary>>,
     delegations: Vec<DelegationStateSummary>,
-    test_runs: Vec<TestRunSummary>,
 }
 
 impl EmittedStateCut {
@@ -34,7 +33,6 @@ impl EmittedStateCut {
             server_instance_id: snapshot.header.server_instance_id.clone(),
             sessions: snapshot.sessions.clone(),
             delegations: snapshot.header.delegations.clone(),
-            test_runs: snapshot.header.test_runs.clone(),
         }
     }
 }
@@ -46,7 +44,6 @@ impl EmittedStateCut {
 struct StateDiffTouchedKeys {
     sessions: BTreeSet<String>,
     delegations: BTreeSet<String>,
-    test_runs: BTreeSet<String>,
 }
 
 impl StateDiffTouchedKeys {
@@ -99,12 +96,8 @@ impl StateDiffTouchedKeys {
             | DeltaEvent::DelegationCanceled { delegation_id, .. } => {
                 self.delegations.insert(delegation_id.clone());
             }
-            DeltaEvent::TestRunChanged { run, .. } => {
-                self.test_runs.insert(run.run_id.clone());
-            }
-            DeltaEvent::TestRunRemoved { run_id, .. } => {
-                self.test_runs.insert(run_id.clone());
-            }
+            DeltaEvent::TestRunChanged { .. } | DeltaEvent::TestRunRemoved { .. }
+            | DeltaEvent::TestRunsInvalidated { .. } => {}
         }
     }
 }
@@ -121,7 +114,6 @@ struct StateDiffPayload<'a> {
     header: StateDiffHeader<'a>,
     sessions: StateDiffSessions<'a>,
     delegations: StateDiffRows<'a, DelegationStateSummary>,
-    test_runs: StateDiffRows<'a, TestRunSummary>,
 }
 
 #[derive(Serialize)]
@@ -136,6 +128,7 @@ struct StateDiffHeader<'a> {
     workspaces: &'a [WorkspaceLayoutSummary],
     delegation_waits: &'a [DelegationWaitRecord],
     test_run_waits: &'a [TestRunWaitRecord],
+    test_run_overview: &'a TestRunOverviewSnapshot,
     pending_engram_mcp_revocation_session_ids: &'a [String],
 }
 
@@ -164,10 +157,6 @@ struct StateDiffRows<'a, T> {
 
 fn delegation_row_key(row: &DelegationStateSummary) -> &str {
     &row.id
-}
-
-fn test_run_row_key(row: &TestRunSummary) -> &str {
-    &row.run_id
 }
 
 /// Base keys absent from the cut, then touched keys absent from both.
@@ -230,7 +219,7 @@ fn state_diff_payload<'a>(
         sessions: _,
         delegations,
         delegation_waits,
-        test_runs,
+        test_run_overview,
         test_run_waits,
         pending_engram_mcp_revocation_session_ids,
     } = &cut.header;
@@ -274,6 +263,7 @@ fn state_diff_payload<'a>(
             workspaces,
             delegation_waits,
             test_run_waits,
+            test_run_overview,
             pending_engram_mcp_revocation_session_ids,
         },
         sessions: StateDiffSessions {
@@ -295,12 +285,6 @@ fn state_diff_payload<'a>(
             delegations,
             &touched.delegations,
             delegation_row_key,
-        ),
-        test_runs: state_diff_rows(
-            &base.test_runs,
-            test_runs,
-            &touched.test_runs,
-            test_run_row_key,
         ),
     }
 }
@@ -515,7 +499,8 @@ impl StateDiffProducer {
         Ok(())
     }
 
-    fn forward_cut(&mut self, snapshot: ImmutableStateSnapshot, senders: &StateBroadcastSenders) {
+    fn forward_cut(&mut self, mut snapshot: ImmutableStateSnapshot, senders: &StateBroadcastSenders) {
+        snapshot.prepare_test_run_activity();
         // The same consumer hooks as the full-state path, which a diff skips.
         #[cfg(test)]
         let snapshot = {

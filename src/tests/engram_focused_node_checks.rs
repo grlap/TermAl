@@ -664,6 +664,8 @@ fn engram_node_notice_normalization_never_admits_arbitrary_shell_forms() {
 
 #[test]
 fn engram_node_invalid_artifacts_cannot_be_rescued_by_summary_or_counts() {
+    let timings = FixtureTimings::start("node_invalid_artifacts");
+    let _repository_seed = EORepositorySeedScope::new();
     type Change = fn(&mut FocusedNodeFixture);
     let cases: &[(&str, Change)] = &[
         ("owner", |f| f.request["owner"] = json!("foreign")),
@@ -708,19 +710,24 @@ fn engram_node_invalid_artifacts_cannot_be_rescued_by_summary_or_counts() {
         }),
     ];
     for (label, change) in cases {
+        timings.phase("fixture_setup");
         let mut fixture = FocusedNodeFixture::new(&format!("node-invalid-{label}"), 0);
+        timings.phase("case_operations");
         change(&mut fixture);
         fixture
             .output
             .push_str("tests: passed=20 failed=0 ignored=0\n");
         one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "indeterminate");
+        timings.phase("scope_cleanup");
     }
     for exit in [
         EngramCommandExit::Unknown,
         EngramCommandExit::NotFinished,
         EngramCommandExit::Code(1),
     ] {
+        timings.phase("fixture_setup");
         let fixture = FocusedNodeFixture::new("node-no-terminal", 0);
+        timings.phase("case_operations");
         let observation = fixture.finish(exit);
         if exit == EngramCommandExit::NotFinished {
             assert!(observation.get("verification_evidence").is_none());
@@ -730,6 +737,7 @@ fn engram_node_invalid_artifacts_cannot_be_rescued_by_summary_or_counts() {
         } else {
             one_node_test(&observation, "indeterminate");
         }
+        timings.phase("scope_cleanup");
     }
 }
 

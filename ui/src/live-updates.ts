@@ -121,6 +121,7 @@ export type SessionDeltaEvent = Exclude<
   | { type: "codexUpdated" }
   | { type: "testRunChanged" }
   | { type: "testRunRemoved" }
+  | { type: "testRunsInvalidated" }
   | { type: "testRunWaitCreated" }
   | { type: "testRunWaitConsumed" }
   | { type: "testRunWaitResumeDispatchFailed" }

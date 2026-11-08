@@ -370,6 +370,7 @@ export type OrchestratorInstance = {
 };
 
 export type Session = {
+  testRunActivity?: import("./test-run-overview").SessionTestRunActivity;
   id: string;
   mailboxParticipantId?: string;
   name: string;
@@ -1421,6 +1422,7 @@ export type WorkspaceFilesChangedEvent = {
 };
 
 export type DeltaEvent =
+  | import("./test-run-overview").TestRunsInvalidated
   | import("./test-runs").TestRunDelta
   | SessionCreatedEvent
   | MessageCreatedEvent

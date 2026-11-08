@@ -170,6 +170,7 @@ impl<T: std::ops::Deref<Target = StateInner>> TestRunProjectionSource for T {
 }
 
 struct TestRunProjectionScope {
+    complete: bool,
     run_ids: HashSet<String>,
     references: HashSet<String>,
     reference_names: HashSet<String>,
@@ -184,6 +185,7 @@ impl TestRunProjectionScope {
             .map(|reference| reference.trim().to_owned())
             .collect();
         Self {
+            complete: false,
             run_ids: scanned.iter().map(|run| run.disk.run_id.clone()).collect(),
             reference_names: references
                 .iter()
@@ -197,18 +199,18 @@ impl TestRunProjectionScope {
         }
     }
     fn observation(&self, row: &TestRunCommandObservation) -> bool {
-        row.artifact
+        self.complete || row.artifact
             .as_ref()
             .is_some_and(|artifact| self.run_ids.contains(&artifact.run_id))
     }
     fn session(&self, row: TestRunProjectionSessionRef<'_>) -> bool {
-        self.references.contains(row.id)
+        self.complete || self.references.contains(row.id)
             || self
                 .reference_names
                 .contains(&row.name.to_ascii_lowercase())
     }
     fn carried(&self, row: TestRunProjectionCarriedRef<'_>) -> bool {
-        row.run_directory.is_some_and(|path| {
+        self.complete || row.run_directory.is_some_and(|path| {
             self.paths
                 .contains(&test_run_path_key(&test_run_display_path(path)))
         })
@@ -246,6 +248,7 @@ fn test_run_selected_set_matches<T: Eq + std::hash::Hash>(
 }
 
 struct TestRunProjectionCut {
+    attention_ids: HashSet<String>,
     scope: TestRunProjectionScope,
     observation_ids: HashSet<String>,
     observation_presence: BTreeMap<String, bool>,
@@ -260,6 +263,19 @@ struct TestRunProjectionCut {
 }
 
 impl TestRunProjectionCut {
+    // The same summary/proof inputs as a scanner cut, covering the complete
+    // catalogue for off-lock overview and paged reads. No files, runtime
+    // handles, persistence waiters, or mutable StateInner borrow escape.
+    fn capture_history(inner: &StateInner) -> Self {
+        let run_ids = inner.test_runs.entries.iter().map(|row| row.summary.run_id.clone())
+            .chain(inner.test_run_registrations.keys().cloned())
+            .chain(inner.test_run_compacted.keys().cloned()).collect();
+        Self::capture(inner, TestRunProjectionScope {
+            complete: true, run_ids, references: HashSet::new(),
+            reference_names: HashSet::new(), paths: HashSet::new(),
+        })
+    }
+
     fn capture(inner: &StateInner, mut scope: TestRunProjectionScope) -> Self {
         // Candidate rows are selected by artifact run id before the shared
         // exact association predicates run. Validation repeats that selection
@@ -360,6 +376,7 @@ impl TestRunProjectionCut {
         };
         Self {
             index,
+            attention_ids: if scope.complete { test_run_attention_ids(inner) } else { HashSet::new() },
             registrations,
             observations,
             compacted,
@@ -398,6 +415,14 @@ impl TestRunProjectionCut {
 
     fn matches(&self, inner: &StateInner) -> bool {
         let live = &inner.test_runs;
+        if self.scope.complete && (
+            self.registrations.len() != inner.test_run_registrations.len()
+                || self.compacted.len() != inner.test_run_compacted.len()
+                || self.index.entries.len() != live.entries.len()
+                || self.attention_ids != test_run_attention_ids(inner)
+        ) {
+            return false;
+        }
         // Revision alone cannot fence unstamped durability or metadata writes.
         self.scope.run_ids.iter().all(|id| {
             self.index.registered.contains(id) == live.registered.contains(id)
@@ -478,7 +503,8 @@ impl TestRunProjectionSource for TestRunProjectionCut {
         self.projects.iter().any(|project| project == id)
     }
     fn projection_has_observation(&self, id: &str) -> bool {
-        self.observation_presence.get(id).copied().unwrap_or(false)
+        self.observations.contains_key(id)
+            || self.observation_presence.get(id).copied().unwrap_or(false)
     }
     fn projection_sessions(&self) -> impl Iterator<Item = TestRunProjectionSessionRef<'_>> {
         self.sessions.iter().map(|row| TestRunProjectionSessionRef {

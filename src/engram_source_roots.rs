@@ -2113,7 +2113,7 @@ impl AppState {
             }
             Some(Some(path)) => Some(path.to_owned()),
         };
-        let (unfocused_clear, clear_selection, full_new_name) = {
+        let (unfocused_clear, clear_selection, full_new_name, completed_clear) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let store =
                 Self::engram_source_root_target_locked(&inner, session_id)
@@ -2151,12 +2151,15 @@ impl AppState {
             let full = path.is_some()
                 && selection.is_none()
                 && engram_named_root_capacity(&inner) >= ENGRAM_WORK_SOURCE_ROOT_LIMIT;
-            (unfocused, selection, full)
+            let completed = path.is_none() && store.as_ref().is_some_and(|store| {
+                engram_completed_own_root_clear_locked(&inner, store, session_id, &work).is_some()
+            });
+            (unfocused, selection, full, completed)
         };
         // An unfocused own-clear is itself the synchronous lifecycle owner.
         // Do not let preparatory maintenance consume its entry first. Current
         // binding/missing-directory reconciliation retains its existing path.
-        if !unfocused_clear && !full_new_name {
+        if !unfocused_clear && !full_new_name && !completed_clear {
             engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
                 self.resolve_removed_engram_roots(session_id, None, budget);
                 Ok(())
@@ -2255,6 +2258,26 @@ impl AppState {
                 .iter()
                 .any(|claim| claim.work_id == work || claim.short_ref == work)
         {
+            // Completion has ended the claim. Only its exact acknowledged
+            // retirement can answer without entering a new authority transition.
+            {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let current = Self::engram_source_root_target_locked(&inner, session_id)
+                    .ok().flatten();
+                if current.as_ref().is_none_or(|current| {
+                    current.connection != target.connection
+                        || !current.settings.same_work_service_settings(&target.settings)
+                }) {
+                    return Err(ApiError::conflict(
+                        "Engram project or store changed while the retained root was being cleared",
+                    ));
+                }
+                if let Some(completed) = engram_completed_own_root_clear_locked(
+                    &inner, &store, session_id, &work,
+                ) {
+                    return Ok(completed);
+                }
+            }
             if let Some(root) = clear_selection.as_ref().filter(|root| root.store == store) {
                 if root.named_by_session != session_id {
                     return Err(ApiError::conflict(

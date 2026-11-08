@@ -2,8 +2,24 @@
 //! source, byte-sensitive web evidence, CRLF scripts, binary/untracked bytes,
 //! and the initialized rincon-common topology. Payloads are synthetic and
 //! contain no project secrets. This is not the historical candidate/hash.
-use super::fixture::{Fixture, child, commit, git, put};
-use std::{fs, path::PathBuf};
+use super::fixture::{Fixture, child, commit, git, put, report_timing};
+use std::{collections::BTreeMap, fs, io::Write, path::PathBuf, time::Instant};
+
+const BASE_FILES: &[(&str, &[u8])] = &[
+    (".gitignore", b"/build/\nnode_modules/\n*.log\n"),
+    (
+        ".gitattributes",
+        b"* text=auto eol=lf\n*.cmd text eol=crlf\n*.png binary\n",
+    ),
+    (
+        ".gitmodules",
+        b"[submodule \"rincon-common\"]\n\tpath = rincon-common\n\turl = https://example.invalid/fixture.git\n",
+    ),
+    ("lib/main.dart", b"void main() {}\n"),
+    ("website/en/privacy.html", b"<p>Local fixture evidence</p>\n"),
+    ("scripts/build.cmd", b"@echo off\r\nexit /b 0\r\n"),
+    ("assets/icon.png", &[137, 80, 78, 71, 13, 10, 26, 10, 0, 255]),
+];
 
 pub struct QuestlyFixture {
     pub repo: Fixture,
@@ -12,32 +28,26 @@ pub struct QuestlyFixture {
 
 impl QuestlyFixture {
     pub fn new(ordinary_files: usize) -> Self {
+        Self::build(ordinary_files, ordinary_files == 10_000)
+    }
+
+    fn build(ordinary_files: usize, bulk_generated: bool) -> Self {
+        let started = Instant::now();
         assert!(ordinary_files <= 10_000);
         let repo = Fixture::new();
-        repo.put(".gitignore", b"/build/\nnode_modules/\n*.log\n");
-        repo.put(
-            ".gitattributes",
-            b"* text=auto eol=lf\n*.cmd text eol=crlf\n*.png binary\n",
-        );
-        repo.put(
-            ".gitmodules",
-            b"[submodule \"rincon-common\"]\n\tpath = rincon-common\n\turl = https://example.invalid/fixture.git\n",
-        );
-        repo.put("lib/main.dart", b"void main() {}\n");
-        repo.put(
-            "website/en/privacy.html",
-            b"<p>Local fixture evidence</p>\n",
-        );
-        repo.put("scripts/build.cmd", b"@echo off\r\nexit /b 0\r\n");
-        repo.put(
-            "assets/icon.png",
-            &[137, 80, 78, 71, 13, 10, 26, 10, 0, 255],
-        );
-        for number in 0..ordinary_files {
-            repo.put(
-                &format!("lib/generated/f{number:05}.dart"),
-                format!("const fixture{number} = {number};\n").as_bytes(),
-            );
+        for (path, bytes) in BASE_FILES {
+            repo.put(path, bytes);
+        }
+        let generated: Vec<_> = (0..ordinary_files)
+            .map(|number| {
+                (
+                    format!("lib/generated/f{number:05}.dart"),
+                    format!("const fixture{number} = {number};\n").into_bytes(),
+                )
+            })
+            .collect();
+        for (path, bytes) in &generated {
+            repo.put(path, bytes);
         }
         let (common, common_git) = child(&repo.root, &repo.root.join(".git"), "rincon-common");
         let (deep, _) = child(&common, &common_git, "packages/domain-core");
@@ -52,7 +62,11 @@ impl QuestlyFixture {
             ],
             None,
         );
-        repo.commit();
+        if bulk_generated {
+            commit_generated(&repo, &generated);
+        } else {
+            repo.commit();
+        }
         repo.put("lib/main.dart", b"void main() { /* staged */ }\n");
         git(&repo.root, &["add", "--", "lib/main.dart"], None);
         repo.put("lib/main.dart", b"void main() { /* unstaged */ }\r\n");
@@ -66,8 +80,128 @@ impl QuestlyFixture {
         repo.put("node_modules/private/ignored", b"not an input");
         // No dependency install, URL access, live store or project process.
         assert!(fs::metadata(repo.root.join(".git")).unwrap().is_dir());
-        Self { repo, deep }
+        let fixture = Self { repo, deep };
+        report_timing("construct", "questly", started);
+        fixture
     }
+}
+
+// All generated payloads are known LF-only, non-executable Dart files. Let Git
+// create their blob IDs in bulk rather than reopen every worktree file in add.
+// The real regular files remain in place for every production capture.
+fn commit_generated(repo: &Fixture, generated: &[(String, Vec<u8>)]) {
+    let mut stream = Vec::new();
+    for (number, (_, bytes)) in generated.iter().enumerate() {
+        writeln!(stream, "blob\nmark :{}\ndata {}", number + 1, bytes.len()).unwrap();
+        stream.extend_from_slice(bytes);
+        stream.push(b'\n');
+    }
+    stream.extend_from_slice(b"done\n");
+    git(
+        &repo.root,
+        &[
+            "fast-import",
+            "--quiet",
+            "--done",
+            "--export-marks=../generated.marks",
+        ],
+        Some(&stream),
+    );
+    // Marks live in the private fixture home, outside its measured repo.
+    let marks: BTreeMap<usize, String> = fs::read_to_string(repo.home.join("generated.marks"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let (mark, oid) = line.split_once(' ').unwrap();
+            (
+                mark.strip_prefix(':').unwrap().parse().unwrap(),
+                oid.to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(marks.len(), generated.len());
+    let mut index = Vec::new();
+    for (number, (path, _)) in generated.iter().enumerate() {
+        writeln!(index, "100644 {}\t{path}", marks[&(number + 1)]).unwrap();
+    }
+    git(
+        &repo.root,
+        &["update-index", "--add", "--index-info"],
+        Some(&index),
+    );
+    let mut add = vec!["add", "--"];
+    add.extend(BASE_FILES.iter().map(|(path, _)| *path));
+    git(&repo.root, &add, None);
+    // Use the same ordinary initial commit, without porcelain's refresh of the
+    // imported index's intentionally empty stat cache. Git owns all object IDs;
+    // the fixed author/committer/date environment is shared with repo.commit().
+    let tree = git(&repo.root, &["write-tree"], None);
+    let head = git(&repo.root, &["commit-tree", &tree, "-m", "fixture"], None);
+    git(&repo.root, &["update-ref", "HEAD", &head], None);
+}
+
+#[test]
+fn bulk_generated_construction_preserves_ordinary_git_inputs() {
+    let _fixture_group = super::test_group::exclusive();
+    let ordinary = QuestlyFixture::build(3, false);
+    let bulk = QuestlyFixture::build(3, true);
+    for relative in ["", "rincon-common", "rincon-common/packages/domain-core"] {
+        let ordinary_root = ordinary.repo.root.join(relative);
+        let bulk_root = bulk.repo.root.join(relative);
+        for args in [
+            vec!["rev-parse", "HEAD"],
+            vec!["rev-parse", "HEAD^{tree}"],
+            vec!["ls-files", "--stage"],
+        ] {
+            assert_eq!(
+                git(&ordinary_root, &args, None),
+                git(&bulk_root, &args, None),
+                "{relative}: {args:?}"
+            );
+        }
+        let flags = |root: &std::path::Path| {
+            let debug = git(root, &["ls-files", "--debug"], None);
+            let flags: Vec<_> = debug
+                .lines()
+                .filter_map(|line| {
+                    line.split_once("flags:")
+                        .map(|(_, flags)| flags.trim().to_owned())
+                })
+                .collect();
+            assert_eq!(flags.len(), git(root, &["ls-files"], None).lines().count());
+            flags
+        };
+        assert_eq!(flags(&ordinary_root), flags(&bulk_root), "{relative}");
+    }
+    fn authored_files(root: &std::path::Path) -> BTreeMap<PathBuf, Vec<u8>> {
+        fn visit(
+            root: &std::path::Path,
+            path: &std::path::Path,
+            files: &mut BTreeMap<PathBuf, Vec<u8>>,
+        ) {
+            for entry in fs::read_dir(path).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_name() == ".git" {
+                    continue;
+                }
+                if entry.file_type().unwrap().is_dir() {
+                    visit(root, &entry.path(), files);
+                } else {
+                    files.insert(
+                        entry.path().strip_prefix(root).unwrap().to_owned(),
+                        fs::read(entry.path()).unwrap(),
+                    );
+                }
+            }
+        }
+        let mut files = BTreeMap::new();
+        visit(root, root, &mut files);
+        files
+    }
+    assert_eq!(
+        authored_files(&ordinary.repo.root),
+        authored_files(&bulk.repo.root)
+    );
 }
 
 /// Census-only reconstruction. Names and payload bytes are synthetic; counts,

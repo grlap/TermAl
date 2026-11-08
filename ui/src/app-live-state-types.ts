@@ -231,6 +231,9 @@ export type UseAppLiveStateReturn = {
   testRunWaitFailures: import("./test-run-waits").TestRunWaitFailures;
   dismissTestRunWaitFailure: (sessionId: string) => void;
   testRuns: import("./test-runs").TestRunSummary[];
+  testRunOverview: import("./test-run-overview").TestRunOverview | undefined;
+  testRunActivities: import("./test-run-overview").TestRunActivities;
+  testRunViewRevision: import("./test-run-overview").TestRunViewRevision | undefined;
   adoptState: (
     nextState: StateResponse,
     options?: AdoptStateOptions,

@@ -2,9 +2,10 @@
 //! Every fixture, including nested and capacity cases, owns one mutex through
 //! cleanup. The named guard must be the first local in each test and must never
 //! be acquired in Fixture::new or twice in one test: this lock is not reentrant.
-//! Timing excludes lock waiting and includes fixture setup, assertions and cleanup.
+//! fixture_ms excludes lock waiting and includes setup, assertions and cleanup;
+//! wait_ms reports the lock wait separately. Both are diagnostic only.
 use std::sync::{Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 static FIXTURE_GROUP: FixtureTestGroup = FixtureTestGroup::new();
 
@@ -29,6 +30,7 @@ impl FixtureTestGroup {
 pub struct FixtureGuard {
     _guard: MutexGuard<'static, ()>,
     started: Instant,
+    waited: Duration,
 }
 
 impl Drop for FixtureGuard {
@@ -39,14 +41,22 @@ impl Drop for FixtureGuard {
             current.name().unwrap_or("unnamed"),
             self.started.elapsed().as_millis()
         );
+        eprintln!(
+            "identity fixture wait: test={} wait_ms={}",
+            current.name().unwrap_or("unnamed"),
+            self.waited.as_millis()
+        );
     }
 }
 
 pub fn exclusive() -> FixtureGuard {
+    let requested = Instant::now();
     let guard = FIXTURE_GROUP.exclusive();
+    let started = Instant::now();
     FixtureGuard {
         _guard: guard,
-        started: Instant::now(),
+        started,
+        waited: started.duration_since(requested),
     }
 }
 

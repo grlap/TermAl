@@ -42,6 +42,39 @@ Provider output persistence or truncation, a background launch or move, a missin
 
 The following exit-based rules describe the legacy observed-check route. Native verification uses the artifact's PASS, FAIL or UNKNOWN directly and preserves the exit only as an observation.
 
+For a host-observed declared Claude task, the original task-completion notice
+also freezes and reads the artifact using the declaration captured at its
+start, even when native verification was not admitted. This covers both an
+explicit background launch and a foreground call the runtime moved to a
+background task. Launch acknowledgement alone does not finish the check. The
+task notice supplies no usable exit or success report: a complete PASS artifact
+therefore leaves the ordinary check UNKNOWN with a named missing-exit reason.
+A FAIL artifact yields FAIL; a missing or invalid artifact yields UNKNOWN with
+its artifact reason. The exit field stays empty. Duplicate notices keep the
+first terminal result. An interrupted task cannot supply PASS. Native
+verification continues to use the frozen artifact verdict directly.
+
+This ordinary check outcome is separate from native credit. A newly untracked
+declaration can be recognized for an ordinary check while native verification
+reports `declaration_not_committed`; a dirty edit of an already committed
+declaration path is a different case. No reservation or verification record is
+created by settling the ordinary task. A restored older observation that lacks
+its original declaration binding remains UNKNOWN rather than reading a new
+declaration at completion. Foreground completion retains the observed-check
+rules below. Claude's explicit successful tool result (`is_error=false`, with
+no background move) is an observed success even without a numeric exit, and
+continues to use the existing exit-aware judge with the artifact. Persisted
+output does not remove that success report. A foreground error result without
+an exit number remains UNKNOWN with a named missing-exit reason; the host
+does not open the provider's console spill file to reconstruct an exit.
+
+Foreground declared observations use these same legacy rules in projects
+without Engram, or with execution observability disabled. Their original start
+binding supplies the artifact; a completion never reconstructs a missing
+binding from the current declaration. The run row and completion wait remain
+pending while the artifact is judged, then expose the applied verdict. An
+older row without its original binding ends UNKNOWN with a named reason.
+
 ## Legacy observed-check outcomes
 
 TRX: TermAl reads one complete `TestRun` document and its direct `ResultSummary` and `Counters` with the quick-xml reader, with no DTD or external-entity resolution, and checks: one root and closed elements with matching end tags; XML characters only, and XML Names for elements, attributes and processing-instruction targets (not `xml`); unique, quoted, whitespace-separated attributes without `<`; only the predefined entities and valid character references; no `--` in comments and no `]]>` in text; an XML declaration, if any, first and with its version (UTF-8 only); only XML whitespace, comments and processing instructions outside the root; and the counter consistency below. It is not a complete XML 1.0 validator, and it is not a security boundary: the declared command is trusted, and it can always write a well-formed passing file.

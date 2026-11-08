@@ -364,10 +364,13 @@ fn named_root_reclamation_notice_survives_restart_and_focus_change_and_acks_once
 
 #[test]
 fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
+    let timings = FixtureTimings::start("published_notice_capacity");
+    timings.phase("fixture_setup");
     let label = "reclaim-published-journal-capacity";
     let (claimed, worktree) = root_fixture(label);
     let clock = claimed.state.engram_budget_clock();
     for occurrence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+        timings.phase("iteration");
         let fixture_binding = test_control_work_binding(&format!("eo-check-{label}"), 1);
         let mut held = EngramHeldClaims {
             items: vec![EngramHeldClaim {
@@ -389,9 +392,11 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
         claimed.transport.enable_named_roots(&claimed.session_id, &binding);
         claimed.transport.set_current_work_binding(Some(binding.clone()));
         claimed.transport.replace_held_claims([Ok(held)]);
+        let naming_timing = fixture_phase("name_root");
         let named = claimed.state.name_engram_source_root(&claimed.session_id,
             EngramSourceRootRequest { work: binding.work_id.clone(),
                 path: Some(Some(worktree.to_string_lossy().into_owned())) });
+        drop(naming_timing);
         assert!(named.is_ok(),
             "new naming {occurrence} must progress after acknowledged retirements: {named:?}");
         if occurrence == ENGRAM_NAMED_ROOT_JOURNAL_LIMIT { break; }
@@ -419,9 +424,11 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
         reader.root_execution_id = "capacity-reader-execution".to_owned();
         claimed.record_mut(|record| record.engram.work_binding = Some(reader.clone()));
         claimed.transport.enable_named_roots(&claimed.session_id, &reader);
+        let recovery_timing = fixture_phase("recover_root");
         assert!(claimed.state.recover_one_engram_root_until(&entry,
             &EngramRootReclamationRoute::Unfocused,
             claimed.state.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_BUDGET).unwrap());
+        drop(recovery_timing);
         let mut inner = claimed.state.inner.lock().unwrap();
         let index = inner.find_session_index(&claimed.session_id).unwrap();
         let notices = refresh_engram_source_root_notices_locked(&mut inner, index);
@@ -437,6 +444,7 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
         assert!(inner.engram_work_naming_history[0].retirements.iter()
             .all(|notice| notice.published && notice.delivered));
         if occurrence + 1 == ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+            let _restart_timing = fixture_phase("restart_roundtrip");
             // Both vectors persist. Restart must preserve the exact durable
             // notice identities without making them scarce journal pins.
             persist_state(claimed.state.persistence_path.as_path(), &inner).unwrap();
@@ -459,6 +467,7 @@ fn named_root_reclamation_published_notices_do_not_exhaust_the_journal() {
     assert!(refresh_engram_source_root_notices_locked(&mut inner, index).iter()
         .all(|notice| !matches!(notice.kind, EngramSourceRootNoticeKind::Reclaimed { .. })),
         "acknowledged retirement notices must not be redelivered after restart");
+    timings.phase("scope_cleanup");
 }
 
 #[test]

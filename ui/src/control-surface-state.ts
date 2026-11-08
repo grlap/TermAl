@@ -71,7 +71,7 @@ import {
   isSessionVisibleInSessionList,
   type SessionListFilter,
 } from "./session-list-filter";
-import type { RunningRunsByOwner } from "./test-runs";
+import type { SessionWorkByOwner as RunningRunsByOwner } from "./test-run-overview";
 import type {
   OrchestratorInstance,
   Project,

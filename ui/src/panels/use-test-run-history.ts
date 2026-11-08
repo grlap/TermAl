@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readTestRuns } from "../test-runs-api";
 import { sortTestRuns, type TestRunSummary } from "../test-runs";
 import { useStableEvent } from "./use-stable-event";
+import type { TestRunFilters } from "../test-runs-api";
+import type { TestRunViewRevision } from "../test-run-overview";
+import { useTestRunPages } from "./use-test-run-pages";
 
 interface HistoryOwner {
   projectId: string;
@@ -19,7 +22,13 @@ interface HistoryOwner {
   error: string | null;
 }
 
-export function useTestRunHistory(projectId: string, live: readonly TestRunSummary[]) {
+export function useTestRunHistory(projectId: string, live: readonly TestRunSummary[], filters: TestRunFilters = {}, revision?: TestRunViewRevision) {
+  const legacy = useLegacyTestRunHistory(projectId, live, !revision);
+  const modern = useTestRunPages(projectId, filters, revision);
+  return revision ? modern : { ...legacy, visible: undefined };
+}
+
+function useLegacyTestRunHistory(projectId: string, live: readonly TestRunSummary[], enabled: boolean) {
   const owner = useRef<HistoryOwner | null>(null);
   const [page, setPage] = useState({ projectId, rows: [] as TestRunSummary[], cursor: null as string | null,
     busy: true, loaded: false, error: null as string | null });
@@ -62,13 +71,14 @@ export function useTestRunHistory(projectId: string, live: readonly TestRunSumma
     }
   });
   useEffect(() => {
+    if (!enabled) return;
     const identity: HistoryOwner = { projectId, controller: new AbortController(), rows: new Map(), overrides: new Map(),
       duringRead: new Map(), superseded: new Set(), cursor: null, failedCursor: undefined,
       busy: false, loaded: false, error: null };
     owner.current = identity;
     void load(identity);
     return () => { identity.controller.abort(); if (owner.current === identity) owner.current = null; };
-  }, [projectId, load]);
+  }, [projectId, load, enabled]);
   useEffect(() => {
     const identity = owner.current;
     if (!identity || identity.projectId !== projectId) return;

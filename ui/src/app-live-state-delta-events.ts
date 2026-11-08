@@ -41,6 +41,7 @@ const DELTA_EVENT_SCOPE = {
   orchestratorsUpdated: "global",
   testRunChanged: "global",
   testRunRemoved: "global",
+  testRunsInvalidated: "global",
   testRunWaitCreated: "global",
   testRunWaitConsumed: "global",
   testRunWaitResumeDispatchFailed: "global",

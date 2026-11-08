@@ -23,6 +23,9 @@ mod idle_state_lock;
 #[path = "test_run_scan_projection.rs"]
 mod scan_projection;
 
+#[path = "test_run_overview.rs"]
+mod overview;
+
 #[path = "test_run_committed_input.rs"]
 mod committed_input;
 
@@ -887,13 +890,10 @@ fn the_rescan_publishes_only_changes_with_consecutive_revisions() {
     let before = fixture.state.full_snapshot().revision;
 
     fixture.refresh(&[9]);
-    assert!(
-        matches!(
-            state_receiver.try_recv(),
-            Err(broadcast::error::TryRecvError::Empty)
-        ),
-        "private discovered-identity saves publish no state snapshot"
-    );
+    let public_cut: Value = serde_json::from_str(&state_receiver.try_recv().unwrap()).unwrap();
+    assert_eq!(public_cut["testRunOverview"]["total"], 2);
+    assert!(public_cut.get("testRuns").is_none());
+    assert!(state_receiver.try_recv().is_err(), "one aggregate cut covers the batch");
     let stored = load_state(fixture.state.persistence_path.as_path())
         .unwrap()
         .unwrap();
@@ -926,9 +926,9 @@ fn the_rescan_publishes_only_changes_with_consecutive_revisions() {
     );
     assert_eq!(fixture.state.full_snapshot().revision, before + 2);
     assert_eq!(
-        fixture.state.snapshot().test_runs.len(),
+        fixture.state.snapshot().test_run_overview.get().counts.total,
         2,
-        "the snapshot carries the runs"
+        "the snapshot counts the canonical runs"
     );
 
     fixture.refresh(&[9]);
@@ -1703,7 +1703,8 @@ fn the_wire_shape_is_the_contracts() {
         "forward slashes"
     );
     let snapshot = serde_json::to_value(fixture.state.snapshot()).unwrap();
-    assert_eq!(snapshot["testRuns"][0]["runId"], "test-wire");
+    assert!(snapshot.get("testRuns").is_none());
+    assert_eq!(snapshot["testRunOverview"]["running"], 1);
 
     let changed = serde_json::to_value(DeltaEvent::TestRunChanged {
         revision: 7,

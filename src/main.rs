@@ -1146,6 +1146,8 @@ include!("test_run_phase_trace.rs");
 include!("test_run_history_probe.rs");
 include!("test_run_history_store.rs");
 include!("test_run_observations.rs");
+include!("test_run_overview.rs");
+include!("test_run_transport_projection.rs");
 include!("test_run_evidence.rs");
 include!("test_run_artifacts.rs");
 include!("test_run_compaction.rs");

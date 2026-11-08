@@ -15,12 +15,13 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
   initialProjectId?: string | null; initialSessionId?: string | null;
   initialRun?: TestRunCardTarget | null;
 }) {
-  const { runs: liveRuns, snapshotReady } = useContext(TestRunsContext);
+  const { runs: liveRuns, snapshotReady, overview, viewRevision } = useContext(TestRunsContext);
   const [projectId, setProjectId] = useState(initialSessionId ? "" : initialProjectId ?? "");
   const [sessionId, setSessionId] = useState(initialSessionId ?? "");
   const [state, setState] = useState<TestRunState | "">("");
+  const [view, setView] = useState<"history" | "active" | "attention">("history");
   const [selectedId, setSelectedId] = useState<string | null>(initialRun?.runId ?? null);
-  const history = useTestRunHistory(projectId, liveRuns);
+  const history = useTestRunHistory(projectId, liveRuns, { sessionId, state, view }, viewRevision);
   const runs = history.runs;
   const names = useMemo(() => new Map(sessions.map(session => [session.id, session.name])), [sessions]);
   const sessionIds = useMemo(() => [...new Set([...sessions.map(session => session.id), ...runs.flatMap(run =>
@@ -35,8 +36,12 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
   const selected = visible.find(run => run.runId === selectedId);
   return <section className="test-runs-panel" aria-label="Test Runs">
     <header><h2>Test Runs</h2><p>Registered launches and host-observed tests. Execution results and verification settlement are shown separately.</p>
-      <p>Live status updates appear alongside paged history. Use Load older to continue.</p></header>
+      <p>Run details load as needed. Use Load older to continue through history.</p>
+      {overview ? <p>{overview.total} runs · {overview.running} running · {overview.needsAttention} need attention · {overview.unknown} unknown</p> : null}</header>
     <div className="test-runs-filters">
+      {overview ? <label>View <select value={view} onChange={event => setView(event.target.value as typeof view)}>
+        <option value="history">History</option><option value="active">Active</option><option value="attention">Needs attention</option>
+      </select></label> : null}
       <label>Project <select value={projectId} onChange={event => setProjectId(event.target.value)}>
         <option value="">All projects</option>
         {projectId && !projects.some(project => project.id === projectId) ? <option value={projectId}>{projectId}</option> : null}
@@ -53,20 +58,20 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
     </div>
     {history.error ? <p role="alert">{history.error} <button type="button" disabled={history.busy} onClick={history.retry}>Retry history</button></p> : null}
     {history.busy ? <p role="status">Loading test-run history…</p> : null}
-    {history.hasMore ? <p>Filters apply to loaded history. <button type="button" disabled={history.busy} onClick={history.more}>Load older</button></p> : null}
+    {history.hasMore ? <p>{overview ? "More matching runs are available." : "Filters apply to loaded history."} <button type="button" disabled={history.busy} onClick={history.more}>Load older</button></p> : null}
     <div className="test-runs-layout">
       <TestRunList runs={visible} names={names} selectedId={selectedId} onSelect={setSelectedId}
-        queryKey={JSON.stringify([projectId, sessionId, state])} ready={snapshotReady || history.loaded} />
+        queryKey={JSON.stringify([projectId, sessionId, state, view])} ready={history.loaded || (!overview && snapshotReady)} onVisible={history.visible} />
       {selected ? <TestRunDetails key={selected.runId} run={selected} /> : initialRun && selectedId === initialRun.runId && !runs.some(run => run.runId === initialRun.runId) ?
         <TestRunDetails key={initialRun.runId} runId={initialRun.runId} fallback={
-          <section aria-label="Recorded run evidence"><h3>{snapshotReady ? "Run not currently indexed" : "Waiting for the test-run index…"}</h3>
+          <section aria-label="Recorded run evidence"><h3>{overview ? "Recorded run evidence" : snapshotReady ? "Run not currently indexed" : "Waiting for the test-run index…"}</h3>
             <p>{initialRun.runId}</p><p>Run directory (literal path): <code>{initialRun.runDir}</code></p>
             <pre>node scripts/test-launcher.mjs summary RUN_DIRECTORY</pre>
             <p>RUN_DIRECTORY is a placeholder. Pass the literal path above as one argument using your shell’s quoting rules.</p>
-            <p>{snapshotReady ? "Discovery may still be in progress; absence from this snapshot does not prove the run was removed." : "The first state snapshot has not arrived yet."}</p>
+            <p>{overview ? "Details are read using the recorded run identity; the global state does not contain run details." : snapshotReady ? "Discovery may still be in progress; absence from this snapshot does not prove the run was removed." : "The first state snapshot has not arrived yet."}</p>
             <p>The transcript card retains its recorded evidence. No new run has been started.</p>
           </section>
-        } /> : <p>Select a run to inspect stages and logs.</p>}
+        } /> : overview && selectedId ? <TestRunDetails key={selectedId} runId={selectedId} /> : <p>Select a run to inspect stages and logs.</p>}
     </div>
   </section>;
 }

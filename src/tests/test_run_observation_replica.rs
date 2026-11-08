@@ -127,7 +127,7 @@ fn observation_replica_measurement() {
     let snapshot = fixture.state.summary_snapshot();
     assert_eq!(snapshot.sessions.len(), REPLICA_SESSIONS);
     assert_eq!(snapshot.delegations.len(), REPLICA_DELEGATIONS);
-    assert_eq!(snapshot.test_runs.len(), REPLICA_RUNS);
+    assert_eq!(snapshot.test_run_overview.get().counts.total, REPLICA_RUNS);
     let serialization = std::time::Instant::now();
     let snapshot_bytes = serde_json::to_vec(&snapshot).unwrap().len();
     let serialization_ns = serialization.elapsed().as_nanos();

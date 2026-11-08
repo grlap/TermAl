@@ -44,8 +44,20 @@ async fn create_test_run_wait(
 #[serde(rename_all = "camelCase")]
 struct TestRunListQuery {
     project_id: Option<String>,
+    session_id: Option<String>,
+    state: Option<TestRunState>,
+    view: Option<TestRunListView>,
     limit: Option<usize>,
     after: Option<String>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum TestRunListView {
+    #[default]
+    History,
+    Active,
+    Attention,
 }
 
 const TEST_RUN_LIST_DEFAULT_LIMIT: usize = 100;
@@ -57,6 +69,12 @@ const TEST_RUN_LIST_MAX_LIMIT: usize = 200;
 #[serde(deny_unknown_fields)]
 struct TestRunListCursor {
     project_id: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    state: Option<TestRunState>,
+    #[serde(default)]
+    view: TestRunListView,
     started_at: Option<String>,
     run_id: String,
 }
@@ -91,17 +109,49 @@ async fn get_test_runs(
                 .map_err(|_| invalid())?;
             let cursor: TestRunListCursor =
                 serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-            if cursor.project_id != query.project_id || cursor.run_id.is_empty() {
+            if cursor.project_id != query.project_id
+                || cursor.session_id != query.session_id
+                || cursor.state != query.state
+                || cursor.view != query.view.unwrap_or_default()
+                || cursor.run_id.is_empty() {
                 return Err(invalid());
             }
             Ok(cursor)
         })
         .transpose()?;
+    run_blocking_api(move || test_run_list_page(&state, query, cursor, limit)).await
+}
+
+fn test_run_list_page(
+    state: &AppState,
+    query: TestRunListQuery,
+    cursor: Option<TestRunListCursor>,
+    limit: usize,
+) -> Result<Json<TestRunListResponse>, ApiError> {
+    let (revision, cut) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        (inner.revision, state.test_run_history_projection_locked(&inner))
+    };
     let project = query.project_id.as_deref();
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let mut runs: Vec<_> = test_run_summaries_locked(&inner)
-        .into_iter()
-        .filter(|run| project.is_none_or(|id| run.project_id.as_deref() == Some(id)))
+    // The capture is immutable. Projection, canonical association merging,
+    // filtering and sorting all run after releasing StateInner.
+    let history_runs = &cut.value().runs;
+    let history = test_run_history_from_projection(&cut.cut, history_runs, project);
+    let matches = |run: &&TestRunSummary| {
+        project.is_none_or(|id| run.project_id.as_deref() == Some(id))
+            && query.session_id.as_deref().is_none_or(|id| {
+                run.owner_session_id.as_deref() == Some(id)
+                    || run.notify_session_id.as_deref() == Some(id)
+            })
+            && query.state.is_none_or(|state| run.state == state)
+            && match query.view.unwrap_or_default() {
+                TestRunListView::History => true,
+                TestRunListView::Active => run.state == TestRunState::Running,
+                TestRunListView::Attention => test_run_needs_attention(run, &cut.cut.attention_ids),
+            }
+    };
+    let total = history_runs.iter().filter(matches).count();
+    let mut runs: Vec<_> = history_runs.iter().filter(matches)
         .filter(|run| {
             cursor.as_ref().is_none_or(|cursor| {
                 run.started_at < cursor.started_at
@@ -109,6 +159,7 @@ async fn get_test_runs(
             })
         })
         .take(limit + 1)
+        .cloned()
         .collect();
     let next_cursor = if runs.len() > limit {
         runs.truncate(limit);
@@ -117,6 +168,9 @@ async fn get_test_runs(
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
                 serde_json::to_vec(&TestRunListCursor {
                     project_id: query.project_id.clone(),
+                    session_id: query.session_id.clone(),
+                    state: query.state,
+                    view: query.view.unwrap_or_default(),
                     started_at: last.started_at.clone(),
                     run_id: last.run_id.clone(),
                 })
@@ -127,10 +181,13 @@ async fn get_test_runs(
         None
     };
     Ok(Json(TestRunListResponse {
+        revision,
+        server_instance_id: state.server_instance_id.clone(),
+        total,
         runs,
         limit,
         next_cursor,
-        history: test_run_history_locked(&inner, project),
+        history,
     }))
 }
 

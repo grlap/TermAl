@@ -14,6 +14,8 @@ mod run_wait_evidence;
 mod heartbeat_evidence;
 mod registration;
 mod prompt_evidence;
+mod observations;
+mod no_trace_declared;
 
 struct WaitFixture {
     state: AppState,
@@ -741,6 +743,7 @@ fn wait_on(summaries: &[TestRunSummary]) -> TestRunWaitRecord {
         runs: summaries
             .iter()
             .map(|summary| TestRunWaitRunLabel {
+                observation: None,
                 remote: None,
                 run_id: summary.run_id.clone(),
                 run_dir: summary.run_dir.clone(),
@@ -857,6 +860,7 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
         created_at: "now".to_owned(),
         title: None,
         runs: vec![TestRunWaitRunLabel {
+            observation: None,
             remote: None,
             run_id: "test-a".to_owned(),
             run_dir: "/repo/.git/review-runs/test-a".to_owned(),

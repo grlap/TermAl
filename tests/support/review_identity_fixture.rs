@@ -6,6 +6,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
+    time::Instant,
 };
 
 pub struct Fixture {
@@ -15,6 +16,7 @@ pub struct Fixture {
 
 impl Fixture {
     pub fn new() -> Self {
+        let started = Instant::now();
         let project = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
         let scratch = project.join(".tmp");
         fs::create_dir_all(&scratch).unwrap();
@@ -30,7 +32,9 @@ impl Fixture {
         let root = home.join("repo");
         fs::create_dir(&root).unwrap();
         git(&root, &["init", "--object-format=sha1"], None);
-        Self { home, root }
+        let fixture = Self { home, root };
+        report_timing("construct", "repository", started);
+        fixture
     }
 
     pub fn put(&self, path: &str, bytes: &[u8]) {
@@ -58,6 +62,7 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        let started = Instant::now();
         // Only this UUID fixture is removed; no live run/worktree is a target.
         let project = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
         let resolved = fs::canonicalize(&self.home).unwrap();
@@ -78,7 +83,19 @@ impl Drop for Fixture {
                 panic!("identity fixture cleanup {}: {error}", resolved.display());
             }
         }
+        report_timing("cleanup", "fixture", started);
     }
+}
+
+// Diagnostic wall times never decide whether a behavior passes.
+pub fn report_timing(phase: &str, class: &str, started: Instant) {
+    let elapsed = started.elapsed();
+    let current = std::thread::current();
+    eprintln!(
+        "identity fixture phase: test={} phase={phase} class={class} elapsed_ms={}",
+        current.name().unwrap_or("unnamed"),
+        elapsed.as_millis()
+    );
 }
 
 fn prepare_fixture_removal(path: &Path, home: &Path) -> std::io::Result<()> {
@@ -166,11 +183,13 @@ pub fn git(root: &Path, args: &[&str], input: Option<&[u8]>) -> String {
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let started = Instant::now();
     let mut child = command.spawn().unwrap();
     if let Some(bytes) = input {
         child.stdin.take().unwrap().write_all(bytes).unwrap();
     }
     let result = child.wait_with_output().unwrap();
+    report_timing("git", args.first().copied().unwrap_or("none"), started);
     assert!(
         result.status.success(),
         "git {args:?}: {}",
@@ -230,13 +249,20 @@ fn git_path(path: &Path) -> String {
 }
 
 pub fn invoke(root: &Path, request: Value) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_termal"))
+    let started = Instant::now();
+    let output = Command::new(env!("CARGO_BIN_EXE_termal"))
         .arg("review-identity")
         .arg(root)
         .arg(serde_json::to_string(&request).unwrap())
         .current_dir(root)
         .output()
-        .unwrap()
+        .unwrap();
+    report_timing(
+        "invoke",
+        request["operation"].as_str().unwrap_or("unknown"),
+        started,
+    );
+    output
 }
 
 pub fn successful(root: &Path, request: Value) -> Value {

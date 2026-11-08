@@ -2,6 +2,16 @@
 import type { TestRunDetail, TestRunSummary } from "./test-runs";
 import type { TestRunCardSnapshot } from "./test-run-card";
 import type { TestRunWaitRecord } from "./test-run-waits";
+import type { TestRunOverview, SessionTestRunActivity } from "./test-run-overview";
+
+export function makeTestRunOverview(overrides: Partial<TestRunOverview> = {}): TestRunOverview {
+  return { version: 1, ready: true, total: 0, running: 0, passed: 0, failed: 0, unknown: 0,
+    needsAttention: 0, evidenceAtRisk: 0, evidenceSafe: 0, evidenceUnknown: 0, projects: [], ...overrides };
+}
+export function makeTestRunActivity(overrides: Partial<SessionTestRunActivity> = {}): SessionTestRunActivity {
+  return { ownedRunning: 0, foregroundRunning: 0, backgroundRunning: 0, modeUnknownRunning: 0, notifyRunning: 0,
+    foregroundStage: null, ownedStage: null, notifyStage: null, ...overrides };
+}
 
 export function makeTestRunCard(overrides: Partial<TestRunCardSnapshot> = {}): TestRunCardSnapshot {
   return { ...makeTestRun(), stagesOmitted: 0, errorTruncated: false, failure: null, ...overrides };

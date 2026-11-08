@@ -762,6 +762,7 @@ impl AppState {
         // prompt; the notification supplies completion, not a verdict.
         for (key, interrupted) in &work.ended {
             self.end_native_declared_task(session_id, token, key, *interrupted);
+            self.end_observed_declared_task(session_id, token, key, *interrupted);
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {

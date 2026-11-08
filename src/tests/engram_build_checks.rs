@@ -459,6 +459,8 @@ fn engram_build_focused_summary_alone_does_not_supply_native_evidence() {
 
 #[test]
 fn engram_build_focused_rejects_stale_foreign_and_mismatched_artifacts() {
+    let timings = FixtureTimings::start("build_invalid_artifacts");
+    let _repository_seed = EORepositorySeedScope::new();
     type Change = fn(&mut FocusedBuildFixture);
     let cases: &[(&str, Change)] = &[
         ("owner", |f| f.request["owner"] = json!("another-session")),
@@ -530,7 +532,9 @@ fn engram_build_focused_rejects_stale_foreign_and_mismatched_artifacts() {
         }),
     ];
     for (label, change) in cases {
+        timings.phase("fixture_setup");
         let mut fixture = FocusedBuildFixture::new(&format!("build-focused-refuse-{label}"), 0);
+        timings.phase("case_operations");
         fixture.save();
         assert_eq!(
             engram_focused_build_exit(
@@ -561,6 +565,7 @@ fn engram_build_focused_rejects_stale_foreign_and_mismatched_artifacts() {
             !diagnostic_refs(&fixture.turn).contains(&"exit:0".to_owned()),
             "{label}"
         );
+        timings.phase("scope_cleanup");
     }
 }
 

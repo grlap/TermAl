@@ -2234,6 +2234,15 @@ impl AppState {
         ended: &[String],
         outcome: Option<EngramExecutionOutcome>,
     ) {
+        self.apply_declared_verdict_to_test_run_with_detail(ended, outcome, None);
+    }
+
+    fn apply_declared_verdict_to_test_run_with_detail(
+        &self,
+        ended: &[String],
+        outcome: Option<EngramExecutionOutcome>,
+        unknown_detail: Option<&str>,
+    ) {
         let [id] = ended else {
             return;
         };
@@ -2247,9 +2256,17 @@ impl AppState {
             let eligible = row.declared_artifact.is_some()
                 && !row.launch_only
                 && row.summary.ended_at.is_some()
-                && row.summary.state != state;
+                && (row.summary.state != state
+                    || row.declared_verdict_pending
+                    || (state == TestRunState::Unknown
+                        && unknown_detail.is_some_and(|detail|
+                            row.summary.error.as_deref() != Some(detail))));
             eligible.then(|| {
                 row.summary.state = state;
+                row.declared_verdict_pending = false;
+                if state == TestRunState::Unknown && let Some(detail) = unknown_detail {
+                    row.summary.error = Some(detail.to_owned());
+                }
                 row.clone()
             })
         });
@@ -2307,18 +2324,57 @@ impl AppState {
         exit: Option<EngramCommandExit>,
         runtime_output_cut: bool,
     ) {
+        self.note_engram_command_finished_reported_with_observation_hook(
+            session_id, provenance, key, command, reported_command, output, exit, runtime_output_cut,
+            #[cfg(test)] || {},
+        );
+    }
+
+    fn note_engram_command_finished_reported_with_observation_hook(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        command: &str,
+        reported_command: Option<&str>,
+        output: &str,
+        exit: Option<EngramCommandExit>,
+        runtime_output_cut: bool,
+        #[cfg(test)] after_observation_end: impl FnOnce(),
+    ) {
         self.observe_test_command_description(session_id, provenance, key, reported_command, None);
+        // Keep the original declared owner across END and its artifact read.
+        // Only this captured owner can owe a later verdict application.
+        let observed_declared = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id).and_then(|index| {
+                runtime_unadmitted_trace(&inner.sessions[index], provenance).and_then(|trace| {
+                    let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
+                    entry.declared.clone().map(|binding|
+                        (trace.host_turn_ref.clone(), entry.check.host_check_id.clone(), binding))
+                })
+            })
+        };
         // Record the provider boundary before artifact capture can retain a
         // terminal result. Only this boundary may finalize native host proof.
         // The rows this exit ended, exactly: a declared verdict below applies
         // only to one of them, never to a row an earlier end closed.
-        let ended_test_runs = self.observe_test_command_end(session_id, provenance, key, exit);
+        let ended_test_runs = if observed_declared.is_some() {
+            self.observe_test_command_end_awaiting_declared_verdict(session_id, provenance, key, exit)
+        } else if let Some(ended) = self.end_untraced_declared_observation(
+            session_id, provenance, key, reported_command, exit,
+            #[cfg(test)] after_observation_end,
+        ) {
+            ended
+        } else {
+            self.observe_test_command_end(session_id, provenance, key, exit)
+        };
         self.observe_test_command_artifact(session_id, provenance, key, command, output, runtime_output_cut);
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
         let (starting_check, workdir, unresolved_writers, launch_held_target,
-            observed_declared, observed_launcher, observed_completion) = {
+            observed_launcher, observed_completion) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -2354,11 +2410,6 @@ impl AppState {
                 launch_held_target,
                 runtime_unadmitted_trace(record, provenance).and_then(|trace| {
                     let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
-                    entry.declared.clone().map(|binding|
-                        (trace.host_turn_ref.clone(), entry.check.host_check_id.clone(), binding))
-                }),
-                runtime_unadmitted_trace(record, provenance).and_then(|trace| {
-                    let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
                     let command = entry.recognized_command.as_ref()?;
                     (entry.declared.is_none() && !entry.launch_only
                         && command.kind == EngramVerificationKind::Test
@@ -2382,18 +2433,22 @@ impl AppState {
             let matches = reported_command.and_then(engram_declared_candidate)
                 .is_some_and(|(_, words)| engram_declared_words(&binding.entry.command)
                     .is_ok_and(|expected| expected == words));
-            let outcome = if matches {
+            let (outcome, detail) = if matches {
                 let exit = exit.unwrap_or(EngramCommandExit::Unknown);
                 let result = engram_declared_result(&binding, exit);
                 if exit != EngramCommandExit::NotFinished {
                     engram_write_declared_diagnostic(&mut std::io::stderr(), &result);
                 }
-                engram_declared_outcome(exit, &result)
-            } else { Some(EngramExecutionOutcome::Unknown) };
-            (turn, check_id, binding, outcome)
+                let detail = match &result.verdict {
+                    EngramTrxVerdict::Unknown(reason) => Some(reason.clone()),
+                    _ => None,
+                };
+                (engram_declared_outcome(exit, &result), detail)
+            } else { (Some(EngramExecutionOutcome::Unknown), None) };
+            (turn, check_id, binding, outcome, detail)
         });
-        if let Some((_, _, _, outcome)) = &observed_declared {
-            self.apply_declared_verdict_to_test_run(&ended_test_runs, *outcome);
+        if let Some((_, _, _, outcome, detail)) = &observed_declared {
+            self.apply_declared_verdict_to_test_run_with_detail(&ended_test_runs, *outcome, detail.as_deref());
         }
         // On the recorder's path, so bounded as the turn path's own held read.
         let launch_held = launch_held_target.map(|target| {
@@ -2546,7 +2601,7 @@ impl AppState {
                     exit: Some(EngramCommandExit::Unknown), runtime_output_cut,
                 });
         }
-        if let Some((turn, check_id, binding, outcome)) = &observed_declared {
+        if let Some((turn, check_id, binding, outcome, _)) = &observed_declared {
             observe_runtime_unadmitted_declared_end(
                 record, provenance,
                 &EngramRecorderObservation::CommandFinished {

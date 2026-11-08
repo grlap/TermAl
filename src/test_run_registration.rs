@@ -1178,16 +1178,16 @@ fn test_run_registered_fallback(inner: &StateInner, row: &TestRunRegistration) -
 }
 
 fn test_run_registered_fallback_from_observations<'a>(
-    inner: &StateInner,
+    inner: &impl TestRunProjectionSource,
     row: &TestRunRegistration,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
 ) -> TestRunSummary {
-    let durable = inner.test_runs.registered.contains(&row.run_id);
-    let failed = inner.test_runs.registration_failures.contains(&row.run_id);
+    let durable = inner.projection_index().registered.contains(&row.run_id);
+    let failed = inner.projection_index().registration_failures.contains(&row.run_id);
     let terminal = test_run_registration_final_observation_from_candidates(
         row,
         observations,
-        Some(&inner.test_runs.observations_durable),
+        Some(&inner.projection_index().observations_durable),
     );
     let unbound = durable && terminal.is_some();
     TestRunSummary {

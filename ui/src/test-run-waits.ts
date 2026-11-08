@@ -28,7 +28,7 @@ export function applyTestRunWaitDelta(waits: readonly TestRunWaitRecord[], delta
   return [...waits.filter(wait => wait.id !== delta.wait.id), delta.wait];
 }
 
-export function testRunWaitPrompt(waits: readonly TestRunWaitRecord[], runs: readonly TestRunSummary[], sessionId: string, now?: number) {
+export function testRunWaitPrompt(waits: readonly TestRunWaitRecord[], runs: readonly TestRunSummary[], sessionId: string, now?: number, missingStatus = "not indexed") {
   const own = waits.filter(wait => wait.sessionId === sessionId);
   if (!own.length) return null;
   return own.map(wait => {
@@ -43,7 +43,7 @@ export function testRunWaitPrompt(waits: readonly TestRunWaitRecord[], runs: rea
       const uncertainty = live?.state === "unknown"
         ? `, ${testRunUnknownLabel(live.unknownReason)}${live.unknownReason === "noPid" || live.unknownReason === "heartbeatStale" ? ", wait remains pending" : ""}`
         : "";
-      return `${id} (${live?.preset ?? saved?.preset ?? "run"}${live ? `, ${live.state}${uncertainty}${live.currentStage ? `, stage ${live.currentStage}` : ""}` : ", not indexed"}${seconds === null ? "" : `, ${Math.floor(seconds / 60)}m${seconds % 60}s`})`;
+      return `${id} (${live?.preset ?? saved?.preset ?? "run"}${live ? `, ${live.state}${uncertainty}${live.currentStage ? `, stage ${live.currentStage}` : ""}` : `, ${missingStatus}`}${seconds === null ? "" : `, ${Math.floor(seconds / 60)}m${seconds % 60}s`})`;
     });
     return `Waiting for ${wait.mode === "all" ? "all test runs" : "any test run"}: ${labels.join(", ")}${wait.title ? ` — ${wait.title}` : ""}`;
   }).join("; ");

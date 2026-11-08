@@ -183,32 +183,33 @@ impl Drop for ObservationPublicationFixture {
     }
 }
 
-fn observation_delta(events: &[SseStreamEvent], id: &str, expected: TestRunState, durability: &str) {
-    let runs: Vec<_> = events
-        .iter()
-        .filter_map(|event| {
-            let SseStreamEvent::Delta(payload) = event else {
-                return None;
-            };
-            match serde_json::from_str::<DeltaEvent>(payload).unwrap() {
-                DeltaEvent::TestRunChanged { run, .. } => Some(run),
-                _ => panic!("unexpected observation delta: {payload}"),
-            }
-        })
-        .collect();
+fn observation_delta(fixture: &ObservationPublicationFixture, events: &[SseStreamEvent], id: &str, expected: TestRunState, durability: &str) {
+    let [SseStreamEvent::Delta(payload)] = events else {
+        panic!("one bounded invalidation per observation transition: {events:?}");
+    };
+    let DeltaEvent::TestRunsInvalidated { overview, activity, server_instance_id, .. } =
+        serde_json::from_str::<DeltaEvent>(payload).unwrap() else {
+            panic!("unexpected observation delta: {payload}");
+        };
+    assert_eq!(server_instance_id, fixture.state.server_instance_id);
+    let running = usize::from(expected == TestRunState::Running);
+    assert_eq!(overview.get().counts.running, running);
+    assert_eq!(activity.wire.get(&fixture.session).map_or(0, |row| row.owned_running), running);
+    if expected == TestRunState::Passed {
+        assert!(overview.get().counts.passed > 0);
+    }
+    // The public event contains counters, not the exact row. Read it through
+    // the production exact-ID owner and retain the durability/credit oracles.
+    let mut diagnostics = TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
+    let Json(detail) = get_test_run_observed(fixture.state.clone(), id, &mut diagnostics).unwrap();
+    assert_eq!(detail.run.run_id, id);
+    assert_eq!(detail.run.state, expected);
     assert_eq!(
-        runs.len(),
-        1,
-        "one exact changed run per observation transition"
-    );
-    assert_eq!(runs[0].run_id, id);
-    assert_eq!(runs[0].state, expected);
-    assert_eq!(
-        runs[0].registration.tracking_durability.as_deref(),
+        detail.run.registration.tracking_durability.as_deref(),
         Some(durability)
     );
     assert!(
-        runs[0].registration.verification_record_ids.is_empty(),
+        detail.run.registration.verification_record_ids.is_empty(),
         "visibility is not verification credit"
     );
 }
@@ -257,7 +258,7 @@ fn observation_publication_repeated_start_end_preserves_pending_durable_and_stor
         let key = format!("observed-command-{number}");
         let id = fixture.start(&key);
         let events = fixture.flush();
-        observation_delta(&events, &id, TestRunState::Running, "pending");
+        observation_delta(&fixture, &events, &id, TestRunState::Running, "pending");
         all.extend(events);
         assert!(!fixture
             .state
@@ -271,12 +272,12 @@ fn observation_publication_repeated_start_end_preserves_pending_durable_and_stor
         let stored = fixture.stored_observation(&id);
         assert_eq!(stored.summary.state, TestRunState::Running);
         let events = fixture.flush();
-        observation_delta(&events, &id, TestRunState::Running, "durable");
+        observation_delta(&fixture, &events, &id, TestRunState::Running, "durable");
         all.extend(events);
 
         fixture.end(&key);
         let events = fixture.flush();
-        observation_delta(&events, &id, TestRunState::Passed, "pending");
+        observation_delta(&fixture, &events, &id, TestRunState::Passed, "pending");
         all.extend(events);
         fixture.write_pending();
         let stored = fixture.stored_observation(&id);
@@ -288,7 +289,7 @@ fn observation_publication_repeated_start_end_preserves_pending_durable_and_stor
         assert_eq!(stored.summary.exit_code, Some(0));
         drop(inner);
         let events = fixture.flush();
-        observation_delta(&events, &id, TestRunState::Passed, "durable");
+        observation_delta(&fixture, &events, &id, TestRunState::Passed, "durable");
         all.extend(events);
     }
     assert_eq!(
@@ -305,7 +306,7 @@ fn observation_publication_failed_sqlite_write_remains_visible_without_durable_a
     let mut fixture = ObservationPublicationFixture::new();
     let id = fixture.start("write-failure");
     let mut all = fixture.flush();
-    observation_delta(&all, &id, TestRunState::Running, "pending");
+    observation_delta(&fixture, &all, &id, TestRunState::Running, "pending");
     let delta = fixture.collect_pending();
     // This fixture's actual cached SQLite connection refuses writes. The
     // production writer/fence finisher supplies the failure; no ACK is faked.
@@ -320,7 +321,7 @@ fn observation_publication_failed_sqlite_write_remains_visible_without_durable_a
     assert!(fixture.writer.write(&delta).is_err());
     fixture.state.step_test_command_observation_persistence();
     let events = fixture.flush();
-    observation_delta(&events, &id, TestRunState::Running, "failed");
+    observation_delta(&fixture, &events, &id, TestRunState::Running, "failed");
     all.extend(events);
     let inner = fixture.state.inner.lock().unwrap();
     assert!(inner.test_runs.observations_failed.contains(&id));
@@ -341,7 +342,7 @@ fn observation_publication_fence_expires_on_its_clock_and_records_failed_trackin
     let mut fixture = ObservationPublicationFixture::new();
     let id = fixture.start("expired-fence");
     let mut all = fixture.flush();
-    observation_delta(&all, &id, TestRunState::Running, "pending");
+    observation_delta(&fixture, &all, &id, TestRunState::Running, "pending");
     let delta = fixture.collect_pending();
     // A genuinely expired fence still fails. Its 5 s deadline runs on the
     // fixture's clock, so this advance, not host time, is what expires it.
@@ -350,7 +351,7 @@ fn observation_publication_fence_expires_on_its_clock_and_records_failed_trackin
     fixture.watermark = delta.watermark;
     fixture.state.step_test_command_observation_persistence();
     let events = fixture.flush();
-    observation_delta(&events, &id, TestRunState::Running, "failed");
+    observation_delta(&fixture, &events, &id, TestRunState::Running, "failed");
     all.extend(events);
     let inner = fixture.state.inner.lock().unwrap();
     assert!(inner.test_runs.observations_failed.contains(&id));
@@ -367,7 +368,7 @@ fn observation_publication_late_start_ack_cannot_ack_the_new_terminal_image() {
     let start_delta = fixture.collect_pending();
     fixture.end("late-start-ack");
     let events = fixture.flush();
-    observation_delta(&events, &id, TestRunState::Passed, "pending");
+    observation_delta(&fixture, &events, &id, TestRunState::Passed, "pending");
     all.extend(events);
     fixture.writer.write(&start_delta).unwrap();
     fixture.watermark = start_delta.watermark;
@@ -394,7 +395,7 @@ fn observation_publication_late_start_ack_cannot_ack_the_new_terminal_image() {
         TestRunState::Passed
     );
     let events = fixture.flush();
-    observation_delta(&events, &id, TestRunState::Passed, "durable");
+    observation_delta(&fixture, &events, &id, TestRunState::Passed, "durable");
     all.extend(events);
     assert_no_observation_snapshots(&all);
 }
@@ -416,10 +417,10 @@ fn observation_publication_disconnected_writer_keeps_synchronous_durability() {
     }
     let id = fixture.start("synchronous-observation");
     let mut all = fixture.flush();
-    observation_delta(&all, &id, TestRunState::Running, "durable");
+    observation_delta(&fixture, &all, &id, TestRunState::Running, "durable");
     fixture.end("synchronous-observation");
     let events = fixture.flush();
-    observation_delta(&events, &id, TestRunState::Passed, "durable");
+    observation_delta(&fixture, &events, &id, TestRunState::Passed, "durable");
     all.extend(events);
     let loaded = load_state(fixture.state.persistence_path.as_path())
         .unwrap()
@@ -450,7 +451,7 @@ fn observation_publication_synchronous_write_failure_uses_the_commits_revision()
     let revision = fixture.state.inner.lock().unwrap().revision;
     let id = fixture.start("synchronous-write-failure");
     let events = fixture.flush();
-    observation_delta(&events, &id, TestRunState::Running, "failed");
+    observation_delta(&fixture, &events, &id, TestRunState::Running, "failed");
     let [SseStreamEvent::Delta(payload)] = events.as_slice() else {
         panic!("failed persistence must leave one narrow factual update");
     };

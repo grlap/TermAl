@@ -33,6 +33,8 @@ impl StateProjectionKey {
 struct StateProjectionCache {
     server_instance_id: String,
     sessions: HashMap<String, (StateProjectionKey, Arc<StateSessionSummary>)>,
+    test_runs: Option<Arc<TestRunHistoryProjection>>,
+    test_run_version: u64,
     #[cfg(test)]
     before_materialize: Option<Box<dyn FnOnce() + Send>>,
     #[cfg(test)]
@@ -57,6 +59,7 @@ impl ImmutableStateSnapshot {
         }
         #[cfg(test)]
         observe_state_snapshot_projection_for_test();
+        self.prepare_test_run_activity();
         // No StateInner/cache guard survives the handoff to this consumer.
         self.header.sessions = self
             .sessions
@@ -125,6 +128,9 @@ impl AppState {
             queue_projection_hash,
             session_mutation_stamp,
             parent_delegation_id,
+            // This is attached from the separate exact test-run cut after
+            // metadata cache lookup; it is never a SessionRecord input.
+            test_run_activity: _,
         } = summary;
         let session = &record.session;
         if !(kimi_effort == &session.kimi_effort

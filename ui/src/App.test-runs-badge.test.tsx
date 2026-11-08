@@ -5,7 +5,7 @@ import { forwardRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import * as runsApi from "./test-runs-api";
-import { makeTestRun, makeTestRunDetail } from "./test-runs-fixtures";
+import { makeTestRun, makeTestRunDetail, makeTestRunOverview, makeTestRunActivity } from "./test-runs-fixtures";
 import type { TestRunSummary } from "./test-runs";
 import {
   EventSourceMock, ResizeObserverMock, clickAndSettle,
@@ -63,6 +63,40 @@ function railButton() {
 }
 
 describe("App test-run badge", () => {
+  it("uses aggregate counts and ownership for session badges while closed panels fetch no run history", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const read = vi.spyOn(runsApi, "readTestRuns");
+      const exact = vi.spyOn(runsApi, "readTestRun");
+      const owner = makeSession("owner", { name: "Background owner" });
+      const notify = makeSession("notify", { name: "Notification recipient" });
+      const owned = makeTestRunActivity({ ownedRunning: 257, backgroundRunning: 257 });
+      const notified = makeTestRunActivity({ notifyRunning: 257 });
+      const state = { ...makeStateResponse({ revision: 1, projects: [], orchestrators: [], workspaces: [], sessions: [
+        { ...makeStateSessionSummary(owner), testRunActivity: owned },
+        { ...makeStateSessionSummary(notify), testRunActivity: notified },
+      ] }), testRunOverview: makeTestRunOverview({ total: 257, running: 257, needsAttention: 257 }) };
+      vi.spyOn(api, "fetchState").mockResolvedValue(state);
+      await renderApp();
+      await dispatchOpenedStateEvent(latestEventSource(), state);
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      expect(railButton()).toHaveAccessibleName("Open Test Runs (257 active runs)");
+      expect(screen.getByRole("button", { name: "Working sessions (1)" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Completed (1)" })).toBeVisible();
+      expect(document.querySelector('.session-row-status-badge[data-work="background"]')).not.toBeNull();
+      expect(read).not.toHaveBeenCalled();
+      expect(exact).not.toHaveBeenCalled();
+      await act(async () => {
+        latestEventSource().dispatchNamedEvent("delta", { type: "testRunsInvalidated", serverInstanceId: "test-instance", revision: 2,
+          overview: makeTestRunOverview({ version: 2, total: 257, passed: 257 }), activity: {} });
+        await flushUiWork();
+      });
+      expect(railButton()).toHaveAccessibleName("Open Test Runs");
+      expect(screen.getByRole("button", { name: "Working sessions (0)" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Completed (2)" })).toBeVisible();
+      expect(read).not.toHaveBeenCalled();
+      expect(exact).not.toHaveBeenCalled();
+    });
+  });
   it("loads the run snapshot and preserves per-run restart detail in the panel", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const run = makeTestRun({ restartWouldVoidEvidence: true });

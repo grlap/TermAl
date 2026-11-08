@@ -1,4 +1,4 @@
-import type { RunningRunsByOwner } from "./test-runs";
+import type { SessionWorkByOwner as RunningRunsByOwner } from "./test-run-overview";
 import type { Session } from "./types";
 import { sessionWorkActivity } from "./session-work-activity";
 

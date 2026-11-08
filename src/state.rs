@@ -744,6 +744,31 @@ impl StateBroadcastSenders {
         #[cfg(test)]
         let _ = self.delta_events.send(observed);
     }
+
+    fn send_delta_event(&self, event: &DeltaEvent) {
+        let payload = match serde_json::to_string(event) {
+            Ok(payload) => payload,
+            Err(error) => {
+                eprintln!("warning: failed to serialize SSE delta at revision {}: {error}", event.revision());
+                return;
+            }
+        };
+        // The private lifecycle channel keeps the original canonical event
+        // for custody tests. Public transport receives counters/invalidation
+        // only; its integration tests observe stream_events.
+        #[cfg(test)]
+        let observed = match event {
+            DeltaEvent::TestRunsInvalidated { internal: Some(event), .. } =>
+                Some(serde_json::to_string(event).expect("canonical test-run event")),
+            DeltaEvent::TestRunsInvalidated { internal: None, .. } => None,
+            _ => Some(payload.clone()),
+        };
+        let _ = self.stream_events.send(SseStreamEvent::Delta(Arc::from(payload)));
+        #[cfg(test)]
+        if let Some(observed) = observed {
+            let _ = self.delta_events.send(observed);
+        }
+    }
 }
 
 fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadcastSenders) {
@@ -772,15 +797,7 @@ fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadca
             );
         }
         StateBroadcastWork::Drain => panic!("drain is handled by the owned broadcaster"),
-        StateBroadcastWork::Delta(event) => match serde_json::to_string(&event) {
-            Ok(payload) => senders.send_delta(payload),
-            Err(err) => {
-                eprintln!(
-                    "warning: failed to serialize SSE delta at revision {}: {err}",
-                    event.revision()
-                );
-            }
-        },
+        StateBroadcastWork::Delta(event) => senders.send_delta_event(&event),
         StateBroadcastWork::Lagged => {
             let _ = senders.stream_events.send(SseStreamEvent::Lagged);
         }
@@ -869,7 +886,7 @@ mod state_broadcast_mailbox_tests {
             sessions: Vec::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
-            test_runs: Vec::new(),
+            test_run_overview: TestRunOverviewSnapshot::default(),
             test_run_waits: Vec::new(),
             pending_engram_mcp_revocation_session_ids: Vec::new(),
         }

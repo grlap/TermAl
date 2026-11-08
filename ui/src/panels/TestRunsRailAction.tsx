@@ -4,9 +4,9 @@ import { useContext } from "react";
 import { TestRunsContext } from "../test-runs-context";
 
 export function TestRunsRailAction() {
-  const { runs, open, snapshotReady } = useContext(TestRunsContext);
+  const { runs, open, snapshotReady, overview } = useContext(TestRunsContext);
   if (!open) return null;
-  const activeCount = snapshotReady ? runs.filter(run => run.state === "running").length : 0;
+  const activeCount = overview ? overview.ready ? overview.running : 0 : snapshotReady ? runs.filter(run => run.state === "running").length : 0;
   const label = activeCount > 0
     ? `Open Test Runs (${activeCount} active ${activeCount === 1 ? "run" : "runs"})`
     : "Open Test Runs";

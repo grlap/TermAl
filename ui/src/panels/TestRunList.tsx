@@ -5,17 +5,20 @@ import type { TestRunSummary } from "../test-runs";
 import { TestRunDuration } from "./TestRunDetails";
 import { useWorkWindow } from "./use-work-window";
 
-export function TestRunList({ runs, names, selectedId, onSelect, queryKey, ready }: {
+export function TestRunList({ runs, names, selectedId, onSelect, queryKey, ready, onVisible }: {
   runs: readonly TestRunSummary[];
   names: ReadonlyMap<string, string>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   queryKey: string;
   ready: boolean;
+  onVisible?: (ids: readonly string[]) => void;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const keys = useMemo(() => runs.map(run => run.runId), [runs]);
   const window = useWorkWindow(keys, viewport, selectedId ?? undefined);
+  const visibleKey = JSON.stringify(window.indices.map(index => keys[index]));
+  useLayoutEffect(() => { onVisible?.(JSON.parse(visibleKey) as string[]); }, [visibleKey, onVisible]);
   const previousQuery = useRef(queryKey);
   const [pendingFocus, setPendingFocus] = useState<{ key: string; keys: readonly string[] } | null>(null);
   useLayoutEffect(() => {

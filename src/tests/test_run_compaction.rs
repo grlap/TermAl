@@ -187,6 +187,11 @@ async fn merged_resolved_detail_is_bounded_with_counts_lookup_and_registration_i
     assert_eq!(list["compactedCount"], 3);
     assert_eq!(list["omittedCount"], 3);
     assert_eq!(list["unresolvedBacklog"], 1);
+    assert_eq!(list["total"], 54);
+    assert!(list["runs"].as_array().unwrap().iter().any(|row| row["runId"] == first
+        && row["historyCompacted"] == true), "complete pages retain resolved compact identities");
+    assert!(!list["runs"].as_array().unwrap().iter().any(|row| row["runId"] == alias),
+        "the retained canonical artifact absorbs its execution alias");
     for id in [&first, &alias] {
         let (status, detail): (StatusCode, Value) = request_json(
             &app,
@@ -316,7 +321,6 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
             } else {
                 None
             };
-            let mut client = fixture.summaries();
             let mut stream = fixture.state.subscribe_stream_events();
             let revision = fixture.state.full_snapshot().revision;
             fs::remove_file(directory.join("request.json")).unwrap();
@@ -343,23 +347,32 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
                 assert_eq!(retained.state, TestRunState::Unknown);
                 assert!(retained.interrupted);
             }
+            // Registration retains a launch, not a terminal observation. With
+            // its artifacts gone this fixture has no proof of completion.
+            // An unregistered cached terminal identity retains its verdict.
+            let known_terminal = terminal && !registered;
+            let expected_state = if known_terminal { TestRunState::Passed } else { TestRunState::Unknown };
+            assert_eq!(retained.state, expected_state, "registered={registered}, terminal={terminal}");
             let mut revisions = Vec::new();
             while let Ok(event) = stream.try_recv() {
-                let SseStreamEvent::Delta(payload) = event else {
-                    panic!("artifact loss must reach the live client without a snapshot reload");
+                let SseStreamEvent::State(payload) = event else {
+                    panic!("artifact loss must publish a cumulative counter cut: {event:?}");
                 };
-                match serde_json::from_str::<DeltaEvent>(&payload).unwrap() {
-                    DeltaEvent::TestRunChanged { revision, run } => {
-                        revisions.push(revision);
-                        client.retain(|old| old.run_id != run.run_id);
-                        client.push(run);
-                    }
-                    _ => panic!("retained unresolved artifact must never be removed"),
-                }
+                let cut: StateResponse = serde_json::from_str(&payload).unwrap();
+                revisions.push(cut.revision);
+                let counts = &cut.test_run_overview.get().counts;
+                assert_eq!(counts.total, 1, "retained identity is still counted");
+                assert_eq!(counts.running, 0);
+                assert_eq!(counts.unknown, usize::from(!known_terminal), "registered={registered}, terminal={terminal}, cut={}", cut.revision);
+                assert_eq!(counts.passed, usize::from(known_terminal), "registered={registered}, terminal={terminal}, cut={}", cut.revision);
+                assert_eq!(counts.evidence_unknown, 1, "artifact loss cannot fabricate settled proof");
             }
-            assert_eq!(revisions, [revision + 1]);
-            assert_eq!(client, fixture.summaries(), "SSE and API populations agree");
-            assert_eq!(client[0].registration.restart_would_void_evidence, None);
+            assert!(!revisions.is_empty(), "the live client must receive the counter change");
+            assert!(revisions.iter().all(|value| *value == revision + 1));
+            let mut diagnostics = TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
+            let Json(detail) = get_test_run_observed(fixture.state.clone(), run_id, &mut diagnostics).unwrap();
+            assert_eq!(detail.run.registration.restart_would_void_evidence, None);
+            assert_eq!(vec![detail.run], fixture.summaries(), "the invalidated identity remains reachable by exact read");
             fixture.refresh(&[]);
             assert!(matches!(
                 stream.try_recv(),

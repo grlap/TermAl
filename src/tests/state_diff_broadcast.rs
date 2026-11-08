@@ -189,7 +189,7 @@ fn state_diff_without_a_base_sends_a_full_state_then_diffs_from_it() {
         expected_revocations
     );
     assert_eq!(diff["delegations"], json!({"changed": [], "removed": []}));
-    assert_eq!(diff["testRuns"], json!({"changed": [], "removed": []}));
+    assert!(diff.get("testRuns").is_none());
 
     forward_cut(&mut producer, &senders, cut(12, &[&a, &b_changed]));
     let cleared = only_diff(&mut receiver);
@@ -316,7 +316,9 @@ fn state_diff_sends_delta_touched_keys_absolutely_and_absent_ones_as_removed() {
     let with_rows = |revision| {
         let mut snapshot = cut(revision, &[&a, &b]);
         snapshot.header.delegations = vec![delegation("d1", "b"), delegation("d2", "b")];
-        snapshot.header.test_runs = vec![test_run("r1", "running"), test_run("r2", "running")];
+        snapshot.header.test_run_overview.wire = test_run_overview(
+            &[test_run("r1", "running"), test_run("r2", "running")], true, 1, &HashSet::new(),
+        ).0;
         snapshot
     };
     let senders = diff_senders();
@@ -371,8 +373,8 @@ fn state_diff_sends_delta_touched_keys_absolutely_and_absent_ones_as_removed() {
     assert!(diff["sessions"].get("order").is_none());
     assert_eq!(ids(&diff["delegations"]["changed"], "id"), ["d1"]);
     assert_eq!(keys(&diff["delegations"]["removed"]), ["ghost-delegation"]);
-    assert_eq!(ids(&diff["testRuns"]["changed"], "runId"), ["r1"]);
-    assert_eq!(keys(&diff["testRuns"]["removed"]), ["ghost-run"]);
+    assert!(diff.get("testRuns").is_none(), "global diffs never grow a run-row collection");
+    assert_eq!(diff["header"]["testRunOverview"]["running"], 2);
 
     // The emitted cut clears the touched keys.
     forward_cut(&mut producer, &senders, with_rows(9));
@@ -380,7 +382,7 @@ fn state_diff_sends_delta_touched_keys_absolutely_and_absent_ones_as_removed() {
     assert!(ids(&diff["sessions"]["changed"], "id").is_empty());
     assert!(keys(&diff["sessions"]["removed"]).is_empty());
     assert_eq!(diff["delegations"], json!({"changed": [], "removed": []}));
-    assert_eq!(diff["testRuns"], json!({"changed": [], "removed": []}));
+    assert!(diff.get("testRuns").is_none());
 }
 
 #[test]
@@ -392,7 +394,9 @@ fn state_diff_rows_compare_values_and_report_keys_absent_from_the_cut() {
     let mut producer = StateDiffProducer::default();
     let mut base = cut(1, &[&a]);
     base.header.delegations = vec![delegation("d1", "a"), delegation("d2", "a")];
-    base.header.test_runs = vec![test_run("r1", "running"), test_run("r2", "running")];
+    base.header.test_run_overview.wire = test_run_overview(
+        &[test_run("r1", "running"), test_run("r2", "running")], true, 1, &HashSet::new(),
+    ).0;
     forward_cut(&mut producer, &senders, base);
     emitted(&mut receiver);
 
@@ -400,15 +404,17 @@ fn state_diff_rows_compare_values_and_report_keys_absent_from_the_cut() {
     let mut d1 = delegation("d1", "a");
     d1.review_freeze_allowed = true;
     next.header.delegations = vec![d1, delegation("d3", "a")];
-    next.header.test_runs = vec![test_run("r1", "passed"), test_run("r2", "running")];
+    next.header.test_run_overview.wire = test_run_overview(
+        &[test_run("r1", "passed"), test_run("r2", "running")], true, 2, &HashSet::new(),
+    ).0;
     forward_cut(&mut producer, &senders, next);
     let diff = only_diff(&mut receiver);
     assert_eq!(ids(&diff["delegations"]["changed"], "id"), ["d1", "d3"]);
     assert_eq!(diff["delegations"]["changed"][0]["reviewFreezeAllowed"], true);
     assert_eq!(keys(&diff["delegations"]["removed"]), ["d2"]);
-    assert_eq!(ids(&diff["testRuns"]["changed"], "runId"), ["r1"]);
-    assert_eq!(diff["testRuns"]["changed"][0]["state"], "passed");
-    assert!(keys(&diff["testRuns"]["removed"]).is_empty());
+    assert!(diff.get("testRuns").is_none());
+    assert_eq!(diff["header"]["testRunOverview"]["running"], 1);
+    assert_eq!(diff["header"]["testRunOverview"]["passed"], 1);
 }
 
 #[test]
@@ -475,7 +481,7 @@ fn state_diff_restarts_from_a_full_state_after_loss_prebuilt_snapshot_or_new_ins
     forward_cut(&mut producer, &senders, cut(5, &[&a]));
     let diff = only_diff(&mut receiver);
     assert_eq!(diff["baseRevision"], 4);
-    assert!(keys(&diff["testRuns"]["removed"]).is_empty());
+    assert!(diff.get("testRuns").is_none());
 
     // A pre-built snapshot is a full state for everyone and leaves no base.
     let mut prebuilt = empty_state_events_response(DIFF_INSTANCE.to_owned());

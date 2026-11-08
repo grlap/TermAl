@@ -706,12 +706,15 @@ fn source_root_review_removed_root_reclamation_requires_covering_lifecycle_proof
 
 #[test]
 fn source_root_review_released_removed_sessions_make_progress_past_journal_capacity() {
+    let timings = FixtureTimings::start("removed_session_capacity");
+    timings.phase("fixture_setup");
     let label = "removed-root-capacity";
     let mut claimed = EOCheckedTurn::idle(label, true);
     naming_store(&claimed);
     let worktree = naming_worktree(&claimed.root);
     let mut store_work = None;
     for sequence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+        timings.phase("iteration");
         let mut held = naming_claim(label);
         let binding = held.items[0].control_binding.as_mut().unwrap();
         binding.claim_id = format!("removed-claim-{sequence}");
@@ -727,6 +730,7 @@ fn source_root_review_released_removed_sessions_make_progress_past_journal_capac
             .transport
             .enable_named_roots(&claimed.session_id, &binding);
         claimed.transport.replace_held_claims([Ok(held)]);
+        let naming_timing = fixture_phase("name_root");
         claimed
             .state
             .name_engram_source_root(
@@ -737,6 +741,7 @@ fn source_root_review_released_removed_sessions_make_progress_past_journal_capac
                 },
             )
             .expect("released removed roots are reclaimed by authoritative reads");
+        drop(naming_timing);
         let journal = claimed
             .state
             .inner
@@ -790,6 +795,7 @@ fn source_root_review_released_removed_sessions_make_progress_past_journal_capac
                 || request.request["kind"] != "ended"),
         "live removal and read reclamation manufacture no remote end"
     );
+    timings.phase("scope_cleanup");
 }
 
 fn replace_or_unbind_naming_session(claimed: &mut EOCheckedTurn, label: &str, remove: bool) {
@@ -2700,12 +2706,15 @@ fn source_root_review_live_removal_never_reports_a_restore_end() {
 
 #[test]
 fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
+    let timings = FixtureTimings::start("successive_claim_capacity");
+    timings.phase("fixture_setup");
     let label = "review-successive-claims";
     let claimed = EOCheckedTurn::idle(label, true);
     let worktree = naming_worktree(&claimed.root);
     naming_store(&claimed);
     let mut last_generation = 0;
     for occurrence in 0..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT {
+        timings.phase("iteration");
         let mut held = naming_claim(label);
         let mut binding = held.items[0].control_binding.clone().unwrap();
         binding.claim_id = format!("successive-claim-{occurrence}");
@@ -2721,6 +2730,7 @@ fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
             .transport
             .enable_named_roots(&claimed.session_id, &binding);
         claimed.transport.replace_held_claims([Ok(held)]);
+        let naming_timing = fixture_phase("name_root");
         let named = claimed
             .state
             .name_engram_source_root(
@@ -2736,6 +2746,7 @@ fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
                     error.message
                 )
             });
+        drop(naming_timing);
         assert!(named.generation > last_generation);
         last_generation = named.generation;
     }
@@ -2756,6 +2767,7 @@ fn source_root_review_successive_claim_displacements_do_not_fill_the_journal() {
             .all(|request| request.request["kind"] == "bound"),
         "displacement never fabricates old-claim Ended"
     );
+    timings.phase("scope_cleanup");
 }
 
 #[test]

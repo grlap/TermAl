@@ -95,6 +95,9 @@ export async function registrationHost(callback, {
   const registrations = new Map();
   if (autoAcknowledge) acknowledge.release();
   const server = createServer(async (request, response) => {
+    // Keep each fixture exchange independent of pooled idle connections while
+    // synchronous Git and source-owner probes occupy the test process.
+    response.setHeader("connection", "close");
     try {
       if (request.method === "GET" && /^\/api\/sessions\/[^/]+\/source-owner$/u.test(request.url)) {
         response.writeHead(200, { "content-type": "application/json" });
