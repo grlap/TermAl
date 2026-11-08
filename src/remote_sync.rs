@@ -678,6 +678,7 @@ fn push_remote_proxy_session_record(
         runtime: SessionRuntime::None,
         engram_mcp_installed: None,
         runtime_reset_required: false,
+        codex_mcp_config_refresh_pending: false,
         #[cfg(windows)]
         retained_dedicated_owners: Vec::new(),
         engram_mcp_runtime_quarantined: false,

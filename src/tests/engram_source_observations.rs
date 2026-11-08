@@ -4,6 +4,9 @@
 use super::*;
 use crate::tests::*;
 
+#[path = "engram_observation_source_id.rs"]
+mod owner_identity;
+
 fn observation_at(second: u32) -> String {
     format!("2026-10-11T00:00:{second:02}Z")
 }
@@ -25,6 +28,7 @@ fn observation_binding() -> EngramControlWorkBinding {
 
 fn observation_source(revision: &str) -> EngramExecutionSourceBasis {
     EngramExecutionSourceBasis {
+        source_id: None,
         workspace_id: "observation-workspace".into(), source_revision: revision.into(),
         source_root_generation: Some(2), source_root_state: Some(EngramSourceRootState::Named),
     }
@@ -61,6 +65,7 @@ fn historical_observation_endpoint() -> EngramRuntimeCheckpointBasis {
     EngramRuntimeCheckpointBasis {
         binding: observation_binding(),
         endpoint: EngramMeasuredBaseline {
+            source_id: None,
             workspace_id: "observation-workspace".into(),
             source_revision: "content-v1:imported".into(), observed_at: observation_at(5),
         },
@@ -480,3 +485,5 @@ mod removal;
 mod delete_races;
 #[path = "engram_ordinary_baseline.rs"]
 mod ordinary_baseline;
+#[path = "engram_observation_diagnostics.rs"]
+mod diagnostics;

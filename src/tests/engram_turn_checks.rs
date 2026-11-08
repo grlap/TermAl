@@ -506,6 +506,7 @@ fn a_check_keeps_the_toolchain_capture_taken_at_its_start() {
 fn engram_ready_basis_capture() -> Arc<EngramBasisCapture> {
     let capture = Arc::new(EngramBasisCapture::default());
     capture.finish(Some(EngramExecutionSourceBasis {
+        source_id: None,
         source_root_generation: None,
         source_root_state: None,
         workspace_id: "C:/w".to_owned(),
@@ -1229,6 +1230,7 @@ fn silent_check_outcome_truncated_notices_keep_complete_redacted_host_log() {
         assert!(pending.len() <= ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES);
         assert!(pending.contains("earlier lines cut; the host log has them"));
         assert!(!pending.contains(&notices[0]));
+        assert!(!pending.contains("\"source_id\"") && !pending.contains("\"execution_observe\""));
     });
     let log = String::from_utf8(log).unwrap();
     for line in notices {
@@ -1239,6 +1241,7 @@ fn silent_check_outcome_truncated_notices_keep_complete_redacted_host_log() {
         );
     }
     assert!(!log.contains("private-argument"));
+    assert!(!log.contains("\"source_id\"") && !log.contains("\"execution_observe\""));
     assert!(!log.contains("source_file_size"));
 }
 
@@ -2900,7 +2903,8 @@ fn late_file_tracking_does_not_invent_a_source_change_after_an_unchanged_check()
         &EngramBasisPlace::Workdir(turn.root.to_string_lossy().into_owned())).unwrap();
     let baseline = EngramRuntimeCheckpointBasis {
         binding: turn.record(|record| record.engram.work_binding.clone().unwrap()),
-        endpoint: EngramMeasuredBaseline { workspace_id: measured.workspace_id,
+        endpoint: EngramMeasuredBaseline {
+            source_id: None, workspace_id: measured.workspace_id,
             source_revision: measured.source_revision, observed_at: unadmitted_observation_timestamp() },
         source_root_generation: measured.source_root_generation,
         source_root_state: measured.source_root_state,

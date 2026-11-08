@@ -40,6 +40,7 @@ fn entry(work: &str, root: &str, generation: u64) -> EngramWorkSourceRoot {
 
 fn gate() -> EngramExecutionSourceBasis {
     EngramExecutionSourceBasis {
+        source_id: None,
         workspace_id: ROOT.to_owned(),
         source_revision: REVISION.to_owned(),
         source_root_generation: Some(10),

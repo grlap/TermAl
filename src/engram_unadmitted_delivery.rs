@@ -234,8 +234,8 @@ fn deliver_runtime_observation_envelope(
         return Ok(report.clone());
     }
     let request: EngramControlRequest =
-        serde_json::from_value(envelope.request.clone()).map_err(|error| {
-            EngramTransportError::protocol(format!("invalid retained observation: {error}"))
+        serde_json::from_value(envelope.request.clone()).map_err(|_| {
+            EngramTransportError::protocol("invalid retained observation shape")
         })?;
     if serde_json::to_value(&request).ok().as_ref() != Some(&envelope.request) {
         return Err(EngramTransportError::protocol(

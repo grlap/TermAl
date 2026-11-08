@@ -952,10 +952,14 @@ fn a_binding_change_after_close_is_visible_and_never_rescopes_the_report() {
         "settled worker must never send the old trace to the new work"
     );
     let notices = fixture.turn.record(system_notices).join("\n");
-    assert!(notices.contains("not reported: scope changed"), "{notices}");
+    assert!(notices.contains("runtime_observation_scope_changed"), "{notices}");
+    assert!(!notices.contains(&original.work_id) && !notices.contains(&replacement.work_id),
+        "scope diagnostics must not copy the error body into the transcript");
+    let retained = fixture.turn.record(|record| record.engram.unadmitted_closing_jobs.iter()
+        .filter_map(|job| job.terminal_failure.as_deref()).collect::<Vec<_>>().join("\n"));
     assert!(
-        notices.contains(&original.work_id) && notices.contains(&replacement.work_id),
-        "{notices}"
+        retained.contains(&original.work_id) && retained.contains(&replacement.work_id),
+        "the original and replacement scopes remain in internal evidence: {retained}"
     );
     assert!(fixture.turn.record(|record| {
         record
@@ -1255,8 +1259,11 @@ async fn a_restored_closing_job_keeps_its_original_scope_and_policy() {
     assert_eq!(job.baseline, expected.baseline);
     assert_eq!(job.scope, expected.scope);
     assert_eq!(job.policy, expected.policy);
-    assert!(job.terminal_failure.as_ref().unwrap().contains("scope changed"));
-    assert!(notices.iter().any(|notice| notice.contains(&replacement.work_id)), "{notices:?}");
+    let retained = job.terminal_failure.as_ref().unwrap();
+    assert!(retained.contains("scope changed") && retained.contains(&replacement.work_id));
+    assert!(notices.iter().any(|notice| notice.contains("runtime_observation_scope_changed")), "{notices:?}");
+    assert!(notices.iter().all(|notice| !notice.contains(&replacement.work_id)),
+        "the changed scope remains internal rather than entering the transcript");
     assert!(fixture.producer.requests().is_empty());
     fixture.assert_no_granted_reporting();
     restarted.trigger_shutdown_signal();

@@ -689,7 +689,12 @@ enum EngramExecutionOutcome {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct EngramExecutionSourceBasis {
     workspace_id: String,
+    // Legacy records keep their original text; owner-backed observations use
+    // only source_id. Naming and admission retain their separate contracts.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     source_revision: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_id: Option<EngramSourceId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_root_generation: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

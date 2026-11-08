@@ -154,6 +154,7 @@ fn association(fixture: &RunFixture, work: &str, producer: &str) -> TestRunEvide
             claim_fence: 1,
         },
         source_basis: EngramExecutionSourceBasis {
+            source_id: None,
             workspace_id: fixture.root.to_string_lossy().into_owned(),
             source_revision: "a".repeat(64),
             source_root_generation: Some(1),

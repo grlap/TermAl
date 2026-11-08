@@ -1868,6 +1868,8 @@ struct StateInner {
     #[cfg(test)]
     test_engram_source_capture: Option<Arc<dyn Fn(&EngramBasisPlace, Duration) -> EngramSourceCapture + Send + Sync>>,
     #[cfg(test)]
+    test_observation_source_owner: Option<Arc<dyn Fn(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output> + Send + Sync>>,
+    #[cfg(test)]
     test_declared_run_snapshot: Option<Arc<dyn Fn(&FsPath, std::time::Instant) -> Result<DeclaredRunSnapshot> + Send + Sync>>,
     #[cfg(test)]
     test_declared_run_clock: Option<Arc<dyn Fn() -> std::time::Instant + Send + Sync>>,
@@ -1999,6 +2001,8 @@ impl StateInner {
             engram_turn_basis_captures_live: Arc::default(),
             #[cfg(test)]
             test_engram_source_capture: None,
+            #[cfg(test)]
+            test_observation_source_owner: None,
             #[cfg(test)]
             test_declared_run_snapshot: None,
             #[cfg(test)]
@@ -2267,6 +2271,9 @@ struct SessionRecord {
     /// exact actor identity installed into that runtime.
     engram_mcp_installed: Option<EngramMcpInstalledDescriptor>,
     runtime_reset_required: bool,
+    /// A settings-only Codex MCP config change, consumed before the next turn.
+    /// The current turn retains its live approval and interaction ownership.
+    codex_mcp_config_refresh_pending: bool,
     /// A stale Engram MCP runtime whose process termination failed and whose
     /// handle is retained for retry. Unlike an ordinary settings reset, its
     /// natural exit must preserve the automatic-resume safety latch.
@@ -2386,6 +2393,7 @@ impl SessionRecord {
 
     fn clear_runtime(&mut self) {
         self.codex_terminal_identity_unresolved = false;
+        self.codex_mcp_config_refresh_pending = false;
         #[cfg(windows)]
         self.retained_dedicated_owners
             .retain(|owner| !owner.tree.is_confirmed());

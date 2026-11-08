@@ -858,7 +858,7 @@ pub(super) fn answer_pending_codex_thread_setups(
 }
 
 /// Retires outstanding setups whose thread id the test does not assert on.
-fn retire_pending_codex_thread_setups(pending_requests: &CodexPendingRequestMap) {
+pub(super) fn retire_pending_codex_thread_setups(pending_requests: &CodexPendingRequestMap) {
     answer_pending_codex_thread_setups(pending_requests, "thread-retired");
 }
 
@@ -956,6 +956,26 @@ pub(super) fn shared_codex_setup_request_for_tracker_test(
     engram_enabled: bool,
     read_only: bool,
 ) -> Value {
+    shared_codex_setup_request_for_policy_test(
+        codex_home,
+        resume_thread_id,
+        engram_enabled,
+        read_only,
+        if read_only {
+            CodexApprovalPolicy::Never
+        } else {
+            CodexApprovalPolicy::AutoApprove
+        },
+    )
+}
+
+pub(super) fn shared_codex_setup_request_for_policy_test(
+    codex_home: &FsPath,
+    resume_thread_id: Option<&str>,
+    engram_enabled: bool,
+    read_only: bool,
+    approval_policy: CodexApprovalPolicy,
+) -> Value {
     let state = test_app_state();
     let session_id = if engram_enabled {
         create_test_engram_codex_session(&state, "shared-codex-seeded-mcp-config")
@@ -1016,11 +1036,7 @@ pub(super) fn shared_codex_setup_request_for_tracker_test(
         &session_id,
         CodexPromptCommand {
             active_turn_generation: 0,
-            approval_policy: if read_only {
-                CodexApprovalPolicy::Never
-            } else {
-                CodexApprovalPolicy::AutoApprove
-            },
+            approval_policy,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
             model: "gpt-5.4".to_owned(),

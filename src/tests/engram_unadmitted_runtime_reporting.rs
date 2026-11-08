@@ -392,6 +392,7 @@ impl ReportingTurn {
             )).unwrap();
             turn.record(|record| record.engram.work_binding.clone()).map(|binding| {
                 EngramRuntimeCheckpointBasis { binding, endpoint: EngramMeasuredBaseline {
+                    source_id: None,
                     workspace_id: basis.workspace_id,
                     source_revision: basis.source_revision,
                     observed_at: unadmitted_observation_timestamp(),
@@ -1370,12 +1371,14 @@ fn earlier_baseline_envelope_keeps_the_existing_out_of_window_protocol_rejection
     let change = EngramObservedSourceChange::ContentComparison {
         workspace_id: "workspace-interval".to_owned(),
         baseline: EngramMeasuredBaseline {
+            source_id: None,
             workspace_id: "workspace-interval".to_owned(),
             source_revision: "content-v1:before".to_owned(),
             observed_at: "2026-10-18T10:00:00Z".to_owned(),
         },
         sighting: EngramMeasuredSighting {
             source_basis: EngramExecutionSourceBasis {
+                source_id: None,
                 workspace_id: "workspace-interval".to_owned(),
                 source_revision: "content-v1:after".to_owned(),
                 source_root_generation: None,

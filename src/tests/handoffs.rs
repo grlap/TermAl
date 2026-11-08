@@ -1024,6 +1024,7 @@ fn observation(
             },
             binding,
             source_basis: EngramExecutionSourceBasis {
+                source_id: None,
                 workspace_id: "C:/worktree".to_owned(),
                 source_revision: "a".repeat(64),
                 source_root_generation: Some(1),

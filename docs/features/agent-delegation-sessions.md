@@ -1445,6 +1445,22 @@ Agent integration hooks:
 - Codex sessions: pass a `config.mcp_servers.termal-delegation` descriptor in
   `thread/start` and `thread/resume`, using the same local executable and
   parent-scoped bridge arguments as the stdio bridge.
+  A root using `approvalPolicy: "never"` receives per-tool approval for mailbox
+  read/read-message/send/acknowledge/list and the read-only session list,
+  delegation list/status/result, board get/list and review-identity tools.
+  Codex otherwise refuses approval-needed MCP calls under `never`. These
+  exceptions apply only to TermAl's owned bridge on both start and resume,
+  including sessions created on a remote host. Work creation, steering,
+  evaluation, submission and authority changes retain their approval behavior;
+  delegated children and other MCP servers receive no additional approvals.
+  Changing a root's policy to or from `never` refreshes that configuration on
+  its next turn by detaching and resuming the same thread; the shared Codex
+  process and the conversation are retained. The current turn keeps its
+  interaction ownership, including recovery of live tool prompts when the
+  operator explicitly selects AutoApprove. Stop and hard-reset guards still
+  block that recovery.
+  A same-name user server is replaced entirely by the owned bridge, so its
+  executable and approval settings cannot inherit these exceptions.
 - ACP sessions: populate `mcpServers` in `session/new`, `session/resume`, and
   `session/load` with the TermAl MCP bridge configuration. ACP
   `McpServer.env` is an array of `{name, value}` entries, so the shared ACP

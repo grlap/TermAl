@@ -20,6 +20,7 @@ fn engram_turn_end_basis(
     };
     let (sealed_root, revision) = sealed.filter(|(sealed_root, _)| sealed_root == root)?;
     engram_named_root_absent(root).then(|| EngramExecutionSourceBasis {
+        source_id: None,
         source_root_generation: None,
         source_root_state: None,
         workspace_id: sealed_root.clone(),
@@ -109,6 +110,7 @@ fn engram_bounded_source_basis(
         return None;
     }
     Some(EngramExecutionSourceBasis {
+        source_id: None,
         source_root_generation: None,
         source_root_state: None,
         workspace_id,

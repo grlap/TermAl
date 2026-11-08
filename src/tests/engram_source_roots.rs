@@ -480,6 +480,7 @@ fn a_sealed_revision_stands_in_only_when_the_root_is_gone() {
     };
     let sealed = (root.clone(), "content-v1:sealed".to_owned());
     let captured = EngramExecutionSourceBasis {
+        source_id: None,
         source_root_generation: None,
         source_root_state: None,
         workspace_id: root.clone(),
@@ -499,6 +500,7 @@ fn a_sealed_revision_stands_in_only_when_the_root_is_gone() {
     assert_eq!(
         engram_turn_end_basis(&place, Some(&sealed), None),
         Some(EngramExecutionSourceBasis {
+            source_id: None,
             source_root_generation: None,
             source_root_state: None,
             workspace_id: root,
@@ -849,6 +851,7 @@ fn a_bounded_closing_capture_measures_a_gone_root_by_its_seal() {
     assert_eq!(
         state.engram_turn_end_basis_within(&place, Some(&sealed), Duration::from_secs(60)),
         Some(EngramExecutionSourceBasis {
+            source_id: None,
             source_root_generation: None,
             source_root_state: None,
             workspace_id: root,

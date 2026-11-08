@@ -210,7 +210,7 @@ impl AppState {
         let capture_budget = timeout()?;
         #[cfg(test)]
         let capture_started = std::time::Instant::now();
-        let measured = self.engram_source_capture_within(&place, capture_budget);
+        let measured = self.engram_observation_source_capture(session_id, &place, capture_budget);
         #[cfg(test)]
         if let Some(line) = unadmitted_capture_diagnostic(
             session_id,
@@ -231,11 +231,13 @@ impl AppState {
                     source_basis, observed_at,
                 }), None)
             }
-            Err(SourceBasisRefusal::UnsupportedGitlinks) => (
+            Err(EngramObservationSourceRefusal::OwnerUnavailable) =>
+                (EngramRuntimeClosingSource::Unavailable { observed_at }, None),
+            Err(EngramObservationSourceRefusal::Legacy(SourceBasisRefusal::UnsupportedGitlinks)) => (
                 EngramRuntimeClosingSource::UnsupportedGitlinks { observed_at },
                 Some(SourceBasisRefusal::UnsupportedGitlinks),
             ),
-            Err(refusal) => {
+            Err(EngramObservationSourceRefusal::Legacy(refusal)) => {
                 let mut error = EngramTransportError::local_state(refusal.to_string());
                 error.code = Some("runtime_observation_source_refused".to_owned());
                 return Err(error);

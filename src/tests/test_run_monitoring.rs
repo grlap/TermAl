@@ -71,6 +71,7 @@ async fn monitoring_interruption_is_durable_idempotent_and_preserves_evidence_an
                         claim_fence: 1,
                     },
                     source_basis: EngramExecutionSourceBasis {
+                        source_id: None,
                         workspace_id: fixture.root.to_string_lossy().into_owned(),
                         source_revision: "a".repeat(64),
                         source_root_generation: None,

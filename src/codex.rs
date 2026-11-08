@@ -1319,6 +1319,7 @@ fn start_shared_codex_thread_setup_request(
             session_id,
             &RuntimeToken::Codex(runtime_id.to_owned()),
             codex_home,
+            setup_request.approval_policy,
         )
         .context("failed to build Codex delegation MCP config")?;
 

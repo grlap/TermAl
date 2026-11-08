@@ -165,6 +165,8 @@ fn engram_record_check_end(
     workers: &Arc<std::sync::atomic::AtomicUsize>,
     provenance: EngramRootCapture,
     lifetime: &Arc<CaptureLifetime>,
+    state: AppState,
+    session: String,
 ) {
     let qualified_command_matches = engram_check_end_matches(check, &reading, starting_check);
     let EngramEndReading {
@@ -285,7 +287,7 @@ fn engram_record_check_end(
         EngramBasisCapture::settled(None)
     } else {
         // The worktree the check ran in, as its opening snapshot was.
-        engram_spawn_basis_capture(check.target.basis_place(), workers, provenance, lifetime)
+        engram_spawn_basis_capture(check.target.basis_place(), workers, provenance, lifetime, state, session)
     };
     // A declared check's declaration and artifact are read as its command
     // ends, on their own thread, like its closing snapshot.
@@ -764,6 +766,8 @@ impl AppState {
             &workers,
             provenance,
             &self.capture_lifetime,
+            self.clone(),
+            session_id.to_owned(),
         );
         carried.terminal_at = Some(engram_interference_tick());
         engram.running_command_keys.remove(key);

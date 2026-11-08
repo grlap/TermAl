@@ -54,6 +54,7 @@ fn a_recorded_closing_sighting_becomes_the_exact_next_baseline() {
     assert_eq!(baseline, EngramRuntimeCheckpointBasis {
         binding: observation_binding(),
         endpoint: EngramMeasuredBaseline {
+            source_id: None,
             workspace_id: source.workspace_id,
             source_revision: source.source_revision,
             observed_at: observation_at(50),

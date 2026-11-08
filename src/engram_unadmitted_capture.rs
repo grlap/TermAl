@@ -305,6 +305,7 @@ impl EngramRuntimeCheckpointBasis {
         Self {
             binding,
             endpoint: EngramMeasuredBaseline {
+                source_id: source_basis.source_id.clone(),
                 workspace_id: source_basis.workspace_id.clone(),
                 source_revision: source_basis.source_revision.clone(),
                 observed_at: observed_at.to_owned(),
@@ -532,20 +533,21 @@ enum EngramRuntimeClosingOutcome {
 enum EngramRuntimeClosingSource {
     Measured(EngramMeasuredSighting),
     UnsupportedGitlinks { observed_at: String },
+    Unavailable { observed_at: String },
 }
 
 impl EngramRuntimeClosingSource {
     fn sighting(&self) -> Option<&EngramMeasuredSighting> {
         match self {
             Self::Measured(sighting) => Some(sighting),
-            Self::UnsupportedGitlinks { .. } => None,
+            Self::UnsupportedGitlinks { .. } | Self::Unavailable { .. } => None,
         }
     }
 
     fn observed_at(&self) -> &str {
         match self {
             Self::Measured(sighting) => &sighting.observed_at,
-            Self::UnsupportedGitlinks { observed_at } => observed_at,
+            Self::UnsupportedGitlinks { observed_at } | Self::Unavailable { observed_at } => observed_at,
         }
     }
 }
@@ -569,6 +571,7 @@ impl EngramRuntimeClosingCapture {
                 && basis.endpoint.workspace_id == source.workspace_id
                 && basis.source_root_generation == source.source_root_generation
                 && basis.source_root_state == source.source_root_state
+                && basis.endpoint.source_id.is_some() == source.source_id.is_some()
         });
         let checked = !self.registered_check_baselines.is_empty()
             && self.registered_check_baselines.iter().all(|basis| {
@@ -576,6 +579,7 @@ impl EngramRuntimeClosingCapture {
                     && basis.endpoint.workspace_id == source.workspace_id
                     && basis.source_root_generation == source.source_root_generation
                     && basis.source_root_state == source.source_root_state
+                    && basis.endpoint.source_id.is_some() == source.source_id.is_some()
                     && EngramHost::check_timestamp(&basis.endpoint.observed_at).zip(
                         EngramHost::check_timestamp(&sighting.observed_at))
                         .is_some_and(|(before, after)| before <= after)
@@ -583,7 +587,7 @@ impl EngramRuntimeClosingCapture {
         // Every qualifying check participates, even when the previous
         // checkpoint or the last check equals the close (X -> Y -> X).
         if checked && let Some(basis) = self.registered_check_baselines.iter().find(|basis|
-            basis.endpoint.source_revision != source.source_revision)
+            !engram_observation_same_source(&basis.endpoint, source))
         {
             return Some(EngramObservedSourceChange::ContentComparison {
                 workspace_id: source.workspace_id.clone(),
@@ -592,7 +596,7 @@ impl EngramRuntimeClosingCapture {
         }
         match compatible {
             Some(basis)
-                if basis.endpoint.source_revision == source.source_revision =>
+                if engram_observation_same_source(&basis.endpoint, source) =>
             {
                 None
             }

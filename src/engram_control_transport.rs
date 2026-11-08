@@ -359,7 +359,12 @@ impl EngramControlTransport for ProcessEngramControlTransport {
             EngramTransportError::protocol(format!("failed encoding request: {err}"))
                 .request_never_sent()
         })?;
-        if encoded.len() > ENGRAM_CONTROL_MAX_FRAME_BYTES {
+        let frame_limit = if matches!(request, EngramControlRequest::ExecutionObserve { .. }) {
+            ENGRAM_OBSERVATION_MAX_REQUEST_BYTES
+        } else {
+            ENGRAM_CONTROL_MAX_FRAME_BYTES
+        };
+        if encoded.len() > frame_limit {
             return Err(EngramTransportError::protocol(
                 "Engram request exceeds the maximum control frame",
             )

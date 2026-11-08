@@ -85,8 +85,13 @@ fn engram_spawn_basis_capture(
     workers: &Arc<std::sync::atomic::AtomicUsize>,
     provenance: EngramRootCapture,
     lifetime: &Arc<CaptureLifetime>,
+    state: AppState,
+    session: String,
 ) -> Arc<EngramBasisCapture> {
-    EngramCapture::spawn(workers, lifetime, move || provenance.stamp(engram_place_source_basis(&place)))
+    EngramCapture::spawn(workers, lifetime, move || provenance.stamp(
+        state.engram_observation_source_capture(&session, &place, ENGRAM_SOURCE_COMMAND_BUDGET)
+            .ok().flatten(),
+    ))
 }
 
 #[cfg(test)]
@@ -1865,7 +1870,8 @@ impl AppState {
             record.engram.active_turn_checks.remove(oldest);
         }
         let start_basis =
-            engram_spawn_basis_capture(target.basis_place(), &workers, provenance, &self.capture_lifetime);
+            engram_spawn_basis_capture(target.basis_place(), &workers, provenance,
+                &self.capture_lifetime, self.clone(), session_id.to_owned());
         // The toolchain is named as the check starts, from the overrides it
         // ran under, not from whatever they say when the turn closes.
         #[cfg(test)]
@@ -2676,6 +2682,8 @@ impl AppState {
             &workers,
             root_provenance,
             &self.capture_lifetime,
+            self.clone(),
+            session_id.to_owned(),
         );
     }
 

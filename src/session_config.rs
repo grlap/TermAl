@@ -9,6 +9,8 @@
 // Live-update vs restart-required semantics vary by agent. Codex hot-
 // swaps the model on the next `thread/resume` and applies effort, Fast mode,
 // approval_policy, and sandbox_mode to the next turn without a restart.
+// A root crossing the Never approval boundary detaches its logical thread
+// first, so resume regenerates the scoped MCP approval exceptions.
 // Claude has no hot reconfig path: model + effort changes flip
 // `runtime_reset_required = true` so the next `send_message` in
 // `state.rs` re-spawns the CLI — except that a live Claude runtime
@@ -218,6 +220,7 @@ impl AppState {
         }
         // Mutable access advances the session's mutation stamp, so even that
         // access must follow the approval-policy payload validation above.
+        let codex_root = !Self::engram_session_has_child_binding_shape_locked(&inner, session_id);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -624,6 +627,15 @@ impl AppState {
                     }
                 }
                 if let Some(approval_policy) = request.approval_policy {
+                    if codex_root
+                        && (record.codex_approval_policy == CodexApprovalPolicy::Never)
+                            != (approval_policy == CodexApprovalPolicy::Never)
+                        && matches!(record.runtime, SessionRuntime::Codex(_))
+                    {
+                        // Refresh thread-scoped approvals before the next turn,
+                        // without fencing the current turn's live interactions.
+                        record.codex_mcp_config_refresh_pending = true;
+                    }
                     record.codex_approval_policy = approval_policy;
                     record.session.approval_policy = Some(approval_policy);
                 }

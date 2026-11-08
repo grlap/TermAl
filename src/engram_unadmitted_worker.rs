@@ -26,6 +26,53 @@ fn runtime_observation_retry_due(due: &str, now: chrono::DateTime<chrono::Utc>) 
     chrono::DateTime::parse_from_rfc3339(due).map_or(true, |at| at <= now)
 }
 
+// Retain transport details in the outbox, independently of the fixed notices
+// published at installation. This transition also handles restored attempts.
+fn finish_runtime_observation_delivery_attempt(
+    report: &mut EngramRuntimeObservationReport,
+    session_id: &str,
+    envelope_index: usize,
+) {
+    if let EngramRuntimeObservationDelivery::Pending { last_error } =
+        &report.envelopes[envelope_index].delivery
+    {
+        report.attempts = report.attempts.saturating_add(1);
+        if report.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS {
+            let message = last_error.clone()
+                .unwrap_or_else(|| "delivery remained uncertain".to_owned());
+            report.envelopes[envelope_index].delivery = EngramRuntimeObservationDelivery::LocalFailure {
+                code: "runtime_observation_retry_exhausted".to_owned(),
+                message,
+            };
+            report.attempts = 0;
+        }
+        report.retry_at = (chrono::Utc::now()
+            + runtime_observation_retry_delay(session_id, report.attempts))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    } else {
+        report.attempts = 0;
+        report.retry_at = unadmitted_observation_timestamp();
+    }
+}
+
+// Even a retained code may originate in a remote response. Select the public
+// vocabulary locally; neither remote messages nor unknown codes are notices.
+fn runtime_observation_notice_code(code: &str) -> &'static str {
+    match code {
+        "invalid_request" => "invalid_request",
+        "execution_observation_invalid" => "execution_observation_invalid",
+        "execution_observation_basis_mismatch" => "execution_observation_basis_mismatch",
+        "execution_observation_policy_basis_mismatch" => "execution_observation_policy_basis_mismatch",
+        ENGRAM_IDEMPOTENCY_CONFLICT_CODE => ENGRAM_IDEMPOTENCY_CONFLICT_CODE,
+        "runtime_observation_retry_exhausted" => "runtime_observation_retry_exhausted",
+        "runtime_observation_invalid_retained_image" => "runtime_observation_invalid_retained_image",
+        "runtime_observation_policy_unavailable" => "runtime_observation_policy_unavailable",
+        "runtime_observation_scope_changed" => "runtime_observation_scope_changed",
+        "runtime_observation_source_refused" => "runtime_observation_source_refused",
+        _ => "runtime_observation_failed",
+    }
+}
+
 // Process-local retirement barrier. A worker registers before checking the
 // stop flag and holds its guard through CAS and persistence, including the
 // synchronous fallback. Restore may start only after this registry and the
@@ -309,33 +356,7 @@ impl AppState {
                     failed
                 }
             };
-            let failed = matches!(
-                next.envelopes[envelope_index].delivery,
-                EngramRuntimeObservationDelivery::Pending { .. }
-            );
-            if failed {
-                next.attempts = next.attempts.saturating_add(1);
-                if next.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS {
-                    let message = match &next.envelopes[envelope_index].delivery {
-                        EngramRuntimeObservationDelivery::Pending { last_error } => last_error
-                            .clone()
-                            .unwrap_or_else(|| "delivery remained uncertain".to_owned()),
-                        _ => unreachable!(),
-                    };
-                    next.envelopes[envelope_index].delivery =
-                        EngramRuntimeObservationDelivery::LocalFailure {
-                            code: "runtime_observation_retry_exhausted".to_owned(),
-                            message,
-                        };
-                    next.attempts = 0;
-                }
-                next.retry_at = (chrono::Utc::now()
-                    + runtime_observation_retry_delay(session_id, next.attempts))
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            } else {
-                next.attempts = 0;
-                next.retry_at = unadmitted_observation_timestamp();
-            }
+            finish_runtime_observation_delivery_attempt(&mut next, session_id, envelope_index);
             if let Err(error) =
                 self.install_runtime_observation_result(session_id, &report, next, envelope_index)
             {
@@ -460,9 +481,15 @@ impl AppState {
                     "runtime_observation_scope_changed" | "runtime_observation_source_refused"))
                     || failed.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS
                 {
+                    let code = runtime_observation_notice_code(error.code.as_deref().unwrap_or(""));
+                    let reason = match code {
+                        "runtime_observation_scope_changed" => "source scope changed",
+                        "runtime_observation_source_refused" => "source capture was refused",
+                        _ => "report preparation failed",
+                    };
                     diagnostic = Some(format!(
-                        "Runtime-started turn {} not reported to Engram: {}. Its checks remain uncredited.",
-                        expected.trace.host_turn_ref, error.message
+                        "Runtime-started turn {} not reported to Engram ({code}): {reason}. Its checks remain uncredited.",
+                        expected.trace.host_turn_ref
                     ));
                     let mut failed = failed;
                     failed.terminal_failure = Some(error.message);
@@ -530,31 +557,34 @@ impl AppState {
         let diagnostic = match &next.envelopes[envelope_index].delivery {
             // An identity collision is told as such: this report was
             // rejected unapplied because an earlier, different operation
-            // holds its key, which is named; that operation is not known.
-            EngramRuntimeObservationDelivery::Refused { code, message }
+            // holds its key; details remain in the retained report, and that
+            // earlier operation is not known.
+            EngramRuntimeObservationDelivery::Refused { code, .. }
                 if code == ENGRAM_IDEMPOTENCY_CONFLICT_CODE =>
             {
                 Some(format!(
                     "Engram rejected the observation of the runtime-started turn as an identity collision ({code}): \
-                     an earlier, different operation already holds its key ({message}). This report was not recorded \
+                     an earlier, different operation already holds its key. This report was not recorded \
                      and is not sent again; the earlier operation is not known. Its checks remain uncredited."
                 ))
             }
             EngramRuntimeObservationDelivery::Refused { code, .. } => Some(format!(
-                "Engram refused the observation of the runtime-started turn ({code}). Its checks remain uncredited."
+                "Engram refused the observation of the runtime-started turn ({}). Its checks remain uncredited.",
+                runtime_observation_notice_code(code)
             )),
             // A bounded replay that never got a certain answer leaves the
             // outcome open: Engram may have recorded any of its attempts.
-            EngramRuntimeObservationDelivery::LocalFailure { code, message }
+            EngramRuntimeObservationDelivery::LocalFailure { code, .. }
                 if code == "runtime_observation_retry_exhausted" =>
             {
                 Some(format!(
-                    "Whether Engram recorded the observation of the runtime-started turn is unresolved ({code}): {message}. \
+                    "Whether Engram recorded the observation of the runtime-started turn is unresolved ({code}). \
                      The request is kept and not sent again; read the item's observations before deciding. Its checks remain uncredited."
                 ))
             }
-            EngramRuntimeObservationDelivery::LocalFailure { code, message } => Some(format!(
-                "Runtime-started turn not reported to Engram ({code}): {message}. Its checks remain uncredited."
+            EngramRuntimeObservationDelivery::LocalFailure { code, .. } => Some(format!(
+                "Runtime-started turn not reported to Engram ({}). Its checks remain uncredited.",
+                runtime_observation_notice_code(code)
             )),
             _ => None,
         };

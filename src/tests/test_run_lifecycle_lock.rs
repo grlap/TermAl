@@ -169,6 +169,7 @@ fn associated_history(count: usize, associated: usize) -> (
             store: store.clone(),
             binding: binding.clone(),
             source_basis: EngramExecutionSourceBasis {
+                source_id: None,
                 workspace_id: fixture.root.to_string_lossy().into_owned(),
                 source_revision: "a".repeat(64),
                 source_root_generation: Some(1),

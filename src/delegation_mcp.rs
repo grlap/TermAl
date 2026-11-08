@@ -366,6 +366,31 @@ fn termal_delegation_mcp_codex_config_with_command(
     })
 }
 
+// Mailbox coordination is deliberately allowed alongside read-only queries.
+// Work creation, lifecycle, tracker and authority-changing tools retain their
+// approval behavior. This is applied only to the owned bridge for Never roots.
+fn codex_never_root_coordination_tool_approvals() -> Value {
+    Value::Object(
+        [
+            "termal_read_mailbox",
+            "termal_read_mailbox_message",
+            "termal_send_to_session",
+            "termal_acknowledge_mailbox",
+            "termal_list_mailboxes",
+            "termal_list_sessions",
+            "termal_get_session_status",
+            "termal_get_session_result",
+            "termal_list_delegations",
+            "termal_board_get",
+            "termal_board_list",
+            "termal_review_identity",
+        ]
+        .into_iter()
+        .map(|tool| (tool.to_owned(), json!({ "approval_mode": "approve" })))
+        .collect(),
+    )
+}
+
 #[derive(Default, Deserialize)]
 struct SeededCodexThreadConfig {
     #[serde(default)]
@@ -528,14 +553,35 @@ impl AppState {
         parent_session_id: &str,
         runtime_token: &RuntimeToken,
         codex_home: &FsPath,
+        approval_policy: CodexApprovalPolicy,
     ) -> Result<(Value, bool)> {
         let engram = self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token);
         let engram_enabled = engram.is_some();
-        let config = self.termal_delegation_mcp_codex_config_with_engram(
+        let mut config = self.termal_delegation_mcp_codex_config_with_engram(
             parent_session_id,
             engram,
             Some(codex_home),
         )?;
+        let never_root = approval_policy == CodexApprovalPolicy::Never && {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_session_index(parent_session_id)
+                .is_some_and(|index| {
+                    let record = &inner.sessions[index];
+                    record.is_local_session()
+                        && record.session.agent == Agent::Codex
+                        && !Self::engram_session_has_child_binding_shape_locked(
+                            &inner,
+                            parent_session_id,
+                        )
+                })
+        };
+        if never_root {
+            // The merger has replaced a same-name seed with our executable,
+            // args and environment. Never attach these approvals to user code.
+            config["mcp_servers"][TERMAL_DELEGATION_MCP_SERVER_NAME]["tools"] =
+                codex_never_root_coordination_tool_approvals();
+        }
         Ok((config, engram_enabled))
     }
 

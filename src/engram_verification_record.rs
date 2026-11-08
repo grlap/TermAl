@@ -1549,6 +1549,7 @@ fn engram_verification_record_basis(body: &EngramVerificationRecordBody) -> Opti
         return None;
     };
     Some(EngramExecutionSourceBasis {
+        source_id: None,
         workspace_id: body.registration.root.workspace_id.clone(),
         // Spelled as every committed-input source basis is
         // (`ordinary_commit_input.rs`); the wire's `input.commit` stays bare.

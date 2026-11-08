@@ -1091,6 +1091,7 @@ include!("ordinary_commit_input.rs");
 include!("engram_source_id.rs");
 include!("engram_source_command.rs");
 include!("engram_source_owner.rs");
+include!("engram_observation_source.rs");
 include!("engram_source_roots.rs");
 include!("engram_named_root_binding.rs");
 include!("engram_root_capture_reason.rs");

@@ -3,13 +3,24 @@
 // Also presents diagnostic differences without changing source equality.
 // Git measurement, executable trust and consumer policy remain their owners.
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct EngramSourceId {
     commit: String,
     tree: String,
     submodules: Vec<EngramSourceIdSubmodule>,
     changes: Vec<EngramSourceIdChange>,
+}
+
+// Diagnostics may reach agent notices. Keep identity data on the producer
+// wire and in durable records, never in automatic Debug output.
+impl std::fmt::Debug for EngramSourceId {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("EngramSourceIdSummary")
+            .field("commit", &self.commit).field("tree", &self.tree)
+            .field("submodules", &self.submodules.len())
+            .field("changes", &self.changes.len()).finish()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

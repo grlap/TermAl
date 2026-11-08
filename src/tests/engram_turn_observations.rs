@@ -65,7 +65,8 @@ fn install_passive_measured_baseline(turn: &EOCheckedTurn, root: &FsPath) -> Eng
     };
     let baseline = EngramRuntimeCheckpointBasis {
         binding: turn.record(|record| record.engram.work_binding.clone().unwrap()),
-        endpoint: EngramMeasuredBaseline { workspace_id: measured.workspace_id,
+        endpoint: EngramMeasuredBaseline {
+            source_id: None, workspace_id: measured.workspace_id,
             source_revision: measured.source_revision, observed_at: unadmitted_observation_timestamp() },
         source_root_generation: measured.source_root_generation,
         source_root_state: measured.source_root_state,
@@ -349,7 +350,8 @@ fn a_worktree_root_over_engrams_basis_bound_leaves_the_report_without_a_basis() 
     let workdir = FsPath::new("C:/w");
     let at_bound = format!("C:/{}", "w".repeat(ENGRAM_SOURCE_BASIS_MAX_BYTES - 3));
     assert_eq!(engram_bounded_source_basis(workdir, FsPath::new(&at_bound), "revision".into()),
-        Some(EngramExecutionSourceBasis { source_root_generation: None, source_root_state: None,
+        Some(EngramExecutionSourceBasis {
+            source_id: None, source_root_generation: None, source_root_state: None,
             workspace_id: at_bound.clone(), source_revision: "revision".into() }));
     assert_eq!(engram_bounded_source_basis(workdir, FsPath::new(&format!("{at_bound}w")), "revision".into()), None);
 }

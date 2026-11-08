@@ -129,7 +129,8 @@ fn permanent_source_refusal_settles_once(
     let matching: Vec<_> = notices.iter().filter(|text| text.contains(&job.trace.host_turn_ref)
         && text.contains("not reported to Engram")).collect();
     assert_eq!(matching.len(), 1, "one visible refusal: {notices:?}");
-    assert!(matching[0].contains(expected_reason));
+    assert!(matching[0].contains(if move_scope { "source scope changed" } else { "source capture was refused" }));
+    assert!(!matching[0].contains(refusal), "the retained cause is not copied into the notice");
     let durable = super::repairs::stored_session(&fixture.turn.state, &fixture.turn.session_id);
     let restored = serde_json::from_str::<PersistedSessionRecord>(&durable).unwrap()
         .into_record().unwrap();

@@ -181,7 +181,7 @@ fn registered_closing_baselines_locked(
             source.workspace_id == *workspace_id
                 && source.source_root_generation == Some(*generation)
                 && source.source_root_state == Some(EngramSourceRootState::Named)
-                && source.source_revision.starts_with("content-v1:")
+                && (source.source_id.is_some() || source.source_revision.starts_with("content-v1:"))
         };
         let ordered = || -> Option<bool> {
             let start = EngramHost::check_timestamp(&check.started_at)?;

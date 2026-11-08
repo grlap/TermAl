@@ -550,6 +550,7 @@ live_row!(
         };
         let measure = || EngramMeasuredSighting {
             source_basis: EngramExecutionSourceBasis {
+                source_id: None,
                 workspace_id: workspace_id.clone(),
                 source_revision: content_revision(&matrix.fixture.root).unwrap().1,
                 source_root_generation: Some(generation),

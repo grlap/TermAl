@@ -110,7 +110,10 @@ struct EngramObservationInterval {
 #[serde(deny_unknown_fields)]
 struct EngramMeasuredBaseline {
     workspace_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     source_revision: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_id: Option<EngramSourceId>,
     observed_at: String,
 }
 
@@ -239,8 +242,8 @@ fn validate_engram_measured_source_sighting(
     };
     if root_basis.capture_run_cut <= 0
         || root_basis.latest_event.as_ref().is_some_and(|id| !engram_observation_object_id(id))
-        || !root_matches || basis.source_revision.trim().is_empty()
-        || basis.source_revision.len() > 512
+        || !root_matches
+        || !engram_observation_identity_valid(&basis.source_revision, basis.source_id.as_ref())
         || basis.workspace_id.is_empty() || basis.workspace_id.len() > 512
     {
         return Err(invalid("source observation measurements do not match the canonical opening"));
@@ -265,9 +268,11 @@ impl EngramInterTurnObservation {
             if baseline.source_basis.workspace_id != basis.workspace_id
                 || baseline.source_basis.source_root_generation != basis.source_root_generation
                 || baseline.source_basis.source_root_state != basis.source_root_state
-                || baseline.source_basis.source_revision == basis.source_revision
-                || baseline.source_basis.source_revision.trim().is_empty()
-                || baseline.source_basis.source_revision.len() > 512 || from > through
+                || (baseline.source_basis.source_id == basis.source_id
+                    && baseline.source_basis.source_revision == basis.source_revision)
+                || baseline.source_basis.source_id.is_some() != basis.source_id.is_some()
+                || !engram_observation_identity_valid(&baseline.source_basis.source_revision,
+                    baseline.source_basis.source_id.as_ref()) || from > through
             {
                 return Err(EngramTransportError::protocol(
                     "source observation has no compatible differing measured baseline"));
@@ -275,6 +280,7 @@ impl EngramInterTurnObservation {
             (baseline.observed_at.clone(), EngramObservedSourceChange::ContentComparison {
                 workspace_id: basis.workspace_id.clone(),
                 baseline: EngramMeasuredBaseline {
+                    source_id: baseline.source_basis.source_id.clone(),
                     workspace_id: baseline.source_basis.workspace_id.clone(),
                     source_revision: baseline.source_basis.source_revision.clone(),
                     observed_at: baseline.observed_at.clone(),
@@ -485,6 +491,7 @@ mod source_sighting_protocol_tests {
 
     fn source_facts() -> EngramMeasuredSourceFacts {
         let basis = EngramExecutionSourceBasis {
+            source_id: None,
             workspace_id: "workspace-protocol".into(), source_revision: "content-v1:new".into(),
             source_root_generation: Some(1), source_root_state: Some(EngramSourceRootState::Named),
         };

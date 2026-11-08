@@ -556,6 +556,8 @@ impl PersistedState {
             #[cfg(test)]
             test_engram_source_capture: None,
             #[cfg(test)]
+            test_observation_source_owner: None,
+            #[cfg(test)]
             test_declared_run_snapshot: None,
             #[cfg(test)]
             test_declared_run_clock: None,
@@ -1188,6 +1190,7 @@ impl PersistedSessionRecord {
             runtime: SessionRuntime::None,
             engram_mcp_installed: None,
             runtime_reset_required: false,
+            codex_mcp_config_refresh_pending: false,
             #[cfg(windows)]
             retained_dedicated_owners: Vec::new(),
             engram_mcp_runtime_quarantined: false,

@@ -407,6 +407,7 @@ fn endpoint_comparison() -> EngramRuntimeClosingCapture {
         baseline: Some(EngramRuntimeCheckpointBasis {
             binding: binding.clone(),
             endpoint: EngramMeasuredBaseline {
+                source_id: None,
                 workspace_id: "workspace-original".into(),
                 source_revision: "content-v1:before".into(),
                 observed_at: "2026-10-18T10:00:00Z".into(),
@@ -421,6 +422,7 @@ fn endpoint_comparison() -> EngramRuntimeClosingCapture {
         },
         source: EngramRuntimeClosingSource::Measured(EngramMeasuredSighting {
             source_basis: EngramExecutionSourceBasis {
+                source_id: None,
                 workspace_id: "workspace-original".into(),
                 source_revision: "content-v1:after".into(),
                 source_root_generation: None, source_root_state: None,

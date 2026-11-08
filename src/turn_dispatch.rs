@@ -34,6 +34,8 @@
 // Codex detaches the logical session from its shared app-server handle.
 // Each path clears protocol-specific pending interactions before the
 // next turn attaches or spawns a fresh session runtime.
+// A deferred Codex MCP config refresh uses that same next-turn detach path,
+// while leaving the current turn's live approval recovery available.
 
 struct StartedTurn {
     dispatch: TurnDispatch,
@@ -539,7 +541,7 @@ impl AppState {
                 }
             }
             Agent::Codex => {
-                if record.runtime_reset_required {
+                if record.runtime_reset_required || record.codex_mcp_config_refresh_pending {
                     if let SessionRuntime::Codex(handle) = &record.runtime {
                         if let Some(shared_session) = &handle.shared_session {
                             shared_session.detach();

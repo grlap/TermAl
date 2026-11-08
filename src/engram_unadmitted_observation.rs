@@ -20,7 +20,7 @@ const ENGRAM_OBSERVATION_MAX_CHECKS: usize = 16;
 const ENGRAM_OBSERVATION_MAX_LABEL_BYTES: usize = 128;
 const ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES: usize = 2_048;
 const ENGRAM_OBSERVATION_MAX_SOURCE_BYTES: usize = 512;
-const ENGRAM_OBSERVATION_MAX_REQUEST_BYTES: usize = 64 * 1_024;
+const ENGRAM_OBSERVATION_MAX_REQUEST_BYTES: usize = 2 * ENGRAM_SOURCE_JSON_LIMIT + 64 * 1_024;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -164,7 +164,9 @@ fn engram_observation_within(
 
 fn engram_observation_source_basis(basis: &EngramExecutionSourceBasis, label: &str) -> Result<(), String> {
     engram_observation_text(&basis.workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, &format!("{label}.workspace_id"))?;
-    engram_observation_text(&basis.source_revision, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, &format!("{label}.source_revision"))?;
+    if !engram_observation_identity_valid(&basis.source_revision, basis.source_id.as_ref()) {
+        return Err(format!("{label}.source_revision must be trimmed legacy text, or one complete bounded source_id"));
+    }
     if !matches!(
         (basis.source_root_generation, basis.source_root_state),
         (None, None) | (Some(1..), Some(_))
@@ -238,12 +240,17 @@ fn engram_validate_observed_source_change(
         EngramObservedSourceChange::ContentComparison { workspace_id, baseline, sighting } => {
             engram_observation_text(workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, "source_change.workspace_id")?;
             engram_observation_text(&baseline.workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, "source_change.baseline.workspace_id")?;
-            engram_observation_text(&baseline.source_revision, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, "source_change.baseline.source_revision")?;
+            if !engram_observation_identity_valid(&baseline.source_revision, baseline.source_id.as_ref()) {
+                return Err("source_change.baseline needs one complete bounded source identity".into());
+            }
             engram_observation_source_basis(&sighting.source_basis, "source_change.sighting.source_basis")?;
             if &baseline.workspace_id != workspace_id || &sighting.source_basis.workspace_id != workspace_id {
                 return Err("a measured source change names one workspace throughout".into());
             }
-            if baseline.source_revision == sighting.source_basis.source_revision {
+            if baseline.source_id.is_some() != sighting.source_basis.source_id.is_some() {
+                return Err("a source comparison cannot mix identity formats".into());
+            }
+            if engram_observation_same_source(baseline, &sighting.source_basis) {
                 return Err("content_comparison needs two different revisions".into());
             }
             let seen_before = engram_observation_within(&baseline.observed_at, from, through, "source_change.baseline")?;
@@ -300,6 +307,9 @@ fn engram_validate_observed_checks(
             return Err(format!("{label} reports a finished result without finished_at; an unfinished check is indeterminate"));
         }
         if let Some(basis) = &check.source_basis {
+            if basis.source_id.is_some() {
+                return Err("observed checks carry no source_id".into());
+            }
             engram_observation_source_basis(basis, &format!("{label} source_basis"))?;
         }
         if let Some(reference) = &check.host_evidence_ref {
@@ -394,6 +404,7 @@ mod unadmitted_observation_tests {
 
     fn source(revision: &str) -> EngramExecutionSourceBasis {
         EngramExecutionSourceBasis {
+            source_id: None,
             workspace_id: "workspace-unadmitted".into(),
             source_revision: revision.into(),
             source_root_generation: Some(2),
@@ -426,6 +437,7 @@ mod unadmitted_observation_tests {
         EngramObservedSourceChange::ContentComparison {
             workspace_id: "workspace-unadmitted".into(),
             baseline: EngramMeasuredBaseline {
+                source_id: None,
                 workspace_id: "workspace-unadmitted".into(),
                 source_revision: "content-v1:before".into(),
                 observed_at: at(10),
@@ -547,7 +559,11 @@ mod unadmitted_observation_tests {
         // Each case starts from a valid request and breaks one rule; the
         // reason names the rule that fired, so a drifting fixture cannot pass.
         let refused = |result: Result<EngramControlRequest, EngramTransportError>, reason: &str| {
-            let error = result.expect_err(reason);
+            // Do not dump an unexpected observation body into test notices.
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("expected observation refusal: {reason}"),
+            };
             assert!(error.message.starts_with("unadmitted observation refused: "), "{reason}: {}", error.message);
             assert!(error.message.contains(reason), "expected {reason:?}, got {}", error.message);
         };
@@ -617,14 +633,43 @@ mod unadmitted_observation_tests {
             }), Vec::new()),
             "source_revision must be trimmed",
         );
-        // Individually valid fields can exceed the serialized whole-request
-        // bound after JSON escaping. No retired credential is needed.
-        let large_checks = (0..16).map(|index| {
+        // Escaped check metadata used to exceed the old 64 KiB frame. It now
+        // fits the observation frame, and every check must survive intact.
+        let large_checks: Vec<_> = (0..16).map(|index| {
             let mut item = check(&format!("large-{index}"));
             item.host_evidence_ref = Some("\\".repeat(ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES));
             item
         }).collect();
-        refused(turn(None, large_checks), "byte bound");
+        let accepted = turn(None, large_checks.clone()).unwrap();
+        let EngramControlRequest::ExecutionObserve { observation } = accepted else { unreachable!() };
+        let EngramInterTurnOccurrence::UnadmittedTurn { observed_checks, .. } = observation.occurrence
+            else { unreachable!() };
+        assert_eq!(observed_checks, large_checks);
+
+        // Two individually admissible identities leave only the frame's
+        // metadata allowance. JSON escaping makes these check facts exceed
+        // that allowance, so the complete request must still be refused.
+        let mut full: EngramSourceId = serde_json::from_value(json!({
+            "commit": "a".repeat(40), "tree": "b".repeat(40), "submodules": [],
+            "changes": [{"path": "p", "status": "??", "origin": null,
+                "blob": "c".repeat(40), "mode": "100644"}],
+        })).unwrap();
+        let overhead = serde_json::to_vec(&full).unwrap().len() - 1;
+        full.changes[0].path = "p".repeat(ENGRAM_SOURCE_JSON_LIMIT - overhead);
+        assert_eq!(serde_json::to_vec(&full).unwrap().len(), ENGRAM_SOURCE_JSON_LIMIT);
+        let mut over_bound = change();
+        let EngramObservedSourceChange::ContentComparison { baseline, sighting, .. } = &mut over_bound
+            else { unreachable!() };
+        baseline.source_revision.clear();
+        baseline.source_id = Some(full.clone());
+        full.changes[0].blob = Some("d".repeat(40));
+        sighting.source_basis.source_revision.clear();
+        sighting.source_basis.source_id = Some(full);
+        let metadata = large_checks.into_iter().map(|mut check| {
+            check.source_basis = None;
+            check
+        }).collect();
+        refused(turn(Some(over_bound), metadata), "byte bound");
     }
 
     #[test]

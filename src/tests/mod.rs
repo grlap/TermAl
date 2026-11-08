@@ -44,6 +44,7 @@ mod codex_read_guidance;
 mod commit_hidden_retain_cost;
 mod codex_read_only_profile;
 mod codex_read_only_tracker;
+mod codex_root_mcp_approvals;
 mod codex_reviewer_mcp_startup;
 pub(crate) use codex_reviewer_mcp_startup::run_settlement_gap_hook;
 mod codex_terminal_reset;
