@@ -1,4 +1,4 @@
-// Browser geometry guard for the session-row markup in AppControlSurface.
+// Browser geometry and motion guard for session rows in AppControlSurface.
 // Uses the real stylesheets; no backend, dev server, or browser installation.
 // Run from the repository root with an absolute Chrome/Chromium executable:
 // node scripts/check-session-list-layout.mjs --chrome-executable PATH
@@ -86,29 +86,49 @@ function checkLayout() {
       }
     }
   }
-  // Real stylesheet rendering complements the App/JSDOM activity assertions.
+  // Computed pseudo-element styles complement App/JSDOM classification checks.
+  // Check behavior after the complete cascade, without reading CSS source text.
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const badgeObservations = [];
-  for (const [activity, status, background] of [
-    ['foreground', 'active', false], ['background', 'idle', true],
-    ['both', 'active', true], ['neither', 'idle', false],
-  ]) {
-    const shell = document.createElement('div'); shell.className = 'session-row-shell';
-    const button = document.createElement('button'); button.className = 'session-row-open';
-    const badge = document.createElement('span');
-    badge.className = 'status-agent-badge session-row-status-badge';
-    badge.dataset.status = status;
-    if (background) badge.dataset.work = 'background';
-    button.append(badge); shell.append(button); document.body.append(shell);
-    const rect = badge.getBoundingClientRect();
-    const animation = getComputedStyle(badge, '::before').animationName;
-    const observation = { activity, status, background, width: rect.width, height: rect.height, animation };
-    badgeObservations.push(observation);
-    if (rect.width <= 0 || rect.height <= 0 || animation !== (activity === 'neither' ? 'none' : 'spin')) {
-      failures.push(observation);
+  for (const theme of ['warm-light', 'dark']) {
+    document.documentElement.dataset.theme = theme;
+    const themedBadges = [];
+    for (const [activity, status, background] of [
+      ['foreground', 'active', false], ['background', 'idle', true],
+      ['both', 'active', true], ['stopping', 'stopping', false], ['neither', 'idle', false],
+    ]) {
+      const shell = document.createElement('div'); shell.className = 'session-row-shell';
+      const button = document.createElement('button'); button.className = 'session-row-open';
+      const badge = document.createElement('span');
+      badge.className = 'status-agent-badge session-row-status-badge';
+      badge.dataset.status = status;
+      if (background) badge.dataset.work = 'background';
+      button.append(badge); shell.append(button); document.body.append(shell);
+      const rect = badge.getBoundingClientRect();
+      const css = getComputedStyle(badge, '::before');
+      const animation = css.animationName;
+      const durationMs = parseFloat(css.animationDuration) * 1000;
+      const observation = { theme, activity, status, background, width: rect.width, height: rect.height,
+        animation, durationMs, timing: css.animationTimingFunction, iterations: css.animationIterationCount };
+      badgeObservations.push(observation);
+      themedBadges.push(observation);
+      const stopped = activity === 'neither' || (reduced && activity === 'background');
+      if (rect.width <= 0 || rect.height <= 0 || animation !== (stopped ? 'none' : 'spin')
+          || (stopped && durationMs !== 0)
+          || (!stopped && (css.animationTimingFunction !== 'linear' || css.animationIterationCount !== 'infinite'))
+          || (['foreground', 'both', 'stopping'].includes(activity) && durationMs !== 850)) {
+        failures.push(observation);
+      }
+      shell.remove();
     }
-    shell.remove();
+    const foreground = themedBadges.find(badge => badge.activity === 'foreground');
+    const background = themedBadges.find(badge => badge.activity === 'background');
+    if (!reduced && (!Number.isFinite(background.durationMs)
+        || background.durationMs < 3 * foreground.durationMs || background.durationMs > 10_000)) {
+      failures.push({ reason: 'Background rotation must be clearly calmer than foreground', foreground, background });
+    }
   }
-  const result = { cases: observations.length, failures, observations, badgeObservations };
+  const result = { reduced, cases: observations.length, failures, observations, badgeObservations };
   document.body.dataset.layoutResult = btoa(JSON.stringify(result));
 }
 
@@ -119,17 +139,28 @@ const html = `<!doctype html><html><head><meta charset="utf-8">
 </head><body><script>window.addEventListener('load', ${checkLayout.toString()});</script></body></html>`;
 const fixture = join(output, 'fixture.html');
 writeFileSync(fixture, html);
-const browser = spawnSync(args[1], ['--headless=new', '--no-first-run', '--no-default-browser-check',
-  '--disable-extensions', '--disable-background-networking', '--host-resolver-rules=MAP * ~NOTFOUND',
-  '--window-size=1280,1000', `--user-data-dir=${join(output, 'chrome-profile')}`,
-  '--dump-dom', pathToFileURL(fixture).href], { encoding: 'utf8', windowsHide: true,
-  timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
-writeFileSync(join(output, 'browser.stderr.log'), browser.stderr ?? '');
-writeFileSync(join(output, 'browser.stdout.html'), browser.stdout ?? '');
-if (browser.error || browser.status !== 0) throw new Error(`Browser failed; see ${output}: ${browser.error ?? browser.status}`);
-const encoded = /data-layout-result="([A-Za-z0-9+/=]+)"/.exec(browser.stdout ?? '')?.[1];
-if (!encoded) throw new Error(`Browser produced no layout observations; see ${output}`);
-const result = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
-writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2));
-console.log(JSON.stringify({ cases: result.cases, failures: result.failures.length, output }));
-if (result.cases !== 108 || result.failures.length) process.exitCode = 1;
+const results = [];
+for (const reduced of [false, true]) {
+  const mode = reduced ? 'reduced' : 'normal';
+  const browser = spawnSync(args[1], ['--headless=new', '--no-first-run', '--no-default-browser-check',
+    '--disable-extensions', '--disable-background-networking', '--host-resolver-rules=MAP * ~NOTFOUND',
+    '--window-size=1280,1000', `--user-data-dir=${join(output, `chrome-profile-${mode}`)}`,
+    reduced ? '--force-prefers-reduced-motion' : '--force-prefers-no-reduced-motion',
+    '--dump-dom', pathToFileURL(fixture).href], { encoding: 'utf8', windowsHide: true,
+    timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
+  writeFileSync(join(output, `${mode}.stderr.log`), browser.stderr ?? '');
+  writeFileSync(join(output, `${mode}.stdout.html`), browser.stdout ?? '');
+  if (browser.error || browser.status !== 0) throw new Error(`Browser failed; see ${output}: ${browser.error ?? browser.status}`);
+  const encoded = /data-layout-result="([A-Za-z0-9+/=]+)"/.exec(browser.stdout ?? '')?.[1];
+  if (!encoded) throw new Error(`Browser produced no layout observations; see ${output}`);
+  const result = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+  results.push(result);
+  writeFileSync(join(output, 'result.json'), JSON.stringify(results, null, 2));
+  console.log(JSON.stringify({ mode, expectedReduced: reduced, reduced: result.reduced,
+    cases: result.cases, badges: result.badgeObservations.length,
+    failures: result.failures.length, output }));
+  if (result.reduced !== reduced || result.cases !== 108 || result.badgeObservations.length !== 10 || result.failures.length) {
+    process.exitCode = 1;
+    break;
+  }
+}

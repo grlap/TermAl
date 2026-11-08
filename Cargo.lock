@@ -2088,6 +2088,8 @@ dependencies = [
  "hkdf",
  "hmac",
  "http-body",
+ "hyper",
+ "hyper-util",
  "icu_normalizer",
  "keyring-core",
  "libc",

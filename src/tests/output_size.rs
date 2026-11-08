@@ -359,6 +359,8 @@ async fn failed_telemetry_journal_does_not_affect_delivery_or_panic_classificati
         thread: "worker".into(),
         location: None,
         message: "fixed".into(),
+        context: HttpPanicContext::default(),
+        backtrace: HostPanicTrace::Unavailable,
     };
     let before = host_lifecycle_classify(&[boot.clone(), panic.clone()]);
     let size = HostLifecycleRecord::OutputSize {

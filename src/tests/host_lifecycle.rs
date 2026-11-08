@@ -21,7 +21,8 @@ fn heartbeat(id: &str, at: &str) -> HostLifecycleRecord {
 
 fn panic_record(id: &str, at: &str) -> HostLifecycleRecord {
     HostLifecycleRecord::Panic { at: at.to_owned(), instance_id: id.to_owned(), thread: "main".to_owned(),
-        location: Some("src/main.rs:1".to_owned()), message: "boom".to_owned() }
+        location: Some("src/main.rs:1".to_owned()), message: "boom".to_owned(),
+        context: HttpPanicContext::default(), backtrace: HostPanicTrace::Unavailable }
 }
 
 fn shutdown(id: &str, outcome: HostShutdownOutcome) -> HostLifecycleRecord {

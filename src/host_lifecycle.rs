@@ -41,7 +41,9 @@ enum HostLifecycleRecord {
     Boot { at: String, instance_id: String, pid: u32, binary_sha256: Option<String> },
     Heartbeat { at: String, instance_id: String, counters: HostHeartbeatCounters },
     OutputSize { at: String, instance_id: String, report: OutputSizeReport },
-    Panic { at: String, instance_id: String, thread: String, location: Option<String>, message: String },
+    Panic { at: String, instance_id: String, thread: String, location: Option<String>, message: String,
+        #[serde(default)] context: HttpPanicContext,
+        #[serde(default)] backtrace: HostPanicTrace },
     Shutdown { at: String, instance_id: String, outcome: HostShutdownOutcome },
 }
 
@@ -335,6 +337,24 @@ impl HostLifecycleRuntime {
 
 static HOST_LIFECYCLE: std::sync::OnceLock<Arc<HostLifecycle>> = std::sync::OnceLock::new();
 
+type HostPanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static>;
+
+fn host_lifecycle_panic_hook(
+    previous: HostPanicHook,
+    current: impl Fn() -> Option<Arc<HostLifecycle>> + Send + Sync + 'static,
+) -> HostPanicHook {
+    Box::new(move |info| {
+        if let Some(lifecycle) = current() {
+            lifecycle.record_panic(
+                std::thread::current().name().unwrap_or("unnamed"),
+                info.location().map(|location| host_lifecycle_location(location.file(), location.line())),
+                host_lifecycle_panic_message(info.payload()),
+            );
+        }
+        previous(info);
+    })
+}
+
 impl HostLifecycle {
     /// Classifies the previous end, then records this boot.
     fn open(directory: PathBuf, instance_id: String, binary_sha256: Option<String>) -> Self {
@@ -367,16 +387,7 @@ impl HostLifecycle {
                 let lifecycle = Arc::new(Self::open(directory, state.server_instance_id.clone(), host_binary_sha256()));
                 if HOST_LIFECYCLE.set(Arc::clone(&lifecycle)).is_ok() {
                     let previous_hook = std::panic::take_hook();
-                    std::panic::set_hook(Box::new(move |info| {
-                        if let Some(lifecycle) = HOST_LIFECYCLE.get() {
-                            lifecycle.record_panic(
-                                std::thread::current().name().unwrap_or("unnamed"),
-                                info.location().map(|location| host_lifecycle_location(location.file(), location.line())),
-                                host_lifecycle_panic_message(info.payload()),
-                            );
-                        }
-                        previous_hook(info);
-                    }));
+                    std::panic::set_hook(host_lifecycle_panic_hook(previous_hook, || HOST_LIFECYCLE.get().cloned()));
                 }
                 lifecycle.run(&state, &thread_stop);
             })
@@ -393,7 +404,8 @@ impl HostLifecycle {
     /// skips rather than waits if another append is in flight.
     fn record_panic(&self, thread: &str, location: Option<String>, message: String) {
         let _ = self.journal.try_append(&HostLifecycleRecord::Panic { at: host_lifecycle_now(),
-            instance_id: self.instance_id.clone(), thread: thread.to_owned(), location, message });
+            instance_id: self.instance_id.clone(), thread: thread.to_owned(), location, message,
+            context: current_http_panic_context(), backtrace: capture_host_panic_trace() });
     }
 
     /// Counters taken without the state lock: the observer mutex, the state

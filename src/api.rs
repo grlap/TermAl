@@ -842,7 +842,7 @@ async fn get_session(
         }
     }
 
-    let body = run_blocking_api(move || {
+    let (body, revision) = run_blocking_api(move || {
         let mut response = state.get_session_tail(
             &session_id,
             query.tail.unwrap_or(SESSION_TAIL_DEFAULT_MESSAGES),
@@ -856,10 +856,12 @@ async fn get_session(
             });
         }
         serde_json::to_vec(&response)
+            .map(|body| (body, response.revision))
             .map_err(|err| ApiError::internal(format!("failed to serialize session: {err}")))
     })
     .await?;
     Ok((
+        axum::Extension(OutputSizeRevision(revision)),
         [(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
@@ -912,7 +914,7 @@ async fn get_session_history(
             "session history from must be `start` when provided",
         ));
     }
-    let body = run_blocking_api(move || {
+    let (body, revision) = run_blocking_api(move || {
         let response = state.get_session_history(
             &session_id,
             query.before.as_deref(),
@@ -922,12 +924,15 @@ async fn get_session_history(
             query.from.as_deref() == Some("start"),
             query.limit,
         )?;
-        serde_json::to_vec(&response).map_err(|err| {
-            ApiError::internal(format!("failed to serialize session history page: {err}"))
-        })
+        serde_json::to_vec(&response)
+            .map(|body| (body, response.revision))
+            .map_err(|err| {
+                ApiError::internal(format!("failed to serialize session history page: {err}"))
+            })
     })
     .await?;
     Ok((
+        axum::Extension(OutputSizeRevision(revision)),
         [(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),

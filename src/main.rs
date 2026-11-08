@@ -171,7 +171,9 @@ async fn run_server() -> Result<()> {
         .fallback_service(
             ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_file)),
         )
-        .layer(axum::middleware::from_fn(output_size_http_observer));
+        .layer(axum::middleware::from_fn(output_size_http_observer))
+        // Last response adapter, including static fallback and compressed bodies.
+        .layer(axum::middleware::from_fn(chunk_http_response_writes));
 
     let listener = TcpListener::bind(address)
         .await
@@ -229,8 +231,7 @@ async fn run_server() -> Result<()> {
         // `borrow_and_update()` pre-check — see api_sse.rs::state_events.
         shutdown_state_for_signal.trigger_shutdown_signal();
     };
-    let result = axum::serve(listener, app)
-        .with_graceful_shutdown(graceful_shutdown_future)
+    let result = serve_http_with_panic_context(listener, app, graceful_shutdown_future)
         .await
         .context("backend server failed");
     federation_runtime.shutdown().await;
@@ -1273,6 +1274,8 @@ include!("claude.rs");
 include!("claude_read_only_refusal.rs");
 include!("repl_codex.rs");
 include!("api.rs");
+include!("http_write_chunks.rs");
+include!("http_panic_context.rs");
 include!("api_git.rs");
 include!("api_files.rs");
 include!("api_sse.rs");

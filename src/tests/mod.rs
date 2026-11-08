@@ -148,6 +148,7 @@ mod file_changes;
 mod git;
 mod home_fixture;
 mod http_routes;
+mod http_write_chunks;
 mod instruction_search;
 mod json_rpc;
 mod kimi;

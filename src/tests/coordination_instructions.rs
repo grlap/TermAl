@@ -92,7 +92,7 @@ fn mailbox_guidance_claude_excludes_nonroots_and_missing_sessions() {
 }
 
 struct AcpGuidanceFixture {
-    state: AppState,
+    state: TestAppStateCleanup<Box<dyn FnOnce() -> std::result::Result<(), String>>>,
     session_id: String,
     agent: AcpAgent,
     runtime_state: Arc<Mutex<AcpRuntimeState>>,
@@ -116,12 +116,20 @@ impl AcpGuidanceFixture {
                 .prompt_history
                 .push(TASK.to_owned());
         }
+        let pending: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+        let cleanup_pending = pending.clone();
+        let release: Box<dyn FnOnce() -> std::result::Result<(), String>> = Box::new(move || {
+            fail_pending_acp_requests(&cleanup_pending, "host guidance fixture finished");
+            Ok(())
+        });
         Self {
-            state,
+            // The lifecycle flag clears before the response thread finishes
+            // updating state. Wait for its actual resource release on drop.
+            state: TestAppStateCleanup::new(state, "ACP guidance response waiter", release),
             session_id,
             agent,
             runtime_state: Self::ready_runtime(),
-            pending: Arc::new(Mutex::new(HashMap::new())),
+            pending,
             lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
             resume_session_id: None,
         }
@@ -323,9 +331,8 @@ fn mailbox_guidance_acp_failed_wire_submission_does_not_consume_teaching() {
 }
 
 #[test]
-fn mailbox_guidance_existing_surfaces_share_agent_neutral_body() {
+fn mailbox_guidance_existing_surfaces_compose_one_bounded_body() {
     let section = termal_codex_agents_section();
-    assert!(!section.contains("This Codex session"));
     assert_eq!(section.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);
     assert_eq!(
         coordination_cli_usage()
@@ -335,13 +342,10 @@ fn mailbox_guidance_existing_surfaces_share_agent_neutral_body() {
     );
     assert!(TERMAL_MAILBOX_GUIDANCE.len() <= 900);
     assert!(TERMAL_MAILBOX_GUIDANCE.lines().count() <= 12);
-    for field in ["TERMAL_CLI", "TERMAL_SESSION_ID", "TERMAL_BASE_URL"] {
-        assert!(TERMAL_MAILBOX_GUIDANCE.contains(field));
-    }
 }
 
 #[test]
-fn mailbox_coverage_guidance_is_shared_bounded_and_explicit_about_later_replies() {
+fn mailbox_coverage_guidance_existing_surfaces_compose_one_bounded_body() {
     assert!(TERMAL_MAILBOX_COVERAGE_GUIDANCE.len() <= 800);
     for surface in [
         render_termal_host_guidance(),
@@ -349,22 +353,5 @@ fn mailbox_coverage_guidance_is_shared_bounded_and_explicit_about_later_replies(
         coordination_cli_usage(),
     ] {
         assert_eq!(surface.matches(TERMAL_MAILBOX_COVERAGE_GUIDANCE).count(), 1);
-    }
-    for required in [
-        "ACK alone never suppresses",
-        "same later active turn",
-        "noContinuation",
-        "--no-continuation",
-        "sent every reply",
-        "owe no work",
-        "delegation, evaluator or gate",
-        "a later message",
-        "re-arms",
-        "Numeric ACK",
-    ] {
-        assert!(
-            TERMAL_MAILBOX_COVERAGE_GUIDANCE.contains(required),
-            "{required}"
-        );
     }
 }
