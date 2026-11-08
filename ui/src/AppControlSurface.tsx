@@ -8,6 +8,7 @@ import {
 } from "react";
 import { AgentIcon } from "./agent-icon";
 import { SessionListWindow } from "./SessionListWindow";
+import { ALL_SESSION_HOSTS, filterSessionsByHost, sessionHostOptions } from "./session-host-filter";
 import { SessionRowRemoteMarker, describeSessionRemote } from "./session-row-remote-marker";
 import {
   describeProjectScope,
@@ -65,6 +66,8 @@ import type {
 } from "./types";
 import {
   filterSessionListVisibleSessions,
+  countSessionsByFilter,
+  countWorkingBreakdown,
   type SessionListFilter,
   type SessionWorkingBreakdown,
 } from "./session-list-filter";
@@ -99,6 +102,8 @@ type AppControlSurfaceProps = {
   openSessionIds: Set<string>;
   sessionListFilter: SessionListFilter;
   setSessionListFilter: Dispatch<SetStateAction<SessionListFilter>>;
+  sessionListHost: string;
+  setSessionListHost: Dispatch<SetStateAction<string>>;
   sessionListSearchQuery: string;
   setSessionListSearchQuery: Dispatch<SetStateAction<string>>;
   sessionFilterCounts: Record<SessionListFilter, number>;
@@ -200,6 +205,8 @@ export function AppControlSurface({
   openSessionIds,
   sessionListFilter,
   setSessionListFilter,
+  sessionListHost,
+  setSessionListHost,
   sessionListSearchQuery,
   setSessionListSearchQuery,
   sessionFilterCounts,
@@ -308,9 +315,13 @@ export function AppControlSurface({
     });
     const isStandaloneSessionList =
       fixedSection === "sessions" && standaloneControlSurfaceTabId !== null;
+    const sessionHost = isStandaloneSessionList
+      ? standaloneControlSurfaceViewState?.sessionListHost ?? ALL_SESSION_HOSTS
+      : sessionListHost;
+    const hostOptions = useMemo(() => sessionHostOptions(remoteLookup), [remoteLookup]);
     const sessionListVisibleSessionCount =
       filterSessionListVisibleSessions(sessions).length;
-    const standaloneSessionListState = isStandaloneSessionList
+    const standaloneSessionListState = useMemo(() => isStandaloneSessionList
       ? buildControlSurfaceSessionListState(
           sessions,
           controlSurfaceSelectedProject,
@@ -318,28 +329,41 @@ export function AppControlSurface({
           standaloneControlSurfaceViewState?.sessionListSearchQuery ?? "",
           testRunsByOwner,
         )
-      : null;
+      : null, [isStandaloneSessionList, sessions, controlSurfaceSelectedProject,
+        standaloneControlSurfaceViewState?.sessionListFilter,
+        standaloneControlSurfaceViewState?.sessionListSearchQuery, testRunsByOwner]);
     const controlSurfaceSessionListFilter = standaloneSessionListState
       ? (standaloneControlSurfaceViewState?.sessionListFilter ?? "all")
       : sessionListFilter;
     const controlSurfaceSessionListSearchQuery = standaloneSessionListState
       ? (standaloneControlSurfaceViewState?.sessionListSearchQuery ?? "")
       : sessionListSearchQuery;
-    const controlSurfaceSessionFilterCounts = standaloneSessionListState
+    const hostScopedSessions = useMemo(() => filterSessionsByHost(
+      standaloneSessionListState?.projectScopedSessions ?? projectScopedSessions,
+      sessionHost, projectLookup,
+    ), [standaloneSessionListState?.projectScopedSessions, projectScopedSessions, sessionHost, projectLookup]);
+    const hostCounts = useMemo(() => sessionHost === ALL_SESSION_HOSTS ? null : ({
+      counts: countSessionsByFilter(hostScopedSessions, testRunsByOwner),
+      working: countWorkingBreakdown(hostScopedSessions, testRunsByOwner),
+    }), [sessionHost, hostScopedSessions, testRunsByOwner]);
+    const controlSurfaceSessionFilterCounts = hostCounts?.counts ?? (standaloneSessionListState
       ? standaloneSessionListState.sessionFilterCounts
-      : sessionFilterCounts;
-    const controlSurfaceWorkingBreakdown = standaloneSessionListState
+      : sessionFilterCounts);
+    const controlSurfaceWorkingBreakdown = hostCounts?.working ?? (standaloneSessionListState
       ? standaloneSessionListState.sessionWorkingBreakdown
-      : sessionWorkingBreakdown;
+      : sessionWorkingBreakdown);
     const controlSurfaceHasSessionListSearch = standaloneSessionListState
       ? standaloneSessionListState.hasSessionListSearch
       : hasSessionListSearch;
     const controlSurfaceSessionListSearchResults = standaloneSessionListState
       ? standaloneSessionListState.sessionListSearchResults
       : sessionListSearchResults;
-    const controlSurfaceFilteredSessions = standaloneSessionListState
+    const baseFilteredSessions = standaloneSessionListState
       ? standaloneSessionListState.filteredSessions
       : filteredSessions;
+    const controlSurfaceFilteredSessions = useMemo(() => filterSessionsByHost(
+      baseFilteredSessions, sessionHost, projectLookup,
+    ), [baseFilteredSessions, sessionHost, projectLookup]);
     const controlSurfaceSearchDefiniteMatchCount = controlSurfaceHasSessionListSearch
       ? controlSurfaceFilteredSessions.filter(
           (session) =>
@@ -1200,7 +1224,26 @@ export function AppControlSurface({
             >
               <section className="session-list-shell" aria-label="Sessions">
                 <div className="session-list-tools">
+                  <div className="session-list-scope-filters">
                   {renderControlPanelProjectScope()}
+                  <div className="control-panel-scope-control">
+                    <label className="control-panel-scope-label" htmlFor={`session-host-${surfaceId}`}>Host</label>
+                    <ThemedCombobox
+                      id={`session-host-${surfaceId}`}
+                      className="control-panel-scope-combobox"
+                      aria-label="Host"
+                      value={sessionHost}
+                      options={hostOptions}
+                      onChange={host => {
+                        if (isStandaloneSessionList) {
+                          updateStandaloneControlSurfaceViewState({ sessionListHost: host });
+                        } else {
+                          setSessionListHost(host);
+                        }
+                      }}
+                    />
+                  </div>
+                  </div>
                   <input
                     ref={
                       fixedSection

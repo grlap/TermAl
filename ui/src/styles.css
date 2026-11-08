@@ -3825,6 +3825,12 @@ textarea {
   gap: 0.6rem;
 }
 
+.session-list-scope-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
 .session-list-search-input {
   padding-right: 1rem;
 }

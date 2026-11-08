@@ -67,6 +67,7 @@ fn attach_response_board_project(
         remote_project_id: None,
         engram: None,
         engram_cleanup_warning: None,
+        environment: ProjectEnvironment::default(),
     });
     let session_index = inner
         .find_session_index(session_id)

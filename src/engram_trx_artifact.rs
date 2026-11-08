@@ -626,6 +626,7 @@ fn engram_declared_result(
     exit: EngramCommandExit,
 ) -> EngramDeclaredResult {
     let mut result = engram_declared_artifact_result(binding);
+    if binding.environment_missing.is_some() { return result; }
     if !engram_declaration_unchanged(binding) {
         result.verdict = EngramTrxVerdict::Unknown("the declaration changed while the command ran".to_owned());
         return result;
@@ -655,6 +656,9 @@ fn engram_declared_artifact_result(binding: &EngramDeclaredBinding) -> EngramDec
         outcome: None,
         counters: None,
     };
+    if let Some(name) = &binding.environment_missing {
+        return result(EngramTrxVerdict::Unknown(format!("environment_missing:{name}")), None);
+    }
     if !engram_declaration_unchanged(binding) {
         return result(
             EngramTrxVerdict::Unknown("the declaration changed while the command ran".to_owned()),

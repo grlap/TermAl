@@ -78,13 +78,14 @@ const ACP_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 const ACP_SESSION_SETUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Spawns ACP runtime.
-fn spawn_acp_runtime(
+fn spawn_acp_runtime_with_environment(
     state: AppState,
     session_id: String,
     cwd: String,
     agent: AcpAgent,
     gemini_approval_mode: Option<GeminiApprovalMode>,
     engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
+    project_environment: &AppliedProjectEnvironment,
 ) -> Result<AcpRuntimeHandle> {
     // Consumed before any early return, so a failed spawn cannot leave the
     // one-shot test seam armed for a later runtime on the same thread.
@@ -113,6 +114,7 @@ fn spawn_acp_runtime(
     }
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
+    project_environment.apply(&mut command);
     command
         .current_dir(&cwd)
         .stdin(Stdio::piped())
@@ -685,6 +687,9 @@ fn handle_acp_prompt_command(
     runtime_state.lock().expect("ACP runtime state mutex poisoned")
         .observation_turn_generation = observation_turn_generation;
     prompt_blocks.push(json!({"type": "text", "text": command.prompt}));
+    if let Some(notice) = state.project_environment_notice(session_id) {
+        prompt_blocks.push(json!({"type": "text", "text": notice}));
+    }
     if let Some(guidance) = &guidance {
         prompt_blocks.push(json!({"type": "text", "text": guidance}));
     }

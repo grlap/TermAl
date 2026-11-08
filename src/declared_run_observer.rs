@@ -395,15 +395,27 @@ impl AppState {
             captured
         };
         let Some(snapshot) = turn.snapshot.as_ref() else { return; };
-        let matched = declared_run_frame_match(&turn, frame, &workdir);
+        let mut matched = declared_run_frame_match(&turn, frame, &workdir);
         if let Some(execution) = turn.execution.as_ref() {
             let mut job = execution.lock().expect("native execution mutex poisoned");
+            if let Some((_, binding)) = &mut matched {
+                binding.environment_missing = job.reservation.declaration.environment_missing.clone();
+            }
             if matched.as_ref().is_none_or(|(_, binding)| binding != &job.reservation.declaration) {
                 job.verification_refusal = Some("original native tool identity was reused with different command facts".to_owned());
             }
             return;
         }
-        let Some((command, declaration)) = matched else { return; };
+        let Some((command, mut declaration)) = matched else { return; };
+        // The provider setup may complete after S0 (shared Codex). Bind the
+        // environment actually applied to that runtime at the original start.
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let record = &inner.sessions[index];
+            if !turn.is_current(record) { return; }
+            record.project_environment.bind(&mut declaration);
+        }
         let Ok(argv) = engram_declared_words(&declaration.entry.command) else { return; };
         let Some(program) = argv.first() else { return; };
         let run_id = format!("test-{}", Uuid::new_v4());

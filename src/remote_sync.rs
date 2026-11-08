@@ -677,6 +677,7 @@ fn push_remote_proxy_session_record(
         remote_id: Some(remote_id.to_owned()),
         remote_session_id: Some(remote_session_id.to_owned()),
         runtime: SessionRuntime::None,
+        project_environment: AppliedProjectEnvironment::default(),
         engram_mcp_installed: None,
         runtime_reset_required: false,
         codex_mcp_config_refresh_pending: false,

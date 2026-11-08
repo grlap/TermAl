@@ -6,8 +6,10 @@ import fs, {
   chmodSync,
   closeSync,
   copyFileSync,
+  cpSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -21,7 +23,7 @@ import fs, {
 } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
-import test from "node:test";
+import test, { after } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   categoryRequiredFiles,
@@ -56,7 +58,7 @@ import {
 import { sourceIdsEqual, RUN_RECORD_JSON_BYTES } from "./test-launcher-input.mjs";
 import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
 import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
-import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
+import { removeFixture, removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 import { registerLauncherRegistrationTests, withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
 import { registerLauncherLifecycleTests } from "./test-launcher-lifecycle-tests.mjs";
@@ -166,9 +168,30 @@ async function workerExit(detached) {
   }
 }
 
-async function repository(t, callback, sourceEnv = fixtureEnv, directory = testTempDirectory()) {
-  const root = mkdtempSync(join(directory, "launcher-fixture-"));
-  removeFixtureOnPass(t, root);
+// The seed is never handed to a test. Only its committed files and independent
+// Git storage are copied; each test creates its own runtime metadata below.
+let repositorySeed;
+let repositorySeedError;
+after(() => {
+  if (repositorySeed) removeFixture(repositorySeed);
+});
+
+function repositorySeedRoot() {
+  if (repositorySeedError) throw repositorySeedError;
+  if (repositorySeed) return repositorySeed;
+  const directory = join(projectRoot, ".tmp");
+  mkdirSync(directory, { recursive: true });
+  repositorySeed = mkdtempSync(join(directory, "launcher-repository-seed-"));
+  try {
+    initializeRepositorySeed(repositorySeed);
+  } catch (error) {
+    repositorySeedError = error;
+    throw error;
+  }
+  return repositorySeed;
+}
+
+function initializeRepositorySeed(root, sourceEnv = fixtureEnv) {
   const env = isolatedGitEnvironment(sourceEnv);
   const nullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
   execFileSync("git", ["init", "--quiet", "--template="], { cwd: root, env });
@@ -187,6 +210,20 @@ async function repository(t, callback, sourceEnv = fixtureEnv, directory = testT
     cwd: root,
     env,
   });
+}
+
+async function repository(t, callback, sourceEnv = fixtureEnv, directory = testTempDirectory()) {
+  const root = mkdtempSync(join(directory, "launcher-fixture-"));
+  removeFixtureOnPass(t, root);
+  if (sourceEnv !== fixtureEnv) {
+    // The hostile-environment witness must still exercise Git construction,
+    // including its hook-capable commit, under the isolated caller environment.
+    initializeRepositorySeed(root, sourceEnv);
+  } else {
+    copyRepositorySeed(root);
+  }
+  const env = isolatedGitEnvironment(sourceEnv);
+  Object.assign(env, writeUiBootstrapFixture(root, join(root, ".git")));
   // Mock once per test context: MockTracker restores in creation order, so a
   // second mock in the same context would restore to the first mock and leak
   // it into every later test of this file.
@@ -196,6 +233,28 @@ async function repository(t, callback, sourceEnv = fixtureEnv, directory = testT
   }
   env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --import=${writeDiskCapacityFixture(root)}`.trim();
   await withHostedRegistrationFixture(root, env, (hostedEnv) => callback(root, hostedEnv));
+}
+
+function copyRepositorySeed(root) {
+  const seed = repositorySeedRoot();
+  // No clone, links, alternates, reflogs or seed-owned npm/run state. Index,
+  // config, refs and object files belong to this copy even when tests mutate
+  // them or add a linked worktree.
+  for (const name of ["tracked.txt", ".gitignore", "ui", ".git/HEAD", ".git/config",
+    ".git/index", ".git/objects", ".git/refs"]) {
+    cpSync(join(seed, name), join(root, name), {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      filter(path) {
+        const entry = lstatSync(path);
+        if (!entry.isFile() && !entry.isDirectory()) {
+          throw new Error(`Repository seed contains a non-regular entry: ${path}`);
+        }
+        return true;
+      },
+    });
+  }
 }
 
 async function sourceMetadataRepository(t, callback) {

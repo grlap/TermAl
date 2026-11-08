@@ -4,6 +4,99 @@ use super::*;
 use super::regressions::public_send;
 
 #[tokio::test]
+async fn bound_directory_refusal_recovers_after_exact_persistence_reconciliation() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let state = federation_mailboxes::central_store();
+    let (caller, participant) = federation_mailboxes::local_participant(&state, "Directory caller");
+    let instance = state.server_instance_id.clone();
+    let initial = list_federation_mailbox_directory(AxumPath(caller.clone()), State(state.clone()))
+        .await.unwrap().0;
+    assert!(initial.participants.iter().any(|row| row.binding == participant.binding));
+    let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_directory_state BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT,'fixture persistence failure'); END;").unwrap();
+    let settings = state.inner.lock().unwrap().preferences.federation.clone();
+    assert!(state.configure_federation(settings).is_err());
+    assert!(!state.inner.lock().unwrap().federation_durable);
+    let refusal = list_federation_mailbox_directory(AxumPath(caller.clone()), State(state.clone()))
+        .await.err().expect("unsettled authority must refuse bound discovery");
+    assert_eq!(refusal.status, StatusCode::CONFLICT);
+    assert_eq!(refusal.kind, Some(ApiErrorKind::FederationMailboxCentralDurability));
+    assert!(refusal.message.contains("central mailbox authority is not durable"));
+    assert!(refusal.message.contains(&caller));
+    assert!(refusal.message.contains(&participant.session_id));
+    assert!(refusal.message.contains("persistence reconciliation"));
+    assert!(!refusal.message.contains("binding is stale"));
+    connection.execute_batch("DROP TRIGGER reject_directory_state;").unwrap();
+    drop(connection);
+    state.reconcile_federation_durability().unwrap();
+    let recovered = list_federation_mailbox_directory(AxumPath(caller.clone()), State(state.clone()))
+        .await.unwrap().0;
+    assert!(recovered.participants.iter().any(|row| row.binding == participant.binding));
+    assert_eq!(state.federation_mailbox_actor(&caller).unwrap().unwrap().binding, participant.binding);
+    assert_eq!(state.server_instance_id, instance, "recovery must use the same running host");
+    assert!(state.inner.lock().unwrap().federation.placements.is_empty());
+}
+
+#[tokio::test]
+async fn bound_directory_missing_entry_names_context_without_rebinding_the_caller() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let state = federation_mailboxes::central_store();
+    let (caller, participant) = federation_mailboxes::local_participant(&state, "Missing directory entry");
+    // Session creation persists state, so prepare the other root before
+    // injecting an inconsistent same-version directory image.
+    let replacement = native(&state, "Current directory caller");
+    assert!(state.federation_mailbox_actor(&replacement).unwrap().is_none());
+    let instance = state.server_instance_id.clone();
+    state.inner.lock().unwrap().federation.mailbox_directory.remove(&participant.session_id);
+    let refusal = list_federation_mailbox_directory(AxumPath(caller.clone()), State(state.clone()))
+        .await.err().expect("a bound caller cannot replace its absent directory identity");
+    assert_eq!(refusal.status, StatusCode::CONFLICT);
+    assert!(refusal.message.contains(&participant.session_id));
+    assert!(refusal.message.contains("observed directory entry is missing or differs"));
+    assert!(refusal.message.contains("another current root session on this host"));
+    let recovered = list_federation_mailbox_directory(AxumPath(replacement.clone()), State(state.clone()))
+        .await.unwrap().0;
+    assert!(recovered.participants.iter().any(|row| row.binding.identity.session_id == replacement));
+    assert!(!recovered.participants.iter().any(|row| row.session_id == participant.session_id));
+    let inner = state.inner.lock().unwrap();
+    assert_eq!(federation_mailbox_root_locked(&inner, &caller).unwrap().mailbox_binding(), Some(&participant.binding));
+    assert!(!inner.federation.mailbox_directory.contains_key(&participant.session_id));
+    assert!(inner.federation.placements.is_empty());
+    assert_eq!(state.server_instance_id, instance);
+}
+
+#[test]
+fn directory_conflict_after_central_recovery_does_not_label_a_healthy_binding_stale() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let state = federation_mailboxes::central_store();
+    let (caller, participant) = federation_mailboxes::local_participant(&state, "Race directory caller");
+    let instance = state.server_instance_id.clone();
+    let authority = FederationMailboxAuthority {
+        app: state.clone(), actor: participant.binding.clone(), lease: None, target: None,
+    };
+    state.inner.lock().unwrap().federation_durable = false;
+    // The commit-adjacent gate intentionally erases the earlier central cause.
+    // Settle that real condition before the directory boundary observes it.
+    let refusal = mailbox_api_error(authority.lock().err().expect("the authority hold must refuse"));
+    assert_eq!(refusal.status, StatusCode::CONFLICT);
+    assert_eq!(refusal.kind, None);
+    state.reconcile_federation_durability().unwrap();
+    let refusal = state.federation_mailbox_directory_refusal(&caller, refusal);
+    assert!(refusal.message.contains(&participant.session_id));
+    assert!(refusal.message.contains("central mailbox authority is currently available"));
+    assert!(refusal.message.contains("directory/binding authority changed or is unresolved"));
+    assert!(!refusal.message.contains("binding is stale"));
+    assert!(!refusal.message.contains("another current root"));
+    assert!(!refusal.message.contains("wait for the existing federation persistence reconciliation"));
+    assert!(authority.lock().is_ok(), "the original binding's rights remain current");
+    assert_eq!(state.federation_mailbox_actor(&caller).unwrap().unwrap().binding, participant.binding);
+    assert_eq!(state.server_instance_id, instance);
+    let unrelated = state.federation_mailbox_directory_refusal(&caller, ApiError::not_found("fixture missing resource"));
+    assert_eq!(unrelated.status, StatusCode::NOT_FOUND);
+    assert_eq!(unrelated.message, "fixture missing resource");
+}
+
+#[tokio::test]
 async fn unbound_central_native_sends_bypass_unavailable_domain_authority() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     for unavailable in ["durability", "continuity", "quarantine"] {
@@ -76,6 +169,13 @@ async fn unavailable_satellite_local_send(bound: bool) {
     let remote_binding = if bound {
         Some(pair.central.federation_mailbox_actor(&remote).unwrap().unwrap().binding.participant_key())
     } else { None };
+    let diagnostic = pair.satellite.federation_mailbox_directory_refusal(
+        &sender, ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+    let central = pair.central.inner.lock().unwrap().federation.local.clone().unwrap();
+    assert!(diagnostic.message.contains(&central.host_id));
+    assert!(diagnostic.message.contains("condition is not observed locally on this host"));
+    assert!(!diagnostic.message.contains("this host is not the central mailbox authority"));
+    assert!(!diagnostic.message.contains("another current root"));
     pair.satellite.federation_peer_handles.lock().unwrap().clear();
     let before = pair.satellite.inner.lock().unwrap().sessions.iter()
         .map(|row| row.mailbox_binding().cloned()).collect::<Vec<_>>();

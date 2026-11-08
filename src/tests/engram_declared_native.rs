@@ -449,6 +449,58 @@ impl NativeFixture {
 }
 
 #[test]
+fn project_environment_native_original_start_uses_the_applied_record_selection() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for configured in [false, true] {
+        let fixture = NativeFixture::new(if configured { "env-native-set" } else { "env-native-missing" }, false);
+        let declaration = fixture.fixture.root.join(ENGRAM_DECLARATION_FILE);
+        let text = fs::read_to_string(&declaration).unwrap();
+        fs::write(&declaration, format!("{text}env = [\"SUPABASE_TEST_URL\"]\n")).unwrap();
+        run_git_test_command(&fixture.fixture.root, &["add", ENGRAM_DECLARATION_FILE]);
+        run_git_test_command(&fixture.fixture.root, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit", "--quiet", "--no-gpg-sign", "-m", "native environment fixture"]);
+        let workdir = fixture.fixture.root.parent().unwrap().join("w");
+        run_git_test_command(&fixture.fixture.root,
+            &["worktree", "add", "--detach", workdir.to_str().unwrap(), "HEAD"]);
+        fs::write(workdir.join(ENGRAM_DECLARATION_FILE),
+            "[[test]]\ncommand = \"dotnet test\"\nartifact = \".tmp/test.trx\"\nenv = [\"WORKDIR_ONLY\"]\n").unwrap();
+        {
+            let mut inner = fixture.fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.session).unwrap();
+            inner.sessions[index].session.workdir = workdir.to_string_lossy().into_owned();
+        }
+        if configured {
+            let mut inner = fixture.fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.session).unwrap();
+            inner.sessions[index].project_environment = AppliedProjectEnvironment {
+                values: ProjectEnvironment(BTreeMap::from([("SUPABASE_TEST_URL".to_owned(), "native-fixture-value".to_owned())])),
+            };
+        }
+        fixture.held_revision(4);
+        fixture.prepare();
+        let notice = fixture.fixture.state.project_environment_notice(&fixture.session);
+        if configured { assert!(notice.is_none(), "notice must use named S0, not the session worktree"); }
+        else {
+            let notice = notice.unwrap();
+            assert!(notice.contains("environment_missing:SUPABASE_TEST_URL"));
+            assert!(!notice.contains("WORKDIR_ONLY"));
+        }
+        let mut recorder = fixture.recorder();
+        fixture.start(&mut recorder);
+        let original = fixture.wait();
+        assert_eq!(original.declaration.environment_missing.is_none(), configured);
+        fixture.start(&mut recorder);
+        assert_eq!(fixture.wait(), original, "duplicate starts preserve the original environment decision");
+        fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+        let (_, registration, request, results) = fixture.finish(&mut recorder, 0);
+        let body = engram_verification_record_body(&registration, &request, &results).unwrap();
+        assert_eq!(body.run.outcome, if configured { EngramVerificationRecordRunOutcome::Passed }
+            else { EngramVerificationRecordRunOutcome::Indeterminate });
+        assert!(!serde_json::to_string(&body).unwrap().contains("native-fixture-value"));
+    }
+}
+
+#[test]
 fn native_provider_starts_register_once_from_persisted_host_time_and_freeze_the_real_artifact() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     for claude in [false, true] {

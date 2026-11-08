@@ -5,11 +5,13 @@
 fn federation_mailbox_central_locked(
     inner: &StateInner,
 ) -> Result<FederationHostIdentity, ApiError> {
+    let mut kind = None;
     let unavailable = if !inner.preferences.federation.enabled {
         Some("central mailbox domain is disabled")
     } else if inner.preferences.federation.role != FederationRole::Central {
         Some("this host is not the central mailbox authority")
     } else if !inner.federation_durable {
+        kind = Some(ApiErrorKind::FederationMailboxCentralDurability);
         Some("central mailbox authority is not durable")
     } else if inner.federation_continuity_lost {
         Some("central mailbox authority continuity is lost")
@@ -23,13 +25,53 @@ fn federation_mailbox_central_locked(
         None
     };
     if let Some(reason) = unavailable {
-        return Err(ApiError::conflict(format!("{FEDERATION_STALE_AUTHORITY}: {reason}")));
+        let mut error = ApiError::conflict(format!("{FEDERATION_STALE_AUTHORITY}: {reason}"));
+        error.kind = kind;
+        return Err(error);
     }
     inner
         .federation
         .local
         .clone()
         .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))
+}
+
+impl AppState {
+    // Diagnostic context only: a later observation cannot establish which
+    // authority check failed earlier, and cannot authorize or repair a binding.
+    fn federation_mailbox_directory_refusal(&self, session: &str, mut error: ApiError) -> ApiError {
+        if error.status != StatusCode::CONFLICT { return error; }
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let binding = federation_mailbox_root_locked(&inner, session).ok()
+            .and_then(|root| root.mailbox_binding());
+        let principal = binding.map(FederationMailboxBinding::participant_key);
+        let missing_entry = inner.preferences.federation.role == FederationRole::Central
+            && binding.is_some_and(|binding| inner.federation.mailbox_directory
+                .get(&binding.participant_key()).is_none_or(|row| row.binding != *binding));
+        let central = inner.preferences.federation.central.as_ref()
+            .map(|host| format!("{} generation {}", host.host_id, host.host_generation))
+            .unwrap_or_else(|| "none".into());
+        let observed = if inner.preferences.federation.role == FederationRole::Central {
+            match federation_mailbox_central_locked(&inner) {
+                Ok(_) => "central mailbox authority is currently available".to_owned(),
+                Err(current) => format!("current central condition: {}", current.message),
+            }
+        } else {
+            "the configured central authority's condition is not observed locally on this host".to_owned()
+        };
+        let recovery = if error.kind == Some(ApiErrorKind::FederationMailboxCentralDurability) {
+            "wait for the existing federation persistence reconciliation to settle, then retry termal_list_sessions with this same session; no host restart or re-enrollment is needed"
+        } else if missing_entry {
+            "the observed directory entry is missing or differs from this binding; use another current root session on this host for termal_list_sessions; this leaves the original binding unchanged and requires no host restart"
+        } else {
+            "directory/binding authority changed or is unresolved; have the operator reconcile the observed authority before retrying this same read; do not refresh enrollment or restart solely because of this refusal"
+        };
+        error.message = format!(
+            "{}; observed context: caller {session}, mailbox binding {}, configured central {central}; {observed}; recovery: {recovery}",
+            error.message, principal.as_deref().unwrap_or("none"),
+        );
+        error
+    }
 }
 
 fn federation_mailbox_remote_in_domain(

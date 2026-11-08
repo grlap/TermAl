@@ -69,6 +69,7 @@ fn engram_declared_reason_code(reason: &str) -> &'static str {
         "the TRX file has more than one Counters" => "trx_duplicate_counters",
         "the TRX Counters lack a counter real files carry" => "trx_missing_counter",
         _ if reason.starts_with("the command exited ") => "command_exit_nonzero",
+        _ if reason.starts_with("environment_missing:") => "environment_missing",
         _ if reason.starts_with("the TRX run outcome is ") => "trx_run_outcome",
         _ if reason.starts_with("the TRX counter ") => "trx_failure_counter",
         _ if reason.starts_with("a TRX counter TermAl does not interpret ") => "trx_unknown_counter",

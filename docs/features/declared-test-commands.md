@@ -15,6 +15,44 @@ Related: [Test Runs](test-runs.md) (the launcher's runs and cards), [Engram host
 | `command` | The exact command line the agent will run, compared token for token with the content of quoted arguments kept. The declared route reads a line by an allow-list, assuming bash or PowerShell 7.3 or later (`pwsh`) runs it: the line is printable ASCII, with words separated by spaces and tabs; the program, the first word, is unquoted and holds no `=`; an unquoted word holds only letters, digits and `. _ / : = @ + -`, starts with neither `@` nor `=`, and holds no `.` if it starts with `-` (PowerShell splits such an argument; quote it); a quoted word is one whole, non-empty token whose quote opens and closes at a separator, holding the same characters plus space, `;` and `=`, so a quoted `;` is literal argument text (the TRX logger needs `trx;LogFileName=…`). Anything else (shell operators, substitution, redirection, globbing, commas, `%`, `!`, `"` inside quotes, a backslash anywhere, mixed quoting, non-ASCII) is refused. Use forward slashes in declared paths (`./tests/Orders.Tests`, not `.\tests\Orders.Tests`): bash reads a backslash as an escape. In this build a `!=` test filter is therefore not declarable: use a positive filter (`TestCategory=Fast`, unquoted — a single-quoted argument is not recognised when Codex runs the entry, because the script of its `pwsh` wrapper may hold no `'`) or a runsettings file. The declared route refuses `cmd` and Windows PowerShell 5.1 (`powershell`) as the first program of the bare line or an accepted wrapper script; it also refuses a recognized Cmd dialect. TermAl does not follow commands invoked indirectly by another program. The line is read from its raw bytes: it must be printable ASCII from end to end, and only ASCII spaces and tabs are trimmed from its ends; CR, LF and every other control character except tab are refused before trimming. A wrapper counts only in an exact shape, every word of it as written: its shell named by a bare name or an absolute path that the program-word rule allows (unquoted, no `=`; not a `.cmd`, `.bat` or `.ps1` shim), and its option words spelled exactly, without quotes: `bash`, `sh` or `zsh` with one flag, `-c` or `-lc`, then the script; or `pwsh` with any of `-NoProfile`, `-NonInteractive`, `-NoLogo`, then `-Command` or `-c`, then the script; the script is one single-quoted word. Codex's Windows executable envelope also permits a whole double-quoted drive-absolute Windows path ending in `pwsh.exe`, such as `"C:\Program Files\PowerShell\7\pwsh.exe" -Command '<line>'`; the path uses letters, digits and `. _ / @ + -`, plus spaces and backslashes, with a colon only after the drive letter. The same pwsh option and single-quoted script rules apply. This exception applies only to the outer executable path: backslashes, quoting and all other characters in the inner declared line still follow the unchanged line rules above. Other quoted executables, relative paths and mixed quoting are refused. Command matching is lexical: TermAl does not resolve the program through PATH or run it. On Windows the Flutter SDK exposes `flutter` and `dart` as `.bat` shims; these real SDK invocations still use the same literal argument allow-list, without shell operators or expansion. The outer shell-wrapper restrictions above remain unchanged, as do built-in recognition and its simple-command rule. |
 | `cwd` | Directory the command runs in, relative to the repository root. Default `"."`. Must resolve inside the worktree. |
 | `artifact` | The one result file the command writes, relative to the repository root. The file content selects TRX (a `TestRun` XML root) or the Dart test JSON reporter (newline-delimited JSON objects), regardless of filename. JUnit XML (`testsuites`/`testsuite` root) is not read yet, see below. |
+| `env` | Optional list of required environment **names**, for example `["SUPABASE_TEST_URL"]`. Names follow the local project environment rules below; an invalid or duplicate name, or a reserved `TERMAL_`/`ENGRAM_` prefix, disables the whole declaration. Values belong to the executing host's local project settings, never this declaration. An omitted or empty list preserves the existing behavior. |
+
+### Local project environment
+
+An operator can replace a local project's environment settings through
+`PATCH /api/projects/{id}/environment`, with an `environment` object mapping
+names to values. The endpoint stores them in that host's existing TermAl state
+store outside the repository and returns the ordinary state snapshot without
+the values. It accepts at most 64 names, 8 KiB per value and 64 KiB in total.
+This PATCH replaces the entire map; omitted names are removed. The response
+does not list configured names. Keep the intended name set when replacing it.
+Names use ASCII letters, digits and underscores and begin with a letter or
+underscore; TermAl and Engram identity names are reserved. No OS user or global
+environment is changed. Configure a remote project's values on its executing
+host's local project; Central's proxy cannot supply or forward its own values.
+Settings are trusted launch configuration: names other than the reserved host
+identities can override provider launch variables, PATH and loader variables.
+
+Claude and ACP receive the selected values in their session process. Shared
+Codex uses its existing thread-scoped shell policy at thread start/resume,
+not the shared app-server process environment. Updates take effect at the next
+runtime start/resume; they do not change an active runtime or a retained run.
+Values are excluded from client/federation snapshots, diagnostic text and
+source identity or declared-run request hashes. The local persistence image
+retains the settings; it must be protected like the rest of the host's state.
+
+Before handing a prompt to the provider, TermAl gives a bounded names-only
+notice for missing or blank required values.
+Claude-native slash commands retain their original text; the notice is
+deferred until the next ordinary prompt so commands such as `/compact` work.
+It does not prevent an agent's
+shell command from executing. Instead, a matched entry with a missing value
+settles as **UNKNOWN**, with `environment_missing:<NAME>`, regardless of its
+exit or artifact verdict, and receives no native credit. This check uses the
+environment TermAl selected for that runtime, never values inherited from the
+host or set independently in an agent shell. The missing-name decision is
+retained from the original command start. Command matching, artifact checks,
+source comparison and completion wakes otherwise retain their existing rules.
 
 A file that does not parse, exceeds the size or entry caps, an entry missing `command` or `artifact`, a `cwd` or `artifact` resolving outside the worktree, or a `command` the route cannot read (above) disables the whole file; TermAl says so once in a host line. Runner options such as `--no-build`, `--list-tests` and assembly paths do not disable a declaration: the validated result artifact must establish that tests actually ran.
 
@@ -197,8 +235,8 @@ repository root. A separate Flutter package uses its own entry and cwd in
 the same way. Prepare dependencies first when using `--no-pub`. A run with
 `--name`, `--plain-name`, `--tags`, a file/directory filter, or an added
 `--reporter expanded` needs its own exact declaration. Lint/format/analyze
-commands are not test commands. This route never starts external services
-or supplies test credentials.
+commands are not test commands. This route never starts external services;
+required environment values must be configured separately on the executing host.
 
 ## Workflow
 

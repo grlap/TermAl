@@ -58,6 +58,7 @@ export const APP_TEST_FILES: readonly string[] = [
   "src/App.scroll-behavior.test.tsx",
   "src/App.send-scroll.test.tsx",
   "src/App.session-lifecycle.test.tsx",
+  "src/App.session-host-filter.test.tsx",
   "src/App.session-remote-marker.test.tsx",
   "src/App.shared-live-events.test.tsx",
   "src/App.smoke.test.tsx",

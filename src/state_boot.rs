@@ -175,6 +175,7 @@ impl StateInner {
     fn validate_projects_consistent(&self) -> Result<()> {
         let mut project_ids = HashSet::new();
         for project in &self.projects {
+            project.environment.validate().map_err(|_| anyhow!("invalid persisted project environment"))?;
             if !project_ids.insert(project.id.as_str()) {
                 return Err(anyhow!("duplicate persisted project id `{}`", project.id));
             }

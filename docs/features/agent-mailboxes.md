@@ -39,6 +39,48 @@ its original route and cannot be bypassed by changing the target spelling.
 If the local ID is unknown, restore directory availability before resolving
 the name; do not guess a recipient or change federation configuration.
 
+`termal_list_sessions` uses this same directory for a domain-bound caller.
+A directory conflict includes the native caller, its observed mailbox binding
+and configured central identity. These are current diagnostic context, not proof
+that the caller's binding caused the refusal. The original specific central
+cause is retained; a later observation cannot reconstruct an earlier race.
+When the cause is unconfirmed central persistence, let the existing persistence
+reconciliation settle, then repeat the same read from the same session. This
+preserves its identity and needs neither re-enrollment nor a host restart.
+Only when the observed authoritative directory entry is absent or differs from the caller's
+binding does the message suggest using another current root on that same host
+for discovery. That does not repair, replace or migrate the old principal.
+An unresolved authority race instead needs operator reconciliation before the
+same read is repeated; a generic conflict alone is not a reason to re-enroll or
+restart. These diagnostics do not relax directory admission or mailbox rights.
+A satellite does not infer central availability or missing directory entries
+from its own local projection.
+
+### Domain participation and native wakes
+
+Automatic domain participation permits mailbox routing, without authorizing
+executor work. A remote domain send without a current explicit executor grant
+commits its message but settles its wake obligation without waking the native
+session. Its cause says "automatic participation does not authorize an executor
+wake". This is an authority boundary, not a request to poll or activate a host.
+A later placement grant cannot change that earlier delivery decision.
+
+For a new routine message that should use the existing native wake channel,
+copy the exact local native ID or `host:<host UUID>::<native session ID>` from
+the session listing's `name`. Remote native mail requires the direct enrolled,
+authenticated, non-revoked pair and current native identity; it needs no
+executor placement. A canonical domain ID in a directory listing does not
+promise native wake availability, particularly between sibling satellites
+without a direct pair. Coordinate an existing authorized relay channel when
+no supported direct native address is available.
+
+The host teaches this distinction in root-session setup and CLI help. It does
+not automatically choose another route. Retrying an unresolved message keeps
+the original intent, body, key and retained route; do not mint a replacement
+intent to bypass it. `durableButNotWoken` alone does not establish a missed
+wake. Read the receipt's exact `messageId` with `termal_read_mailbox_message`
+for the current state, which may have changed since the send.
+
 HTTP send receipts, `termal_send_to_session`, and CLI `mailbox send` also
 return `senderProcessedThrough` and `senderCursorAdvanced`. The first is the
 sender's durable cursor snapshot resulting from this operation; the second

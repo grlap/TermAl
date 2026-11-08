@@ -16,8 +16,10 @@ mailbox list is discovery only."#;
 // A separately bounded addition keeps the original receipt protocol unchanged.
 const TERMAL_MAILBOX_COVERAGE_GUIDANCE: &str = "ACK alone never suppresses a queued continuation. The host may cover it with an exact read and receipt ACK in the same later active turn, through its boundary, when nothing is unread. Set noContinuation (CLI --no-continuation) on a receipt acknowledgement only when you have fully handled every message through that receipt, sent every reply they need, and owe no work in a later turn. Never set it when you promised a follow-up, are waiting for a delegation, evaluator or gate result that will not arrive as mail, or have not read the whole page. It covers only that mailbox and receipt boundary; a later message, including a reply you await, re-arms the wake. Numeric ACK cannot carry it.";
 
+const TERMAL_MAILBOX_WAKE_GUIDANCE: &str = "Routing-only domain mail is saved without waking its recipient unless a current explicit executor grant authorizes that wake. Automatic domain participation grants no executor wake. For new routine native mail, use the exact local native session ID or host:<host UUID>::<native session ID> from the session listing's name, where the direct authenticated pair and current native authority exist. A canonical domain ID in the listing is not a native-wake promise; otherwise coordinate an existing authorized relay channel. Never switch routes or mint a new intent to replay unresolved mail: retries keep the original message, key and route. A later grant does not change an earlier delivery decision. durableButNotWoken alone does not establish a missed wake; read the receipt's exact messageId with termal_read_mailbox_message for current status.";
+
 fn render_termal_host_guidance() -> String {
-    format!("TermAl host guidance\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}")
+    format!("TermAl host guidance\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}\n{TERMAL_MAILBOX_WAKE_GUIDANCE}")
 }
 
 /// Check live ownership at the injection boundary, not a cached agent label.

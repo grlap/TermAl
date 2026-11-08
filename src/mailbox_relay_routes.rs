@@ -763,10 +763,16 @@ impl AppState {
                 // The locator and receipt do not reconstruct membership. Keep
                 // this distinct from an existing association's owner denial.
                 ApiError::conflict(
-                    "native mailbox association is missing at its local home; \
-                     re-resolve the exact mailbox locator from the latest mailbox list or notification \
-                     and retry with the unchanged receipt; if the same locator is still refused, \
-                     report the missing association metadata; no acknowledgement was recorded",
+                    "no saved native mailbox association for this exact mailboxId and caller; \
+                     this request stopped before acknowledgement and does not establish the current cursor. \
+                     Verify mailboxId was copied exactly from the original notification or mailbox list. \
+                     This refusal does not establish metadata loss or membership. If the exact mailbox, \
+                     original home and participant are confirmed but their association is unavailable, \
+                     refreshing the same locator cannot restore it. An original sender retaining the \
+                     identical committed send request and idempotency key can replay that exact send \
+                     under its current identity and enrollment, then retry the unchanged page receipt. \
+                     Otherwise report the unverified locator or unavailable association to the original \
+                     home owner; do not reconstruct membership from the locator or receipt",
                 )
             } else {
                 ApiError::not_found("native mailbox association not found")

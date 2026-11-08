@@ -1405,7 +1405,7 @@ impl AppState {
         // further. The other writers in a turn are not resolved for it first:
         // one left unresolved counts in every worktree, which can only make
         // the check unknown.
-        let (declared, declaration_line) = if mediated && recognised.is_none() {
+        let (mut declared, declaration_line) = if mediated && recognised.is_none() {
             engram_declared_start(
                 ran,
                 FsPath::new(&workdir),
@@ -1439,9 +1439,17 @@ impl AppState {
         });
         // Visibility is independent of a work grant. Reuse only the existing
         // recognition boundary; this extra declared read cannot admit credit.
-        let visibility_declared = if !mediated && recognised.is_none() {
+        let mut visibility_declared = if !mediated && recognised.is_none() {
             engram_declared_start(ran, FsPath::new(&workdir), places.as_deref(), None).0
         } else { None };
+        let applied = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.find_session_index(session_id).map(|index| inner.sessions[index].project_environment.clone())
+                .unwrap_or_default()
+        };
+        for (_, _, binding) in declared.iter_mut().chain(visibility_declared.iter_mut()) {
+            applied.bind(binding);
+        }
         // ACP may repeat a start when it first supplies command text. Consume
         // any saved original observation before considering a new start; this
         // does not create a retroactive check or borrow the current grant.

@@ -626,9 +626,10 @@ fn prompt_resuming_the_thread_its_own_setup_just_started_parks_instead_of_supers
 // it gets its own test rather than riding on the happy path.
 #[test]
 fn failed_thread_setup_write_releases_the_setup_slot() {
-    struct FailingWriter;
+    struct FailingWriter { writes: usize }
     impl std::io::Write for FailingWriter {
         fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            self.writes += 1;
             Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "codex stdin closed",
@@ -646,7 +647,7 @@ fn failed_thread_setup_write_releases_the_setup_slot() {
 
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let (input_tx, _dummy_input_rx) = mpsc::channel::<CodexRuntimeCommand>();
-    let mut writer = FailingWriter;
+    let mut writer = FailingWriter { writes: 0 };
 
     let result = handle_shared_codex_prompt_command(
         &mut writer,
@@ -677,6 +678,8 @@ fn failed_thread_setup_write_releases_the_setup_slot() {
         result.is_err(),
         "a failed stdin write should surface as an error"
     );
+    assert!(writer.writes > 0, "the failure must reach the stdin writer");
+    assert!(format!("{:#}", result.unwrap_err()).contains("codex stdin closed"));
 
     let pending_setup = runtime
         .sessions

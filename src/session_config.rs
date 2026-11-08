@@ -944,6 +944,9 @@ impl AppState {
             ));
         }
         let agent = inner.sessions[index].session.agent;
+        let project_environment = AppliedProjectEnvironment {
+            values: project_environment_for_session_locked(&inner, session_id),
+        };
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
         let host_mcp_servers_only =
             session_is_acceptance_evaluator_child_locked(&inner, session_id);
@@ -1001,7 +1004,7 @@ impl AppState {
                         "failed to build Claude delegation MCP config: {err:#}"
                     ))
                 })?;
-            let handle = spawn_claude_runtime(
+            let handle = spawn_claude_runtime_with_environment(
                 self.clone(),
                 record.session.id.clone(),
                 record.session.workdir.clone(),
@@ -1019,6 +1022,7 @@ impl AppState {
                 engram_mcp.as_ref().map(|config| &config.stdio),
                 host_mcp_servers_only,
                 Some(response_tx),
+                &project_environment,
             )
             .map_err(|err| {
                 ApiError::internal(format!(
@@ -1026,6 +1030,7 @@ impl AppState {
                 ))
             })?;
             record.runtime = SessionRuntime::Claude(handle);
+            record.project_environment = project_environment;
             record.register_dedicated_runtime();
             record.engram_mcp_installed = engram_mcp.map(|config| config.installed);
             drop(inner);
@@ -1226,6 +1231,7 @@ impl AppState {
                         expected_acp_agent,
                         record.session.gemini_approval_mode,
                         engram_mcp.as_ref().map(|config| &config.stdio),
+                        &project_environment,
                     )
                     .map_err(|err| {
                         ApiError::internal(format!(
@@ -1234,6 +1240,7 @@ impl AppState {
                         ))
                     })?;
                 record.runtime = SessionRuntime::Acp(handle.clone());
+                record.project_environment = project_environment;
                 record.register_dedicated_runtime();
                 record.engram_mcp_installed =
                     engram_mcp.as_ref().map(|config| config.installed.clone());

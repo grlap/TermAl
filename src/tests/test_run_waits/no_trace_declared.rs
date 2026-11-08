@@ -125,6 +125,66 @@ fn assert_settled(fixture: &WaitFixture, id: &str, state: TestRunState, reason: 
 }
 
 #[test]
+fn project_environment_late_description_retains_original_applied_names() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for off in [false, true] {
+        for original_value in [None, Some(" \t"), Some("original-runtime-fixture-value")] {
+            let fixture = fixture(off);
+            let path = fixture.root.join("termal-tests.toml");
+            let declaration = fs::read_to_string(&path).unwrap();
+            fs::write(path, format!("{declaration}env = ['SUPABASE_TEST_URL']\n")).unwrap();
+            let selection = |value: Option<&str>| AppliedProjectEnvironment {
+                values: ProjectEnvironment(value.map(|value|
+                    ("SUPABASE_TEST_URL".to_owned(), value.to_owned())).into_iter().collect()),
+            };
+            let configured = original_value.is_some_and(|value| !value.trim().is_empty());
+            let set_selection = |applied| {
+                let mut inner = fixture.state.inner.lock().unwrap();
+                let index = inner.find_session_index(&fixture.session).unwrap();
+                inner.sessions[index].project_environment = applied;
+            };
+            set_selection(selection(original_value));
+            let key = "late-environment-description";
+            fixture.state.note_engram_command_started(&fixture.session,
+                &EngramObservationProvenance::Ambient, key, None,
+                Some(&test_run_display_path(&fixture.root)));
+            {
+                let inner = fixture.state.inner.lock().unwrap();
+                let pending = inner.test_runs.unclassified_commands.values().next().unwrap();
+                assert_eq!(pending.project_environment_present.contains("SUPABASE_TEST_URL"), configured);
+                assert!(!format!("{pending:?}").contains("original-runtime-fixture-value"));
+            }
+            // A repeated placeholder and the later description must not borrow
+            // a different selection applied since the original tool start.
+            set_selection(selection(if configured { None } else { Some("later-runtime-value") }));
+            fixture.state.note_engram_command_started(&fixture.session,
+                &EngramObservationProvenance::Ambient, key, None,
+                Some(&test_run_display_path(&fixture.root)));
+            for _ in 0..2 {
+                assert_eq!(fixture.state.observe_test_command_description(&fixture.session,
+                    &EngramObservationProvenance::Ambient, key, Some(COMMAND),
+                    Some(&test_run_display_path(&fixture.root))), TestCommandOriginalStart::ThisTurn);
+            }
+            let id = {
+                let inner = fixture.state.inner.lock().unwrap();
+                let rows: Vec<_> = inner.test_run_observations.values()
+                    .filter(|row| row.tool_identity == sha256_hex(key.as_bytes())).collect();
+                assert_eq!(rows.len(), 1, "duplicate descriptions keep one original observation");
+                let binding = rows[0].declared_binding.as_ref().unwrap();
+                assert_eq!(binding.environment_missing.is_none(), configured);
+                rows[0].execution_id.clone()
+            };
+            fixture.register(&[&id], "all").unwrap();
+            artifact(&fixture, Some(PASS));
+            end(&fixture, key, COMMAND, Some(EngramCommandExit::Code(0)));
+            assert_settled(&fixture, &id,
+                if configured { TestRunState::Passed } else { TestRunState::Unknown },
+                (!configured).then_some("environment_missing:SUPABASE_TEST_URL"));
+        }
+    }
+}
+
+#[test]
 fn no_trace_foreground_rows_and_waits_use_the_existing_artifact_and_exit_judge() {
     let cases = [
         (

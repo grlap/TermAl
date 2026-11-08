@@ -125,6 +125,34 @@ fn a_declared_command_with_a_passing_trx_is_reported_as_test_evidence() {
     assert_eq!(observed_result(&request), "passed", "{request:#}");
 }
 
+#[test]
+fn project_environment_record_selection_reaches_real_checks_without_affecting_a_mixed_entry() {
+    for configured in [false, true] {
+        let turn = EOCheckedTurn::start(if configured { "env-configured" } else { "env-missing" }, true);
+        declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
+        let path = turn.root.join(ENGRAM_DECLARATION_FILE);
+        let required = format!("{}env = [\"SUPABASE_TEST_URL\"]\n", fs::read_to_string(&path).unwrap());
+        let other = entry("fixture-tests --plain", None, DECLARED_ARTIFACT);
+        fs::write(&path, format!("{required}\n{other}")).unwrap();
+        run_git_test_command(&turn.root, &["add", ENGRAM_DECLARATION_FILE]);
+        run_git_test_command(&turn.root, &["commit", "--quiet", "-m", "env fixture"]);
+        if configured {
+            turn.record_mut(|record| record.project_environment = AppliedProjectEnvironment {
+                values: ProjectEnvironment(BTreeMap::from([("SUPABASE_TEST_URL".to_owned(), "fixture-selected".to_owned())])),
+            });
+        }
+        turn.run("env-required", DECLARED_TEST, EngramCommandExit::Code(0), || write_artifact(&turn, PASSING_TRX));
+        let (_, result) = declared_diagnostic(&turn);
+        if configured { assert_eq!(result.verdict, EngramTrxVerdict::Pass); }
+        else { assert_eq!(result.verdict, EngramTrxVerdict::Unknown("environment_missing:SUPABASE_TEST_URL".to_owned())); }
+        // Same declaration and same runtime: the env-free entry remains a
+        // normal declared check even while another entry needs configuration.
+        fs::remove_file(turn.root.join(DECLARED_ARTIFACT)).unwrap();
+        turn.run("env-plain", "fixture-tests --plain", EngramCommandExit::Code(0), || write_artifact(&turn, PASSING_TRX));
+        assert_eq!(declared_diagnostic(&turn).1.verdict, EngramTrxVerdict::Pass);
+    }
+}
+
 /// Another Git repository beside the turn's, as the directory a runtime
 /// reports for a command of the session that runs there.
 fn elsewhere_repository(turn: &EOCheckedTurn, label: &str) -> String {

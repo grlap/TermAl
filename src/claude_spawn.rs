@@ -313,6 +313,15 @@ fn apply_claude_writer_command(
     // not written, and stale context is not either. Its context is delivered
     // once it is written, and only then (`claude_compact_hook.rs`).
     let command = match command {
+        ClaudeRuntimeCommand::Prompt(mut prompt) => {
+            // Claude interprets native commands only when the original user
+            // text starts with '/'. Defer guidance until an ordinary prompt.
+            if !prompt.text.trim_start().starts_with('/')
+                && let Some(notice) = context.state.project_environment_notice(&context.session_id) {
+                prompt.text = format!("{notice}\n\n{}", prompt.text);
+            }
+            ClaudeRuntimeCommand::Prompt(prompt)
+        }
         ClaudeRuntimeCommand::HookResponse(response) => {
             match claude_hook_response_to_write(context, response) {
                 Some(response) => ClaudeRuntimeCommand::HookResponse(response),
@@ -613,7 +622,7 @@ fn claude_bash_tool_shell_from_env<'a>(
 }
 
 /// Spawns Claude runtime.
-fn spawn_claude_runtime(
+fn spawn_claude_runtime_with_environment(
     state: AppState,
     session_id: String,
     cwd: String,
@@ -625,6 +634,7 @@ fn spawn_claude_runtime(
     engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
     host_mcp_servers_only: bool,
     model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
+    project_environment: &AppliedProjectEnvironment,
 ) -> Result<ClaudeRuntimeHandle> {
     if !state.agent_runtime_spawning_enabled {
         return Err(anyhow!(
@@ -663,6 +673,7 @@ fn spawn_claude_runtime(
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
+    project_environment.apply(&mut command);
     // Decided once, from the environment the process is handed.
     let bash_tool_shell = claude_bash_tool_shell(&command);
 

@@ -49,6 +49,79 @@ fn messages(state: &AppState) -> u64 {
 }
 
 #[tokio::test]
+async fn routing_only_domain_mail_and_distinct_native_mail_keep_separate_wake_authority() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let pair = qualified_pair().await;
+    let sender = native(&pair.central, "Sender");
+    let target = test_session_id(&pair.satellite, Agent::Claude);
+    let (runtime, input) = test_claude_runtime_handle("explicit-native-wake");
+    {
+        let mut inner = pair.satellite.inner.lock().unwrap();
+        let index = inner.find_session_index(&target).unwrap();
+        let record = &mut inner.sessions[index];
+        record.session.status = SessionStatus::Active;
+        record.runtime = SessionRuntime::Claude(runtime);
+        record.orchestrator_auto_dispatch_blocked = true;
+    }
+    let rows = directory(&pair.central, &sender).await;
+    let domain = rows.iter().find(|row|
+        row.binding.identity.host_id == pair.id && row.binding.identity.session_id == target)
+        .unwrap().binding.participant_key();
+    let routed = ordinary(&pair.central, &sender, &domain, "domain-routing-only").await.unwrap();
+    assert_eq!(routed.notification_cause.as_deref(),
+        Some("delivered to mailbox; automatic participation does not authorize an executor wake"));
+    pair.central.drain_one_federation_executor_wake("").await;
+    {
+        let connection = pair.central.mailbox_store.connection().unwrap();
+        let state: String = connection.query_row(
+            "SELECT state FROM federation_mailbox_wake_obligations WHERE message_id=?1",
+            [&routed.message_id], |row| row.get(0)).unwrap();
+        assert_eq!(state, "settled");
+    }
+    {
+        let inner = pair.satellite.inner.lock().unwrap();
+        assert!(inner.sessions[inner.find_session_index(&target).unwrap()].queued_prompts.is_empty());
+    }
+    assert!(matches!(input.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+
+    // A separate message explicitly selects the native channel. This is not
+    // replay or fallback for the domain message, whose receipt stays owned.
+    let sent = ordinary(&pair.central, &sender, &address(&pair.satellite, &target),
+        "separate-native-message").await.unwrap();
+    assert_ne!(sent.message_id, routed.message_id);
+    pair.central.run_mailbox_relay_wake_batch(0, 0).await;
+    {
+        let mut inner = pair.satellite.inner.lock().unwrap();
+        let index = inner.find_session_index(&target).unwrap();
+        let record = &mut inner.sessions[index];
+        record.session.status = SessionStatus::Idle;
+        record.orchestrator_auto_dispatch_blocked = false;
+    }
+    let dispatch = pair.satellite.dispatch_next_queued_turn(&target, false).unwrap().unwrap();
+    deliver_turn_dispatch(&pair.satellite, dispatch).unwrap();
+    let ClaudeRuntimeCommand::Prompt(prompt) = recv_within_guard(&input, "explicit native wake").unwrap()
+        else { panic!("native wake must reach the provider"); };
+    assert!(prompt.text.contains(&sent.mailbox_id));
+    assert!(!prompt.text.contains("separate-native-message"));
+    assert!(!prompt.text.contains(&routed.mailbox_id));
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
+    let actor = pair.satellite.native_mailbox_relay_descriptor(&target).unwrap().principal;
+    assert!(pair.satellite.mailbox_store.mailbox_relay_notification(&actor, &locator.id, sent.sequence)
+        .unwrap().unwrap().handed_off);
+    let duplicate = ordinary(&pair.central, &sender, &domain, "domain-routing-only").await.unwrap();
+    assert!(duplicate.duplicate);
+    assert_eq!((&duplicate.mailbox_id, &duplicate.message_id), (&routed.mailbox_id, &routed.message_id));
+    assert_eq!(pair.central.inner.lock().unwrap().federation.peers[&pair.id].membership,
+        FederationMembershipState::Verified);
+    for state in [&pair.central, &pair.satellite] {
+        let inner = state.inner.lock().unwrap();
+        assert!(inner.federation.placements.values().all(|placement|
+            !federation_placement_authority(&inner.federation, &inner.preferences.federation, placement)));
+    }
+    pair.finish().await;
+}
+
+#[tokio::test]
 async fn explicit_native_pair_exchanges_mail_without_proxy_or_manual_join() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let pair = qualified_pair().await;

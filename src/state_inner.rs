@@ -86,6 +86,7 @@ impl StateInner {
             root_path,
             remote_id,
             remote_project_id: None,
+            environment: ProjectEnvironment::default(),
             engram: None,
             engram_cleanup_warning: None,
         };
@@ -167,6 +168,7 @@ impl StateInner {
             remote_id: None,
             remote_session_id: None,
             runtime: SessionRuntime::None,
+            project_environment: AppliedProjectEnvironment::default(),
             engram_mcp_installed: None,
             runtime_reset_required: false,
             codex_mcp_config_refresh_pending: false,

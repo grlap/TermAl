@@ -28,6 +28,8 @@ struct EngramDeclaredEntry {
     command: String,
     cwd: String,
     artifact: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    env: Vec<String>,
 }
 
 /// What the worktree's declaration says, read at one moment.
@@ -57,6 +59,8 @@ struct EngramRawDeclaredEntry {
     command: Option<String>,
     cwd: Option<String>,
     artifact: Option<String>,
+    #[serde(default)]
+    env: Vec<String>,
 }
 
 /// The declaration at `root`, read once within its cap. Only the file read
@@ -124,6 +128,11 @@ fn engram_parse_declaration(
             .filter(|artifact| !artifact.is_empty())
             .ok_or("an entry is missing `artifact`")?;
         let cwd = raw.cwd.unwrap_or_else(|| ".".to_owned());
+        let names: BTreeSet<_> = raw.env.iter().collect();
+        if raw.env.len() > 64 || names.len() != raw.env.len()
+            || raw.env.iter().any(|name| !project_environment_name(name)) {
+            return Err("an entry has invalid or duplicate environment names");
+        }
         engram_declared_words(&command)?;
         if !engram_declared_path_inside(root, &cwd, true) {
             return Err("an entry's `cwd` does not resolve inside the worktree");
@@ -135,6 +144,7 @@ fn engram_parse_declaration(
             command,
             cwd,
             artifact,
+            env: raw.env,
         });
     }
     Ok(entries)
@@ -452,6 +462,8 @@ struct EngramDeclaredBinding {
     /// The worktree root the declaration was read in.
     root: PathBuf,
     entry: EngramDeclaredEntry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    environment_missing: Option<String>,
     declaration_sha256: String,
     declaration_bytes: u64,
     artifact_start: EngramArtifactStart,
@@ -524,6 +536,7 @@ fn engram_declared_bind(
     (
         Some(EngramDeclaredBinding {
             root: target.root.clone(),
+            environment_missing: entry.env.first().cloned(),
             entry,
             declaration_sha256: sha256,
             declaration_bytes: bytes,

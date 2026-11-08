@@ -215,11 +215,12 @@ impl AppState {
     }
 
     async fn mailbox_directory_snapshot(&self, session: &str) -> Result<FederationMailboxDirectorySnapshot, ApiError> {
-        let unavailable_hosts = self.ensure_automatic_mailbox_participation(session, true).await?;
+        let unavailable_hosts = self.ensure_automatic_mailbox_participation(session, true).await
+            .map_err(|error| self.federation_mailbox_directory_refusal(session, error))?;
         let (mut participants, _, mut alias_basis): (Vec<FederationMailboxParticipant>, _, _) = self
             .dispatch_federation_mailbox_operation_with_alias_basis(
                 session, FederationMailboxOperation::Directory { alias_basis: true }, None,
-            ).await?;
+            ).await.map_err(|error| self.federation_mailbox_directory_refusal(session, error))?;
         participants.retain(|row| !unavailable_hosts.iter().any(|host| host.host_id == row.binding.identity.host_id));
         if let Some(basis) = &mut alias_basis {
             basis.complete &= unavailable_hosts.is_empty();

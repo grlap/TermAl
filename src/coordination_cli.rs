@@ -85,7 +85,7 @@ sessions list lists root sessions. The MCP delegation spawn tool creates
 children, not roots; it is not a CLI subcommand. Create roots through the
 server UI or POST /api/sessions (docs/architecture.md).
 
-{COORDINATION_CLI_USAGE}\n\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}"
+{COORDINATION_CLI_USAGE}\n\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}\n{TERMAL_MAILBOX_WAKE_GUIDANCE}"
     )
 }
 

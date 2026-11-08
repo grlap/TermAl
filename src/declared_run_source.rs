@@ -48,7 +48,8 @@ fn declared_run_snapshot_with_owner(root: &FsPath, pin: &EngramSourceOwnerPin, d
         let directory_key = engram_exact_path_key(&fs::canonicalize(root.join(&entry.cwd))?);
         captured.push(DeclaredRunOpeningEntry {
             binding: EngramDeclaredBinding {
-                root: root.clone(), entry, declaration_sha256: sha256.clone(),
+                root: root.clone(), environment_missing: entry.env.first().cloned(),
+                entry, declaration_sha256: sha256.clone(),
                 declaration_bytes: bytes, artifact_start, artifact_canonical, started,
             },
             directory_key,

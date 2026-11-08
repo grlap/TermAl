@@ -705,6 +705,7 @@ export function useControlSurfaceScope({
         if (
           previous.projectId === next.projectId &&
           previous.sessionListFilter === next.sessionListFilter &&
+          previous.sessionListHost === next.sessionListHost &&
           previous.sessionListSearchQuery === next.sessionListSearchQuery
         ) {
           return current;

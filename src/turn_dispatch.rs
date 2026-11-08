@@ -202,6 +202,7 @@ impl AppState {
         agent: AcpAgent,
         gemini_approval_mode: Option<GeminiApprovalMode>,
         engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
+        project_environment: &AppliedProjectEnvironment,
     ) -> Result<AcpRuntimeHandle> {
         #[cfg(test)]
         {
@@ -217,13 +218,14 @@ impl AppState {
             }
         }
 
-        spawn_acp_runtime(
+        spawn_acp_runtime_with_environment(
             self.clone(),
             session_id,
             workdir,
             agent,
             gemini_approval_mode,
             engram_mcp,
+            project_environment,
         )
     }
 
@@ -285,11 +287,13 @@ impl AppState {
         let host_mcp_servers_only = session_is_acceptance_evaluator_child_locked(inner, &session_id);
         let host_shutdown = self.shutdown_signal_tx.borrow();
         if *host_shutdown { return Ok(None); }
-        let mut started = self.start_turn_on_record(
+        let project_environment = project_environment_for_session_locked(inner, &session_id);
+        let mut started = self.start_turn_on_record_with_environment(
             &mut inner.sessions[index],
             queued.pending_prompt.id.clone(), queued.pending_prompt.text.clone(),
             queued.attachments.clone(), queued.pending_prompt.expanded_text.clone(),
             queued.pending_prompt.source.clone(), engram_mcp, host_mcp_servers_only,
+            project_environment,
         ).map_err(|error| annotate_queued_followup_start_failure(
             inner, index, anyhow!("failed to dispatch queued prompt: {}", error.message),
         ))?;
@@ -344,7 +348,7 @@ impl AppState {
     /// (it needs the whole state, which this record-level helper does not
     /// hold): it forgets the commands of the session's earlier turn and marks
     /// another session's open Engram checks in its worktree as overlapped.
-    fn start_turn_on_record(
+    fn start_turn_on_record_with_environment(
         &self,
         record: &mut SessionRecord,
         message_id: String,
@@ -354,6 +358,7 @@ impl AppState {
         source: Option<MessageSource>,
         engram_mcp: Option<EngramMcpRuntimeConfig>,
         host_mcp_servers_only: bool,
+        project_environment: ProjectEnvironment,
     ) -> std::result::Result<StartedTurn, ApiError> {
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
@@ -489,7 +494,8 @@ impl AppState {
                                     "failed to build Claude delegation MCP config: {err:#}"
                                 ))
                             })?;
-                        let handle = spawn_claude_runtime(
+                        let applied = AppliedProjectEnvironment { values: project_environment.clone() };
+                        let handle = spawn_claude_runtime_with_environment(
                             self.clone(),
                             record.session.id.clone(),
                             record.session.workdir.clone(),
@@ -507,6 +513,7 @@ impl AppState {
                             engram_mcp.as_ref().map(|config| &config.stdio),
                             host_mcp_servers_only,
                             None,
+                            &applied,
                         )
                         .map_err(|err| {
                             ApiError::internal(format!(
@@ -514,6 +521,7 @@ impl AppState {
                             ))
                         })?;
                         record.runtime = SessionRuntime::Claude(handle.clone());
+                        record.project_environment = applied;
                         record.register_dedicated_runtime();
                         record.engram_mcp_installed = engram_mcp.map(|config| config.installed);
                         handle
@@ -672,6 +680,7 @@ impl AppState {
                         ));
                     }
                     SessionRuntime::None => {
+                        let applied = AppliedProjectEnvironment { values: project_environment.clone() };
                         let handle = self
                             .start_acp_runtime_for_turn(
                                 record.session.id.clone(),
@@ -679,6 +688,7 @@ impl AppState {
                                 expected_acp_agent,
                                 record.session.gemini_approval_mode,
                                 engram_mcp.as_ref().map(|config| &config.stdio),
+                                &applied,
                             )
                             .map_err(|err| {
                                 ApiError::internal(format!(
@@ -687,6 +697,7 @@ impl AppState {
                                 ))
                             })?;
                         record.runtime = SessionRuntime::Acp(handle.clone());
+                        record.project_environment = applied;
                         record.register_dedicated_runtime();
                         record.engram_mcp_installed =
                             engram_mcp.as_ref().map(|config| config.installed.clone());
@@ -1895,7 +1906,8 @@ impl AppState {
             let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
             let host_mcp_servers_only =
                 session_is_acceptance_evaluator_child_locked(&inner, session_id);
-            let started = self.start_turn_on_record(
+            let project_environment = project_environment_for_session_locked(&inner, session_id);
+            let started = self.start_turn_on_record_with_environment(
                 inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid"),
@@ -1906,6 +1918,7 @@ impl AppState {
                 source,
                 engram_mcp,
                 host_mcp_servers_only,
+                project_environment,
             )?;
             EngramHost::turn_started(&mut inner, index);
             let revision = self
@@ -1971,7 +1984,8 @@ impl AppState {
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
         let host_mcp_servers_only =
             session_is_acceptance_evaluator_child_locked(&inner, session_id);
-        let started = self.start_turn_on_record(
+        let project_environment = project_environment_for_session_locked(&inner, session_id);
+        let started = self.start_turn_on_record_with_environment(
             inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid"),
@@ -1982,6 +1996,7 @@ impl AppState {
             source,
             engram_mcp,
             host_mcp_servers_only,
+            project_environment,
         )?;
         EngramHost::turn_started(&mut inner, index);
         let revision = self

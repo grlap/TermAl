@@ -2003,6 +2003,9 @@ fn handle_shared_codex_start_turn_inner(
         session_state.turn_started = false;
     }
 
+    let project_environment_notice = state.project_environment_notice(session_id);
+    let prompt = project_environment_notice.as_ref()
+        .map(|notice| format!("{notice}\n\n{}", command.prompt));
     set_shared_codex_writer_context(
         writer_context,
         format!(
@@ -2120,7 +2123,7 @@ fn handle_shared_codex_start_turn_inner(
             // returns from Fast to Standard.
             "serviceTier": command.service_tier,
             "sandboxPolicy": codex_sandbox_policy_value(command.sandbox_mode),
-            "input": codex_user_input_items(&command.prompt, &command.attachments),
+            "input": codex_user_input_items(prompt.as_deref().unwrap_or(&command.prompt), &command.attachments),
         }),
     );
     let pending_turn_request = match turn_start_result {

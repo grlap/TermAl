@@ -1188,6 +1188,7 @@ impl PersistedSessionRecord {
             remote_id: self.remote_id,
             remote_session_id: self.remote_session_id,
             runtime: SessionRuntime::None,
+            project_environment: AppliedProjectEnvironment::default(),
             engram_mcp_installed: None,
             runtime_reset_required: false,
             codex_mcp_config_refresh_pending: false,

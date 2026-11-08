@@ -97,6 +97,8 @@ enum ApiErrorKind {
     FederationMailboxUpgradeRequired,
     FederationMailboxWriterAdmission,
     FederationMailboxDirectoryFence,
+    /// Local cause metadata; never reconstructed from remote error text.
+    FederationMailboxCentralDurability,
     FederationMailboxReadExpired,
     FederationMailboxReadConflict,
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -455,6 +457,9 @@ struct Project {
     remote_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_project_id: Option<String>,
+    /// Host-local project settings. Client projections remove the values.
+    #[serde(default, skip_serializing_if = "ProjectEnvironment::is_empty")]
+    environment: ProjectEnvironment,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram: Option<EngramProjectSettings>,
     /// Durable, redacted operator warning for Engram cleanup that completed
@@ -487,6 +492,7 @@ where
         .iter()
         .cloned()
         .map(|mut project| {
+            project.environment = ProjectEnvironment::default();
             let engram_declared = project.remote_id == LOCAL_REMOTE_ID
                 && fs::metadata(FsPath::new(&project.root_path).join(".engram-project"))
                     .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);

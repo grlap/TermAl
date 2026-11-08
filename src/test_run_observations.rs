@@ -239,6 +239,7 @@ struct TestRunUnclassifiedCommand {
     workdir: String,
     started_at: String,
     directories: Option<Vec<Option<String>>>,
+    project_environment_present: BTreeSet<String>,
 }
 
 /// What a command's start or description found of its invocation's original
@@ -452,10 +453,11 @@ impl AppState {
         if origin.runtime_identity.is_none() {
             return;
         }
-        self.inner
-            .lock()
-            .expect("state mutex poisoned")
-            .test_runs
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let present = inner.find_session_index(&origin.session_id)
+            .map(|index| inner.sessions[index].project_environment.values.present_names())
+            .unwrap_or_default();
+        inner.test_runs
             .unclassified_commands
             .entry(origin.execution_id())
             .or_insert(TestRunUnclassifiedCommand {
@@ -463,6 +465,7 @@ impl AppState {
                 workdir,
                 started_at,
                 directories,
+                project_environment_present: present,
             });
     }
 
@@ -553,7 +556,7 @@ impl AppState {
             .map(|directory| vec![Some(directory.to_owned())])
             .or(pending.directories.clone());
         let recognised = EngramHost::recognized_check(ran);
-        let declared = recognised
+        let mut declared = recognised
             .is_none()
             .then(|| {
                 engram_declared_start(
@@ -565,6 +568,9 @@ impl AppState {
                 .0
             })
             .flatten();
+        if let Some((_, _, binding)) = &mut declared {
+            AppliedProjectEnvironment::bind_present_names(&pending.project_environment_present, binding);
+        }
         let Some(command) = recognised
             .as_ref()
             .or_else(|| declared.as_ref().map(|(command, _, _)| command))

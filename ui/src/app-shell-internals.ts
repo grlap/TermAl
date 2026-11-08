@@ -144,4 +144,5 @@ export type StandaloneControlSurfaceViewState = {
   projectId?: string;
   sessionListFilter?: SessionListFilter;
   sessionListSearchQuery?: string;
+  sessionListHost?: string;
 };

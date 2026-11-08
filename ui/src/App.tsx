@@ -1,3 +1,4 @@
+import { ALL_SESSION_HOSTS } from "./session-host-filter";
 import {
   startTransition,
   useCallback,
@@ -370,6 +371,7 @@ export default function App() {
   const [sessionListFilter, setSessionListFilter] =
     useState<SessionListFilter>("all");
   const [sessionListSearchQuery, setSessionListSearchQuery] = useState("");
+  const [sessionListHost, setSessionListHost] = useState(ALL_SESSION_HOSTS);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     ALL_PROJECTS_FILTER_ID,
   );
@@ -2021,6 +2023,8 @@ export default function App() {
         openSessionIds={openSessionIds}
         sessionListFilter={sessionListFilter}
         setSessionListFilter={setSessionListFilter}
+        sessionListHost={sessionListHost}
+        setSessionListHost={setSessionListHost}
         sessionListSearchQuery={sessionListSearchQuery}
         setSessionListSearchQuery={setSessionListSearchQuery}
         sessionFilterCounts={sessionFilterCounts}

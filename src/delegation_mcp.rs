@@ -582,6 +582,31 @@ impl AppState {
             config["mcp_servers"][TERMAL_DELEGATION_MCP_SERVER_NAME]["tools"] =
                 codex_never_root_coordination_tool_approvals();
         }
+        let applied = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            // A queued setup can outlive Stop or session removal. Keep the
+            // runtime fence without turning this stale prompt into a fatal
+            // shared-writer error; StartTurn handles the stale continuation.
+            let Some(index) = inner.find_session_index(parent_session_id) else {
+                return Ok((config, engram_enabled));
+            };
+            if !inner.sessions[index].runtime.matches_runtime_token(runtime_token) {
+                return Ok((config, engram_enabled));
+            }
+            let values = project_environment_for_session_locked(&inner, parent_session_id);
+            let mut applied = AppliedProjectEnvironment { values };
+            {
+                // A resumed thread must not retain an explicitly set value
+                // removed since its previous runtime selection.
+                for name in inner.sessions[index].project_environment.values.0.keys() {
+                    applied.values.0.entry(project_environment_key(name)).or_default();
+                }
+                inner.sessions[index].project_environment = applied.clone();
+            }
+            applied
+        };
+        let names: Vec<_> = applied.values.0.keys().map(String::as_str).collect();
+        merge_owned_agent_shell_env_into_codex_config(&mut config, &applied.values.0, &names, &[], "Project")?;
         Ok((config, engram_enabled))
     }
 

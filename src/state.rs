@@ -2278,6 +2278,8 @@ struct SessionRecord {
     remote_id: Option<String>,
     remote_session_id: Option<String>,
     runtime: SessionRuntime,
+    /// Process-local selection applied at provider start/resume, never persisted.
+    project_environment: AppliedProjectEnvironment,
     #[cfg(windows)]
     retained_dedicated_owners: Vec<RetainedDedicatedOwner>,
     /// Descriptor actually installed into the currently attached local agent

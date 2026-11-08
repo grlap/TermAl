@@ -442,6 +442,7 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .route("/api/projects", post(create_project))
         .route("/api/projects/{id}", delete(delete_project))
+        .route("/api/projects/{id}/environment", patch(update_project_environment))
         .route(
             "/api/projects/{id}/engram",
             patch(update_project_engram_settings),
@@ -1235,6 +1236,7 @@ include!("session_config.rs");
 include!("session_markers.rs");
 include!("turn_dispatch.rs");
 include!("session_crud.rs");
+include!("project_environment.rs");
 include!("sse_broadcast.rs");
 include!("state_broadcast_worker.rs");
 include!("state_broadcast_diff.rs");
