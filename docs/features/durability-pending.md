@@ -38,9 +38,28 @@ The write may commit after the caller receives it. Retain the complete original
 request and identity; an explicit retry must resend that unchanged request.
 Do not mint a new run, attempt, generation or release audit to resolve it.
 The `retry` field describes the safe request, not an instruction for an
-unbounded or automatic retry loop.
+unbounded retry loop.
 
-The launcher stops before starting any test stage on pending registration.
+The launcher may use its second registration POST attempt to recover a fully
+validated pending response. It sends the same original bytes and operation
+identity, within the original overall ACK budget: 8 s, or 38 s when the request
+includes the source-owner probe allowance. It does not extend the host's 5 s
+claim/durability wait, reset its own deadline, create another run, or rerun a
+test. A successful response still needs the strict durable ACK and exact GET
+confirmation before execution.
+
+After both attempts or budget exhaustion, an unresolved registration retains
+its typed pending identity and the launcher stops before starting any test
+stage, as before. Any unconfirmed recovery outcome retains the last validated
+pending identity and its bounded advisory evidence, including a refusal or
+malformed reply, an invalid ACK, or failed GET confirmation. The latest
+recovery error remains visible; it cannot prove the earlier queued write was
+never applied. This is neither a durable receipt nor proof that the write
+will never commit. A later explicit resend of the unchanged original request
+can confirm that same registration. Malformed or unrelated pending responses,
+definite HTTP refusals, invalid ACKs and GET confirmation failures do not
+authorize another POST.
+
 The delegation MCP bridge validates the status, version, operation, endpoint
 and original caller/request context, then returns `isError: true`, with the
 same validated envelope in text and `structuredContent`. It strips unknown
@@ -126,7 +145,8 @@ shutdown writer, ordinary unavailability, transport loss and other conflicts
 keep their existing error categories; message text containing “Deadline” is
 not typed evidence. Shared authority maintenance helpers do not turn into
 public pending APIs. Nothing changes persistence scheduling, batching,
-SQLite pragmas, admission/retry budgets or deadlines.
+SQLite pragmas, admission budgets or deadlines. Launcher recovery reuses its
+existing two-attempt limit; other pending clients remain single-attempt.
 
 The deterministic regressions use disposable SQLite stores, real delta
 collection and content-fence readback, and explicit clock/phase boundaries.

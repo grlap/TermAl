@@ -180,6 +180,12 @@ struct QueuedPromptRecord {
 }
 
 impl QueuedPromptRecord {
+    fn projected_interrupted(&self) -> bool {
+        self.engram_interrupted
+            || self.engram_ordinary_handoff
+            || !self.promotion_disposition_known
+    }
+
     // History protects immutable stored content from mailbox coalescing. It
     // is never consulted as an authorization or a prerequisite to dispatch.
     fn has_stored_history(&self) -> bool {
@@ -197,12 +203,31 @@ fn projected_pending_prompts(record: &SessionRecord) -> Vec<PendingPrompt> {
         .iter()
         .map(|queued| {
             let mut prompt = queued.pending_prompt.clone();
-            prompt.engram_interrupted = queued.engram_interrupted
-                || queued.engram_ordinary_handoff || !queued.promotion_disposition_known;
+            prompt.engram_interrupted = queued.projected_interrupted();
             prompt.is_engram_retained = queued.has_stored_history();
             prompt
         })
         .collect()
+}
+
+// The public queue hash depends only on ordered identity and disposition, not
+// prompt bodies. Borrow the same authority as projected_pending_prompts so a
+// warm metadata cut can validate it without cloning prompts or hashing again.
+fn projected_pending_prompt_identities(
+    record: &SessionRecord,
+) -> impl Iterator<Item = (&str, bool, bool)> {
+    let authoritative = record.is_local_session() && !record.queued_prompts.is_empty();
+    let queued_count = if authoritative { record.queued_prompts.len() } else { 0 };
+    let embedded = if authoritative { &[] } else { record.session.pending_prompts.as_slice() };
+    record.queued_prompts.iter().take(queued_count).map(|queued| {
+        (
+            queued.pending_prompt.id.as_str(),
+            queued.projected_interrupted(),
+            queued.has_stored_history(),
+        )
+    }).chain(embedded.iter().map(|prompt| {
+        (prompt.id.as_str(), prompt.engram_interrupted, prompt.is_engram_retained)
+    }))
 }
 
 fn sync_pending_prompts(record: &mut SessionRecord) {

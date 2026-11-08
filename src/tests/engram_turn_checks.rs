@@ -856,6 +856,23 @@ impl EOCheckedTurn {
         let workdir = normalize_user_facing_path(&workdir);
         let session = create_test_project_session(&state, Agent::Codex, &project, &workdir);
         enable_test_project_engram(&state, &project, &root);
+        // Naming exercises the full owner protocol independently of these
+        // older ordinary-observation fixtures' historical content seam.
+        let owner_binary = super::engram_source_owner::source_owner_fixture_binary(
+            state.test_temp_root.as_ref().unwrap().path());
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.projects.iter_mut().find(|p| p.id == project).unwrap()
+                .engram.as_mut().unwrap().binary_path = Some(owner_binary.to_string_lossy().into_owned());
+            inner.test_observation_source_owner = Some(Arc::new(|_, _, args, _, _| {
+                if args[0] == "--version" {
+                    return Ok(super::engram_source_owner::source_owner_reply(args));
+                }
+                Ok(super::engram_source_owner::source_owner_output(0, serde_json::to_vec(
+                    &super::engram_source_command::source_envelope(FsPath::new(&args[2]), "clean")
+                ).unwrap()))
+            }));
+        }
         fs::write(root.join(".engram-project"), "github.com/example/source-root\n").unwrap();
         let binding = test_control_work_binding(&format!("eo-check-{label}"), 1);
         {
@@ -3976,7 +3993,7 @@ fn name_other_session_source_root(turn: &EOCheckedTurn, session: &str, root: &Fs
     let binding = opening.binding;
     let source_root = EngramTurnSourceRoot {
         root, common_dir_key, short_ref: binding.work_id.clone(), claim_id: binding.claim_id.clone(),
-        generation: 0, sealed_revision: None,
+        generation: 0, sealed_revision: None, sealed_source_id: None,
     };
     trace.opening_root = Some(EngramRuntimeOpeningRoot {
         store: opening.store, binding: binding.clone(), provenance, source_root: Some(source_root),

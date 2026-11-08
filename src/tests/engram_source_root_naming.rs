@@ -44,6 +44,9 @@ mod unconfirmed_root_reasons;
 #[path = "engram_root_retained_runs.rs"]
 mod retained_runs;
 
+#[path = "engram_naming_source.rs"]
+mod source_id;
+
 impl EOCheckedTurn {
     /// These reconciliation fixtures script BOTH producer operations. A
     /// status tuple alone cannot invent the canonical run/event carrier.
@@ -1731,7 +1734,7 @@ fn a_source_root_clear_keeps_the_ordinary_turns_original_named_generation() {
         assert_eq!(record.engram.observed_opening().unwrap().provenance, opening.provenance);
         let root = record.engram.observed_source_root().unwrap();
         assert_eq!(root.generation, named.generation);
-        assert!(root.sealed_revision.is_some());
+        assert!(root.sealed_source_id.is_some());
     });
     assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }
@@ -3697,10 +3700,9 @@ fn a_clear_during_a_turn_seals_the_root_that_turn_is_measured_in() {
     claimed.begin("Observe the named root.");
     assert!(claimed.record_mut(|record| record.engram.observed_source_root().is_some()));
     let cleared = request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
-    let revision = content_revision_of(&worktree);
-    assert_eq!(cleared.sealed.and_then(|sealed| sealed.source_revision), Some(revision.clone()));
+    let source_id = cleared.sealed.and_then(|sealed| sealed.source_id).unwrap();
     assert_eq!(claimed.record_mut(|record| record.engram.observed_source_root()
-        .and_then(|root| root.sealed_revision.clone())), Some(revision));
+        .and_then(|root| root.sealed_source_id.clone())), Some(source_id));
     assert!(pending_line(&claimed).is_some_and(|line| line.contains("no worktree named")));
     assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }
@@ -3732,7 +3734,7 @@ fn a_clear_seals_no_turn_of_another_claim_measured_in_the_same_worktree() {
     let cleared = request_naming(&claimed, label, None, vec![held]).unwrap();
     assert!(cleared.sealed.is_none());
     assert_eq!(claimed.record_mut(|record| record.engram.observed_source_root()
-        .map(|root| root.sealed_revision.clone())), Some(None));
+        .map(|root| root.sealed_source_id.clone())), Some(None));
     assert_ordinary_turn_has_no_native_requests(&claimed);
     claimed.end();
 }
@@ -4036,10 +4038,10 @@ fn a_name_is_refused_when_base_mcp_is_off_or_the_project_changes_meanwhile() {
 
 /// The claimed root's turn record: its grant, and the revision sealed on its
 /// root, if any.
-fn turn_seal(claimed: &EOCheckedTurn) -> (Option<String>, Option<String>) {
+fn turn_seal(claimed: &EOCheckedTurn) -> (Option<String>, Option<EngramSourceId>) {
     claimed.record_mut(|record| (
         record.engram.observed_turn_ref().map(str::to_owned),
-        record.engram.observed_source_root().and_then(|root| root.sealed_revision.clone()),
+        record.engram.observed_source_root().and_then(|root| root.sealed_source_id.clone()),
     ))
 }
 
@@ -4711,7 +4713,7 @@ fn ordinary_opening_keeps_its_root(transition: &str) {
         let root = record.engram.observed_source_root().unwrap();
         assert_eq!(root.generation, named.generation);
         assert_eq!(Some(&root.root), named.root.as_ref());
-        assert_eq!(root.sealed_revision.is_some(), matches!(transition, "clear" | "rename"));
+        assert_eq!(root.sealed_source_id.is_some(), matches!(transition, "clear" | "rename"));
     });
     assert_eq!(content_revision_of(&worktree), before, "naming metadata does not synthesize a content edit");
     if matches!(transition, "pending" | "unknown") {

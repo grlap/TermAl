@@ -105,6 +105,24 @@ it does not imply that the home or connection is unavailable.
 
 Reads do not acknowledge. MCP/CLI request issuance; acknowledgements accept
 only the unchanged issued receipt, never a numeric boundary or `readKey`.
+A later read does not revoke an earlier issued receipt. A valid receipt remains
+bound to its original participant, mailbox and range. Re-acknowledging one at
+or behind the current cursor succeeds idempotently: it neither moves the cursor
+backward nor acknowledges newer unread messages, issues a new receipt or
+suppresses the newer messages' owed wake. Foreign or unissued receipts and
+receipts that skip unprocessed visible messages remain refused.
+
+Authenticated non-404 client refusals retain the home's HTTP status and carry
+only a bounded, closed reason code with static guidance. For example, a 423
+`native_mailbox_home_persistence_settling` identifies a home federation
+persistence hold; it does not imply an identity or receipt problem. Unsupported,
+malformed or uncorrelated reason metadata becomes
+`native_mailbox_home_reason_unavailable`, without exposing home error prose,
+message bodies or store identities. This adds no automatic retry or fallback.
+The existing 404 distinction is unchanged: a structured resource/membership
+refusal stays 404, while an unstructured missing-capability response becomes
+409. Existing 5xx outcome-uncertainty handling also remains unchanged.
+
 `noContinuation` is refused for relay mailboxes. Relay receipts conservatively
 report `durableButNotWoken`: commitment is not proof that a native agent ran.
 The home's message notification field also remains conservative; native wake

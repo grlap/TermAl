@@ -547,10 +547,14 @@ struct EngramTurnSourceRoot {
     /// The name's generation (`EngramWorkSourceRoot::generation`), which a
     /// check carried past this turn keeps to settle only under the same name.
     generation: u64,
-    /// The root's revision when a rename or a clear during this turn sealed
-    /// it. The close uses it only when the root is gone
-    /// (`engram_named_root_absent`); it knows of no edit made after the seal.
+    /// Historical string seals stay readable as stored. New naming never
+    /// constructs one or derives a full identity from one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     sealed_revision: Option<String>,
+    /// Complete owner identity at rename/clear, pinned to this original turn.
+    /// It knows of no edit made after the seal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sealed_source_id: Option<EngramSourceId>,
 }
 
 impl EngramTurnSourceRoot {
@@ -562,6 +566,7 @@ impl EngramTurnSourceRoot {
             claim_id: entry.claim_id.clone(),
             generation: entry.generation,
             sealed_revision: None,
+            sealed_source_id: None,
         }
     }
 
@@ -1324,8 +1329,7 @@ fn engram_source_root_registered(root: &FsPath, common: &FsPath) -> bool {
 
 /// Whether the named root is gone: its path no longer exists, or it no
 /// longer holds its own `.git` entry, so it is no longer a worktree root.
-/// Only then may a turn's close use a sealed revision. Only a lookup that
-/// says so counts (`engram_lookup_says_missing`): a denied or failed one
+/// Only a lookup that says so counts (`engram_lookup_says_missing`): a denied or failed one
 /// leaves a root that may still exist, and changed, unmeasured.
 fn engram_named_root_absent(root: &str) -> bool {
     let path = FsPath::new(root);
@@ -1361,6 +1365,7 @@ fn engram_place_source_basis_with(
     engram_place_source_capture_with(place, ordinary_commit_input).ok().flatten()
 }
 
+#[cfg(test)]
 fn engram_place_source_capture(place: &EngramBasisPlace) -> EngramSourceCapture {
     engram_place_source_capture_with(place, ORDINARY_COMMIT_INPUT_DEFAULT)
 }
@@ -1791,15 +1796,15 @@ struct EngramSourceRootResponse {
     /// The named root; absent after a clear.
     #[serde(skip_serializing_if = "Option::is_none")]
     root: Option<String>,
-    /// The root's content revision now.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_revision: Option<String>,
-    /// Why the root has no revision now, when it has none.
+    /// Private capture; automatic naming output carries only its summary.
+    #[serde(skip)]
+    source_basis: Option<EngramExecutionSourceBasis>,
+    /// Why the root could not be measured now.
     #[serde(skip_serializing_if = "Option::is_none")]
     unmeasured: Option<String>,
     /// The generation of the new name; 0 after a clear.
     generation: u64,
-    /// The previous root's revision, sealed for the caller's turn running in
+    /// The previous root, sealed for the caller's turn running in
     /// it under the same claim since before the call; absent when no such
     /// turn took it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1841,8 +1846,8 @@ fn engram_source_root_evaluation_notice_locked(
 #[serde(rename_all = "camelCase")]
 struct EngramSealedSourceRoot {
     root: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_revision: Option<String>,
+    #[serde(skip)]
+    source_id: Option<EngramSourceId>,
 }
 
 const ENGRAM_SOURCE_ROOT_TAKES_EFFECT_NOTICE: &str = "The source root takes effect at your next \
@@ -2508,7 +2513,7 @@ impl AppState {
         // sealed below, under the lock, if that turn still runs); with no
         // such turn nothing is captured. The captures are taken within what
         // is left of the budget, counted with the turns' capture threads; one
-        // not taken seals no revision, or reports the new root unmeasured.
+        // not taken seals no identity, or reports the new root unmeasured.
         let sealed = old
             .as_ref()
             .filter(|old| validated.as_ref().is_none_or(|(root, _)| *root != old.root))
@@ -2519,22 +2524,16 @@ impl AppState {
             })
             .map(|old| EngramSealedSourceRoot {
                 root: old.root.clone(),
-                source_revision: self
-                    .engram_source_basis_within(
-                        &EngramBasisPlace::Named {
-                            root: old.root.clone(),
-                            common_dir_key: old.common_dir_key.clone(),
-                        },
+                source_id: self
+                    .engram_naming_source_basis_within(
+                        &target, &old.root, &old.common_dir_key,
                         engram_source_root_capture_budget(left(), control_left),
                     )
-                    .map(|basis| basis.source_revision),
+                    .and_then(|basis| basis.source_id),
             });
         let basis = validated.as_ref().and_then(|(root, common_dir_key)| {
-            self.engram_source_basis_within(
-                &EngramBasisPlace::Named {
-                    root: root.clone(),
-                    common_dir_key: common_dir_key.clone(),
-                },
+            self.engram_naming_source_basis_within(
+                &target, root, common_dir_key,
                 engram_source_root_capture_budget(left(), control_left),
             )
         });
@@ -2923,9 +2922,11 @@ impl AppState {
                         same_turn
                             && turn_root.root == sealed.root
                             && turn_root.claim_id == old.claim_id
+                            && turn_root.generation == old.generation
+                            && turn_root.common_dir_key == old.common_dir_key
                     })
                     .map(|turn_root| {
-                        turn_root.sealed_revision = sealed.source_revision.clone();
+                        turn_root.sealed_source_id = sealed.source_id.clone();
                         sealed
                     })
             }
@@ -3062,14 +3063,14 @@ impl AppState {
                 });
             }
         }
-        let (root, source_revision, unmeasured) = match (&validated, basis) {
+        let (root, source_basis, unmeasured) = match (&validated, basis) {
             (Some((root, _)), Some(basis)) => {
-                (Some(root.clone()), Some(basis.source_revision), None)
+                (Some(root.clone()), Some(basis), None)
             }
             (Some((root, _)), None) => (
                 Some(root.clone()),
                 None,
-                Some("TermAl cannot take its content revision now; see the host log".to_owned()),
+                Some("TermAl cannot measure this source root now".to_owned()),
             ),
             (None, _) => (None, None, None),
         };
@@ -3102,7 +3103,7 @@ impl AppState {
             work_ref: claim.short_ref,
             work_id: claim.work_id,
             root,
-            source_revision,
+            source_basis,
             unmeasured,
             generation,
             sealed,

@@ -9,6 +9,9 @@ mod initial_state_snapshot;
 #[path = "state_diff_broadcast.rs"]
 mod state_diff_broadcast;
 
+#[path = "queue_projection_cache.rs"]
+mod queue_projection_cache;
+
 struct ProjectionObserver;
 
 impl ProjectionObserver {
@@ -438,6 +441,14 @@ fn warm_projection_scan_reports_measurement_at_live_session_count() {
         for index in 1..6793 {
             let mut record = template.clone();
             record.session.id = format!("projection-fixture-{index}");
+            // A declared mix, without queued bodies in the cache. The first
+            // session and every other even index keep an empty queue.
+            if index % 2 == 1 {
+                record.queued_prompts = vec![
+                    queue_projection_cache::queued("first"),
+                    queue_projection_cache::queued("second"),
+                ].into();
+            }
             inner.push_session(record);
         }
     }
@@ -459,10 +470,22 @@ fn warm_projection_scan_reports_measurement_at_live_session_count() {
     }
     assert_eq!(projections.load(Ordering::SeqCst), 0);
     drop(observer);
-    eprintln!(
-        "projection_measurement sessions=6793 warm_us={warm_micros} cached_lock_us={micros:?} cached_summaries=6793"
-    );
     assert_eq!(cuts.len(), 3);
+    let mut fresh_micros = Vec::new();
+    for cut in cuts {
+        let inner = state.inner.lock().unwrap();
+        let started = std::time::Instant::now();
+        let fresh = state.snapshot_from_inner(&inner);
+        fresh_micros.push(started.elapsed().as_micros());
+        drop(inner);
+        assert_eq!(
+            serde_json::to_value(&fresh).unwrap(),
+            serde_json::to_value(cut.materialize()).unwrap()
+        );
+    }
+    eprintln!(
+        "projection_measurement sessions=6793 empty_queues=3397 two_prompt_queues=3396 warm_us={warm_micros} cached_lock_us={micros:?} fresh_lock_us={fresh_micros:?} cached_summaries=6793 lock_wait_excluded=true"
+    );
 }
 
 #[test]

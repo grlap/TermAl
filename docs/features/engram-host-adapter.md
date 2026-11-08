@@ -1136,22 +1136,26 @@ happens elsewhere. The agent therefore names the item's worktree once with
   after the verdict is recorded. Naming the main checkout is possible, and
   takes the shared tree on the item: another session's edit there becomes
   the item's change.
-- **Renaming or clearing during a turn** seals the old root's revision for
+- **Naming captures** use the configured, pinned Engram source owner and keep
+  its complete `source_id`, including submodule heads and local changes, in
+  private host state. An unavailable owner leaves the root unmeasured; it does
+  not invoke a local content-revision fallback or prevent the name itself.
+  Automatic naming responses contain root, generation, notice and measurement
+  availability, with neither revision strings nor full source objects.
+- **Renaming or clearing during a turn** seals the old root's source identity for
   the session's turn running then in that root under the same claim, and
-  the response reports the seal only when that turn took it. A turn of
+  the response reports only the sealed root when that turn took it. A turn of
   another claim measured in the same worktree (two works may name one) is
   not sealed: its work still names the tree, so its later edits there
   count. Only a turn already running with that root when the naming call
   began is sealed, and only while it still runs: a turn started during the
   call, whose start the capture may predate, and a turn already finished
-  are not, and with no such turn no capture is taken. The sealed turn's
-  close uses a live capture of the old root when
-  it still exists, and the sealed revision only when the root is gone (its
-  path missing, or no longer a worktree root), as a lookup that says so
-  shows; a denied or failed lookup, like a root that exists but could not
-  be measured, leaves no basis. The capture and that lookup run together
-  within the close's bound. A sealed revision does not know of edits made
-  after the seal.
+  are not, and with no such turn no capture is taken. New private seals retain
+  the complete owner object; historical string seals remain readable as stored.
+  A seal knows of no edit after its capture. Ordinary closing still validates
+  its canonical root and generation; the seal cannot substitute an old root
+  for a changed canonical selection. Naming, binding receipts and completion
+  seals gain no Engram source-bearing wire field.
 - **Invalidation.** An evaluation by an evaluator child records the root,
   claim and generation it was requested on, or, with no root named, the
   claim the requesting session was bound to. Its first submission is
@@ -1453,7 +1457,9 @@ happens elsewhere. The agent therefore names the item's worktree once with
   replay readback. Each control phase consumes the allowance left by the
   previous phase; filesystem capture time does not refresh or consume that
   allowance. Path validation consumes the overall budget. Captures leave the
-  remaining control allowance and commit reserve available. The MCP bridge
+  remaining control allowance and commit reserve available. Each owner capture
+  also has the configured source-command cap; its probes share one
+  deadline and are counted in the host's existing capture-worker limit. The MCP bridge
   waits for the naming budget plus its normal request allowance; Codex's tool
   timeout is longer still. A pre-transport timeout names nothing. After
   transport starts, a failure can leave an unknown outcome and retains the

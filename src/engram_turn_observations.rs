@@ -1,5 +1,4 @@
-// Bounded source measurement shared by ordinary observation, naming and
-// explicit verification. Filesystem capture runs off the state lock and
+// Historical source capture still used by acceptance. Filesystem capture runs off the state lock and
 // cannot authorize delivery or create a control obligation.
 
 const ENGRAM_SOURCE_BASIS_MAX_BYTES: usize = 512;
@@ -123,22 +122,9 @@ fn engram_bounded_source_basis(
 const ENGRAM_TURN_BASIS_CAPTURE_LIMIT: usize = 32;
 
 impl AppState {
-    /// The source basis at `place` ([`engram_place_source_basis`]) on its own
-    /// thread, waited for at most `budget`. The capture reads every listed
-    /// file and a read cannot be interrupted, so a read that stalls must not
-    /// hold the turn that waits for it: past the budget the basis counts as
-    /// not taken, the conservative path, and the thread is left to finish
-    /// ([`bounded_content_revision_capture`]).
-    fn engram_source_basis_within(
-        &self,
-        place: &EngramBasisPlace,
-        budget: Duration,
-    ) -> Option<EngramExecutionSourceBasis> {
-        self.engram_source_capture_within(place, budget).ok().flatten()
-    }
-
     /// Preserve only typed definitive refusals. Exhausted capacity, deadline,
     /// panic or any other missing capture remains transient absence.
+    #[cfg(test)]
     fn engram_source_capture_within(
         &self,
         place: &EngramBasisPlace,

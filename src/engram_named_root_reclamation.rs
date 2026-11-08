@@ -425,7 +425,7 @@ fn engram_completed_own_root_clear_locked(
     }
     Some(EngramSourceRootResponse {
         work_ref: notice.selection.short_ref.clone(), work_id: history.work_id.clone(), root: None,
-        source_revision: None, unmeasured: None, generation: 0, sealed: None,
+        source_basis: None, unmeasured: None, generation: 0, sealed: None,
         evaluation_notice: None,
         notice: format!("`{}`: already ended by completion; no name was changed and no producer event was created.",
             notice.selection.short_ref),
@@ -902,7 +902,7 @@ impl AppState {
         }
         Ok(EngramSourceRootResponse {
             work_ref: root.short_ref.clone(), work_id: root.work_id.clone(), root: None,
-            source_revision: None, unmeasured: None, generation: 0, sealed: None,
+            source_basis: None, unmeasured: None, generation: 0, sealed: None,
             evaluation_notice: None,
             notice: format!("`{}`: obsolete retained name retired with canonical authority; no producer event was created.", root.short_ref),
         })

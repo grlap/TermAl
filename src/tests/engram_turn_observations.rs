@@ -508,7 +508,8 @@ fn a_named_ordinary_turn_measures_the_worktree_and_ignores_a_main_checkout_edit(
         let worktree = add_observed_worktree(&turn);
         let named = name_observed_worktree(&turn, &worktree);
         assert_eq!(named.generation, 1);
-        assert_eq!(named.source_revision, Some(content_revision_of(&worktree)));
+        assert!(named.source_basis.as_ref().unwrap().source_id.is_some());
+        assert!(named.source_basis.as_ref().unwrap().source_revision.is_empty());
         install_passive_measured_baseline(&turn, &worktree);
         let prompt = turn.begin_prompt("Observe the named worktree.").prompt;
         assert!(prompt.contains("its named source root"), "{prompt}");
@@ -579,7 +580,6 @@ fn closing_an_ordinary_turn_cannot_reselect_a_root_cleared_after_its_opening() {
             assert_eq!(expected[0].generation, named.generation);
             assert_eq!(Some(&expected[0].root), named.root.as_ref());
         }
-        let sealed_revision = content_revision_of(&worktree);
         turn.record(|record| {
             let current = record.engram.unadmitted_active_turn.as_ref().unwrap();
             assert_eq!(current.host_turn_ref, original.host_turn_ref);
@@ -588,8 +588,9 @@ fn closing_an_ordinary_turn_cannot_reselect_a_root_cleared_after_its_opening() {
             assert_eq!(root.root, original.opening_root.as_ref().unwrap().source_root.as_ref().unwrap().root);
             assert_eq!(root.generation, named.generation);
             if clear {
-                assert_eq!(root.sealed_revision.as_deref(), Some(sealed_revision.as_str()),
+                assert!(root.sealed_source_id.is_some(),
                     "a documented clear seals the earlier root, without relabeling its generation");
+                assert!(root.sealed_revision.is_none());
             } else {
                 assert_eq!(current, &original);
             }

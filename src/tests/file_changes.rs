@@ -155,6 +155,7 @@ fn file_change_capture_fixture() -> (Arc<AppState>, String, String) {
                 claim_id: "original-claim".to_owned(),
                 generation: 1,
                 sealed_revision: None,
+                sealed_source_id: None,
             }),
         });
         record.engram.unadmitted_active_turn = Some(trace);

@@ -32,13 +32,23 @@ impl StateProjectionKey {
 #[derive(Default)]
 struct StateProjectionCache {
     server_instance_id: String,
-    sessions: HashMap<String, (StateProjectionKey, Arc<StateSessionSummary>)>,
+    sessions: HashMap<String, CachedStateSessionSummary>,
     test_runs: Option<Arc<TestRunHistoryProjection>>,
     test_run_version: u64,
     #[cfg(test)]
     before_materialize: Option<Box<dyn FnOnce() + Send>>,
     #[cfg(test)]
     capture_sink: Option<mpsc::Sender<(std::time::Instant, Duration, std::thread::ThreadId)>>,
+}
+
+struct CachedStateSessionSummary {
+    key: StateProjectionKey,
+    summary: Arc<StateSessionSummary>,
+    // Only the local public hash's inputs, with no queued text/attachments.
+    // They are captured with summary under StateInner and compared even when
+    // a producer forgot to advance its session's mutation stamp.
+    // None also distinguishes a nonlocal record from an empty local queue.
+    queue_identities: Option<Vec<(String, bool, bool)>>,
 }
 
 struct ImmutableStateSnapshot {
@@ -78,6 +88,7 @@ impl AppState {
         local_instance_id: &str,
         record: &SessionRecord,
         summary: &StateSessionSummary,
+        queue_identities: Option<&[(String, bool, bool)]>,
     ) -> bool {
         let StateSessionSummary {
             mailbox_participant_id,
@@ -211,12 +222,15 @@ impl AppState {
                 == (session.status == SessionStatus::Active)
                     .then(|| bounded_live_activity_summary(&session.live_activity))
                     .flatten()
-            && *queue_projection_hash
-                == if local {
-                    Some(Self::queue_projection_hash(record))
-                } else {
-                    session.queue_projection_hash.clone()
-                }
+            && match (local, queue_identities) {
+                (true, Some(identities)) => projected_pending_prompt_identities(record).eq(
+                    identities.iter().map(|(id, interrupted, retained)| {
+                        (id.as_str(), *interrupted, *retained)
+                    }),
+                ),
+                (false, None) => queue_projection_hash == &session.queue_projection_hash,
+                _ => false,
+            }
     }
 
     fn immutable_state_snapshot_locked(&self, inner: &StateInner) -> ImmutableStateSnapshot {
@@ -245,22 +259,34 @@ impl AppState {
                 let id = record.session.id.as_str();
                 live.insert(id);
                 let key = StateProjectionKey::for_record(record);
-                if let Some((cached_key, summary)) = cache.sessions.get(id) {
-                    if *cached_key == key
+                if let Some(cached) = cache.sessions.get(id) {
+                    if cached.key == key
                         && Self::cached_state_summary_matches_record(
                             &self.server_instance_id,
                             record,
-                            summary,
+                            &cached.summary,
+                            cached.queue_identities.as_deref(),
                         )
                     {
-                        return summary.clone();
+                        return cached.summary.clone();
                     }
                 }
                 let summary = Arc::new(Self::wire_session_summary_from_record(
                     &self.server_instance_id,
                     record,
                 ));
-                cache.sessions.insert(id.to_owned(), (key, summary.clone()));
+                let queue_identities = if record.is_local_session() {
+                    Some(projected_pending_prompt_identities(record)
+                        .map(|(id, interrupted, retained)| (id.to_owned(), interrupted, retained))
+                        .collect())
+                } else {
+                    None
+                };
+                cache.sessions.insert(id.to_owned(), CachedStateSessionSummary {
+                    key,
+                    summary: summary.clone(),
+                    queue_identities,
+                });
                 summary
             })
             .collect();

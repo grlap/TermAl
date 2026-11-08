@@ -140,7 +140,7 @@ fn source_root_unknown_fields_mcp_typo_cannot_clear_or_seal_the_named_root() {
             .engram
             .observed_source_root()
             .unwrap()
-            .sealed_revision
+            .sealed_source_id
             .is_none()
     }));
     let before = naming_snapshot(&claimed);
@@ -294,7 +294,7 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
             "the running turn does not move"
         );
         assert!(
-            current.sealed_revision.is_none(),
+            current.sealed_source_id.is_none(),
             "the same name does not seal the running turn"
         );
     });
@@ -313,15 +313,18 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
         .unwrap();
     assert_eq!(cleared["generation"], 0);
     assert!(cleared.get("root").is_none());
-    let revision = content_revision(&worktree).unwrap().1;
-    assert_eq!(cleared["sealed"]["sourceRevision"], revision);
+    assert!(cleared["sealed"]["root"].is_string());
+    assert!(cleared["sealed"].get("sourceRevision").is_none());
+    assert!(cleared["sealed"].get("sourceId").is_none());
+    let source_id = claimed.record(|record| record.engram.observed_source_root()
+        .unwrap().sealed_source_id.clone().unwrap());
     claimed.record(|record| {
         let current = record.engram.observed_source_root().unwrap();
         assert_eq!(current.root, admitted.root);
         assert_eq!(current.generation, admitted.generation);
         assert_eq!(
-            current.sealed_revision.as_deref(),
-            Some(revision.as_str()),
+            current.sealed_source_id.as_ref(),
+            Some(&source_id),
             "the documented clear seals the old turn revision"
         );
     });
@@ -371,7 +374,7 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
             current.generation, admitted.generation,
             "re-naming takes effect next turn"
         );
-        assert_eq!(current.sealed_revision.as_deref(), Some(revision.as_str()));
+        assert_eq!(current.sealed_source_id.as_ref(), Some(&source_id));
     });
     assert_eq!(server.posts(), 3);
     assert_ordinary_turn_has_no_native_requests(&claimed);

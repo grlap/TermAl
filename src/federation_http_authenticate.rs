@@ -78,6 +78,8 @@ async fn federation_authenticate_message(
         &body,
     )?;
     federation_verify_mac(&context.keys[key], &[&representation], &tag)?;
+    // Bytes is shared; no operation/message-body clone or parse on success.
+    let relay_body = relay_request.then(|| body.clone());
     let mailbox_intent = if mailbox_request {
         serde_json::from_slice::<FederationMailboxRequest>(&body).ok()
     } else { None };
@@ -195,6 +197,16 @@ async fn federation_authenticate_message(
             Ok(Err(_)) => return Err(federation_transport_unavailable()),
             Err(_) => return Ok(federation_request_timeout()),
         };
+    // Keep both legacy 404 capability/resource branches and all 5xx
+    // uncertainty handling unchanged. Only explicit non-404 client refusals
+    // acquire the bounded diagnostic envelope, before signing it.
+    let body = if let Some(request) = relay_body.as_ref()
+        && parts.status.is_client_error() && parts.status != StatusCode::NOT_FOUND
+    {
+        parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+        parts.headers.insert(axum::http::header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        axum::body::Bytes::from(mailbox_relay_refusal_body(request, parts.status, &body))
+    } else { body };
     let response = federation_response_representation(
         &context,
         counter,

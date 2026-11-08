@@ -263,13 +263,13 @@ impl FederationRpcClient {
                 // An authenticated transport refusal settles only this attempt;
                 // application uncertainty and its idempotency key remain owned.
                 context.settle(counter);
-                if matches!(&route, FederationRpcRoute::MailboxRelay(_, _)) {
+                if let FederationRpcRoute::MailboxRelay(_, relay_request) = &route {
                     return Ok(Err(if status == StatusCode::NOT_FOUND && serde_json::from_slice::<ErrorResponse>(&bytes).is_ok() {
                         ApiError::not_found("authenticated native mailbox resource or membership not found")
                     } else if status == StatusCode::NOT_FOUND {
                         ApiError::conflict("native mailbox relay capability or membership unavailable; both hosts must support the relay protocol; no local fallback")
                     } else if status.is_client_error() {
-                        ApiError::from_status(status,"authenticated native mailbox relay refused; check original identity, home and request")
+                        mailbox_relay_verified_refusal(relay_request, &body, status, &bytes)
                     } else { federation_mailbox_unknown_outcome(status,"native mailbox relay response unavailable") }));
                 }
                 if matches!(&route, FederationRpcRoute::Binding(_, _)) {

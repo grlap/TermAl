@@ -1347,11 +1347,20 @@ impl AppState {
             ));
         }
         let has_explicit_project = request.project_id.is_some();
-        let requested_workdir = request
-            .workdir
-            .as_deref()
-            .map(resolve_session_workdir)
-            .transpose()?;
+        // An explicitly selected remote project owns its directory validation.
+        // Keep the request bytes for that host, including its path semantics.
+        let explicit_remote_project = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            request.project_id.as_deref()
+                .and_then(|id| inner.find_project(id))
+                .filter(|project| project.remote_id != LOCAL_REMOTE_ID)
+                .cloned()
+        };
+        let requested_workdir = if explicit_remote_project.is_some() {
+            None
+        } else {
+            request.workdir.as_deref().map(resolve_session_workdir).transpose()?
+        };
         let requested_model = request
             .model
             .as_deref()
@@ -1372,7 +1381,11 @@ impl AppState {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_owned);
-        let project = {
+        let project = if let Some(project) = explicit_remote_project {
+            // The proxy's existing binding/lease checks reject an owner that
+            // changes after this snapshot, rather than falling back to local.
+            Some(project)
+        } else {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(project_id) = request.project_id.as_deref() {
                 Some(inner.find_project(project_id).cloned().ok_or_else(|| {

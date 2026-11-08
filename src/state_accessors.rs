@@ -44,6 +44,7 @@ const SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS: usize = 160;
 
 #[cfg(test)]
 thread_local! {
+    static TEST_BEFORE_QUEUE_PROJECTION_HASH: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
     static TEST_BEFORE_SESSION_SUMMARY_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
     static TEST_BEFORE_STATE_SNAPSHOT_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
 }
@@ -654,21 +655,13 @@ mod visible_session_hydration_error_tests {
 
 impl AppState {
     fn queue_projection_hash(record: &SessionRecord) -> String {
-        let pending_prompts = if record.is_local_session() && !record.queued_prompts.is_empty() {
-            projected_pending_prompts(record)
-        } else {
-            record.session.pending_prompts.clone()
-        };
-        let identity_and_disposition = pending_prompts
-            .iter()
-            .map(|prompt| {
-                (
-                    prompt.id.as_str(),
-                    prompt.engram_interrupted,
-                    prompt.is_engram_retained,
-                )
-            })
-            .collect::<Vec<_>>();
+        #[cfg(test)]
+        TEST_BEFORE_QUEUE_PROJECTION_HASH.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook();
+            }
+        });
+        let identity_and_disposition = projected_pending_prompt_identities(record).collect::<Vec<_>>();
         let serialized = serde_json::to_vec(&(
             record.orchestrator_auto_dispatch_blocked,
             identity_and_disposition,

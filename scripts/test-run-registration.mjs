@@ -273,7 +273,8 @@ async function httpFailure(response, diagnostics, signal) {
     pending = registrationPending(body, response, diagnostics, reason);
     if (pending) stateLock = boundedStateLockEvidence(body.stateLock);
   } catch (error) {
-    // Non-2xx already forbids execution and automatic replay. A body failure
+    // Non-2xx forbids execution. Only the fully validated pending envelope
+    // permits the bounded same-request replay; a body failure
     // cannot turn that status into an ambiguous retryable POST transport loss.
     bodyCategory = failureCategory(error, signal);
     bodyCode = transportCode(error);
@@ -364,14 +365,29 @@ export async function registerTestRun(request, runDirectory, env = process.env) 
   const configuration = hostConfiguration(env);
   const { session, url } = configuration;
   if (request.owner !== session) throw new Error("registration error: launching session differs from the run owner");
-  // Both attempts send these exact bytes. A lost ACK cannot create another
-  // run or change the immutable request while the outcome is unresolved.
+  // Both attempts send these exact bytes and operation identity. A lost ACK
+  // or validated pending write cannot create another logical registration.
   const body = JSON.stringify({ runId: request.runId, runDirectory });
   const identity = requestIdentity(request);
   const budgetMs = request.sourceOwner === undefined ? registrationBudgetMs : sourceRegistrationBudgetMs;
   const deadline = Date.now() + budgetMs;
   const diagnostics = new RegistrationDiagnostics(request, deadline, "registration", budgetMs);
+  let pendingFailure;
+  const terminalFailure = (error, signal) => {
+    const failure = diagnostics.failure(error, signal);
+    // A failed recovery response cannot settle the earlier enqueued write.
+    // Keep its validated identity without hiding the latest failure diagnostics.
+    if (pendingFailure) {
+      failure.durabilityPending = pendingFailure.durabilityPending;
+      if (pendingFailure.stateLock) failure.stateLock = pendingFailure.stateLock;
+    }
+    return failure;
+  };
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (Date.now() >= deadline) {
+      throw terminalFailure(pendingFailure
+        ?? responseFailure("aborted", "registration budget exhausted; no tests started"));
+    }
     diagnostics.attempt = attempt + 1;
     diagnostics.enter("post_headers", "unavailable");
     const controller = new AbortController();
@@ -391,8 +407,7 @@ export async function registerTestRun(request, runDirectory, env = process.env) 
         definitiveRefusal = true;
         throw await httpFailure(response, diagnostics, controller.signal);
       }
-      // Once a reply arrives, malformed or unsupported content is a refusal;
-      // only an ambiguous transport loss may retry these same POST bytes.
+      // Malformed or unsupported ACK content never authorizes replay.
       const acknowledgement = await readResponse(response);
       definitiveRefusal = true;
       diagnostics.enter("post_validation");
@@ -405,11 +420,16 @@ export async function registerTestRun(request, runDirectory, env = process.env) 
       return { state: "registered", contract, version, runId: request.runId, registered: true, initiatingSessionId: session,
         hostOrigin: configuration.base.origin, runDirectory, requestIdentity: identity };
     } catch (error) {
+      if (error.durabilityPending) {
+        pendingFailure = error;
+        if (attempt === 0 && Date.now() < deadline) continue;
+        throw terminalFailure(error, controller.signal);
+      }
       if (definitiveRefusal || error.message.startsWith("registration error:")) {
-        throw diagnostics.failure(error, controller.signal);
+        throw terminalFailure(error, controller.signal);
       }
       if (attempt === 1 || Date.now() >= deadline) {
-        throw diagnostics.failure(error, controller.signal);
+        throw terminalFailure(error, controller.signal);
       }
     } finally {
       clearTimeout(timeout);

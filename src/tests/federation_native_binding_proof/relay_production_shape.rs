@@ -7,6 +7,9 @@ use super::*;
 #[path = "relay_ack_association.rs"]
 mod ack_association;
 
+#[path = "relay_home_reasons.rs"]
+mod home_reasons;
+
 pub(super) struct ProxySend {
     caller: String,
     _proxy: String,
