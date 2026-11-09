@@ -202,7 +202,8 @@ fn prepare_sqlite_obligation_reader_floor(
 ) -> Result<Option<PersistedState>> {
     let (_, version) = sqlite_state_schema_header(connection)?;
     if matches!(version.as_str(), SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
-        | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR) {
+        | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
+        | SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR) {
         return prepare_sqlite_native_test_completion_reader_floor(connection, for_load);
     }
     if version == SQLITE_CHECKPOINT_RESULT_PREDECESSOR {

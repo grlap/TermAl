@@ -236,7 +236,6 @@ fn executor_outcome_floor_upgrades_the_relay_floor_and_refuses_unknown_futures()
     let identity = mailbox_relay_store_id(&connection).unwrap();
     ensure_sqlite_coordination_schema(&connection).unwrap();
     assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION);
-    assert_eq!(COORDINATION_SQLITE_SCHEMA_VERSION, "7-review-custody-index-1");
     assert_eq!(mailbox_relay_store_id(&connection).unwrap(), identity, "the relay store identity is kept");
     assert_eq!(connection.query_row(
         "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='federation_executor_outcomes'",
@@ -286,8 +285,10 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
     assert_eq!(version(&reopened), COORDINATION_SQLITE_SCHEMA_VERSION);
     let after = coordination_schema_objects(&reopened).unwrap();
     let added = after.iter().filter(|object| !before.contains(object)).collect::<Vec<_>>();
-    assert_eq!(added.len(), 1);
-    assert_eq!(added[0].name, "mailbox_messages_topic_key_sender");
+    assert_eq!(added.iter().map(|object| object.name.as_str()).collect::<BTreeSet<_>>(),
+        BTreeSet::from(["mailbox_messages_topic_key_sender", "remote_prompt_intents",
+            "remote_prompt_receives", "remote_prompt_intents_identity_immutable",
+            "remote_prompt_receives_identity_immutable"]));
     assert!(before.iter().all(|object| after.contains(object)), "step six objects stay frozen");
     assert_eq!(reopened.query_row("SELECT COUNT(*), SUM(length(body)) FROM mailbox_messages", [],
         |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?))).unwrap(), (512, 512 * body.len() as u64));

@@ -1073,8 +1073,16 @@ have Engram's 8192 UTF-8 byte limit; a longer command is reported as
 their fingerprints are preserved, and a terminal refusal is not resent.
 
 A committed-input registration in a named root reads that exact claim's
-current held association before it publishes the registration. An unavailable
-Engram service or a missing claim refuses the launch before tests start; a
+current held association before it publishes the registration. A same-claim
+handoff can retain the original name: the current holder's held read must prove
+the same work, claim and recovery run against the canonical bound naming proof.
+The original namer, naming time and generation remain unchanged, as do earlier
+registrations. The original namer's identity is not authority for the launching
+session. A complete reply proving the caller holds no matching claim leaves
+its launch unbound and ineligible for claim-bound credit, as before; uncertain
+or inconsistent authority still refuses registration.
+An unavailable Engram service or an unavailable selected claim refuses the
+launch before tests start; a
 changed claim fence requires naming the root again. This read shares the
 registration's five-second durability budget. Replay keeps the original
 association and does not read the claim again. Automatic selection does not

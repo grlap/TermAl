@@ -17,6 +17,8 @@ enum FederationRpcRoute {
     Onboarding(FederationLinkLease, FederationOnboardingRpc),
     Mailbox(FederationLinkLease, FederationMailboxRequest),
     NativeBinding(FederationLinkLease, FederationNativeBindingRequest),
+    #[cfg_attr(not(test), allow(dead_code))] // Unmounted policy foundation.
+    PromptPolicy(FederationLinkLease, FederationPromptPolicyRequest),
     ExecutorWake(FederationLinkLease, FederationExecutorWakeRequest),
     ExecutorOutcome(FederationLinkLease, FederationExecutorOutcomeRequest),
     Binding(FederationLinkLease, FederationBindingCommand),

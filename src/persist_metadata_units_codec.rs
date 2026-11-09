@@ -359,6 +359,7 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
                 | SQLITE_OBSERVATION_PREDECESSOR | SQLITE_OBSERVATION_SCHEMA_VERSION
                 | SQLITE_CHECKPOINT_RESULT_PREDECESSOR | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
                 | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR | SQLITE_SCHEMA_VERSION
+                | SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
                 | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION),
         ) => Ok(version.to_owned()),
         Some(version) => Err(reject_unsupported_state_schema(format!(
@@ -395,6 +396,7 @@ fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Opt
             .map_err(Into::into);
     }
     let units = if matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+        | SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
         | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
         | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
         read_metadata_units(connection)?

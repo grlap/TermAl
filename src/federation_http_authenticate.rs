@@ -20,6 +20,8 @@ async fn federation_authenticate_message(
     let mailbox_request =
         parts.method == axum::http::Method::POST && parts.uri.path() == "/federation/v1/mailbox";
     let relay_request = parts.method == axum::http::Method::POST && parts.uri.path() == MAILBOX_RELAY_RPC_ROUTE;
+    let prompt_policy_request = parts.method == axum::http::Method::POST
+        && parts.uri.path() == FEDERATION_PROMPT_POLICY_ROUTE;
     let executor_request = parts.method == axum::http::Method::POST
         && (parts.uri.path() == FEDERATION_EXECUTOR_WAKE_ROUTE
             || parts.uri.path() == FEDERATION_EXECUTOR_OUTCOME_ROUTE);
@@ -31,15 +33,19 @@ async fn federation_authenticate_message(
         && parts.uri.path() == FEDERATION_EXECUTOR_OUTCOME_ROUTE;
     let telemetry_request = parts.method == axum::http::Method::GET
         && parts.uri.path() == "/federation/v1/host-utilization";
-    let durable_request = mailbox_request || relay_request || binding_request || executor_request;
-    let request_limit = if executor_request {
+    let durable_request = mailbox_request || relay_request || binding_request || executor_request || prompt_policy_request;
+    let request_limit = if prompt_policy_request {
+        FEDERATION_PROMPT_POLICY_REQUEST_BYTES
+    } else if executor_request {
         32 * 1024
     } else if mailbox_request || relay_request {
         FEDERATION_MAILBOX_REQUEST_BYTES
     } else {
         4096
     };
-    let response_limit = if telemetry_request {
+    let response_limit = if prompt_policy_request {
+        REMOTE_PROMPT_STATUS_BYTES
+    } else if telemetry_request {
         host_utilization::RESPONSE_BYTES
     } else if executor_request {
         32 * 1024
@@ -108,7 +114,10 @@ async fn federation_authenticate_message(
     } else {
         MailboxRelayHomeRpcStage::RequestAdmission
     };
-    let authority = || -> Result<FederationLinkLease, ApiError> {
+    let authority_state = state.clone();
+    let authority_context = context.clone();
+    let authority_headers = parts.headers.clone();
+    let authority = move || -> Result<FederationLinkLease, ApiError> {
         if let Err(error) = reserved {
             // An earlier delivery of this authenticated counter may have
             // committed and lost its reply. This transport refusal settles
@@ -124,33 +133,47 @@ async fn federation_authenticate_message(
                 error
             });
         }
-        if parts
-            .headers
+        if authority_headers
             .get(FEDERATION_INCARNATION_HEADER)
             .and_then(|value| value.to_str().ok())
-            != Some(context.incarnation.as_str())
+            != Some(authority_context.incarnation.as_str())
         {
             return Err(federation_auth_refused());
         }
-        let header = parts
-            .headers
+        let header = authority_headers
             .get(FEDERATION_AUTHORITY_HEADER)
             .ok_or_else(federation_auth_refused)?;
         let authority: FederationRequestAuthority =
             serde_json::from_slice(header.as_bytes()).map_err(|_| federation_auth_refused())?;
-        authority.ensure_expected(&state.channel.snapshot)?;
-        (state.ensure_current)()?;
-        state.channel.lease(&context.incarnation)
+        authority.ensure_expected(&authority_state.channel.snapshot)?;
+        (authority_state.ensure_current)()?;
+        authority_state.channel.lease(&authority_context.incarnation)
     };
-    let response = match authority() {
-        Err(error) => error.into_response(),
-        Ok(lease) => match state.channel.bound.try_acquire() {
-            Err(error) => {
-                relay_failure_stage = MailboxRelayHomeRpcStage::RpcCapacity;
-                error.into_response()
-            }
+    // The policy namespace uses the same owner checks on the blocking pool.
+    // Its permit follows the job through cancellation and durable settlement.
+    let admitted = if prompt_policy_request {
+        match state.channel.bound.try_acquire() {
+            Err(error) => Err(error),
             Ok(permit) => {
                 let permit = Arc::new(permit);
+                let checked = run_blocking_api(move || {
+                    let lease = authority()?;
+                    Ok((lease, permit))
+                });
+                match state.channel.control.clock.timeout_at(deadline, checked).await {
+                    Ok(result) => result,
+                    Err(_) => Err(federation_prompt_policy_unknown_outcome()),
+                }
+            }
+        }
+    } else {
+        authority().and_then(|lease| state.channel.bound.try_acquire()
+            .map(|permit| (lease, Arc::new(permit)))
+            .inspect_err(|_| relay_failure_stage = MailboxRelayHomeRpcStage::RpcCapacity))
+    };
+    let response = match admitted {
+        Err(error) => error.into_response(),
+        Ok((lease, permit)) => {
                 parts.extensions.insert(FederationAuthenticatedPeer {
                     lease: Some(lease.clone()),
                     mailbox_permit: durable_request.then(|| permit.clone()),
@@ -158,6 +181,7 @@ async fn federation_authenticate_message(
                 let request =
                     axum::extract::Request::from_parts(parts, axum::body::Body::from(body));
                 relay_failure_stage = MailboxRelayHomeRpcStage::HandlerResponse;
+                let mut policy_handler_expired = false;
                 let response = match state.channel.control.clock.timeout_at(deadline, next.run(request)).await {
                     Ok(response) => response,
                     Err(_) if binding_request => {
@@ -170,6 +194,10 @@ async fn federation_authenticate_message(
                     }
                     Err(_) if mailbox_request => federation_mailbox_unknown_response(
                         mailbox_intent.as_ref(), "handler_deadline"),
+                    Err(_) if prompt_policy_request => {
+                        policy_handler_expired = true;
+                        federation_prompt_policy_unknown_outcome().into_response()
+                    }
                     Err(_) if outcome_request => ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
                         "remote wake outcome query handler deadline").into_response(),
                     Err(_) if telemetry_request => ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
@@ -181,6 +209,24 @@ async fn federation_authenticate_message(
                         return Ok(federation_request_timeout());
                     }
                 };
+                if policy_handler_expired {
+                    // Do not reacquire a contended owner after this deadline;
+                    // the admitted context authenticates only an unknown result.
+                    response
+                } else if prompt_policy_request {
+                    let check = state.ensure_current.clone();
+                    let lease = lease.clone();
+                    let permit = permit.clone();
+                    let checked = run_blocking_api(move || {
+                        let _permit = permit;
+                        check()?;
+                        lease.with_incarnation(|| Ok(()))
+                    });
+                    match state.channel.control.clock.timeout_at(deadline, checked).await {
+                        Ok(Ok(())) => response,
+                        _ => federation_prompt_policy_unknown_outcome().into_response(),
+                    }
+                } else {
                 match (state.ensure_current)().and_then(|_| lease.with_incarnation(|| Ok(()))) {
                     Ok(()) => response,
                     Err(_) if binding_request => {
@@ -195,8 +241,8 @@ async fn federation_authenticate_message(
                         mailbox_intent.as_ref(), "authority_changed"),
                     Err(error) => error.into_response(),
                 }
-            }
-        },
+                }
+        }
     };
     let (mut parts, body) = response.into_parts();
     let body =

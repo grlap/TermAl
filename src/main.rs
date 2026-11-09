@@ -34,6 +34,11 @@ mod engram_host;
 use engram_host::{EngramHost, EngramRecorderObservation};
 mod host_command;
 mod host_utilization;
+// The foundation is exercised by tests until the delivery routes are mounted.
+#[cfg_attr(not(test), allow(dead_code))]
+mod remote_prompt_authority;
+#[cfg_attr(not(test), allow(dead_code))]
+mod remote_prompt_protocol;
 use host_command::Command;
 #[cfg(windows)]
 mod windows_launch;
@@ -341,6 +346,7 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/health", get(health))
         .route("/api/diagnostics/persistence", get(get_persistence_diagnostics))
         .route("/api/diagnostics/host-lifecycle", get(get_host_lifecycle_diagnostics))
+        .route("/api/diagnostics/runtime-observations", get(get_runtime_observation_counts))
         .route("/api/diagnostics/mailbox-relay-wakes", get(get_mailbox_relay_wake_diagnostics))
         .route(
             "/api/federation/peers/{id}/enroll",
@@ -906,6 +912,8 @@ include!("federation_mailbox_reads.rs");
 include!("federation_delivery_schema.rs");
 include!("federation_executor_schema.rs");
 include!("federation_executor_journal.rs");
+include!("remote_prompt_storage_schema.rs");
+include!("remote_prompt_journal.rs");
 include!("federation_executor_reservations.rs");
 include!("federation_executor_mirrors.rs");
 include!("federation_executor_drain.rs");
@@ -949,6 +957,12 @@ include!("federation_mailbox_bridge.rs");
 include!("federation_mailbox_alias.rs");
 include!("mailbox_append_wake.rs");
 include!("federation_registry.rs");
+include!("federation_prompt_policy.rs");
+include!("federation_prompt_policy_current.rs");
+include!("federation_prompt_policy_rpc.rs");
+include!("federation_prompt_admission.rs");
+include!("federation_prompt_operator.rs");
+include!("remote_prompt_projection.rs");
 include!("federation_onboarding_record.rs");
 include!("federation_onboarding_protocol.rs");
 include!("federation_onboarding_store.rs");
@@ -1039,6 +1053,7 @@ include!("engram_unadmitted_observation.rs");
 include!("engram_unadmitted_capture.rs");
 include!("engram_unadmitted_closing.rs");
 include!("engram_unadmitted_delivery.rs");
+include!("engram_runtime_observation_counts.rs");
 include!("engram_unadmitted_worker.rs");
 include!("engram_unadmitted_lifecycle.rs");
 include!("engram_source_observation_removal.rs");

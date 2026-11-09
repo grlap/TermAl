@@ -1,7 +1,7 @@
 // Test-only child of src/tests/test_run_registration.rs. Owns the witnesses
 // that an ordinary committed-input run's registration takes its work binding
-// from the one named source root the launching session named for the run's
-// worktree, with that claim's current held binding, and pins
+// from the one named source root the launching session currently holds for the
+// run's worktree, with that claim's current held binding, and pins
 // that root; that a stale session binding is never used for it; that such a
 // run in another worktree stays unbound, but two matching names refuse; and
 // that a staged-lane run keeps copying the session's binding; and that the
@@ -120,7 +120,7 @@ pub(super) fn name_root(
     let read: EngramNamedRootReadResponse = serde_json::from_value(json!({
         "project_id": store.project_id, "work_id": binding.work_id, "run_id": binding.run_id,
         "claim_id": binding.claim_id, "root_execution_id": binding.root_execution_id,
-        "run": { "state": "open", "generation": 2 },
+        "run": { "state": "claimed", "generation": 2 },
         "named_root": { "state": "bound", "workspace_id": entry.root,
                         "generation": generation, "named_at": "2026-10-30T00:00:00Z" },
         "latest_event": null,
@@ -261,7 +261,8 @@ fn a_committed_input_run_without_a_matching_named_root_stays_unbound() {
     assert_eq!(unnamed.named_root, None);
     assert!(!unnamed.validated_unbound);
 
-    // A name for another worktree, or by another session, does not match.
+    // A name for another worktree does not match. The launching session's
+    // held read, not the original namer's label, decides a retained name.
     name_root(
         &fixture,
         &store,
@@ -272,17 +273,23 @@ fn a_committed_input_run_without_a_matching_named_root_stays_unbound() {
     );
     let other = claim("other-session");
     name_root(&fixture, &store, &other, "another-session", &canonical_root(&fixture), 2);
-    let registration = register_run(&fixture, &session, "test-named-root-elsewhere", true);
-    assert_eq!(registration.work_binding, None);
-    assert_eq!(registration.named_root, None);
-    assert!(
-        fixture
-            .summary("test-named-root-elsewhere")
-            .registration
-            .bound_work_ids
-            .is_empty()
-    );
+    let transport = ScriptedEngramControlTransport::new([]);
+    transport.replace_held_claims([Ok(current_held_claim(&binding))]);
+    fixture.state.install_test_engram_transport(transport);
+    let id = "test-named-root-elsewhere";
+    let directory = registered_run(&fixture, &session, id);
+    let path = directory.join("request.json");
+    let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    request["input"] = json!("commit");
+    fs::write(path, request.to_string()).unwrap();
+    fixture.state.register_test_run(&session, registration_request(id, &directory)).unwrap();
+    let inner = fixture.state.inner.lock().unwrap();
+    assert!(inner.test_run_registrations[id].work_binding.is_none());
+    assert!(!inner.test_run_registrations[id].validated_unbound);
 }
+
+#[path = "test_run_registration_handoff.rs"]
+mod handoff;
 
 #[test]
 fn a_committed_input_run_under_two_matching_named_roots_reports_both_names() {
@@ -318,7 +325,7 @@ fn committed_registration_refuses_ambiguity_added_during_its_held_read() {
     let keys = test_run_worktree_keys(&fixture.root).unwrap();
     let clock = fixture.state.inner.lock().unwrap().engram_budget_clock_snapshot();
     let mut diagnostics = TestRunRegistrationDiagnostics::new("fixture");
-    let prepared = fixture.state.read_test_run_current_named_binding(
+    let prepared = fixture.state.read_test_run_current_launcher_named_binding(
         &session, "test-ambiguity-race", Some(&keys), &clock,
         test_run_registration_deadline(&clock, std::time::Instant::now()), &mut diagnostics).unwrap();
     let second = claim("second");
@@ -517,7 +524,7 @@ fn committed_registration_rechecks_the_named_root_after_the_held_read() {
         let keys = test_run_worktree_keys(&fixture.root).unwrap();
         let clock = fixture.state.inner.lock().unwrap().engram_budget_clock_snapshot();
         let mut diagnostics = TestRunRegistrationDiagnostics::new("fixture");
-        let prepared = fixture.state.read_test_run_current_named_binding(
+        let prepared = fixture.state.read_test_run_current_launcher_named_binding(
             &session, "test-root-race", Some(&keys), &clock,
             test_run_registration_deadline(&clock, std::time::Instant::now()), &mut diagnostics).unwrap();
         let mut inner = fixture.state.inner.lock().unwrap();

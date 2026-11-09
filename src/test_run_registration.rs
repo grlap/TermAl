@@ -70,7 +70,8 @@ struct TestRunRegistration {
     declared_terminal: Option<DeclaredRunTerminal>,
     // Captured by the host, never accepted from the launcher's payload. For
     // an ordinary committed-input run: the claim of the one root the
-    // launching session named for this worktree (src/test_run_named_root.rs),
+    // launching session currently holds for this worktree, including a
+    // retained name from its prior holder (src/test_run_named_root.rs),
     // never the session's current binding; for any other run: the session's
     // binding at registration, as before.
     work_binding: Option<EngramControlWorkBinding>,
@@ -712,8 +713,13 @@ impl AppState {
         diagnostics.fence_deadline = Some(deadline);
         let current_named_binding = if committed_input {
             diagnostics.enter("read_current_claim");
-            Some(self.read_test_run_current_named_binding(session_id, &request.run_id,
-                worktree_keys.as_ref(), &clock, deadline, diagnostics)?)
+            Some(if native.is_some() {
+                self.read_test_run_current_named_binding(session_id, &request.run_id,
+                    worktree_keys.as_ref(), &clock, deadline, diagnostics)?
+            } else {
+                self.read_test_run_current_launcher_named_binding(session_id, &request.run_id,
+                    worktree_keys.as_ref(), &clock, deadline, diagnostics)?
+            })
         } else {
             None
         };

@@ -176,6 +176,10 @@ impl FederationPeerRecord {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FederationState {
+    // Permission values belong to this existing durable federation owner.
+    // An absent policy admits no direct prompts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prompt_permissions: Option<FederationPromptPermissions>,
     /// Central immutable binding-install intents share the reservation's state
     /// transaction. Satellites retain only the installed per-session binding.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -221,6 +225,9 @@ fn federation_next_generation(generation: u64) -> Result<u64, ApiError> {
 
 impl FederationState {
     fn validate(&self) -> Result<()> {
+        if let Some(permissions) = &self.prompt_permissions {
+            permissions.validate().map_err(|_| anyhow!("invalid persisted prompt permission policy"))?;
+        }
         for (key, intent) in &self.binding_install_intents {
             intent
                 .validate()

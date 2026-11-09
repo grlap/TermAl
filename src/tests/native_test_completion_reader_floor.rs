@@ -2,6 +2,9 @@
 // No live store, provider execution, verification credit or older binary runs.
 use super::*;
 
+#[path = "direct_prompt_reader_floor.rs"]
+mod direct_prompt;
+
 const OLD_FLOORS: &[&str] = &["2", "2-metadata-units-1", SQLITE_METADATA_UNITS_VERSION,
     SQLITE_OBSERVATION_PREDECESSOR, SQLITE_OBSERVATION_SCHEMA_VERSION,
     SQLITE_CHECKPOINT_RESULT_PREDECESSOR, SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR,

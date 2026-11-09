@@ -6,6 +6,7 @@
 use super::*;
 
 mod fixture_clock;
+mod prompt_policy;
 mod references;
 mod relay;
 mod alias_grammar;

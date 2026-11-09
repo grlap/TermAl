@@ -364,6 +364,7 @@ fn validate_no_legacy_embedded_state(
         )));
     } else if matches!(required_state_meta_value(connection, "schema_version")?.as_str(),
         SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
             | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
             | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
         return Err(reject_unsupported_state_schema(

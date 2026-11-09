@@ -106,7 +106,9 @@ fn populated_v4() -> (TestTempRoot, PathBuf) {
     {
         let connection = store.connection().unwrap();
         connection.execute_batch(
-            "DROP TABLE federation_executor_outcomes;
+            "DROP TABLE remote_prompt_intents;
+             DROP TABLE remote_prompt_receives;
+             DROP TABLE federation_executor_outcomes;
              DROP TABLE mailbox_relay_notifications;
              DROP TABLE mailbox_relay_wakes;
              DROP TABLE mailbox_relay_intents;

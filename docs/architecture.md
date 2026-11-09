@@ -378,6 +378,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | GET | `/api/health` | Health check + capability probe |
 | GET | `/api/diagnostics/persistence` | Read bounded, passive [persistence writer diagnostics](features/persistence-diagnostics.md) |
 | GET | `/api/diagnostics/host-lifecycle` | Read how the previous instance ended, from the [host lifecycle journal](features/host-lifecycle-journal.md) |
+| GET | `/api/diagnostics/runtime-observations` | Read [runtime observation custody counts](features/runtime-observation-counts.md), without payloads or store access |
 | GET | `/api/diagnostics/mailbox-relay-wakes` | Read undelivered relay home wakes, their recorded refusals and the bounded process-local home RPC 5xx history ([native mailbox relay](features/native-mailbox-relay.md)) |
 | GET | `/api/file?path=...` | Read file content |
 | PUT | `/api/file` | Write file content |

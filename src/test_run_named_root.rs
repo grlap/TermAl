@@ -4,9 +4,10 @@
 // binding (which under turn-gated control OFF is stale or absent); other runs
 // keep the session's binding (src/test_run_registration.rs). Owns the
 // request's input-kind test, the run worktree's comparison keys, the choice
-// of the one named root that the launching session named for that worktree
-// in the registration's authority store, the claim identity selected from
-// canonical naming proofs and refreshed by a current held-claim read, and the pinned root
+// of the one named root the launching session currently holds for that worktree
+// in the registration's authority store (its original namer is immutable), the
+// claim identity selected from canonical naming proofs and refreshed by a
+// current held-claim read, and the pinned root
 // (`TestRunNamedRoot`) the registration records. The held read runs off-lock;
 // the root, service and claim identity are revalidated before publication.
 // Does not own the registration itself (src/test_run_registration.rs), the
@@ -97,14 +98,47 @@ fn test_run_registration_named_binding(
     store: Option<&EngramAuthorityStoreKey>,
     worktree: Option<&TestRunWorktreeKeys>,
 ) -> Result<(Option<EngramControlWorkBinding>, Option<TestRunNamedRoot>), ApiError> {
+    test_run_registration_named_binding_with_held(inner, session_id, store, worktree, None)
+}
+
+// A launcher's fresh held read may establish a successor holder of the same
+// claim. Native opening/command observers keep the original-namer lookup above.
+fn test_run_held_claim_owns_name(
+    inner: &StateInner, entry: &EngramWorkSourceRoot, held: &EngramHeldClaims,
+) -> bool {
+    let Some(previous) = engram_named_root_claim_binding(&inner.engram_work_naming_history, entry)
+        else { return false; };
+    let bound = engram_work_naming_proofs(&inner.engram_work_naming_history, &entry.store, &entry.work_id)
+        .any(|proof| proof.binding == previous
+            && matches!(proof.read.run.state.as_str(), "claimed" | "active")
+            && matches!(&proof.read.named_root,
+                EngramNamedRootState::Bound { workspace_id, generation, named_at }
+                if workspace_id == &entry.root
+                    && u64::try_from(*generation).ok() == Some(entry.generation)
+                    && engram_named_at_matches(named_at, &entry.named_at)));
+    bound && held.items.iter().any(|claim| {
+        claim.work_id == entry.work_id && claim.claim_id == entry.claim_id
+            && claim.control_binding.as_ref()
+                .is_some_and(|binding| engram_same_recovery_run(&previous, binding))
+    })
+}
+
+fn test_run_registration_named_binding_with_held(
+    inner: &StateInner,
+    session_id: &str,
+    store: Option<&EngramAuthorityStoreKey>,
+    worktree: Option<&TestRunWorktreeKeys>,
+    held: Option<&EngramHeldClaims>,
+) -> Result<(Option<EngramControlWorkBinding>, Option<TestRunNamedRoot>), ApiError> {
     let (Some(store), Some(worktree)) = (store, worktree) else {
         return Ok((None, None));
     };
     let mut matching = inner.engram_work_source_roots.iter().filter(|entry| {
         &entry.store == store
-            && entry.named_by_session == session_id
             && entry.common_dir_key == worktree.common_dir
             && engram_exact_path_key(FsPath::new(&entry.root)) == worktree.root
+            && (entry.named_by_session == session_id
+                || held.is_some_and(|held| test_run_held_claim_owns_name(inner, entry, held)))
     });
     let Some(entry) = matching.next() else {
         return Ok((None, None));
@@ -140,7 +174,9 @@ enum TestRunCurrentNamedBinding {
     Fresh {
         store: Option<EngramAuthorityStoreKey>,
         named: (Option<EngramControlWorkBinding>, Option<TestRunNamedRoot>),
-        named_fence: Option<i64>,
+        roots: Vec<EngramWorkSourceRoot>,
+        held: Option<EngramHeldClaims>,
+        allow_successor: bool,
         current: Option<EngramControlWorkBinding>,
         target: Option<EngramBindingTarget>,
     },
@@ -156,7 +192,32 @@ impl AppState {
         deadline: std::time::Instant,
         diagnostics: &mut TestRunRegistrationDiagnostics,
     ) -> Result<TestRunCurrentNamedBinding, ApiError> {
-        let (store, named, named_fence, target) = {
+        self.read_test_run_named_binding_for_scope(session_id, run_id, keys, clock, deadline, diagnostics, false)
+    }
+
+    fn read_test_run_current_launcher_named_binding(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        keys: Option<&TestRunWorktreeKeys>,
+        clock: &EngramBudgetClock,
+        deadline: std::time::Instant,
+        diagnostics: &mut TestRunRegistrationDiagnostics,
+    ) -> Result<TestRunCurrentNamedBinding, ApiError> {
+        self.read_test_run_named_binding_for_scope(session_id, run_id, keys, clock, deadline, diagnostics, true)
+    }
+
+    fn read_test_run_named_binding_for_scope(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        keys: Option<&TestRunWorktreeKeys>,
+        clock: &EngramBudgetClock,
+        deadline: std::time::Instant,
+        diagnostics: &mut TestRunRegistrationDiagnostics,
+        allow_successor: bool,
+    ) -> Result<TestRunCurrentNamedBinding, ApiError> {
+        let (store, original, roots, target) = {
             let inner = diagnostics.lock(&self.inner);
             if let Some(earlier) = inner.test_run_registrations.get(run_id).or_else(|| {
                 inner.test_run_compacted.get(run_id).and_then(|row| row.registration.as_ref())
@@ -171,24 +232,56 @@ impl AppState {
                 .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
                 .and_then(|project| project.engram.as_ref())
                 .and_then(|settings| settings.authority_store_key.clone());
-            let named = test_run_registration_named_binding(&inner, session_id, store.as_ref(), keys)?;
-            let named_fence = test_run_named_root_fence(&inner, session_id, store.as_ref(), named.1.as_ref());
-            let target = if named.0.is_some() {
+            // Preserve the existing ambiguity refusal for this session's own
+            // names, but discover retained names before deciding who holds them.
+            let original = test_run_registration_named_binding(&inner, session_id, store.as_ref(), keys)?;
+            let roots = test_run_registration_root_candidates(&inner, store.as_ref(), keys)
+                .into_iter().filter(|entry| allow_successor || entry.named_by_session == session_id).collect::<Vec<_>>();
+            let needs_authority = if allow_successor { !roots.is_empty() } else { original.0.is_some() };
+            let target = if needs_authority {
                 Some(Self::engram_source_root_target_locked(&inner, session_id)
                     .map_err(ApiError::conflict)?
                     .ok_or_else(|| ApiError::conflict("named run's work service is unavailable"))?)
             } else {
                 None
             };
-            (store, named, named_fence, target)
+            (store, original, roots, target)
         };
-        let current = if let (Some(previous), Some(target)) = (&named.0, &target) {
+        let held = if let Some(target) = &target {
             let timeout = test_run_registration_remaining(clock, deadline, diagnostics)?
                 .min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT).min(target.settings.call_timeout());
             let result = target.adapter.read_held_claims(&target.connection, timeout);
             test_run_registration_remaining(clock, deadline, diagnostics)?;
-            let held = result
-                .map_err(|error| ApiError::bad_gateway(format!("test registration held-claim read: {error}")))?;
+            Some(result.map_err(|error| ApiError::bad_gateway(format!("test registration held-claim read: {error}")))?)
+        } else {
+            None
+        };
+        let named = if !allow_successor {
+            original
+        } else if roots.is_empty() {
+            (None, None)
+        } else {
+            let inner = diagnostics.lock(&self.inner);
+            test_run_registration_named_binding_with_held(
+                &inner, session_id, store.as_ref(), keys,
+                if allow_successor { held.as_ref() } else { None })?
+        };
+        if allow_successor && held.as_ref().is_some_and(|held| held.omitted > 0
+            && roots.iter().any(|entry| entry.named_by_session != session_id
+                && !held.items.iter().any(|claim| {
+                    claim.work_id == entry.work_id && claim.claim_id == entry.claim_id
+                })))
+        {
+            return Err(ApiError::conflict("named run's candidate ownership is absent from the bounded held list; other claims were omitted"));
+        }
+        if allow_successor && named.0.is_none() && held.as_ref().is_some_and(|held| {
+            roots.iter().any(|entry| held.items.iter().any(|claim| {
+                claim.work_id == entry.work_id && claim.claim_id == entry.claim_id
+            }))
+        }) {
+            return Err(ApiError::conflict("named run's source root has no proven claim held by the launching session"));
+        }
+        let current = if let (Some(previous), Some(held)) = (&named.0, &held) {
             let mut exact = held.items.iter().filter(|claim| {
                 claim.work_id == previous.work_id && claim.claim_id == previous.claim_id
             });
@@ -204,6 +297,10 @@ impl AppState {
                     && binding.claim_fence >= previous.claim_fence
                     && binding.work_revision >= previous.work_revision)
                 .ok_or_else(|| ApiError::conflict("named run's held association changed"))?;
+            let named_fence = roots.iter().find(|entry| entry.work_id == previous.work_id
+                && entry.claim_id == previous.claim_id
+                && named.1.as_ref().is_some_and(|named| named.workspace_id == entry.root
+                    && named.generation == entry.generation)).map(|entry| entry.claim_fence);
             if Some(binding.claim_fence) != named_fence {
                 return Err(ApiError::conflict("named run's claim fence changed; name the source root again"));
             }
@@ -211,7 +308,7 @@ impl AppState {
         } else {
             None
         };
-        Ok(TestRunCurrentNamedBinding::Fresh { store, named, named_fence, current, target })
+        Ok(TestRunCurrentNamedBinding::Fresh { store, named, roots, held, allow_successor, current, target })
     }
 }
 
@@ -233,10 +330,18 @@ impl TestRunCurrentNamedBinding {
                 }
                 Ok((earlier.work_binding.clone(), earlier.named_root.clone()))
             }
-            Self::Fresh { store: expected_store, named, named_fence, current, target } => {
+            Self::Fresh { store: expected_store, named, roots, held, allow_successor, current, target } => {
+                let observed_fence = roots.iter().find(|entry| named.1.as_ref()
+                    .is_some_and(|named| named.workspace_id == entry.root && named.generation == entry.generation))
+                    .map(|entry| entry.claim_fence);
                 if expected_store.as_ref() != store
-                    || &test_run_registration_named_binding(inner, session_id, store, keys)? != named
-                    || &test_run_named_root_fence(inner, session_id, store, named.1.as_ref()) != named_fence
+                    || &test_run_registration_named_binding_with_held(inner, session_id, store, keys,
+                        if *allow_successor { held.as_ref() } else { None })? != named
+                    || if *allow_successor {
+                        &test_run_registration_root_candidates(inner, store, keys) != roots
+                    } else {
+                        test_run_named_root_fence(inner, session_id, store, named.1.as_ref()) != observed_fence
+                    }
                 {
                     return Err(ApiError::conflict("test run named root changed during its claim read"));
                 }
@@ -258,6 +363,17 @@ impl TestRunCurrentNamedBinding {
             }
         }
     }
+}
+
+// Bounded by the existing named-root registry. Preserve the entire entry so a
+// handoff never rewrites naming provenance or hides a root/fence race.
+fn test_run_registration_root_candidates(inner: &StateInner,
+    store: Option<&EngramAuthorityStoreKey>, keys: Option<&TestRunWorktreeKeys>,
+) -> Vec<EngramWorkSourceRoot> {
+    let (Some(store), Some(keys)) = (store, keys) else { return Vec::new(); };
+    inner.engram_work_source_roots.iter().filter(|entry| &entry.store == store
+        && entry.common_dir_key == keys.common_dir
+        && engram_exact_path_key(FsPath::new(&entry.root)) == keys.root).cloned().collect()
 }
 
 fn test_run_named_root_fence(inner: &StateInner, session_id: &str, store: Option<&EngramAuthorityStoreKey>,

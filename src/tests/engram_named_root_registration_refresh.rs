@@ -131,6 +131,92 @@ fn advance_held_fence(turn: &EOCheckedTurn, label: &str) -> EngramHeldClaims {
 }
 
 #[test]
+fn a_new_holder_refreshes_the_same_name_before_registering_its_advanced_fence() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let label = "registration-real-handoff";
+    let mut turn = EOCheckedTurn::idle(label, true);
+    let path = naming_worktree(&turn.root);
+    let initial = naming_claim(label);
+    let named = request_naming(&turn, label, Some(&path), vec![initial.clone()]).unwrap();
+    let old_session = turn.session_id.clone();
+    let original_request = registration_request_for(&turn, &path, "test-before-real-handoff");
+    let old_directory = original_request.run_directory.clone();
+    turn.state.register_test_run(&old_session, original_request).unwrap();
+    let (original, entry, event, mut read) = {
+        let inner = turn.state.inner.lock().unwrap();
+        (serde_json::to_value(&inner.test_run_registrations["test-before-real-handoff"]).unwrap(),
+         inner.engram_work_source_roots[0].clone(),
+         serde_json::to_value(&inner.engram_named_root_journal[0].confirmed).unwrap(),
+         inner.engram_work_naming_history[0].proofs[0].read.clone())
+    };
+    assert_eq!(read.run.state, "claimed");
+    let project = turn.record(|record| record.session.project_id.clone().unwrap());
+    let successor = create_test_project_session(&turn.state, Agent::Codex, &project, &turn.root);
+    let held = advance_held_fence(&turn, label);
+    let binding = held.items[0].control_binding.as_ref().unwrap().clone();
+    assert_eq!(binding.claim_fence, initial.items[0].claim_fence + 1);
+    assert!(binding.work_revision > initial.items[0].control_binding.as_ref().unwrap().work_revision);
+    turn.session_id = successor.clone();
+    turn.record_mut(|record| record.engram.work_binding = Some(binding.clone()));
+    turn.transport.enable_named_roots(&successor, &binding);
+    // Model the producer's handoff-accepted result, not a second naming event.
+    read.run.state = "active".into();
+    read.read_cut.position += 1;
+    read.claim = Some(EngramNamedRootReadClaim {
+        state: "active".into(), holder: Some(successor.clone()),
+        expires_at: Some((chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339()),
+        revision: Some(binding.work_revision), fence: Some(binding.claim_fence),
+    });
+    turn.transport.named_roots.lock().unwrap().as_mut().unwrap()
+        .root_reads.insert(binding.claim_id.clone(), serde_json::to_value(read).unwrap());
+
+    let request = registration_request_for(&turn, &path, "test-before-new-holder-refresh");
+    let error = turn.state.register_test_run(&successor, request).err().unwrap();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("claim fence changed; name the source root again"), "{error:?}");
+    assert!(!turn.state.inner.lock().unwrap().test_run_registrations.contains_key("test-before-new-holder-refresh"));
+
+    // The predecessor's scripted work-session reply cannot authorize the
+    // successor's connection. Keep this refusal observable before supplying
+    // the successor child's own identity, as a real child would return.
+    let error = request_naming(&turn, label, Some(&path), vec![held.clone()]).err().unwrap();
+    assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+    assert!(error.message.contains("ordinary work-session identity differs"), "{error:?}");
+    assert_eq!(turn.state.inner.lock().unwrap().engram_work_source_roots[0], entry);
+    turn.transport.named_roots.lock().unwrap().as_mut().unwrap().work_session_read_reply =
+        Some(Ok(json!({
+            "project_id": "github.com/example/source-root", "session_id": successor,
+            "work_session": true, "capabilities": ["host_work_v1"],
+        })));
+    let refreshed = request_naming(&turn, label, Some(&path), vec![held]).unwrap();
+    assert_eq!(refreshed.generation, named.generation);
+    assert_eq!(refreshed.root, named.root);
+    let request = registration_request_for(&turn, &path, "test-after-new-holder-refresh");
+    turn.state.register_test_run(&successor, request).unwrap();
+    let inner = turn.state.inner.lock().unwrap();
+    let current = &inner.test_run_registrations["test-after-new-holder-refresh"];
+    assert_eq!(current.work_binding.as_ref(), Some(&binding));
+    assert_eq!(current.initiating_session_id, successor);
+    assert_eq!(current.named_root.as_ref().unwrap().generation, named.generation);
+    let retained = &inner.engram_work_source_roots[0];
+    assert_eq!(retained.claim_fence, binding.claim_fence);
+    assert_eq!(retained.named_by_session, old_session);
+    assert_eq!(retained.named_at, entry.named_at);
+    assert_eq!(retained.generation, entry.generation);
+    assert_eq!(serde_json::to_value(&inner.engram_named_root_journal[0].confirmed).unwrap(), event);
+    assert_eq!(serde_json::to_value(&inner.test_run_registrations["test-before-real-handoff"]).unwrap(), original);
+    drop(inner);
+    let saved = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+    assert_eq!(saved.engram_work_source_roots[0].named_by_session, old_session);
+    assert_eq!(saved.engram_work_source_roots[0].claim_fence, binding.claim_fence);
+    let reads = turn.transport.held_claim_reads();
+    turn.state.register_test_run(&old_session, RegisterTestRunRequest {
+        run_id: "test-before-real-handoff".into(), run_directory: old_directory,
+    }).unwrap();
+    assert_eq!(turn.transport.held_claim_reads(), reads);
+}
+
+#[test]
 fn naming_one_worktree_for_a_second_claim_reports_registration_ambiguity() {
     let label = "reg-two-names";
     let turn = EOCheckedTurn::idle(label, true);

@@ -67,10 +67,30 @@ impl FederationRpcClient {
     }
 
     async fn request_once<T: DeserializeOwned>(&self, route: FederationRpcRoute) -> Result<T, ApiError> {
-        (self.ensure_current)()?;
-        let _permit = self.channel.bound.try_acquire()?;
+        let policy_deadline = matches!(&route, FederationRpcRoute::PromptPolicy(_, _))
+            .then(|| tokio::time::Instant::from_std(self.channel.control.clock.now() + Duration::from_secs(10)));
+        let policy_permit = if matches!(&route, FederationRpcRoute::PromptPolicy(_, _)) {
+            let permit = Arc::new(self.channel.bound.try_acquire()?);
+            let job_permit = permit.clone();
+            let check = self.ensure_current.clone();
+            self.channel.control.clock.timeout_at(policy_deadline.expect("policy deadline"),
+                run_blocking_api(move || {
+                    let _permit = job_permit;
+                    check()
+                })).await
+                .map_err(|_| federation_prompt_policy_unknown_outcome())??;
+            Some(permit)
+        } else {
+            (self.ensure_current)()?;
+            None
+        };
+        let _permit = match policy_permit {
+            Some(permit) => permit,
+            None => Arc::new(self.channel.bound.try_acquire()?),
+        };
         let (lease, path) = match &route {
             FederationRpcRoute::Health(lease) => (lease, "/federation/v1/health"),
+            FederationRpcRoute::PromptPolicy(lease, _) => (lease, FEDERATION_PROMPT_POLICY_ROUTE),
             FederationRpcRoute::HostUtilization(lease) => (lease, "/federation/v1/host-utilization"),
             FederationRpcRoute::Onboarding(lease, probe) => (lease, probe.path()),
             FederationRpcRoute::Mailbox(lease, request) => (lease,
@@ -106,6 +126,7 @@ impl FederationRpcClient {
         let url = format!("http://{}{path}", self.address);
         let builder = match &route {
             FederationRpcRoute::Health(_) => self.client.get(url),
+            FederationRpcRoute::PromptPolicy(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::HostUtilization(_) => self.client.get(url),
             FederationRpcRoute::Onboarding(_, probe) => probe.request(&self.client, url),
             FederationRpcRoute::Mailbox(_, body) => self.client.post(url).json(body),
@@ -125,6 +146,10 @@ impl FederationRpcClient {
         let limit = match &route {
             FederationRpcRoute::Mailbox(_, _) | FederationRpcRoute::MailboxRelay(_, _) => FEDERATION_MAILBOX_REQUEST_BYTES,
             FederationRpcRoute::ExecutorWake(_, _) | FederationRpcRoute::ExecutorOutcome(_, _) => 32 * 1024,
+            FederationRpcRoute::PromptPolicy(_, body) => {
+                body.validate()?;
+                FEDERATION_PROMPT_POLICY_REQUEST_BYTES
+            }
             _ => 4096,
         };
         if body.len() > limit {
@@ -245,7 +270,21 @@ impl FederationRpcClient {
                 return Err(error);
             }
             rpc_stage = "authority";
-            if let Err(error) = (self.ensure_current)() {
+            let current = if matches!(&route, FederationRpcRoute::PromptPolicy(_, _)) {
+                // The MAC/counter and current security context already prove
+                // receipt. A later local owner wait must not leave a watchdog
+                // outstanding or turn its deadline into a pair-link failure.
+                context.settle(counter);
+                let check = self.ensure_current.clone();
+                let job_permit = _permit.clone();
+                run_blocking_api(move || {
+                    let _permit = job_permit;
+                    check()
+                }).await
+            } else {
+                (self.ensure_current)()
+            };
+            if let Err(error) = current {
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     context.settle(counter);
                     return Ok(Err(error));
@@ -304,8 +343,18 @@ impl FederationRpcClient {
         #[cfg(test)]
         let request_started_at = std::time::Instant::now();
         let timeout = if telemetry { host_utilization::PEER_DEADLINE } else { Duration::from_secs(10) };
-        match self.channel.control.clock.timeout(timeout, request).await {
+        let result = if let Some(deadline) = policy_deadline {
+            self.channel.control.clock.timeout_at(deadline, request).await
+        } else {
+            self.channel.control.clock.timeout(timeout, request).await
+        };
+        match result {
             Ok(Ok(result)) => result,
+            failure if policy_deadline.is_some() && rpc_stage == "authority" && failure.is_err() => {
+                // The blocking authority job still owns its permit. Its late
+                // result cannot supply policy to the expired caller.
+                Err(federation_prompt_policy_unknown_outcome())
+            }
             failure if telemetry && (failure.is_err()
                 || matches!(rpc_stage, "execute" | "responseBody" | "decode")) => {
                 // This GET has no application outcome to recover. Settle its

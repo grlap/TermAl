@@ -47,7 +47,11 @@ fn native_test_field_has_target_keys(field: &str, value: &Value, entry: bool) ->
 // This runs under the migration owner's locked OLD header, before its typed
 // load/normalization. Presence is refused even for null/empty target keys.
 fn reject_unversioned_native_test_custody(connection: &rusqlite::Connection, version: &str) -> Result<()> {
+    reject_unversioned_direct_prompt_policy(connection, version)?;
     if version == SQLITE_SCHEMA_VERSION || version == SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION {
+        return Ok(());
+    }
+    if matches!(version, SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR) {
         return Ok(());
     }
     if version == "2" {
@@ -103,6 +107,9 @@ fn validate_native_test_predecessor_inventory(units: &PersistMetadataUnits, acti
 // steps, so a new field is never emitted under an intermediate frozen floor.
 fn advance_sqlite_native_test_completion_reader_floor(connection: &rusqlite::Connection) -> Result<()> {
     let version = required_state_meta_value(connection, "schema_version")?;
+    if matches!(version.as_str(), SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR) {
+        return advance_sqlite_direct_prompt_reader_floor(connection);
+    }
     if matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
         validate_current_sqlite_state_schema(connection)?;
         read_metadata_units(connection)?;

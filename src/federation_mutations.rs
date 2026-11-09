@@ -12,14 +12,17 @@ enum FederationSettingsFence {
 
 /// Facts about this host that a federation mutation may guard on, read under
 /// the same state lock as the candidate it installs.
-struct FederationMutationContext {
+struct FederationMutationContext<'a> {
+    // Borrow the same locked owner; never snapshot a second native roster.
+    native_state: &'a StateInner,
     /// The central of each local session's domain mailbox binding.
     bound_centrals: Vec<FederationHostIdentity>,
 }
 
-impl FederationMutationContext {
-    fn locked(inner: &StateInner) -> Self {
+impl<'a> FederationMutationContext<'a> {
+    fn locked(inner: &'a StateInner) -> Self {
         Self {
+            native_state: inner,
             bound_centrals: inner
                 .sessions
                 .iter()
@@ -250,6 +253,38 @@ impl AppState {
         clock: EngramBudgetClock,
         budget: Duration,
     ) -> Result<T, ApiError> {
+        self.mutate_federation_core_with_replay(
+            lease, reset_continuity, update, on_install, clock, budget, false,
+        )
+    }
+
+    // Permission issuance may discover a concurrent exact replay under this
+    // same owner. Only these callers opt out of an unchanged installation;
+    // ordinary federation mutations retain their version/persistence behavior.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn mutate_federation_permission<T>(
+        &self,
+        lease: Option<&FederationLinkLease>,
+        update: impl FnOnce(&mut FederationState, &mut FederationSettings,
+            &FederationMutationContext) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
+        self.mutate_federation_core_with_replay(
+            lease, false, update, |_| {}, EngramBudgetClock::Real,
+            Duration::from_secs(5), true,
+        )
+    }
+
+    fn mutate_federation_core_with_replay<T>(
+        &self,
+        lease: Option<&FederationLinkLease>,
+        reset_continuity: bool,
+        update: impl FnOnce(&mut FederationState, &mut FederationSettings,
+            &FederationMutationContext) -> Result<T, ApiError>,
+        on_install: impl FnOnce(&T),
+        clock: EngramBudgetClock,
+        budget: Duration,
+        replay_unchanged: bool,
+    ) -> Result<T, ApiError> {
         let install = || {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(lease) = lease {
@@ -278,6 +313,11 @@ impl AppState {
                     .as_ref()
                     .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?,
             )?;
+            if replay_unchanged && candidate == inner.federation
+                && settings == inner.preferences.federation
+            {
+                return Ok((value, None));
+            }
             candidate.version = federation_next_generation(candidate.version)?;
             candidate
                 .validate()
@@ -295,12 +335,13 @@ impl AppState {
                         ApiError::internal("federation persistence failed; admission remains held")
                     })?
             };
-            Ok((value, image, dispatch))
+            Ok((value, Some((image, dispatch))))
         };
-        let (value, image, dispatch) = match lease {
+        let (value, persisted) = match lease {
             Some(lease) => lease.with_incarnation(install)?,
             None => install()?,
         };
+        let Some((image, dispatch)) = persisted else { return Ok(value) };
         self.finish_federation_durability_with_budget(&image, dispatch, clock, budget)?;
         if reset_continuity {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
