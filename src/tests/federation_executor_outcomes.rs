@@ -8,6 +8,9 @@
 // federation_executor_recovery_regressions.rs, whose Fixture it uses.
 use super::*;
 
+#[path = "federation_domain_summary.rs"]
+mod domain_summary;
+
 // The fixture's satellite has no persist writer; a healthy one acknowledges.
 fn acknowledge_all_fences(state: &mut AppState) {
     state.shutdown_persist_blocking();

@@ -66,8 +66,10 @@ struct MailboxMessage {
     #[serde(default, skip_serializing)]
     unread_depth_at_append: u64,
     notification_state: String,
-    /// The shared sentence for `notification_state`
-    /// (`mailbox_wake_state_sentence`), for every reader, the UI included.
+    /// Usually the shared sentence for `notification_state`
+    /// (`mailbox_wake_state_sentence`). Remote-target domain exact reads
+    /// instead use their existing `notification_cause`; the state remains
+    /// the stored disposition. Page and local-target reads keep the state sentence.
     /// Empty from mailbox homes that predate it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     notification_summary: String,

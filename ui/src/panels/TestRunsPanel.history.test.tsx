@@ -28,12 +28,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function view(runs: TestRunSummary[] = [], initialProjectId: string | null = null, initialRun: TestRunCardTarget | null = null) {
+function view(runs: TestRunSummary[] = [], initialProjectId: string | null = null, initialRun: TestRunCardTarget | null = null,
+  initialSessionId: string | null = null) {
   return <TestRunsContext.Provider value={{ runs, open: vi.fn(), snapshotReady: true }}>
     <TestRunsPanel projects={[
       { id: "project-a", name: "Project A", rootPath: "C:/a" },
       { id: "project-b", name: "Project B", rootPath: "C:/b" },
-    ]} sessions={[]} initialProjectId={initialProjectId} initialRun={initialRun} />
+    ]} sessions={[]} initialProjectId={initialProjectId} initialRun={initialRun} initialSessionId={initialSessionId} />
   </TestRunsContext.Provider>;
 }
 
@@ -117,11 +118,12 @@ it("filters loaded history by terminal state and either session role without hid
   vi.mocked(api.readTestRuns).mockResolvedValueOnce({ runs: [
     historical("history-owner", { ownerSessionId: "archived-owner", notifySessionId: null }),
     historical("history-notify", { ownerSessionId: "other", notifySessionId: "archived-owner", state: "failed" }),
+    historical("history-unrelated", { ownerSessionId: "other", notifySessionId: null, state: "failed" }),
   ], limit: 100, nextCursor: "more-history" });
-  render(view());
+  render(view([], null, null, "archived-owner"));
   expect(await screen.findByText("history-owner")).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Session"), { target: { value: "archived-owner" } });
   expect(screen.getByText("history-notify")).toBeInTheDocument();
+  expect(screen.queryByText("history-unrelated")).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("State"), { target: { value: "failed" } });
   expect(screen.queryByText("history-owner")).not.toBeInTheDocument();
   expect(screen.getByText("history-notify")).toBeInTheDocument();

@@ -427,10 +427,20 @@ nowhere:
   waits for (an active turn, a paused queue to be resumed, a due automatic
   retry that clears by itself, provider capacity).
 Every message, from a page read or the exact read, also carries
-`notificationSummary`, the same wake sentence for its `notificationState`;
-the UI shows it beside the state. One formatter
-(`src/mailbox_status_text.rs`) writes all of these lines for the API, the
-tools, the CLI and the UI.
+`notificationSummary`; the UI shows it beside `notificationState`. Page reads
+and local-target exact reads use the wake sentence for that stored state.
+On a remote-target domain exact read, the existing `notificationCause`
+instead supplies the wake clause of both `notificationSummary` and
+`currentStatus.summary`, including its recorded receiver observation time
+when present. For example, the state may remain `durableButNotWoken` while
+the cause and both summaries report a later verified remote wake. Pending
+or unavailable evidence remains explicit; an acknowledgement alone never
+becomes evidence of provider handoff. This read-time wording changes no
+stored disposition or immutable send receipt.
+`src/mailbox_status_text.rs` owns the state sentences, send-receipt wording
+and current-status observation/acknowledgement formatting. The domain cause
+producer supplies the remote wake clause. The API, tools, CLI and UI use
+the returned strings; native relay progress retains its separate contract.
 Page reads carry no `currentStatus`. The exact read issues no page receipt,
 moves no cursor and wakes nobody. When a remote mailbox home cannot be reached
 (the relay link is down or changed, no relay peer is held, or the transport

@@ -1,5 +1,6 @@
 import {
   useMemo,
+  useRef,
   type Dispatch,
   type DragEvent as ReactDragEvent,
   type JSX,
@@ -319,6 +320,7 @@ export function AppControlSurface({
       ? standaloneControlSurfaceViewState?.sessionListHost ?? ALL_SESSION_HOSTS
       : sessionListHost;
     const hostOptions = useMemo(() => sessionHostOptions(remoteLookup), [remoteLookup]);
+    const sessionScopeRef = useRef<HTMLDivElement>(null);
     const sessionListVisibleSessionCount =
       filterSessionListVisibleSessions(sessions).length;
     const standaloneSessionListState = useMemo(() => isStandaloneSessionList
@@ -731,7 +733,7 @@ export function AppControlSurface({
       });
     }
 
-    function renderControlPanelProjectScope() {
+    function renderControlPanelProjectScope(menuAnchorRef?: RefObject<HTMLElement | null>) {
       return (
         <div className="control-panel-scope-control">
           <label
@@ -743,6 +745,7 @@ export function AppControlSurface({
           <ThemedCombobox
             id={controlPanelProjectFilterId}
             className="control-panel-scope-combobox"
+            menuAnchorRef={menuAnchorRef}
             value={controlSurfaceSelectedProjectId}
             options={controlPanelProjectOptions}
             onChange={handleControlSurfaceProjectScopeChange}
@@ -1224,8 +1227,8 @@ export function AppControlSurface({
             >
               <section className="session-list-shell" aria-label="Sessions">
                 <div className="session-list-tools">
-                  <div className="session-list-scope-filters">
-                  {renderControlPanelProjectScope()}
+                  <div className="session-list-scope-filters" ref={sessionScopeRef}>
+                  {renderControlPanelProjectScope(sessionScopeRef)}
                   <div className="control-panel-scope-control">
                     <label className="control-panel-scope-label" htmlFor={`session-host-${surfaceId}`}>Host</label>
                     <ThemedCombobox

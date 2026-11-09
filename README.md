@@ -384,7 +384,8 @@ results under Git metadata and prints a bounded summary. See [Testing](docs/test
 for prerequisites, platform details, detached runs, and result recovery.
 
 Open the [Test Runs tab](docs/features/test-runs.md) from the control-panel rail
-to inspect runs, filter by project, session, or state, and read stages and logs.
+to inspect runs, choose a view, filter by project or state, and read stages and logs.
+Session markers open a scoped list with a notice and a **Show all runs** action.
 Execution results and host verification settlement are shown separately.
 
 ## Project structure

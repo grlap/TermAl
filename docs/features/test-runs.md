@@ -634,7 +634,7 @@ tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
   - The list shows a state pill, preset (or the focused command), worktree,
     owner session, notification target, started time, duration, and the
     current stage while running.
-  - The list can be filtered by state and by session.
+  - View, Project and State control the list. There is no session picker.
   - Deltas update the list; there is no polling.
 - **Run detail.** Every stage with state, exit code and duration.
   - `unrun` and interrupted stages are shown explicitly.
@@ -659,7 +659,9 @@ tm-ncc6.7.1 (tab wiring), tm-ncc6.7.2 (list, detail, log tail) and tm-ncc6.8
   - with exactly one, ` · ` and that run's `currentStage` when it has one, for
     example "running tests · rust-tests", and nothing more otherwise.
 
-  Clicking it opens the Test Runs tab filtered to that session. The marker
+  Clicking it opens the Test Runs tab scoped to that session. A notice names
+  the session, and **Show all runs** clears that scope while retaining the
+  other filters. The marker
   disappears when no run in that role is `running`. In a session pane it sits
   in the pane's existing toolbar strip, cut to 16rem with the full label as its
   title, and adds no row: the transcript, the activity strip and the composer

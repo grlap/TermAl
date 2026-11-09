@@ -1,9 +1,11 @@
-// The one plain-language wording of a mailbox message's wake and
-// acknowledgement state. The HTTP API returns these strings, and the
-// delegation tools, the CLI and the UI show them as returned, so every
-// reader sees the same sentence for the same state.
+// Shared plain-language wording of a mailbox message's wake and
+// acknowledgement state. The HTTP API returns these strings; delegation
+// tools, the CLI and the UI show them as returned. Remote-target domain
+// exact reads supply their existing notification cause as the wake clause,
+// rather than deriving that clause from the stored notification state.
 // Owns: the send-receipt line (the wake status AT SEND TIME and the next
-// action), the per-state wake sentence, and the exact read's "as of" summary.
+// action), the per-state wake sentence, and the exact read's "as of" and
+// acknowledgement formatting. Domain cause wording belongs to its producer.
 // Does not own: reading or storing any state (src/mailboxes.rs). It promises
 // no wake, retry or delivery, and never asks for a resend or a poll.
 // New module beside src/mailboxes.rs, not split out of it.
@@ -74,15 +76,25 @@ fn mailbox_current_status_summary(
     notification_state: &str,
     recipient_acknowledged: bool,
 ) -> String {
+    mailbox_current_status_summary_with_cause(
+        observed_at,
+        &mailbox_wake_state_sentence(notification_state),
+        recipient_acknowledged,
+    )
+}
+
+/// The caller already owns this wake observation; ACK remains independent.
+fn mailbox_current_status_summary_with_cause(
+    observed_at: &str,
+    wake_summary: &str,
+    recipient_acknowledged: bool,
+) -> String {
     let acknowledgement = if recipient_acknowledged {
         "The recipient has acknowledged it."
     } else {
         "Not yet acknowledged by the recipient."
     };
-    format!(
-        "As of {observed_at}: {} {acknowledgement}",
-        mailbox_wake_state_sentence(notification_state)
-    )
+    format!("As of {observed_at}: {wake_summary} {acknowledgement}")
 }
 
 /// Relay admission and target handoff are independent observations. The home

@@ -251,12 +251,24 @@ impl AppState {
             .map(|target| target.binding.identity.host_id != target.binding.central.host_id);
         drop(inner);
         if target_is_remote == Some(true) {
-            if self.refresh_federation_executor_reservation_domain().is_err() {
-                message.notification_cause = Some("remote wake state unavailable; authority not durable".into());
-                return;
+            message.notification_cause = Some(
+                if self.refresh_federation_executor_reservation_domain().is_err() {
+                    "remote wake state unavailable; authority not durable".to_owned()
+                } else {
+                    self.mailbox_store.federation_executor_wake_state(&message.id)
+                        .unwrap_or_else(|_| "remote wake state unavailable; ownership not inferred".to_owned())
+                },
+            );
+            if let Some(cause) = message.notification_cause.as_deref() {
+                message.notification_summary = format!("{}.", cause.trim_end_matches('.'));
+                if let Some(status) = message.current_status.as_mut() {
+                    status.summary = mailbox_current_status_summary_with_cause(
+                        &status.observed_at,
+                        &message.notification_summary,
+                        status.recipient_acknowledged,
+                    );
+                }
             }
-            message.notification_cause = Some(self.mailbox_store.federation_executor_wake_state(&message.id)
-                .unwrap_or_else(|_| "remote wake state unavailable; ownership not inferred".to_owned()));
         } else if target_is_remote == Some(false) {
             match self.mailbox_store.native_mailbox_wake_pending(&message.id) {
                 Ok(true) => message.notification_cause = Some("committed; native wake pending".into()),

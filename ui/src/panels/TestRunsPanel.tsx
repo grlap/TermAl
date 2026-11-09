@@ -24,11 +24,6 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
   const history = useTestRunHistory(projectId, liveRuns, { sessionId, state, view }, viewRevision);
   const runs = history.runs;
   const names = useMemo(() => new Map(sessions.map(session => [session.id, session.name])), [sessions]);
-  const sessionIds = useMemo(() => [...new Set([...sessions.map(session => session.id), ...runs.flatMap(run =>
-    [run.ownerSessionId, run.notifySessionId].filter((id): id is string => id !== null)), ...(sessionId ? [sessionId] : [])])],
-  [sessions, runs, sessionId]);
-  const sessionOptions = useMemo(() => sessionIds.map(id => <option key={id} value={id}>{names.get(id) ?? id}</option>),
-    [sessionIds, names]);
   // History already has the canonical time/id order; filtering preserves it.
   const visible = useMemo(() => runs.filter(run => (!projectId || run.projectId === projectId) &&
     (!sessionId || testRunMatchesSession(run, sessionId)) && (!state || run.state === state)),
@@ -37,7 +32,9 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
   return <section className="test-runs-panel" aria-label="Test Runs">
     <header><h2>Test Runs</h2><p>Registered launches and host-observed tests. Execution results and verification settlement are shown separately.</p>
       <p>Run details load as needed. Use Load older to continue through history.</p>
-      {overview ? <p>{overview.total} runs · {overview.running} running · {overview.needsAttention} need attention · {overview.unknown} unknown</p> : null}</header>
+      {overview ? <p>{overview.total} runs · {overview.running} running · {overview.needsAttention} need attention · {overview.unknown} unknown</p> : null}
+      {sessionId ? <p>Showing runs for <strong>{names.get(sessionId) ?? sessionId}</strong>. <button type="button"
+        onClick={() => setSessionId("")}>Show all runs</button></p> : null}</header>
     <div className="test-runs-filters">
       {overview ? <label>View <select value={view} onChange={event => setView(event.target.value as typeof view)}>
         <option value="history">History</option><option value="active">Active</option><option value="attention">Needs attention</option>
@@ -51,13 +48,9 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
         <option value="">All states</option>
         {(["running", "passed", "failed", "unknown"] as const).map(value => <option key={value}>{value}</option>)}
       </select></label>
-      <label>Session <select value={sessionId} onChange={event => setSessionId(event.target.value)}>
-        <option value="">All sessions</option>
-        {sessionOptions}
-      </select></label>
     </div>
     {history.error ? <p role="alert">{history.error} <button type="button" disabled={history.busy} onClick={history.retry}>Retry history</button></p> : null}
-    {history.busy ? <p role="status">Loading test-run history…</p> : null}
+    {history.busy && !history.loaded ? <p role="status">Loading test-run history…</p> : null}
     {history.hasMore ? <p>{overview ? "More matching runs are available." : "Filters apply to loaded history."} <button type="button" disabled={history.busy} onClick={history.more}>Load older</button></p> : null}
     <div className="test-runs-layout">
       <TestRunList runs={visible} names={names} selectedId={selectedId} onSelect={setSelectedId}

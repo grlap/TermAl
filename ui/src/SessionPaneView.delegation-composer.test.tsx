@@ -852,16 +852,26 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(document.querySelector(".test-run-session-chrome")).toBeNull();
   });
 
-  it("does not render the session-mode footer in a Test Runs tab", async () => {
+  it("keeps a linked Test Runs scope visible and clearable without the session-mode footer", async () => {
     const session = makeSession();
     const pane: WorkspacePane = {
       ...makePane(session.id),
-      tabs: [{ id: "tab-runs", kind: "testRuns", originSessionId: session.id, originProjectId: session.projectId, refreshToken: "one", filterSessionId: null }],
+      tabs: [{ id: "tab-runs", kind: "testRuns", originSessionId: session.id, originProjectId: session.projectId, refreshToken: "one", filterSessionId: session.id }],
       activeTabId: "tab-runs", viewMode: "testRuns",
     };
-    renderSessionPaneView({ session, draft: "", pane, expectComposer: false });
+    renderSessionPaneView({ session, draft: "", pane, expectComposer: false, testRuns: [
+      makeTestRun({ ownerSessionId: session.id }),
+      makeTestRun({ runId: "other-session-run", ownerSessionId: "other", notifySessionId: null }),
+    ] });
     await settleAsyncUi();
     expect(screen.getByRole("heading", { name: "Test Runs" })).toBeInTheDocument();
+    expect(screen.getByText(/Showing runs for/)).toHaveTextContent(session.name);
+    expect(screen.getByText("test-one")).toBeInTheDocument();
+    expect(screen.queryByText("other-session-run")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show all runs" }));
+    expect(screen.getByText("other-session-run")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing runs for/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Session" })).not.toBeInTheDocument();
     expect(document.querySelector(".composer")).toBeNull();
     expect(screen.queryByText(/This tile is in/)).not.toBeInTheDocument();
   });

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type RefObject,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -19,6 +20,7 @@ export function ThemedCombobox({
   className,
   disabled = false,
   id,
+  menuAnchorRef,
   onChange,
   options,
   value,
@@ -28,6 +30,7 @@ export function ThemedCombobox({
   className?: string;
   disabled?: boolean;
   id: string;
+  menuAnchorRef?: RefObject<HTMLElement | null>;
   onChange: (nextValue: string) => void;
   options: readonly ComboboxOption[];
   value: string;
@@ -120,6 +123,9 @@ export function ThemedCombobox({
       }
 
       const rect = trigger.getBoundingClientRect();
+      const anchor = menuAnchorRef?.current?.getBoundingClientRect();
+      const left = anchor ? Math.max(0, Math.min(anchor.left, window.innerWidth)) : rect.left;
+      const width = anchor ? Math.max(0, Math.min(anchor.right, window.innerWidth) - left) : rect.width;
       const viewportPadding = 12;
       const estimatedHeight = Math.min(Math.max(options.length * 76 + 12, 120), 360);
       const availableBelow = window.innerHeight - rect.bottom - viewportPadding;
@@ -129,8 +135,8 @@ export function ThemedCombobox({
       const maxHeight = Math.max(openUpward ? availableAbove : availableBelow, 140);
 
       setMenuStyle({
-        left: rect.left,
-        width: rect.width,
+        left,
+        width,
         maxHeight,
         top: openUpward ? undefined : rect.bottom + 8,
         bottom: openUpward ? window.innerHeight - rect.top + 8 : undefined,
@@ -138,14 +144,22 @@ export function ThemedCombobox({
     }
 
     updateMenuStyle();
+    // A split-pane resize need not resize the window. Observe only while
+    // this anchored menu is open; other comboboxes retain trigger sizing.
+    const observer = menuAnchorRef?.current ? new ResizeObserver(updateMenuStyle) : null;
+    if (observer && menuAnchorRef?.current) {
+      observer.observe(menuAnchorRef.current);
+      if (triggerRef.current) observer.observe(triggerRef.current);
+    }
     window.addEventListener("resize", updateMenuStyle);
     window.addEventListener("scroll", updateMenuStyle, true);
 
     return () => {
+      observer?.disconnect();
       window.removeEventListener("resize", updateMenuStyle);
       window.removeEventListener("scroll", updateMenuStyle, true);
     };
-  }, [isOpen, options.length]);
+  }, [isOpen, options.length, menuAnchorRef]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -284,7 +298,7 @@ export function ThemedCombobox({
             <div
               ref={listRef}
               id={listboxId}
-              className="combo-menu"
+              className={menuAnchorRef ? "combo-menu combo-menu-panel" : "combo-menu"}
               role="listbox"
               style={menuStyle}
             >

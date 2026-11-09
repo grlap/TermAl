@@ -45,9 +45,10 @@ const runs = () => Array.from({ length: 250 }, (_, index) => makeTestRun({ runId
   endedAt: "2026-09-25T12:10:00.000Z" }));
 const session = (name: string): Session => ({ id: "named-owner", name, emoji: "", agent: "Codex",
   workdir: "C:/fixture", model: "fixture", status: "idle", preview: "", messages: [] });
-function view(rows: TestRunSummary[], options: { selected?: number; sessions?: Session[] } = {}) {
+function view(rows: TestRunSummary[], options: { selected?: number; sessions?: Session[]; sessionId?: string } = {}) {
   return <TestRunsContext.Provider value={{ runs: rows, open: vi.fn(), snapshotReady: true }}>
     <TestRunsPanel projects={[]} sessions={options.sessions ?? []}
+      initialSessionId={options.sessionId}
       initialRun={options.selected === undefined ? null : { runId: id(options.selected), runDir: "C:/fixture/run" }} />
   </TestRunsContext.Provider>;
 }
@@ -55,15 +56,15 @@ const list = () => screen.getByLabelText("Discovered runs");
 const buttons = () => within(list()).getAllByRole("button");
 const row = (index: number) => within(list()).getByRole("button", { name: new RegExp(id(index)) });
 
-it("bounds mounted history while filtering still reaches a run and session beyond the window", async () => {
+it("bounds mounted history while state filtering still reaches a run beyond the window", async () => {
   render(view(runs()));
   await waitFor(() => expect(api.readTestRuns).toHaveBeenCalledTimes(1));
   measure();
   expect(buttons().length).toBeLessThanOrEqual(WORK_WINDOW_ROWS + 3);
   expect(within(list()).queryByText(id(249))).not.toBeInTheDocument();
-  expect(within(screen.getByLabelText("Session")).getByRole("option", { name: "owner-249" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("State"), { target: { value: "failed" } });
   expect(row(249)).toBeInTheDocument();
+  expect(row(249)).toHaveTextContent("Owner: owner-249");
   expect(buttons()).toHaveLength(1);
   fireEvent.click(row(249));
   expect(await screen.findByRole("heading", { name: id(249) })).toBeInTheDocument();
@@ -107,20 +108,19 @@ it("retains selected details when scrolling, then resets a shrinking filter with
   expect(filter).toHaveFocus();
 });
 
-it("updates all session choices and labels after source changes while retaining the current filter", async () => {
+it("updates session labels after source changes while retaining the session-link scope", async () => {
   const original = runs();
-  const rendered = render(view(original, { sessions: [session("Before rename")] }));
+  original[249] = { ...original[249], ownerSessionId: "named-owner" };
+  const rendered = render(view(original, { sessions: [session("Before rename")], sessionId: "named-owner" }));
   await waitFor(() => expect(api.readTestRuns).toHaveBeenCalledTimes(1));
-  fireEvent.change(screen.getByLabelText("Session"), { target: { value: "owner-249" } });
-  expect(row(249)).toBeInTheDocument();
+  expect(row(249)).toHaveTextContent("Owner: Before rename");
   rendered.rerender(view([...original, makeTestRun({ runId: "added", ownerSessionId: "new-owner", notifySessionId: null })],
-    { sessions: [session("After rename")] }));
-  const choices = within(screen.getByLabelText("Session"));
-  expect(choices.getByRole("option", { name: "After rename" })).toBeInTheDocument();
-  expect(choices.queryByRole("option", { name: "Before rename" })).not.toBeInTheDocument();
-  expect(choices.getByRole("option", { name: "new-owner" })).toBeInTheDocument();
-  expect(screen.getByLabelText("Session")).toHaveValue("owner-249");
-  expect(row(249)).toBeInTheDocument();
+    { sessions: [session("After rename")], sessionId: "named-owner" }));
+  expect(row(249)).toHaveTextContent("Owner: After rename");
+  expect(screen.queryByText("Owner: Before rename")).not.toBeInTheDocument();
+  expect(screen.queryByText("added")).not.toBeInTheDocument();
+  expect(buttons()).toHaveLength(1);
+  expect(screen.queryByRole("combobox", { name: "Session" })).not.toBeInTheDocument();
 });
 
 it("keeps the visible row anchored when a new live head and an older history page arrive", async () => {

@@ -49,14 +49,40 @@ describe("Test Runs panel", () => {
     expect(screen.queryByText("legacy-value-that-cannot-prove-source")).not.toBeInTheDocument();
   });
 
-  it("filters by state and either session role, without execution controls", () => {
-    render(view([makeTestRun(), makeTestRun({ runId: "test-other", state: "passed", ownerSessionId: "other", notifySessionId: null })], "session-coordinator"));
+  it("keeps session-link scope and state filtering without a session picker or execution controls", () => {
+    render(view([
+      makeTestRun(),
+      makeTestRun({ runId: "test-owned", ownerSessionId: "session-coordinator", notifySessionId: null }),
+      makeTestRun({ runId: "test-other", state: "passed", ownerSessionId: "other", notifySessionId: null }),
+    ], "session-coordinator"));
+    expect(screen.getByText("test-one")).toBeInTheDocument();
+    expect(screen.getByText("test-owned")).toBeInTheDocument();
     expect(screen.queryByText("test-other")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Session"), { target: { value: "" } });
-    expect(screen.getByText("test-other")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Session" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("State"), { target: { value: "unknown" } });
     expect(screen.getByText("No test runs match these filters.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /cancel|rerun|start run/i })).not.toBeInTheDocument();
+  });
+  it("shows runs from every session when opened without a session link", () => {
+    render(view([makeTestRun(), makeTestRun({ runId: "test-other", ownerSessionId: "delegated-child", notifySessionId: null })]));
+    expect(screen.getByText("test-one")).toBeInTheDocument();
+    expect(screen.getByText("test-other")).toBeInTheDocument();
+    expect(screen.getByText("Owner: delegated-child")).toBeInTheDocument();
+    expect(screen.getByText("Notify: session-coordinator")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Session" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "All sessions" })).not.toBeInTheDocument();
+  });
+  it("names a session-link scope and clears it without clearing the State filter", () => {
+    render(view([makeTestRun(), makeTestRun({ runId: "test-other-failed", state: "failed", ownerSessionId: "other", notifySessionId: null })], "session-coordinator"));
+    expect(screen.getByText(/Showing runs for/)).toHaveTextContent("session-coordinator");
+    fireEvent.change(screen.getByLabelText("State"), { target: { value: "failed" } });
+    expect(screen.getByText("No test runs match these filters.")).toBeInTheDocument();
+    expect(screen.queryByText("test-other-failed")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show all runs" }));
+    expect(screen.getByText("test-other-failed")).toBeInTheDocument();
+    expect(screen.getByLabelText("State")).toHaveValue("failed");
+    expect(screen.queryByText(/Showing runs for/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Session" })).not.toBeInTheDocument();
   });
   it("shows unknown/interrupted and unrun, diagnostics and truncated log tails", async () => {
     const run = makeTestRun({ state: "unknown" });

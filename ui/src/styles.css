@@ -4313,6 +4313,14 @@ textarea {
     0 0 0 1px var(--accent-blue-soft);
 }
 
+.combo-menu-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.combo-menu-panel .combo-option-description {
+  overflow-wrap: anywhere;
+}
+
 .combo-option {
   display: flex;
   align-items: flex-start;

@@ -10,8 +10,11 @@
 /// What an exact read observed about one message at `observed_at`: its
 /// current wake state, whether its recipient has acknowledged it (the
 /// recipient's own cursor reached it; the sender's never counts), and the
-/// shared summary (`mailbox_current_status_summary`). Derived at read time;
-/// nothing is stored.
+/// shared summary (`mailbox_current_status_summary`). Remote-target domain
+/// exact reads replace its wake clause with their existing notification cause
+/// via `mailbox_current_status_summary_with_cause`, retaining the observation
+/// time, stored notification state and separate acknowledgement. Derived at
+/// read time; nothing is stored.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct MailboxMessageCurrentStatus {
