@@ -1451,6 +1451,22 @@ happens elsewhere. The agent therefore names the item's worktree once with
   snapshot; pending or unknown authority still withholds evidence. A check whose opening and closing bases differ, including provenance,
   is not reported as a check of the root. Engram independently requires the verification and its
   producer to match the active root's workspace and generation.
+- **Ordinary turns after a focus change.** Prompt handoff does not wait for
+  an Engram authority read. If the closing worker finds another focused held
+  item than the opening's cached association, that turn remains uncaptured.
+  Its bounded notice identifies the turn and the changed work association.
+  The worker can use one canonical root read, within its closing budget, to
+  refresh the session for a later opening. An already named root must match
+  its acknowledged local path and generation; an unnamed root needs canonical
+  confirmation too. Publication uses the existing authority and durability
+  fences, and occurs only while the same session is still between turns and
+  no naming owns its binding. A settled work is read first; a refused read
+  does not withdraw its acknowledged authority or create recovery debt.
+  If proof is unavailable or a session/root change races the read, nothing is
+  installed and the notice says to name the root for a later turn. No naming
+  event, grant or verification credit is created. A later quiet turn can then
+  supply a sighting without a command or another name; the refused earlier
+  turn is never rewritten or credited.
 - **How long naming takes.** One budget of 102 seconds on the server covers
   two source captures, the commit reserve, and one shared 20-second control
   allowance across held-claim read, retired-claim maintenance, initial status, binding event and any

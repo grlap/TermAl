@@ -211,6 +211,50 @@ as `homeRpcFailuresResetOnRestart` states. It contains no message bodies or
 private error text. These observations do not change the reply to the peer,
 prove whether an operation committed, or authorize a retry or a new identity.
 
+`federationDurability` on that endpoint is a separate 64-record metadata
+history. It records the initial value, actual false/true transitions with
+fixed `site` labels, and refused central-authority (409) and channel-authority
+(423) checks with a fixed `stage`. UTC `at` timestamps aid correlation;
+`falseForMs` uses a monotonic clock. A false window's `windowId` links its
+transition, refusals and eventual restoration even when early records have
+been evicted (`evicted`). Repeated refusals with the same window, stage and
+status coalesce in their first-observation position: `count`, `lastAt` and
+`lastFalseForMs` retain the repeat total and latest observation. The original
+`at` and `falseForMs` remain the first observation. This prevents recurring
+health refusals during one hold from evicting its opening cause. Outside a
+hold, only consecutive identical refusals coalesce. Repeated assignments of
+the same value do not start a new window. These are authority-check outcomes, which callers can map to
+other HTTP responses; they are not counts of final wire responses.
+Idle central worker gates, channel-monitor predicates and per-row currency
+predicates do not add refusal rows. Coverage is limited to these central-authority and channel-authority
+checks; it is not an exhaustive record of every durability-gated refusal.
+The endpoint never waits for the state mutex: `available: false` with fixed
+`reason: state_lock_busy` makes only this section unavailable, while the wake
+and 5xx sections still answer. A normal snapshot
+has `available: true`; unavailable does not mean an empty history.
+The history resets on restart or state reconstruction. Its `observerId` and
+the endpoint's `serverInstanceId` distinguish those lifetimes. Reconstruction
+records the loaded initial value without inventing a pre-load hold duration.
+It keeps no payloads, private reasons or credentials, and changes no admission,
+durability, persistence or retry decisions.
+
+The same section has a separate bounded `linkEvents` history (64 records,
+`linkEventsEvicted`, `linkEventsLimit`). It retains the existing first terminal
+observation for each context and local install failures across later successful
+attestations. Rows contain UTC time, peer UUID, enrollment/transport generations,
+fixed kind/stage/reason, and applicable owner, incarnation, I/O kind, elapsed
+milliseconds, last sequence, RPC stage and HTTP status. `generationBasis` is
+`installed_receipt` for the context's captured installation receipt, including
+an install whose durability failed; before a receipt exists it is
+`attempt_basis`, captured from the channel at install-attempt entry (including
+a reused satellite channel). A context that never entered installation falls
+back to its labeled `channel_snapshot`. The owned installation task retains
+its result even if its attestation waiter was cancelled. No stderr, host name, URL/path, private error prose
+or payload is copied. Link records have their own eviction bound and cannot
+evict durability transitions. Both histories share the documented observer
+lifetime/reset. A retained install failure is not proof of a bad peer key;
+a retained terminal reason does not change transport or authorize a retry.
+
 New sends, wake admission and handoffs recheck current native identity and
 authority. Store contention or transport loss is not success, nor proof that
 an already admitted write did not commit. Retry the original send/key, read

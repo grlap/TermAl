@@ -222,10 +222,21 @@ impl AppState {
                 .map_err(|error| ApiError::bad_request(error.to_string()))?;
             if let FederationMailboxAlias::HostNative { host, session_id } = alias {
                 let host = host.to_string();
-                let local = self.inner.lock().expect("state mutex poisoned")
-                    .federation.local.as_ref().map(|local| local.host_id.clone());
-                if local.as_deref() == Some(host.as_str()) {
-                    return Ok(None);
+                {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.federation.local.as_ref().is_some_and(|local| local.host_id == host) {
+                        return Ok(None);
+                    }
+                    let settings = &inner.preferences.federation;
+                    if settings.enabled && settings.role == FederationRole::Satellite
+                        && settings.central.as_ref().is_some_and(|central| central.host_id != host)
+                    {
+                        return Err(ApiError::bad_request(
+                            "native satellite-to-sibling mailbox delivery is unsupported; a satellite's native remote target must be its configured Central. \
+                             For a new domain message, use the canonical domain-session- id returned by this host's termal_list_sessions; \
+                             delivery saves mail but does not wake the recipient without an executor grant",
+                        ));
+                    }
                 }
                 return self.federation_peer_snapshot(&host)
                     .map(|peer| Some((session_id.to_owned(), peer)));

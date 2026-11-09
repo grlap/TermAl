@@ -681,35 +681,24 @@ fn mailbox_receipt_concurrent_reads_and_replays_share_durable_authority() {
     let store = MailboxStore::open(&path).unwrap();
     let first = store.append(&test_input()).unwrap();
     let other = MailboxStore::open(&path).unwrap();
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    let peer_barrier = barrier.clone();
-    let mailbox_id = first.mailbox_id.clone();
-    let worker = std::thread::spawn(move || {
-        peer_barrier.wait();
-        let page = other
-            .read_range("session-target", &mailbox_id, Some(0), 10)
-            .unwrap();
-        other
-            .acknowledge_page(
-                "session-target",
-                &mailbox_id,
-                page.receipt.as_deref().unwrap(),
-            )
-            .unwrap();
-        page.receipt
-    });
-    barrier.wait();
-    let page = store
-        .read_range("session-target", &first.mailbox_id, Some(0), 10)
-        .unwrap();
-    store
-        .acknowledge_page(
-            "session-target",
-            &first.mailbox_id,
-            page.receipt.as_deref().unwrap(),
-        )
-        .unwrap();
-    assert_eq!(worker.join().unwrap(), page.receipt);
+    let receipts =
+        crate::tests::phase_sync::run_concurrently([&store, &other].into_iter().map(|reader| {
+            let mailbox_id = first.mailbox_id.clone();
+            move || {
+                let page = reader
+                    .read_range("session-target", &mailbox_id, Some(0), 10)
+                    .unwrap();
+                reader
+                    .acknowledge_page(
+                        "session-target",
+                        &mailbox_id,
+                        page.receipt.as_deref().unwrap(),
+                    )
+                    .unwrap();
+                page.receipt
+            }
+        }));
+    assert_eq!(receipts[0], receipts[1]);
     assert_eq!(
         mailbox_processed_through(
             &store.connection().unwrap(),
@@ -1492,26 +1481,17 @@ fn concurrent_appends_allocate_one_dense_mailbox_sequence() {
     let root = MailboxTestRoot::new();
     let path = root.database_path();
     let store = Arc::new(MailboxStore::open(&path).expect("mailbox store should open"));
-    let barrier = Arc::new(std::sync::Barrier::new(5));
-    let mut handles = Vec::new();
-    for index in 0..4 {
+    let mut receipts = crate::tests::phase_sync::run_concurrently((0..4).map(|index| {
         let store = store.clone();
-        let barrier = barrier.clone();
-        handles.push(std::thread::spawn(move || {
-            let mut input = test_input();
-            input.idempotency_key = format!("send-{index}");
-            input.body = format!("message {index}");
-            barrier.wait();
+        let mut input = test_input();
+        input.idempotency_key = format!("send-{index}");
+        input.body = format!("message {index}");
+        move || {
             store
                 .append(&input)
                 .expect("concurrent append should succeed")
-        }));
-    }
-    barrier.wait();
-    let mut receipts = handles
-        .into_iter()
-        .map(|handle| handle.join().expect("append thread should join"))
-        .collect::<Vec<_>>();
+        }
+    }));
     receipts.sort_by_key(|receipt| receipt.sequence);
     assert_eq!(
         receipts

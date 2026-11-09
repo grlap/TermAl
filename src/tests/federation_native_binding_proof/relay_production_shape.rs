@@ -144,9 +144,37 @@ async fn mailbox_relay_boot_boundary_retries_after_missing_link_without_replayin
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::production_shape().await;
     let proxy = ProxySend::new(&fixture).await;
+    let first = proxy.send(&fixture, "boot-acknowledged-first").await;
+    fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
+    let first_page = read_relay_page(&fixture.satellite, &fixture.native, &first.mailbox_id).await.unwrap();
+    assert_eq!(first_page.messages.len(), 1);
+    assert_eq!(first_page.messages[0].id, first.message_id);
+    let first_receipt = first_page.receipt.expect("the first page issues an ACK receipt");
+    let actor = fixture.satellite.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
+    let acknowledged = acknowledge_mailbox(
+        AxumPath((fixture.native.clone(), first.mailbox_id.clone())),
+        State(fixture.satellite.clone()), Json(AcknowledgeMailboxRequest {
+            receipt: Some(first_receipt.clone()), expected_processed_through: None,
+            processed_through: None, no_continuation: false,
+        }),
+    ).await.unwrap().0;
+    assert!(first.sequence > 0);
+    assert_eq!(acknowledged.participants.iter().find(|participant|
+        participant.session_id == actor.participant_key()).unwrap().processed_through, first.sequence);
+    assert_eq!(acknowledged.unread_count, 0);
+
     let sent = proxy.send(&fixture, "boot-waits-for-link").await;
+    assert_eq!(sent.mailbox_id, first.mailbox_id);
+    assert_eq!(sent.sequence, first.sequence + 1);
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
     assert!(queued_relay_wake(&fixture, &sent.mailbox_id).is_some());
+    let before = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await.unwrap();
+    assert_eq!(before.processed_through, first.sequence);
+    assert_eq!(before.messages.len(), 1);
+    assert_eq!(before.messages[0].id, sent.message_id);
+    assert_eq!(before.messages[0].sequence, sent.sequence);
+    assert_eq!(before.messages[0].body, "routine body stays at the central home");
+    let retained_receipt = before.receipt.expect("retain the second page receipt across reconnect");
     // The restored process has lost its former runtime queue. Keep the exact
     // durable boundary and message; only process-owned delivery is gone.
     fixture.satellite.mailbox_store.connection().unwrap().execute(
@@ -171,11 +199,51 @@ async fn mailbox_relay_boot_boundary_retries_after_missing_link_without_replayin
     let wake = queued_relay_wake(&fixture, &sent.mailbox_id).expect("unread metadata is rearmed");
     assert!(wake.contains("[TermAl mailbox notification]"));
     assert!(!wake.contains("routine body"));
+    {
+        let inner = fixture.satellite.inner.lock().unwrap();
+        let native = &inner.sessions[inner.find_session_index(&fixture.native).unwrap()];
+        let sources = native.queued_prompts.iter().filter_map(|queued|
+            queued.pending_prompt.source.as_ref()?.mailbox.as_ref())
+            .filter(|source| source.mailbox_id == sent.mailbox_id).collect::<Vec<_>>();
+        assert_eq!(sources.len(), 1, "only the retained unread boundary is rearmed");
+        assert_eq!(sources[0].message_id, sent.message_id);
+        assert_eq!(sources[0].sequence, sent.sequence);
+    }
+    let recovered = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await.unwrap();
+    assert_eq!(recovered.processed_through, first.sequence);
+    assert_eq!(recovered.messages.len(), 1, "the acknowledged first message is not replayed");
+    assert_eq!(recovered.messages[0].id, sent.message_id);
+    assert_eq!(recovered.messages[0].sequence, sent.sequence);
+    assert_eq!(recovered.messages[0].body, before.messages[0].body);
+
+    let old_ack = acknowledge_mailbox(
+        AxumPath((fixture.native.clone(), sent.mailbox_id.clone())),
+        State(fixture.satellite.clone()), Json(AcknowledgeMailboxRequest {
+            receipt: Some(first_receipt), expected_processed_through: None,
+            processed_through: None, no_continuation: false,
+        }),
+    ).await.unwrap().0;
+    assert_eq!(old_ack.participants.iter().find(|participant|
+        participant.session_id == actor.participant_key()).unwrap().processed_through, first.sequence);
+    assert_eq!(old_ack.unread_count, 1, "an old ACK cannot consume the retained newer message");
+    let final_ack = acknowledge_mailbox(
+        AxumPath((fixture.native.clone(), sent.mailbox_id.clone())),
+        State(fixture.satellite.clone()), Json(AcknowledgeMailboxRequest {
+            receipt: Some(retained_receipt), expected_processed_through: None,
+            processed_through: None, no_continuation: false,
+        }),
+    ).await.unwrap().0;
+    assert_eq!(final_ack.participants.iter().find(|participant|
+        participant.session_id == actor.participant_key()).unwrap().processed_through, sent.sequence);
+    assert_eq!(final_ack.unread_count, 0, "the pre-outage second receipt still owns its exact boundary");
+    let empty = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await.unwrap();
+    assert_eq!(empty.processed_through, sent.sequence);
+    assert!(empty.messages.is_empty());
     let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
     let count: u64 = fixture.central.mailbox_store.connection().unwrap().query_row(
         "SELECT count(*) FROM mailbox_messages WHERE mailbox_id=?1", [&locator.id], |row| row.get(0),
     ).unwrap();
-    assert_eq!(count, 1, "boot recovery never replays the committed message");
+    assert_eq!(count, 2, "boot recovery never replays either committed message");
     proxy.finish().await;
     fixture.finish().await;
 }

@@ -504,6 +504,7 @@ impl PersistedState {
             state_lock_epoch: next_state_lock_epoch(),
             federation: self.federation,
             federation_durable: true,
+            federation_durability_diagnostics: FederationDurabilityDiagnostics::new(true, "state_restored"),
             federation_continuity_lost: false,
             federation_attestation: HashMap::new(),
             codex: self.codex,

@@ -70,7 +70,7 @@ impl FederationExecutorWakeDrain {
         if !fallback && !more && generation == self.observed_kick { return; }
         {
             let inner = app.inner.lock().expect("state mutex poisoned");
-            if federation_mailbox_central_locked(&inner).is_err() { return; }
+            if federation_mailbox_central_checked(&inner, false).is_err() { return; }
         }
         let (send, receive) = tokio::sync::oneshot::channel();
         self.observed_kick = generation;

@@ -9,9 +9,9 @@
 // (engram_named_root_naming_supersede.rs), the evaluation side
 // (acceptance_evaluation_unchanged_binding.rs) or the authority fence's own
 // phases (engram_authority_fence_phases.rs).
-// Split out of engram_named_root_naming_supersede.rs, which keeps only tests
-// that compile without the bounded retry, so that file alone is the naming
-// side's test-only fail-first witness.
+// Split out of engram_named_root_naming_supersede.rs. The original
+// fail-first witness remains in Git history; both modules now exercise
+// the bounded retry implementation.
 use super::*;
 use super::reclamation::{root_fixture, request_fixture_name};
 

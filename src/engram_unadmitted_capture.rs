@@ -524,6 +524,7 @@ enum EngramRuntimeClosingOutcome {
     Unclaimed,
     Binding(EngramRuntimeClosingScope),
     Policy(EngramObservationPolicyBasis),
+    FocusChanged { binding: EngramControlWorkBinding, refreshed: bool },
     Report(EngramRuntimeObservationReport, Option<SourceBasisRefusal>),
 }
 

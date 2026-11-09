@@ -104,7 +104,7 @@ async fn federation_central_monitor(
                     client.channel.observe_terminal(&terminal_context, "monitor", "sshChildExited");
                     return Err(federation_transport_unavailable());
                 }
-                if let Err(error) = client.channel.current_authority() {
+                if let Err(error) = client.channel.current_authority_checked(false) {
                     if error.status == StatusCode::LOCKED { continue; }
                     return Err(error);
                 }
@@ -155,7 +155,7 @@ async fn federation_satellite_monitor(
         if server.is_finished() {
             return Err(federation_transport_unavailable());
         }
-        if client.channel.current_authority().is_err() {
+        if client.channel.current_authority_checked(false).is_err() {
             continue;
         }
         if let Ok(lease) = client.channel.current_lease() {
@@ -174,7 +174,7 @@ async fn federation_satellite_monitor(
                     if client.retain_health_refusal(&lease, &error) {
                         continue;
                     }
-                    if client.channel.current_authority().is_err() {
+                    if client.channel.current_authority_checked(false).is_err() {
                         continue;
                     }
                     // Availability is withdrawn immediately, retaining the

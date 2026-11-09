@@ -324,7 +324,7 @@ impl AppState {
                 .map_err(|_| ApiError::bad_request("invalid federation transition"))?;
             inner.federation = candidate;
             inner.preferences.federation = settings;
-            inner.federation_durable = false;
+            inner.set_federation_durable(false, "mutation_install");
             on_install(&value);
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
             let dispatch = if lease.is_some() {
@@ -443,7 +443,7 @@ impl AppState {
         if federation_persist_image(&PersistedState::metadata_from_inner(&inner)) != *image {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
-        inner.federation_durable = true;
+        inner.set_federation_durable(true, "durability_finished");
         self.federation_executor_wake_signal.kick();
         Ok(())
     }

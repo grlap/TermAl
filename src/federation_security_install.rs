@@ -35,6 +35,9 @@ impl FederationChannel {
         &self,
         context: Arc<FederationSecurityContext>,
     ) -> Result<FederationControlGuard, ApiError> {
+        let attempt = self.transport_basis();
+        let _ = context.diagnostic_attempt_basis.set((
+            attempt.enrollment_generation, attempt.transport_generation));
         let guard = FederationControlGuard {
             channel: self.clone(),
             owner: context.owner,
@@ -42,7 +45,10 @@ impl FederationChannel {
             cancelled: Arc::new(AtomicBool::new(false)),
         };
         let opening = self.opening.clone().lock_owned().await;
-        let expected = self.current_authority()?;
+        let expected = self.current_authority().map_err(|error| {
+            self.retain_install_diagnostic(&context, error.status);
+            error
+        })?;
         if self
             .state
             .lock()
@@ -50,7 +56,9 @@ impl FederationChannel {
             .installed_owner
             >= context.owner
         {
-            return Err(federation_auth_refused());
+            let error = federation_auth_refused();
+            self.retain_install_diagnostic(&context, error.status);
+            return Err(error);
         }
         let settlement = self.basis.begin_settlement();
         let channel = self.clone();
@@ -58,86 +66,100 @@ impl FederationChannel {
         tokio::spawn(async move {
             let _settlement = settlement;
             let _opening = opening;
-            let (result, installed) = if let Some(app) = &channel.app {
-                let app = app.clone();
-                let expected = expected.clone();
-                let incarnation = context.incarnation.clone();
-                #[cfg(test)]
-                let clock = channel.durability_clock.clone();
-                #[cfg(test)]
-                let published = channel.connection_published.clone();
-                tokio::task::spawn_blocking(move || {
-                    let mut installed = None;
-                    #[cfg(not(test))]
-                    let result =
-                        app.federation_peer_connected_owned(&expected, incarnation, &mut installed);
+            // The owned result is retained even if the attestation waiter is gone.
+            // Finish the link-state critical section before publishing diagnostics.
+            let result: Result<(), ApiError> = async {
+                let (result, installed) = if let Some(app) = &channel.app {
+                    let app = app.clone();
+                    let expected = expected.clone();
+                    let incarnation = context.incarnation.clone();
                     #[cfg(test)]
-                    let result = app.federation_peer_connected_owned_with_clock(
-                        &expected,
-                        incarnation,
-                        &mut installed,
-                        clock,
-                    );
+                    let clock = channel.durability_clock.clone();
                     #[cfg(test)]
-                    if result.is_ok() {
-                        published();
-                    }
-                    (result, installed)
-                })
-                .await
-                .map_err(|_| federation_transport_unavailable())?
-            } else {
-                (Ok(expected.clone()), Some(expected.clone()))
-            };
-            let mut state = channel
-                .state
-                .lock()
-                .expect("federation link mutex poisoned");
-            let same_basis = channel.transport_basis().same_transport_as(&expected);
-            if same_basis {
+                    let published = channel.connection_published.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let mut installed = None;
+                        #[cfg(not(test))]
+                        let result =
+                            app.federation_peer_connected_owned(&expected, incarnation, &mut installed);
+                        #[cfg(test)]
+                        let result = app.federation_peer_connected_owned_with_clock(
+                            &expected,
+                            incarnation,
+                            &mut installed,
+                            clock,
+                        );
+                        #[cfg(test)]
+                        if result.is_ok() {
+                            published();
+                        }
+                        (result, installed)
+                    })
+                    .await
+                    .map_err(|_| federation_transport_unavailable())?
+                } else {
+                    (Ok(expected.clone()), Some(expected.clone()))
+                };
+                let mut state = channel
+                    .state
+                    .lock()
+                    .expect("federation link mutex poisoned");
+                let same_basis = channel.transport_basis().same_transport_as(&expected);
+                // Freeze the exact installed receipt for historical diagnostics,
+                // including an installation whose durability subsequently failed.
                 if let Some(receipt) = &installed {
-                    *channel
-                        .basis
-                        .write()
-                        .expect("federation basis lock poisoned") = receipt.clone();
-                    // This authenticated mutation already withdrew the prior
-                    // runtime UUID in M1. Never leave its stale local lease.
-                    state.recorded_incarnation = None;
-                    state.incarnation = None;
-                    if let Some(old) = state.security.take() {
-                        old.retire();
-                    }
+                    let _ = context.diagnostic_basis.set((
+                        receipt.enrollment_generation, receipt.transport_generation));
                 }
-            }
-            let cleanup = |receipt: &FederationPeerSnapshot| {
-                if let Some(app) = &channel.app {
-                    app.federation_peer_disconnected(receipt, &context.incarnation);
-                }
-            };
-            let receipt = match result {
-                Ok(receipt) => receipt,
-                Err(error) => {
+                if same_basis {
                     if let Some(receipt) = &installed {
-                        cleanup(receipt);
+                        *channel
+                            .basis
+                            .write()
+                            .expect("federation basis lock poisoned") = receipt.clone();
+                        // This authenticated mutation already withdrew the prior
+                        // runtime UUID in M1. Never leave its stale local lease.
+                        state.recorded_incarnation = None;
+                        state.incarnation = None;
+                        if let Some(old) = state.security.take() {
+                            old.retire();
+                        }
                     }
-                    return Err(error);
                 }
-            };
-            if !same_basis
-                || cancelled.load(Ordering::SeqCst)
-                || context.owner <= state.installed_owner
-            {
-                cleanup(&receipt);
-                return Err(federation_auth_refused());
+                let cleanup = |receipt: &FederationPeerSnapshot| {
+                    if let Some(app) = &channel.app {
+                        app.federation_peer_disconnected(receipt, &context.incarnation);
+                    }
+                };
+                let receipt = match result {
+                    Ok(receipt) => receipt,
+                    Err(error) => {
+                        if let Some(receipt) = &installed {
+                            cleanup(receipt);
+                        }
+                        return Err(error);
+                    }
+                };
+                if !same_basis
+                    || cancelled.load(Ordering::SeqCst)
+                    || context.owner <= state.installed_owner
+                {
+                    cleanup(&receipt);
+                    return Err(federation_auth_refused());
+                }
+                state.installed_owner = context.owner;
+                state.incarnation = Some(context.incarnation.clone());
+                state.recorded_incarnation = Some(context.incarnation.clone());
+                state.security = Some(context.clone());
+                let _ = context.installed_at.set(channel.control.clock.now());
+                drop(state);
+                channel.observe_attestation(Some(context.owner));
+                Ok(())
+            }.await;
+            if let Err(error) = &result {
+                channel.retain_install_diagnostic(&context, error.status);
             }
-            state.installed_owner = context.owner;
-            state.incarnation = Some(context.incarnation.clone());
-            state.recorded_incarnation = Some(context.incarnation.clone());
-            state.security = Some(context.clone());
-            let _ = context.installed_at.set(channel.control.clock.now());
-            drop(state);
-            channel.observe_attestation(Some(context.owner));
-            Ok(())
+            result
         })
         .await
         .map_err(|_| federation_transport_unavailable())??;

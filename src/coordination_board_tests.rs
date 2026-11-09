@@ -566,39 +566,49 @@ fn coordination_board_idempotency_receipts_are_bounded_per_scope() {
 #[test]
 fn board_writer_acquires_private_connection_before_shared_writer_admission() {
     let root = CoordinationBoardTestRoot::new();
-    let connection_acquired = Arc::new(std::sync::Barrier::new(2));
-    let continue_to_writer_admission = Arc::new(std::sync::Barrier::new(2));
-    let mut store =
-        CoordinationBoardStore::open(&root.database_path()).expect("board store should open");
-    store.write_ordering_hook = Some(CoordinationBoardWriteOrderingHook {
-        connection_acquired: connection_acquired.clone(),
-        continue_to_writer_admission: continue_to_writer_admission.clone(),
-    });
-    let shared_write_lock = store.write_lock.clone();
-    let store = Arc::new(store);
-    let worker_store = store.clone();
-    let worker = std::thread::spawn(move || {
-        worker_store
-            .set(&board_input(
-                "ordering.probe",
-                Some(json!(true)),
-                0,
-                "ordering-probe",
-            ))
-            .expect("board write should finish after the ordering probe");
-    });
+    std::thread::scope(|scope| {
+        let continue_to_writer_admission = crate::tests::phase_sync::ReleaseGateOnDrop::new();
+        let (connection_acquired, acquired_rx) = std::sync::mpsc::channel();
+        let mut store =
+            CoordinationBoardStore::open(&root.database_path()).expect("board store should open");
+        store.write_ordering_hook = Some(CoordinationBoardWriteOrderingHook {
+            connection_acquired,
+            continue_to_writer_admission: continue_to_writer_admission.gate(),
+        });
+        let shared_write_lock = store.write_lock.clone();
+        let worker = scope.spawn(move || {
+            store
+                .set(&board_input(
+                    "ordering.probe",
+                    Some(json!(true)),
+                    0,
+                    "ordering-probe",
+                ))
+                .expect("board write should finish after the ordering probe");
+        });
 
-    connection_acquired.wait();
-    let mailbox_admission_probe =
-        lock_sqlite_state_writer_for(&shared_write_lock, Duration::from_millis(50));
-    let mailbox_admission_was_available = mailbox_admission_probe.is_some();
-    drop(mailbox_admission_probe);
-    continue_to_writer_admission.wait();
-    worker.join().expect("board writer thread should join");
-    assert!(
-        mailbox_admission_was_available,
-        "a board writer paused after acquiring its private connection must not yet hold the shared mailbox writer admission"
-    );
+        if crate::tests::phase_sync::receive_result(
+            &acquired_rx,
+            "board private connection acquired",
+        )
+        .is_err()
+        {
+            match worker.join() {
+                Err(panic) => std::panic::resume_unwind(panic),
+                Ok(()) => panic!("board writer exited before publishing its private connection"),
+            }
+        }
+        let mailbox_admission_probe =
+            lock_sqlite_state_writer_for(&shared_write_lock, Duration::from_millis(50));
+        let mailbox_admission_was_available = mailbox_admission_probe.is_some();
+        drop(mailbox_admission_probe);
+        continue_to_writer_admission.release();
+        worker.join().expect("board writer thread should join");
+        assert!(
+            mailbox_admission_was_available,
+            "a board writer paused after acquiring its private connection must not yet hold the shared mailbox writer admission"
+        );
+    });
 }
 
 #[test]

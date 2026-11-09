@@ -100,20 +100,20 @@ fn federation_m4_store_concurrent_connections_return_one_identical_operation() {
     let path = root.path().join("coordination.sqlite");
     let left = MailboxStore::open(&path).unwrap();
     let right = MailboxStore::open(&path).unwrap();
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    let mut threads = Vec::new();
-    for store in [left, right] {
-        let barrier = barrier.clone();
-        threads.push(std::thread::spawn(move || {
-            barrier.wait();
-            receive(&store, &operation("one"))
-        }));
-    }
-    let results: Vec<_> = threads.into_iter().map(|thread| thread.join().unwrap()).collect();
+    let results = phase_sync::run_concurrently(
+        [left, right]
+            .into_iter()
+            .map(|store| move || receive(&store, &operation("one"))),
+    );
     assert_eq!(results[0], results[1]);
     let reopened = MailboxStore::open(&path).unwrap();
-    assert_eq!(reopened.pending_federation_executor_operations("central-fixture", "", 100)
-        .unwrap().len(), 1);
+    assert_eq!(
+        reopened
+            .pending_federation_executor_operations("central-fixture", "", 100)
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]

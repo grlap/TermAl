@@ -327,3 +327,52 @@ async fn federation_connect_failure_recovery_preserves_observed_credential_mater
         "a failed own connect must not reset the observed material fence"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_link_diagnostics_retains_cancelled_owned_install_failure() {
+    let mut fixture = Fixture::new().await;
+    let mut writer = ControlledWriter::attach(&mut fixture.app);
+    let channel = scripted_channel(&fixture.app, &fixture.id);
+    let attempted = channel.clone();
+    let waiter = tokio::spawn(async move {
+        federation_control_fixture::establish(&attempted).await
+    });
+    let held = writer.take().await;
+    // Receipt installation has happened and its durable write is pending.
+    waiter.abort();
+    assert!(matches!(waiter.await, Err(error) if error.is_cancelled()));
+    let connection = rusqlite::Connection::open(fixture.app.persistence_path.as_path()).unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_cancelled_install BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT,'PRIVATE cancelled install failure'); END;").unwrap();
+    let error = persist_state(fixture.app.persistence_path.as_path(),
+        &fixture.app.inner.lock().unwrap()).unwrap_err();
+    held.finish(Err(PersistFenceError::WriteFailed(error.to_string())));
+    // The owned task keeps this mutex through cleanup and diagnostic publication.
+    let settled = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, channel.opening.lock()).await.unwrap();
+    drop(settled);
+    let retained = fixture.app.inner.lock().unwrap().federation_durability_diagnostics.snapshot()["linkEvents"].clone();
+    assert_eq!(retained.as_array().unwrap().len(), 1);
+    assert_eq!(retained[0]["kind"], "install_failure");
+    assert_eq!(retained[0]["status"], 500);
+    assert_eq!(retained[0]["generationBasis"], "installed_receipt");
+    assert_eq!(retained[0]["transportGeneration"], channel.transport_basis().transport_generation);
+    assert!(!retained.to_string().contains("PRIVATE"));
+    connection.execute_batch("DROP TRIGGER reject_cancelled_install;").unwrap();
+    drop(connection);
+    let app = fixture.app.clone();
+    let reconcile = tokio::task::spawn_blocking(move ||
+        app.reconcile_federation_durability_with_clock(EngramBudgetClock::scripted()));
+    let fence = writer.take().await;
+    ControlledWriter::commit(&fixture.app, &fence);
+    reconcile.await.unwrap().unwrap();
+    let next = channel.clone();
+    let success = tokio::spawn(async move { federation_control_fixture::establish(&next).await });
+    let fence = writer.take().await;
+    ControlledWriter::commit(&fixture.app, &fence);
+    let (_peer, proof) = success.await.unwrap();
+    let after = fixture.app.inner.lock().unwrap().federation_durability_diagnostics.snapshot();
+    assert_eq!(after["linkEvents"], retained);
+    assert_eq!(fixture.app.federation_registry_view().unwrap()["peers"][0]["attestation"]["lastReason"], "authenticated");
+    drop(proof);
+    fixture.satellite_stop.send_replace(true);
+    fixture.satellite_task.await.unwrap().unwrap();
+}

@@ -431,6 +431,13 @@ impl AppState {
                 return Ok(());
             }
         }
+        let focus_label = match &result {
+            Ok(EngramRuntimeClosingOutcome::FocusChanged { binding, .. }) =>
+                engram_work_source_root_for_claim(&inner.engram_work_source_roots,
+                    &expected.scope.store, &binding.work_id, &binding.claim_id)
+                    .map(|root| root.short_ref.clone()),
+            _ => None,
+        };
         let state = &mut inner.sessions[index].engram;
         let Some(position) = state
             .unadmitted_closing_jobs
@@ -458,6 +465,17 @@ impl AppState {
                 job.attempts = 0;
                 job.retry_at = unadmitted_observation_timestamp();
                 job.last_error = None;
+            }
+            Ok(EngramRuntimeClosingOutcome::FocusChanged { binding, refreshed }) => {
+                let error = runtime_observation_scope_changed(&expected.scope,
+                    &format!("canonical claim {} / {}", binding.work_id, binding.claim_id));
+                let mut failed = expected.failed(session_id, &error);
+                failed.terminal_failure = Some(error.message);
+                state.unadmitted_closing_jobs[position] = failed;
+                let notice = runtime_observation_focus_notice(&expected.trace.host_turn_ref,
+                    focus_label.as_deref(), refreshed);
+                state.set_pending_source_root_line(notice.clone());
+                diagnostic = Some(notice);
             }
             Ok(EngramRuntimeClosingOutcome::Report(report, source_refusal)) => {
                 if !state

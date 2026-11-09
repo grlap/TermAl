@@ -178,7 +178,7 @@ impl FederationExecutorMirrorAuthority<'_> {
             &self.lease.channel.transport_basis(), &self.lease.incarnation)
             .map_err(|_| federation_executor_conflict())?;
         let binding = self.operation.mailbox_binding();
-        if federation_mailbox_central_locked(&inner).ok().as_ref() != Some(&binding.central)
+        if federation_mailbox_central_checked(&inner, false).ok().as_ref() != Some(&binding.central)
             || peer.enrollment_generation != self.operation.enrollment_generation
             || !federation_mailbox_remote_in_domain(&inner.federation, &inner.preferences.federation, &peer, &binding)
             || !inner.federation.placements.values().any(|placement|

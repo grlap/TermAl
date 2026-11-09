@@ -66,24 +66,38 @@ fn concurrent_explicit_native_join_and_standalone_send_have_one_admitted_winner(
     let state = central_store();
     let a = standalone(&state);
     let b = standalone(&state);
-    let barrier = Arc::new(std::sync::Barrier::new(3));
-    let sender = state.clone();
-    let sender_target = b.clone();
-    let send_barrier = barrier.clone();
-    let send = std::thread::spawn(move || {
-        send_barrier.wait();
-        sender.append_mailbox_message_and_notify(&a, send_request(&sender_target))
+    let (sent, joined) = std::thread::scope(|scope| {
+        let release = phase_sync::ReleaseGateOnDrop::new();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let sender = state.clone();
+        let sender_target = b.clone();
+        let send_gate = release.gate();
+        let send_ready = ready_tx.clone();
+        let send = scope.spawn(move || {
+            let _ = send_ready.send(());
+            phase_sync::wait_for_gate(&send_gate, true);
+            sender.append_mailbox_message_and_notify(&a, send_request(&sender_target))
+        });
+        let joining = state.clone();
+        let join_gate = release.gate();
+        let join = scope.spawn(move || {
+            let _ = ready_tx.send(());
+            phase_sync::wait_for_gate(&join_gate, true);
+            joining.join_federation_mailbox_session(&b)
+        });
+        for _ in 0..2 {
+            phase_sync::receive(&ready_rx, "native join/send contender ready");
+        }
+        release.release();
+        let sent = send.join().unwrap();
+        let joined = join.join().unwrap();
+        (sent, joined)
     });
-    let joining = state.clone();
-    let join_barrier = barrier.clone();
-    let join = std::thread::spawn(move || {
-        join_barrier.wait();
-        joining.join_federation_mailbox_session(&b)
-    });
-    barrier.wait();
-    let sent = send.join().unwrap();
-    let joined = join.join().unwrap();
-    assert_ne!(sent.is_ok(), joined.is_ok(), "send={sent:?}, join={joined:?}");
+    assert_ne!(
+        sent.is_ok(),
+        joined.is_ok(),
+        "send={sent:?}, join={joined:?}"
+    );
 }
 
 #[test]

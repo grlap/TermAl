@@ -4,6 +4,117 @@ use super::*;
 use super::regressions::public_send;
 
 #[tokio::test]
+async fn durability_history_keeps_transitions_across_idle_worker_ticks() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for condition in ["disabled", "standalone", "satellite", "durability"] {
+        let state = federation_mailboxes::central_store();
+        let (_, participant) = federation_mailboxes::local_participant(&state, "Idle observer");
+        let before = {
+            let mut inner = state.inner.lock().unwrap();
+            inner.set_federation_durable(false, "test_hold");
+            inner.set_federation_durable(true, "test_release");
+            match condition {
+                "disabled" => inner.preferences.federation.enabled = false,
+                "standalone" => inner.preferences.federation.role = FederationRole::Standalone,
+                "satellite" => inner.preferences.federation.role = FederationRole::Satellite,
+                "durability" => inner.set_federation_durable(false, "test_hold"),
+                _ => unreachable!(),
+            }
+            inner.federation_durability_diagnostics.snapshot()
+        };
+        let mut drain = FederationExecutorWakeDrain::default();
+        let mut wakes = FederationMailboxWakeWorker::default();
+        let mut relay = MailboxRelayWakeWorker::default();
+        for _ in 0..70 {
+            state.federation_executor_wake_signal.kick();
+            drain.tick(&state);
+            // Join the actual outcome poll for this tick, without timers.
+            if let Some(poll) = drain.outcome_poll.take() {
+                poll.await.unwrap();
+            }
+            wakes.tick(&state, true).await;
+            relay.tick(&state, true).await;
+            if let Some(task) = relay.task.take() {
+                task.await.unwrap();
+            }
+            assert_eq!(state.run_native_mailbox_wake_batch(0), (0, false));
+            assert!(state.native_mailbox_relay_home_checked(false).is_err());
+            let inner = state.inner.lock().unwrap();
+            assert!(!federation_mailbox_participant_current_locked(&inner, &participant));
+        }
+        drain.shutdown().await;
+        wakes.shutdown().await;
+        relay.shutdown().await;
+        assert_eq!(state.inner.lock().unwrap().federation_durability_diagnostics.snapshot(), before,
+            "idle gates and predicates must preserve real transition history: {condition}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durability_diagnostics_answers_while_state_is_locked() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let state = federation_mailboxes::central_store();
+    let observer = state.inner.lock().unwrap().federation_durability_diagnostics.snapshot();
+    let (held_tx, held_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let holder_state = state.clone();
+    let holder = std::thread::spawn(move || {
+        let _held = holder_state.inner.lock().unwrap();
+        held_tx.send(()).unwrap();
+        release_rx.recv().unwrap();
+    });
+    held_rx.await.unwrap();
+    let request_state = state.clone();
+    let mut request = tokio::spawn(async move {
+        get_mailbox_relay_wake_diagnostics(State(request_state)).await
+    });
+    // A broken blocking handler is released before the assertion and teardown.
+    let result = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, &mut request).await;
+    release_tx.send(()).unwrap();
+    holder.join().unwrap();
+    let response = result.expect("diagnostics must answer before the state holder releases")
+        .unwrap().unwrap().0;
+    assert_eq!(response["federationDurability"]["available"], false);
+    assert_eq!(response["federationDurability"]["reason"], "state_lock_busy");
+    assert_eq!(response["serverInstanceId"], state.server_instance_id);
+    assert_eq!(response["pendingHomeWakes"], 0);
+    assert_eq!(response["homeRpcFailures"], json!([]));
+    assert_eq!(response["refusedHomeWakes"], json!([]));
+    let recovered = get_mailbox_relay_wake_diagnostics(State(state.clone())).await.unwrap().0;
+    assert_eq!(recovered["federationDurability"], observer);
+}
+
+#[tokio::test]
+async fn durability_history_resets_on_persisted_reconstruction() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let state = federation_mailboxes::central_store();
+    let (persisted, previous) = {
+        let mut inner = state.inner.lock().unwrap();
+        inner.set_federation_durable(false, "test_hold");
+        (serde_json::to_vec(&PersistedState::from_inner(&inner)).unwrap(),
+            inner.federation_durability_diagnostics.snapshot())
+    };
+    let mut restored = serde_json::from_slice::<PersistedState>(&persisted).unwrap()
+        .into_inner().unwrap();
+    let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
+    bind_loaded_federation(&mut restored, &connection, state.persistence_path.as_path()).unwrap();
+    let fresh = restored.federation_durability_diagnostics.snapshot();
+    assert_ne!(fresh["observerId"], previous["observerId"]);
+    assert_eq!(fresh["evicted"], 0);
+    let records = fresh["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["kind"], "initial");
+    assert_eq!(records[0]["site"], "state_restored");
+    assert_eq!(records[0]["durable"], true);
+    assert!(records[0]["windowId"].is_null());
+    assert!(records[0]["falseForMs"].is_null());
+    *state.inner.lock().unwrap() = restored;
+    let response = get_mailbox_relay_wake_diagnostics(State(state.clone())).await.unwrap().0;
+    assert_eq!(response["federationDurability"], fresh);
+    assert_eq!(response["serverInstanceId"], state.server_instance_id);
+}
+
+#[tokio::test]
 async fn bound_directory_refusal_recovers_after_exact_persistence_reconciliation() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let state = federation_mailboxes::central_store();
@@ -12,6 +123,10 @@ async fn bound_directory_refusal_recovers_after_exact_persistence_reconciliation
     let initial = list_federation_mailbox_directory(AxumPath(caller.clone()), State(state.clone()))
         .await.unwrap().0;
     assert!(initial.participants.iter().any(|row| row.binding == participant.binding));
+    let diagnostic_before = state.inner.lock().unwrap().federation_durability_diagnostics.snapshot();
+    list_federation_mailbox_directory(AxumPath(caller.clone()), State(state.clone())).await.unwrap();
+    assert_eq!(state.inner.lock().unwrap().federation_durability_diagnostics.snapshot(), diagnostic_before,
+        "healthy discovery of current participants emits no transition or refusal");
     let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
     connection.execute_batch("CREATE TRIGGER reject_directory_state BEFORE INSERT ON state_metadata_units BEGIN SELECT RAISE(ABORT,'fixture persistence failure'); END;").unwrap();
     let settings = state.inner.lock().unwrap().preferences.federation.clone();
@@ -26,12 +141,24 @@ async fn bound_directory_refusal_recovers_after_exact_persistence_reconciliation
     assert!(refusal.message.contains(&participant.session_id));
     assert!(refusal.message.contains("persistence reconciliation"));
     assert!(!refusal.message.contains("binding is stale"));
+    let held = get_mailbox_relay_wake_diagnostics(State(state.clone())).await.unwrap().0;
+    let records = held["federationDurability"]["records"].as_array().unwrap();
+    let refused = records.iter().rev().find(|row| row["kind"] == "refusal").unwrap();
+    let transition = records.iter().rev().find(|row| row["kind"] == "transition" && row["durable"] == false).unwrap();
+    assert_eq!(refused["status"], 409);
+    assert_eq!(refused["stage"], "central_authority_durability");
+    assert_eq!(refused["windowId"], transition["windowId"]);
     connection.execute_batch("DROP TRIGGER reject_directory_state;").unwrap();
     drop(connection);
     state.reconcile_federation_durability().unwrap();
     let recovered = list_federation_mailbox_directory(AxumPath(caller.clone()), State(state.clone()))
         .await.unwrap().0;
     assert!(recovered.participants.iter().any(|row| row.binding == participant.binding));
+    let recovered_diagnostic = state.inner.lock().unwrap().federation_durability_diagnostics.snapshot();
+    let finished = recovered_diagnostic["records"].as_array().unwrap().iter().rev()
+        .find(|row| row["kind"] == "transition").unwrap();
+    assert_eq!(finished["durable"], true);
+    assert_eq!(finished["windowId"], refused["windowId"]);
     assert_eq!(state.federation_mailbox_actor(&caller).unwrap().unwrap().binding, participant.binding);
     assert_eq!(state.server_instance_id, instance, "recovery must use the same running host");
     assert!(state.inner.lock().unwrap().federation.placements.is_empty());

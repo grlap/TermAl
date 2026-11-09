@@ -59,6 +59,8 @@ struct FederationSecurityContext {
     outgoing_rpc_ready: AtomicBool,
     // Diagnostic facts stay with this exact context, including after replacement.
     installed_at: std::sync::OnceLock<std::time::Instant>,
+    diagnostic_basis: std::sync::OnceLock<(u64, u64)>,
+    diagnostic_attempt_basis: std::sync::OnceLock<(u64, u64)>,
     terminal_logged: AtomicBool,
     last_control_sequence: std::sync::atomic::AtomicU64,
     retired: tokio::sync::watch::Sender<bool>,
@@ -102,6 +104,8 @@ impl FederationSecurityContext {
             watchdog_started: AtomicBool::new(false),
             outgoing_rpc_ready: AtomicBool::new(false),
             installed_at: std::sync::OnceLock::new(),
+            diagnostic_basis: std::sync::OnceLock::new(),
+            diagnostic_attempt_basis: std::sync::OnceLock::new(),
             terminal_logged: AtomicBool::new(false),
             last_control_sequence: std::sync::atomic::AtomicU64::new(0),
             retired: tokio::sync::watch::channel(false).0,

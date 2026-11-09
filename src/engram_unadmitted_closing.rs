@@ -1,6 +1,9 @@
-// Read-only closing capture for observation reporting. Call on the observation
+// Closing capture for observation reporting. Call on the observation
 // worker after retaining the trace and previous checkpoint endpoint under the
-// turn-result lock. No reconcile/admission/hold method is called here.
+// turn-result lock. A focus mismatch refuses this report and may refresh only
+// a future opening through the existing canonical authority owner.
+
+include!("engram_unadmitted_focus.rs");
 
 /// The test build's diagnostic line for one closing-capture attempt: the
 /// attempt number, the capture budget, the time its source measurement took,
@@ -103,10 +106,22 @@ impl AppState {
             ));
         };
         if job.scope.binding.as_ref() != Some(&binding) {
-            return Err(runtime_observation_scope_changed(
-                &job.scope,
-                &format!("canonical claim {} / {}", binding.work_id, binding.claim_id),
-            ));
+            if job.scope.binding.as_ref().is_some_and(|previous| previous.work_id != binding.work_id) {
+                let refreshed = match self.refresh_runtime_observation_focus(
+                    session_id, job, &target, &binding, deadline,
+                ) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        eprintln!("engram> prospective observation focus refresh refused: {}", error.message);
+                        false
+                    }
+                };
+                return Ok(EngramRuntimeClosingOutcome::FocusChanged { binding, refreshed });
+            }
+            // A new revision, fence or run of the same work is not a focus
+            // move and keeps its existing refusal/recovery requirements.
+            return Err(runtime_observation_scope_changed(&job.scope,
+                &format!("canonical claim {} / {}", binding.work_id, binding.claim_id)));
         }
         let root = target
             .adapter

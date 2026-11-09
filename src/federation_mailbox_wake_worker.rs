@@ -37,7 +37,7 @@ impl FederationMailboxWakeWorker {
         }
         {
             let inner = app.inner.lock().expect("state mutex poisoned");
-            if federation_mailbox_central_locked(&inner).is_err() {
+            if federation_mailbox_central_checked(&inner, false).is_err() {
                 return;
             }
         }
@@ -71,7 +71,7 @@ impl AppState {
     fn run_native_mailbox_wake_batch(&self, after: i64) -> (i64, bool) {
         let central = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            match federation_mailbox_central_locked(&inner) {
+            match federation_mailbox_central_checked(&inner, false) {
                 Ok(central) => central,
                 Err(_) => return (after, false),
             }

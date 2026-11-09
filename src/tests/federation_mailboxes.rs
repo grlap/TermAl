@@ -108,23 +108,20 @@ async fn opposite_first_sends_and_creation_use_one_mailbox_and_one_pair_of_membe
     let state = central_store();
     let (a, pa) = local_participant(&state, "A");
     let (b, pb) = local_participant(&state, "B");
-    let barrier = Arc::new(std::sync::Barrier::new(3));
-    let mut threads = Vec::new();
-    for (caller, target, key) in [
-        (a.clone(), pb.session_id.clone(), "a"),
-        (b.clone(), pa.session_id.clone(), "b"),
-    ] {
-        let app = state.clone();
-        let barrier = barrier.clone();
-        threads.push(std::thread::spawn(move || {
+    let mut responses = phase_sync::run_concurrently(
+        [
+            (a.clone(), pb.session_id.clone(), "a"),
+            (b.clone(), pa.session_id.clone(), "b"),
+        ]
+        .into_iter()
+        .map(|(caller, target, key)| {
+            let app = state.clone();
             let req = request(&app, &caller, send(&target, key));
-            barrier.wait();
-            app.execute_federation_mailbox(req, None).unwrap().value
-        }));
-    }
-    barrier.wait();
-    let first = threads.remove(0).join().unwrap();
-    let second = threads.remove(0).join().unwrap();
+            move || app.execute_federation_mailbox(req, None).unwrap().value
+        }),
+    );
+    let first = responses.remove(0);
+    let second = responses.remove(0);
     assert_eq!(first["mailboxId"], second["mailboxId"]);
     let conn = state.mailbox_store.connection().unwrap();
     assert_eq!(
@@ -161,7 +158,8 @@ async fn opposite_first_sends_and_creation_use_one_mailbox_and_one_pair_of_membe
     assert_eq!(mailbox.latest_sequence, 2);
     let notifications = state.clone();
     tokio::task::spawn_blocking(move || notifications.run_native_mailbox_wake_batch(0))
-        .await.unwrap();
+        .await
+        .unwrap();
     let inner = state.inner.lock().unwrap();
     assert_eq!(
         inner.sessions[inner.find_session_index(&a).unwrap()]

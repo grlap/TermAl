@@ -17,18 +17,20 @@ pub(super) fn set_gate(gate: &(Mutex<bool>, Condvar), value: bool) {
 /// Opens a fixture's one-shot start gate on normal release or assertion unwind.
 /// Keep this owner inside the driving `thread::scope` closure so it drops
 /// before the scope joins workers waiting on the cloned gate.
-pub(super) struct ReleaseGateOnDrop(Arc<(Mutex<bool>, Condvar)>);
+/// For a worker's arrival signal, move the owner into that worker instead:
+/// returning early or panicking then also releases its waiting peer.
+pub(crate) struct ReleaseGateOnDrop(Arc<(Mutex<bool>, Condvar)>);
 
 impl ReleaseGateOnDrop {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(Arc::new((Mutex::new(false), Condvar::new())))
     }
 
-    pub(super) fn gate(&self) -> Arc<(Mutex<bool>, Condvar)> {
+    pub(crate) fn gate(&self) -> Arc<(Mutex<bool>, Condvar)> {
         self.0.clone()
     }
 
-    pub(super) fn release(&self) {
+    pub(crate) fn release(&self) {
         set_gate(&self.0, true);
     }
 }
@@ -37,6 +39,108 @@ impl Drop for ReleaseGateOnDrop {
     fn drop(&mut self) {
         self.release();
     }
+}
+
+/// Starts every job at the same boundary and joins every started worker, even
+/// if constructing a later job panics. Prepare fallible inputs in the iterator,
+/// before returning a job: a failed preparation must not strand a rendezvous.
+pub(crate) fn run_concurrently<F, T>(jobs: impl IntoIterator<Item = F>) -> Vec<T>
+where
+    F: FnOnce() -> T + Send,
+    T: Send,
+{
+    std::thread::scope(|scope| {
+        let release = ReleaseGateOnDrop::new();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let mut workers = Vec::new();
+        for job in jobs {
+            let gate = release.gate();
+            let ready = ready_tx.clone();
+            workers.push(scope.spawn(move || {
+                let _ = ready.send(());
+                wait_for_gate(&gate, true);
+                job()
+            }));
+        }
+        drop(ready_tx);
+        for _ in &workers {
+            receive(&ready_rx, "concurrent fixture worker ready");
+        }
+        release.release();
+        workers
+            .into_iter()
+            .map(|worker| match worker.join() {
+                Ok(value) => value,
+                Err(panic) => std::panic::resume_unwind(panic),
+            })
+            .collect()
+    })
+}
+
+#[test]
+fn concurrent_fixture_joins_started_jobs_when_later_preparation_panics() {
+    let finished = std::sync::atomic::AtomicUsize::new(0);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_concurrently((0..2).map(|index| {
+            assert_eq!(index, 0, "original preparation failure");
+            let finished = &finished;
+            move || {
+                finished.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+    }));
+    let panic = result.expect_err("preparing the second job must fail");
+    let message = panic.downcast_ref::<String>().unwrap();
+    assert!(message.contains("original preparation failure"));
+    assert_eq!(finished.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn concurrent_fixture_preserves_a_worker_panic_and_joins_its_sibling() {
+    let finished = std::sync::atomic::AtomicUsize::new(0);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_concurrently((0..2).map(|index| {
+            let finished = &finished;
+            move || {
+                if index == 0 {
+                    panic!("original worker failure");
+                }
+                finished.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+    }));
+    let panic = result.expect_err("the worker failure must propagate");
+    assert_eq!(
+        panic.downcast_ref::<&str>(),
+        Some(&"original worker failure")
+    );
+    assert_eq!(finished.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn failed_fixture_participant_releases_a_sibling_before_the_rendezvous() {
+    let (finished_tx, finished_rx) = mpsc::channel();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        std::thread::scope(|scope| {
+            let arrival = ReleaseGateOnDrop::new();
+            let gate = arrival.gate();
+            scope.spawn(move || {
+                wait_for_gate(&gate, true);
+                finished_tx.send(()).unwrap();
+            });
+            let failed = scope.spawn(move || {
+                let _arrival = arrival;
+                panic!("original participant failed before arrival");
+            });
+            std::panic::resume_unwind(failed.join().unwrap_err());
+        });
+    }));
+    let panic = result.expect_err("the participant's original failure must survive");
+    assert_eq!(
+        panic.downcast_ref::<&str>(),
+        Some(&"original participant failed before arrival")
+    );
+    receive(&finished_rx, "sibling released by the failed participant");
 }
 
 #[test]
@@ -110,7 +214,7 @@ const GATE_HANG_LIMIT: Duration = Duration::from_secs(600);
 
 /// Holds a worker until the flag reads `value`.
 #[track_caller]
-pub(super) fn wait_for_gate(gate: &(Mutex<bool>, Condvar), value: bool) {
+pub(crate) fn wait_for_gate(gate: &(Mutex<bool>, Condvar), value: bool) {
     wait_for_gate_within(gate, value, GATE_HANG_LIMIT);
 }
 
@@ -492,7 +596,7 @@ pub(super) fn receive<T>(receiver: &mpsc::Receiver<T>, phase: &str) -> T {
 
 /// Preserves channel-disconnect assertions at call sites that match a Result.
 #[track_caller]
-pub(super) fn receive_result<T>(
+pub(crate) fn receive_result<T>(
     receiver: &mpsc::Receiver<T>,
     phase: &str,
 ) -> Result<T, mpsc::RecvError> {

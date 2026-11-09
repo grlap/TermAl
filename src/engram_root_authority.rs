@@ -9,10 +9,36 @@ const ENGRAM_NAMING_HISTORY_EPOCH: u64 = 1;
 /// again when what it acts on is unchanged.
 const ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR: &str =
     "named-root acknowledgement belongs to a superseded authority image";
+const ENGRAM_AUTHORITY_RESPONSE_SUPERSEDED_ERROR: &str =
+    "named-root response belongs to a superseded work owner";
 
 /// How many times a naming prepares a fresh authority image after another
 /// owner superseded the previous one, within the naming's own budget.
 const ENGRAM_NAMING_SUPERSEDED_RETRIES: usize = 3;
+
+/// Local facts a naming read is allowed to confirm. Kept names capture these
+/// before dropping the state lock, so recovery cannot adopt a rival selection.
+struct EngramNamingReadContext {
+    selection: Option<EngramWorkSourceRoot>,
+    journal: Option<EngramNamedRootJournal>,
+}
+
+impl EngramNamingReadContext {
+    fn capture(
+        inner: &StateInner,
+        store: &EngramAuthorityStoreKey,
+        binding: &EngramControlWorkBinding,
+    ) -> Self {
+        Self {
+            selection: engram_work_source_root_for_work(
+                &inner.engram_work_source_roots, store, &binding.work_id,
+            ).cloned(),
+            journal: engram_root_journal(
+                &inner.engram_named_root_journal, store, &binding.claim_id,
+            ).cloned(),
+        }
+    }
+}
 
 /// How the host line telling a work's sessions that its retained naming
 /// history needs repair begins (`recover_engram_authority_runs`).
@@ -987,9 +1013,7 @@ impl AppState {
             .as_ref()
             .is_none_or(|current| current.id != owner.id || current.version != owner.version)
         {
-            return Err(ApiError::conflict(
-                "named-root response belongs to a superseded work owner",
-            ));
+            return Err(ApiError::conflict(ENGRAM_AUTHORITY_RESPONSE_SUPERSEDED_ERROR));
         }
         let binding = history
             .unresolved_runs
@@ -1901,37 +1925,134 @@ impl AppState {
         deadline: std::time::Instant,
         unchanged: impl Fn(&StateInner) -> bool,
     ) -> Result<EngramAuthorityTransition, ApiError> {
+        self.retry_engram_naming_supersession_until(
+            deadline, unchanged, "nothing was named",
+            || self.prepare_engram_authority_until(store, binding, deadline),
+        )
+    }
+
+    fn retry_engram_naming_supersession_until<T>(
+        &self,
+        deadline: std::time::Instant,
+        unchanged: impl Fn(&StateInner) -> bool,
+        progress: &str,
+        mut attempt: impl FnMut() -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
         let clock = self.engram_budget_clock();
         let mut retries = 0;
         loop {
-            let prepared = self.prepare_engram_authority_until(store, binding, deadline);
-            let error = match prepared {
-                Ok(owner) => return Ok(owner),
+            let error = match attempt() {
+                Ok(value) => return Ok(value),
                 Err(error) => error,
             };
             if error.status != StatusCode::CONFLICT
-                || error.message != ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR
+                || !matches!(error.message.as_str(),
+                    ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR | ENGRAM_AUTHORITY_RESPONSE_SUPERSEDED_ERROR)
             {
                 return Err(error);
             }
+            let cause = error.message;
             if !unchanged(&self.inner.lock().expect("state mutex poisoned")) {
                 return Err(ApiError::conflict(format!(
-                    "{ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR}, and this naming's claim or work \
+                    "{cause}, and this naming's claim or work \
                      binding changed while it waited, so retrying the same request cannot help: \
-                     nothing was named; read the claim again and name the root under the \
+                     {progress}; read the claim again and name the root under the \
                      current claim"
                 )));
             }
             if retries >= ENGRAM_NAMING_SUPERSEDED_RETRIES || clock.now() >= deadline {
                 return Err(ApiError::conflict(format!(
-                    "{ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR} at each of {} attempts within this \
-                     naming's budget: nothing was named, and its claim and work binding are \
+                    "{cause} at each of {} attempts within this \
+                     naming's budget: {progress}, and its claim and work binding are \
                      unchanged, so the identical naming request can be retried",
                     retries + 1
                 )));
             }
             retries += 1;
         }
+    }
+
+    /// Naming alone may refresh a superseded local owner. Retain the exact
+    /// connection, runtime, binding, selection and journal, re-read the same
+    /// canonical fact under a newly acknowledged owner, and keep the lock on
+    /// success so selection installation cannot race another owner again.
+    /// No producer transition is sent by this recovery.
+    fn learn_engram_naming_authority_until<'a>(
+        &'a self,
+        target: &EngramBindingTarget,
+        reader: &EngramBindingTarget,
+        owner: &EngramAuthorityTransition,
+        proof: &EngramNamedRootReadResponse,
+        captured: Option<EngramNamingReadContext>,
+        deadline: std::time::Instant,
+    ) -> Result<(StateMutexGuard<'a, StateInner>, EngramAuthorityTransition, EngramNamedRootReadResponse), ApiError> {
+        let store = target.settings.authority_store_key.as_ref()
+            .ok_or_else(|| ApiError::conflict("naming authority store disappeared"))?;
+        if reader.settings.authority_store_key.as_ref() != Some(store) {
+            return Err(ApiError::conflict("naming canonical reader belongs to another authority store"));
+        }
+        let binding = &owner.binding;
+        let live_binding = target.work_binding.as_ref()
+            .filter(|current| engram_same_recovery_run(binding, current))
+            .ok_or_else(|| ApiError::conflict(
+                "naming recovery requires its captured live association to name the original run",
+            ))?;
+        let EngramNamingReadContext { selection, journal } = captured.unwrap_or_else(|| {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            EngramNamingReadContext::capture(&inner, store, binding)
+        });
+        let unchanged = |inner: &StateInner| {
+            Self::engram_source_root_target_locked(inner, &target.connection.session_id)
+                .ok().flatten().is_some_and(|current| {
+                    current.connection == target.connection
+                        && current.settings.same_work_service_settings(&target.settings)
+                        && current.work_binding.as_ref() == Some(live_binding)
+                })
+                && inner.find_session_index(&target.connection.session_id).is_some_and(|index| {
+                    Self::engram_root_runtime_is_current(&inner.sessions[index], &target.runtime_snapshot)
+                })
+                // An immutable event can retain another live reporter. Its
+                // connection reads the original run, but its current work
+                // association does not own the caller's naming request.
+                && Self::engram_source_root_target_locked(inner, &reader.connection.session_id)
+                    .ok().flatten().is_some_and(|current| {
+                        current.connection == reader.connection
+                            && current.settings.same_work_service_settings(&reader.settings)
+                    })
+                && inner.find_session_index(&reader.connection.session_id).is_some_and(|index| {
+                    Self::engram_root_runtime_is_current(&inner.sessions[index], &reader.runtime_snapshot)
+                })
+                && engram_work_source_root_for_work(&inner.engram_work_source_roots, store, &binding.work_id) == selection.as_ref()
+                && engram_root_journal(&inner.engram_named_root_journal, store, &binding.claim_id) == journal.as_ref()
+        };
+        let mut first = true;
+        self.retry_engram_naming_supersession_until(
+            deadline, &unchanged, "the exact transition or local selection may already be retained",
+            || {
+                let (owner, current_proof) = if first {
+                    first = false;
+                    (owner.clone(), proof.clone())
+                } else {
+                    if !unchanged(&self.inner.lock().expect("state mutex poisoned")) {
+                        return Err(ApiError::conflict("naming authority changed before canonical recovery; the retained transition needs reconciliation"));
+                    }
+                    let owner = self.prepare_engram_authority_until(store, binding, deadline)?;
+                    let current = self.read_engram_authority_fact_until(reader, binding, deadline)?;
+                    if current != *proof {
+                        return Err(ApiError::conflict("naming canonical proof changed during owner recovery; the retained transition needs reconciliation"));
+                    }
+                    (owner, current)
+                };
+                #[cfg(test)]
+                self.test_engram_authority_ack_boundary("before_naming_learning_lock");
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                if !unchanged(&inner) {
+                    return Err(ApiError::conflict("naming authority changed during canonical recovery; the retained transition needs reconciliation"));
+                }
+                Self::learn_engram_authority_locked(&mut inner, store, &owner, &current_proof)?;
+                Ok((inner, owner, current_proof))
+            },
+        )
     }
 
     fn recover_engram_authority_candidate_until(

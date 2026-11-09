@@ -141,11 +141,9 @@ fn ordered_publication_interleaved_commits_keep_revision_and_body_sequence_order
     let first_sequence = body_sequence_of(&state, &session) + 1;
     // Two producers commit body changes to the one local session, one delta
     // per commit, while a third makes metadata-only commits between them.
-    let start = Arc::new(std::sync::Barrier::new(3));
-    let text_producer = {
-        let (state, session, start) = (state.clone(), session.clone(), start.clone());
-        std::thread::spawn(move || {
-            start.wait();
+    let text_producer: Box<dyn FnOnce() + Send> = {
+        let (state, session) = (state.clone(), session.clone());
+        Box::new(move || {
             for _ in 0..30 {
                 state
                     .append_text_delta(&session, "streamed-body", "x")
@@ -153,10 +151,9 @@ fn ordered_publication_interleaved_commits_keep_revision_and_body_sequence_order
             }
         })
     };
-    let message_producer = {
-        let (state, session, start) = (state.clone(), session.clone(), start.clone());
-        std::thread::spawn(move || {
-            start.wait();
+    let message_producer: Box<dyn FnOnce() + Send> = {
+        let (state, session) = (state.clone(), session.clone());
+        Box::new(move || {
             for index in 0..30 {
                 state
                     .push_message(
@@ -175,10 +172,9 @@ fn ordered_publication_interleaved_commits_keep_revision_and_body_sequence_order
             }
         })
     };
-    let metadata_producer = {
-        let (state, session, start) = (state.clone(), session.clone(), start.clone());
-        std::thread::spawn(move || {
-            start.wait();
+    let metadata_producer: Box<dyn FnOnce() + Send> = {
+        let (state, session) = (state.clone(), session.clone());
+        Box::new(move || {
             for index in 0..30 {
                 let mut inner = state.inner.lock().unwrap();
                 let at = inner.find_session_index(&session).unwrap();
@@ -187,9 +183,7 @@ fn ordered_publication_interleaved_commits_keep_revision_and_body_sequence_order
             }
         })
     };
-    for producer in [text_producer, message_producer, metadata_producer] {
-        producer.join().unwrap();
-    }
+    phase_sync::run_concurrently([text_producer, message_producer, metadata_producer]);
 
     let pending = mailbox.take_pending_for_test();
     assert!(
@@ -223,9 +217,10 @@ fn ordered_publication_interleaved_commits_keep_revision_and_body_sequence_order
         "body sequences increase by one in mailbox order; metadata commits take none"
     );
     assert!(
-        pending
-            .iter()
-            .any(|work| matches!(work, StateBroadcastWork::Snapshot(_) | StateBroadcastWork::ImmutableSnapshot(_))),
+        pending.iter().any(|work| matches!(
+            work,
+            StateBroadcastWork::Snapshot(_) | StateBroadcastWork::ImmutableSnapshot(_)
+        )),
         "the metadata commits were published"
     );
 

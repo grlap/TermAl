@@ -83,7 +83,7 @@ impl AppState {
                 .mailbox_directory
                 .insert(participant.session_id.clone(), participant.clone());
             inner.federation.version = federation_next_generation(inner.federation.version)?;
-            inner.federation_durable = false;
+            inner.set_federation_durable(false, "local_binding_install");
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
             let dispatch = self
                 .persist_internal_locked_with_dispatch(&inner)
@@ -207,7 +207,7 @@ impl AppState {
                 root.federation_automatic_mailbox_binding = None;
             }
             inner.federation.version = version;
-            inner.federation_durable = false;
+            inner.set_federation_durable(false, "native_binding_install");
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
             let dispatch = if lease.is_some() {
                 self.queue_federation_entrypoint_persistence()?

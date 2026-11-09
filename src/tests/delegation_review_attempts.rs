@@ -1114,15 +1114,14 @@ fn independent_store_connections_initialize_one_key_and_old_open_preserves_opaqu
     let path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
     let a = MailboxStore::open(&path).unwrap();
     let b = MailboxStore::open(&path).unwrap();
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    let barrier_a = barrier.clone();
-    let handle = std::thread::spawn(move || {
-        barrier_a.wait();
-        a.review_attempt_auth_key(true).unwrap().unwrap()
-    });
-    barrier.wait();
-    let key_b = b.review_attempt_auth_key(true).unwrap().unwrap();
-    let key_a = handle.join().unwrap();
+    let mut keys = phase_sync::run_concurrently(
+        [&a, &b]
+            .into_iter()
+            .map(|store| move || store.review_attempt_auth_key(true).unwrap().unwrap()),
+    );
+    drop(a);
+    let key_a = keys.remove(0);
+    let key_b = keys.remove(0);
     assert!(key_a.as_str() == key_b.as_str());
     let first = state
         .retain_review_attempt(&parent, &delegation, 1)
@@ -1222,21 +1221,13 @@ fn a_legal_large_producer_envelope_cannot_be_silently_reduced_to_fit_retention()
 #[test]
 fn concurrent_retention_retries_publish_one_identical_snapshot_without_dispatch_deadlock() {
     let (state, parent, delegation, _) = terminal_review("Concurrent immutable prose.");
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    let worker = state.clone();
-    let p = parent.clone();
-    let d = delegation.clone();
-    let start = barrier.clone();
-    let handle = std::thread::spawn(move || {
-        start.wait();
-        worker.retain_review_attempt(&p, &d, 1).unwrap().1
-    });
-    barrier.wait();
-    let id = state
-        .retain_review_attempt(&parent, &delegation, 1)
-        .unwrap()
-        .1;
-    assert_eq!(handle.join().unwrap(), id);
+    let ids = phase_sync::run_concurrently((0..2).map(|_| {
+        let worker = state.clone();
+        let p = parent.clone();
+        let d = delegation.clone();
+        move || worker.retain_review_attempt(&p, &d, 1).unwrap().1
+    }));
+    assert_eq!(ids[0], ids[1]);
     let count: u64 = state
         .mailbox_store
         .connection()

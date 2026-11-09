@@ -292,40 +292,50 @@ fn concurrent_peer_arrival_during_drain_is_not_lost_or_duplicated() {
             .status = SessionStatus::Idle;
     }
 
-    let start = std::sync::Arc::new(std::sync::Barrier::new(3));
-    let drain_state = state.clone();
-    let drain_target = target_id.clone();
-    let drain_start = start.clone();
-    let drain = std::thread::spawn(move || {
-        drain_start.wait();
-        drain_state.dispatch_next_queued_turn(&drain_target, false)
-    });
-    let arrival_state = state.clone();
-    let arrival_target = target_id.clone();
-    let arrival_start = start.clone();
-    let arrival = std::thread::spawn(move || {
-        arrival_start.wait();
-        arrival_state.dispatch_turn(
-            &arrival_target,
-            SendMessageRequest {
-                text: "peer arriving during drain".to_owned(),
-                expanded_text: None,
-                attachments: Vec::new(),
-                source_session_id: Some(sender),
-                source_mailbox: None,
-            },
-        )
-    });
-    start.wait();
+    let (drained, arrival_result) = std::thread::scope(|scope| {
+        let release = phase_sync::ReleaseGateOnDrop::new();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let drain_state = state.clone();
+        let drain_target = target_id.clone();
+        let drain_start = release.gate();
+        let drain_ready = ready_tx.clone();
+        let drain = scope.spawn(move || {
+            let _ = drain_ready.send(());
+            phase_sync::wait_for_gate(&drain_start, true);
+            drain_state.dispatch_next_queued_turn(&drain_target, false)
+        });
+        let arrival_state = state.clone();
+        let arrival_target = target_id.clone();
+        let arrival_start = release.gate();
+        let arrival = scope.spawn(move || {
+            let _ = ready_tx.send(());
+            phase_sync::wait_for_gate(&arrival_start, true);
+            arrival_state.dispatch_turn(
+                &arrival_target,
+                SendMessageRequest {
+                    text: "peer arriving during drain".to_owned(),
+                    expanded_text: None,
+                    attachments: Vec::new(),
+                    source_session_id: Some(sender),
+                    source_mailbox: None,
+                },
+            )
+        });
+        for _ in 0..2 {
+            phase_sync::receive(&ready_rx, "peer drain contender ready");
+        }
+        release.release();
 
-    let drained = drain
-        .join()
-        .expect("drain thread should not panic")
-        .expect("drain should not fail");
-    let arrival_result = arrival
-        .join()
-        .expect("arrival thread should not panic")
-        .expect("arrival should not fail");
+        let drained = drain
+            .join()
+            .expect("drain thread should not panic")
+            .expect("drain should not fail");
+        let arrival_result = arrival
+            .join()
+            .expect("arrival thread should not panic")
+            .expect("arrival should not fail");
+        (drained, arrival_result)
+    });
     let dispatch_count = usize::from(drained.is_some())
         + usize::from(matches!(
             arrival_result,

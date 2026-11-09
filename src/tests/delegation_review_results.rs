@@ -793,22 +793,18 @@ fn concurrent_different_review_submissions_promote_the_mailbox_winner() {
         .validate_delegation_review_submission(&child_session_id, different_request)
         .expect("second submission should validate against the same attempt");
 
-    let barrier = Arc::new(std::sync::Barrier::new(3));
-    let mut handles = Vec::new();
-    for submission in [first_submission, second_submission] {
-        let state = state.clone();
-        let barrier = barrier.clone();
-        handles.push(std::thread::spawn(move || {
-            barrier.wait();
-            state.persist_validated_delegation_review_submission(&submission)
-        }));
-    }
-    barrier.wait();
+    let results =
+        phase_sync::run_concurrently([first_submission, second_submission].into_iter().map(
+            |submission| {
+                let state = state.clone();
+                move || state.persist_validated_delegation_review_submission(&submission)
+            },
+        ));
 
     let mut accepted = None;
     let mut rejected = None;
-    for handle in handles {
-        match handle.join().expect("submission thread should join") {
+    for result in results {
+        match result {
             Ok(receipt) => {
                 assert!(accepted.replace(receipt).is_none(), "only one payload wins");
             }

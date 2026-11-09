@@ -855,36 +855,40 @@ fn native_windows_launch_does_not_inherit_unrelated_handle() {
 fn native_windows_launch_serializes_stdio_with_a_concurrent_standard_child() {
     let directory = scratch();
     let marker = directory.join("legacy-ready.json");
-    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-    let legacy_barrier = barrier.clone();
-    let legacy_marker = marker.clone();
-    let (attempt_tx, attempt_rx) = std::sync::mpsc::channel();
-    let legacy = std::thread::spawn(move || {
-        legacy_barrier.wait();
-        assert!(crate::host_command::inheritance_is_locked());
-        attempt_tx.send(()).unwrap();
-        let mut command = crate::Command::new("node.exe");
-        command
-            .arg(fixture())
-            .arg("hold")
-            .arg(legacy_marker)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        command.spawn().unwrap()
+    let (launch, mut legacy, legacy_identity) = std::thread::scope(|scope| {
+        let release = crate::tests::phase_sync::ReleaseGateOnDrop::new();
+        let legacy_gate = release.gate();
+        let legacy_marker = marker.clone();
+        let (attempt_tx, attempt_rx) = std::sync::mpsc::channel();
+        let legacy = scope.spawn(move || {
+            crate::tests::phase_sync::wait_for_gate(&legacy_gate, true);
+            assert!(crate::host_command::inheritance_is_locked());
+            attempt_tx.send(()).unwrap();
+            let mut command = crate::Command::new("node.exe");
+            command
+                .arg(fixture())
+                .arg("hold")
+                .arg(legacy_marker)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            let child = command.spawn().unwrap();
+            let identity = Identity::capture(child.id(), creation(child.as_raw_handle()));
+            (child, identity)
+        });
+        let launch = prepare_with_hook(&node_spec("parity"), false, false, |handles| {
+            for &handle in handles {
+                let mut flags = 0;
+                assert_ne!(unsafe { GetHandleInformation(handle, &mut flags) }, 0);
+                assert_ne!(flags & HANDLE_FLAG_INHERIT, 0);
+            }
+            release.release();
+            attempt_rx.recv_timeout(GUARD).unwrap();
+        })
+        .unwrap();
+        let (legacy, legacy_identity) = legacy.join().unwrap();
+        (launch, legacy, legacy_identity)
     });
-    let launch = prepare_with_hook(&node_spec("parity"), false, false, |handles| {
-        for &handle in handles {
-            let mut flags = 0;
-            assert_ne!(unsafe { GetHandleInformation(handle, &mut flags) }, 0);
-            assert_ne!(flags & HANDLE_FLAG_INHERIT, 0);
-        }
-        barrier.wait();
-        attempt_rx.recv_timeout(GUARD).unwrap();
-    })
-    .unwrap();
-    let mut legacy = legacy.join().unwrap();
-    let legacy_identity = Identity::capture(legacy.id(), creation(legacy.as_raw_handle()));
     let process = launch.process();
     ready(&marker, &process);
     let mut stdout = process.take_stdout().unwrap();

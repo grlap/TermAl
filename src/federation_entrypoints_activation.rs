@@ -37,7 +37,7 @@ async fn activate_federation_satellite_route(
                     .validate()
                     .map_err(|_| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
                 inner.federation = candidate;
-                inner.federation_durable = false;
+                inner.set_federation_durable(false, "peer_activation");
                 let image = federation_persist_image(&PersistedState::metadata_from_inner(inner));
                 let dispatch = app.queue_federation_entrypoint_persistence()?;
                 Ok((activated, Some((image, dispatch))))

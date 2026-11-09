@@ -197,7 +197,7 @@ async fn federation_supervise(
                 // never refresh from the stale enumeration or adopt a config.
                 !channel
                     .as_ref()
-                    .is_some_and(|channel| channel.current_authority().is_ok())
+                    .is_some_and(|channel| channel.current_authority_checked(false).is_ok())
             })
             .map(|(id, _)| id.clone())
             .collect();

@@ -5,6 +5,14 @@
 fn federation_mailbox_central_locked(
     inner: &StateInner,
 ) -> Result<FederationHostIdentity, ApiError> {
+    federation_mailbox_central_checked(inner, true)
+}
+
+fn federation_mailbox_central_checked(
+    inner: &StateInner, record_refusal: bool,
+) -> Result<FederationHostIdentity, ApiError> {
+    // Idle worker gates and per-row predicates opt out: they have no refused
+    // operation and must not rotate actual refusals out of the bounded history.
     let mut kind = None;
     let unavailable = if !inner.preferences.federation.enabled {
         Some("central mailbox domain is disabled")
@@ -25,6 +33,12 @@ fn federation_mailbox_central_locked(
         None
     };
     if let Some(reason) = unavailable {
+        if record_refusal {
+            inner.federation_durability_diagnostics.refusal(inner.federation_durable,
+                if kind == Some(ApiErrorKind::FederationMailboxCentralDurability) {
+                    "central_authority_durability"
+                } else { "central_authority_check" }, 409);
+        }
         let mut error = ApiError::conflict(format!("{FEDERATION_STALE_AUTHORITY}: {reason}"));
         error.kind = kind;
         return Err(error);
@@ -52,7 +66,8 @@ impl AppState {
             .map(|host| format!("{} generation {}", host.host_id, host.host_generation))
             .unwrap_or_else(|| "none".into());
         let observed = if inner.preferences.federation.role == FederationRole::Central {
-            match federation_mailbox_central_locked(&inner) {
+            // This is later diagnostic context, not another refused operation.
+            match federation_mailbox_central_checked(&inner, false) {
                 Ok(_) => "central mailbox authority is currently available".to_owned(),
                 Err(current) => format!("current central condition: {}", current.message),
             }
@@ -107,7 +122,7 @@ fn federation_mailbox_participant_current_locked(
     inner: &StateInner,
     participant: &FederationMailboxParticipant,
 ) -> bool {
-    if !federation_mailbox_central_locked(inner)
+    if !federation_mailbox_central_checked(inner, false)
         .is_ok_and(|central| central == participant.binding.central)
     {
         return false;

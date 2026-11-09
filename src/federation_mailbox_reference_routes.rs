@@ -100,7 +100,7 @@ async fn provision_federation_mailbox_reference(
             }
             inner.federation.mailbox_references.insert(row.id.clone(), row.clone());
             inner.federation.version = row.generation;
-            inner.federation_durable = false;
+            inner.set_federation_durable(false, "reference_insert");
             let image = federation_persist_image(&PersistedState::metadata_from_inner(inner));
             let dispatch = reference_publication_observe!("route.persist_dispatch", state.persist_internal_locked_with_dispatch(inner))
                 .map_err(|_| ApiError::internal("reference persistence failed; publication remains held"))?;

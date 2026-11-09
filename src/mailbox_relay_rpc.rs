@@ -118,13 +118,17 @@ impl AppState {
     }
 
     fn native_mailbox_relay_home(&self) -> Result<MailboxRelayHome, ApiError> {
+        self.native_mailbox_relay_home_checked(true)
+    }
+
+    fn native_mailbox_relay_home_checked(&self, record_refusal: bool) -> Result<MailboxRelayHome, ApiError> {
         let store_id = {
             let connection = self.mailbox_store.connection().map_err(mailbox_api_error)?;
             mailbox_relay_store_id(&connection).map_err(mailbox_api_error)?
         };
         let inner = self.inner.lock().expect("state mutex poisoned");
         Ok(MailboxRelayHome {
-            host: federation_mailbox_central_locked(&inner)?,
+            host: federation_mailbox_central_checked(&inner, record_refusal)?,
             store_id,
         })
     }

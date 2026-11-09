@@ -1529,7 +1529,7 @@ impl AppState {
             (target, event)
         };
         let (target, event) = prepared;
-        let Ok(reply) = self.send_engram_root_event_until(&target, &event, deadline) else {
+        let Ok(reply) = self.send_engram_root_event_until(&target, &event, deadline, false) else {
             return;
         };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1659,7 +1659,7 @@ impl AppState {
         budget: Duration,
     ) -> Result<EngramRootEventReply, ApiError> {
         let clock = self.engram_budget_clock();
-        self.send_engram_root_event_until(target, event, clock.now() + budget)
+        self.send_engram_root_event_until(target, event, clock.now() + budget, true)
     }
 
     /// Prepare the authority image for sending `event`. Nothing has been sent
@@ -1696,6 +1696,7 @@ impl AppState {
         target: &EngramBindingTarget,
         event: &EngramNamedRootEvent,
         deadline: std::time::Instant,
+        live_naming: bool,
     ) -> Result<EngramRootEventReply, ApiError> {
         let clock = self.engram_budget_clock();
         let binding = {
@@ -1711,6 +1712,7 @@ impl AppState {
             })?
         };
         let owner = self.prepare_engram_root_event_authority_until(event, &binding, deadline)?;
+        let naming_target = target;
         let original_reporter;
         let target = if target.connection.session_id == event.reporter {
             target
@@ -1845,10 +1847,19 @@ impl AppState {
                 ));
             }
         }
-        {
+        let (owner, proof) = if live_naming {
+            let (inner, owner, proof) =
+                self.learn_engram_naming_authority_until(naming_target, target, &owner, &proof, None, deadline)?;
+            drop(inner);
+            (owner, proof)
+        } else {
+            // The test-only historical cleanup driver retains strict owner learning.
+            // Live naming may hold a newer fence/revision of the same run;
+            // its captured association is checked by naming's recovery helper.
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             Self::learn_engram_authority_locked(&mut inner, &event.root.store, &owner, &proof)?;
-        }
+            (owner, proof)
+        };
         let active = match event.kind {
             EngramNamedRootKind::Bound => {
                 engram_root_event_matches_state(event, Some(&proof.named_root))

@@ -1,6 +1,9 @@
 //! Selection-loss notices follow actual ordinary provider delivery and naming ACKs.
 use super::*;
 
+#[path = "engram_source_root_focus.rs"]
+mod focused;
+
 const SELECTION_WARNING: &str = "Engram no longer confirms this claim's local source-root selection";
 
 #[test]

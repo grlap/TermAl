@@ -5595,35 +5595,51 @@ fn acceptance_requests_racing_for_one_task_spawn_exactly_one_evaluator() {
     super::delegation_support::install_delegation_codex_runtime(&state, "acceptance-race-runtime");
     let peer = create_test_project_session(&state, Agent::Codex, &project, &root);
     // Both requests finish every tracker read before either may spawn.
-    let barrier = Arc::new(std::sync::Barrier::new(2));
     let outcomes = std::thread::scope(|scope| {
-        let racers = [parent.clone(), peer].map(|requester| {
-            let (state, barrier) = (state.clone(), barrier.clone());
-            scope.spawn(move || {
-                let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
-                    if args.iter().any(|arg| arg == "inspect") {
-                        Ok(evidence_selection::canonical_core_receipt())
-                    } else if args.first().map(String::as_str) == Some("control-policy") {
-                        barrier.wait();
-                        Ok(policy_receipt(Some(&["independent_session"])))
-                    } else if args.iter().any(|arg| arg == "held") {
-                        Ok(json!({"items": [], "omitted": 0}))
-                    } else if args.iter().any(|arg| arg == "--full") {
-                        Ok(full_receipt())
-                    } else {
-                        Ok(show_receipt(None))
-                    }
-                };
-                state
-                    .request_acceptance_evaluation_with_runner(
-                        &requester,
-                        evaluation_request(Some(Agent::Codex)),
-                        reader,
-                    )
-                    .map(|_| ())
+        let arrivals = [
+            phase_sync::ReleaseGateOnDrop::new(),
+            phase_sync::ReleaseGateOnDrop::new(),
+        ];
+        let peers = [arrivals[1].gate(), arrivals[0].gate()];
+        let racers = [parent.clone(), peer]
+            .into_iter()
+            .zip(arrivals)
+            .zip(peers)
+            .map(|((requester, arrival), peer_gate)| {
+                let state = state.clone();
+                scope.spawn(move || {
+                    let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
+                        if args.iter().any(|arg| arg == "inspect") {
+                            Ok(evidence_selection::canonical_core_receipt())
+                        } else if args.first().map(String::as_str) == Some("control-policy") {
+                            arrival.release();
+                            phase_sync::wait_for_gate(&peer_gate, true);
+                            Ok(policy_receipt(Some(&["independent_session"])))
+                        } else if args.iter().any(|arg| arg == "held") {
+                            Ok(json!({"items": [], "omitted": 0}))
+                        } else if args.iter().any(|arg| arg == "--full") {
+                            Ok(full_receipt())
+                        } else {
+                            Ok(show_receipt(None))
+                        }
+                    };
+                    state
+                        .request_acceptance_evaluation_with_runner(
+                            &requester,
+                            evaluation_request(Some(Agent::Codex)),
+                            reader,
+                        )
+                        .map(|_| ())
+                })
             })
-        });
-        racers.map(|racer| racer.join().expect("a request thread panicked"))
+            .collect::<Vec<_>>();
+        racers
+            .into_iter()
+            .map(|racer| match racer.join() {
+                Ok(value) => value,
+                Err(panic) => std::panic::resume_unwind(panic),
+            })
+            .collect::<Vec<_>>()
     });
     let refusals = outcomes
         .iter()
@@ -5792,16 +5808,20 @@ fn acceptance_creation_racing_a_followup_leaves_exactly_one_active_evaluator() {
         finished_evaluator_fixture("acceptance-followup-race-runtime");
     // The request has finished every tracker read, and the follow-up has not
     // begun, when both are released towards their locked admissions.
-    let barrier = Arc::new(std::sync::Barrier::new(2));
     let (created, followed) = std::thread::scope(|scope| {
+        let creation_arrived = phase_sync::ReleaseGateOnDrop::new();
+        let followup_arrived = phase_sync::ReleaseGateOnDrop::new();
+        let creation_gate = creation_arrived.gate();
+        let followup_gate = followup_arrived.gate();
         let creation = {
-            let (state, parent, barrier) = (state.clone(), parent.clone(), barrier.clone());
+            let (state, parent) = (state.clone(), parent.clone());
             scope.spawn(move || {
                 let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
                     if args.iter().any(|arg| arg == "inspect") {
                         Ok(evidence_selection::canonical_core_receipt())
                     } else if args.first().map(String::as_str) == Some("control-policy") {
-                        barrier.wait();
+                        creation_arrived.release();
+                        phase_sync::wait_for_gate(&followup_gate, true);
                         Ok(policy_receipt(Some(&["independent_session"])))
                     } else if args.iter().any(|arg| arg == "held") {
                         Ok(json!({"items": [], "omitted": 0}))
@@ -5821,14 +5841,10 @@ fn acceptance_creation_racing_a_followup_leaves_exactly_one_active_evaluator() {
             })
         };
         let followup = {
-            let (state, parent, first, barrier) = (
-                state.clone(),
-                parent.clone(),
-                first.clone(),
-                barrier.clone(),
-            );
+            let (state, parent, first) = (state.clone(), parent.clone(), first.clone());
             scope.spawn(move || {
-                barrier.wait();
+                followup_arrived.release();
+                phase_sync::wait_for_gate(&creation_gate, true);
                 state
                     .followup_delegation(&parent, &first, "Look again.".to_owned())
                     .map(|_| ())

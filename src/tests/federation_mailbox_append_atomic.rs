@@ -135,24 +135,13 @@ fn federation_delivery_append_parallel_same_key_has_one_canonical_message_and_wa
     let state = federation_mailboxes::central_store();
     let (sender, _) = federation_mailboxes::local_participant(&state, "Sender");
     let (_, target) = federation_mailboxes::local_participant(&state, "Target");
-    let barrier = Arc::new(std::sync::Barrier::new(5));
-    let mut workers = Vec::new();
-    for _ in 0..4 {
+    let responses = phase_sync::run_concurrently((0..4).map(|_| {
         let app = state.clone();
         let sender = sender.clone();
         let target = target.session_id.clone();
-        let ready = barrier.clone();
-        workers.push(std::thread::spawn(move || {
-            let request = federation_mailboxes::request(&app, &sender, send(&target, "concurrent"));
-            ready.wait();
-            app.execute_federation_mailbox(request, None).unwrap().value
-        }));
-    }
-    barrier.wait();
-    let responses: Vec<_> = workers
-        .into_iter()
-        .map(|worker| worker.join().unwrap())
-        .collect();
+        let request = federation_mailboxes::request(&app, &sender, send(&target, "concurrent"));
+        move || app.execute_federation_mailbox(request, None).unwrap().value
+    }));
     assert!(
         responses
             .iter()

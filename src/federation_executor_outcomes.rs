@@ -349,7 +349,7 @@ impl AppState {
         let deadline = std::time::Instant::now() + FEDERATION_EXECUTOR_OUTCOME_PASS_BUDGET;
         let (central, hosts) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Ok(central) = federation_mailbox_central_locked(&inner) else { return; };
+            let Ok(central) = federation_mailbox_central_checked(&inner, false) else { return; };
             let hosts = inner.federation.placements.values()
                 .map(|placement| placement.identity.host_id.clone())
                 .filter(|host| *host != central.host_id)

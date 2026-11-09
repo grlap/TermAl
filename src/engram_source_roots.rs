@@ -2702,7 +2702,7 @@ impl AppState {
             }),
             _ => None,
         });
-        let transition = if let Some(event) = event {
+        let mut transition = if let Some(event) = event {
             if entry.is_some()
                 && old.is_none()
                 && engram_named_root_capacity(&inner) >= ENGRAM_WORK_SOURCE_ROOT_LIMIT
@@ -2780,6 +2780,27 @@ impl AppState {
         } else {
             None
         };
+        if let Some((event, reply)) = &mut transition {
+            drop(inner);
+            #[cfg(test)]
+            self.test_engram_authority_ack_boundary("before_naming_selection");
+            let (locked, owner, proof) = engram_source_root_control_within(
+                &clock, &mut control_left, left(), |budget| {
+                    self.learn_engram_naming_authority_until(
+                        &target, &target, &reply.owner, &reply.proof, None, (clock.now() + budget).min(deadline),
+                    )
+                },
+            )?;
+            inner = locked;
+            reply.owner = owner;
+            reply.proof = proof;
+            if engram_work_source_root_for_work(&inner.engram_work_source_roots, &store, &claim.work_id) != old.as_ref()
+                || engram_root_journal(&inner.engram_named_root_journal, &store, &claim.claim_id)
+                    .and_then(|journal| journal.pending.as_ref()) != Some(event)
+            {
+                return Err(ApiError::conflict("named-root selection changed before installation; the exact transition needs reconciliation"));
+            }
+        }
         let index = inner.find_session_index(session_id).ok_or_else(|| {
             ApiError::conflict("naming session disappeared; transition remains pending")
         })?;
@@ -2842,8 +2863,8 @@ impl AppState {
         // A new name given during a turn takes effect at the session's next
         // one (`acceptance_named_root_sighting.rs`). Marked with the turn
         // running as the selection is installed, in this same lock hold and
-        // before any later step that may fail or release the lock (authority
-        // learning, persistence, publication): a selection that stays
+        // before any later step that may fail or release the lock
+        // (persistence, publication): a selection that stays
         // installed always carries its mark, so a retry that keeps the name,
         // and so sends no transition, still finds it. A failed persistence
         // below restores the marks with the selection. A turn admitted later
@@ -2900,7 +2921,6 @@ impl AppState {
             journal.obsolete = false;
             journal.retirement = None;
             journal.pending = None;
-            Self::learn_engram_authority_locked(&mut inner, &store, &reply.owner, &reply.proof)?;
         }
         // The seal is for the caller's turn measured in the old root under
         // the old entry's claim, and is reported only when that turn took it.
@@ -2964,10 +2984,14 @@ impl AppState {
             .and_then(|history| history.transition.clone())
             .filter(|owner| owner.phase == EngramAuthorityPhase::Prepared)
         {
+            let captured = EngramNamingReadContext::capture(&inner, &store, &owner.binding);
             drop(inner);
+            #[cfg(test)]
+            self.test_engram_authority_ack_boundary("before_kept_naming_proof");
             let proof = self.read_engram_authority_fact_until(&target, &owner.binding, deadline)?;
-            inner = self.inner.lock().expect("state mutex poisoned");
-            Self::learn_engram_authority_locked(&mut inner, &store, &owner, &proof)?;
+            let (locked, owner, _) =
+                self.learn_engram_naming_authority_until(&target, &target, &owner, &proof, Some(captured), deadline)?;
+            inner = locked;
             drop(inner);
             self.publish_engram_authority_until(&store, &owner, deadline)?;
             inner = self.inner.lock().expect("state mutex poisoned");

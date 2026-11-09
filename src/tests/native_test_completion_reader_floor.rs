@@ -270,33 +270,61 @@ fn native_floor_concurrent_openers_commit_one_extension_and_keep_import_activati
     let path = temporary.path().join("state.sqlite");
     {
         let connection = rusqlite::Connection::open(&path).unwrap();
-        seed_source(&connection, SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR, false);
+        seed_source(
+            &connection,
+            SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR,
+            false,
+        );
     }
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    let threads = (0..2).map(|index| {
+    crate::tests::phase_sync::run_concurrently((0..2).map(|index| {
         let path = path.clone();
-        let barrier = barrier.clone();
-        std::thread::spawn(move || {
-            let connection = rusqlite::Connection::open(path).unwrap();
-            connection.busy_timeout(SQLITE_BUSY_TIMEOUT).unwrap();
-            barrier.wait();
-            prepare_existing_sqlite_state_reader_floor(&connection, index == 0).map(|_| ()).unwrap();
-        })
-    }).collect::<Vec<_>>();
-    for thread in threads { thread.join().unwrap(); }
+        let connection = rusqlite::Connection::open(path).unwrap();
+        connection.busy_timeout(SQLITE_BUSY_TIMEOUT).unwrap();
+        move || {
+            prepare_existing_sqlite_state_reader_floor(&connection, index == 0)
+                .map(|_| ())
+                .unwrap();
+        }
+    }));
     let connection = rusqlite::Connection::open(&path).unwrap();
     assert_eq!(metadata_unit_generation(&connection).unwrap(), 8);
-    assert!(matches!(read_engram_import_reconciliation_state(&connection).unwrap(), EngramImportReconciliationState::NotActivated));
+    assert!(matches!(
+        read_engram_import_reconciliation_state(&connection).unwrap(),
+        EngramImportReconciliationState::NotActivated
+    ));
     let before = image(&connection);
     prepare_existing_sqlite_state_reader_floor(&connection, true).unwrap();
-    assert_eq!(image(&connection), before, "ordinary reopen never activates import");
-    let acknowledged = activate_engram_import_reconciliation_sqlite(&path, &connection,
-        &EngramImportActivationCapability::for_test(), import_record(), |journal, _| journal.clone()).unwrap();
-    assert_eq!(read_engram_import_reconciliation_state(&connection).unwrap(),
-        EngramImportReconciliationState::Activated(Arc::new(acknowledged)));
-    assert_eq!(required_state_meta_value(&connection, "schema_version").unwrap(), SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION);
+    assert_eq!(
+        image(&connection),
+        before,
+        "ordinary reopen never activates import"
+    );
+    let acknowledged = activate_engram_import_reconciliation_sqlite(
+        &path,
+        &connection,
+        &EngramImportActivationCapability::for_test(),
+        import_record(),
+        |journal, _| journal.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        read_engram_import_reconciliation_state(&connection).unwrap(),
+        EngramImportReconciliationState::Activated(Arc::new(acknowledged))
+    );
+    assert_eq!(
+        required_state_meta_value(&connection, "schema_version").unwrap(),
+        SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+    );
     let before = image(&connection);
-    assert!(activate_engram_import_reconciliation_sqlite(&path, &connection,
-        &EngramImportActivationCapability::for_test(), import_record(), |_, _| ()).is_err());
+    assert!(
+        activate_engram_import_reconciliation_sqlite(
+            &path,
+            &connection,
+            &EngramImportActivationCapability::for_test(),
+            import_record(),
+            |_, _| ()
+        )
+        .is_err()
+    );
     assert_eq!(image(&connection), before, "activation is not replayed");
 }

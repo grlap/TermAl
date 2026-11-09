@@ -79,6 +79,7 @@ impl FederationChannel {
         if context.terminal_logged.swap(true, Ordering::SeqCst) {
             return;
         }
+        self.retain_terminal_diagnostic(context, stage, reason, io_kind, rpc);
         self.update_attestation(|observation, _| {
             // Record before the owning teardown. A delayed old control task
             // cannot replace its successor, nor can cleanup hide the first cause.

@@ -900,6 +900,8 @@ include!("federation_identity.rs");
 include!("federation_mailbox_protocol.rs");
 include!("mailbox_relay_protocol.rs");
 include!("mailbox_relay_errors.rs");
+include!("federation_durability_diagnostics.rs");
+include!("federation_link_diagnostics.rs");
 include!("mailbox_relay_schema.rs");
 include!("mailbox_relay_store.rs");
 include!("mailbox_relay_rpc.rs");

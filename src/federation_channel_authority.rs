@@ -21,6 +21,11 @@ impl FederationChannel {
     }
 
     fn current_authority(&self) -> Result<FederationPeerSnapshot, ApiError> {
+        self.current_authority_checked(true)
+    }
+
+    // Monitoring and diagnostic predicates do not refuse an operation.
+    fn current_authority_checked(&self, record_refusal: bool) -> Result<FederationPeerSnapshot, ApiError> {
         let (basis, recorded) = {
             let state = self.state.lock().expect("federation link mutex poisoned");
             (self.transport_basis(), state.recorded_incarnation.clone())
@@ -39,6 +44,10 @@ impl FederationChannel {
         // temporary persistence hold is not a lost remote incarnation.
         result.map_err(|error| {
             if !inner.federation_durable && !inner.federation_continuity_lost {
+                if record_refusal {
+                    inner.federation_durability_diagnostics.refusal(
+                        inner.federation_durable, "channel_authority_check", 423);
+                }
                 ApiError::from_status(
                     StatusCode::LOCKED,
                     "federation persistence is settling; retry",

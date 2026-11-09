@@ -287,6 +287,47 @@ async fn unenrolled_host_uuid_never_resolves_to_a_local_literal_namesake() {
     assert_eq!(stored, 0);
 }
 
+#[tokio::test]
+async fn satellite_native_sibling_refusal_keeps_local_and_central_authority_distinct() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let pair = qualified_pair().await;
+    let sender = native(&pair.satellite, "Satellite sender");
+    let local = native(&pair.satellite, "Local recipient");
+    let central = native(&pair.central, "Central recipient");
+    let unsupported = format!("host:{}::session-2", Uuid::new_v4());
+    native(&pair.satellite, &unsupported);
+    let result = async {
+        let error = ordinary(&pair.satellite, &sender, &unsupported, "unsupported-native-host")
+            .await.expect_err("a satellite cannot open a native route to another remote host");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(error.message.contains("termal_list_sessions")
+            && error.message.contains("domain-session-")
+            && error.message.contains("executor grant"), "{}", error.message);
+        assert_eq!(messages(&pair.central) + messages(&pair.satellite), 0,
+            "the refusal neither appends domain mail nor falls back to the local namesake");
+        let intents: u64 = pair.satellite.mailbox_store.connection().unwrap().query_row(
+            "SELECT (SELECT COUNT(*) FROM mailbox_relay_intents)+(SELECT COUNT(*) FROM federation_mailbox_intents)",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(intents, 0, "unsupported native addressing retains no new send intent");
+
+        let sent = ordinary(&pair.satellite, &sender, &address(&pair.central, &central),
+            "configured-central-control").await?;
+        receive_and_ack(&pair.central, &central, &sent).await?;
+        pair.satellite_channel.invalidate();
+        let unavailable = ordinary(&pair.satellite, &sender, &address(&pair.central, &central),
+            "disconnected-central-control").await.unwrap_err();
+        assert_eq!(unavailable.status, StatusCode::CONFLICT,
+            "loss of the configured central link retains its authority failure");
+        let local_sent = ordinary(&pair.satellite, &sender, &address(&pair.satellite, &local),
+            "self-host-control").await?;
+        receive_and_ack(&pair.satellite, &local, &local_sent).await?;
+        assert_eq!(messages(&pair.central) + messages(&pair.satellite), 2);
+        Ok::<_, ApiError>(())
+    }.await;
+    pair.finish().await;
+    result.expect("only unsupported remote native addressing receives the topology refusal");
+}
+
 async fn refused_peer_case(condition: &str) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let pair = federation_onboarding_fixture::Pair::with_enrolled_profile(

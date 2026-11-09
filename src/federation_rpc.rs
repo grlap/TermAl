@@ -87,7 +87,7 @@ impl FederationRpcClient {
             // in the authenticated RPC owner; never revive that connection.
             return false;
         }
-        if let Err(authority) = self.channel.current_authority() {
+        if let Err(authority) = self.channel.current_authority_checked(false) {
             if !matches!(authority.status, StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) {
                 self.channel.invalidate_if_current(lease);
                 return false;

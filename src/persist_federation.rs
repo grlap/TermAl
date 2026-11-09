@@ -160,7 +160,7 @@ fn bind_loaded_federation(
     if inner.federation_continuity_lost && inner.federation.admission_quarantine.is_none() {
         persist_detected_federation_quarantine(inner, connection, path)?;
     }
-    inner.federation_durable = true;
+    inner.set_federation_durable(true, "boot_loaded");
     Ok(())
 }
 

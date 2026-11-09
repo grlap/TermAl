@@ -1686,28 +1686,15 @@ fn concurrent_claude_user_input_submissions_deliver_exactly_one_runtime_response
         "claude-concurrent-input",
         &message_id,
     );
-    let barrier = Arc::new(std::sync::Barrier::new(3));
     let answers = BTreeMap::from([("scope".to_owned(), vec!["Focused".to_owned()])]);
 
-    let results = std::thread::scope(|scope| {
-        let mut workers = Vec::new();
-        for _ in 0..2 {
-            let state = state.clone();
-            let barrier = Arc::clone(&barrier);
-            let session_id = session_id.clone();
-            let message_id = message_id.clone();
-            let answers = answers.clone();
-            workers.push(scope.spawn(move || {
-                barrier.wait();
-                state.submit_user_input(&session_id, &message_id, answers, false)
-            }));
-        }
-        barrier.wait();
-        workers
-            .into_iter()
-            .map(|worker| worker.join().expect("submission worker should not panic"))
-            .collect::<Vec<_>>()
-    });
+    let results = phase_sync::run_concurrently((0..2).map(|_| {
+        let state = state.clone();
+        let session_id = session_id.clone();
+        let message_id = message_id.clone();
+        let answers = answers.clone();
+        move || state.submit_user_input(&session_id, &message_id, answers, false)
+    }));
 
     assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
     assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);

@@ -182,8 +182,8 @@ struct CoordinationBoardStore {
 #[cfg(test)]
 #[derive(Clone)]
 struct CoordinationBoardWriteOrderingHook {
-    connection_acquired: Arc<std::sync::Barrier>,
-    continue_to_writer_admission: Arc<std::sync::Barrier>,
+    connection_acquired: std::sync::mpsc::Sender<()>,
+    continue_to_writer_admission: Arc<(Mutex<bool>, std::sync::Condvar)>,
 }
 
 struct CoordinationBoardConnectionGuard<'a> {
@@ -470,8 +470,8 @@ impl CoordinationBoardStore {
             self.connection_for_operation("waiting for the coordination board connection")?;
         #[cfg(test)]
         if let Some(hook) = self.write_ordering_hook.as_ref() {
-            hook.connection_acquired.wait();
-            hook.continue_to_writer_admission.wait();
+            let _ = hook.connection_acquired.send(());
+            crate::tests::phase_sync::wait_for_gate(&hook.continue_to_writer_admission, true);
         }
         // Acquire the private board connection before the writer admission
         // shared with mailboxes. A board reader may hold this connection for

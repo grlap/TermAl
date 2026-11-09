@@ -203,23 +203,28 @@ async fn concurrent_same_key_callers_share_one_frozen_page() {
     let request = keyed(&case, &original, &key, false);
     let writer = case.pair.central.mailbox_store.write_lock.clone();
     let held = lock_sqlite_state_writer(&writer);
-    let barrier = Arc::new(std::sync::Barrier::new(3));
-    let mut jobs = Vec::new();
-    for _ in 0..2 {
+    let mut pages = phase_sync::run_concurrently((0..2).map(|_| {
         let app = case.pair.central.clone();
         let lease = case.pair.lease.clone();
         let request = request.clone();
-        let barrier = barrier.clone();
-        jobs.push(tokio::task::spawn_blocking(move || {
-            barrier.wait();
-            app.execute_federation_mailbox(request, Some(lease)).unwrap().value
-        }));
-    }
-    barrier.wait();
-    let first = jobs.remove(0).await.unwrap();
-    let second = jobs.remove(0).await.unwrap();
+        move || {
+            app.execute_federation_mailbox(request, Some(lease))
+                .unwrap()
+                .value
+        }
+    }));
+    let first = pages.remove(0);
+    let second = pages.remove(0);
     drop(held);
-    let count = case.pair.central.mailbox_store.federation_reads.lock().unwrap().entries.len();
+    let count = case
+        .pair
+        .central
+        .mailbox_store
+        .federation_reads
+        .lock()
+        .unwrap()
+        .entries
+        .len();
     case.pair.finish().await;
     assert_eq!(count, 1);
     assert_eq!(first, second);

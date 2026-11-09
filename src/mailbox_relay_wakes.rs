@@ -875,7 +875,7 @@ impl AppState {
                 observed.validate()?;
                 let peer = worker.mailbox_relay_home_wake_peer(&observed)?;
                 if !worker
-                    .native_mailbox_relay_home()
+                    .native_mailbox_relay_home_checked(false)
                     .is_ok_and(|home| home == observed.conversation.home)
                 {
                     return Err(ApiError::conflict(
@@ -1097,7 +1097,8 @@ fn mailbox_relay_bounded_reason(reason: &str) -> String {
 }
 
 /// Undelivered home wake obligations and this process's recorded refusals.
-/// Reads one count from the coordination store; takes no state lock.
+/// Reads one count from the coordination store; never waits for the state lock.
+/// A busy state makes only the durability section unavailable.
 async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let store = state.mailbox_store.clone();
     let pending = run_blocking_api(move || {
@@ -1108,12 +1109,19 @@ async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Re
     .await?;
     let (refused, untracked) = state.mailbox_store.relay_home_wake_refusals.snapshot();
     let (rpc_failures, rpc_evicted) = state.mailbox_store.relay_home_rpc_failures.snapshot();
+    let durability = match state.inner.try_lock_now() {
+        Some(inner) => inner.federation_durability_diagnostics.snapshot(),
+        None =>
+            json!({ "available": false, "reason": "state_lock_busy" }),
+    };
     Ok(Json(json!({
+        "serverInstanceId": state.server_instance_id,
         "pendingHomeWakes": pending,
         "refusedHomeWakes": refused,
         "untrackedRefusals": untracked,
         "homeRpcFailures": rpc_failures,
         "homeRpcFailuresEvicted": rpc_evicted,
         "homeRpcFailuresResetOnRestart": true,
+        "federationDurability": durability,
     })))
 }
