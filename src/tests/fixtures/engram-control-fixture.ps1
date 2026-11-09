@@ -185,15 +185,22 @@ if ($initialMode.StartsWith("fixture-tree-")) {
     } while (-not $readyLine.Contains("termal-descendant-ready"))
     }
 }
+if ($initialMode.StartsWith("fixture-stderr-")) {
+    [IO.File]::WriteAllText((Join-Path $engramHome "stderr-child-pid"), [string]$PID)
+    [Console]::Error.Write("thread 'fixture' panicked at PRIVATE_PATH token=PRIVATE_TOKEN PRIVATE_REQUEST " + ("x" * 131072))
+    [Console]::Error.Flush()
+    if ($initialMode -eq "fixture-stderr-startup-exit") { exit 0 }
+}
 [Console]::Out.WriteLine("termal-engram-control-fixture-ready")
 [Console]::Out.Flush()
 
 while ($null -ne ($line = [Console]::In.ReadLine())) {
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+    if ($mode -eq "fixture-stderr-exit") { exit 0 }
     if ($mode -eq "fixture-eof") {
         exit 0
     }
-    if ($mode -eq "fixture-hang") {
+    if ($mode -eq "fixture-hang" -or $mode -eq "fixture-stderr-hang") {
         # No response and no timer: the host must kill this blocked reader.
         [void][Console]::In.ReadLine()
         exit 0

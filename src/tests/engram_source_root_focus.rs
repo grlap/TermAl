@@ -201,6 +201,196 @@ fn assert_private_focus_system_notices(
 }
 
 #[test]
+fn a_forward_work_revision_refreshes_only_the_next_quiet_turn() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let label = "forward-work-revision";
+    let (turn, path) = confirmation_root(label);
+    turn.state
+        .install_control_test_transport(FocusSelectingTransport::new(turn.transport.clone()));
+    let mut held = naming_claim(label);
+    let first = held.items[0].control_binding.clone().unwrap();
+    let named = request_naming(&turn, label, Some(&path), vec![held.clone()]).unwrap();
+    let names_before = turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .clone();
+
+    turn.begin("Keep the opening captured before the work criteria change.");
+    let opening = turn.record(|record| record.engram.observed_opening().cloned().unwrap());
+    let previous_ref = observed_turn_ref(&turn);
+    let mut revised = first.clone();
+    revised.work_revision = 2;
+    held.items[0].control_binding = Some(revised.clone());
+    // The producer's current claim view changes without a new run or root
+    // event. Neither this update nor the held-claim read changes host state.
+    turn.transport.register_named_root_run(&revised);
+    focus(&turn, &held, &revised);
+    assert_eq!(
+        turn.record(|record| record.engram.observed_opening().cloned()),
+        Some(opening)
+    );
+    turn.end();
+    settle_close(&turn);
+    assert!(
+        !turn
+            .transport
+            .requests()
+            .iter()
+            .any(|sent| sent.request["idempotency_key"]
+                == format!("termal-source-sighting:{previous_ref}")),
+        "the revised criteria cannot relabel the earlier opening"
+    );
+    turn.record(|record| {
+        assert!(
+            record
+                .engram
+                .unadmitted_closing_jobs
+                .iter()
+                .any(|job| job.trace.host_turn_ref == previous_ref
+                    && job.terminal_failure.is_some()
+                    && job.scope.binding.as_ref() == Some(&first)),
+            "the old closing job must retain its original revision"
+        );
+    });
+
+    turn.begin("Measure the existing named root under the current work revision.");
+    let next_ref = observed_turn_ref(&turn);
+    turn.end();
+    settle_close(&turn);
+    assert_named_sighting(
+        &turn,
+        &next_ref,
+        &revised,
+        named.root.as_ref().unwrap(),
+        named.generation,
+    );
+    assert_eq!(
+        turn.state.inner.lock().unwrap().engram_work_source_roots,
+        names_before,
+        "a revision refresh cannot create or rewrite a name"
+    );
+}
+
+#[test]
+fn a_revision_advance_keeps_changed_claims_and_roots_unconfirmed() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for change in [
+        "backwards",
+        "claim",
+        "fence",
+        "run",
+        "execution",
+        "root",
+        "authority",
+    ] {
+        let label = format!("revision-refuses-{change}");
+        let (turn, path) = confirmation_root(&label);
+        turn.state
+            .install_control_test_transport(FocusSelectingTransport::new(turn.transport.clone()));
+        let mut held = naming_claim(&label);
+        let mut first = held.items[0].control_binding.clone().unwrap();
+        if change == "backwards" {
+            first.work_revision = 2;
+        }
+        held.items[0].control_binding = Some(first.clone());
+        turn.transport.register_named_root_run(&first);
+        request_naming(&turn, &label, Some(&path), vec![held.clone()]).unwrap();
+        let names_before = turn
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .clone();
+        turn.begin("Do not adopt a changed claim or root as a revision refresh.");
+        let previous_ref = observed_turn_ref(&turn);
+        let mut changed = first.clone();
+        changed.work_revision = if change == "backwards" { 1 } else { 2 };
+        match change {
+            "claim" => changed.claim_id.push_str("-different"),
+            "fence" => changed.claim_fence += 1,
+            "run" => changed.run_id.push_str("-different"),
+            "execution" => changed.root_execution_id.push_str("-different"),
+            _ => {}
+        }
+        held.items[0].claim_id = changed.claim_id.clone();
+        held.items[0].claim_fence = changed.claim_fence;
+        held.items[0].control_binding = Some(changed.clone());
+        turn.transport.register_named_root_run(&changed);
+        if change == "root" {
+            let mut roots = turn.transport.named_roots.lock().unwrap();
+            let roots = roots.as_mut().unwrap();
+            let mut proof = roots
+                .request(
+                    &turn.session_id,
+                    &EngramControlRequest::NamedRootRead {
+                        run_id: changed.run_id.clone(),
+                        claim_id: changed.claim_id.clone(),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            let generation = proof["named_root"]["generation"].as_i64().unwrap() + 1;
+            let position = proof["read_cut"]["position"].as_i64().unwrap() + 1;
+            proof["named_root"]["generation"] = json!(generation);
+            proof["latest_event"]["generation"] = json!(generation);
+            proof["latest_event"]["event"] = json!(sha256_hex(b"a newer root event"));
+            proof["latest_event"]["position"]["position"] = json!(position);
+            proof["read_cut"]["position"] = json!(position);
+            roots.root_reads.insert(changed.claim_id.clone(), proof);
+        }
+        focus(&turn, &held, &changed);
+        if change == "authority" {
+            let store = turn
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .engram_work_source_roots
+                .iter()
+                .find(|root| root.work_id == first.work_id)
+                .unwrap()
+                .store
+                .clone();
+            let clock = turn.state.engram_budget_clock();
+            turn.state
+                .prepare_engram_authority_until(&store, &first, clock.now() + DEADLOCK_GUARD)
+                .unwrap();
+        }
+        turn.end();
+        settle_close(&turn);
+        turn.begin("A later turn must still refuse the mismatched association.");
+        let next_ref = observed_turn_ref(&turn);
+        turn.end();
+        settle_close(&turn);
+        for turn_ref in [&previous_ref, &next_ref] {
+            assert!(
+                !turn
+                    .transport
+                    .requests()
+                    .iter()
+                    .any(|sent| sent.request["idempotency_key"]
+                        == format!("termal-source-sighting:{turn_ref}")),
+                "{change}"
+            );
+        }
+        assert_eq!(
+            turn.record(|record| record.engram.work_binding.clone()),
+            Some(first),
+            "{change}"
+        );
+        assert_eq!(
+            turn.state.inner.lock().unwrap().engram_work_source_roots,
+            names_before,
+            "{change}"
+        );
+    }
+}
+
+#[test]
 fn a_focus_change_refuses_one_close_then_captures_the_next_quiet_turn() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let label = "focus-before-ordinary-opening";

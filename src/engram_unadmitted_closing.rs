@@ -57,35 +57,51 @@ impl AppState {
         let deadline = target.budget_clock.now() + target.settings.call_timeout();
         let timeout = || target.rpc_timeout_until(deadline);
         if job.scope.binding.is_none() {
-            target.adapter.read_work_session(&target.connection, &store, timeout()?)?;
+            target
+                .adapter
+                .read_work_session(&target.connection, &store, timeout()?)?;
             let binding = target.adapter.read_work_binding(
                 &target.connection,
-                EngramBindingPreference { current: target.work_binding.as_ref() },
+                EngramBindingPreference {
+                    current: target.work_binding.as_ref(),
+                },
                 timeout()?,
             )?;
             let Some(binding) = binding else {
                 if target.work_binding.is_some() {
-                    return Err(runtime_observation_scope_changed(&job.scope,
-                        "the original claim association is no longer current"));
+                    return Err(runtime_observation_scope_changed(
+                        &job.scope,
+                        "the original claim association is no longer current",
+                    ));
                 }
                 // An ordinary chat has no work owner to report to. A successful
                 // canonical read proving no claim is a quiet terminal result,
                 // not a transport failure or a retry/removal obligation.
                 return Ok(EngramRuntimeClosingOutcome::Unclaimed);
             };
-            if target.work_binding.as_ref().is_some_and(|expected| expected != &binding) {
-                return Err(runtime_observation_scope_changed(&job.scope,
-                    "the original claim association is no longer current"));
+            if target
+                .work_binding
+                .as_ref()
+                .is_some_and(|expected| expected != &binding)
+            {
+                return Err(runtime_observation_scope_changed(
+                    &job.scope,
+                    "the original claim association is no longer current",
+                ));
             }
             let inner = self.inner.lock().expect("state mutex poisoned");
             job.scope.require_current(&inner, session_id)?;
-            let mut scope = EngramRuntimeClosingScope::capture_with_binding(
-                &inner, session_id, Some(&binding),
-            ).map_err(EngramTransportError::local_state)?;
+            let mut scope =
+                EngramRuntimeClosingScope::capture_with_binding(&inner, session_id, Some(&binding))
+                    .map_err(EngramTransportError::local_state)?;
             scope.historical_fields = job.scope.historical_fields.clone();
             return Ok(EngramRuntimeClosingOutcome::Binding(scope));
         }
-        let current = job.scope.binding.as_ref().expect("ordinary binding read completed");
+        let current = job
+            .scope
+            .binding
+            .as_ref()
+            .expect("ordinary binding read completed");
         let Some(policy) = job.policy.as_ref() else {
             return target
                 .adapter
@@ -106,22 +122,49 @@ impl AppState {
             ));
         };
         if job.scope.binding.as_ref() != Some(&binding) {
-            if job.scope.binding.as_ref().is_some_and(|previous| previous.work_id != binding.work_id) {
-                let refreshed = match self.refresh_runtime_observation_focus(
-                    session_id, job, &target, &binding, deadline,
-                ) {
+            if job
+                .scope
+                .binding
+                .as_ref()
+                .is_some_and(|previous| previous.work_id != binding.work_id)
+            {
+                let refreshed = match self
+                    .refresh_runtime_observation_focus(session_id, job, &target, &binding, deadline)
+                {
                     Ok(()) => true,
                     Err(error) => {
-                        eprintln!("engram> prospective observation focus refresh refused: {}", error.message);
+                        eprintln!(
+                            "engram> prospective observation focus refresh refused: {}",
+                            error.message
+                        );
                         false
                     }
                 };
                 return Ok(EngramRuntimeClosingOutcome::FocusChanged { binding, refreshed });
             }
-            // A new revision, fence or run of the same work is not a focus
-            // move and keeps its existing refusal/recovery requirements.
-            return Err(runtime_observation_scope_changed(&job.scope,
-                &format!("canonical claim {} / {}", binding.work_id, binding.claim_id)));
+            if job
+                .scope
+                .binding
+                .as_ref()
+                .is_some_and(|previous| runtime_observation_forward_revision(previous, &binding))
+            {
+                // Refresh only a later opening. This job still belongs to
+                // the old revision and must keep its scope-change refusal.
+                if let Err(error) = self
+                    .refresh_runtime_observation_focus(session_id, job, &target, &binding, deadline)
+                {
+                    eprintln!(
+                        "engram> prospective observation revision refresh refused: {}",
+                        error.message
+                    );
+                }
+            }
+            // Other changes to the same work keep their existing refusal
+            // and recovery requirements, including a new fence or run.
+            return Err(runtime_observation_scope_changed(
+                &job.scope,
+                &format!("canonical claim {} / {}", binding.work_id, binding.claim_id),
+            ));
         }
         let root = target
             .adapter
@@ -165,7 +208,11 @@ impl AppState {
                 || !target
                     .source_root_read_fence
                     .same_store(&inner, &target.project_id)
-                || record.engram.work_binding.as_ref().is_some_and(|current| current != &binding)
+                || record
+                    .engram
+                    .work_binding
+                    .as_ref()
+                    .is_some_and(|current| current != &binding)
             {
                 return Err(EngramTransportError::local_state(
                     "runtime closing basis changed during its read",
@@ -240,15 +287,25 @@ impl AppState {
         let (source, source_refusal) = match measured {
             Ok(measured) => {
                 let source_basis = provenance.stamp(measured).ok_or_else(|| {
-                    EngramTransportError::local_state("runtime closing source could not be measured")
+                    EngramTransportError::local_state(
+                        "runtime closing source could not be measured",
+                    )
                 })?;
-                (EngramRuntimeClosingSource::Measured(EngramMeasuredSighting {
-                    source_basis, observed_at,
-                }), None)
+                (
+                    EngramRuntimeClosingSource::Measured(EngramMeasuredSighting {
+                        source_basis,
+                        observed_at,
+                    }),
+                    None,
+                )
             }
-            Err(EngramObservationSourceRefusal::OwnerUnavailable) =>
-                (EngramRuntimeClosingSource::Unavailable { observed_at }, None),
-            Err(EngramObservationSourceRefusal::Legacy(SourceBasisRefusal::UnsupportedGitlinks)) => (
+            Err(EngramObservationSourceRefusal::OwnerUnavailable) => (
+                EngramRuntimeClosingSource::Unavailable { observed_at },
+                None,
+            ),
+            Err(EngramObservationSourceRefusal::Legacy(
+                SourceBasisRefusal::UnsupportedGitlinks,
+            )) => (
                 EngramRuntimeClosingSource::UnsupportedGitlinks { observed_at },
                 Some(SourceBasisRefusal::UnsupportedGitlinks),
             ),
@@ -258,7 +315,9 @@ impl AppState {
                 return Err(error);
             }
         };
-        let observer = target.adapter.read_work_session(&target.connection, &store, timeout()?)?;
+        let observer = target
+            .adapter
+            .read_work_session(&target.connection, &store, timeout()?)?;
         // The ordinary child's identity proves the observing session. No
         // control status, phase or leftover open grant enters this report.
         {
@@ -269,12 +328,14 @@ impl AppState {
                 return Ok(EngramRuntimeClosingOutcome::BindingRecoveryPending);
             }
             job.scope.require_current(&inner, session_id)?;
-            let current =
-                Self::engram_source_root_target_locked(&inner, session_id)
-                    .map_err(EngramTransportError::local_state)?;
+            let current = Self::engram_source_root_target_locked(&inner, session_id)
+                .map_err(EngramTransportError::local_state)?;
             if current.as_ref().is_none_or(|current| {
                 current.connection != target.connection
-                    || current.work_binding.as_ref().is_some_and(|current| current != &binding)
+                    || current
+                        .work_binding
+                        .as_ref()
+                        .is_some_and(|current| current != &binding)
             }) || !target
                 .source_root_read_fence
                 .same_store(&inner, &target.project_id)

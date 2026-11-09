@@ -72,6 +72,7 @@ struct EngramControlProcess {
     config: EngramConnectionConfig,
     process: Arc<SharedChild>,
     process_tree: Arc<EngramProcessTree>,
+    stderr: EngramControlStderr,
     requests: mpsc::Sender<EngramProcessRequest>,
     worker_finished: Arc<AtomicBool>,
     retiring: AtomicBool,
@@ -83,6 +84,12 @@ struct EngramControlProcess {
 }
 
 impl EngramControlProcess {
+    fn observe_failure(&self, error: EngramTransportError) -> EngramTransportError {
+        error
+            .with_control_process(observe_engram_control_process(&self.process))
+            .with_control_stderr(&self.stderr)
+    }
+
     fn request_termination(&self) -> Result<()> {
         self.retiring.store(true, Ordering::Release);
         let (reply, _) = mpsc::channel();
@@ -279,7 +286,10 @@ impl ProcessEngramControlTransport {
             self.startup_handshake,
             self.idle_timeout,
         );
-        let mut processes = self.processes.lock().expect("Engram process registry mutex poisoned");
+        let mut processes = self
+            .processes
+            .lock()
+            .expect("Engram process registry mutex poisoned");
         match spawned {
             Ok(process) => {
                 let process = Arc::new(process);
@@ -376,10 +386,11 @@ impl EngramControlTransport for ProcessEngramControlTransport {
             // This request sent no frame. Leave the registered process for a
             // later request with a fresh budget; repeated cold starts could
             // otherwise prevent bounded lifecycle reads from ever progressing.
-            return Err(EngramTransportError::deadline(
-                "Engram admission budget exhausted during process startup",
-            )
-            .request_never_sent());
+            return Err(process
+                .observe_failure(EngramTransportError::deadline(
+                    "Engram admission budget exhausted during process startup",
+                ))
+                .request_never_sent());
         }
         let (reply_tx, reply_rx) = mpsc::channel();
         process
@@ -392,13 +403,13 @@ impl EngramControlTransport for ProcessEngramControlTransport {
             .map_err(|err| {
                 // The worker had already dropped its receiver, so it never
                 // took this request and wrote none of it.
-                let evidence = observe_engram_control_process(&process.process);
+                let error = process
+                    .observe_failure(EngramTransportError::transport(format!(
+                        "Engram control worker is unavailable: {err}"
+                    )))
+                    .request_never_sent();
                 self.discard_process(&connection.session_id, &process);
-                EngramTransportError::transport(format!(
-                    "Engram control worker is unavailable: {err}"
-                ))
-                .with_control_process(evidence)
-                .request_never_sent()
+                error
             })?;
 
         let remaining = timeout.saturating_sub(started_at.elapsed());
@@ -414,21 +425,19 @@ impl EngramControlTransport for ProcessEngramControlTransport {
                 Err(error)
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                let evidence = observe_engram_control_process(&process.process);
-                self.discard_process(&connection.session_id, &process);
-                Err(EngramTransportError::deadline(format!(
+                let error = process.observe_failure(EngramTransportError::deadline(format!(
                     "Engram control call exceeded {} ms",
                     timeout.as_millis()
-                ))
-                .with_control_process(evidence))
+                )));
+                self.discard_process(&connection.session_id, &process);
+                Err(error)
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let evidence = observe_engram_control_process(&process.process);
+                let error = process.observe_failure(EngramTransportError::transport(
+                    "Engram control worker exited before replying",
+                ));
                 self.discard_process(&connection.session_id, &process);
-                Err(
-                    EngramTransportError::transport("Engram control worker exited before replying")
-                        .with_control_process(evidence),
-                )
+                Err(error)
             }
         }
     }
@@ -439,14 +448,8 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        read_engram_work_binding_from_cli(
-            connection,
-            preference,
-            timeout,
-            &self.host_workdir,
-        )
+        read_engram_work_binding_from_cli(connection, preference, timeout, &self.host_workdir)
     }
-
 
     fn read_held_claims(
         &self,
@@ -460,7 +463,9 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         // Startup keeps its registry reservation until it publishes a child
         // or an error. Never remove that reservation and admit another spawn.
         let process = loop {
-            let mut processes = self.processes.lock()
+            let mut processes = self
+                .processes
+                .lock()
                 .expect("Engram process registry mutex poisoned");
             if processes.get(session_id).is_some_and(Option::is_none) {
                 drop(processes);
@@ -481,9 +486,12 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         deadline: std::time::Instant,
     ) -> Result<(), EngramTransportError> {
         let process = loop {
-            let entry = self.processes.lock()
+            let entry = self
+                .processes
+                .lock()
                 .expect("Engram process registry mutex poisoned")
-                .get(session_id).cloned();
+                .get(session_id)
+                .cloned();
             match entry {
                 None => return Ok(()),
                 Some(Some(process)) => break process,
@@ -555,7 +563,7 @@ fn spawn_engram_control_process(
         .arg(&connection.session_id)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| {
             EngramTransportError::transport(format!("failed spawning Engram control: {err}"))
@@ -568,6 +576,10 @@ fn spawn_engram_control_process(
         .stdout
         .take()
         .ok_or_else(|| EngramTransportError::transport("Engram control stdout is unavailable"))?;
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or_else(|| EngramTransportError::transport("Engram control stderr is unavailable"))?;
     let process = Arc::new(SharedChild::new(child).map_err(|err| {
         EngramTransportError::transport(format!("failed sharing Engram control child: {err}"))
     })?);
@@ -578,6 +590,19 @@ fn spawn_engram_control_process(
             "failed preparing Engram control process tree: {err:#}"
         ))
     })?);
+    let stderr = Arc::new(Mutex::new(EngramControlStderrObservation::default()));
+    let worker_stderr = stderr.clone();
+    let reader_observation = stderr.clone();
+    // The reader owns only this pipe and bounded metadata. Exact tree cleanup
+    // closes the pipe; EOF reporting never waits for the reader to finish.
+    let _stderr_reader = std::thread::Builder::new()
+        .name("engram-control-stderr".to_owned())
+        .spawn(move || read_engram_control_stderr(stderr_pipe, &reader_observation))
+        .map_err(|_| {
+            let _ = process_tree.terminate(&process);
+            let _ = process.wait();
+            EngramTransportError::transport("failed spawning Engram control stderr reader")
+        })?;
     let worker_process = process.clone();
     let worker_process_tree = process_tree.clone();
     let worker_finished = Arc::new(AtomicBool::new(false));
@@ -593,7 +618,12 @@ fn spawn_engram_control_process(
         .spawn(move || {
             let mut stdout = BufReader::new(stdout);
             if let Some(handshake) = startup_handshake {
-                let startup_result = read_engram_control_startup_handshake(&mut stdout, handshake);
+                let startup_result = read_engram_control_startup_handshake(&mut stdout, handshake)
+                    .map_err(|error| {
+                        error
+                            .with_control_process(observe_engram_control_process(&worker_process))
+                            .with_control_stderr(&worker_stderr)
+                    });
                 let startup_failed = startup_result.is_err();
                 let _ = startup_tx.send(startup_result);
                 if startup_failed {
@@ -614,8 +644,12 @@ fn spawn_engram_control_process(
                             worker_finished_signal.store(true, Ordering::Release);
                             break;
                         };
-                        let mut result =
-                            exchange_engram_control_frame_with_limit(&mut stdin, &mut stdout, &frame, request.response_limit);
+                        let mut result = exchange_engram_control_frame_with_limit(
+                            &mut stdin,
+                            &mut stdout,
+                            &frame,
+                            request.response_limit,
+                        );
                         // Engram's host service continues after request-level
                         // `{status:"error"}` replies. Treat only malformed or
                         // broken exchanges as terminal for this sidecar.
@@ -626,7 +660,11 @@ fn spawn_engram_control_process(
                             worker_finished_signal.store(true, Ordering::Release);
                             // Observed before this worker terminates it.
                             let evidence = observe_engram_control_process(&worker_process);
-                            result = result.map_err(|error| error.with_control_process(evidence));
+                            result = result.map_err(|error| {
+                                error
+                                    .with_control_process(evidence)
+                                    .with_control_stderr(&worker_stderr)
+                            });
                         }
                         let _ = request.reply.send(result);
                         if is_terminal {
@@ -666,10 +704,14 @@ fn spawn_engram_control_process(
             Err(mpsc::RecvTimeoutError::Timeout) => Err(EngramTransportError::transport(format!(
                 "Engram control startup handshake exceeded {} ms",
                 handshake.timeout.as_millis()
-            ))),
+            ))
+            .with_control_process(observe_engram_control_process(&process))
+            .with_control_stderr(&stderr)),
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(EngramTransportError::transport(
                 "Engram control worker exited before the startup handshake",
-            )),
+            )
+            .with_control_process(observe_engram_control_process(&process))
+            .with_control_stderr(&stderr)),
         };
         if let Err(error) = startup_result {
             let _ = process_tree.terminate(&process);
@@ -682,6 +724,7 @@ fn spawn_engram_control_process(
         config: connection.clone(),
         process,
         process_tree,
+        stderr,
         requests: request_tx,
         worker_finished,
         retiring: AtomicBool::new(false),
@@ -770,9 +813,10 @@ fn exchange_engram_control_frame_with_limit(
     // Bound allocation before reading; an overlong line retires the sidecar
     // instead of leaving unread bytes available as a successor's reply.
     let read = std::io::Read::take(stdout, (response_limit + 1) as u64)
-        .read_until(b'\n', &mut response).map_err(|err| {
-        EngramTransportError::transport(format!("failed reading Engram response: {err}"))
-    })?;
+        .read_until(b'\n', &mut response)
+        .map_err(|err| {
+            EngramTransportError::transport(format!("failed reading Engram response: {err}"))
+        })?;
     if read == 0 {
         return Err(EngramTransportError::transport(
             "Engram control reached EOF before replying",
@@ -788,13 +832,19 @@ fn exchange_engram_control_frame_with_limit(
     match envelope {
         EngramControlResponse::Ok { result } => {
             if response_limit == ACCEPTANCE_PRIVATE_RESPONSE_MAX_BYTES
-                && serde_json::to_vec(&result).map_err(|_| EngramTransportError::protocol("cannot measure private evidence page"))?.len()
+                && serde_json::to_vec(&result)
+                    .map_err(|_| {
+                        EngramTransportError::protocol("cannot measure private evidence page")
+                    })?
+                    .len()
                     > ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES
             {
-                return Err(EngramTransportError::protocol("private evidence page exceeds the supported capacity"));
+                return Err(EngramTransportError::protocol(
+                    "private evidence page exceeds the supported capacity",
+                ));
             }
             Ok(result)
-        },
+        }
         EngramControlResponse::Error { error } => {
             Err(EngramTransportError::remote(error.into_body()))
         }

@@ -1470,6 +1470,11 @@ happens elsewhere. The agent therefore names the item's worktree once with
   event, grant or verification credit is created. A later quiet turn can then
   supply a sighting without a command or another name; the refused earlier
   turn is never rewritten or credited.
+  A forward work-revision change can also refresh a later opening when the
+  work, run, root execution, claim and claim fence are unchanged. This path
+  requires settled authority and the same acknowledged named root and
+  generation. A lower revision or a changed identity cannot use it, and the
+  mismatched closing turn keeps its original refusal.
 - **How long naming takes.** One budget of 102 seconds on the server covers
   two source captures, the commit reserve, and one shared 20-second control
   allowance across held-claim read, retired-claim maintenance, initial status, binding event and any
@@ -3439,6 +3444,31 @@ as delivery authority. Sample each enabled project record's sessions by its
 project id, rather than grouping distinct project records by repository name.
 Broad `/api/state` summaries do not include pending prompt bodies or this
 targeted observation history.
+
+## Control-child stderr diagnostics
+
+Control children drain stderr continuously with a private 4096-byte tail.
+Worker-side startup and terminal exchange failures, including EOF, carry the
+existing exact-child PID/exit observation plus fixed stderr-class and byte-count,
+truncation, completion and read-failure metadata. Caller-side startup timeouts,
+request deadlines and disconnected-worker failures snapshot the same evidence
+before cleanup. An unsent request whose startup exhausted its budget retains
+the ready child and snapshots its evidence without terminating it. Only
+allowlisted classes escape the reader; arbitrary child text, credentials, paths and echoed
+request payloads are withheld. No raw stderr is persisted or inherited.
+A class is a pattern observed in stderr, not proof of the failure's cause.
+The last recognized class can survive later unclassified bytes.
+
+The snapshot does not wait for stderr to close: stdout EOF can be reported
+while the child remains alive. Counts describe bytes drained at that point;
+zero bytes with incomplete capture do not prove silent stderr. Process-tree
+termination and reap keep their existing owner, and the pipe reader ends
+when that owned pipe closes. Capture changes no protocol, deadline, retry,
+authority or request-application decision.
+
+Actual-child checks cover live-child EOF on Unix and EOF after normal child
+exit on Windows. Windows live-child stdout closure remains an open pipe
+behavior question; the diagnostic capture adds no wait for that condition.
 
 ## Related
 

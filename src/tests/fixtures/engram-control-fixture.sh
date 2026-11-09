@@ -197,6 +197,20 @@ case "$initial_mode" in
     case "$ready_line" in *termal-descendant-ready*) ;; *) exit 3 ;; esac
     ;;
 esac
+case "$initial_mode" in
+  fixture-stderr-*)
+    # Exceed pipe capacity before readiness; arbitrary text stays private.
+    printf '%s' "thread 'fixture' panicked at PRIVATE_PATH token=PRIVATE_TOKEN PRIVATE_REQUEST " >&2
+    block=$(printf '%1024s' '' | tr ' ' x)
+    i=0
+    while [ "$i" -lt 128 ]; do printf '%s' "$block" >&2; i=$((i + 1)); done
+    if [ "$initial_mode" = fixture-stderr-startup-eof ]; then
+      exec 1>&-
+      IFS= read -r unused
+      exit 0
+    fi
+    ;;
+esac
 printf '%s\n' 'termal-engram-control-fixture-ready'
 
 while IFS= read -r line; do
@@ -206,10 +220,15 @@ while IFS= read -r line; do
   fi
   mode=$(tr -d '\r\n' < "$project_file")
   case "$mode" in
+    fixture-stderr-live-eof)
+      exec 1>&-
+      IFS= read -r unused
+      exit 0
+      ;;
     fixture-eof)
       exit 0
       ;;
-    fixture-hang)
+    fixture-hang|fixture-stderr-hang)
       # No response and no timer: the host must kill this blocked reader.
       IFS= read -r unused
       exit 0

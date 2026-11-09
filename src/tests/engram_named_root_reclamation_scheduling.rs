@@ -21,6 +21,7 @@ impl WarmRequestGate {
             config: original.config.clone(),
             process: original.process.clone(),
             process_tree: original.process_tree.clone(),
+            stderr: original.stderr.clone(),
             requests,
             worker_finished: original.worker_finished.clone(),
             retiring: AtomicBool::new(false),

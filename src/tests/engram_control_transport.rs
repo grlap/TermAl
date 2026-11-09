@@ -459,7 +459,7 @@ fn real_process_eof_reports_the_control_process_identity_and_exit_state() {
 fn real_process_deadline_reports_the_running_control_process() {
     let temp_root = TestTempRoot::create("engram-control-fixture-deadline-evidence");
     let project_file = temp_root.path().join(".engram-project");
-    fs::write(&project_file, "fixture-hang\n").expect("hang mode should write");
+    fs::write(&project_file, "fixture-stderr-hang\n").expect("hang mode should write");
     let connection = EngramConnectionConfig {
         binary_path: real_engram_control_fixture_path(),
         project_file,
@@ -483,6 +483,24 @@ fn real_process_deadline_reports_the_running_control_process() {
         )
         .expect_err("the hung fixture should hit the deadline");
     assert_eq!(timeout.kind, EngramTransportErrorKind::Deadline);
+    assert!(
+        timeout.message.contains("control call exceeded"),
+        "{timeout:?}"
+    );
+    assert!(!timeout.request_never_sent);
+    assert!(
+        timeout.message.contains("stderr class=panic"),
+        "{timeout:?}"
+    );
+    assert!(
+        timeout.message.contains("retainedBytes=4096"),
+        "{timeout:?}"
+    );
+    assert!(timeout.message.contains("truncated=true"), "{timeout:?}");
+    assert!(timeout.message.contains("complete=false"), "{timeout:?}");
+    for private in ["PRIVATE_PATH", "PRIVATE_TOKEN", "PRIVATE_REQUEST"] {
+        assert!(!format!("{timeout:?}").contains(private));
+    }
     let cause = serde_json::to_value(EngramCausalFailure::error(
         &timeout,
         "work_session_read",
@@ -494,6 +512,10 @@ fn real_process_deadline_reports_the_running_control_process() {
         cause["controlProcess"],
         json!({"identity": format!("pid {pid}"), "exitState": "running when the failure was seen"})
     );
+    assert!(cause.to_string().contains("stderr class=panic"));
+    for private in ["PRIVATE_PATH", "PRIVATE_TOKEN", "PRIVATE_REQUEST"] {
+        assert!(!cause.to_string().contains(private));
+    }
 }
 
 #[test]
@@ -708,6 +730,7 @@ fn real_process_reset_cleanup_deadline_retains_the_exact_child_and_refuses_a_suc
         config: original.config.clone(),
         process: original.process.clone(),
         process_tree: original.process_tree.clone(),
+        stderr: original.stderr.clone(),
         requests: original.requests.clone(),
         worker_finished: original.worker_finished.clone(),
         retiring: AtomicBool::new(false),
@@ -778,6 +801,7 @@ fn real_process_work_session_waits_for_same_session_predecessor_cleanup() {
         config: original.config.clone(),
         process: original.process.clone(),
         process_tree: original.process_tree.clone(),
+        stderr: original.stderr.clone(),
         requests: original.requests.clone(),
         worker_finished: original.worker_finished.clone(),
         retiring: AtomicBool::new(true),
@@ -1345,4 +1369,115 @@ fn real_process_respawn_starts_a_new_connection_generation() {
         "a respawn is a new connection"
     );
     transport.shutdown_session(&connection.session_id);
+}
+
+// Windows live-EOF fixtures reach the deadline; verify live EOF on Unix.
+#[cfg(unix)]
+#[test]
+fn real_process_control_eof_retains_bounded_private_stderr_from_live_child() {
+    let binary_path = real_engram_control_fixture_path();
+    for mode in ["fixture-stderr-live-eof", "fixture-stderr-startup-eof"] {
+        let root = TestTempRoot::create(mode);
+        fs::write(root.path().join(".engram-project"), mode).unwrap();
+        let connection = unsent_boundary_connection(&root, binary_path.clone(), mode);
+        let transport = real_process_fixture_transport(root.path());
+        let error = transport
+            .request(
+                &connection,
+                &EngramControlRequest::WorkSessionRead {},
+                DEADLOCK_GUARD,
+            )
+            .expect_err("the fixture closes stdout while still waiting on stdin");
+        assert_eq!(error.kind, EngramTransportErrorKind::Transport);
+        assert_eq!(
+            error.request_never_sent,
+            mode == "fixture-stderr-startup-eof",
+            "{mode}: {error:?}"
+        );
+        let process = error
+            .control_process
+            .as_ref()
+            .expect("exact child was observed before cleanup");
+        assert_eq!(process.exit_state, "running when the failure was seen");
+        assert!(error.message.contains("EOF"));
+        assert!(
+            error.message.contains("stderr class=panic"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("retainedBytes=4096"));
+        assert!(error.message.contains("truncated=true"));
+        assert!(
+            error.message.contains("complete=false"),
+            "stderr is still open on the live child"
+        );
+        let cause = EngramCausalFailure::error(&error, "work_session_read", None, &[]);
+        let projected = serde_json::to_string(&cause).unwrap();
+        for secret in ["PRIVATE_PATH", "PRIVATE_TOKEN", "PRIVATE_REQUEST"] {
+            assert!(!projected.contains(secret));
+            assert!(!format!("{error:?}").contains(secret));
+        }
+        assert_eq!(
+            cause.control_process.identity,
+            format!("pid {}", process.pid)
+        );
+        transport.shutdown_session(&connection.session_id);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn real_process_control_eof_retains_bounded_private_stderr_after_child_exit() {
+    for mode in ["fixture-stderr-exit", "fixture-stderr-startup-exit"] {
+        let root = TestTempRoot::create(mode);
+        fs::write(root.path().join(".engram-project"), mode).unwrap();
+        let connection =
+            unsent_boundary_connection(&root, real_engram_control_fixture_path(), mode);
+        let transport = real_process_fixture_transport(root.path());
+        let error = transport
+            .request(
+                &connection,
+                &EngramControlRequest::WorkSessionRead {},
+                DEADLOCK_GUARD,
+            )
+            .expect_err("the fixture exits after emitting bounded diagnostic noise");
+        assert_eq!(
+            error.kind,
+            EngramTransportErrorKind::Transport,
+            "{mode}: {error:?}"
+        );
+        assert_eq!(
+            error.request_never_sent,
+            mode == "fixture-stderr-startup-exit",
+            "{mode}: {error:?}"
+        );
+        let process = error
+            .control_process
+            .as_ref()
+            .expect("exact child was observed before cleanup");
+        let fixture_pid = fs::read_to_string(root.path().join("stderr-child-pid"))
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
+        assert_eq!(process.pid, fixture_pid);
+        assert!(!process.exit_state.is_empty());
+        assert!(error.message.contains("EOF"), "{mode}: {error:?}");
+        assert!(
+            error.message.contains("stderr class=panic"),
+            "{mode}: {error:?}"
+        );
+        assert!(error.message.contains("retainedBytes=4096"));
+        assert!(error.message.contains("truncated=true"));
+        let cause = EngramCausalFailure::error(&error, "work_session_read", None, &[]);
+        let projected = serde_json::to_string(&cause).unwrap();
+        for secret in ["PRIVATE_PATH", "PRIVATE_TOKEN", "PRIVATE_REQUEST"] {
+            assert!(!projected.contains(secret));
+            assert!(!format!("{error:?}").contains(secret));
+        }
+        assert_eq!(
+            cause.control_process.identity,
+            format!("pid {}", process.pid)
+        );
+        transport.shutdown_session(&connection.session_id);
+    }
 }

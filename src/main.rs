@@ -1145,6 +1145,7 @@ include!("engram_declared_diagnostics.rs");
 include!("engram_check_paths.rs");
 include!("engram_write_places.rs");
 include!("engram_check_toolchain.rs");
+include!("engram_control_stderr.rs");
 include!("engram_control_transport.rs");
 include!("engram_readiness.rs");
 #[cfg(test)]
