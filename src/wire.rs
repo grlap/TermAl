@@ -1749,7 +1749,7 @@ enum AcceptanceEvaluationMode {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(
     rename_all = "camelCase",
-    from = "PersistedDelegationAcceptanceEvaluation"
+    try_from = "PersistedDelegationAcceptanceEvaluation"
 )]
 struct DelegationAcceptanceEvaluation {
     work_ref: String,
@@ -1792,6 +1792,10 @@ struct DelegationAcceptanceEvaluation {
     /// kept; such an evaluation declares none, as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_fingerprint: Option<String>,
+    /// Complete owner identity, private to the persisted host attempt.
+    /// Historical attempts keep source_fingerprint without conversion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_id: Option<EngramSourceId>,
     /// The work's named source root the evaluation was requested on, when
     /// its claim had one (`engram_source_roots.rs`): the evaluator runs there
     /// and its fingerprint is taken there. The first submission is refused
@@ -1834,8 +1838,8 @@ struct DelegationAcceptanceEvaluation {
 enum AcceptanceEvaluationSubmission {
     #[default]
     None,
-    /// `payload_digest` names the exact argument list, which is the only
-    /// thing that may be sent again while the outcome is open.
+    /// `payload_digest` names the arguments and any saved source object.
+    /// A shared source's temporary file location is outside that identity.
     Pending {
         payload_digest: String,
         started_at: String,
@@ -1862,6 +1866,9 @@ enum AcceptanceEvaluationSubmission {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AcceptanceEvaluationOpenWrite {
+    /// Canonical source object, saved before invocation and hidden from clients.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_payload: Option<AcceptanceSourcePayload>,
     /// Names the evaluator's own part of the command, its normalized verdicts:
     /// what "the same verdicts" is decided on.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -1890,25 +1897,31 @@ impl DelegationAcceptanceEvaluation {
     /// What a client may see: everything but the host-private argument list.
     fn client_view(&self) -> Self {
         let mut view = self.clone();
+        view.source_id = None;
         view.selected_evidence.clear();
         if let AcceptanceEvaluationSubmission::Pending { original, .. }
         | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } = &mut view.submission
         {
             original.args.clear();
+            original.source_payload = None;
         }
         if let Some(history) = view.attempt_history.as_mut() {
             if let Some(refusal) = history.refusal.as_mut() {
                 refusal.original.args.clear();
+                refusal.original.source_payload = None;
             }
             for previous in &mut history.previous {
+                previous.source_id = None;
                 if let Some(refusal) = previous.refusal.as_mut() {
                     refusal.original.args.clear();
+                    refusal.original.source_payload = None;
                 }
                 if let AcceptanceEvaluationSubmission::Pending { original, .. }
                 | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } =
                     &mut previous.submission
                 {
                     original.args.clear();
+                    original.source_payload = None;
                 }
             }
         }
@@ -1976,6 +1989,8 @@ struct PersistedDelegationAcceptanceEvaluation {
     store: Option<EngramAuthorityStoreKey>,
     #[serde(default)]
     source_fingerprint: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_acceptance_optional_source_id")]
+    source_id: Option<EngramSourceId>,
     #[serde(default)]
     source_root: Option<AcceptanceEvaluationSourceRoot>,
     #[serde(default)]
@@ -1999,8 +2014,13 @@ struct PersistedRawAcceptanceEvaluationOutcome {
     recorded_at: String,
 }
 
-impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvaluation {
-    fn from(persisted: PersistedDelegationAcceptanceEvaluation) -> Self {
+impl TryFrom<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvaluation {
+    type Error = &'static str;
+
+    fn try_from(persisted: PersistedDelegationAcceptanceEvaluation) -> std::result::Result<Self, Self::Error> {
+        if persisted.source_id.is_some() && persisted.source_fingerprint.is_some() {
+            return Err("evaluation target has more than one source identity");
+        }
         let submission = match (persisted.submission, persisted.outcome) {
             (AcceptanceEvaluationSubmission::None, Some(outcome)) => {
                 AcceptanceEvaluationSubmission::Recorded {
@@ -2010,7 +2030,7 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
             }
             (submission, _) => submission,
         };
-        Self {
+        Ok(Self {
             work_ref: persisted.work_ref,
             mode: persisted.mode,
             parent_session: persisted.parent_session,
@@ -2023,13 +2043,14 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
             attempt_key: persisted.attempt_key,
             store: persisted.store,
             source_fingerprint: persisted.source_fingerprint,
+            source_id: persisted.source_id,
             source_root: persisted.source_root,
             source_claim: persisted.source_claim,
             naming_history: persisted.naming_history,
             submission,
             attempt_history: persisted.attempt_history,
             selected_evidence: persisted.selected_evidence,
-        }
+        })
     }
 }
 

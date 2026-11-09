@@ -6,6 +6,16 @@ const COMMAND: &str = "node scripts/test-launcher.mjs focused -- node --test scr
 const KEY: &str = "live-launcher";
 const COMMITTED_COMMAND: &str = "node scripts/test-launcher.mjs focused --input commit -- node --test scripts/test-launcher.test.mjs";
 
+fn clean_owner_source(root: &FsPath) -> Value {
+    assert!(run_git_test_command_output(root, &["status", "--porcelain"]).is_empty(),
+        "the receipt fixture measures an actual clean checkout");
+    json!({
+        "commit": run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim(),
+        "tree": run_git_test_command_output(root, &["rev-parse", "HEAD^{tree}"]).trim(),
+        "submodules": [], "changes": [],
+    })
+}
+
 // Scoped protocol input, not a source cache. Real pinned-Git controls below
 // bypass it. Dropping a fixture removes its unique run's reply on every exit.
 struct NoticeSourceReply(String);
@@ -24,6 +34,7 @@ struct RegisteredLauncherTurn {
     directory: PathBuf,
     started: String,
     command: String,
+    source_id: Option<Value>,
     notice_source: std::cell::RefCell<Option<NoticeSourceReply>>,
 }
 
@@ -87,10 +98,14 @@ impl RegisteredLauncherTurn {
             "stages": [{ "name": "focused", "command": "node",
                 "args": ["--test", "scripts/test-launcher.test.mjs"] }],
         });
-        if committed { request["input"] = json!("commit"); }
+        let source_id = committed.then(|| clean_owner_source(&root));
+        if let Some(source) = &source_id {
+            request["input"] = json!("commit");
+            request["sourceId"] = source.clone();
+        }
         fs::write(directory.join("request.json"), serde_json::to_vec(&request).unwrap()).unwrap();
         let command = if committed { COMMITTED_COMMAND } else { COMMAND }.to_owned();
-        let fixture = Self { turn, recorder, run_id, directory, started, command,
+        let fixture = Self { turn, recorder, run_id, directory, started, command, source_id,
             notice_source: std::cell::RefCell::new(None) };
         fixture.write_results("running");
         assert_eq!(TestRunDisk::read(&fixture.directory, None).unwrap().state(&|_, _| false),
@@ -153,10 +168,13 @@ impl RegisteredLauncherTurn {
         let (head, dirty) = committed_source_status(&git).expect("fixture Git reads must be complete");
         assert!(dirty.is_empty(), "receipt fixture must be clean: {dirty:?}");
         self.set_notice_source(TestReceivedNoticeSourceResult::Status(head.clone(), dirty));
+        let source_before = self.source_id.as_ref().expect("a native receipt has an admitted owner identity");
+        let source_after = clean_owner_source(FsPath::new(&registration.worktree));
         let at = test_run_timestamp();
         fs::write(self.directory.join("results.json"), serde_json::to_vec(&json!({
             "runId":self.run_id, "state":if passed {"passed"} else {"failed"},
             "started":self.started, "ended":at, "exitCode":if passed {0} else {1},
+            "sourceIdBefore":source_before, "sourceIdAfter":source_after,
             "stages":[{"name":"focused", "state":if passed {"passed"} else {"failed"},
                 "code":if passed {0} else {1}, "started":at, "ended":at}],
             "input":{"kind":"commit", "commit":head, "cleanBefore":true,

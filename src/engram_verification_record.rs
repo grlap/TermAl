@@ -130,6 +130,20 @@ enum EngramVerificationRecordInput {
     },
 }
 
+impl EngramVerificationRecordInput {
+    // Commit-only consumers keep their existing policy after the full body
+    // has been rebuilt and its receipt/digest checked by the caller.
+    fn clean_commit(&self) -> Option<&str> {
+        match self {
+            Self::Commit { commit } => Some(commit),
+            Self::SourceId { source_id } if source_id.changes.is_empty()
+                && source_id.submodules.iter().all(|child| child.changes.is_empty()) =>
+                    Some(&source_id.commit),
+            _ => None,
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for EngramVerificationRecordInput {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
@@ -426,13 +440,22 @@ fn engram_verification_record_digest_answers(digest: &str, body: &EngramVerifica
 }
 
 /// One run's frozen record, ready to send.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct EngramVerificationRecordFrozen {
     run_dir: PathBuf,
     run_id: String,
     /// The persisted body; it re-serializes to the exact persisted text.
     record: Value,
     body: EngramVerificationRecordBody,
+}
+
+impl std::fmt::Debug for EngramVerificationRecordFrozen {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EngramVerificationRecordFrozen")
+            .field("run_id", &self.run_id)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What one look at a registered run found before any call. The reasons are
@@ -937,6 +960,18 @@ fn engram_verification_record_body(
     request: &Value,
     results: &Value,
 ) -> Result<EngramVerificationRecordBody, String> {
+    engram_verification_record_build_body(registration, request, results, None)
+}
+
+// A retained body is checked in its original format, never converted during
+// replay. Only that historical reader can reconstruct a commit projection
+// from source-bearing artifacts; a fresh record keeps the complete identity.
+fn engram_verification_record_build_body(
+    registration: &TestRunRegistration,
+    request: &Value,
+    results: &Value,
+    retained_input: Option<&EngramVerificationRecordInput>,
+) -> Result<EngramVerificationRecordBody, String> {
     if let Some(start) = registration.declared_native.as_ref() {
         return engram_verification_record_native_body(registration, request, results, start);
     }
@@ -978,12 +1013,44 @@ fn engram_verification_record_body(
     if checks.is_empty() {
         return Err("the run records no stage".to_owned());
     }
-    engram_verification_record_envelope(registration, request, results,
-        EngramVerificationRecordInput::Commit { commit },
-        EngramVerificationRecordPostRun::Commit(EngramVerificationRecordCommitPostRun {
+    let historical = retained_input.is_some_and(|input| matches!(input,
+        EngramVerificationRecordInput::Commit { .. }));
+    let has_source = request.get("sourceId").is_some()
+        || results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some();
+    let endpoints = if has_source {
+        let admitted = test_run_source_id(request.get("sourceId"))
+            .ok_or("the admitted owner source_id is unavailable")?;
+        let (before, after) = test_run_source_endpoints(results)
+            .ok_or("the owner source_id endpoints are unavailable")?;
+        if admitted != before || before != after || before.commit != commit {
+            return Err("the owner source_id differs across the run boundaries".to_owned());
+        }
+        if !before.changes.is_empty() || before.submodules.iter().any(|child| !child.changes.is_empty()) {
+            return Err("the owner source_id contradicts the clean committed input".to_owned());
+        }
+        Some((before, after))
+    } else { None };
+    let (record_input, post_run) = if !historical {
+        // SourceId carries no legacy classification fields. Retain the
+        // ordinary committed-input policy even when rebuilding a held receipt.
+        if outcome != TestRunCommittedInputOutcome::Clean || !after.clean || !after.paths.is_empty() {
+            return Err("the run's post-run committed input is not clean".to_owned());
+        }
+        let (before, after) = endpoints.ok_or("the run records no complete owner source_id")?;
+        (EngramVerificationRecordInput::SourceId { source_id: before },
+            EngramVerificationRecordPostRun::SourceId(EngramVerificationRecordSourcePostRun { source_id: after }))
+    } else {
+        // A retained commit body keeps its historical shape, without
+        // inventing equivalence with a new SourceId or rewriting its bytes.
+        (EngramVerificationRecordInput::Commit { commit },
+            EngramVerificationRecordPostRun::Commit(EngramVerificationRecordCommitPostRun {
             outcome, clean_before: input.clean_before, clean_after: after.clean,
             dirty_paths: after.paths.iter().map(|path| path.path.clone()).collect(), disposition: None,
-        }), checks)
+        }))
+    };
+    let body = engram_verification_record_envelope(registration, request, results, record_input, post_run, checks)?;
+    engram_verification_record_frame_bound(&body, &registration.run_id, "verification_frame_too_large")?;
+    Ok(body)
 }
 
 fn engram_verification_record_native_body(
@@ -1030,19 +1097,27 @@ fn engram_verification_record_native_body(
     }
     let body = engram_verification_record_envelope(registration, request, results, input, post_run,
         vec![terminal.check.clone()])?;
-    // Reuse the control transport's existing frame bound. Keep the full
+    // Reuse the control transport's operation-specific frame bound. Keep the full
     // identity and a named refusal instead of sending a shortened record or
     // letting a permanent oversize frame become a transport retry.
-    let frame = EngramControlRequest::VerificationRecord {
-        operation_key: engram_verification_record_key(&registration.run_id),
-        record: serde_json::to_value(&body).map_err(|error| error.to_string())?,
-    };
-    let bytes = serde_json::to_vec(&frame).map_err(|error| error.to_string())?;
-    if bytes.len() > ENGRAM_CONTROL_MAX_FRAME_BYTES {
-        return Err(format!("native_verification_frame_too_large: {} bytes exceeds the existing {} byte control frame",
-            bytes.len(), ENGRAM_CONTROL_MAX_FRAME_BYTES));
-    }
+    engram_verification_record_frame_bound(&body, &registration.run_id, "native_verification_frame_too_large")?;
     Ok(body)
+}
+
+fn engram_verification_record_frame_bound(body: &EngramVerificationRecordBody, run_id: &str, code: &str)
+    -> Result<(), String>
+{
+    let frame = EngramControlRequest::VerificationRecord {
+        operation_key: engram_verification_record_key(run_id),
+        record: serde_json::to_value(body).map_err(|_| "the record cannot be encoded")?,
+    };
+    let bytes = serde_json::to_vec(&frame).map_err(|_| "the record frame cannot be encoded")?;
+    let framed_len = bytes.len().saturating_add(1); // The transport writes one LF.
+    let limit = engram_control_request_frame_limit(&frame);
+    if framed_len > limit {
+        return Err(format!("{code}: {framed_len} bytes exceeds the {limit} byte verification frame"));
+    }
+    Ok(())
 }
 
 fn engram_verification_record_envelope(
@@ -1288,7 +1363,8 @@ fn engram_verification_record_is_host_body(
     ) else {
         return false;
     };
-    engram_verification_record_body(registration, &request, &results).is_ok_and(|rebuilt| rebuilt == *body)
+    engram_verification_record_build_body(registration, &request, &results, Some(&body.input))
+        .is_ok_and(|rebuilt| rebuilt == *body)
 }
 
 /// Looks at one registered run off the state lock: whether it emits, and
@@ -1369,7 +1445,8 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
         };
         let rebuilt = inputs()
             .ok()
-            .and_then(|(request, results)| engram_verification_record_body(registration, &request, &results).ok());
+            .and_then(|(request, results)| engram_verification_record_build_body(
+                registration, &request, &results, Some(&frozen.body.input)).ok());
         if rebuilt.as_ref() != Some(&frozen.body) {
             return Prepared::Pending(EngramVerificationRecordPending::BodyMismatch);
         }
@@ -1394,8 +1471,11 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
     if let Some(reason) = refusal {
         return pending(reason);
     }
-    let built = engram_verification_record_body(registration, &request, &results)
-        .and_then(|body| engram_verification_record_text(&body).map(|text| (body, text)));
+    let retained = engram_verification_record_frozen(&run_dir, &registration.run_id);
+    let built = match retained.as_ref() {
+        Some(frozen) => engram_verification_record_build_body(registration, &request, &results, Some(&frozen.body.input)),
+        None => engram_verification_record_body(registration, &request, &results),
+    }.and_then(|body| engram_verification_record_text(&body).map(|text| (body, text)));
     let (rebuilt, rebuilt_text) = match built {
         Ok(built) => built,
         Err(detail) => {
@@ -1484,7 +1564,7 @@ fn engram_verification_record_send(
         Ok(value) => {
             let receipt = match parse_engram_result::<EngramVerificationRecordReceipt>(value) {
                 Ok(receipt) => receipt,
-                Err(error) => return rejected(format!("the receipt is unreadable: {error}")),
+                Err(_) => return rejected("the receipt is unreadable".to_owned()),
             };
             if let Err(why) = engram_verification_record_receipt_check(&frozen.body, &receipt) {
                 return rejected(why.to_owned());
@@ -1523,8 +1603,8 @@ fn engram_verification_record_send(
                     .is_some_and(|code| ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS.contains(&code)) =>
         {
             rejected(format!(
-                "Engram refused it: {}: {}",
-                error.code.as_deref().unwrap_or("no code"), error.message
+                "Engram refused it: {}",
+                error.code.as_deref().unwrap_or("no code")
             ))
         }
         // Any other answer, transient (a deadline, a busy or unavailable
@@ -1542,18 +1622,20 @@ fn engram_verification_record_send(
     }
 }
 
-/// The source basis of a committed-input run's checks: the commit, in the
-/// named root it registered with. None for any other input.
+/// The source basis of a run's checks in its original named root. Current
+/// records retain the complete owner value; historical commit records stay
+/// in their stored format. Staged inputs still supply no producer basis.
 fn engram_verification_record_basis(body: &EngramVerificationRecordBody) -> Option<EngramExecutionSourceBasis> {
-    let EngramVerificationRecordInput::Commit { commit } = &body.input else {
-        return None;
+    let (source_id, source_revision) = match &body.input {
+        EngramVerificationRecordInput::SourceId { source_id } => (Some(source_id.clone()), String::new()),
+        EngramVerificationRecordInput::Commit { commit } =>
+            (None, format!("{COMMITTED_SOURCE_REVISION_SCHEME}:{commit}")),
+        EngramVerificationRecordInput::StagedTree { .. } => return None,
     };
     Some(EngramExecutionSourceBasis {
-        source_id: None,
+        source_id,
         workspace_id: body.registration.root.workspace_id.clone(),
-        // Spelled as every committed-input source basis is
-        // (`ordinary_commit_input.rs`); the wire's `input.commit` stays bare.
-        source_revision: format!("{COMMITTED_SOURCE_REVISION_SCHEME}:{commit}"),
+        source_revision,
         source_root_generation: Some(body.registration.root.generation),
         source_root_state: Some(EngramSourceRootState::Named),
     })

@@ -64,6 +64,7 @@ fn observe_engram_control_process(process: &SharedChild) -> EngramControlProcess
 struct EngramProcessRequest {
     /// None is an internal shutdown wake, never a wire frame.
     request: Option<Vec<u8>>,
+    response_limit: usize,
     reply: mpsc::Sender<std::result::Result<Value, EngramTransportError>>,
 }
 
@@ -87,6 +88,7 @@ impl EngramControlProcess {
         let (reply, _) = mpsc::channel();
         let _ = self.requests.send(EngramProcessRequest {
             request: None,
+            response_limit: ENGRAM_CONTROL_MAX_FRAME_BYTES,
             reply,
         });
         self.process_tree.terminate(&self.process)
@@ -355,21 +357,7 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         // after the hand-off may follow a partial or complete write and
         // keeps the outcome unknown.
         let started_at = std::time::Instant::now();
-        let encoded = serde_json::to_vec(request).map_err(|err| {
-            EngramTransportError::protocol(format!("failed encoding request: {err}"))
-                .request_never_sent()
-        })?;
-        let frame_limit = if matches!(request, EngramControlRequest::ExecutionObserve { .. }) {
-            ENGRAM_OBSERVATION_MAX_REQUEST_BYTES
-        } else {
-            ENGRAM_CONTROL_MAX_FRAME_BYTES
-        };
-        if encoded.len() > frame_limit {
-            return Err(EngramTransportError::protocol(
-                "Engram request exceeds the maximum control frame",
-            )
-            .request_never_sent());
-        }
+        let encoded = encode_engram_control_request(request)?;
 
         // Spawn, attach, resume and the startup handshake only read from the
         // process; none of them writes this request. A program that could
@@ -398,6 +386,7 @@ impl EngramControlTransport for ProcessEngramControlTransport {
             .requests
             .send(EngramProcessRequest {
                 request: Some(encoded),
+                response_limit: engram_control_response_frame_limit(request),
                 reply: reply_tx,
             })
             .map_err(|err| {
@@ -626,7 +615,7 @@ fn spawn_engram_control_process(
                             break;
                         };
                         let mut result =
-                            exchange_engram_control_frame(&mut stdin, &mut stdout, &frame);
+                            exchange_engram_control_frame_with_limit(&mut stdin, &mut stdout, &frame, request.response_limit);
                         // Engram's host service continues after request-level
                         // `{status:"error"}` replies. Treat only malformed or
                         // broken exchanges as terminal for this sidecar.
@@ -754,10 +743,20 @@ fn read_engram_control_startup_handshake(
     Ok(())
 }
 
+#[cfg(test)]
 fn exchange_engram_control_frame(
     stdin: &mut impl Write,
     stdout: &mut impl BufRead,
     request: &[u8],
+) -> std::result::Result<Value, EngramTransportError> {
+    exchange_engram_control_frame_with_limit(stdin, stdout, request, ENGRAM_CONTROL_MAX_FRAME_BYTES)
+}
+
+fn exchange_engram_control_frame_with_limit(
+    stdin: &mut impl Write,
+    stdout: &mut impl BufRead,
+    request: &[u8],
+    response_limit: usize,
 ) -> std::result::Result<Value, EngramTransportError> {
     stdin
         .write_all(request)
@@ -768,7 +767,10 @@ fn exchange_engram_control_frame(
         })?;
 
     let mut response = Vec::new();
-    let read = stdout.read_until(b'\n', &mut response).map_err(|err| {
+    // Bound allocation before reading; an overlong line retires the sidecar
+    // instead of leaving unread bytes available as a successor's reply.
+    let read = std::io::Read::take(stdout, (response_limit + 1) as u64)
+        .read_until(b'\n', &mut response).map_err(|err| {
         EngramTransportError::transport(format!("failed reading Engram response: {err}"))
     })?;
     if read == 0 {
@@ -776,7 +778,7 @@ fn exchange_engram_control_frame(
             "Engram control reached EOF before replying",
         ));
     }
-    if response.len() > ENGRAM_CONTROL_MAX_FRAME_BYTES {
+    if response.len() > response_limit {
         return Err(EngramTransportError::protocol(
             "Engram response exceeds the maximum control frame",
         ));
@@ -784,7 +786,15 @@ fn exchange_engram_control_frame(
     let envelope: EngramControlResponse =
         engram_decode_slice(&response, "invalid Engram response")?;
     match envelope {
-        EngramControlResponse::Ok { result } => Ok(result),
+        EngramControlResponse::Ok { result } => {
+            if response_limit == ACCEPTANCE_PRIVATE_RESPONSE_MAX_BYTES
+                && serde_json::to_vec(&result).map_err(|_| EngramTransportError::protocol("cannot measure private evidence page"))?.len()
+                    > ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES
+            {
+                return Err(EngramTransportError::protocol("private evidence page exceeds the supported capacity"));
+            }
+            Ok(result)
+        },
         EngramControlResponse::Error { error } => {
             Err(EngramTransportError::remote(error.into_body()))
         }

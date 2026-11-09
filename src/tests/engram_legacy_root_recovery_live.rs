@@ -122,7 +122,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
             if generation == named.generation as i64));
     });
     let before = content_revision(&fixture.root).unwrap().1;
-    let (body, receipt) = fixture.registered_check(session, &fixture.root, "cargo test --offline");
+    let (body, receipt) = fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
     assert_eq!(body.registration.binding, binding);
     assert_eq!(body.registration.root.generation, named.generation as i64);
     let stored = fixture.object(&receipt.verifications[0].record_id);
@@ -134,7 +134,7 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
     let shown = fixture.work(session, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
-    let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("the registered native witness requires committed input"); };
+    let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("historical evaluation witness requires its retained Commit record"); };
     fixture.work(session, &["evaluate", work, "--mode", "same-session", "--acceptance-basis",
         &acceptance, "--evidence-basis", &evidence, "--verdict", "1=pass:observed", "--rationale",
         "1=Real registered check in a prospectively confirmed legacy root passed", "--evidence",
@@ -142,6 +142,6 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         "--attempt", "legacy-forward-completion", "--json"]);
     fixture.work(session, &["done", work, "Prospective root check passed", "--source-fingerprint", commit, "--json"]);
     let completed = fixture.work(session, &["show", work, "--json"]);
-    assert_eq!(completed["status"]["work"]["lifecycle"], "completed", "{completed:#}");
+    assert_eq!(completed["status"]["work"]["lifecycle"], "completed", "<completed withheld>");
     assert_no_live_turn_gate(&fixture.live.transport);
 }

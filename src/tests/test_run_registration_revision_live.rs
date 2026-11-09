@@ -65,20 +65,20 @@ fn registration_refreshes_after_revision_or_child_attachment_but_never_after_reg
         assert!(later.work_revision > current.work_revision);
         let route = fixture.live.state.engram_verification_record_route(&registration).unwrap();
         // Check both the producer's original message and the host's retained
-        // detail, so an unrelated authority refusal cannot satisfy the
-        // revision witness.
+        // detail. The transport checks the specific revision cause; retained
+        // diagnostics expose only the bounded code.
         let link = route.link();
         let error = link.adapter.request(link.connection, &engram_verification_record_request(&frozen), link.timeout)
             .expect_err("the actual producer refuses the stale frozen revision");
         assert_eq!(error.kind, EngramTransportErrorKind::Remote);
         assert_eq!(error.code.as_deref(), Some("verification_record_refused"));
-        assert!(error.message.contains("work changed since registration"), "{error:?}");
+        assert!(error.message.contains("work changed since registration"),
+            "the transport refusal identifies the stale work revision");
         let step = engram_verification_record_send(frozen, Ok(route.link()));
         let EngramVerificationRecordStep::Rejected(detail) = &step else {
-            panic!("the actual backend must refuse the stale registered revision: {step:?}");
+            panic!("the actual backend must refuse the stale registered revision");
         };
-        assert!(detail.starts_with("Engram refused it: verification_record_refused: "), "{detail}");
-        assert!(detail.contains("work changed since registration"), "{detail}");
+        assert_eq!(detail, "Engram refused it: verification_record_refused");
         fixture.live.state.note_engram_verification_record_step(&registration, &step);
         let stored = fixture.live.state.inner.lock().unwrap().test_run_registrations[&registration.run_id].clone();
         assert_eq!(stored.work_binding.as_ref(), Some(&current), "refusal never refreshes the registration");

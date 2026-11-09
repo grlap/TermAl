@@ -167,6 +167,8 @@ fn verification_records_are_marked_with_kind_result_and_revision_in_both_briefs(
     assert_eq!(
         record.verification,
         Some(AcceptanceEvidenceVerification {
+            source_basis: None,
+            applicability_tree: None,
             check_kind: "test".to_owned(),
             result: "passed".to_owned(),
             source_revision: Some("content-v1:fc2ca148".to_owned()),
@@ -225,6 +227,8 @@ fn a_verification_from_another_revision_is_context_only_and_the_binding_names_th
         body_bytes: Some(22),
         cut_by_tracker: false,
         verification: Some(AcceptanceEvidenceVerification {
+            source_basis: None,
+            applicability_tree: None,
             check_kind: "test".to_owned(),
             result: "passed".to_owned(),
             source_revision: Some(EARLIER_REVISION.to_owned()),

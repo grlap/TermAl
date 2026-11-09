@@ -53,41 +53,25 @@ fn delayed_predecessor_three_turn_check_attribution() {
         "MATRIX_THREE_TURN_ATTRIBUTION {:#}",
         json!({
             "turnRefs":{"A":a,"B":b,"C":c},
-            "check":check.results,
-            "requests":matrix.fixture.live.transport.requests_for("execution_observe"),
-            "observations":observations
+            "checkRun":check.run_id,
+            "checkState":check.results["state"],
+            "requestCount":matrix.fixture.live.transport.requests_for("execution_observe").len(),
+            "observationsRead":!observations.is_null()
         })
     );
     matrix.refuse(&check, || {});
-    let SourceRevision::Taken { revision, .. } =
-        source_revision(&matrix.fixture.root, true).unwrap()
-    else {
-        panic!("the ordinary completion probe freshly measures committed Y");
-    };
+    let current = matrix.source_id_now();
+    assert!(current.changes.is_empty(), "the probe measures committed Y");
     assert_ne!(
-        revision,
-        format!(
-            "git-commit:{}",
-            check.results["input"]["commit"].as_str().unwrap()
-        )
+        current.commit,
+        check.results["input"]["commit"].as_str().unwrap()
     );
-    let attempted = matrix.fixture.command_output(
-        &matrix.holder,
-        &[
-            "done",
-            &matrix.work,
-            "Completion probe after the real later-turn edit",
-            "--source-fingerprint",
-            &revision,
-            "--json",
-        ],
-        true,
-    );
+    let attempted = matrix.done_output_source(&current);
     eprintln!(
-        "MATRIX_THREE_TURN_DONE status={} stdout={} stderr={}",
+        "MATRIX_THREE_TURN_DONE status={} stdout_bytes={} stderr_bytes={}",
         attempted.status,
-        String::from_utf8_lossy(&attempted.stdout),
-        String::from_utf8_lossy(&attempted.stderr)
+        attempted.stdout.len(),
+        attempted.stderr.len()
     );
     assert!(
         !attempted.status.success(),
@@ -97,15 +81,13 @@ fn delayed_predecessor_three_turn_check_attribution() {
     let core = matrix
         .fixture
         .work(&matrix.holder, &["core", "inspect", &matrix.work, "--json"]);
-    assert_ne!(core["run"]["state"], "completed", "{core:#}");
+    assert_ne!(core["run"]["state"], "completed", "<core withheld>");
     assert!(
         core["run"]["completion_seal"].is_null(),
-        "no seal on the unchecked input: {core:#}"
+        "no seal on the unchecked input: <core withheld>"
     );
-    assert_eq!(
-        fs::read(check.directory.join("results.json")).unwrap(),
-        original
-    );
+    assert!(fs::read(check.directory.join("results.json")).unwrap() == original,
+        "the complete original result is unchanged");
 }
 
 #[test]
@@ -130,14 +112,11 @@ fn check_a_edit_commit_check_b_in_one_turn_accepts_last_input() {
     matrix.close();
     matrix.settle();
     matrix.accept(&last, || {});
-    assert_eq!(
-        fs::read(first.directory.join("results.json")).unwrap(),
-        original_results
-    );
+    assert!(fs::read(first.directory.join("results.json")).unwrap() == original_results,
+        "later checks preserve every original result byte");
     for (id, original) in first.records.iter().zip(original_records) {
-        assert_eq!(
-            matrix.fixture.object(id),
-            original,
+        assert!(
+            matrix.fixture.object(id) == original,
             "later checks never rewrite original records"
         );
     }
@@ -182,10 +161,8 @@ fn late_close_a_after_successor_edit_commit_check_b_accepts_b() {
     );
     matrix.close();
     matrix.accept_after_done(&last, || {}, || gate.release());
-    assert_eq!(
-        fs::read(first.directory.join("results.json")).unwrap(),
-        original_results
-    );
+    assert!(fs::read(first.directory.join("results.json")).unwrap() == original_results,
+        "the complete earlier result is unchanged");
 }
 
 #[test]
@@ -231,13 +208,13 @@ fn note_citing_judgment_after_measured_change_cannot_seal() {
     let evaluation_recorded = match matrix.request(&check) {
         Err(body) => {
             Matrix::assert_source_refusal(&body);
-            eprintln!("MATRIX_CHANGED_NOTE_PENDING_AT_HOST {body:#}");
+            eprintln!("MATRIX_CHANGED_NOTE_PENDING_AT_HOST <body withheld>");
             false
         }
         Ok((child, _cleanup)) => {
             let (status, body) = matrix.submit(&child, &check);
             eprintln!(
-                "MATRIX_CHANGED_NOTE_EVALUATION status={} body={body:#}",
+                "MATRIX_CHANGED_NOTE_EVALUATION status={} body=<body withheld>",
                 status.as_u16()
             );
             if !status.is_success() {
@@ -246,30 +223,11 @@ fn note_citing_judgment_after_measured_change_cannot_seal() {
             status.is_success()
         }
     };
-    let SourceRevision::Taken { revision, .. } =
-        source_revision(&matrix.fixture.root, true).unwrap()
-    else {
-        panic!("negative completion freshly measures the CLEAN new input");
-    };
-    let output = matrix.fixture.command_output(
-        &matrix.holder,
-        &[
-            "done",
-            &matrix.work,
-            "Attempt completion after the measured change",
-            "--source-fingerprint",
-            &revision,
-            "--json",
-        ],
-        true,
-    );
-    let body = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let current = matrix.source_id_now();
+    assert!(current.changes.is_empty(), "negative completion measures the clean new input");
+    let output = matrix.done_output_source(&current);
     eprintln!(
-        "MATRIX_CHANGED_NOTE_DONE exit={:?} {body}",
+        "MATRIX_CHANGED_NOTE_DONE exit={:?} <body withheld>",
         output.status.code()
     );
     let core = matrix
@@ -277,11 +235,11 @@ fn note_citing_judgment_after_measured_change_cannot_seal() {
         .work(&matrix.holder, &["core", "inspect", &matrix.work, "--json"]);
     assert!(
         core["run"]["completion_seal"].is_null(),
-        "REAL HOLE: a note-citing judgment sealed unchecked changed input: {core:#}; {body}"
+        "REAL HOLE: a note-citing judgment sealed unchecked changed input: <core withheld>; <body withheld>"
     );
     assert_eq!(
         core["run"]["state"], "active",
-        "evaluation stays pending completion: {core:#}"
+        "evaluation stays pending completion: <core withheld>"
     );
     matrix.assert_completion_refusal(&output, evaluation_recorded);
 }
@@ -579,9 +537,8 @@ live_row!(failed_check_fix_commit_recheck_same_turn_accepts, {
     matrix.close();
     matrix.settle();
     matrix.accept(&passed, || {});
-    assert_eq!(
-        fs::read(failed.directory.join("results.json")).unwrap(),
-        original_results,
+    assert!(
+        fs::read(failed.directory.join("results.json")).unwrap() == original_results,
         "fix and later check leave the original failing evidence alone"
     );
 });
@@ -615,8 +572,8 @@ live_row!(real_edit_during_independent_evaluator_is_refused, {
     let check = matrix.check(false);
     matrix.close();
     matrix.settle();
-    let (child, _cleanup) = matrix.request(&check).unwrap_or_else(|error| {
-        panic!("this row must create the evaluator BEFORE the edit: {error:#}")
+    let (child, _cleanup) = matrix.request(&check).unwrap_or_else(|_| {
+        panic!("this row must create the evaluator BEFORE the edit: <details withheld>")
     });
     let reports = matrix
         .fixture
@@ -627,16 +584,15 @@ live_row!(real_edit_during_independent_evaluator_is_refused, {
     let (status, body) = matrix.submit(&child, &check);
     assert!(
         !status.is_success(),
-        "post-request edit must fail submission: {body:#}"
+        "post-request edit must fail submission: <body withheld>"
     );
     Matrix::assert_source_refusal(&body);
-    assert_eq!(
+    assert!(
         matrix
             .fixture
             .live
             .transport
-            .requests_for("execution_observe"),
-        reports,
+            .requests_for("execution_observe") == reports,
         "the submission cannot rely on a new turn report"
     );
 });
@@ -652,10 +608,8 @@ live_row!(cached_original_completion_after_real_edit_is_refused, {
     matrix.close();
     matrix.settle();
     matrix.refuse(&check, || {});
-    assert_eq!(
-        fs::read(check.directory.join("results.json")).unwrap(),
-        original
-    );
+    assert!(fs::read(check.directory.join("results.json")).unwrap() == original,
+        "the complete cached result is unchanged");
 });
 
 live_row!(check_on_another_commit_is_refused, {
@@ -692,8 +646,7 @@ live_row!(dirty_input_check_is_refused_without_a_passed_record, {
     );
     assert_ne!(
         check.results["input"]["eligible"], true,
-        "{:#}",
-        check.results
+        "dirty input must not be eligible"
     );
     matrix.receive_check(events, &mut check, true);
     assert!(check.records.is_empty());
@@ -730,18 +683,18 @@ live_row!(
         // Change only which producer-issued citation the evaluator submits. The
         // real task remains test-bound, and the real registered record remains.
         matrix.citation = Citation::UnboundNote;
-        let (child, _cleanup) = matrix.request(&check).unwrap_or_else(|error| {
-            panic!("the evaluation request must reach the actual citation judgment: {error:#}")
+        let (child, _cleanup) = matrix.request(&check).unwrap_or_else(|_| {
+            panic!("the evaluation request must reach the actual citation judgment: <details withheld>")
         });
         let (status, body) = matrix.submit(&child, &check);
         assert!(
             !status.is_success(),
-            "asserted prose cannot borrow Git provenance: {body:#}"
+            "asserted prose cannot borrow Git provenance: <body withheld>"
         );
         let text = body.to_string().to_ascii_lowercase();
         assert!(
             text.contains("verification") || text.contains("bound") || text.contains("observed"),
-            "must be the actual evidence refusal, not a fixture error: {body:#}"
+            "must be the actual evidence refusal, not a fixture error: <body withheld>"
         );
     }
 );
@@ -777,7 +730,7 @@ live_row!(measured_edit_then_revert_to_checked_commit_accepts, {
     );
     assert!(
         measured.to_string().contains("source_change"),
-        "the intermediate change really reached the producer: {measured:#}"
+        "the intermediate change really reached the producer: <measured withheld>"
     );
     let originals = matrix.stored_objects();
     assert!(

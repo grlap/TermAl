@@ -210,6 +210,9 @@ fn engram_bind_decision(
             "its newest sighting is at {revision}, not at the gate's revision {}: {ENGRAM_BIND_SIGHTING_REMEDY}",
             gate.source_revision
         )),
+        EngramRootSighting::PresentShared { .. } => skip(
+            "its newest sighting contains only a display summary, which cannot supply the legacy binding's source revision".to_owned(),
+        ),
         EngramRootSighting::Absent => skip(format!(
             "it has no sighting of its root: {ENGRAM_BIND_SIGHTING_REMEDY}"
         )),

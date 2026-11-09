@@ -371,10 +371,7 @@ fn acceptance_committed_input_record_acknowledged(
         return Err("acknowledged for another body: the frozen body changed after Engram's answer".to_owned());
     }
     if frozen.body.registration.host_run_id != run_id
-        || frozen.body.input
-            != (EngramVerificationRecordInput::Commit {
-                commit: commit.to_owned(),
-            })
+        || frozen.body.input.clean_commit() != Some(commit)
     {
         return Err("acknowledged for another run or input".to_owned());
     }

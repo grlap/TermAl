@@ -10,11 +10,11 @@
 // root whose index skips a tracked path, a debris, input-changed, failed or
 // ineligible run, a record rewritten with its results to another commit after
 // Engram's answer, a run whose results were deleted or read incoherent) is refused with its typed reason, also without a sighting
-// read. An admitted evaluation judges and declares `git-commit:<HEAD>`, the
-// source the run's verification record names, and is judged again on that
-// commit at its first submission. A task with no such run (none registered,
+// read. An admitted new evaluation captures the complete owner identity and
+// checks it again at its first submission. Retained commit-format records
+// keep their historical basis without conversion. A task with no such run (none registered,
 // one of another work, or one that never started on a clean checkout) is in
-// the legacy flow, which still declares the content revision. Owns those witnesses and the helpers that register such
+// the sighting flow, which captures the same owner identity. Owns those witnesses and the helpers that register such
 // a run through the registration seam and write its results and its record's
 // files as the sender leaves them. Does not own the sighting preflight's own
 // tests or their fixture, which it uses from its parent module,
@@ -76,6 +76,11 @@ fn acceptance_owner_reports(state: &AppState, parent: &str, named_root: &str,
     inner.test_native_source_owner_metadata = Some(Arc::new(|state, session, deadline|
         state.source_owner_metadata_snapshot_with(session, deadline,
             |_, _, args, _, _| Ok(source_owner_reply(args)))));
+    let observed = envelope.clone();
+    inner.test_observation_source_owner = Some(Arc::new(move |_, _, args, _, _| {
+        if args[0] == "--version" { return Ok(source_owner_reply(args)); }
+        Ok(source_owner_output(0, observed.clone()))
+    }));
     let expected_root = fs::canonicalize(root).unwrap();
     inner.test_acceptance_source_owner_capture = Some(Arc::new(move |_, cwd, args, _, _| {
         assert_eq!(fs::canonicalize(cwd).unwrap(), expected_root,
@@ -177,6 +182,17 @@ fn try_register_committed_run_as(
     run_id: &str,
     results: Value,
 ) -> Result<TestRunRegistration, ApiError> {
+    try_register_committed_run_with_source_as(state, parent, named_root, run_id, results, None)
+}
+
+fn try_register_committed_run_with_source_as(
+    state: &AppState,
+    parent: &str,
+    named_root: &str,
+    run_id: &str,
+    mut results: Value,
+    source: Option<EngramSourceId>,
+) -> Result<TestRunRegistration, ApiError> {
     if state.inner.lock().unwrap().test_acceptance_source_owner_capture.is_none() {
         acceptance_owner_reports(state, parent, named_root, Vec::new(), Vec::new());
     }
@@ -186,7 +202,7 @@ fn try_register_committed_run_as(
         .expect("the named root's common Git directory resolves");
     let directory = normalize_user_facing_path(&common.join("review-runs").join(run_id));
     fs::create_dir_all(&directory).unwrap();
-    let request = json!({
+    let mut request = json!({
         "runId": run_id,
         "root": test_run_display_path(&root),
         "full": true,
@@ -197,6 +213,11 @@ fn try_register_committed_run_as(
         "detached": true,
         "input": "commit",
     });
+    if let Some(source) = source {
+        request["sourceId"] = json!(source);
+        results["sourceIdBefore"] = json!(source);
+        results["sourceIdAfter"] = json!(source);
+    }
     fs::write(directory.join("request.json"), request.to_string()).unwrap();
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
     state
@@ -244,11 +265,14 @@ fn write_record(registration: &TestRunRegistration, commit: &str, progress: Valu
     let read = |name: &str| -> Value {
         serde_json::from_str(&fs::read_to_string(directory.join(name)).unwrap()).unwrap()
     };
-    let mut body = engram_verification_record_body(registration, &read("request.json"), &read("results.json"))
-        .expect("the fixture run builds its verification record");
     let input = EngramVerificationRecordInput::Commit {
         commit: commit.to_owned(),
     };
+    // This acceptance seam intentionally exercises a retained commit-format
+    // record; its contract is separate from new owner-backed run production.
+    let mut body = engram_verification_record_build_body(registration,
+        &read("request.json"), &read("results.json"), Some(&input))
+        .expect("the historical fixture run rebuilds its verification record");
     if body.input != input {
         body.input = input;
     }
@@ -312,6 +336,9 @@ fn host_observed(state: &AppState, registration: &TestRunRegistration, commit: &
 fn current_registration(state: &AppState) -> TestRunRegistration {
     state.inner.lock().unwrap().test_run_registrations[COMMITTED_RUN_ID].clone()
 }
+
+#[path = "acceptance_source_record_compatibility.rs"]
+mod source_record_compatibility;
 
 /// The task the fixture's reads describe, naming its work by id as the
 /// canonical receipt does, under its claim at the naming fence.
@@ -397,7 +424,7 @@ fn assert_refused_without_a_sighting(
         Err(refusal) => refusal,
         Ok(decision) => panic!("{case}: the committed flow must refuse, not {decision:?}"),
     };
-    assert_eq!(refusal.code(), code, "{case}: {refusal:?}");
+    assert_eq!(refusal.code(), code, "{case}: <details withheld>");
     let error = refusal.clone().into_api_error("w-task");
     assert_eq!(error.status, StatusCode::CONFLICT, "{case}");
     assert!(
@@ -488,11 +515,8 @@ fn an_acknowledged_committed_run_at_head_is_admitted_without_a_sighting_read() {
             .unwrap_or_else(|error| {
                 panic!("{progress}: an unchanged root keeps its commit: {}", error.message)
             });
-        assert_eq!(
-            declared.source_fingerprint,
-            Some(format!("git-commit:{head}")),
-            "{progress}"
-        );
+        assert_eq!(declared.source_id, target.source_id, "{progress}");
+        assert!(declared.source_fingerprint.is_none());
         // A root no longer clean at that commit is the changed worktree.
         fs::write(worktree(&named_root).join("judged.txt"), "changed after the request\n")
             .unwrap();
@@ -502,9 +526,7 @@ fn an_acknowledged_committed_run_at_head_is_admitted_without_a_sighting_read() {
             .expect_err("a root no longer clean at the admitted commit is refused");
         assert_eq!(error.status, StatusCode::CONFLICT, "{progress}");
         assert!(
-            error.message.contains("the worktree changed while it was evaluated")
-                && error.message.contains(&format!("requested at git-commit:{head}"))
-                && error.message.contains("is not clean at a commit"),
+            error.message.contains("the worktree changed while it was evaluated"),
             "{progress}: {}",
             error.message
         );
@@ -557,10 +579,9 @@ fn a_pinned_child_uses_the_existing_record_and_acceptance_but_child_dirt_refuses
 }
 
 /// Asserts that `target`, an evaluation admitted on `registration`'s run at
-/// `head` in `named_root`, judges and declares `git-commit:<head>` in that
-/// root: exactly the source the run's verification record names, so the brief
-/// lists that record as citable while a record of another revision stays
-/// context only.
+/// `head` in `named_root`, retains the complete current owner identity there.
+/// Its legacy record stays legacy, and cannot be treated as a matching shared
+/// identity merely because the root commit agrees.
 fn assert_judges_the_admitted_commit(
     target: &DelegationAcceptanceEvaluation,
     registration: &TestRunRegistration,
@@ -569,11 +590,9 @@ fn assert_judges_the_admitted_commit(
     case: &str,
 ) {
     let judged = format!("git-commit:{head}");
-    assert_eq!(
-        target.source_fingerprint.as_deref(),
-        Some(judged.as_str()),
-        "{case}: the evaluation declares the admitted commit"
-    );
+    let source = target.source_id.as_ref().expect("new requests retain complete source identity");
+    assert_eq!(source.commit, head, "{case}");
+    assert!(target.source_fingerprint.is_none());
     let source_root = target.source_root.as_ref().expect("the target records the root");
     assert_eq!(source_root.root, named_root, "{case}");
     let frozen = engram_verification_record_frozen(
@@ -610,6 +629,9 @@ fn assert_judges_the_admitted_commit(
     let mut task = parse_acceptance_evaluation_task(show, full_receipt())
         .expect("the show is a task");
     task.judged_revision = target.source_fingerprint.clone();
+    task.judged_source_basis = Some(AcceptanceSourceBasis::Shared(AcceptanceSharedSourceBasis {
+        workspace_id: Some(source_root.root.clone()), source_id:source.clone(),
+    }));
     task.judged_workspace = acceptance_source_workspace(&source_root.root);
     let independent = build_acceptance_evaluator_brief(&task, named_root, MAX_ACCEPTANCE_BRIEF_BYTES)
         .expect("the brief builds")
@@ -630,22 +652,20 @@ fn assert_judges_the_admitted_commit(
         };
         let on_source = lines(ON_SOURCE);
         assert!(
-            !on_source.is_empty() && on_source.iter().all(|line| !line.contains("context only")),
-            "{case} {name}: the run's record is on the judged source: {prompt}"
+            !on_source.is_empty() && on_source.iter().all(|line| line.contains("context only")),
+            "{case} {name}: a historical commit is never promoted to a complete shared identity"
         );
         let off_source = lines(OFF_SOURCE);
         assert!(
             !off_source.is_empty()
-                && off_source.iter().all(|line| line.contains(&format!(
-                    "[context only: it ran at content-v1:4983be8a, not at {judged}"
-                ))),
-            "{case} {name}: a record of another revision stays context only: {prompt}"
+                && off_source.iter().all(|line| line.contains("context only")),
+            "{case} {name}: a record of another revision stays context only"
         );
     }
 }
 
 #[test]
-fn an_admitted_same_session_request_hands_the_session_the_admitted_commit() {
+fn an_admitted_shared_same_session_request_requires_a_persisted_attempt() {
     let (state, parent, _store, named_root) = named_root_parent();
     let head = commit_named_root(&named_root);
     let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
@@ -657,33 +677,25 @@ fn an_admitted_same_session_request_hands_the_session_the_admitted_commit() {
     );
     host_observed(&state, &registration, &head, acknowledged("settled"));
 
-    let response = state
+    let error = state
         .request_acceptance_evaluation_with_runner(
             &parent,
             evaluation_request(None),
             reader_admitting("same_session"),
         )
-        .unwrap_or_else(|error| panic!("the committed run admits the request: {}", error.message));
+        .err().expect("shared same-session evaluation cannot bypass durable custody");
     assert_eq!(sighting_reads(&transport), 0, "no sighting read");
-    let wire = serde_json::to_value(&response).unwrap();
-    let judged = format!("git-commit:{head}");
-    assert_eq!(wire["sourceFingerprint"], judged.as_str());
-    assert!(
-        wire["brief"]
-            .as_str()
-            .unwrap()
-            .contains(&format!("source_fingerprint {judged}")),
-        "{}",
-        wire["brief"]
-    );
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("requires a persisted host attempt"));
 }
 
 #[test]
-fn a_legacy_request_still_declares_the_content_revision_of_the_named_root() {
+fn a_sighted_request_without_a_registered_run_uses_the_complete_owner_identity() {
     // A clean root at a commit, but no committed-input run: the sighting
-    // decides and the evaluation declares the content revision, as before.
+    // decides presence, and the owner supplies the independent full identity.
     let (state, parent, _store, named_root) = named_root_parent();
     let head = commit_named_root(&named_root);
+    acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
     let transport = install_sighting_transport(&state, &named_root, 1, present_sighting());
 
     let response = request(&state, &parent)
@@ -697,15 +709,15 @@ fn a_legacy_request_still_declares_the_content_revision_of_the_named_root() {
         .acceptance_evaluation
         .clone()
         .expect("an evaluator carries its target");
-    let expected = content_revision(&worktree(&named_root)).unwrap().1;
-    assert!(expected.starts_with("content-v1:"), "{expected}");
-    assert_eq!(target.source_fingerprint, Some(expected.clone()));
-    assert_ne!(target.source_fingerprint, Some(format!("git-commit:{head}")));
-    // Its first submission measures the content revision again, as before.
+    let expected = target.source_id.as_ref().expect("the owner supplied the complete identity");
+    assert_eq!(expected.commit, head);
+    assert!(target.source_fingerprint.is_none());
+    // Its first submission recaptures the complete identity through the owner.
     let declared = state
         .acceptance_evaluation_declared_target(&record.child_session_id, &target)
         .unwrap_or_else(|error| panic!("an unchanged root keeps its revision: {}", error.message));
-    assert_eq!(declared.source_fingerprint, Some(expected));
+    assert_eq!(declared.source_id.as_ref(), Some(expected));
+    assert!(declared.source_fingerprint.is_none());
 }
 
 #[test]
@@ -756,7 +768,7 @@ fn a_record_engram_has_not_acknowledged_at_head_is_refused_without_a_sighting() 
                 AcceptanceCommittedInputRefusal::RecordNotAcknowledged { run_id, commit, .. }
                     if run_id == COMMITTED_RUN_ID && *commit == head
             ),
-            "{case}: {refusal:?}"
+            "{case}: <details withheld>"
         );
     }
 }
@@ -1117,7 +1129,7 @@ fn an_acknowledgment_only_in_the_run_directory_is_not_admitted_and_does_not_stop
                 AcceptanceCommittedInputRefusal::RecordNotAcknowledged { run_id, commit, .. }
                     if run_id == COMMITTED_RUN_ID && *commit == head
             ),
-            "{case}: {refusal:?}"
+            "{case}: <details withheld>"
         );
         // The sender neither settles from the file nor takes it as finished.
         let prepared = engram_verification_record_prepare(&current);
@@ -1490,7 +1502,7 @@ await withHostedRegistrationFixture(root,env,async hosted=>{
             .arg(code.to_string())
             .output()
             .unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "{}", output.stderr.len());
         let stdout = String::from_utf8(output.stdout).unwrap();
         let frame: Value = serde_json::from_str(
             stdout.lines().find_map(|line| line.strip_prefix("LAUNCHER_RESULT=")).unwrap(),

@@ -159,6 +159,7 @@ fn named_root_reclamation_completed_selection_does_not_depend_on_warm_process_sc
                 .unwrap()
                 .requests
                 .send(EngramProcessRequest {
+                    response_limit: ENGRAM_CONTROL_MAX_FRAME_BYTES,
                     request: Some(br#"{"operation":"named_root_read"}"#.to_vec()),
                     reply,
                 })

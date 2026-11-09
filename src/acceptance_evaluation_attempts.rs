@@ -28,15 +28,43 @@ struct AcceptanceEvaluationAttemptHistory {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "PersistedAcceptanceEvaluationPreviousAttempt")]
 struct AcceptanceEvaluationPreviousAttempt {
     ordinal: u8,
     key: String,
     acceptance_basis: i64,
     evidence_basis: i64,
     source_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_id: Option<EngramSourceId>,
     submission: AcceptanceEvaluationSubmission,
     refusal: Option<AcceptanceEvaluationDefinitiveRefusal>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedAcceptanceEvaluationPreviousAttempt {
+    ordinal: u8,
+    key: String,
+    acceptance_basis: i64,
+    evidence_basis: i64,
+    source_fingerprint: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_acceptance_optional_source_id")]
+    source_id: Option<EngramSourceId>,
+    submission: AcceptanceEvaluationSubmission,
+    refusal: Option<AcceptanceEvaluationDefinitiveRefusal>,
+}
+
+impl TryFrom<PersistedAcceptanceEvaluationPreviousAttempt> for AcceptanceEvaluationPreviousAttempt {
+    type Error = &'static str;
+    fn try_from(value: PersistedAcceptanceEvaluationPreviousAttempt) -> std::result::Result<Self, Self::Error> {
+        if value.source_id.is_some() && value.source_fingerprint.is_some() {
+            return Err("a previous evaluation attempt cannot mix legacy and shared source identities");
+        }
+        Ok(Self { ordinal: value.ordinal, key: value.key, acceptance_basis: value.acceptance_basis,
+            evidence_basis: value.evidence_basis, source_fingerprint: value.source_fingerprint,
+            source_id: value.source_id, submission: value.submission, refusal: value.refusal })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -78,10 +106,10 @@ fn acceptance_evaluation_attempt_prompt(
         header.push_str(&format!(
             "Previous evidence cut: {}. The brief below names the newly read cut and all available evidence through it. Changes are presentation, never a restriction of judgment scope.\nPrevious source: {}; current source: {}.\n",
             previous.evidence_basis,
-            acceptance_brief_text(previous.source_fingerprint.as_deref().unwrap_or("unmeasured"), 160),
-            acceptance_brief_text(seed.source_fingerprint.as_deref().unwrap_or("unmeasured"), 160)
+            acceptance_attempt_source_label(previous.source_id.as_ref(), previous.source_fingerprint.as_deref()),
+            acceptance_attempt_source_label(seed.source_id.as_ref(), seed.source_fingerprint.as_deref())
         ));
-        if previous.source_fingerprint != seed.source_fingerprint {
+        if previous.source_id != seed.source_id || previous.source_fingerprint != seed.source_fingerprint {
             header.push_str("Source changed. Inspect the whole new revision and judge every criterion afresh; bound criteria need checks passed on that revision.\n");
         }
         if let Some(refusal) = previous

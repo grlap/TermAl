@@ -24,6 +24,19 @@ struct TestRunEvidenceAssociation {
     lifecycle_read: Option<Arc<EngramNamedRootReadResponse>>,
 }
 
+// Presentation only: equality and settlement use the complete source_basis
+// above. Never serialize the owner's identity into automatic run summaries.
+fn test_run_source_summary(basis: &EngramExecutionSourceBasis) -> String {
+    match &basis.source_id {
+        Some(source) => format!("source_id: commit {}, tree {}, {} changes, {} submodules, {} submodule changes",
+            source.commit.chars().take(12).collect::<String>(),
+            source.tree.chars().take(12).collect::<String>(),
+            source.changes.len(), source.submodules.len(),
+            source.submodules.iter().map(|child| child.changes.len()).sum::<usize>()),
+        None => basis.source_revision.clone(),
+    }
+}
+
 // Share a canonical response across its associations without changing its
 // persisted object/null representation or requiring serde's global rc feature.
 mod test_run_shared_lifecycle_read {

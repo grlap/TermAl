@@ -20,10 +20,8 @@ fn claude_frame_check_a_edit_commit_check_b_same_turn_accepts_last_input() {
     );
     frames.end(&matrix);
     matrix.accept(&last, || {});
-    assert_eq!(
-        fs::read(first.directory.join("results.json")).unwrap(),
-        original_results
-    );
+    assert!(fs::read(first.directory.join("results.json")).unwrap() == original_results,
+        "the complete earlier result is unchanged");
 }
 
 struct ClaudeFrames {
@@ -97,7 +95,7 @@ impl ClaudeFrames {
         assert_eq!(
             applied.next,
             ClaudeFrameApplied::Continue,
-            "actual frame failed: {frame:#}"
+            "actual frame failed: <frame withheld>"
         );
         applied
     }

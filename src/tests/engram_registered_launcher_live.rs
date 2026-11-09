@@ -18,6 +18,7 @@ struct LoopbackRegistration {
     server: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     url: String,
+    temporary: PathBuf,
 }
 
 impl LoopbackRegistration {
@@ -45,6 +46,8 @@ impl LoopbackRegistration {
             server: Some(server),
             stop: Some(stop),
             url,
+            temporary: state.test_temp_root.as_ref().expect("the disposable host owns its scratch")
+                .path().join("launcher-tmp"),
         }
     }
 }
@@ -55,8 +58,8 @@ impl Drop for LoopbackRegistration {
             let _ = stop.send(());
         }
         if let Some(server) = self.server.take() {
-            if let Err(error) = self.runtime.block_on(server) {
-                eprintln!("fixture registration server failed to join: {error}");
+            if let Err(_) = self.runtime.block_on(server) {
+                eprintln!("fixture registration server failed to join: <details withheld>");
             }
         }
     }
@@ -70,6 +73,18 @@ pub(super) fn run_check(
     EngramVerificationRecordBody,
     EngramVerificationRecordReceipt,
 ) {
+    run_check_in_lane(fixture, session, root, false)
+}
+
+pub(super) fn run_historical_check(fixture: &CompletionFixture, session: &str, root: &FsPath)
+    -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
+{
+    run_check_in_lane(fixture, session, root, true)
+}
+
+fn run_check_in_lane(fixture: &CompletionFixture, session: &str, root: &FsPath, historical: bool)
+    -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
+{
     assert!(run_git_test_command_output(root, &["status", "--porcelain"]).is_empty());
     let before = run_git_test_command_output(root, &["rev-parse", "HEAD"])
         .trim()
@@ -115,7 +130,7 @@ pub(super) fn run_check(
         test_run_path_key(request["root"].as_str().unwrap()),
         test_run_path_key(&test_run_display_path(root))
     );
-    assert_eq!(results["state"], "passed", "{results:#}");
+    assert_eq!(results["state"], "passed", "the actual registered check passed");
     assert_eq!(results["input"]["commit"], before);
     assert_eq!(results["input"]["outcome"], "clean");
     assert_eq!(results["input"]["eligible"], true);
@@ -176,8 +191,9 @@ pub(super) fn run_check(
         1,
         "original provider locator owns one row"
     );
-    let EngramVerificationRecordPrepared::Ready(frozen) =
-        engram_verification_record_prepare(&registration)
+    let prepared = if historical { CompletionFixture::prepare_historical_record(&registration) }
+        else { engram_verification_record_prepare(&registration) };
+    let EngramVerificationRecordPrepared::Ready(frozen) = prepared
     else {
         panic!("actual committed-input run must prepare native evidence");
     };
@@ -220,10 +236,38 @@ pub(super) fn run_check(
     eprintln!(
         "PINNED_LAUNCHER_CHECK {}",
         json!({ "run_id": run_id, "input": results["input"],
-        "own_rows": own_row(&fixture.live.state), "receipt": receipt,
-        "settled": loaded.test_run_registrations[run_id].verification_record })
+        "own_rows": own_row(&fixture.live.state).len(), "records": receipt.verifications.len(),
+        "settled": matches!(&loaded.test_run_registrations[run_id].verification_record,
+            Some(TestRunVerificationAck::Settled { .. })) })
     );
     (body, receipt)
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn current_source_id_launcher_record_is_received_and_settled_without_evaluation() {
+    let fixture = completion_fixture();
+    install_launcher(&fixture);
+    let session = &fixture.live.session_id;
+    let added = fixture.work(session, &["add", "Receive the full owner identity", "--accept",
+        "The registered producer is received", "--bind", "1=test", "--json"]);
+    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    fixture.work(session, &["claim", work, "--json"]);
+    fixture.live.state.name_engram_source_root(session, EngramSourceRootRequest {
+        work:work.to_owned(), path:Some(Some(fixture.root.to_string_lossy().into_owned())),
+    }).unwrap();
+    fixture.begin(session, "Produce a current owner-backed verification record.");
+    let (body, receipt) = run_check(&fixture, session, &fixture.root);
+    let EngramVerificationRecordInput::SourceId { source_id } = &body.input else {
+        panic!("the fresh launcher must produce a complete owner identity");
+    };
+    assert!(matches!(&body.post_run, EngramVerificationRecordPostRun::SourceId(post_run)
+        if post_run.source_id == *source_id));
+    let stored = fixture.object(&receipt.verifications[0].record_id);
+    assert!(stored["source_basis"] == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap());
+    finish_live_root(&fixture.live.state, session);
+    fixture.wait_for_reports(session);
+    assert_no_live_turn_gate(&fixture.live.transport);
 }
 
 #[test]
@@ -264,7 +308,7 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
         session,
         "Check current content, then make a real source edit.",
     );
-    let (body, receipt) = run_check(&fixture, session, &fixture.root);
+    let (body, receipt) = run_historical_check(&fixture, session, &fixture.root);
     let before = content_revision(&fixture.root).unwrap().1;
     fs::write(
         fixture.root.join("README.md"),
@@ -291,10 +335,7 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
         .filter(|change| !change.is_null())
         .collect::<Vec<_>>();
     assert_eq!(changes.len(), 1);
-    assert_eq!(
-        changes[0]["detection"], "content_comparison",
-        "{changes:#?}"
-    );
+    assert_eq!(changes[0]["detection"], "content_comparison");
     let shown = fixture.work(session, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
@@ -329,7 +370,7 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
         "an actual post-check edit cannot be evaluated as passed"
     );
     let refusal: Value = serde_json::from_slice(&output.stderr).unwrap();
-    eprintln!("PINNED_LAUNCHER_EDIT_REFUSAL {refusal}");
+    eprintln!("PINNED_LAUNCHER_EDIT_REFUSAL <details withheld>");
     assert_eq!(refusal["error"]["code"], "acceptance_evaluation_refused");
     assert_eq!(
         refusal["error"]["details"]["cause"]["mismatch"],
@@ -351,7 +392,7 @@ fn a_real_edit_after_the_registered_launcher_check_is_still_refused() {
         &["commit", "--quiet", "-m", "fixture intended edit"],
     );
     fixture.begin(session, "Check the intended revision in a later work turn.");
-    let (later, receipt) = run_check(&fixture, session, &fixture.root);
+    let (later, receipt) = run_historical_check(&fixture, session, &fixture.root);
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
     let EngramVerificationRecordInput::Commit { commit } = &later.input else {

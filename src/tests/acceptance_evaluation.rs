@@ -8,6 +8,9 @@ use super::work_visualizer::fixture;
 use super::*;
 use std::sync::atomic::AtomicUsize;
 
+#[path = "acceptance_source.rs"]
+mod shared_source;
+
 #[path = "acceptance_evaluation_source.rs"]
 mod source;
 
@@ -40,6 +43,9 @@ mod evaluation_ids;
 
 #[path = "acceptance_evaluation_evidence.rs"]
 mod evidence_selection;
+
+#[path = "acceptance_verification_evidence.rs"]
+mod private_verification;
 
 #[path = "acceptance_evaluation_notes_cut.rs"]
 mod notes_cut;
@@ -155,6 +161,7 @@ fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAc
         attempt_key: delegation_id.to_owned(),
         store: None,
         source_fingerprint: None,
+        source_id: None,
         source_root: None,
         naming_history: Some(EngramWorkNamingToken {
             epoch: ENGRAM_NAMING_HISTORY_EPOCH,
@@ -3298,6 +3305,7 @@ fn acceptance_submit_carries_an_open_write_across_requests_until_a_receipt() {
     // The open write as an earlier request of `two_verdicts()` would have left it.
     let with_original = |open: AcceptanceEvaluationSubmission, digest: &str, args: Vec<String>| {
         let original = AcceptanceEvaluationOpenWrite {
+            source_payload: None,
             verdicts_digest: acceptance_evaluation_payload_digest(
                 &acceptance_evaluation_verdict_args(&two_verdicts()),
             ),
@@ -3821,6 +3829,10 @@ fn acceptance_submit_sends_nothing_when_pending_is_not_acknowledged() {
         });
         writer.receive_fence();
         writer.fail_write();
+        // A failed Pending acknowledgement sends nothing. Its withdrawal
+        // must itself be acknowledged before the request can finish.
+        writer.receive_fence();
+        writer.write();
         let error = submit.join().unwrap().unwrap_err();
         assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(
@@ -4173,6 +4185,10 @@ fn acceptance_submit_releases_its_in_flight_marker_on_every_way_out() {
         });
         writer.receive_fence();
         writer.fail_write();
+        writer.receive_fence();
+        assert!(!submit.is_finished(), "withdrawal still awaits its durable acknowledgement");
+        assert_eq!(submissions_in_flight(&state), 1);
+        writer.write();
         let error = submit.join().unwrap().unwrap_err();
         assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
     });
@@ -4446,6 +4462,7 @@ fn acceptance_submit_replays_the_original_arguments_after_host_drift() {
 #[test]
 fn acceptance_open_write_round_trips_and_names_its_actor() {
     let original = AcceptanceEvaluationOpenWrite {
+        source_payload: None,
         verdicts_digest: "v1".to_owned(),
         args: [
             "work",

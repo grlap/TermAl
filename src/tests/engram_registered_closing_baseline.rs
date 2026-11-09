@@ -4,15 +4,68 @@ use super::*;
 
 const COMMAND: &str = "node scripts/test-launcher.mjs focused --input commit -- cargo test --lib";
 
+fn owner_envelope(directory: &FsPath) -> Value {
+    let mut envelope = super::super::engram_source_command::source_envelope(directory, "clean");
+    let commit = run_git_test_command_output(directory, &["rev-parse", "HEAD"]).trim().to_owned();
+    let tree = run_git_test_command_output(directory, &["rev-parse", "HEAD^{tree}"]).trim().to_owned();
+    assert!(run_git_test_command_output(directory, &["status", "--porcelain"]).is_empty(),
+        "the scripted owner fixture only reports actual clean checkouts");
+    envelope["source"] = json!(format!("git-commit:{commit}"));
+    envelope["tree"] = json!(tree);
+    envelope["source_id"]["commit"] = json!(commit);
+    envelope["source_id"]["tree"] = envelope["tree"].clone();
+    envelope
+}
+
+struct OwnerCheckedTurn {
+    turn: EOCheckedTurn,
+    owner_reply: Arc<Mutex<Value>>,
+}
+
+impl std::ops::Deref for OwnerCheckedTurn {
+    type Target = EOCheckedTurn;
+    fn deref(&self) -> &EOCheckedTurn { &self.turn }
+}
+
+fn start_named(label: &str) -> OwnerCheckedTurn {
+    let turn = EOCheckedTurn::prepare_in(label, true, None, true);
+    let EngramRootCapture::Recorded { workspace_id, state: EngramSourceRootState::Named, .. } =
+        turn.state.engram_root_capture(&turn.session_id)
+        else { panic!("the idle fixture already owns its confirmed named root"); };
+    // Git is fixture setup, outside the caller's production capture deadline.
+    let owner_reply = Arc::new(Mutex::new(owner_envelope(FsPath::new(&workspace_id))));
+    let reply = owner_reply.clone();
+    {
+        let mut inner = turn.state.inner.lock().unwrap();
+        // Keep production owner parsing, custody and scope rechecks. Only the
+        // subprocess reply is scripted; the older content-v1 hook is disabled.
+        inner.test_engram_source_capture = None;
+        inner.test_observation_source_owner = Some(Arc::new(move |_, _, args, _, _| {
+            if args[0] == "--version" {
+                return Ok(super::super::engram_source_owner::source_owner_reply(args));
+            }
+            let envelope = reply.lock().unwrap();
+            assert_eq!(envelope["root"], engram_exact_path_key(FsPath::new(&args[2])),
+                "the scripted owner replies only for its measured named root");
+            Ok(super::super::engram_source_owner::source_owner_output(0,
+                serde_json::to_vec(&*envelope).unwrap()))
+        }));
+    }
+    turn.begin("Run the checks.");
+    OwnerCheckedTurn { turn, owner_reply }
+}
+
 fn root(turn: &EOCheckedTurn) -> PathBuf {
     turn.record(|record| PathBuf::from(&record.engram.observed_source_root().unwrap().root))
 }
 
-fn commit_content(turn: &EOCheckedTurn, content: &str) {
+fn commit_content(turn: &OwnerCheckedTurn, content: &str) {
     let directory = root(turn);
     fs::write(directory.join("README.md"), content).unwrap();
     run_git_test_command(&directory, &["add", "README.md"]);
     run_git_test_command(&directory, &["commit", "--quiet", "-m", "fixture source"]);
+    let envelope = owner_envelope(&directory);
+    *turn.owner_reply.lock().unwrap() = envelope;
 }
 
 fn registered_check(turn: &EOCheckedTurn, key: &str) {
@@ -25,6 +78,7 @@ fn registered_check_with_result_publication(turn: &EOCheckedTurn, key: &str, aft
     let commit = run_git_test_command_output(&directory, &["rev-parse", "HEAD"])
         .trim()
         .to_owned();
+    let source = owner_envelope(&directory)["source_id"].clone();
     let mut recorder = turn.recorder();
     recorder
         .command_started_in(
@@ -46,6 +100,7 @@ fn registered_check_with_result_publication(turn: &EOCheckedTurn, key: &str, aft
         "runId": run_id, "root": directory.to_string_lossy(), "owner": turn.session_id,
         "creatorPid": std::process::id(), "started": started,
         "input": "commit", "full": false, "detached": false,
+        "sourceId": source,
         "stages": [{ "name": "focused", "command": argv[0], "args": &argv[1..] }],
     });
     fs::write(
@@ -69,6 +124,7 @@ fn registered_check_with_result_publication(turn: &EOCheckedTurn, key: &str, aft
     let results = json!({
         "runId": run_id, "state": "passed", "exitCode": 0,
         "started": started, "ended": ended,
+        "sourceIdBefore": source, "sourceIdAfter": source,
         "stages": [{ "name": "focused", "state": "passed", "code": 0,
             "command": argv, "started": stage_started, "ended": ended,
             "tests": { "runner": "cargo-libtest", "passed": 1, "failed": 0, "ignored": 0 } }],
@@ -101,7 +157,7 @@ fn registered_check_with_result_publication(turn: &EOCheckedTurn, key: &str, aft
     let prepared = engram_verification_record_prepare(&registration);
     assert!(
         matches!(prepared, EngramVerificationRecordPrepared::Ready(_)),
-        "{prepared:?}"
+        "the registered owner-backed fixture prepares a complete record"
     );
     assert!(
         turn.record(|record| record
@@ -129,20 +185,20 @@ fn registered_check_with_result_publication(turn: &EOCheckedTurn, key: &str, aft
 #[test]
 fn a_clean_registered_check_is_a_closing_baseline_without_a_prior_checkpoint() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = EOCheckedTurn::start_named("registered-first-baseline");
+    let turn = start_named("registered-first-baseline");
     assert!(turn.record(|record| record.engram.runtime_checkpoint.is_none()));
     registered_check(&turn, "first-clean");
     let observation = turn.finish();
     assert!(
         observation["occurrence"]["source_change"].is_null(),
-        "{observation:#}"
+        "a clean registered baseline produces no source-change payload"
     );
 }
 
 #[test]
 fn native_completion_retained_after_preparation_preserves_the_registered_closing_baseline() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = EOCheckedTurn::start_named("registered-native-completion-race");
+    let turn = start_named("registered-native-completion-race");
     {
         let inner = turn.state.inner.lock().unwrap();
         turn.state.persist_internal_locked(&inner).unwrap();
@@ -172,7 +228,7 @@ fn native_completion_retained_after_preparation_preserves_the_registered_closing
     let after = turn.state.inner.lock().unwrap().test_run_registrations[&before.run_id].clone();
     assert!(after.native_completion.is_some());
     assert_ne!(after, before);
-    assert_eq!(baselines(), original, "a factual completion append preserves the endpoints");
+    assert!(baselines() == original, "a factual completion append preserves the endpoints");
     {
         let mut inner = turn.state.inner.lock().unwrap();
         inner.test_run_registrations.update(&before.run_id, |run| {
@@ -185,7 +241,7 @@ fn native_completion_retained_after_preparation_preserves_the_registered_closing
 #[test]
 fn an_edit_after_a_registered_check_reports_a_real_comparison() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = EOCheckedTurn::start_named("registered-edited-baseline");
+    let turn = start_named("registered-edited-baseline");
     registered_check(&turn, "before-edit");
     let before = turn.record(|record| {
         record
@@ -205,21 +261,19 @@ fn an_edit_after_a_registered_check_reports_a_real_comparison() {
     commit_content(&turn, "changed after the check\n");
     let observation = turn.finish();
     let change = &observation["occurrence"]["source_change"];
-    assert_eq!(change["detection"], "content_comparison", "{observation:#}");
-    assert_eq!(
-        change["baseline"]["source_revision"],
-        before.source_revision
-    );
-    assert_ne!(
-        change["baseline"]["source_revision"],
-        change["sighting"]["source_basis"]["source_revision"]
-    );
+    assert_eq!(change["detection"], "content_comparison");
+    assert!(change["baseline"]["source_id"] ==
+        serde_json::to_value(before.source_id.unwrap()).unwrap(),
+        "the original complete owner identity supplies the baseline");
+    assert!(change["baseline"]["source_id"] !=
+        change["sighting"]["source_basis"]["source_id"],
+        "the post-check edit changes the complete owner identity");
 }
 
 #[test]
 fn every_registered_check_is_compared_even_when_the_source_returns_to_its_first_content() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = EOCheckedTurn::start_named("registered-reverted-baseline");
+    let turn = start_named("registered-reverted-baseline");
     let original = fs::read_to_string(root(&turn).join("README.md")).unwrap();
     registered_check(&turn, "first-content");
     commit_content(&turn, "intermediate checked content\n");
@@ -228,17 +282,16 @@ fn every_registered_check_is_compared_even_when_the_source_returns_to_its_first_
     registered_check(&turn, "first-content-again");
     let observation = turn.finish();
     let change = &observation["occurrence"]["source_change"];
-    assert_eq!(change["detection"], "content_comparison", "{observation:#}");
-    assert_ne!(
-        change["baseline"]["source_revision"],
-        change["sighting"]["source_basis"]["source_revision"]
-    );
+    assert_eq!(change["detection"], "content_comparison");
+    assert!(change["baseline"]["source_id"] !=
+        change["sighting"]["source_basis"]["source_id"],
+        "the intermediate checked identity remains distinct after a revert");
 }
 
 #[test]
 fn no_registered_check_keeps_the_missing_baseline_assumption() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = EOCheckedTurn::start_named("registered-absent-baseline");
+    let turn = start_named("registered-absent-baseline");
     let observation = turn.finish();
     assert_eq!(
         observation["occurrence"]["source_change"]["detection"],
@@ -251,7 +304,7 @@ fn retained_failed_closings_do_not_disable_a_new_checks_baseline() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     for (terminal, other_claim) in [(true, false), (true, true), (false, false)] {
         let turn =
-            EOCheckedTurn::start_named(&format!("retained-closing-{terminal}-{other_claim}"));
+            start_named(&format!("retained-closing-{terminal}-{other_claim}"));
         registered_check(&turn, "new-clean-check");
         let prepared = turn
             .state
@@ -294,7 +347,7 @@ fn retained_failed_closings_do_not_disable_a_new_checks_baseline() {
             let observation = turn.finish();
             assert!(
                 observation["occurrence"]["source_change"].is_null(),
-                "{observation:#}"
+                "a terminal earlier report does not invent a source change"
             );
             assert!(
                 turn.record(|record| record.engram.unadmitted_closing_jobs.contains(&historical)),
@@ -309,7 +362,7 @@ fn retained_failed_closings_do_not_disable_a_new_checks_baseline() {
 #[test]
 fn a_registered_check_with_failed_source_capture_keeps_the_assumption() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = EOCheckedTurn::start_named("registered-failed-baseline");
+    let turn = start_named("registered-failed-baseline");
     registered_check(&turn, "failed-source");
     turn.record_mut(|record| {
         let check = record
@@ -330,7 +383,7 @@ fn a_registered_check_with_failed_source_capture_keeps_the_assumption() {
 #[test]
 fn an_unregistered_check_does_not_erase_the_unknown_prefix() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = EOCheckedTurn::start_named("unregistered-baseline");
+    let turn = start_named("unregistered-baseline");
     let directory = root(&turn);
     let mut recorder = turn.recorder();
     recorder
@@ -373,7 +426,7 @@ fn incomplete_or_changed_registered_check_scope_keeps_the_assumption() {
         "missing-earlier-check",
     ] {
         eprintln!("REGISTERED_BASELINE_CASE {mismatch}");
-        let turn = EOCheckedTurn::start_named(&format!("registered-{mismatch}"));
+        let turn = start_named(&format!("registered-{mismatch}"));
         registered_check(&turn, "scoped-check");
         match mismatch {
             "claim-fence" => {
@@ -473,7 +526,7 @@ fn incomplete_or_changed_registered_check_scope_keeps_the_assumption() {
         let observation = turn.finish();
         assert_eq!(
             observation["occurrence"]["source_change"]["detection"], "assumed_missing_baseline",
-            "{mismatch}: {observation:#}"
+            "{mismatch}: an incomplete registered scope keeps the baseline unknown"
         );
     }
 }
@@ -481,7 +534,7 @@ fn incomplete_or_changed_registered_check_scope_keeps_the_assumption() {
 #[test]
 fn the_registered_closing_measurements_survive_job_serialization_without_retimestamping() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = EOCheckedTurn::start_named("registered-durable-baseline");
+    let turn = start_named("registered-durable-baseline");
     registered_check(&turn, "durable-check");
     let prepared = turn
         .state
@@ -501,16 +554,25 @@ fn the_registered_closing_measurements_survive_job_serialization_without_retimes
             2,
             "actual start and after measurements are both retained"
         );
+        assert!(baselines.iter().all(|basis| basis.endpoint.source_id.is_some()
+            && basis.endpoint.source_revision.is_empty()), "new closing baselines retain owner identity");
         let mut job = EngramRuntimeClosingJob::new(trace, None, scope);
         job.registered_check_baselines = baselines;
         job
     };
     let mut wire = serde_json::to_value(&job).unwrap();
     let restored: EngramRuntimeClosingJob = serde_json::from_value(wire.clone()).unwrap();
-    assert_eq!(
-        restored.registered_check_baselines,
-        job.registered_check_baselines
-    );
+    assert!(restored.registered_check_baselines == job.registered_check_baselines,
+        "job serialization preserves the complete retained endpoints");
+    let mut old = wire.clone();
+    for basis in old["registered_check_baselines"].as_array_mut().unwrap() {
+        basis["endpoint"].as_object_mut().unwrap().remove("source_id");
+        basis["endpoint"]["source_revision"] = json!("content-v1:stored-historical-baseline");
+    }
+    let historical: EngramRuntimeClosingJob = serde_json::from_value(old).unwrap();
+    assert!(historical.registered_check_baselines.iter().all(|basis|
+        basis.endpoint.source_id.is_none()
+            && basis.endpoint.source_revision == "content-v1:stored-historical-baseline"));
     wire.as_object_mut()
         .unwrap()
         .remove("registered_check_baselines");

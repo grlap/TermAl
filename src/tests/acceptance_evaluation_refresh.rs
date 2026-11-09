@@ -279,6 +279,10 @@ fn acceptance_refresh_regression_api_hides_history_arguments() {
                 criterion:1,criterion_text:"private selection context".to_owned(),locators:vec![REFRESH_SELECTED_PROOF.to_owned()]
             }];
             let original = AcceptanceEvaluationOpenWrite {
+                source_payload: Some(AcceptanceSourcePayload {
+                    source_id: shared_source::identity(),
+                    source_file: Some(state.persistence_path.parent().unwrap().join("private-history-source.json")),
+                }),
                 args: vec!["--actor-context".to_owned(), "private-test-context".to_owned()],
                 ..AcceptanceEvaluationOpenWrite::default()
             };
@@ -296,19 +300,28 @@ fn acceptance_refresh_regression_api_hides_history_arguments() {
             let history = target.attempt_history.as_mut().unwrap();
             history.refusal = Some(refusal.clone());
             history.previous = vec![AcceptanceEvaluationPreviousAttempt {
+                source_id: Some(shared_source::identity()),
                 ordinal: 1, key: "old-key".to_owned(), acceptance_basis: 7,
                 evidence_basis: 42, source_fingerprint: None,
                 submission: pending_with("old-digest", original), refusal: Some(refusal),
             }];
             assert!(serde_json::to_value(&inner.delegations[index]).unwrap().to_string().contains("\"args\""));
+            assert!(serde_json::to_value(&inner.delegations[index]).unwrap().to_string().contains("private-history-source.json"),
+                "all history positions must carry the private payload before projection");
         }
         let value = serde_json::to_value(state.get_delegation(&parent, &id).unwrap()).unwrap();
         assert!(!value.to_string().contains("\"args\""), "API must strip history args with recorded={recorded}");
         assert!(!value.to_string().contains("private-test-context"));
+        assert!(!value.to_string().contains("sourcePayload"));
+        assert!(!value.to_string().contains("private-history-source.json"));
+        assert!(!value.to_string().contains("private-path.txt"));
         assert!(value["delegation"]["acceptanceEvaluation"].get("selectedEvidence").is_none());
         let inner = state.inner.lock().unwrap();
         let summary = serde_json::to_value(delegation_summary_from_record(&inner.delegations[inner.find_delegation_index(&id).unwrap()])).unwrap();
         assert!(!summary.to_string().contains("\"args\""));
+        assert!(!summary.to_string().contains("sourcePayload"));
+        assert!(!summary.to_string().contains("private-history-source.json"));
+        assert!(!summary.to_string().contains("private-path.txt"));
         assert!(summary["acceptanceEvaluation"].get("selectedEvidence").is_none());
         assert_eq!(value["delegation"]["acceptanceEvaluation"]["attemptHistory"]["previous"][0]["key"], "old-key");
     }
@@ -632,6 +645,7 @@ fn acceptance_refresh_busy_unknown_and_foreign_preferences_refuse_before_reads()
             "original",
             "lost reply",
             AcceptanceEvaluationOpenWrite {
+                source_payload: None,
                 args: vec!["original-key-and-payload".to_owned()],
                 ..Default::default()
             },
@@ -748,7 +762,14 @@ fn acceptance_refresh_three_keys_then_explicit_request_spawns_a_fresh_evaluator(
 
 #[test]
 fn acceptance_refresh_explicit_reuse_rearms_only_the_host_brief() {
-    let (state, _, parent, _, id) = finished_evaluator_fixture("acceptance-host-brief-runtime");
+    let (state, project, parent, root, id) = finished_evaluator_fixture("acceptance-host-brief-runtime");
+    source::make_workdir_a_worktree(&root);
+    let original = shared_source::identity();
+    update_evaluation_target(&state, &id, |target| target.source_id = Some(original.clone()));
+    let mut fresh = original.clone();
+    fresh.changes[0].blob = Some("e".repeat(40));
+    let captured = fresh.clone();
+    shared_source::install_owner(&state, &project, move |_| Some(captured.clone()));
     let child = {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_delegation_index(&id).unwrap();
@@ -783,7 +804,13 @@ fn acceptance_refresh_explicit_reuse_rearms_only_the_host_brief() {
     assert_eq!(delegation.delegation.id, id);
     assert_eq!(delegation.delegation.child_session_id, child);
     let target = current_target(&state, &id);
+    assert_eq!(target.source_id, Some(fresh));
+    assert!(target.source_fingerprint.is_none());
     let history = target.attempt_history.unwrap();
+    assert_eq!(history.previous[0].source_id.as_ref(), Some(&original));
+    let restored: AcceptanceEvaluationAttemptHistory =
+        serde_json::from_value(serde_json::to_value(&history).unwrap()).unwrap();
+    assert_eq!(restored, history);
     assert!(!history.requester_text_tainted);
     let brief = &history.prepared_brief.unwrap().prompt;
     let inner = state.inner.lock().unwrap();
@@ -793,6 +820,8 @@ fn acceptance_refresh_explicit_reuse_rearms_only_the_host_brief() {
         .unwrap();
     assert_eq!(queued.pending_prompt.text, *brief);
     assert!(brief.contains("Current evidence cut: 43") && brief.contains("cccccccc3333"));
+    assert!(brief.contains("Source changed."));
+    assert!(!brief.contains("private-path.txt"));
     assert_eq!(inner.delegations.len(), 1);
 }
 
@@ -904,6 +933,7 @@ fn acceptance_refresh_eligibility_uses_persisted_history_and_current_policy() {
         .unwrap();
     let old = reservation.previous.acceptance_evaluation.as_ref().unwrap();
     let seed = AcceptanceEvaluationTargetSeed {
+        source_id: None,
         work_ref: old.work_ref.clone(),
         mode: old.mode,
         acceptance_basis: old.acceptance_basis,

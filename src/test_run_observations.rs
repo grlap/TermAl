@@ -1276,7 +1276,7 @@ fn test_run_observation_summary(
     summary.registration.source_fingerprints = row
         .evidence
         .iter()
-        .map(|association| association.source_basis.source_revision.clone())
+        .map(|association| test_run_source_summary(&association.source_basis))
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();

@@ -150,6 +150,8 @@ struct SlowStoreOutcome {
     optional_timed_out: usize,
     selected_reads: usize,
     binding_pages: usize,
+    private_reads: usize,
+    expected_private_reads: usize,
 }
 
 /// The simulated clock of a slow store, shared by the CLI reader and the
@@ -204,7 +206,7 @@ enum VisibleCriteria {
 
 /// The canonical binding index of a task with `criteria` criteria, in
 /// Engram's pages of eight rows; criterion 2 keeps the fixture's binding.
-fn binding_pages(criteria: usize) -> Vec<Value> {
+fn binding_pages(criteria: usize, all_bound: bool) -> Vec<Value> {
     let (_, _, template) = canonical_binding_receipts();
     let bound_row = template["rows"][1].clone();
     let starts = (0..criteria).step_by(8).collect::<Vec<_>>();
@@ -215,8 +217,12 @@ fn binding_pages(criteria: usize) -> Vec<Value> {
             let shown = 8.min(criteria - earlier);
             let rows = (earlier..earlier + shown)
                 .map(|index| {
-                    if index == 1 {
-                        bound_row.clone()
+                    if all_bound || index == 1 {
+                        let mut row = bound_row.clone();
+                        row["criterion"] = json!(index + 1);
+                        row["binding"]["obligation"]["rule"]["rule_id"] =
+                            json!(format!("acceptance_criterion_requires_verification:{}", index + 1));
+                        row
                     } else {
                         json!({"criterion": index + 1, "binding": null})
                     }
@@ -237,6 +243,8 @@ struct SlowBindingTransport {
     pages: Mutex<std::collections::VecDeque<Value>>,
     served: AtomicUsize,
     timed_out: AtomicUsize,
+    private_reads: AtomicUsize,
+    private_pages: Option<Mutex<std::collections::VecDeque<(usize, Value)>>>,
 }
 
 impl EngramControlTransport for SlowBindingTransport {
@@ -266,6 +274,24 @@ impl EngramControlTransport for SlowBindingTransport {
             return Ok(json!({"project_id":"established-project",
                 "session_id":connection.session_id, "work_session":true,
                 "capabilities":["host_work_v1", "verification_record_v1"]}));
+        }
+        if let EngramControlRequest::AcceptanceVerificationRead { criterion, after, .. } = request {
+            self.private_reads.fetch_add(1, Ordering::SeqCst);
+            if let Err(error) = self.clock.read(timeout) {
+                self.timed_out.fetch_add(1, Ordering::SeqCst);
+                return Err(error);
+            }
+            if let Some(pages) = &self.private_pages {
+                let (expected_criterion, page) = pages.lock().unwrap().pop_front()
+                    .expect("unexpected extra private verification page");
+                assert_eq!(*criterion, expected_criterion);
+                assert_eq!(after.is_some(), page["earlier"].as_u64().unwrap() > 0);
+                return Ok(page);
+            }
+            return Err(EngramTransportError::remote(EngramControlErrorBody {
+                code:"unsupported_operation".to_owned(),
+                message:"this slow historical producer has no private verification index".to_owned(),
+            }));
         }
         assert!(matches!(
             request,
@@ -303,6 +329,16 @@ fn long_history_on_a_slow_store(
     criteria: usize,
     visible: VisibleCriteria,
 ) -> SlowStoreOutcome {
+    long_history_with_private_producer(latency, selected, criteria, visible, None)
+}
+
+fn long_history_with_private_producer(
+    latency: Duration,
+    selected: &[&str],
+    criteria: usize,
+    visible: VisibleCriteria,
+    private_page_count: Option<usize>,
+) -> SlowStoreOutcome {
     const TOTAL: u64 = LONG_HISTORY_TOTAL;
     const PER_PAGE: u64 = LONG_HISTORY_PER_PAGE;
     let (state, project, parent, root) = fixture();
@@ -325,14 +361,40 @@ fn long_history_on_a_slow_store(
         }
     }
     full["work"]["acceptance"] = json!(acceptance);
+    if private_page_count.is_some() {
+        full["work"]["acceptance_bindings"] = json!((1..=criteria)
+            .map(|criterion| json!({"criterion":criterion,"requirement":{"check_kind":"test"}}))
+            .collect::<Vec<_>>());
+    }
     // Routing for canonical discovery, then the slow transport in its place.
-    install_binding_evidence_transport(&state, &parent, vec![binding]);
+    install_binding_evidence_transport(&state, &parent, vec![binding.clone()]);
     let clock = SlowStoreClock::new(latency);
     let bindings = Arc::new(SlowBindingTransport {
         clock: clock.clone(),
-        pages: Mutex::new(binding_pages(criteria).into()),
+        pages: Mutex::new(binding_pages(criteria, private_page_count.is_some()).into()),
         served: AtomicUsize::new(0),
         timed_out: AtomicUsize::new(0),
+        private_reads: AtomicUsize::new(0),
+        private_pages: private_page_count.map(|count| {
+            let pages = (1..=criteria).flat_map(|criterion| {
+                let basis = binding["basis"].clone();
+                (0..count).map(move |page| {
+                    let rows = (0..8).map(|row| {
+                        let position = (page * 8 + row + 1) * 2;
+                        json!({"record":format!("{:032x}", 1000 + position),
+                            "position":position,"check_kind":"test","check_fingerprint":"e".repeat(32),
+                            "result":"passed","source_basis":{"workspace_id":"fixture-workspace","source_revision":"git:older"},
+                            "producer":{"record":format!("{:032x}", 1000 + position - 1),
+                                "position":position - 1,"outcome":"succeeded"}})
+                    }).collect::<Vec<_>>();
+                    let omitted = (count - page - 1) * 8;
+                    (criterion,json!({"basis":basis,"criterion":criterion,"requirement":{"check_kind":"test"},
+                        "total":count*8,"earlier":page*8,"shown":8,"omitted":omitted,"rows":rows,
+                        "continuation":(omitted > 0).then(|| format!("private-{criterion}-{}",page + 2))}))
+                })
+            }).collect::<std::collections::VecDeque<_>>();
+            Mutex::new(pages)
+        }),
     });
     state.install_test_engram_transport(bindings.clone());
     let pages = AtomicUsize::new(0);
@@ -398,6 +460,8 @@ fn long_history_on_a_slow_store(
         optional_timed_out: optional_timed_out.load(Ordering::SeqCst),
         selected_reads: selected_reads.load(Ordering::SeqCst),
         binding_pages: bindings.served.load(Ordering::SeqCst),
+        private_reads: bindings.private_reads.load(Ordering::SeqCst),
+        expected_private_reads: private_page_count.map_or(1, |pages| criteria * pages),
     }
 }
 
@@ -412,6 +476,8 @@ fn assert_paging_stopped_on_time_and_evaluated(outcome: SlowStoreOutcome) -> Val
         outcome.timed_out, 0,
         "no read that decides the request may outrun the time it was funded"
     );
+    assert_eq!(outcome.private_reads, outcome.expected_private_reads,
+        "every private verification page must be funded, not skipped");
     let wire = serde_json::to_value(response).unwrap();
     let unread = &wire["evidenceOmissions"]["unread"];
     assert_eq!(unread["reason"], "time_budget", "{unread}");
@@ -429,38 +495,59 @@ fn assert_paging_stopped_on_time_and_evaluated(outcome: SlowStoreOutcome) -> Val
 /// page with less time than it takes. Paging stops first, and says so.
 #[test]
 fn a_long_note_history_on_a_slow_store_stops_paging_and_still_evaluates() {
-    let outcome =
-        long_history_on_a_slow_store(Duration::from_secs(4), &[], 2, VisibleCriteria::All);
-    let (pages, selected_reads, binding_pages) =
-        (outcome.pages, outcome.selected_reads, outcome.binding_pages);
-    assert_paging_stopped_on_time_and_evaluated(outcome);
-    assert!(pages >= 1, "the share that can fund pages is used");
-    assert_eq!(selected_reads, 0);
-    assert_eq!(binding_pages, 1);
+    for latency in [Duration::from_millis(900), Duration::from_secs(4)] {
+        let outcome = long_history_on_a_slow_store(latency, &[], 2, VisibleCriteria::All);
+        let (pages, selected_reads, binding_pages) =
+            (outcome.pages, outcome.selected_reads, outcome.binding_pages);
+        assert_paging_stopped_on_time_and_evaluated(outcome);
+        if latency < Duration::from_secs(1) {
+            assert!(pages >= 1, "available optional history is still read");
+        }
+        assert_eq!(selected_reads, 0);
+        assert_eq!(binding_pages, 1);
+    }
 }
 
 /// More than eight criteria page the binding index. Every binding page is a
 /// read that decides the request, so optional paging leaves time for each.
 #[test]
 fn a_long_note_history_keeps_every_binding_page_funded() {
-    let outcome =
-        long_history_on_a_slow_store(Duration::from_secs(4), &[], 10, VisibleCriteria::All);
-    let (pages, binding_pages) = (outcome.pages, outcome.binding_pages);
-    assert_paging_stopped_on_time_and_evaluated(outcome);
-    assert!(pages >= 1, "the share that can fund pages is used");
-    assert_eq!(binding_pages, 2);
+    // Until the binding index is read, all criteria may require private scans.
+    // Keep the slow cases and a faster store with room for optional history.
+    for latency in [Duration::from_millis(230), Duration::from_secs(3), Duration::from_secs(4)] {
+        let outcome = long_history_on_a_slow_store(
+            latency,
+            &[],
+            10,
+            VisibleCriteria::All,
+        );
+        let (pages, binding_pages) = (outcome.pages, outcome.binding_pages);
+        assert_paging_stopped_on_time_and_evaluated(outcome);
+        if latency < Duration::from_secs(1) {
+            assert!(pages >= 1, "the share that can fund pages is used");
+        }
+        assert_eq!(binding_pages, 2);
+    }
 }
 
 /// A windowed show that clipped its criteria list still counts the clipped
 /// criteria: the binding index pages over all of them.
 #[test]
 fn a_clipped_criteria_list_still_funds_every_binding_page() {
-    let outcome =
-        long_history_on_a_slow_store(Duration::from_secs(4), &[], 10, VisibleCriteria::First(3));
-    let (pages, binding_pages) = (outcome.pages, outcome.binding_pages);
-    assert_paging_stopped_on_time_and_evaluated(outcome);
-    assert!(pages >= 1, "the share that can fund pages is used");
-    assert_eq!(binding_pages, 2);
+    for latency in [Duration::from_millis(230), Duration::from_secs(3), Duration::from_secs(4)] {
+        let outcome = long_history_on_a_slow_store(
+            latency,
+            &[],
+            10,
+            VisibleCriteria::First(3),
+        );
+        let (pages, binding_pages) = (outcome.pages, outcome.binding_pages);
+        assert_paging_stopped_on_time_and_evaluated(outcome);
+        if latency < Duration::from_secs(1) {
+            assert!(pages >= 1, "the share that can fund pages is used");
+        }
+        assert_eq!(binding_pages, 2);
+    }
 }
 
 /// Without a criteria list the binding index size is unknown, so optional
@@ -483,11 +570,27 @@ fn a_long_note_history_keeps_the_selected_evidence_reads_funded() {
         "22222222222222222222222222222222",
         "33333333333333333333333333333333",
     ];
-    let outcome =
-        long_history_on_a_slow_store(Duration::from_secs(3), &selected, 2, VisibleCriteria::All);
-    let (pages, selected_reads) = (outcome.pages, outcome.selected_reads);
-    let wire = assert_paging_stopped_on_time_and_evaluated(outcome);
-    assert!(pages >= 1, "the share that can fund pages is used");
-    assert_eq!(selected_reads, selected.len());
-    assert_eq!(wire["criterionEvidence"][0]["locators"], json!(selected));
+    for latency in [Duration::from_millis(800), Duration::from_secs(3)] {
+        let outcome = long_history_on_a_slow_store(latency, &selected, 2, VisibleCriteria::All);
+        let (pages, selected_reads) = (outcome.pages, outcome.selected_reads);
+        let wire = assert_paging_stopped_on_time_and_evaluated(outcome);
+        if latency < Duration::from_secs(1) {
+            assert!(pages >= 1, "available optional history is still read");
+        }
+        assert_eq!(selected_reads, selected.len());
+        assert_eq!(wire["criterionEvidence"][0]["locators"], json!(selected));
+    }
+}
+
+#[test]
+fn optional_history_cannot_starve_supported_private_scans_across_criteria_and_pages() {
+    for visible in [VisibleCriteria::All, VisibleCriteria::First(1), VisibleCriteria::Absent] {
+        for (latency, pages_per_criterion) in [(Duration::from_secs(3), 1), (Duration::from_millis(2500), 2)] {
+            let outcome = long_history_with_private_producer(latency, &[], 4, visible, Some(pages_per_criterion));
+            assert_eq!(outcome.binding_pages, 1);
+            let wire = assert_paging_stopped_on_time_and_evaluated(outcome);
+            let brief = wire["brief"].as_str().unwrap();
+            assert!(brief.contains("verification test passed"), "supported metadata reaches the brief");
+        }
+    }
 }

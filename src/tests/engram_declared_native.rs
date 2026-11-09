@@ -789,9 +789,14 @@ fn native_credit_accepts_equal_dirty_source_ids_and_refuses_changed_dirty_conten
         } else {
             let body = body.unwrap();
             assert_eq!(body.run.outcome, EngramVerificationRecordRunOutcome::Passed);
+            let producers = engram_verification_record_producers(&registration.run_id, &body);
+            assert_eq!(producers.len(), 1);
+            let basis = producers[0].1.source_basis.as_ref().unwrap();
+            assert_eq!(basis.source_id.as_ref(), Some(&before));
+            assert!(basis.source_revision.is_empty());
             let wire = serde_json::to_value(body).unwrap();
-            assert_eq!(wire["input"], json!({"kind":"source_id","source_id":before}));
-            assert_eq!(wire["post_run"], json!({"source_id":before}));
+            assert!(wire["input"] == json!({"kind":"source_id","source_id":before}), "the complete native input is retained");
+            assert!(wire["post_run"] == json!({"source_id":before}), "the complete native post-run identity is retained");
             assert!(wire["post_run"].get("clean_before").is_none());
         }
     }
@@ -817,7 +822,11 @@ fn native_credit_compares_the_complete_child_object_without_requiring_a_clean_ch
     fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
     let (_, registration, request, results) = fixture.finish(&mut recorder, 0);
     let body = engram_verification_record_body(&registration, &request, &results).unwrap();
-    assert_eq!(serde_json::to_value(&body).unwrap()["input"]["source_id"], json!(before));
+    assert!(serde_json::to_value(&body).unwrap()["input"]["source_id"] == json!(before),
+        "the complete native input identity matches");
+    let producers = engram_verification_record_producers(&registration.run_id, &body);
+    assert_eq!(producers.len(), 1);
+    assert_eq!(producers[0].1.source_basis.as_ref().unwrap().source_id.as_ref(), Some(&before));
     for field in ["commit", "blob", "mode"] {
         let mut changed = registration.clone();
         let after = changed.declared_terminal.as_mut().unwrap().source.as_mut().unwrap();
@@ -906,7 +915,7 @@ fn native_source_change_reason_reaches_withheld_record_and_turn_notice() {
         assert_eq!(results["state"], "passed", "the artifact verdict stays factual");
         assert_eq!(results["nativeEligible"], false);
         let EngramVerificationRecordPrepared::Pending(EngramVerificationRecordPending::SourceChanged { detail, changes }) = prepared
-            else { panic!("expected a specific source-change reason: {prepared:?}"); };
+            else { panic!("expected a specific source-change reason"); };
         assert!(detail.contains("source changed during the run") && detail.contains(path));
         let expected_kind = if kind.starts_with("untracked") || kind == "many" { "untracked_file" } else { kind };
         assert!(changes.iter().any(|change| change.kind == expected_kind && change.path == path && change.before != change.after));
@@ -940,12 +949,12 @@ fn native_source_change_reason_reaches_withheld_record_and_turn_notice() {
         wrong_request["nativeSourceId"] = Value::Null;
         let refusal = engram_verification_record_body(&registration, &wrong_request, &results).unwrap_err();
         assert!(refusal.contains("host reservation") && !refusal.contains("source changed"),
-            "reservation mismatch remains distinct: {refusal}");
+            "reservation mismatch remains distinct: <details withheld>");
     }
 }
 
 #[test]
-fn native_full_source_overflow_is_named_without_truncation_or_a_commit_fallback() {
+fn native_large_sources_are_preserved_and_genuine_frame_overflow_is_named() {
     let fixture = NativeFixture::new("native-source-overflow", false);
     let mut source = fixture.source_owner.identity();
     source.changes = (0..1600).map(|index| EngramSourceIdChange {
@@ -960,13 +969,30 @@ fn native_full_source_overflow_is_named_without_truncation_or_a_commit_fallback(
     fixture.wait();
     fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
     let (_, registration, request, results) = fixture.finish(&mut recorder, 0);
-    assert_eq!(results["input"]["source_id"], json!(source), "the original complete evidence is retained");
+    assert!(results["input"]["source_id"] == json!(source), "the original complete evidence is retained");
     assert_eq!(results["state"], "passed", "transport limits do not rewrite the original outcome");
-    let error = engram_verification_record_body(&registration, &request, &results).unwrap_err();
-    assert!(error.starts_with("native_verification_frame_too_large:"), "{error}");
-    assert!(matches!(engram_verification_record_prepare(&registration),
-        EngramVerificationRecordPrepared::Pending(EngramVerificationRecordPending::BodyNotBuilt { detail })
-            if detail.starts_with("native_verification_frame_too_large:")));
+    let mut body = engram_verification_record_body(&registration, &request, &results).unwrap();
+    let wire = serde_json::to_value(&body).unwrap();
+    assert!(wire["input"] == json!({"kind":"source_id", "source_id":source}),
+        "a large complete identity is neither truncated nor converted to a commit");
+    assert!(wire["post_run"]["source_id"] == json!(source));
+    let frame = EngramControlRequest::VerificationRecord {
+        operation_key:engram_verification_record_key(&registration.run_id), record:wire,
+    };
+    let encoded = encode_engram_control_request(&frame).unwrap();
+    assert!(encoded.len() > ENGRAM_CONTROL_MAX_FRAME_BYTES,
+        "the native fixture exceeds the historical frame capacity");
+    assert!(encoded.len() + 1 <= ACCEPTANCE_VERIFICATION_FRAME_MAX_BYTES);
+    let EngramVerificationRecordPrepared::Ready(prepared) = engram_verification_record_prepare(&registration) else {
+        panic!("the new private frame must prepare the complete native record");
+    };
+    assert_eq!(prepared.body, body);
+    // The enlarged private channel still refuses a genuinely oversized
+    // complete frame, including non-source fields.
+    body.checks[0].summary = Some("x".repeat(ACCEPTANCE_VERIFICATION_FRAME_MAX_BYTES));
+    let error = engram_verification_record_frame_bound(&body, &registration.run_id,
+        "native_verification_frame_too_large").unwrap_err();
+    assert!(error.starts_with("native_verification_frame_too_large:"), "<details withheld>");
 }
 
 #[test]

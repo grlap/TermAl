@@ -990,6 +990,7 @@ fn criterion_evidence_request_refuses_wrong_or_partial_records_and_changed_basis
 }
 
 pub(super) struct BindingEvidenceTransport {
+    requirements: BTreeMap<usize, Value>,
     pages: Mutex<std::collections::VecDeque<Value>>,
     requests: Mutex<Vec<Value>>,
 }
@@ -1019,6 +1020,21 @@ impl EngramControlTransport for BindingEvidenceTransport {
             return Ok(scripted_no_root_sighting(
                 connection, work_ref, run_id, *run_cut,
             ));
+        }
+        if let EngramControlRequest::AcceptanceVerificationRead {
+            work_id, expected_work_revision, run_id, run_cut, criterion, ..
+        } = request {
+            let Some(requirement) = self.requirements.get(criterion) else {
+                return Err(EngramTransportError::remote(EngramControlErrorBody {
+                    code: "unsupported_operation".into(), message: "no private verification read scripted in this fixture".into(),
+                }));
+            };
+            return Ok(json!({
+                "basis":{"project_id":"established-project", "work_id":work_id,
+                    "work_revision":expected_work_revision, "run_id":run_id, "run_cut":run_cut},
+                "criterion":criterion, "requirement":requirement,
+                "total":0, "earlier":0, "shown":0, "omitted":0, "rows":[], "continuation":null
+            }));
         }
         assert!(matches!(
             request,
@@ -1055,6 +1071,10 @@ pub(super) fn install_binding_evidence_transport(
     pages: Vec<Value>,
 ) -> Arc<BindingEvidenceTransport> {
     let transport = Arc::new(BindingEvidenceTransport {
+        requirements: pages.iter().filter_map(|page| page["rows"].as_array()).flatten()
+            .filter_map(|row| Some((usize::try_from(row["criterion"].as_u64()?).ok()?,
+                row["binding"]["requirement"].clone())))
+            .collect(),
         pages: Mutex::new(pages.into()),
         requests: Mutex::new(Vec::new()),
     });
@@ -1734,7 +1754,7 @@ fn criterion_evidence_page_limits_refuse_before_admission() {
                 vec![first]
             }
             "oversize_page" => {
-                first["rows"][0]["binding"] = json!({"padding": "a".repeat(16 * 1024)});
+                first["rows"][0]["binding"] = json!({"padding": "a".repeat(ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES)});
                 vec![first]
             }
             "repeated_cursor" => {

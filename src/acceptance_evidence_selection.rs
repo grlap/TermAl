@@ -1033,12 +1033,15 @@ struct AcceptanceBindingEvidenceSatisfaction {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AcceptanceBindingEvidenceVerification {
+    /// Returned as stored; informational metadata never creates eligibility.
+    #[serde(default, deserialize_with = "deserialize_acceptance_verification_applicability")]
+    applicability: Option<AcceptanceVerificationApplicability>,
     record: String,
     position: i64,
     check_kind: String,
     check_fingerprint: String,
     result: String,
-    source_basis: EngramExecutionSourceBasis,
+    source_basis: AcceptanceVerificationSourceBasis,
     /// For a bound record, the original's producer: its position is on the
     /// original's run, not this one.
     producer: AcceptanceBindingEvidenceProducer,
@@ -1064,7 +1067,7 @@ struct AcceptanceBindingEvidenceBound {
     #[allow(dead_code)]
     run: Value,
     original_position: i64,
-    original_basis: EngramExecutionSourceBasis,
+    original_basis: AcceptanceVerificationSourceBasis,
     #[allow(dead_code)]
     original_completed_at: String,
     #[allow(dead_code)]
@@ -1182,7 +1185,7 @@ impl AppState {
         let mut after = None;
         let mut rows = Vec::new();
         let mut cursors = BTreeSet::new();
-        // Engram's complete rows have a fixed eight-row/16-KiB page bound.
+        // Engram's complete rows have an eight-row operation-specific bound.
         // A task with more than 128 criteria is refused, never silently partial.
         for _ in 0..MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES {
             let request = EngramControlRequest::AcceptanceBindingRead {
@@ -1206,16 +1209,14 @@ impl AppState {
                 }
                 Err(error) => return Err(acceptance_binding_read_error(error)),
             };
-            if serde_json::to_vec(&value).map_or(true, |bytes| bytes.len() > 16 * 1024) {
+            if serde_json::to_vec(&value).map_or(true, |bytes| bytes.len() > ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES) {
                 return Err(ApiError::bad_gateway(
                     "acceptance binding evidence exceeds the wire page bound",
                 ));
             }
             let page: AcceptanceBindingEvidencePage =
-                serde_json::from_value(value).map_err(|error| {
-                    ApiError::bad_gateway(format!(
-                        "acceptance binding evidence: invalid page: {error}"
-                    ))
+                serde_json::from_value(value).map_err(|_| {
+                    ApiError::bad_gateway("acceptance binding evidence: invalid page")
                 })?;
             if page.basis != expected
                 || page.total != task.criteria.len()
@@ -1262,6 +1263,22 @@ impl AppState {
         Err(ApiError::conflict(
             "criterion binding evidence exceeded the complete-index page bound; no evaluation was started",
         ))
+    }
+}
+
+// Full private identities drive comparison. This function provides only the
+// bounded display label retained in the brief; it never supplies identity.
+fn acceptance_binding_source_revision(basis: &AcceptanceVerificationSourceBasis) -> Option<String> {
+    match &basis.identity {
+        AcceptanceSourceBasis::Shared(shared) => {
+            acceptance_source_bytes(&shared.source_id).ok()?;
+            Some(format!("source-id:{} ({} changes, {} submodules)",
+                &shared.source_id.commit[..12], shared.source_id.changes.len(), shared.source_id.submodules.len()))
+        }
+        AcceptanceSourceBasis::Legacy(legacy) if (1..=96).contains(&legacy.fingerprint.len()) && legacy.fingerprint.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '.')) =>
+                Some(legacy.fingerprint.clone()),
+        _ => None,
     }
 }
 
@@ -1341,6 +1358,8 @@ fn apply_acceptance_binding_evidence(
             continue;
         };
         let verification = satisfaction.verification;
+        let source_revision = acceptance_binding_source_revision(&verification.source_basis)
+            .ok_or_else(invalid)?;
         // A native record's producer precedes it on this run. A bound
         // record's producer and original lie on the original's run, so they
         // are ordered there; the original ran at this record's revision.
@@ -1362,8 +1381,7 @@ fn apply_acceptance_binding_evidence(
                         .work_ref
                         .chars()
                         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-                    && bound.original_basis.source_revision
-                        == verification.source_basis.source_revision
+                    && acceptance_verification_basis_agrees(&bound.original_basis, &verification.source_basis)
             }
         };
         if !position_valid(satisfaction.evaluated_cut)
@@ -1383,16 +1401,10 @@ fn apply_acceptance_binding_evidence(
             || satisfaction.evaluated_cut >= resolution.position
             || verification.source_basis.workspace_id.is_empty()
             || verification.source_basis.workspace_id.len() > 512
-            || verification.source_basis.source_revision.is_empty()
-            || verification.source_basis.source_revision.len() > 96
-            || !verification
-                .source_basis
-                .source_revision
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '.'))
         {
             return Err(invalid());
         }
+        let source_label = &source_revision;
         links.push(AcceptanceCriterionEvidence {
             criterion: row.criterion,
             locators: vec![verification.record.clone()],
@@ -1408,23 +1420,33 @@ fn apply_acceptance_binding_evidence(
             locator: verification.record, kind: "verification".to_owned(), by: None, created_at: None,
             summary: Some(format!("Host projection of the original recorded closure (not the stored record body) at run cut {}: command fingerprint {}; source workspace {} at {}; producer {} succeeded.{provenance} This records the original closure, not current freshness.",
                 satisfaction.evaluated_cut, verification.check_fingerprint, verification.source_basis.workspace_id,
-                verification.source_basis.source_revision, verification.producer.record)),
+                source_label, verification.producer.record)),
             body_bytes: None, non_holder: false, cut_by_tracker: false,
             verification: Some(AcceptanceEvidenceVerification {
+                source_basis: Some(verification.source_basis.identity.clone()),
+                applicability_tree: verification.applicability.map(|restriction| restriction.tree),
                 check_kind: verification.check_kind, result: verification.result,
-                source_revision: Some(verification.source_basis.source_revision),
+                source_revision: Some(source_revision),
                 source_workspace: acceptance_source_workspace(&verification.source_basis.workspace_id),
             }),
         });
     }
     for evidence in additions {
-        // The canonical closure names the workspace its record ran in, which
-        // the window's copy of that same record may not: carry it over, so a
-        // complete copy listed in place of the projection is marked alike.
+        // The window may omit the canonical closure's source metadata. Carry
+        // it onto that same record so its complete copy is marked alike,
+        // without replacing the stored body or metadata already supplied.
         let workspace = evidence
             .verification
             .as_ref()
             .and_then(|verification| verification.source_workspace.clone());
+        let revision = evidence
+            .verification
+            .as_ref()
+            .and_then(|verification| verification.source_revision.clone());
+        let source_basis = evidence.verification.as_ref()
+            .and_then(|verification| verification.source_basis.clone());
+        let applicability_tree = evidence.verification.as_ref()
+            .and_then(|verification| verification.applicability_tree.clone());
         for entry in task
             .indexed_evidence
             .iter_mut()
@@ -1432,8 +1454,17 @@ fn apply_acceptance_binding_evidence(
             .filter(|entry| entry.locator == evidence.locator)
         {
             if let Some(verification) = entry.verification.as_mut() {
+                if verification.source_basis.is_none() {
+                    verification.source_basis = source_basis.clone();
+                }
+                if verification.applicability_tree.is_none() {
+                    verification.applicability_tree = applicability_tree.clone();
+                }
                 if verification.source_workspace.is_none() {
                     verification.source_workspace = workspace.clone();
+                }
+                if verification.source_revision.is_none() {
+                    verification.source_revision = revision.clone();
                 }
             }
         }

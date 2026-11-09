@@ -153,7 +153,7 @@ fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_r
     fixture.state.engram_verification_records_tick();
     let sent = operations(&transport)[before_tick..].to_vec();
     let records = of_kind(&sent, "verification_record");
-    assert_eq!(records.len(), 1, "one record goes out: {sent:?}");
+    assert_eq!(records.len(), 1, "one record goes out");
     assert!(
         of_kind(&sent, "session_bind").is_empty(),
         "the sender binds nothing"
@@ -162,7 +162,7 @@ fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_r
         &ready(&original),
     ))
     .expect("the request serializes");
-    assert_eq!(records[0], expected, "the same frozen body and key");
+    assert!(records[0] == expected, "the same frozen body and key");
     assert_eq!(
         records[0]["operation_key"],
         "termal-run:test-record-naming-rebind"
@@ -171,11 +171,7 @@ fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_r
         records[0]["registration"]["binding"],
         serde_json::to_value(binding()).unwrap()
     );
-    assert_eq!(
-        fs::read_to_string(&body_path).unwrap(),
-        frozen_text,
-        "never rebuilt"
-    );
+    assert!(fs::read_to_string(&body_path).unwrap() == frozen_text, "never rebuilt");
     assert_eq!(current(&fixture, &run).named_root, original.named_root);
     assert!(matches!(
         engram_verification_record_prepare(&current(&fixture, &run)),

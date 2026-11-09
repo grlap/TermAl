@@ -154,6 +154,7 @@ struct AcceptanceEvaluationTargetSeed {
     /// The content revision of the evaluator's worktree, taken after the
     /// reads above; `None` when it could not be taken.
     source_fingerprint: Option<String>,
+    source_id: Option<EngramSourceId>,
     /// The work's named source root it was taken on, if any.
     source_root: Option<AcceptanceEvaluationSourceRoot>,
     /// With no root named, the requested work's live claim held by the requester.
@@ -182,6 +183,7 @@ impl AcceptanceEvaluationTargetSeed {
             attempt_key,
             store: Some(self.store),
             source_fingerprint: self.source_fingerprint,
+            source_id: self.source_id,
             source_root: self.source_root,
             source_claim: self.source_claim,
             naming_history: self.naming_history,
@@ -558,6 +560,9 @@ struct EngramVerificationForEvaluation {
     result: Option<String>,
     #[serde(default)]
     source_revision: Option<String>,
+    /// Window-only display facts, never a complete identity or credit input.
+    #[serde(default)]
+    source_id_summary: Option<Value>,
     /// The workspace the check ran in, from the record's source basis.
     #[serde(default)]
     source_workspace: Option<String>,
@@ -565,6 +570,9 @@ struct EngramVerificationForEvaluation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AcceptanceEvidenceVerification {
+    /// Complete canonical private identity, never populated from a summary.
+    source_basis: Option<AcceptanceSourceBasis>,
+    applicability_tree: Option<String>,
     check_kind: String,
     result: String,
     source_revision: Option<String>,
@@ -575,6 +583,24 @@ struct AcceptanceEvidenceVerification {
 /// The longest workspace id kept from a record or measured for a judgment,
 /// the bound the tracker puts on a source basis's workspace.
 const MAX_ACCEPTANCE_SOURCE_WORKSPACE_BYTES: usize = 512;
+
+/// Project only bounded revision words for the existing brief markers. The
+/// summary cannot reconstruct an identity or participate in evidence matching.
+fn acceptance_window_source_revision(value: &Value) -> Option<String> {
+    let summary = value.as_object()?;
+    if summary.len() != 5 { return None; }
+    let commit = summary.get("commit")?.as_str()?;
+    let tree = summary.get("tree")?.as_str()?;
+    let valid_hash = |hash: &str| hash.len() == 40
+        && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    if !valid_hash(commit) || !valid_hash(tree) { return None; }
+    let submodules = summary.get("submodules")?.as_u64()?;
+    let changes = summary.get("changes")?.as_u64()?;
+    let child_changes = summary.get("submodule_changes")?.as_u64()?;
+    if child_changes > 0 && submodules == 0 { return None; }
+    Some(format!("source-id:{} ({} changes, {} submodules, {} child changes)",
+        &commit[..12], changes, submodules, child_changes))
+}
 
 /// A workspace id as a source basis names it: a non-empty path of bounded
 /// size without control characters, which could break the brief's lines.
@@ -598,21 +624,25 @@ fn acceptance_evidence_verification(
         .result
         .as_deref()
         .filter(|result| is_acceptance_tracker_word(result))?;
-    let source_revision = verification
-        .source_revision
-        .as_deref()
-        .filter(|revision| {
-            (1..=96).contains(&revision.len())
-                && revision
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '.')
-        })
-        .map(str::to_owned);
+    let source_revision = if let Some(summary) = verification.source_id_summary.as_ref() {
+        // Malformed or mixed metadata stays explicitly off-source, and its
+        // remote contents never enter the brief or a serde error message.
+        Some(verification.source_revision.is_none()
+            .then(|| acceptance_window_source_revision(summary)).flatten()
+            .unwrap_or_else(|| "source-id:unavailable".to_owned()))
+    } else {
+        verification.source_revision.as_deref().filter(|revision| {
+            (1..=96).contains(&revision.len()) && revision.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '.')
+        }).map(str::to_owned)
+    };
     let source_workspace = verification
         .source_workspace
         .as_deref()
         .and_then(acceptance_source_workspace);
     Some(AcceptanceEvidenceVerification {
+        source_basis: None,
+        applicability_tree: None,
         check_kind: check_kind.to_owned(),
         result: result.to_owned(),
         source_revision,
@@ -719,6 +749,8 @@ struct AcceptanceEvaluationTask {
     /// criterion, so the briefs mark such records context only. `None` when
     /// the source is unmeasured.
     judged_revision: Option<String>,
+    /// The actual private comparison input. `judged_revision` is display only.
+    judged_source_basis: Option<AcceptanceSourceBasis>,
     /// The workspace this evaluation judges, from the same measured source
     /// basis as `judged_revision`. Engram refuses, for a bound criterion, a
     /// verification record that ran in another workspace even at the same
@@ -731,6 +763,7 @@ struct AcceptanceEvaluationTask {
 /// verification record against it.
 #[derive(Clone, Copy, Debug, Default)]
 struct AcceptanceJudgedSource<'a> {
+    basis: Option<&'a AcceptanceSourceBasis>,
     revision: Option<&'a str>,
     workspace: Option<&'a str>,
 }
@@ -844,6 +877,7 @@ fn parse_acceptance_evaluation_task(
         obligation_assessments: Vec::new(),
         // Set by the request once the host has measured the source.
         judged_revision: None,
+        judged_source_basis: None,
         judged_workspace: None,
     })
 }
@@ -851,6 +885,7 @@ fn parse_acceptance_evaluation_task(
 impl AcceptanceEvaluationTask {
     fn judged_source(&self) -> AcceptanceJudgedSource<'_> {
         AcceptanceJudgedSource {
+            basis: self.judged_source_basis.as_ref(),
             revision: self.judged_revision.as_deref(),
             workspace: self.judged_workspace.as_deref(),
         }
@@ -871,6 +906,10 @@ impl AcceptanceEvaluationTask {
         source_claim: Option<AcceptanceEvaluationSourceClaim>,
     ) -> AcceptanceEvaluationTargetSeed {
         AcceptanceEvaluationTargetSeed {
+            source_id: match self.judged_source_basis.as_ref() {
+                Some(AcceptanceSourceBasis::Shared(shared)) => Some(shared.source_id.clone()),
+                _ => None,
+            },
             work_ref: self.work_ref.clone(),
             mode,
             acceptance_basis: self.acceptance_basis,
@@ -882,7 +921,9 @@ impl AcceptanceEvaluationTask {
                 .as_ref()
                 .map(|carried| carried.evaluation.clone()),
             store,
-            source_fingerprint,
+            source_fingerprint: if matches!(self.judged_source_basis, Some(AcceptanceSourceBasis::Shared(_))) {
+                None
+            } else { source_fingerprint },
             source_root,
             source_claim,
             work_id: self.canonical_work_id().map(str::to_owned),
@@ -1002,7 +1043,19 @@ fn acceptance_brief_off_source_marker(
     let Some(verification) = evidence.verification.as_ref() else {
         return String::new();
     };
-    if let (Some(ran_at), Some(judged)) = (verification.source_revision.as_deref(), judged.revision) {
+    if let Some(judged_basis) = judged.basis {
+        if !verification.source_basis.as_ref().is_some_and(|ran| ran.same_source(judged_basis)) {
+            return " [context only: its complete source identity differs or is unavailable; not citable for a bound criterion]".to_owned();
+        }
+        if let (AcceptanceSourceBasis::Shared(judged), Some(tree)) =
+            (judged_basis, verification.applicability_tree.as_deref()) {
+            if judged.source_id.tree != tree {
+                return " [context only: its recorded Git tree restriction differs from this source; not citable for a bound criterion]".to_owned();
+            }
+        }
+    }
+    if judged.basis.is_none()
+        && let (Some(ran_at), Some(judged)) = (verification.source_revision.as_deref(), judged.revision) {
         if ran_at != judged {
             return format!(
                 " [context only: it ran at {ran_at}, not at {judged}, the revision this evaluation judges; not citable for a bound criterion]"
@@ -2454,7 +2507,17 @@ fn acceptance_evaluation_cli_args(
     // peer worktree holding the same content matches too. The flag came into
     // Engram's `evaluate` with `--evidence-basis` (Engram 45b0f9e), which this
     // list always passes, so no binary that takes the rest refuses it.
-    if let Some(fingerprint) = target.source_fingerprint.as_ref() {
+    if target.source_id.is_some() && target.source_fingerprint.is_some() {
+        return Err(ApiError::conflict("evaluation target has more than one source identity"));
+    }
+    if target.source_id.is_some() {
+        if target.mode == AcceptanceEvaluationMode::SameSession {
+            return Err(ApiError::conflict("shared-source same_session preparation is unsupported until it has a persisted host attempt"));
+        }
+        // This is a canonical argument template. The persisted source payload
+        // publishes the actual immutable file only at the subprocess boundary.
+        args.extend(["--source-id-file".to_owned(), "<host-private-source-id>".to_owned()]);
+    } else if let Some(fingerprint) = target.source_fingerprint.as_ref() {
         args.extend(["--source-fingerprint".to_owned(), fingerprint.clone()]);
     }
     // The carried failure the evaluation acknowledges, read with the brief.

@@ -112,12 +112,17 @@ pub(super) fn isolated_launcher_for(
             .env("CARGO_TARGET_DIR", root.join("target"))
             .env("CARGO_BUILD_JOBS", "1");
     }
-    let temporary = root.join("target").join("launcher-tmp");
-    fs::create_dir_all(&temporary).unwrap();
+    // The owner may stage EOL configuration, which must be outside the
+    // inspected checkout. The disposable host owns this sibling scratch,
+    // including when the launcher measures a linked worktree.
+    let temporary = &service.temporary;
+    fs::create_dir_all(temporary).unwrap();
+    assert!(!fs::canonicalize(temporary).unwrap().starts_with(fs::canonicalize(root).unwrap()),
+        "owner scratch stays outside the measured checkout");
     command
-        .env("TMPDIR", &temporary)
-        .env("TMP", &temporary)
-        .env("TEMP", &temporary)
+        .env("TMPDIR", temporary)
+        .env("TMP", temporary)
+        .env("TEMP", temporary)
         .env("TERMAL_SESSION_ID", session)
         .env("TERMAL_BASE_URL", &service.url)
         .current_dir(root)

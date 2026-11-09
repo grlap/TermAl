@@ -601,6 +601,15 @@ enum EngramControlRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         after: Option<String>,
     },
+    AcceptanceVerificationRead {
+        work_id: String,
+        expected_work_revision: i64,
+        run_id: String,
+        run_cut: i64,
+        criterion: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        after: Option<String>,
+    },
     NamedRootRead {
         run_id: String,
         claim_id: String,
@@ -1235,6 +1244,14 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
             if let Some(reply) = roots.request(&connection.session_id, request) {
                 return reply;
             }
+        }
+        if matches!(request, EngramControlRequest::AcceptanceVerificationRead { .. }) {
+            // This general fixture models the historical producer. Complete
+            // private reads use their own explicitly scripted page transport.
+            return Err(EngramTransportError::remote(EngramControlErrorBody {
+                code: "unsupported_operation".to_owned(),
+                message: "private verification metadata is not scripted".to_owned(),
+            }));
         }
         let response = self
             .responses

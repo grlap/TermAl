@@ -67,7 +67,7 @@ impl ReceivedCheckNotice {
         let disk = TestRunDisk::read(directory, None)?;
         if !test_run_registered_disk_matches(registration, &disk)
             || !registered_closing_clean_input(registration, &disk) { return None; }
-        let EngramVerificationRecordInput::Commit { commit } = &frozen.body.input else { return None; };
+        let commit = frozen.body.input.clean_commit()?;
         #[cfg(test)]
         {
             let hook = TEST_RECEIVED_NOTICE_SOURCE_READ.lock().unwrap().remove(&registration.run_id);
@@ -92,7 +92,7 @@ impl ReceivedCheckNotice {
             };
             match status {
                 Ok((head, dirty)) => {
-                    if head != *commit || !dirty.is_empty() { return None; }
+                    if head != commit || !dirty.is_empty() { return None; }
                     if std::time::Instant::now() >= deadline {
                         ReceivedNoticeSource::SourceUnavailable(ReceivedNoticeSourceUnavailable::Deadline)
                     } else { ReceivedNoticeSource::Current }

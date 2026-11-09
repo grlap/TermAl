@@ -12,7 +12,7 @@ fn summary(run_dir: &FsPath) -> String {
     assert!(
         output.status.success(),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        output.stderr.len()
     );
     String::from_utf8(output.stdout).unwrap()
 }
@@ -31,8 +31,9 @@ fn typed_producer_refusal_reaches_the_retained_record_and_actual_summary() {
     let own = connection(SESSION, "actor");
     read_work_session(&transport, &adapter, &own, supported());
     let wire = json!({"status":"error", "error":{
-        "code":"verification_record_refused", "message":"registered verification refused",
-        "details":{"field":"root", "reason":"named root moved since registration", "ignored":"secret-not-for-output"}
+        "code":"verification_record_refused",
+        "message":format!("execution_observe source_id {}", source_projection::source_for_refusal_test()),
+        "details":{"field":"root", "reason":"secret-not-for-output", "ignored":"secret-not-for-output"}
     }});
     let EngramControlResponse::Error { error } = serde_json::from_value(wire).unwrap() else {
         panic!("error envelope")
@@ -42,7 +43,9 @@ fn typed_producer_refusal_reaches_the_retained_record_and_actual_summary() {
     let EngramVerificationRecordStep::Rejected(detail) = &step else {
         panic!("{step:?}")
     };
-    assert!(detail.contains("field: root; reason: named root moved since registration"));
+    assert_eq!(detail, "Engram refused it: verification_record_refused");
+    assert!(!detail.contains("source_id"));
+    assert!(!detail.contains("execution_observe"));
     assert!(!detail.contains("secret-not-for-output"));
     assert_eq!(
         engram_verification_record_progress(&run.run_dir),
@@ -53,10 +56,11 @@ fn typed_producer_refusal_reaches_the_retained_record_and_actual_summary() {
     let rendered = summary(&run.run_dir);
     assert!(rendered.contains("verification: rejected:"), "{rendered}");
     assert!(
-        rendered.contains("field: root; reason: named root moved since registration"),
+        rendered.contains("verification_record_refused"),
         "{rendered}"
     );
     assert!(!rendered.contains("secret-not-for-output"));
+    assert!(!rendered.contains("private-child.txt"));
     assert_eq!(
         transport.sent_operations(),
         ["work_session_read", "verification_record"]

@@ -31,15 +31,15 @@ fn changed_after_evaluation(commit_change: bool) {
     // declared fingerprint must not override Engram's own current-root read.
     matrix.refuse(&check, || {});
     matrix.refuse_done(&check, true);
-    assert_eq!(
+    assert!(
         matrix
             .fixture
             .live
             .transport
-            .requests_for("execution_observe"),
-        reports
+            .requests_for("execution_observe") == reports,
+        "source reports are unchanged by a refused completion"
     );
-    assert_eq!(matrix.fixture.object(&evaluation_id), original_evaluation);
+    assert!(matrix.fixture.object(&evaluation_id) == original_evaluation, "the complete evaluation remains unchanged");
     matrix.assert_objects_unchanged(originals);
 }
 
@@ -72,17 +72,12 @@ live_row!(
         // The note is a real unbound citation, not an invented verification for
         // the failed preflight. No passing run exists to support this judgment.
         matrix.refuse(&dirty, || {});
-        let SourceRevision::Taken { revision, .. } =
-            source_revision(&matrix.fixture.root, true).unwrap()
-        else {
-            panic!("the dirty run's root has really been restored to a clean commit")
-        };
-        let output = matrix.done_output_revision(&revision);
+        let current = matrix.source_id_now();
+        assert!(current.changes.is_empty(), "the root has been restored");
+        let output = matrix.done_output_source(&current);
         matrix.assert_completion_refusal(&output, false);
-        assert_eq!(
-            fs::read(dirty.directory.join("results.json")).unwrap(),
-            original_result
-        );
+        assert!(fs::read(dirty.directory.join("results.json")).unwrap() == original_result,
+            "restoring source does not rewrite the earlier result");
         assert!(
             matrix
                 .fixture
@@ -194,17 +189,15 @@ live_row!(
                 let text = body.to_string().to_ascii_lowercase();
                 assert!(
                     text.contains("eligible") || text.contains("fail"),
-                    "refuse the newer failed check, not unrelated setup: {body:#}"
+                    "refuse the newer failed check, not unrelated setup: <body withheld>"
                 );
             }
             Ok(_) => {
                 panic!("early selection must not skip the newer failure and reuse an old PASS")
             }
         }
-        assert_eq!(
-            fs::read(passed.directory.join("results.json")).unwrap(),
-            old_result
-        );
+        assert!(fs::read(passed.directory.join("results.json")).unwrap() == old_result,
+            "a later failed check does not rewrite the earlier result");
         matrix.assert_objects_unchanged(originals);
         matrix.close();
         matrix.settle();
@@ -231,7 +224,7 @@ live_row!(
         let output = matrix.done_output(&passed);
         assert!(
             !output.status.success(),
-            "newer FAIL must block done: {output:?}"
+            "newer FAIL must block done: <details withheld>"
         );
         let body: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(body["operation"], "done");
@@ -239,7 +232,7 @@ live_row!(
         if text.contains("result_not_passed") {
             assert!(
                 failed.records.iter().any(|record| text.contains(record)),
-                "the actual later failed verification must decide: {body:#}"
+                "the actual later failed verification must decide: <body withheld>"
             );
         } else {
             // A newly registered failure can first stale the older
@@ -249,7 +242,7 @@ live_row!(
         let core = matrix
             .fixture
             .work(&matrix.holder, &["core", "inspect", &matrix.work, "--json"]);
-        assert!(core["run"]["completion_seal"].is_null(), "{core:#}");
+        assert!(core["run"]["completion_seal"].is_null(), "<core withheld>");
         matrix.assert_objects_unchanged(originals);
         matrix.close();
         matrix.settle();
@@ -455,7 +448,8 @@ live_row!(
         );
         assert_ne!(check.records, fresh.records);
         matrix.close();
-        assert_eq!(settle_claim_transition(&matrix, &original), retained_jobs);
+        assert!(settle_claim_transition(&matrix, &original) == retained_jobs,
+            "the complete retained closing jobs are unchanged");
         matrix.accept(&fresh, || {});
         matrix.assert_objects_unchanged(originals);
     }
@@ -519,12 +513,12 @@ live_row!(
         matrix.close();
         let retained_jobs = settle_claim_transition(&matrix, &original);
         matrix.accept(&check, || {});
-        assert_eq!(
+        assert!(
             matrix.fixture.record(&matrix.holder, |record| record
                 .engram
                 .unadmitted_closing_jobs
-                .clone()),
-            retained_jobs
+                .clone()) == retained_jobs,
+            "the complete retained closing jobs are unchanged"
         );
         matrix.assert_objects_unchanged(originals);
     }
@@ -603,6 +597,6 @@ live_row!(
         let stored = matrix.fixture.object(&receipt.observation);
         fs::write(matrix.fixture.root.join("README.md"), original).unwrap();
         matrix.accept(&check, || {});
-        assert_eq!(matrix.fixture.object(&receipt.observation), stored);
+        assert!(matrix.fixture.object(&receipt.observation) == stored, "the complete observation remains unchanged");
     }
 );

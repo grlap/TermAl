@@ -1880,6 +1880,7 @@ fn source_root_authority_foreign_generation_cannot_hide_a_later_claim_name() {
         &binding.work_id,
     );
     let seed = AcceptanceEvaluationTargetSeed {
+        source_id: None,
         reuse_identity: None,
         selected_evidence: Vec::new(),
         work_ref: format!("w-{label}"),

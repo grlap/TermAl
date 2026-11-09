@@ -141,9 +141,9 @@ fn first_close_while_native_test_is_running_accepts_its_later_result() {
                 .expect("actual native launcher starts");
             if !output.status.success() {
                 eprintln!(
-                    "MATRIX_INFLIGHT_NATIVE_FAILURE stdout={} stderr={}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
+                    "MATRIX_INFLIGHT_NATIVE_FAILURE stdout_bytes={} stderr_bytes={}",
+                    output.stdout.len(),
+                    output.stderr.len()
                 );
             }
             output
@@ -190,14 +190,8 @@ fn first_close_while_native_test_is_running_accepts_its_later_result() {
     assert_eq!(check.exit, 0, "{}", check.output);
     matrix.receive_check(events, &mut check, false);
     eprintln!(
-        "MATRIX_INFLIGHT_CLOSING_REQUESTS {:#}",
-        json!(
-            matrix
-                .fixture
-                .live
-                .transport
-                .requests_for("execution_observe")
-        )
+        "MATRIX_INFLIGHT_CLOSING_REQUEST_COUNT {}",
+        matrix.fixture.live.transport.requests_for("execution_observe").len()
     );
     matrix.accept(&check, || {});
 }

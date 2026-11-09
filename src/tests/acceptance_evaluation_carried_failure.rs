@@ -526,7 +526,7 @@ fn a_persisted_target_without_supersedes_loads_and_newest_verdicts_are_keyed_by_
     let persisted: PersistedDelegationAcceptanceEvaluation =
         serde_json::from_value(stored).unwrap();
     assert_eq!(
-        DelegationAcceptanceEvaluation::from(persisted).supersedes,
+        DelegationAcceptanceEvaluation::try_from(persisted).unwrap().supersedes,
         None
     );
     // Verdicts out of order, duplicated and with a gap: only the gapless run

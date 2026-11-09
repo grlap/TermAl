@@ -1545,17 +1545,13 @@ happens elsewhere. The agent therefore names the item's worktree once with
     was built was not in it and reaches the next prompt, and so does a line the
     prompt carried that was given again after it was built, so the next
     prompt still ends on the latest state.
-- **Limits.** The show receipt of the installed Engram carries no work id,
-  so an evaluation is matched to its root by short reference. An evaluation
-  is measured in a named root only when the requesting session is bound to
-  the claim that named it; a session holding two claims that asks for the
-  evaluation of the one it is not bound to is measured in its workdir. A
-  same-session evaluation takes its fingerprint in the root but records
-  none, having no evaluator child: a rename or a clear after it does not
-  refuse its submission, and the tracker's own freshness check is what
-  stands. A turn's report carries its source facts with unknown causality,
+- **Limits.** Acceptance resolves canonical work identity and the requested
+  held claim independently of the turn's bound item. Its complete owner
+  capture uses that claim's named root, or the session workdir when none is
+  named. Shared-source same-session evaluation is refused until it has durable
+  attempt custody. A turn's report carries its source facts with unknown causality,
   as described above; a change made between two turns is attributed to
-  neither. A closing `content-v1` capture that refuses Git submodules still
+  neither. An unavailable closing owner capture still
   reports the turn's outcome and observed checks with source attribution
   unavailable. It reports no source change, sighting or checkpoint and grants
   no freshness or credit. In this case null source change reports no source
@@ -2309,9 +2305,17 @@ counts still describe that window and can overlap separately selected records.
 `independent_session` and `sub_agent` spawn an evaluator delegation and return
 the ordinary creation response plus `mode` and `workRef`; the parent waits with
 `termal_resume_after_delegations`. `same_session` spawns nothing and returns
-`{ mode, workRef, acceptanceBasis, evidenceBasis, sourceFingerprint?, brief }`,
-where the brief tells the caller to record the evaluation with its own tracker
-tool, including the `source_fingerprint` when there is one.
+`{ mode, workRef, acceptanceBasis, evidenceBasis, brief }`,
+where the brief tells the caller to record an undeclared evaluation with its own
+tracker tool. When the owner supplies a complete source identity, `same_session`
+is refused until that route has a persisted host attempt and immutable file
+custody. When only the saved host preference selected `same_session`, the host
+selects an admitted independent evaluator or sub-agent instead, retaining the
+same captured source. A task pin is never overridden. If the task pins
+`same_session`, unpin it; if policy admits only `same_session`, admit
+`independent_session` or `sub_agent` in the project's Engram policy, then request
+evaluation again. An unavailable owner leaves the same-session undeclared
+brief unchanged.
 
 A `sub_agent` target captures immutable `parentSession` and `executionIdentity`
 under the child-creation lock, from the actual parent session and delegation
@@ -2325,8 +2329,8 @@ current parent. A definitive producer refusal is final for that send, not
 an unknown outcome or a reason to try same-session; an uncertain send keeps
 the original argument list for identical replay.
 
-**Declared source fingerprint.** After the reads, for all three modes,
-the host takes the [content revision](#content-revision) of the worktree the
+**Declared source identity.** After the reads, the host asks the configured
+Engram source owner for the complete existing `source_id` of the worktree the
 evaluator reads:
 the work's named [source root](#source-root) when the requesting session is
 holding the claim that named it (the evaluator child then runs there), else
@@ -2374,8 +2378,10 @@ persistence and is compared at spawn and first submission, so later naming
 still invalidates an old workdir request after its receipt has compacted.
 Unconfirmed publication and legacy targets without a trusted token refuse a
 fresh admission; another work's naming does not invalidate this one. Unknown
-submission outcomes still retry their immutable saved arguments. The value
-comes from the same function as every basis the turns report. The capture
+submission outcomes still retry their immutable saved arguments. A new target
+retains the complete owner object privately, including dirty root entries and
+direct submodules. Historical targets retain their recorded fingerprint and
+argument form without conversion. The capture
 runs on its own thread and is abandoned at the freeze budget, so a slow file
 read cannot hold the request past the allowance the bridge gives it; an
 abandoned capture counts as not taken. Its thread lives on until its read
@@ -2383,29 +2389,32 @@ returns. At most four such capture threads are alive in the host at once,
 healthy and abandoned alike and across all projects; past that a request
 starts none and declares nothing. So a worktree whose reads stall costs at
 most four threads however often it is asked, and, while they stall,
-evaluations in every project declare no fingerprint. An evaluator
-delegation keeps it on its target and declares it as `--source-fingerprint`,
-with no workspace. A `same_session` caller gets it in the response and in its
-brief. Engram voids an evaluation when the run reports a source change after
-it, unless the change is to the declared revision. So a change the parent
-reports for the content that was judged, at its turn's close, a commit of
-that content, or a peer worktree holding it leaves the evaluation fresh
-(tm-5gi4). A change to other content still voids it, and so does a report
-of any other revision. When the revision cannot be taken, nothing is
-declared, as before, and the response's `notice` says so. An evaluator's
-first submission takes the revision again. When the worktree no longer
-holds the requested revision, the submission is refused with `409`, naming
-both values, before anything runs or is written. The refusal is final for
-that evaluator, and both the refusal and the submit tool's description tell
-it not to submit again but to finish and report, since only the parent can
-request a new evaluation. The parent's fan-in does not yet name this reason.
-When it cannot be taken again within
-the budget, the submission declares nothing. A replay after an unknown
-outcome resends its stored arguments unchanged. In `same_session` the host
-measures the value and the agent passes it on; the host cannot see what the
-agent passes. Under the policy `require_source_freshness`, Engram's
-`done` must also present the evaluated fingerprint; TermAl does not supply
-it at completion yet.
+evaluations in every project declare no identity. New evaluator attempts use
+`--source-id-file`: an immutable private file of at most 1 MiB, retained with
+the original attempt through unknown outcomes. Its locator is not identity and
+never enters a brief or automatic response. The first submission captures the
+owner object again and compares the complete identity through `same_source`;
+workspace and named-root generation remain separate existing guards. A changed
+dirty blob or direct-child identity refuses with `409` before any write. The
+bounded refusal names the category without copying the source object. An
+unavailable capture leaves the submission undeclared, with a diagnostic, and
+never falls back to a local content revision. An unknown outcome reopens the
+same original file and replays unchanged arguments; it never recaptures or
+publishes a replacement. Attempt reuse retains each earlier identity privately
+and supplies only a bounded change summary to the evaluator.
+
+`acceptance_binding_read` and `acceptance_verification_read` supply complete
+private verification metadata at the exact work revision, run, criterion and
+cut. Each page holds at most eight whole rows within the 2,113,536-byte page
+limit, with bounded continuation reads. A changed basis, incoherent cursor or
+incomplete scan refuses preparation. Complete identities mark matching and
+mismatching evidence; a notes-window or sighting summary cannot reconstruct
+one. Private metadata also retains each record's existing Git-tree restriction.
+Briefs show bounded commit/count labels and context-only markers, never full
+objects or private file locators. Historical evidence remains historical and
+does not become a shared identity because its commit label agrees. These reads
+grant no new authority, eligibility or verification credit. Completion remains
+Engram's existing decision path.
 
 Canonical work identity for the naming fence comes from an independent,
 read-only `work core inspect` on the validated host read target. This read does
@@ -2657,7 +2666,7 @@ kind and the admissible citation. TermAl then runs, as the evaluator:
 engram work --actor-id <child seat> --session-id <child session> [--actor-context …]
   evaluate REF --mode … --acceptance-basis N --evidence-basis M
   --verdict P=VERDICT:BASIS --rationale P=TEXT [--evidence P=LOCATOR]…
-  [--source-fingerprint content-v1:<sha256>] [--supersedes <carried failure id>]
+  [--source-id-file <private immutable file>] [--supersedes <carried failure id>]
   [--model anthropic/<model> | openai/<model>] --attempt <persisted attempt key> --json
 ```
 
@@ -2667,6 +2676,8 @@ tracker replays an identical resend (its receipt says `replayed: true`) and
 refuses different content once an evaluation is recorded. The command is also
 bounded as a whole: an argument list past the conservative Windows command-line
 limit is a `400` before anything runs.
+Historical attempts retain `--source-fingerprint` and their original digest;
+the two declaration forms are exclusive.
 
 **One outcome model.** The tracker's write and the host's record of it can come
 apart (a lost response, a failed persist), so the target carries an explicit
@@ -2676,7 +2687,7 @@ silence:
 | State | Meaning | How it is entered |
 | --- | --- | --- |
 | absent (`none`) | nothing is recorded by this evaluator | initially; and, only for the request that itself entered from `none`, after a first send with positive evidence that it recorded nothing: a tracker refusal (below), a store that stayed locked, or a tracker process that never started |
-| `pending` | a write was started and its outcome is not yet known | set, with a digest of the exact argument list and that list itself, and acknowledged durable *before* the tracker runs |
+| `pending` | a write was started and its outcome is not yet known | set with the original command and payload digest, and acknowledged durable *before* the tracker runs; shared-source attempts also retain the complete private identity and immutable file locator |
 | `recorded` | the tracker holds the evaluation | a success receipt, acknowledged durable before the success answer. The record keeps a bounded extract (`evaluationId`, `mode`, `passed`, `verdictsTotal`, `blocking`, `replayed`, `workRevision`, `evaluatedCut`), never the raw receipt, which can be a whole control frame; the child's answer carries the raw receipt, cut to 16 KiB on a character boundary with `receiptTruncated: true` when it is larger |
 | `unconfirmed` | the host could not learn whether the write landed | see below; its `reason` leads with the latest thing learned |
 
@@ -2737,17 +2748,31 @@ is no longer the one written ends the wait as a failure. The acknowledgement is
 never skipped:
 
 - no acknowledgement of `pending` (a failed write, a deadline, a stopped
-  writer): the tracker is not run, memory returns to the prior state and the
-  answer is `500` "nothing was sent". A restart can therefore never find an
-  absent state beside a tracker write;
+  writer): the tracker is not run. A queued deadline keeps the open attempt
+  and returns a typed `503` durability-pending response. Other failures try
+  to withdraw this request's own pending state; an uncertain withdrawal keeps
+  it open for identical replay. A restart never finds an absent state beside
+  a tracker write;
 - no acknowledgement of `recorded`: memory returns to `pending`, so memory never
   says recorded while disk may not, and the answer is `500` telling the
   evaluator to submit the same verdicts again; the tracker replays them and the
   receipt is recovered without a second write;
 - `unconfirmed` is acknowledged the same way; when that fails it stays in
   memory and is logged, because disk still holds the acknowledged `pending`,
-  which reads the same to the parent. `none` is not waited for: a restart that
-  still finds `pending` errs on the safe side.
+  which reads the same to the parent;
+- withdrawal to `none` after a confirmed locked or never-started send also
+  waits for durable acknowledgement. Failure restores the open state in
+  memory. The immutable source file is retained until a terminal disposition
+  is acknowledged and its last consumer releases it, so restart replay can
+  reopen and verify the original file. A failed begin conservatively retains
+  its locator as well.
+
+Historical payload digests still cover the original argument list unchanged.
+A shared-source digest covers the command template and the complete source
+object, with the private file locator replaced by a stable marker. Replay
+uses the persisted original object and locator; it never recaptures or
+republishes the source. These private objects and locators are omitted from
+client projections and evaluator briefs.
 
 ### Obligation assessments in the brief
 

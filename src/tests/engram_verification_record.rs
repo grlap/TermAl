@@ -19,6 +19,9 @@ mod refusals;
 #[path = "engram_verification_declared.rs"]
 mod declared;
 
+#[path = "engram_verification_source_projection.rs"]
+mod source_projection;
+
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const SESSION: &str = "session-record";
 const STARTED: &str = "2026-10-30T10:00:00.000Z";
@@ -91,6 +94,7 @@ fn commit_request(root: &FsPath) -> Value {
         "root": root.to_string_lossy(),
         "full": true,
         "input": "commit",
+        "sourceId": commit_source(),
         "stages": [
             { "name": "cargo-check", "command": "cargo", "args": ["check"] },
             { "name": "typescript", "command": "node",
@@ -103,6 +107,10 @@ fn commit_request(root: &FsPath) -> Value {
         ],
         "started": STARTED,
     })
+}
+
+fn commit_source() -> Value {
+    json!({"commit":COMMIT,"tree":"b".repeat(40),"submodules":[],"changes":[]})
 }
 
 fn stage(name: &str, state: &str, code: i64, command: &[&str], minute: u32) -> Value {
@@ -145,6 +153,8 @@ fn commit_results() -> Value {
     let mut rust_tests = stage("rust-tests", "passed", 0, &["sh", "scripts/test-rust.sh"], 3);
     rust_tests["tests"] = json!({ "runner": "cargo-libtest", "passed": 3, "failed": 0, "ignored": 0 });
     json!({
+        "sourceIdBefore": commit_source(),
+        "sourceIdAfter": commit_source(),
         "state": "failed",
         "exitCode": 1,
         "started": STARTED,
@@ -216,14 +226,14 @@ fn record_run(fixture: &RunFixture, run_id: &str, request: Value, results: Value
 fn ready(registration: &TestRunRegistration) -> EngramVerificationRecordFrozen {
     match engram_verification_record_prepare(registration) {
         EngramVerificationRecordPrepared::Ready(frozen) => frozen,
-        other => panic!("the run should be ready to send, not {other:?}"),
+        _ => panic!("the run should be ready to send"),
     }
 }
 
 fn pending_of(registration: &TestRunRegistration) -> EngramVerificationRecordPending {
     match engram_verification_record_prepare(registration) {
         EngramVerificationRecordPrepared::Pending(reason) => reason,
-        other => panic!("the run should be pending, not {other:?}"),
+        _ => panic!("the run should be pending"),
     }
 }
 
@@ -767,13 +777,14 @@ fn the_record_matches_the_producers_own_request_fixture() {
         );
         continue;
     }
-    let built = engram_verification_record_body(&registration, &request, &results).expect("the run builds");
+    let built = engram_verification_record_build_body(&registration, &request, &results, Some(&read.input))
+        .expect("the retained historical record rebuilds");
     let wire = serde_json::to_value(EngramControlRequest::VerificationRecord {
         operation_key: engram_verification_record_key(&registration.run_id),
         record: serde_json::to_value(&built).unwrap(),
     })
     .unwrap();
-    assert_eq!(without_host_text(wire), without_host_text(producer.clone()));
+    assert!(without_host_text(wire) == without_host_text(producer.clone()), "the complete producer request matches");
     // The check fingerprint is the producer's own over the command text.
     assert_eq!(built.checks[0].check_fingerprint, fingerprint(producer["checks"][0]["command"].as_str().unwrap()));
     assert_eq!(built.registration.owning_session_id.as_deref(), Some(registration.owning_session_id.as_str()));
@@ -800,7 +811,7 @@ fn the_producers_quiet_sighting_is_neither_a_turn_nor_verification_credit() {
         observed_interval: observation.observed_interval.clone(),
         policy_basis: observation.policy_basis.clone(),
     }, sighting, built_at).unwrap();
-    assert_eq!(serde_json::to_value(&request).unwrap(), frame["request"]);
+    assert!(serde_json::to_value(&request).unwrap() == frame["request"], "the complete source observation request matches");
     assert!(frame["request"].get("routing_token").is_none());
     assert!(frame["request"]["occurrence"].get("host_turn_ref").is_none());
     let session = frame["response"]["result"]["observing_session"].as_str().unwrap();
@@ -851,7 +862,12 @@ fn the_producers_receipt_and_refusal_fixtures_settle_and_reject() {
     let producer = producer_request();
     let fixture = RunFixture::new("verification-record-producer-receipt");
     let (registration, request, results) = producer_fixture_run(&fixture, &producer);
-    let body = engram_verification_record_body(&registration, &request, &results).expect("the run builds");
+    let mut stored = producer.as_object().unwrap().clone();
+    stored.remove("operation");
+    stored.remove("operation_key");
+    let retained: EngramVerificationRecordBody = serde_json::from_value(Value::Object(stored)).unwrap();
+    let body = engram_verification_record_build_body(&registration, &request, &results, Some(&retained.input))
+        .expect("the retained historical record rebuilds");
     let receipt: EngramVerificationRecordReceipt =
         serde_json::from_value(producer_receipt()).expect("the producer's receipt reads");
     assert_eq!(engram_verification_record_receipt_check(&body, &receipt), Ok(()));
@@ -924,15 +940,12 @@ fn a_committed_input_full_gate_records_every_stage_in_the_producers_shape() {
     // The launcher records no command of its own: reconstructed, as text.
     assert_eq!(record["run"]["command"], "node scripts/test-launcher.mjs full --input commit");
     assert_eq!(record["run"]["outcome"], "failed");
-    assert_eq!(record["input"], json!({ "kind": "commit", "commit": COMMIT }));
+    assert!(record["input"] == json!({ "kind": "source_id", "source_id": commit_source() }), "the complete input identity matches");
     assert_eq!(
         record["registration"]["root"],
         json!({ "workspace_id": test_run_display_path(&fixture.root), "generation": 3, "state": "named" })
     );
-    assert_eq!(
-        record["post_run"],
-        json!({ "outcome": "clean", "clean_before": true, "clean_after": true })
-    );
+    assert!(record["post_run"] == json!({ "source_id": commit_source() }), "the complete post-run identity matches");
     let expected = [
         ("cargo-check", "build", "cargo check".to_owned()),
         ("typescript", "build", "node node_modules/typescript/bin/tsc --noEmit".to_owned()),
@@ -1076,12 +1089,12 @@ fn the_frozen_body_is_byte_identical_when_rebuilt_and_after_a_reload() {
             .and_then(|body| engram_verification_record_text(&body))
             .expect("the run builds a record")
     };
-    assert_eq!(rebuilt(), rebuilt());
+    assert!(rebuilt() == rebuilt(), "rebuilding preserves every body byte");
 
     let first = ready(&run.registration);
     let persisted = fs::read_to_string(run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE))
         .expect("the body is persisted beside the run");
-    assert_eq!(persisted, rebuilt());
+    assert!(persisted == rebuilt(), "persisted and rebuilt body bytes match");
     // A later look reads the persisted body back and sends it only while it
     // is exactly the record the host builds again: the run's files changed
     // under it make it a mismatch, never sent, and it is never rewritten.
@@ -1089,16 +1102,13 @@ fn the_frozen_body_is_byte_identical_when_rebuilt_and_after_a_reload() {
     changed["stages"][0]["ended"] = json!("2026-10-30T10:00:45.000Z");
     fs::write(run.run_dir.join("results.json"), changed.to_string()).unwrap();
     assert_eq!(pending_of(&run.registration), EngramVerificationRecordPending::BodyMismatch);
-    assert_eq!(
-        fs::read_to_string(run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)).unwrap(),
-        persisted
-    );
+    assert!(fs::read_to_string(run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)).unwrap() == persisted,
+        "a mismatch does not rewrite the frozen body");
     fs::write(run.run_dir.join("results.json"), commit_results().to_string()).unwrap();
     let reloaded = ready(&run.registration);
-    assert_eq!(
-        serde_json::to_vec(&engram_verification_record_request(&first)).unwrap(),
-        serde_json::to_vec(&engram_verification_record_request(&reloaded)).unwrap()
-    );
+    assert!(serde_json::to_vec(&engram_verification_record_request(&first)).unwrap()
+        == serde_json::to_vec(&engram_verification_record_request(&reloaded)).unwrap(),
+        "the complete request survives reload byte-for-byte");
 
     // A body that no longer reads back exactly is never sent or rebuilt.
     fs::write(run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE), format!(" {persisted}")).unwrap();
@@ -1492,9 +1502,9 @@ fn an_unavailable_work_session_keeps_the_frozen_record_until_its_own_read_recove
     fixture.state.engram_verification_records_tick();
     assert_eq!(transport.sent_operations(), ["work_session_read", "work_session_read", "verification_record"]);
     let sent = transport.sent_records();
-    assert_eq!(sent[0], expected, "the same frozen body and key");
+    assert!(sent[0] == expected, "the same frozen body and key");
     assert_eq!(sent[0]["operation_key"], "termal-run:test-record-naming-later");
-    assert_eq!(fs::read_to_string(&body_path).unwrap(), frozen_text, "never rebuilt");
+    assert!(fs::read_to_string(&body_path).unwrap() == frozen_text, "never rebuilt");
     assert!(sent_binds(&transport).is_empty());
     assert!(matches!(
         engram_verification_record_prepare(&current(&fixture, &run)),
@@ -1583,7 +1593,7 @@ fn a_resend_after_a_child_reconnect_repeats_every_request_byte() {
     let sent = transport.sent_records();
     assert_eq!(sent.len(), 2);
     assert!(sent.iter().all(|request| request.get("routing_token").is_none()));
-    assert_eq!(record_wire_bytes(&sent[0]), record_wire_bytes(&sent[1]), "the same body and operation key");
+    assert!(record_wire_bytes(&sent[0]) == record_wire_bytes(&sent[1]), "the same body and operation key");
     assert_eq!(sent[1]["operation_key"], "termal-run:test-record-reconnect");
 }
 
@@ -1617,7 +1627,7 @@ fn an_ordinary_resend_keeps_its_registration_despite_focus_or_historical_metadat
     assert_eq!(sent.len(), 2);
     assert!(sent[0].get("routing_token").is_none());
     assert!(sent[1].get("routing_token").is_none());
-    assert_eq!(record_wire_bytes(&sent[0]), record_wire_bytes(&sent[1]), "the same body and operation key");
+    assert!(record_wire_bytes(&sent[0]) == record_wire_bytes(&sent[1]), "the same body and operation key");
     assert_eq!(sent[1]["operation_key"], "termal-run:test-record-recovery");
     assert_eq!(sent[1]["registration"]["binding"], serde_json::to_value(binding()).unwrap());
     assert!(!transport.sent_operations().iter().any(|operation| operation == "session_bind"));
@@ -1737,7 +1747,9 @@ fn a_receipt_settles_the_runs_own_launch_observation_without_a_checkpoint() {
     let producer = sha256_hex(b"termal-run:test-record-settle:rust-tests");
     assert_eq!(row.evidence[1].producer_observation_id, producer);
     assert_eq!(row.evidence[1].action_fingerprint, fingerprint("sh scripts/test-rust.sh"));
-    assert_eq!(row.evidence[1].source_basis.source_revision, format!("git-commit:{COMMIT}"));
+    assert!(row.evidence[1].source_basis.source_revision.is_empty());
+    assert!(serde_json::to_value(row.evidence[1].source_basis.source_id.as_ref().unwrap()).unwrap() == commit_source(),
+        "settlement retains the complete identity");
     assert_eq!(row.evidence[1].source_basis.source_root_generation, Some(3));
     drop(inner);
     assert_eq!(
@@ -1815,7 +1827,18 @@ fn a_crash_after_the_receipt_settles_from_the_held_receipt_without_a_resend() {
 fn a_held_receipt_never_settles_a_body_rewritten_with_its_results_to_another_commit() {
     const UNTESTED: &str = "89abcdef0123456789abcdef0123456789abcdef";
     let fixture = RunFixture::new("verification-record-rewritten");
-    let run = record_run(&fixture, "test-record-rewritten", commit_request(&fixture.root), commit_results());
+    // Keep this historical receipt/commit-rewrite case: current bodies also
+    // validate the owner's original complete admission at all boundaries.
+    let mut old_request = commit_request(&fixture.root);
+    old_request.as_object_mut().unwrap().remove("sourceId");
+    let mut old_results = commit_results();
+    old_results.as_object_mut().unwrap().remove("sourceIdBefore");
+    old_results.as_object_mut().unwrap().remove("sourceIdAfter");
+    let legacy = EngramVerificationRecordInput::Commit { commit: COMMIT.into() };
+    let run = record_run(&fixture, "test-record-rewritten", old_request.clone(), old_results.clone());
+    let historical = engram_verification_record_build_body(&run.registration, &old_request, &old_results, Some(&legacy)).unwrap();
+    fs::write(run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE),
+        engram_verification_record_text(&historical).unwrap()).unwrap();
     register(&fixture, &[&run]);
     let execution_id = attach_launch_row(&fixture, &run);
     let transport = Arc::new(RecordingTransport::default());
@@ -1843,14 +1866,15 @@ fn a_held_receipt_never_settles_a_body_rewritten_with_its_results_to_another_com
     // The run's results and its frozen body are rewritten together to an
     // untested commit: the body is the host's own rebuild of those results,
     // and the receipt still answers its stages and outcome.
-    let mut results = commit_results();
+    let mut results = old_results;
     results["input"]["commit"] = json!(UNTESTED);
     results["input"]["after"]["commit"] = json!(UNTESTED);
     fs::write(run.run_dir.join("results.json"), results.to_string()).unwrap();
     let TestRunJson::Parsed(request, _, _) = test_run_read_json(&run.run_dir.join("request.json")) else {
         panic!("the request reads back");
     };
-    let rewritten = engram_verification_record_body(&run.registration, &request, &results).expect("a record builds");
+    let rewritten = engram_verification_record_build_body(&run.registration, &request, &results, Some(&legacy))
+        .expect("the historical record rebuilds");
     fs::write(
         run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE),
         engram_verification_record_text(&rewritten).unwrap(),
@@ -2062,7 +2086,7 @@ fn only_a_definite_refusal_rejects_the_record_and_any_other_answer_resends_it_un
     let sent = transport.sent_records();
     assert_eq!(sent.len(), deferred.len() + 1);
     for request in &sent[1..] {
-        assert_eq!(record_wire_bytes(request), record_wire_bytes(&sent[0]), "the same body and operation key");
+        assert!(record_wire_bytes(request) == record_wire_bytes(&sent[0]), "the same body and operation key");
     }
     assert_eq!(sent[0]["operation_key"], "termal-run:test-record-deferred");
 }
@@ -2194,7 +2218,7 @@ fn a_body_written_before_the_host_froze_it_is_never_sent() {
     let body_path = run.run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
     fs::write(&body_path, &planted).unwrap();
     assert_eq!(pending_of(&run.registration), EngramVerificationRecordPending::BodyMismatch);
-    assert_eq!(fs::read_to_string(&body_path).unwrap(), planted, "never rewritten");
+    assert!(fs::read_to_string(&body_path).unwrap() == planted, "never rewritten");
 
     // Through the tick, nothing goes out for it.
     let (session, transport) = engram_session(&fixture, true);
@@ -2260,7 +2284,7 @@ fn unknown_frozen_body_fields_are_rejected_without_sending_or_settling() {
         assert!(matches!(provider.try_recv(), Err(mpsc::TryRecvError::Empty)));
         assert!(current(&fixture, &run).verification_record.is_none(), "no held receipt");
         assert!(row_records(&fixture, &execution_id).is_empty(), "no native association");
-        assert_eq!(fs::read_to_string(&path).unwrap(), planted, "no silent normalization");
+        assert!(fs::read_to_string(&path).unwrap() == planted, "no silent normalization");
 
         // Correcting the input to the exact host-generated body makes the
         // normal native sender eligible; no new key or registration is made.
@@ -2271,7 +2295,7 @@ fn unknown_frozen_body_fields_are_rejected_without_sending_or_settling() {
         assert_eq!(transport.sent_operations(), ["work_session_read", "verification_record"]);
         assert_eq!(transport.sent_records()[0]["operation_key"],
             engram_verification_record_key(&run.registration.run_id));
-        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert!(fs::read_to_string(&path).unwrap() == original, "the original body is retained byte-for-byte");
         assert!(matches!(engram_verification_record_prepare(&current(&fixture, &run)),
             EngramVerificationRecordPrepared::Finished));
         let records = row_records(&fixture, &execution_id);
@@ -2435,7 +2459,7 @@ fn a_deferred_record_is_sent_again_only_once_its_backoff_runs_out() {
     assert_eq!(pass_with(&fixture, &mut cursor), 1);
     let sent = transport.sent_records();
     assert_eq!(sent.len(), 2);
-    assert_eq!(sent[0], sent[1], "the same body under the same key");
+    assert!(sent[0] == sent[1], "the same body under the same key");
 
     // Deferred again, its wait doubled: not after the first wait, after twice it.
     clock.advance(ENGRAM_VERIFICATION_RECORD_BACKOFF_START);
@@ -2478,7 +2502,7 @@ fn an_unavailable_work_child_backs_off_then_recovers_without_rebinding() {
         ["work_session_read", "work_session_read", "verification_record"]
     );
     let sent = transport.sent();
-    assert!(sent[2].get("routing_token").is_none(), "{sent:?}");
+    assert!(sent[2].get("routing_token").is_none(), "no routing token in the complete request");
     assert_eq!(naming_state(&fixture, &session), naming_before,
         "unavailable transport and retry do not mutate naming state");
 }

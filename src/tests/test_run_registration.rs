@@ -881,6 +881,7 @@ fn native_evidence_fixture_from(fixture: RunFixture, with_build: bool, success: 
     let run_id = format!("test-{}", Uuid::new_v4());
     let mut request = json!({
         "root": root.to_string_lossy(), "input": "commit", "full": false,
+        "sourceId": launcher_source_id_fixture(),
         "owner": session, "started": test_run_timestamp(),
         "stages": [{"name": "focused", "command": "cargo", "args": ["test"]}],
     });
@@ -900,6 +901,7 @@ fn native_evidence_fixture_from(fixture: RunFixture, with_build: bool, success: 
     let ended = started + chrono::Duration::milliseconds(1);
     let mut results = json!({
         "runId": run_id, "state": "passed", "exitCode": 0,
+        "sourceIdBefore": launcher_source_id_fixture(), "sourceIdAfter": launcher_source_id_fixture(),
         "started": started.to_rfc3339(), "ended": ended.to_rfc3339(),
         "stages": [{"name": "focused", "state": "passed", "code": 0,
             "command": ["cargo", "test"], "started": started.to_rfc3339(),

@@ -185,6 +185,7 @@ fn an_evaluation_whose_admission_learns_the_named_binding_is_still_admitted() {
         .begin_acceptance_evaluation_submission(
             &authority,
             AcceptanceEvaluationOpenWrite {
+                source_payload: None,
                 verdicts_digest: acceptance_evaluation_payload_digest(
                     &acceptance_evaluation_verdict_args(&request),
                 ),

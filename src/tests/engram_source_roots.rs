@@ -632,6 +632,7 @@ fn an_evaluation_whose_work_was_renamed_is_refused_at_its_first_submission() {
                 attempt_key: "delegation-a".to_owned(),
                 store: Some(store()),
                 source_fingerprint: source_fingerprint.clone(),
+                source_id: None,
                 source_root: Some(source_root.clone()),
                 naming_history: Some(EngramWorkNamingToken {
                     epoch: ENGRAM_NAMING_HISTORY_EPOCH,

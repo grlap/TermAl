@@ -8,7 +8,7 @@
 // than that evaluate call.
 
 const TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME: &str = "termal_evaluate_acceptance";
-const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce the acceptance evaluation an Engram task needs before it can be completed. Call this when the tracker refuses completion for a missing acceptance evaluation, or before `done` on a task that has acceptance criteria. Supply reuseDelegationId to explicitly prefer a previous eligible evaluator; omission preserves fresh spawning. Reuse permits at most three host-issued attempt keys and requires settled prior submission and brief delivery. Supply the task's workRef; agent (Claude or Codex) and model override the project's evaluator defaults. Supplying model requires an explicit agent; otherwise the request is refused before any tracker read. Without an agent default, a Claude/Codex parent prefers the other ready, nonblocking vendor, otherwise its own vendor. Other parents prefer ready, nonblocking Codex, then Claude, and fall back to Codex when neither is ready. TermAl reads the task and the project policy, selects the evaluation mode, and for an independent evaluation spawns a read-only evaluator child that records its verdicts in the tracker under its own identity: wait for it with termal_resume_after_delegations, then read the status or result for what was recorded. One evaluator runs per task: a request made while one is running is refused and names that delegation and its parent session, so wait on it or ask that session. When the mode is same_session nothing is spawned and the returned brief tells you how to record the evaluation yourself.";
+const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce the acceptance evaluation an Engram task needs before it can be completed. Call this when the tracker refuses completion for a missing acceptance evaluation, or before `done` on a task that has acceptance criteria. Supply reuseDelegationId to explicitly prefer a previous eligible evaluator; omission preserves fresh spawning. Reuse permits at most three host-issued attempt keys and requires settled prior submission and brief delivery. Supply the task's workRef; agent (Claude or Codex) and model override the project's evaluator defaults. Supplying model requires an explicit agent; otherwise the request is refused before any tracker read. Without an agent default, a Claude/Codex parent prefers the other ready, nonblocking vendor, otherwise its own vendor. Other parents prefer ready, nonblocking Codex, then Claude, and fall back to Codex when neither is ready. TermAl reads the task and the project policy, selects the evaluation mode, and for an independent evaluation spawns a read-only evaluator child that records its verdicts in the tracker under its own identity: wait for it with termal_resume_after_delegations, then read the status or result for what was recorded. One evaluator runs per task: a request made while one is running is refused and names that delegation and its parent session, so wait on it or ask that session. For an undeclared same_session evaluation nothing is spawned and the returned brief tells you how to record it yourself. A complete owner source identity requires a persisted child attempt: a saved same_session preference falls back to another policy-admitted mode. A task pin or a same_session-only policy instead receives a refusal naming the required unpin or policy change.";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME: &str = "termal_submit_acceptance_evaluation";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_acceptance_evaluation";
@@ -91,23 +91,6 @@ impl AppState {
             REVIEW_FREEZE_TIMEOUT,
             move || engram_place_source_basis(&place),
         )
-    }
-
-    /// The revision an evaluation at `place` judges and declares, and the
-    /// workspace it judges. Engram judges a workspace only on a named source
-    /// root: the evaluation declares none, so on a workdir a peer worktree's
-    /// record of the same revision is admitted and no workspace is returned.
-    fn acceptance_evaluation_judged_source(
-        &self,
-        place: &EngramBasisPlace,
-    ) -> (Option<String>, Option<String>) {
-        let Some(basis) = self.acceptance_evaluation_source_basis(place) else {
-            return (None, None);
-        };
-        let workspace = matches!(place, EngramBasisPlace::Named { .. })
-            .then(|| acceptance_source_workspace(&basis.workspace_id))
-            .flatten();
-        (Some(basis.source_revision), workspace)
     }
 }
 
@@ -1166,11 +1149,18 @@ impl AppState {
         let mut notes_cursors = BTreeSet::new();
         // Ordinary legacy paging can shorten the brief. Once canonical
         // identity is acquired, contradictory carriers and page failures abort.
-        // The full binding list is read after paging. Reserve its ordinary
-        // session identity read whenever canonical binding discovery can run,
-        // even if the later full contract turns out to have no bindings.
+        // The full binding list is read after paging. Every criterion may
+        // require a private scan, including continuations. Reserve its bounded
+        // complete scan rather than letting optional notes spend that time.
+        // The binding index itself admits at most 128 criteria. An unknown
+        // criteria count therefore reserves that whole supported bound.
         let binding_session_read = discovery.target.is_some()
             && discovery.identity.as_ref().is_some_and(|identity| identity.active_run_id.is_some());
+        let criteria = acceptance_windowed_criteria_count(&show);
+        let private_reads = criteria
+            .unwrap_or(MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES * 8)
+            .min(MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES * 8)
+            * MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES;
         let mandatory_reads_after_paging = acceptance_mandatory_reads_after_paging(
             &request.criterion_evidence,
             automatic
@@ -1179,8 +1169,8 @@ impl AppState {
                 .and_then(|reservation| reservation.previous.acceptance_evaluation.as_ref())
                 .map(|target| target.selected_evidence.as_slice())
                 .unwrap_or_default(),
-            acceptance_windowed_criteria_count(&show),
-        ) + u32::from(binding_session_read);
+            criteria,
+        ) + (1 + private_reads as u32) * u32::from(binding_session_read);
 
         let mut older_pages = Vec::new();
         let mut collected = acceptance_evidence_page_len(&show);
@@ -1458,6 +1448,7 @@ impl AppState {
             body_deadline,
             &now,
         )?;
+        self.read_acceptance_verification_evidence(&target.store, &mut task, &discovery, body_deadline, &now)?;
         // Whole assessments of the cited verification records, within the
         // same discovery deadline as the record reads above: it already holds
         // back the closing bracket's reserve, so it is not taken again. A
@@ -1570,7 +1561,7 @@ impl AppState {
                         .any(|word| AcceptanceEvaluationMode::parse(word) == Some(*mode))
                 })
         });
-        let mode = select_acceptance_evaluation_mode(
+        let mut mode = select_acceptance_evaluation_mode(
             task.pinned_mode
                 .as_deref()
                 .or(preferred_mode.map(AcceptanceEvaluationMode::word)),
@@ -1585,7 +1576,7 @@ impl AppState {
                 "sub_agent evaluation requires its parent to be the work's holder or executor; this requester is neither holder nor executor",
             ));
         }
-        // The declared fingerprint is taken only by the modes that use it,
+        // The declared source identity is taken only by the modes that use it,
         // after the reads, on the worktree the evaluator reads: the work's
         // named source root when the requesting session holds its claim
         // (`engram_source_roots.rs`), where the evaluator child then runs;
@@ -1653,19 +1644,8 @@ impl AppState {
             deadline,
             &now,
         )?;
-        // Admitted in the committed flow, the evaluation judges and declares
-        // the admitted commit in the named root, as the run's verification
-        // record names its source, whatever the committed-input default; the
-        // legacy flow measures the source as before.
-        let committed_source = committed_admission
-            .as_ref()
-            .zip(source_root.as_ref())
-            .map(|(admission, root)| {
-                (
-                    Some(acceptance_committed_judged_revision(&admission.commit)),
-                    acceptance_source_workspace(&root.root),
-                )
-            });
+        // Admission retains its existing guards. New attempts capture the
+        // complete owner identity independently; no revision-string fallback.
         let place = source_root.as_ref().map_or_else(
             || EngramBasisPlace::Workdir(parent_workdir.clone()),
             AcceptanceEvaluationSourceRoot::place,
@@ -1677,7 +1657,7 @@ impl AppState {
         let root_notice = source_root.as_ref().map(|_| {
             format!(
                 "The evaluation reads `{}`'s named source root {evaluator_dir}, where its \
-                 fingerprint is taken.",
+                 source identity is captured.",
                 task.work_ref
             )
         }).or_else(|| requested_claim.as_ref().map(|_| format!("The evaluation of `{}` reads this session's workdir {evaluator_dir}: no source root named for the requested work's claim.", task.work_ref)));
@@ -1686,6 +1666,33 @@ impl AppState {
                 .is_none()
                 .then(|| ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE.to_owned())
         };
+
+        // A saved preference is not a task pin. Resolve a shared-source
+        // same-session preference before entering the child path, retaining
+        // this capture so the new attempt judges exactly the same source.
+        let same_session_source = if mode == AcceptanceEvaluationMode::SameSession {
+            if let Some(carried) = task.carried_failure.as_ref()
+                .filter(|carried| carried.supersedes_required)
+            {
+                return Err(ApiError::conflict(format!(
+                    "`{}`: the run's executor revised the criteria that evaluation {} failed, and the tracker accepts that failure's acknowledgement only from an evaluator that never held the run, which a same_session evaluation cannot be. Same_session was chosen because the task pins it or the project's Engram policy admits nothing else; unpin the task's evaluation mode or admit independent_session in the policy",
+                    acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
+                    carried.evaluation,
+                )));
+            }
+            Some(self.acceptance_owner_judged_source(
+                parent_session_id, &place, committed_admission.as_ref().map(|admission| admission.commit.as_str()))?)
+        } else {
+            None
+        };
+        if mode == AcceptanceEvaluationMode::SameSession
+            && task.pinned_mode.is_none()
+            && same_session_source.as_ref().is_some_and(|(basis, _, _)|
+                matches!(basis, Some(AcceptanceSourceBasis::Shared(_))))
+        {
+            mode = select_acceptance_evaluation_mode(None, admitted.as_deref())
+                .map_err(ApiError::conflict)?;
+        }
 
         match mode {
             AcceptanceEvaluationMode::IndependentSession | AcceptanceEvaluationMode::SubAgent => {
@@ -1706,9 +1713,13 @@ impl AppState {
                         .flatten()
                         .map(|model| model.trim().to_owned())
                 });
-                let (source_fingerprint, judged_workspace) = committed_source
-                    .unwrap_or_else(|| self.acceptance_evaluation_judged_source(&place));
+                let (source_basis, source_fingerprint, judged_workspace) = match same_session_source {
+                    Some(source) => source,
+                    None => self.acceptance_owner_judged_source(parent_session_id, &place,
+                        committed_admission.as_ref().map(|admission| admission.commit.as_str()))?,
+                };
                 // The brief marks records of any other source context only.
+                task.judged_source_basis = source_basis;
                 task.judged_revision = source_fingerprint.clone();
                 task.judged_workspace = judged_workspace;
                 let unmeasured = unmeasured(&source_fingerprint);
@@ -1821,23 +1832,21 @@ impl AppState {
                 })
             }
             AcceptanceEvaluationMode::SameSession => {
-                // The tracker admits the acknowledgement of a failure whose
-                // criteria the run's executor revised only from an evaluator
-                // that never held the run, which this session is not.
-                if let Some(carried) = task
-                    .carried_failure
-                    .as_ref()
-                    .filter(|carried| carried.supersedes_required)
-                {
-                    return Err(ApiError::conflict(format!(
-                        "`{}`: the run's executor revised the criteria that evaluation {} failed, and the tracker accepts that failure's acknowledgement only from an evaluator that never held the run, which a same_session evaluation cannot be. Same_session was chosen because the task pins it or the project's Engram policy admits nothing else; unpin the task's evaluation mode or admit independent_session in the policy",
-                        acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
-                        carried.evaluation,
-                    )));
+                let (source_basis, source_fingerprint, judged_workspace) = match same_session_source {
+                    Some(source) => source,
+                    None => self.acceptance_owner_judged_source(parent_session_id, &place,
+                        committed_admission.as_ref().map(|admission| admission.commit.as_str()))?,
+                };
+                if matches!(source_basis, Some(AcceptanceSourceBasis::Shared(_))) {
+                    let remedy = if task.pinned_mode.is_some() {
+                        "unpin the task's evaluation mode; the project's Engram policy must admit independent_session or sub_agent"
+                    } else {
+                        "admit independent_session or sub_agent in the project's Engram policy"
+                    };
+                    return Err(ApiError::conflict(format!("shared-source same_session evaluation requires a persisted host attempt; {remedy}, then request evaluation again")));
                 }
-                let (source_fingerprint, judged_workspace) = committed_source
-                    .unwrap_or_else(|| self.acceptance_evaluation_judged_source(&place));
                 // The brief marks records of any other source context only.
+                task.judged_source_basis = source_basis;
                 task.judged_revision = source_fingerprint.clone();
                 task.judged_workspace = judged_workspace;
                 {
@@ -2006,13 +2015,11 @@ impl AppState {
         Ok((authority, target, model, in_flight))
     }
 
-    /// The target a first send declares. The evaluator read its worktree for
-    /// a while, so the revision taken at the request is declared only if the
-    /// worktree still holds it, as a check requires of its two snapshots: a
-    /// worktree that moved on is refused, naming both revisions, and one whose
-    /// revision cannot be taken again declares none, which leaves Engram to
-    /// void on any later change. An open write is replayed from its stored
-    /// argument list, so nothing here applies to it.
+    /// The target a first send declares. The captured identity is declared
+    /// only if a fresh capture still matches it; an unavailable capture stays
+    /// undeclared. Shared targets compare complete owner identities, while
+    /// historical targets retain their recorded revision semantics. An open
+    /// write replays its stored arguments and immutable source unchanged.
     fn acceptance_evaluation_declared_target(
         &self,
         child: &str,
@@ -2048,6 +2055,22 @@ impl AppState {
                     .then(|| child.to_owned()));
             (place, owner)
         };
+        if let Some(requested @ AcceptanceSourceBasis::Shared(_)) = target.private_source_basis() {
+            let current = source_owner_session.as_deref().zip(place.as_ref())
+                .and_then(|(owner, place)| self.acceptance_shared_source_capture(owner, place));
+            match current {
+                Some(current) if requested.same_source(&AcceptanceSourceBasis::Shared(AcceptanceSharedSourceBasis {
+                    workspace_id: None, source_id: current.clone(),
+                })) => {}
+                Some(_) => return Err(ApiError::conflict(
+                    "the worktree changed while it was evaluated; the complete source identity differs from the requested attempt. Do not submit again; report this to the parent for a new evaluation")),
+                None => {
+                    eprintln!("acceptance evaluation> complete source recapture was unavailable; the submission declares no source identity");
+                    declared.source_id = None;
+                }
+            }
+            return Ok(declared);
+        }
         // Without a revision taken at the request there is nothing to compare.
         let Some(requested) = target.source_fingerprint.as_deref() else {
             return Ok(declared);
@@ -2179,19 +2202,32 @@ impl AppState {
 
         // Acknowledged durable before the tracker runs: whatever happens
         // next, a restart never reads this record as "nothing was sent".
-        let AcceptanceEvaluationBegun {
-            uncertain_at_entry,
-            payload_digest,
-            original,
-        } = self.begin_acceptance_evaluation_submission(
+        let private_directory = engram_host_workdir(self.persistence_path.as_ref())
+            .map_err(|_| ApiError::internal("evaluation source storage is unavailable"))?
+            .join("evaluation-sources");
+        // Open writes replay their persisted object and file. A fresh attempt
+        // publishes before pending becomes durable, and never overwrites it.
+        let is_new = matches!(authority.target.submission, AcceptanceEvaluationSubmission::None);
+        let (source_payload, source_file) = acceptance_source_candidate(&declared, is_new, &private_directory)?;
+        let begun = self.begin_acceptance_evaluation_submission(
             &authority,
             AcceptanceEvaluationOpenWrite {
+                source_payload,
                 verdicts_digest: acceptance_evaluation_payload_digest(
                     &acceptance_evaluation_verdict_args(&request),
                 ),
                 args,
             },
-        )?;
+        );
+        // A failed begin may have published Pending before its acknowledgement
+        // failed. Keep the locator: only an acknowledged terminal disposition
+        // can prove that a restart no longer needs this file.
+        let AcceptanceEvaluationBegun {
+            uncertain_at_entry,
+            payload_digest,
+            original,
+        } = begun?;
+        let source_file = acceptance_source_replay_file(&original, &payload_digest, source_file, &private_directory)?;
         // What runs is what the open write was sent as. For an earlier
         // request's write that is its own argument list, under the actor it
         // named, whatever the developer name or the model has become since.
@@ -2215,13 +2251,7 @@ impl AppState {
             )?;
         }
 
-        let send = || {
-            classify_acceptance_evaluation_run(run(
-                &connection,
-                &original.args,
-                ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
-            ))
-        };
+        let send = || run_acceptance_source_payload(&connection, &original, source_file.as_ref(), &run);
         // An earlier request's open write counts as this request's unknown
         // first send, so the one send here is already its identical resend.
         let mut uncertain = uncertain_at_entry;
@@ -2239,7 +2269,9 @@ impl AppState {
             // judgment under the old cut. Only the typed resubmit asks for reads.
             (AcceptanceEvaluationRunOutcome::Refused { code, message: words, alternatives }, None) => {
                 let shown = alternatives.clone();
-                if self.record_acceptance_evaluation_refusal(&authority, code.as_deref(), &words, original, alternatives)? {
+                let retained = self.record_acceptance_evaluation_refusal(&authority, code.as_deref(), &words, original, alternatives)?;
+                if let Some(file) = &source_file { file.terminal(); }
+                if retained {
                     return Err(ApiError::conflict(acceptance_citation_retry_offer(&words, &shown)));
                 }
                 if code.as_deref() == Some("acceptance_evaluation_resubmit")
@@ -2273,13 +2305,15 @@ impl AppState {
                 )));
             }
             (AcceptanceEvaluationRunOutcome::Locked(detail), None) => {
-                self.withdraw_own_acceptance_evaluation_pending(&authority, &payload_digest);
+                self.withdraw_acceptance_evaluation_after_no_write(&authority, &payload_digest, &detail)?;
+                if let Some(file) = &source_file { file.terminal(); }
                 return Err(ApiError::bad_gateway(format!(
                     "engram work evaluate: the store stayed locked and nothing was recorded; submit the same verdicts again: {detail}"
                 )));
             }
             (AcceptanceEvaluationRunOutcome::NeverStarted(detail), None) => {
-                self.withdraw_own_acceptance_evaluation_pending(&authority, &payload_digest);
+                self.withdraw_acceptance_evaluation_after_no_write(&authority, &payload_digest, &detail)?;
+                if let Some(file) = &source_file { file.terminal(); }
                 return Err(ApiError::bad_gateway(format!(
                     "{detail}: the tracker never ran, so nothing was sent; submit again"
                 )));
@@ -2336,6 +2370,7 @@ impl AppState {
                 "the tracker recorded the evaluation, but TermAl could not confirm that it persisted that ({}); submit the same verdicts again: the tracker replays them and the receipt is recovered", err.message
             )));
         }
+        if let Some(file) = &source_file { file.terminal(); }
         let (receipt, receipt_truncated) = bounded_acceptance_evaluation_receipt(receipt);
         Ok(AcceptanceEvaluationSubmitResponse {
             schema_version: ACCEPTANCE_EVALUATION_SUBMISSION_SCHEMA_VERSION,
@@ -2376,7 +2411,7 @@ impl AppState {
         authority: &AcceptanceEvaluationSubmitAuthority,
         current: AcceptanceEvaluationOpenWrite,
     ) -> Result<AcceptanceEvaluationBegun, ApiError> {
-        let current_digest = acceptance_evaluation_payload_digest(&current.args);
+        let current_digest = current.digest()?;
         let (written, begun, dispatch) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
@@ -2511,7 +2546,17 @@ impl AppState {
             // request's own `pending` still stands. An earlier open write is
             // not this request's to withdraw.
             if begun.uncertain_at_entry.is_none() {
-                self.withdraw_own_acceptance_evaluation_pending(authority, &begun.payload_digest);
+                if let Err(error) = self.withdraw_own_acceptance_evaluation_pending(authority, &begun.payload_digest) {
+                    if error.is_enqueued_durability_deadline() {
+                        return Err(error);
+                    }
+                    // Preserve the admission failure as well as the cleanup
+                    // failure. A different Pending is never ours to withdraw.
+                    return Err(ApiError::internal(format!(
+                        "the submission was not acknowledged as persisted before running the tracker ({}), so nothing was sent; withdrawal also could not be acknowledged ({}); submit the same verdicts again",
+                        reason.message, error.message
+                    )));
+                }
             }
             return Err(ApiError::internal(format!(
                 "the submission was not acknowledged as persisted before running the tracker ({}), so nothing was sent; submit the same verdicts again", reason.message
@@ -2707,39 +2752,74 @@ impl AppState {
         .with_kind(ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged)
     }
 
+    fn withdraw_acceptance_evaluation_after_no_write(
+        &self,
+        authority: &AcceptanceEvaluationSubmitAuthority,
+        payload_digest: &str,
+        send_detail: &str,
+    ) -> Result<(), ApiError> {
+        self.withdraw_own_acceptance_evaluation_pending(authority, payload_digest)
+            .map_err(|error| {
+                let detail = truncate_chars(send_detail, 1_000);
+                if error.is_enqueued_durability_deadline() {
+                    // Keep the typed pending response intact while preserving
+                    // the known send failure in the host's bounded diagnostic.
+                    eprintln!("acceptance evaluation> no-write send before withdrawal deadline: {detail}");
+                    error
+                } else {
+                    ApiError::internal(format!("{detail}; {}", error.message))
+                }
+            })
+    }
+
     /// Back to `none`, which only the request that entered from `none` may do,
     /// and only after a first send that positively recorded nothing (or before
     /// any send). It moves nothing but this request's own `pending`: never an
-    /// `unconfirmed`, never another digest. `none` is the truth whether or not
-    /// it reaches disk (disk then still says `pending`, the safe side), so a
-    /// failed persist is logged and the evaluator's answer is unchanged.
+    /// `unconfirmed`, never another digest. Cleanup requires acknowledged
+    /// durable `none`; an uncertain withdrawal restores the open state in
+    /// memory and keeps its immutable source file available for replay.
     fn withdraw_own_acceptance_evaluation_pending(
         &self,
         authority: &AcceptanceEvaluationSubmitAuthority,
         own_payload_digest: &str,
-    ) {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = acceptance_evaluation_attempt_index_locked(&inner, authority) else {
-            return;
+    ) -> Result<(), ApiError> {
+        let (written, previous, dispatch) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = acceptance_evaluation_attempt_index_locked(&inner, authority)
+                .ok_or_else(|| ApiError::internal("the evaluator disappeared before withdrawal was acknowledged"))?;
+            let target = inner.delegations[index].acceptance_evaluation.as_mut()
+                .ok_or_else(|| ApiError::internal("the evaluation target disappeared before withdrawal was acknowledged"))?;
+            if !matches!(
+                &target.submission,
+                AcceptanceEvaluationSubmission::Pending { payload_digest, .. }
+                    if payload_digest == own_payload_digest
+            ) {
+                return Err(ApiError::internal("the submission changed before withdrawal was acknowledged"));
+            }
+            let previous = std::mem::replace(&mut target.submission, AcceptanceEvaluationSubmission::None);
+            inner.mark_delegation_mutated(index);
+            match self.commit_locked_with_persist_dispatch(&mut inner) {
+                Ok((_, dispatch)) => (inner.delegations[index].clone(), previous, dispatch),
+                Err(error) => {
+                    if let Some(target) = inner.delegations[index].acceptance_evaluation.as_mut() {
+                        target.submission = previous;
+                    }
+                    return Err(ApiError::internal(format!("nothing was sent, but submission withdrawal could not be persisted: {error:#}")));
+                }
+            }
         };
-        let Some(target) = inner.delegations[index].acceptance_evaluation.as_mut() else {
-            return;
-        };
-        if !matches!(
-            &target.submission,
-            AcceptanceEvaluationSubmission::Pending { payload_digest, .. }
-                if payload_digest == own_payload_digest
-        ) {
-            return;
+        if dispatch == PersistDispatch::Synchronous {
+            return Ok(());
         }
-        target.submission = AcceptanceEvaluationSubmission::None;
-        inner.mark_delegation_mutated(index);
-        if let Err(err) = self.commit_locked(&mut inner) {
-            eprintln!(
-                "acceptance evaluation> failed to persist the withdrawn submission of `{}`: {err:#}",
-                authority.delegation_id
-            );
+        if let Err(error) = self.confirm_acceptance_evaluation_submission_durable_classified(authority, &written) {
+            self.restore_unacknowledged_acceptance_evaluation_submission(authority, &written, previous);
+            return Err(if error.is_enqueued_durability_deadline() {
+                error.at_durability_boundary(DurabilityPendingOperation::AcceptanceEvaluationSubmission)
+            } else {
+                ApiError::internal(format!("nothing was sent, but submission withdrawal is unconfirmed ({}); submit the same verdicts again", error.message))
+            });
         }
+        Ok(())
     }
 
     /// Keeps the write open as `unconfirmed`, carrying what it was sent as and
@@ -2834,7 +2914,7 @@ impl AppState {
         }
         let confirmed = self.confirm_acceptance_evaluation_submission_durable_classified(authority, &written);
         if confirmed.is_err() && recorded {
-            self.restore_unacknowledged_acceptance_evaluation_recorded(
+            self.restore_unacknowledged_acceptance_evaluation_submission(
                 authority, &written, previous,
             );
         }
@@ -2842,8 +2922,8 @@ impl AppState {
     }
 
     /// Puts the open state back where the record still carries exactly the
-    /// `recorded` this request wrote, and queues that for the writer.
-    fn restore_unacknowledged_acceptance_evaluation_recorded(
+    /// terminal disposition this request wrote, and queues that for the writer.
+    fn restore_unacknowledged_acceptance_evaluation_submission(
         &self,
         authority: &AcceptanceEvaluationSubmitAuthority,
         written: &DelegationRecord,

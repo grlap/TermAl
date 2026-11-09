@@ -302,7 +302,7 @@ impl Matrix {
             &self.fixture.project_id,
             &self.fixture.root,
         );
-        let (status, body) = self.http(
+        let (status, _body) = self.http(
             &sender,
             "mailboxes/send",
             &json!({
@@ -310,7 +310,7 @@ impl Matrix {
                 "idempotencyKey":format!("matrix-mail-{}",Uuid::new_v4()),"class":"routine"
             }),
         );
-        assert!(status.is_success(), "real ordinary mail wake: {body:#}");
+        assert!(status.is_success(), "real ordinary mail wake: <body withheld>");
     }
 
     fn edit(&self, value: &str) {
@@ -374,7 +374,7 @@ impl Matrix {
             serde_json::from_slice(&fs::read(directory.join("results.json")).unwrap()).unwrap();
         assert!(
             matches!(results["state"].as_str(), Some("passed" | "failed")),
-            "actual terminal result required: {results:#}"
+            "actual terminal result required"
         );
         assert_eq!(results["runId"], request["runId"]);
         assert_eq!(
@@ -467,9 +467,8 @@ impl Matrix {
 
     fn assert_objects_unchanged(&self, originals: Vec<(String, Value)>) {
         for (id, original) in originals {
-            assert_eq!(
-                self.fixture.object(&id),
-                original,
+            assert!(
+                self.fixture.object(&id) == original,
                 "new decisions must preserve every earlier immutable object: {id}"
             );
         }
@@ -541,13 +540,16 @@ impl Matrix {
                     if check.exit == 0 { "passed" } else { "failed" },
                     "a clean failing invocation records failure, never passed credit"
                 );
-                assert_eq!(
-                    original["source_basis"]["source_revision"],
-                    format!(
-                        "git-commit:{}",
-                        check.results["input"]["commit"].as_str().unwrap()
-                    )
-                );
+                let source: EngramSourceId = serde_json::from_value(
+                    check.results["sourceIdBefore"].clone()).unwrap();
+                source.validate(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET).unwrap();
+                assert!(check.results["sourceIdBefore"] == check.results["sourceIdAfter"],
+                    "the actual check preserves its complete owner identity");
+                assert!(original["source_basis"]["source_id"] ==
+                    serde_json::to_value(&source).unwrap(),
+                    "the real producer retains the complete launcher input");
+                assert!(original["source_basis"].get("source_revision").is_none(),
+                    "a fresh owner record has no revision-string surrogate");
             }
         } else {
             assert!(
@@ -560,8 +562,9 @@ impl Matrix {
         }
         eprintln!(
             "MATRIX_ACTUAL_CHECK {}",
-            json!({"run": check.run_id,
-            "results": check.results, "verification": row.verification_record})
+            json!({"run": check.run_id, "state": check.results["state"],
+            "eligible": check.results["input"]["eligible"],
+            "settled": matches!(row.verification_record, Some(TestRunVerificationAck::Settled { .. }))})
         );
     }
 
@@ -588,8 +591,8 @@ impl Matrix {
             .expect("real fixture HTTP response");
         let status = response.status();
         let text = response.text().unwrap();
-        let value = serde_json::from_str(&text).unwrap_or_else(|error| {
-            panic!("real endpoint returned non-JSON ({status}): {error}: {text}")
+        let value = serde_json::from_str(&text).unwrap_or_else(|_| {
+            panic!("real endpoint returned non-JSON ({status})")
         });
         (status, value)
     }
@@ -628,7 +631,7 @@ impl Matrix {
         let (status, body) = self.http(&self.holder, "acceptance-evaluations", &request);
         eprintln!(
             "MATRIX_EVALUATION_REQUEST {}",
-            json!({"status":status.as_u16(),"body":body})
+            json!({"status":status.as_u16(),"bodyBytes":serde_json::to_vec(&body).unwrap().len()})
         );
         if !status.is_success() {
             return Err(body);
@@ -657,9 +660,13 @@ impl Matrix {
         let target = child.acceptance_evaluation.as_ref().unwrap();
         assert_eq!(target.mode, AcceptanceEvaluationMode::IndependentSession);
         assert!(
-            target.source_fingerprint.is_some(),
+            target.source_id.is_some() && target.source_fingerprint.is_none(),
             "unmeasured source cannot supply the positive witness"
         );
+        assert!(target.source_id.as_ref() == Some(&self.source_id_now()),
+            "the request retains its complete fresh owner identity privately");
+        assert!(!child.prompt.contains("\"changes\":[") && !child.prompt.contains("\"submodules\":["),
+            "the evaluator receives bounded summaries, not the identity object");
         let cleanup = LiveRootCleanup {
             transport: self.fixture.live.transport.clone(),
             session_id: child.child_session_id.clone(),
@@ -685,7 +692,7 @@ impl Matrix {
         );
         eprintln!(
             "MATRIX_EVALUATION_SUBMISSION {}",
-            json!({"status":result.0.as_u16(),"body":result.1})
+            json!({"status":result.0.as_u16(),"bodyBytes":serde_json::to_vec(&result.1).unwrap().len()})
         );
         result
     }
@@ -695,26 +702,13 @@ impl Matrix {
     }
 
     fn done_after_decision(&self, after_decision: impl FnOnce()) -> Value {
-        // The ordinary holder CLI is the completion route (TermAl has no
-        // work-done HTTP endpoint). Measure NOW under the production Git rule,
-        // never copy a declaration from the evaluator or a result's text.
-        let SourceRevision::Taken { root, revision } =
-            source_revision(&self.fixture.root, true).unwrap()
-        else {
-            panic!("completion must freshly measure a clean input");
-        };
-        assert_eq!(fs::canonicalize(&self.fixture.root).unwrap(), root);
-        let done = self.fixture.work(
-            &self.holder,
-            &[
-                "done",
-                &self.work,
-                "Ordinary checked work completed through the holder path",
-                "--source-fingerprint",
-                &revision,
-                "--json",
-            ],
-        );
+        // The holder declares a fresh complete owner identity, independently
+        // of the evaluator's saved declaration and the earlier check result.
+        let source = self.source_id_now();
+        let output = self.done_output_source(&source);
+        assert!(output.status.success(), "ordinary checked input must complete");
+        let done: Value = serde_json::from_slice(&output.stdout)
+            .expect("successful completion returns its actual receipt");
         // The real done command has returned its decision. A delayed report
         // need not remain blocked during the independent post-seal reads.
         after_decision();
@@ -723,12 +717,12 @@ impl Matrix {
             .work(&self.holder, &["show", &self.work, "--json"]);
         assert_eq!(
             shown["status"]["work"]["lifecycle"], "completed",
-            "{shown:#}"
+            "<shown withheld>"
         );
         let core = self
             .fixture
             .work(&self.holder, &["core", "inspect", &self.work, "--json"]);
-        assert_eq!(core["run"]["state"], "completed", "{core:#}");
+        assert_eq!(core["run"]["state"], "completed", "<core withheld>");
         let seal = core["run"]["completion_seal"]
             .as_str()
             .expect("completion ends in a real seal");
@@ -739,7 +733,7 @@ impl Matrix {
         );
         eprintln!(
             "MATRIX_COMPLETED_SEAL {}",
-            json!({"done":done,"core":core,"source":revision})
+            json!({"seal":seal,"source":acceptance_attempt_source_label(Some(&source),None)})
         );
         done
     }
@@ -748,38 +742,45 @@ impl Matrix {
         assert_eq!(check.exit, 0, "{}", check.output);
         assert_eq!(check.results["state"], "passed");
         assert_eq!(check.results["input"]["eligible"], true);
-        let SourceRevision::Taken { root, revision } =
-            source_revision(&self.fixture.root, true).unwrap()
-        else {
-            panic!("a positive decision requires a fresh clean root");
-        };
-        assert_eq!(root, fs::canonicalize(&self.fixture.root).unwrap());
-        assert_eq!(
-            revision,
-            format!(
-                "git-commit:{}",
-                check.results["input"]["commit"].as_str().unwrap()
-            )
-        );
+        let checked: EngramSourceId = serde_json::from_value(check.results["sourceIdBefore"].clone()).unwrap();
+        assert!(checked == self.source_id_now(),
+            "a positive decision requires the exact checked root and direct-child identities");
+    }
+
+    fn source_id_now(&self) -> EngramSourceId {
+        let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
+        let owner = self.fixture.live.state.source_owner_metadata_until(&self.holder, deadline)
+            .expect("the live matrix pins its actual source owner");
+        engram_source_id_until(&owner, &self.fixture.root, deadline)
+            .expect("the actual owner captures the complete current identity")
     }
 
     fn evaluate(&self, check: &ActualCheck, during: impl FnOnce()) -> (String, Value) {
         self.assert_checked_source(check);
-        let (child, _cleanup) = self.request(check).unwrap_or_else(|error| {
-            panic!("correct ordinary checked input must reach an independent evaluator: {error:#}")
+        let (child, _cleanup) = self.request(check).unwrap_or_else(|_| {
+            panic!("correct ordinary checked input must reach an independent evaluator: <details withheld>")
         });
         during();
         self.assert_checked_source(check);
         let (status, body) = self.submit(&child, check);
         assert!(
             status.is_success(),
-            "correct ordinary checked input must be accepted: {body:#}"
+            "correct ordinary checked input must be accepted: <body withheld>"
         );
         let evaluation_id = body["receipt"]["evaluation"]["evaluation"]
             .as_str()
             .expect("real producer-issued evaluation identity")
             .to_owned();
         let evaluation = self.fixture.object(&evaluation_id);
+        let recorded: AcceptanceSourceBasis = serde_json::from_value(evaluation["source_basis"].clone())
+            .expect("the stored evaluation retains its typed declared source");
+        let AcceptanceSourceBasis::Shared(recorded) = recorded else {
+            panic!("a new evaluation cannot retain a legacy fingerprint");
+        };
+        assert!(Some(&recorded.source_id) == child.acceptance_evaluation.as_ref().unwrap().source_id.as_ref(),
+            "the consumer stores the exact complete identity from the host attempt");
+        assert!(recorded.source_id == self.source_id_now(),
+            "the live consumer's evaluated source matches the current full identity");
         let saved = self
             .fixture
             .live
@@ -802,44 +803,66 @@ impl Matrix {
     }
 
     fn done_output(&self, check: &ActualCheck) -> std::process::Output {
-        // Deliberately present the formerly checked revision. Engram must
-        // inspect the root now rather than trust this stale declaration or
-        // wait for a turn report to reveal the edit.
-        let old_revision = format!(
-            "git-commit:{}",
-            check.results["input"]["commit"].as_str().unwrap()
-        );
-        self.done_output_revision(&old_revision)
+        // Present the formerly checked complete identity. Engram must inspect
+        // the root now rather than trust this stale declaration or wait for a
+        // turn report to reveal the edit.
+        let checked: EngramSourceId = serde_json::from_value(check.results["sourceIdBefore"].clone())
+            .expect("the actual check retained its complete input identity");
+        self.done_output_source(&checked)
     }
 
-    fn done_output_revision(&self, revision: &str) -> std::process::Output {
-        self.fixture.command_output(
+    fn done_output_source(&self, source: &EngramSourceId) -> std::process::Output {
+        let file = AcceptanceSourcePayload {
+            source_id: source.clone(),
+            source_file: None,
+        }
+        .publish(&self.fixture.home.join("completion-sources"))
+        .expect("the fixture retains an immutable completion declaration");
+        let output = self.fixture.command_output(
             &self.holder,
             &[
                 "done",
                 &self.work,
                 "Attempt completion on the previously checked input",
-                "--source-fingerprint",
-                revision,
+                "--source-id-file",
+                file.path().to_str().unwrap(),
                 "--json",
             ],
             true,
-        )
+        );
+        // Diagnostics expose only closed categories, never a source payload,
+        // locator, remote free text or the returned body's private fields.
+        let body: Value = serde_json::from_slice(&output.stdout)
+            .or_else(|_| serde_json::from_slice(&output.stderr))
+            .unwrap_or(Value::Null);
+        let code = body["error"]["code"].as_str().or_else(|| body["code"].as_str());
+        let category = match code {
+            Some("work_completion_refused") => "completion_refused",
+            Some("acceptance_evaluation_stale") => "evaluation_stale",
+            Some("missing_acceptance_evaluation") => "missing_evaluation",
+            _ if output.status.success() => "completed",
+            _ => "unclassified_failure",
+        };
+        eprintln!("MATRIX_DONE_DECISION {}", json!({"category":category,"exit":output.status.code()}));
+        if output.status.success() {
+            file.terminal();
+        }
+        output
     }
 
     fn refuse_done(&self, check: &ActualCheck, evaluation_recorded: bool) {
         let output = self.done_output(check);
         eprintln!(
-            "MATRIX_DONE_REFUSAL exit={:?} stdout={} stderr={}",
+            "MATRIX_DONE_REFUSAL exit={:?} stdout_bytes={} stderr_bytes={}",
             output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            output.stdout.len(),
+            output.stderr.len()
         );
         self.assert_completion_refusal(&output, evaluation_recorded);
         let core = self
             .fixture
             .work(&self.holder, &["core", "inspect", &self.work, "--json"]);
-        assert!(core["run"]["completion_seal"].is_null(), "{core:#}");
+        assert!(core["run"]["completion_seal"].is_null(), "<core withheld>");
     }
 
     fn accept(&self, check: &ActualCheck, during: impl FnOnce()) {
@@ -860,15 +883,13 @@ impl Matrix {
         let (evaluation_id, evaluation) = self.evaluate(check, during);
         self.assert_checked_source(check);
         self.done_after_decision(after_decision);
-        assert_eq!(
-            self.fixture.object(&evaluation_id),
-            evaluation,
+        assert!(
+            self.fixture.object(&evaluation_id) == evaluation,
             "done never rewrites its evaluation"
         );
         for (id, original) in check.records.iter().zip(originals) {
-            assert_eq!(
-                self.fixture.object(id),
-                original,
+            assert!(
+                self.fixture.object(id) == original,
                 "completion never rewrites old verification"
             );
         }
@@ -882,7 +903,7 @@ impl Matrix {
                 let (status, body) = self.submit(&child, check);
                 assert!(
                     !status.is_success(),
-                    "real post-check source change must be refused: {body:#}"
+                    "real post-check source change must be refused: <body withheld>"
                 );
                 Self::assert_source_refusal(&body);
                 // A refused submission leaves the evaluator's provider turn
@@ -893,7 +914,7 @@ impl Matrix {
                     child.child_session_id.clone(),
                 );
                 recorder
-                    .push_text(&format!("Acceptance submission refused: {}", body["error"]))
+                    .push_text("Acceptance submission refused; the parent must read the recorded bounded diagnostic.")
                     .unwrap();
                 finish_live_root(&self.fixture.live.state, &child.child_session_id);
                 let finished = self
@@ -931,11 +952,11 @@ impl Matrix {
                 || text.contains("input")
                 || text
                     .contains("registered check's named root is unavailable or has been rebound"),
-            "must preserve a real source/input refusal, not a CLI/fixture/setup failure: {body:#}"
+            "must preserve a real source/input refusal, not a CLI/fixture/setup failure: <body withheld>"
         );
         assert!(
             !text.contains("invalid request") && !text.contains("unknown argument"),
-            "{body:#}"
+            "<body withheld>"
         );
     }
 
@@ -946,39 +967,52 @@ impl Matrix {
         );
         let body: Value = serde_json::from_slice(&output.stdout)
             .or_else(|_| serde_json::from_slice(&output.stderr))
-            .unwrap_or_else(|error| {
-                panic!("ordinary done must return its typed refusal: {error}; {output:?}")
+            .unwrap_or_else(|_| {
+                panic!("ordinary done must return its typed refusal: <details withheld>; <details withheld>")
             });
         if body["error"]["code"] == "work_completion_refused" {
-            assert!(evaluation_recorded, "{body:#}");
-            assert_eq!(body["error"]["details"]["work_ref"], self.work, "{body:#}");
+            assert!(evaluation_recorded, "<body withheld>");
+            assert_eq!(body["error"]["details"]["work_ref"], self.work, "<body withheld>");
             let reason = body["error"]["details"]["reason"]
                 .as_str()
                 .expect("the completion refusal names its actual cause");
             assert!(
                 (reason.starts_with("registered root ") && reason.contains(" is dirty;"))
                     || (reason.starts_with("registered check ran on git-commit:")
-                        && reason.contains(", but the named root is at git-commit:")),
-                "a measured dirty or different-commit refusal: {body:#}"
+                        && reason.contains(", but the named root is at git-commit:"))
+                    || reason == "the named root's full source_id changed since the registered check; run a check on the current source state",
+                "a measured dirty or different-commit refusal: <body withheld>"
             );
             return;
         }
-        assert_eq!(body["operation"], "done", "{body:#}");
-        assert_eq!(body["recovery"]["item"]["ref"], self.work, "{body:#}");
+        assert_eq!(body["operation"], "done", "<body withheld>");
+        assert_eq!(body["recovery"]["item"]["ref"], self.work, "<body withheld>");
         let cause = &body["recovery"]["cause"];
         if evaluation_recorded {
-            assert_eq!(body["code"], "acceptance_evaluation_stale", "{body:#}");
-            assert_eq!(cause["kind"], "acceptance_evaluation_stale", "{body:#}");
+            assert_eq!(body["code"], "acceptance_evaluation_stale", "<body withheld>");
+            assert_eq!(cause["kind"], "acceptance_evaluation_stale", "<body withheld>");
             assert!(
                 matches!(
                     cause["reason"].as_str(),
                     Some("source" | "mutation" | "unadmitted_change" | "verification_source")
                 ),
-                "a source barrier, not an unrelated policy/setup refusal: {body:#}"
+                "a source barrier, not an unrelated policy/setup refusal: <body withheld>"
             );
         } else {
-            assert_eq!(body["code"], "missing_acceptance_evaluation", "{body:#}");
-            assert_eq!(cause["kind"], "missing_acceptance_evaluation", "{body:#}");
+            assert_eq!(body["code"], "missing_acceptance_evaluation", "<body withheld>");
+            assert_eq!(cause["kind"], "missing_acceptance_evaluation", "<body withheld>");
         }
     }
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn current_source_id_matrix_tick_retains_actual_receipt_and_basis_without_evaluation() {
+    let matrix = Matrix::new(Citation::BoundVerification, false);
+    matrix.begin("Run a real check and retain its full owner-backed evidence.");
+    let check = matrix.check(false);
+    matrix.assert_checked_source(&check);
+    assert!(!check.records.is_empty(), "the production tick returned actual producer receipts");
+    matrix.close();
+    matrix.settle();
 }

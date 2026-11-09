@@ -55,7 +55,8 @@ fn source_observation_live_gitlink_reports_outcome_and_declared_check_only() {
     recorded_occurrence["observed_checks"] = json!([{
         "check": occurrence["observed_checks"][0], "credit": "uncredited",
     }]);
-    assert_eq!(fixture.object(receipt["observation"].as_str().unwrap())["occurrence"], recorded_occurrence);
+    assert!(fixture.object(receipt["observation"].as_str().unwrap())["occurrence"] == recorded_occurrence,
+        "the exact occurrence remains stored");
     assert!(fixture.live.transport.requests_for("verification_record").is_empty());
     assert_no_live_turn_gate(&fixture.live.transport);
 }
@@ -83,12 +84,13 @@ fn source_observation_live_delete_recovers_original_committed_reply() {
         serde_json::to_value(&record.engram.unadmitted_reports[0]).unwrap()
     });
     let saved: Value = serde_json::from_str(&persisted_session_json(&fixture.live.state, session)).unwrap();
-    assert_eq!(saved["engramUnadmittedReports"][0], retained, "real committed session row owns the original report");
+    assert!(saved["engramUnadmittedReports"][0] == retained, "real committed session row owns the original report");
     let loaded = load_state(fixture.live.state.persistence_path.as_path()).unwrap().unwrap();
     let loaded_record = &loaded.sessions[loaded.find_session_index(session).unwrap()];
-    assert_eq!(serde_json::to_value(&loaded_record.engram.unadmitted_reports[0]).unwrap(), retained);
+    assert!(serde_json::to_value(&loaded_record.engram.unadmitted_reports[0]).unwrap() == retained,
+        "the exact report survives reload");
     let error = fixture.live.state.kill_session(session).err().expect("Delete keeps the unresolved original report");
-    assert!(error.message.contains("Session kept"), "{error:?}");
+    assert!(error.message.contains("Session kept"), "<details withheld>");
     fixture.record(session, |record| {
         assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
         assert!(record.session.messages.iter().any(|message| matches!(message,
@@ -100,7 +102,7 @@ fn source_observation_live_delete_recovers_original_committed_reply() {
     let original = observations.first().unwrap();
     let replay = observations.iter().filter(|request| request["idempotency_key"] == original["idempotency_key"]).collect::<Vec<_>>();
     assert_eq!(replay.len(), 2, "one discarded committed reply and one exact recovery");
-    assert_eq!(replay[0], replay[1], "source timestamps, claim, policy, interval and key replay byte-for-byte");
+    assert!(replay[0] == replay[1], "source timestamps, claim, policy, interval and key replay byte-for-byte");
     assert!(fixture.live.receiver.try_recv().is_err(), "report retry cannot redeliver the provider prompt");
     assert_no_live_turn_gate(&fixture.live.transport);
     fixture.live.state.kill_session(session).unwrap();
@@ -125,17 +127,23 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
             work: work.to_owned(), path: Some(Some(fixture.root.to_string_lossy().into_owned())),
         }).unwrap();
         fixture.begin(session, "Check the first revision.");
-        let before = content_revision(&fixture.root).unwrap().1;
-        let (body, receipt) = fixture.registered_check(session, &fixture.root, "cargo test --offline");
+        let source_now = || {
+            let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
+            let owner = fixture.live.state.source_owner_metadata_until(session, deadline).unwrap();
+            engram_source_id_until(&owner, &fixture.root, deadline).unwrap()
+        };
+        let before = source_now();
+        let (body, receipt) = fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
         let verification = &receipt.verifications[0].record_id;
         let original_check = fixture.object(verification);
-        assert_eq!(original_check["source_basis"], serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap());
+        assert!(original_check["source_basis"] == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap(),
+            "the original check retains its complete prepared basis");
         finish_live_root(&fixture.live.state, session);
         fixture.wait_for_reports(session);
         let prior_requests = fixture.live.transport.requests_for("execution_observe").len();
         fs::write(fixture.root.join("README.md"), "changed between ordinary turns\n").unwrap();
-        let changed = content_revision(&fixture.root).unwrap().1;
-        assert_ne!(changed, before);
+        let changed = source_now();
+        assert!(changed != before, "the full identity records the real edit");
         fixture.begin(session, "Inspect quietly without running a check or writing source.");
         finish_live_root(&fixture.live.state, session);
         fixture.wait_for_reports(session);
@@ -143,8 +151,12 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
         let current = &requests[prior_requests..];
         let change = current.iter().find_map(|request| request["occurrence"].get("source_change")
             .filter(|change| change["detection"] == "content_comparison")).expect("the real closing capture accounts for the interval");
-        assert_eq!(change["baseline"]["source_revision"], before);
-        assert_eq!(change["sighting"]["source_basis"]["source_revision"], changed);
+        assert!(change["baseline"]["source_id"] == serde_json::to_value(&before).unwrap(),
+            "the baseline retains the complete original identity");
+        assert!(change["sighting"]["source_basis"]["source_id"] == serde_json::to_value(&changed).unwrap(),
+            "the sighting retains the complete changed identity");
+        assert!(change["baseline"].get("source_revision").is_none());
+        assert!(change["sighting"]["source_basis"].get("source_revision").is_none());
         let actual_receipt = fixture.record(session, |record| {
             record.engram.unadmitted_reports.iter().flat_map(|report| &report.envelopes)
                 .find_map(|envelope| {
@@ -156,7 +168,8 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
                 }).expect("the actual producer acknowledged this exact source change")
         });
         let stored_observation = fixture.object(actual_receipt["observation"].as_str().unwrap());
-        assert_eq!(stored_observation["occurrence"]["source_change"], *change);
+        assert!(stored_observation["occurrence"]["source_change"] == *change,
+            "the exact source change was durably retained");
         assert_eq!(stored_observation["causality"]["kind"], "unknown");
         for request in current {
             assert_eq!(request["causality"]["kind"], "unknown");
@@ -164,26 +177,29 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
             assert!(request.get("routing_token").is_none());
             assert!(request["occurrence"]["observed_checks"].as_array().is_none_or(Vec::is_empty));
         }
-        assert_eq!(fixture.object(verification), original_check, "new source never rewrites old producer evidence");
-        assert_eq!(content_revision(&fixture.root).unwrap().1, changed);
+        assert!(fixture.object(verification) == original_check, "new source never rewrites old producer evidence");
+        assert!(source_now() == changed, "later reads never change the recorded source");
         let shown = fixture.work(session, &["show", work, "--json"]);
         let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
         let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
         let citation = format!("1={verification}");
+        // This deliberately retained historical record is compared through
+        // the legacy CLI alternative, independently of the new source facts.
+        let legacy_changed = content_revision(&fixture.root).unwrap().1;
         let refused = refused_evaluation(&fixture, session, &[
             "evaluate", work, "--mode", "same-session", "--acceptance-basis", &acceptance,
             "--evidence-basis", &evidence, "--verdict", "1=pass:observed", "--rationale",
             "1=Try the earlier native check at changed source", "--evidence", &citation,
-            "--source-fingerprint", &changed, "--attempt", "old-check", "--json",
+            "--source-fingerprint", &legacy_changed, "--attempt", "old-check", "--json",
         ]);
-        assert_eq!(refused["error"]["code"], "acceptance_evaluation_refused", "{refused:#}");
+        assert_eq!(refused["error"]["code"], "acceptance_evaluation_refused", "<refused withheld>");
         let cause = &refused["error"]["details"]["cause"];
-        assert_eq!(cause["kind"], "citation", "{refused:#}");
-        assert_eq!(cause["mismatch"], "wrong_source", "{refused:#}");
+        assert_eq!(cause["kind"], "citation", "<refused withheld>");
+        assert_eq!(cause["mismatch"], "wrong_source", "<refused withheld>");
         assert_eq!(cause["citation"], *verification);
-        let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("the registered native witness requires committed input"); };
+        let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("historical evaluation witness requires its retained Commit record"); };
         assert_eq!(cause["checked_revision"], *commit);
-        assert_eq!(cause["judged_revision"], changed);
+        assert_eq!(cause["judged_revision"], legacy_changed);
         assert_eq!(cause["remedy"], "run_current_check_and_evaluate");
         assert_no_live_turn_gate(&fixture.live.transport);
     }
@@ -193,7 +209,12 @@ fn unnamed_source_interval(fixture: &CompletionFixture, session: &str, work: &st
     let binding = fixture.claim_binding(session);
     assert_eq!(fixture.canonical_read(session, &binding).named_root, EngramNamedRootState::None);
     fixture.begin(session, "Observe a genuine unnamed check without native registration credit.");
-    let before = content_revision(&fixture.root).unwrap().1;
+    let source_now = || {
+        let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
+        let owner = fixture.live.state.source_owner_metadata_until(session, deadline).unwrap();
+        engram_source_id_until(&owner, &fixture.root, deadline).unwrap()
+    };
+    let before = source_now();
     let mut recorder = SessionRecorder::new(fixture.live.state.clone(), session.to_owned());
     recorder.command_started_in("unnamed-check", "cargo test --offline", Some("cargo test --offline"),
         Some(&fixture.root.to_string_lossy())).unwrap();
@@ -206,8 +227,8 @@ fn unnamed_source_interval(fixture: &CompletionFixture, session: &str, work: &st
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
     fs::write(fixture.root.join("README.md"), "new unnamed source between turns\n").unwrap();
-    let changed = content_revision(&fixture.root).unwrap().1;
-    assert_ne!(changed, before);
+    let changed = source_now();
+    assert!(changed != before, "the full unnamed identity records the real edit");
     fixture.begin(session, "Read the changed unnamed source quietly.");
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
@@ -215,8 +236,8 @@ fn unnamed_source_interval(fixture: &CompletionFixture, session: &str, work: &st
     assert!(requests.iter().any(|request| {
         let change = &request["occurrence"]["source_change"];
         change["detection"] == "content_comparison"
-            && change["baseline"]["source_revision"] == before
-            && change["sighting"]["source_basis"]["source_revision"] == changed
+            && change["baseline"]["source_id"] == serde_json::to_value(&before).unwrap()
+            && change["sighting"]["source_basis"]["source_id"] == serde_json::to_value(&changed).unwrap()
     }), "the real producer receives the distinct unnamed source interval");
     let shown = fixture.work(session, &["show", work, "--notes", "--json"]);
     let mut checks = Vec::new();
@@ -238,8 +259,8 @@ fn refused_evaluation(fixture: &CompletionFixture, session: &str, args: &[&str])
         .args(["work", "--actor-id", &actor, "--session-id", session]);
     if let Some(context) = context.as_deref() { command.args(["--actor-context", context]); }
     let output = command.args(args).output().unwrap();
-    assert_eq!(output.status.code(), Some(1), "a stale citation must be refused: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-    serde_json::from_slice(&output.stderr).unwrap_or_else(|error|
-        panic!("typed evaluation refusal: {error}: {}", String::from_utf8_lossy(&output.stderr)))
+    assert_eq!(output.status.code(), Some(1), "a stale citation must be refused: stdout_bytes={} stderr_bytes={}",
+        output.stdout.len(), output.stderr.len());
+    serde_json::from_slice(&output.stderr).unwrap_or_else(|_|
+        panic!("typed evaluation refusal: <details withheld>: {}", output.stderr.len()))
 }

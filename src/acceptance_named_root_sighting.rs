@@ -42,7 +42,7 @@ enum EngramSightingRoot {
 }
 
 /// Whether the bound root has a sighting at or before the read cut.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 enum EngramRootSighting {
     Absent,
@@ -51,6 +51,57 @@ enum EngramRootSighting {
         position: i64,
         revision: String,
     },
+    #[serde(rename = "present")]
+    PresentShared {
+        record: String,
+        position: i64,
+        source_id_summary: AcceptanceSightingSourceSummary,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AcceptanceSightingSourceSummary {
+    commit: String,
+    tree: String,
+    changes: usize,
+    submodules: usize,
+}
+
+impl<'de> Deserialize<'de> for EngramRootSighting {
+    fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+        enum Legacy {
+            Absent,
+            Present { record: String, position: i64, revision: String },
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Shared {
+            state: String,
+            record: String,
+            position: i64,
+            source_id_summary: AcceptanceSightingSourceSummary,
+        }
+        let value = Value::deserialize(decoder)?;
+        if value.get("source_id_summary").is_some() {
+            let shared: Shared = serde_json::from_value(value)
+                .map_err(|_| serde::de::Error::custom("malformed shared root sighting"))?;
+            if shared.state != "present" || !engram_source_id_oid(&shared.source_id_summary.commit)
+                || !engram_source_id_oid(&shared.source_id_summary.tree)
+            {
+                return Err(serde::de::Error::custom("invalid shared root sighting summary"));
+            }
+            Ok(Self::PresentShared { record: shared.record, position: shared.position,
+                source_id_summary: shared.source_id_summary })
+        } else {
+            match serde_json::from_value(value).map_err(|_| serde::de::Error::custom("malformed historical root sighting"))? {
+                Legacy::Absent => Ok(Self::Absent),
+                Legacy::Present { record, position, revision } => Ok(Self::Present { record, position, revision }),
+            }
+        }
+    }
 }
 
 /// The schema version of `named_root_sighting_read` this host understands.
@@ -107,7 +158,8 @@ impl EngramNamedRootSightingRead {
         } = &self.root
         {
             let sighted_after_cut = matches!(sighting,
-                EngramRootSighting::Present { position, .. } if *position > self.read_cut);
+                EngramRootSighting::Present { position, .. }
+                    | EngramRootSighting::PresentShared { position, .. } if *position > self.read_cut);
             if *generation < 1
                 || *binding_position < 0
                 || *binding_position > self.read_cut
@@ -206,7 +258,7 @@ fn acceptance_sighting_decision(
         )));
     }
     match sighting {
-        EngramRootSighting::Present { .. } => Ok(()),
+        EngramRootSighting::Present { .. } | EngramRootSighting::PresentShared { .. } => Ok(()),
         EngramRootSighting::Absent => {
             let remedy = evaluation_notice.map_or_else(
                 || format!(

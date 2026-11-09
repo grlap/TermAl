@@ -254,6 +254,35 @@ fn a_member_is_bound_only_with_its_newest_sighting_at_the_gate_revision() {
 }
 
 #[test]
+fn a_shared_sighting_summary_does_not_supply_a_legacy_binding_identity() {
+    let target = EngramBindTarget {
+        work_id: "work-member".to_owned(), short_ref: "w-member".to_owned(),
+        claim_id: "claim-member".to_owned(), claim_fence: 3, root_generation: 12,
+    };
+    let roots = vec![entry("member", ROOT, 12)];
+    let claims = held(&[("member", 3)]);
+    let mut legacy_gate = gate();
+    legacy_gate.source_revision = format!("git-commit:{}", "a".repeat(40));
+    let mut read = sighting("member", sighted_at(&legacy_gate.source_revision));
+    assert!(matches!(
+        engram_bind_decision(&target, &claims, &roots, Ok(&read), &legacy_gate),
+        EngramBindDecision::Bind { .. }
+    ));
+    if let EngramSightingRoot::Bound { sighting, .. } = &mut read.root {
+        *sighting = EngramRootSighting::PresentShared {
+            record: "a".repeat(32), position: 30,
+            source_id_summary: AcceptanceSightingSourceSummary {
+                commit: "a".repeat(40), tree: "b".repeat(40), changes: 0, submodules: 0,
+            },
+        };
+    }
+    assert!(matches!(
+        engram_bind_decision(&target, &claims, &roots, Ok(&read), &legacy_gate),
+        EngramBindDecision::Skip(_)
+    ));
+}
+
+#[test]
 fn a_bind_request_carries_one_member_under_a_key_stable_per_gate_and_member() {
     let measurement = EngramBindMeasurement {
         workspace_id: ROOT.to_owned(),

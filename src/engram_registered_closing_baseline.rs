@@ -1,4 +1,4 @@
-// Closing fallback from this turn's original registered Git checks. Reuses
+// Closing fallback from this turn's original registered owner checks. Reuses
 // terminal preparation; never captures source, sends evidence or waits for it.
 
 // Off-lock only. Rebuild the ordinary native record from the same bytes the
@@ -43,7 +43,9 @@ fn registered_closing_clean_input(registration: &TestRunRegistration, disk: &Tes
     {
         return false;
     }
-    let Ok(body) = engram_verification_record_body(registration, &request, &results) else {
+    let retained = engram_verification_record_frozen(directory, &registration.run_id);
+    let Ok(body) = engram_verification_record_build_body(registration, &request, &results,
+        retained.as_ref().map(|frozen| &frozen.body.input)) else {
         return false;
     };
     match &registration.verification_record {
@@ -169,7 +171,7 @@ fn registered_closing_baselines_locked(
             return Vec::new();
         };
         // Registration identity was checked off-lock and again above. Only
-        // existing, ready content measurements supply endpoints, never the
+        // existing, ready owner measurements supply endpoints, never the
         // registered body's Git revision or a new read at close.
         let Some((Some(before), before_at)) = check.start_basis.measured_value() else {
             return Vec::new();
@@ -181,7 +183,7 @@ fn registered_closing_baselines_locked(
             source.workspace_id == *workspace_id
                 && source.source_root_generation == Some(*generation)
                 && source.source_root_state == Some(EngramSourceRootState::Named)
-                && (source.source_id.is_some() || source.source_revision.starts_with("content-v1:"))
+                && source.source_id.is_some() && source.source_revision.is_empty()
         };
         let ordered = || -> Option<bool> {
             let start = EngramHost::check_timestamp(&check.started_at)?;

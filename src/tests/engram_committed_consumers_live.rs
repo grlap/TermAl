@@ -422,14 +422,14 @@ fn refuse_consumer_done(matrix: &Matrix, check: &ActualCheck, consumer: &Consume
             assert!(!output.status.success());
             let body: Value = serde_json::from_slice(&output.stdout)
                 .or_else(|_| serde_json::from_slice(&output.stderr)).unwrap();
-            assert_eq!(body["error"]["code"], "work_completion_refused", "{body:#}");
-            assert_eq!(body["error"]["details"]["work_ref"], matrix.work, "{body:#}");
+            assert_eq!(body["error"]["code"], "work_completion_refused", "<body withheld>");
+            assert_eq!(body["error"]["details"]["work_ref"], matrix.work, "<body withheld>");
             let reason = body["error"]["details"]["reason"].as_str().unwrap();
             assert!(reason.contains("no submodule mapping found")
-                && reason.contains(consumer.children[0].0), "{body:#}");
+                && reason.contains(consumer.children[0].0), "<body withheld>");
             let core = matrix.fixture.work(&matrix.holder, &["core", "inspect", &matrix.work, "--json"]);
-            assert!(core["run"]["completion_seal"].is_null(), "{core:#}");
-            eprintln!("MATRIX_DONE_REFUSAL exit={:?} stdout={} stderr={}", output.status.code(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            assert!(core["run"]["completion_seal"].is_null(), "<core withheld>");
+            eprintln!("MATRIX_DONE_REFUSAL exit={:?} stdout_bytes={} stderr_bytes={}", output.status.code(), output.stdout.len(), output.stderr.len());
             return;
         }
         Change::TrackedChild
@@ -443,10 +443,10 @@ fn refuse_consumer_done(matrix: &Matrix, check: &ActualCheck, consumer: &Consume
     };
     let output = matrix.done_output(check);
     eprintln!(
-        "MATRIX_DONE_REFUSAL exit={:?} stdout={} stderr={}",
+        "MATRIX_DONE_REFUSAL exit={:?} stdout_bytes={} stderr_bytes={}",
         output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        output.stdout.len(),
+        output.stderr.len()
     );
     assert!(
         !output.status.success(),
@@ -455,10 +455,10 @@ fn refuse_consumer_done(matrix: &Matrix, check: &ActualCheck, consumer: &Consume
     let body: Value = serde_json::from_slice(&output.stdout)
         .or_else(|_| serde_json::from_slice(&output.stderr))
         .expect("ordinary done returns its typed refusal");
-    assert_eq!(body["error"]["code"], "work_completion_refused", "{body:#}");
+    assert_eq!(body["error"]["code"], "work_completion_refused", "<body withheld>");
     assert_eq!(
         body["error"]["details"]["work_ref"], matrix.work,
-        "{body:#}"
+        "<body withheld>"
     );
     let reason = body["error"]["details"]["reason"]
         .as_str()
@@ -470,7 +470,7 @@ fn refuse_consumer_done(matrix: &Matrix, check: &ActualCheck, consumer: &Consume
     let refused_root = reason
         .strip_prefix("registered root ")
         .and_then(|value| value.strip_suffix(&suffix))
-        .unwrap_or_else(|| panic!("expected this row's '{expected}' guard refusal: {body:#}"));
+        .unwrap_or_else(|| panic!("expected this row's '{expected}' guard refusal: <body withheld>"));
     assert_eq!(
         fs::canonicalize(refused_root).unwrap(),
         fs::canonicalize(&matrix.fixture.root).unwrap(),
@@ -479,7 +479,7 @@ fn refuse_consumer_done(matrix: &Matrix, check: &ActualCheck, consumer: &Consume
     let core = matrix
         .fixture
         .work(&matrix.holder, &["core", "inspect", &matrix.work, "--json"]);
-    assert!(core["run"]["completion_seal"].is_null(), "{core:#}");
+    assert!(core["run"]["completion_seal"].is_null(), "<core withheld>");
 }
 
 fn changed_consumer(consumer: &Consumer, change: Change) {

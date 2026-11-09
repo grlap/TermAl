@@ -50,28 +50,24 @@ fn rejected_build_evaluation(
         command.args(["--actor-context", &context]);
     }
     let output = command.args(args).output().unwrap();
-    let text = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
     assert!(
         !output.status.success(),
-        "must refuse this citation: {text}"
+        "must refuse this citation (exit {:?}, stdout {} bytes, stderr {} bytes)",
+        output.status.code(), output.stdout.len(), output.stderr.len()
     );
     let refusal: Value = serde_json::from_slice(&output.stderr)
         .or_else(|_| serde_json::from_slice(&output.stdout))
-        .unwrap_or_else(|error| panic!("structured refusal required: {error}: {text}"));
+        .unwrap_or_else(|_| panic!("structured refusal required"));
     assert_eq!(
         refusal["error"]["code"], "acceptance_evaluation_refused",
-        "{text}"
+        "<refusal details withheld>"
     );
     let cause = &refusal["error"]["details"]["cause"];
-    assert_eq!(cause["kind"], "citation", "{text}");
-    assert_eq!(cause["mismatch"], mismatch, "{text}");
-    assert_eq!(cause["criterion"].as_u64(), Some(1), "{text}");
-    assert_eq!(cause["requirement"]["check_kind"], "build", "{text}");
-    assert_eq!(cause["citation"], citation, "{text}");
+    assert_eq!(cause["kind"], "citation", "<refusal details withheld>");
+    assert_eq!(cause["mismatch"], mismatch, "<refusal details withheld>");
+    assert_eq!(cause["criterion"].as_u64(), Some(1), "<refusal details withheld>");
+    assert_eq!(cause["requirement"]["check_kind"], "build", "<refusal details withheld>");
+    assert_eq!(cause["citation"], citation, "<refusal details withheld>");
 }
 
 fn newest_build_record(
@@ -90,8 +86,8 @@ fn newest_build_record(
         .into_iter()
         .filter(|row| row["verification"]["check_kind"] == kind)
         .collect::<Vec<_>>();
-    assert_eq!(rows.len(), 1, "one store-minted {kind}: {shown:#}");
-    assert_eq!(rows[0]["verification"]["result"], result, "{shown:#}");
+    assert_eq!(rows.len(), 1, "one store-minted {kind}: <shown withheld>");
+    assert_eq!(rows[0]["verification"]["result"], result, "<shown withheld>");
     rows[0]["locator"].as_str().unwrap().to_owned()
 }
 
@@ -117,21 +113,21 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
         fixture.work(session, &["note", work, "Run the claimed Build in the named source", "--status", "--json"]);
         let source = content_revision(&fixture.root).unwrap().1;
         fixture.begin(session, "Run the actual Cargo build.");
-        let (body, receipt) = fixture.registered_check(session, &fixture.root, "cargo build --offline");
+        let (body, receipt) = fixture.historical_registered_check(session, &fixture.root, "cargo build --offline");
         let id = &receipt.verifications[0].record_id;
         let stored = fixture.object(id);
-        assert_eq!(stored["check_kind"], "build", "{stored:#}");
-        assert_eq!(stored["source_basis"]["source_root_generation"], named.generation, "{stored:#}");
+        assert_eq!(stored["check_kind"], "build", "<stored withheld>");
+        assert_eq!(stored["source_basis"]["source_root_generation"], named.generation, "<stored withheld>");
         assert_eq!(stored["source_basis"], serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap());
         assert_eq!(newest_build_record(&fixture, work, "build", if fails { "failed" } else { "passed" }), *id);
-        let EngramVerificationRecordInput::Commit { commit: revision } = &body.input else { panic!("the registered native witness requires committed input"); };
+        let EngramVerificationRecordInput::Commit { commit: revision } = &body.input else { panic!("historical evaluation witness requires its retained Commit record"); };
         let shown = fixture.work(session, &["show", work, "--json"]);
         let args = build_evaluation_args(work, &shown, id, revision);
         if fails {
             rejected_build_evaluation(&fixture, &args, id, "passed_verification_required");
         } else {
             let evaluated = fixture.work(session, &args.iter().map(String::as_str).collect::<Vec<_>>());
-            assert_eq!(evaluated["evaluation"]["passed"], 1, "{evaluated:#}");
+            assert_eq!(evaluated["evaluation"]["passed"], 1, "<evaluated withheld>");
             assert_eq!(evaluated["evaluation"]["verdicts_total"], 1);
             assert_eq!(evaluated["evaluation"]["verdicts_omitted"], 0);
             assert_eq!(evaluated["evaluation"]["source_fingerprint"], *revision);
@@ -144,7 +140,7 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
             finish_live_root(&fixture.live.state, session);
             fixture.wait_for_reports(session);
             fixture.begin(session, "Run a real Test as the wrong-kind control.");
-            let (_, receipt) = fixture.registered_check(session, &fixture.root, "cargo test --offline");
+            let (_, receipt) = fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
             let test = newest_build_record(&fixture, work, "test", "passed");
             assert_eq!(test, receipt.verifications[0].record_id);
             let shown = fixture.work(session, &["show", work, "--json"]);

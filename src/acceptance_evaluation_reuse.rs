@@ -182,6 +182,7 @@ impl AppState {
             acceptance_basis: old.acceptance_basis,
             evidence_basis: old.evidence_basis,
             source_fingerprint: old.source_fingerprint.clone(),
+            source_id: old.source_id.clone(),
             submission: old.submission.clone(),
             refusal: history.refusal.take(),
         });
