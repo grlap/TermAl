@@ -209,7 +209,7 @@ fn private_verification_pages_keep_large_complete_identities_and_pin_every_reque
             Some(expected.tree.as_str())
         );
         let (line, _) =
-            acceptance_brief_evidence_line(entry, false, AcceptanceJudgedSource::default());
+            acceptance_brief_evidence_line(entry, false, AcceptanceJudgedSource::default(), false);
         assert!(!line.contains("private-tree/") && !line.contains("private-path.txt"));
     }
     let requests = transport.requests.lock().unwrap();

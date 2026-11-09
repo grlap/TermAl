@@ -2316,9 +2316,18 @@ including an old record already fetched in the window. Optional index
 details shrink before window evidence is clipped or omitted, preserving newer
 failed checks. Canonical summaries are labeled host projections, not stored
 record bodies. Both responses (including the compact spawned result) carry `criterionEvidence`
-rows with `criterion`, full `locators` and `association`. Index bodies and then
-index detail can shrink before complete criteria are refused; each clipped or
-omitted body remains in `evidenceOmissions`. Captured notes-window omission
+rows with `criterion`, full `locators` and `association`. Only optional canonical
+index bodies and details can shrink before complete criteria are refused; each
+clipped or omitted body remains in `evidenceOmissions`. Explicitly selected
+records remain whole at every detail level, once per record even when also
+present in the notes window. Selected text keeps its original whitespace and
+line endings inside a fenced data block; that framing also counts toward the
+brief's byte limit. If the complete selected set cannot fit, the host
+refuses before evaluator creation and reports the selected UTF-8 body bytes,
+the smallest required brief size, the available byte budget and total brief
+limit. The caller can inspect the criteria and proof sizes before reducing
+either; the host never starts
+a judgment on silently reduced selected proof. Captured notes-window omission
 counts still describe that window and can overlap separately selected records.
 
 `independent_session` and `sub_agent` spawn an evaluator delegation and return

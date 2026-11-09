@@ -5,6 +5,9 @@ use super::*;
 #[path = "acceptance_selected_evidence_diagnostics.rs"]
 mod selected_evidence_diagnostics;
 
+#[path = "acceptance_selected_proof_budget.rs"]
+mod selected_proof_budget;
+
 // Compact continuations are generated from the producer's compact header and
 // window schema, rather than by cloning an initial show response.
 fn compact_notes_chain() -> (Value, Value, Value, Value) {
@@ -656,8 +659,8 @@ fn criterion_evidence_final_body_plan_recomputes_clips_and_omissions() {
             .count(),
         1
     );
-    // A later fitting candidate drops the index; it must forget the earlier
-    // complete body and report its omission once, while preserving newer proof.
+    // Optional index detail gives way, but validated selected proof stays whole
+    // and its earlier partial window copy cannot leave a false omission.
     let floor = render_acceptance_evaluator_brief_with_index_detail(
         &task,
         ".",
@@ -670,7 +673,7 @@ fn criterion_evidence_final_body_plan_recomputes_clips_and_omissions() {
         AcceptanceOmissionDetail::Minimal,
     );
     let fitted = build_acceptance_evaluator_brief(&task, ".", floor.prompt.len()).unwrap();
-    assert!(!fitted.prompt.contains("end-of-selected-proof"));
+    assert!(fitted.prompt.contains("end-of-selected-proof"));
     assert!(fitted.prompt.contains("A newer test failed"));
     assert!(!fitted.cuts.left_out.contains(&locator));
     assert_eq!(
@@ -680,13 +683,9 @@ fn criterion_evidence_final_body_plan_recomputes_clips_and_omissions() {
             .iter()
             .filter(|value| **value == locator)
             .count(),
-        1
+        0
     );
-    assert!(
-        fitted
-            .prompt
-            .contains("where a verdict depends on them, give insufficient-evidence")
-    );
+    assert_eq!(fitted.prompt.matches("end-of-selected-proof").count(), 1);
     assert!(!fitted.prompt.contains("criterionEvidence in the response"));
 }
 
@@ -1473,12 +1472,12 @@ fn criterion_evidence_request_discloses_unsupported_ordinary_closure_discovery()
 }
 
 #[test]
-fn criterion_evidence_large_index_keeps_newer_failed_window_body() {
+fn criterion_evidence_large_canonical_index_keeps_newer_failed_window_body() {
     let (show, full, _) = canonical_binding_receipts();
     let mut task = parse_acceptance_evaluation_task(show, full).unwrap();
     let current = "A newer failed check still needs assessment";
     task.evidence[0].summary = Some(current.to_owned());
-    // The request path may read sixteen older records of up to 16 KiB each.
+    // Canonical discovery may add many optional recorded-closure projections.
     let mut locators = Vec::new();
     for index in 0..16 {
         let locator = format!("{index:032x}");
@@ -1491,7 +1490,7 @@ fn criterion_evidence_large_index_keeps_newer_failed_window_body() {
     task.criterion_evidence.push(AcceptanceCriterionEvidence {
         criterion: 1,
         locators,
-        association: "requester".to_owned(),
+        association: "original obligation closure".to_owned(),
     });
     let brief = build_acceptance_evaluator_brief(&task, ".", 12_000).unwrap();
     assert!(

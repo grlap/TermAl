@@ -996,12 +996,24 @@ fn acceptance_prompt_with_obligations(
 }
 
 /// Where the host's `anchor` line starts: the last line that starts with it,
-/// since record text quoted earlier in the brief may contain the same phrase.
+/// outside verbatim proof blocks, which may contain the same phrase.
 fn acceptance_brief_anchor_offset(prompt: &str, anchor: &str) -> Option<usize> {
-    prompt
-        .rfind(&format!("\n{anchor}"))
-        .map(|newline| newline + 1)
-        .or_else(|| prompt.starts_with(anchor).then_some(0))
+    let (mut offset, mut found, mut fence) = (0, None, None);
+    for line in prompt.split_inclusive('\n') {
+        let text = line.trim_end_matches('\n');
+        let ticks = text.bytes().take_while(|byte| *byte == b'`').count();
+        if let Some(size) = fence {
+            if ticks == size && text.len() == size {
+                fence = None;
+            }
+        } else if ticks >= 3 && &text[ticks..] == "text" {
+            fence = Some(ticks);
+        } else if text.starts_with(anchor) {
+            found = Some(offset);
+        }
+        offset += line.len();
+    }
+    found
 }
 
 /// The line that names, in the brief, the records whose assessment it does
@@ -1014,7 +1026,11 @@ fn acceptance_obligation_names_line(
         .iter()
         .filter(|assessment| {
             !assessment.carried
-                && !prompt.contains(&acceptance_obligation_not_carried_line(assessment))
+                && acceptance_brief_anchor_offset(
+                    prompt,
+                    acceptance_obligation_not_carried_line(assessment).trim_end_matches('\n'),
+                )
+                .is_none()
         })
         .map(|assessment| assessment.locator.as_str())
         .collect::<Vec<_>>();
@@ -1042,14 +1058,16 @@ fn acceptance_brief_protected_rendering(
         .flat_map(|link| link.locators.iter().map(String::as_str))
         .collect();
     let start = task.evidence.len() - plan.shown;
+    let selected = acceptance_selected_proof_locators(task);
     let mut fully_rendered = BTreeSet::new();
     let mut lines = Vec::new();
     for (index, entry) in task.evidence.iter().enumerate() {
         let line = (index >= start).then(|| {
             let (line, clipped) = acceptance_brief_evidence_line(
                 entry,
-                index - start < plan.clipped,
+                index - start < plan.clipped && !selected.contains(entry.locator.as_str()),
                 task.judged_source(),
+                selected.contains(entry.locator.as_str()),
             );
             if !clipped && !entry.cut_by_tracker && entry.summary.is_some() {
                 fully_rendered.insert(entry.locator.clone());

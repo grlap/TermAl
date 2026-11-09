@@ -1261,6 +1261,7 @@ fn acceptance_brief_evidence_line(
     evidence: &AcceptanceEvaluationEvidence,
     clip: bool,
     judged: AcceptanceJudgedSource<'_>,
+    selected: bool,
 ) -> (String, bool) {
     let locator = acceptance_brief_text(&evidence.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS);
     let mut attribution = match evidence.verification.as_ref() {
@@ -1292,12 +1293,19 @@ fn acceptance_brief_evidence_line(
     let body = evidence
         .summary
         .as_deref()
-        .map(acceptance_brief_line)
-        .filter(|body| !body.is_empty());
+        .map(|body| {
+            if selected {
+                body.to_owned()
+            } else {
+                acceptance_brief_line(body)
+            }
+        })
+        .filter(|body| selected || !body.is_empty());
     let mut clipped = false;
     let mut text = match body {
         None if evidence.cut_by_tracker => "(body not shown)".to_owned(),
         None => "(empty)".to_owned(),
+        Some(body) if selected => acceptance_brief_verbatim_body(&body),
         Some(body) => match clip
             .then(|| acceptance_brief_clipped_body(&body, &locator))
             .flatten()
@@ -1737,8 +1745,8 @@ fn build_acceptance_evaluator_brief_with_command_form(
         }
     }
     let mut floor = usize::MAX;
-    // Optional indexed bodies give way before the chronological window.
-    // Selected old proof must not crowd out a newer failed check.
+    // Optional canonical projections give way before the chronological window.
+    // Explicit selected bodies remain whole at every detail level.
     for index_detail in [
         AcceptanceOmissionDetail::Full,
         AcceptanceOmissionDetail::Compact,
@@ -1876,9 +1884,14 @@ fn render_acceptance_evaluator_brief_with_index_detail(
     };
     let mut evidence = Vec::with_capacity(listed.len() + 1);
     let mut fully_rendered = BTreeSet::new();
+    let selected = acceptance_selected_proof_locators(task);
     for (index, entry) in listed.iter().enumerate() {
-        let (line, was_clipped) =
-            acceptance_brief_evidence_line(entry, index < clipped, task.judged_source());
+        let (line, was_clipped) = acceptance_brief_evidence_line(
+            entry,
+            index < clipped && !selected.contains(entry.locator.as_str()),
+            task.judged_source(),
+            selected.contains(entry.locator.as_str()),
+        );
         if was_clipped {
             cuts.clipped.push(locator_of(entry));
         }
@@ -2001,8 +2014,28 @@ fn acceptance_contract_too_large(
     smallest: usize,
     max_bytes: usize,
 ) -> ApiError {
+    let selected = acceptance_selected_proof_locators(task);
+    let selected_detail = if !selected.is_empty() {
+        let body_bytes: usize = selected
+            .iter()
+            .filter_map(|locator| {
+                task.indexed_evidence
+                    .iter()
+                    .chain(&task.evidence)
+                    .find(|entry| entry.locator.as_str() == *locator)
+                    .and_then(|entry| entry.summary.as_ref())
+                    .map(String::len)
+            })
+            .sum();
+        format!(
+            "; {} distinct selected records also require {body_bytes} UTF-8 body bytes. The complete criteria and selected proof must fit together (total brief limit {MAX_ACCEPTANCE_BRIEF_BYTES} bytes before reserved host framing). No evaluator was started; inspect the criteria and proof sizes before reducing either",
+            selected.len(),
+        )
+    } else {
+        String::new()
+    };
     ApiError::conflict(format!(
-        "`{}`: the acceptance contract is too large to brief an evaluator: its {} complete criteria take {} bytes, and with the host's instructions alone the brief is {smallest} bytes against a limit of {max_bytes}",
+        "`{}`: the acceptance contract is too large to brief an evaluator: its {} complete criteria take {} bytes, and the brief is {smallest} bytes against a limit of {max_bytes} after optional context has given way{selected_detail}",
         acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         task.criteria.len(),
         acceptance_brief_criteria(task).len(),

@@ -88,9 +88,10 @@ in Engram::Advisor's session, recorded verbatim):
 - Candidate commits (Greg, 2026-10-31: 'zatwierdzam opcje B', 'idzmy na
   prostsa opcja B / zatwierdzam'). So that focused checks, reviews and the
   full gate run on a clean commit, a writable session may commit its change
-  on its own feature branch or detached worktree, never on master and never
-  pushed. A candidate commit is not a landing and grants no push, install or
-  restart. The final full gate runs on a clean checkout of a single
+  on its own feature branch or detached worktree, never on master, and never
+  pushed except as an author test ref under the next bullet. A candidate
+  commit is not a landing and grants no other push, install or restart.
+  The final full gate runs on a clean checkout of a single
   candidate commit whose parent is the current master. The integration
   owner lands it only by fast-forwarding master to exactly that gated
   commit, when the standing rule's three conditions above hold. If master has
@@ -117,10 +118,37 @@ in Engram::Advisor's session, recorded verbatim):
   new candidate is committed on a new branch or a detached HEAD at the
   current master, and the earlier candidate is left as it is. The
   staged-tree lane remains available.
+- Author test refs (Greg, 2026-11-09, relayed by Engram::Asistant in TermAl
+  mailbox 588693a8 #1187: 'prosze zapisac to jako skille i instrukcje w
+  pamieci / ja nie widze innego sensu', answering his question in #1183, 'nie
+  rozumiem, czemu po prostu nie wysylamy brancha ?', and the proposal relayed
+  to him in #1184 that coders push their own candidate commits to test
+  branches on origin, so that remote runners test the exact commit). So that a
+  remote runner tests the exact commit at any stage, the session that wrote a
+  candidate commit may push exactly that commit to origin as
+  `refs/heads/author-test/<item>-<commit8>`, where `<item>` is the item's short
+  work ref and `<commit8>` is the first eight hex digits of the commit id, with
+  the explicit refspec `<commit>:refs/heads/author-test/<item>-<commit8>`:
+  never master or another branch, another remote, a force-push, rebase or
+  merge. The push only creates that ref: the pusher first confirms it is absent
+  on origin and never updates an existing ref. The candidate's parent must
+  already be on origin, so that the push publishes no other commit. No review
+  is needed first. The repository is public and a pushed ref is visible to
+  anyone, so before pushing, the pusher confirms the whole candidate is safe to
+  publish and carries no secret. The runner fetches the ref into its own clone,
+  checks the commit out in a fresh worktree whose index and tracked files equal
+  that commit and which holds no untracked files, and confirms that the commit
+  it ran is the one the request names. A run on an author test ref is evidence
+  only; it is not a landing gate, and landing is unchanged. The pusher deletes
+  only that same ref, with an explicit refspec, once the run's evidence is
+  recorded, and at the latest when the item closes, and records the push and
+  the deletion (commit id, times) on the item. This grants no other commit,
+  push, install or restart.
 - A commit in a feature branch or detached worktree is not yet on `master`.
   Hand its hash and exact-input gate, review and task evidence to the
   integration owner; do not run `git push origin master` from that worktree.
-- Only the integration owner performs pushes under this rule. Every other
+- Apart from author test refs, only the integration owner performs
+  pushes under this rule. Every other
   committing session, including one committing directly on master, sends
   the commit hash and exact-input gate, review and task evidence to that
   owner by TermAl mailbox.
@@ -159,10 +187,11 @@ in Engram::Advisor's session, recorded verbatim):
   widening, verbatim with its source, by any route; recording his words,
   narrowing, or clarifying needs only (a), (b) and (c). No other approval
   is asked.
-- Outside the standing rule's three conditions above and the
-  candidate-commits bullet, a commit or push needs Greg's own word in the
-  acting session. Outside this standing rule and the candidate-commits
-  bullet, a word relayed by another session never carries a commit or push.
+- Outside the standing rule's three conditions above, the
+  candidate-commits bullet and the author test refs bullet, a commit or
+  push needs Greg's own word in the acting session. Outside this standing
+  rule, the candidate-commits bullet and the author test refs bullet, a
+  word relayed by another session never carries a commit or push.
   This rule grants no restart, deploy or global-configuration authority; those
   acts are Greg's and need his explicit word. The moment of a TermAl
   restart is the agents' decision (Greg, 2026-10-02: 'Wolę aby agenci

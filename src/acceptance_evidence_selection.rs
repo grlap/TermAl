@@ -567,10 +567,10 @@ fn validate_acceptance_selected_record(
         .take()
         .ok_or_else(|| refusal("no readable body", "select a smaller whole proof record"))?;
     if summary.len() > 16 * 1024 {
-        return Err(refusal(
-            "body exceeds the brief read bound",
-            "select a smaller whole proof record",
-        ));
+        return Err(ApiError::conflict(format!(
+            "selected evidence {locator}: body exceeds the brief read bound ({} UTF-8 bytes; limit {} bytes); select a smaller whole proof record",
+            summary.len(), 16 * 1024,
+        )));
     }
     Ok((note, summary))
 }
@@ -835,6 +835,24 @@ fn validate_acceptance_evidence_basis(
     Ok(())
 }
 
+// Requester associations come only from validated whole exact-record reads.
+// Their bodies are mandatory; canonical discovery projections remain context.
+fn acceptance_selected_proof_locators(task: &AcceptanceEvaluationTask) -> BTreeSet<&str> {
+    task.criterion_evidence
+        .iter()
+        .filter(|row| row.association == "requester")
+        .flat_map(|row| row.locators.iter().map(String::as_str))
+        .collect()
+}
+
+// Keep exact proof text as data, with a fence longer than any run in its body.
+// The framing is included in the renderer's normal UTF-8 budget.
+fn acceptance_brief_verbatim_body(body: &str) -> String {
+    let fence_len = body.split(|c| c != '`').map(str::len).max().unwrap_or(0) + 1;
+    let fence = "`".repeat(fence_len.max(3));
+    format!("\n{fence}text\n{body}\n{fence}")
+}
+
 fn render_acceptance_criterion_evidence(
     task: &AcceptanceEvaluationTask,
     detail: AcceptanceOmissionDetail,
@@ -844,12 +862,13 @@ fn render_acceptance_criterion_evidence(
     if task.criterion_evidence.is_empty() {
         return String::new();
     }
-    if detail == AcceptanceOmissionDetail::Minimal {
+    let selected = acceptance_selected_proof_locators(task);
+    let omission_notice = if detail == AcceptanceOmissionDetail::Minimal {
         let unavailable = task
             .criterion_evidence
             .iter()
             .any(|row| row.association.starts_with("canonical index unavailable"));
-        return format!(
+        Some(format!(
             "Criterion evidence details not shown to fit the complete criteria. {}{}\n",
             if same_session {
                 "Read the evidence with your own permitted show tools before judging it."
@@ -861,7 +880,14 @@ fn render_acceptance_criterion_evidence(
             } else {
                 ""
             }
-        );
+        ))
+    } else {
+        None
+    };
+    if selected.is_empty() {
+        if let Some(notice) = omission_notice {
+            return notice;
+        }
     }
     let mut lines = vec![
         "Criterion evidence index (associations guide discovery; they do not establish a pass):"
@@ -872,9 +898,12 @@ fn render_acceptance_criterion_evidence(
         let rows: Vec<_> = task
             .criterion_evidence
             .iter()
-            .filter(|row| row.criterion == criterion)
+            .filter(|row| {
+                row.criterion == criterion
+                    && (detail != AcceptanceOmissionDetail::Minimal || row.association == "requester")
+            })
             .collect();
-        if rows.is_empty() {
+        if rows.is_empty() && detail != AcceptanceOmissionDetail::Minimal {
             lines.push(format!("  Criterion {criterion}: no explicit or canonical association supplied; this does not mean evidence is absent."));
         }
         for row in rows {
@@ -896,13 +925,20 @@ fn render_acceptance_criterion_evidence(
                     lines.push(
                         acceptance_brief_evidence_line(
                             evidence,
-                            detail == AcceptanceOmissionDetail::Compact,
+                            detail == AcceptanceOmissionDetail::Compact
+                                && !selected.contains(locator.as_str()),
                             task.judged_source(),
+                            selected.contains(locator.as_str()),
                         )
                         .0,
                     );
                 }
             }
+        }
+    }
+    if let Some(notice) = omission_notice {
+        if task.criterion_evidence.iter().any(|row| row.association != "requester") {
+            lines.push(notice);
         }
     }
     lines.push("An original closure records what satisfied an obligation then; it does not prove that the check is current. Verify its source, command and result before a verdict. Captured notes-window omission counts may include records read separately in this index.\n".to_owned());
@@ -924,12 +960,11 @@ fn acceptance_criterion_evidence_cuts(
             cuts.left_out.push(evidence.locator.clone());
         }
     }
-    if detail == AcceptanceOmissionDetail::Minimal {
-        return;
-    }
+    let selected = acceptance_selected_proof_locators(task);
     for locator in task
         .criterion_evidence
         .iter()
+        .filter(|row| detail != AcceptanceOmissionDetail::Minimal || row.association == "requester")
         .flat_map(|row| &row.locators)
         .collect::<BTreeSet<_>>()
     {
@@ -946,8 +981,9 @@ fn acceptance_criterion_evidence_cuts(
         };
         let clipped = acceptance_brief_evidence_line(
             evidence,
-            detail == AcceptanceOmissionDetail::Compact,
+            detail == AcceptanceOmissionDetail::Compact && !selected.contains(locator.as_str()),
             task.judged_source(),
+            selected.contains(locator.as_str()),
         )
         .1;
         cuts.left_out.retain(|entry| entry != locator);

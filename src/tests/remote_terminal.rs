@@ -998,8 +998,7 @@ async fn interruptible_remote_stream_reader_rejects_queued_bytes_after_endpoint_
 
     send_terminal_stream_result(&event_tx, Err(error)).await;
     match event_rx
-        .recv()
-        .await
+        .try_recv()
         .expect("terminal error event should emit")
     {
         TerminalCommandStreamEvent::Error { error, status } => {
@@ -1085,8 +1084,7 @@ async fn terminal_stream_error_event_preserves_unknown_remote_status_after_remov
 
     send_terminal_stream_result(&event_tx, Err(error)).await;
     match event_rx
-        .recv()
-        .await
+        .try_recv()
         .expect("terminal error event should emit")
     {
         TerminalCommandStreamEvent::Error { error, status } => {
@@ -1278,11 +1276,7 @@ async fn remote_terminal_frame_dispatch_rechecks_authority_during_backpressure()
     forwarder.join().expect("forwarder should exit cleanly");
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
-    match event_rx
-        .recv()
-        .await
-        .expect("sentinel should remain queued")
-    {
+    match event_rx.try_recv().expect("sentinel should remain queued") {
         TerminalCommandStreamEvent::Error { error, status } => {
             assert_eq!(error, "sentinel");
             assert_eq!(status, StatusCode::IM_A_TEAPOT.as_u16());
