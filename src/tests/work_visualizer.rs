@@ -4,7 +4,14 @@
 use super::*;
 
 #[test]
-fn work_list_requests_two_hundred_rows_of_all_lifecycles_and_forwards_the_cursor() {
+fn work_list_uses_machine_pages_and_larger_continuations_with_the_same_filters() {
+    let first = WorkListQuery::default().arguments();
+    assert!(first.windows(2).any(|pair| pair == ["--limit", "200"]));
+    assert!(
+        first
+            .windows(2)
+            .any(|pair| pair == ["--page-bytes", "1048576"])
+    );
     let query = WorkListQuery {
         after: Some("opaque-cursor".to_owned()),
         reader_id: Some("host-reader".to_owned()),
@@ -18,7 +25,9 @@ fn work_list_requests_two_hundred_rows_of_all_lifecycles_and_forwards_the_cursor
             "--verbose",
             "--json",
             "--limit",
-            "200",
+            "1000",
+            "--page-bytes",
+            "1048576",
             "--after=opaque-cursor"
         ]
     );
@@ -32,6 +41,67 @@ fn host_reader_key(state: &AppState, project: &str) -> String {
         .1
         .unwrap()
         .reader_key
+}
+
+#[test]
+fn work_host_reads_large_machine_pages_without_forwarding_unused_verbose_fields() {
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let reader = host_reader_key(&state, &project);
+    for (start, end, limit) in [(0, 200, "200"), (200, 1000, "1000")] {
+        let items: Vec<_> = (start..end)
+            .map(|index| {
+                let mut row = listing()["items"][0].clone();
+                row["work"]["work_id"] = json!(format!("fixture-{index}"));
+                row["work"]["short_ref"] = json!(format!("fixture-ref-{index}"));
+                row["work"]["outcome"] = json!("unused verbose outcome ".repeat(20));
+                row
+            })
+            .collect();
+        let bytes = serde_json::to_vec(&json!({"items":items,"total":1000,
+            "shown_before":start,"more":end < 1000,
+            "after":if end < 1000 { Some("next-page") } else { None }}))
+        .unwrap();
+        assert!(bytes.len() > 12 * 1024 && bytes.len() < 1024 * 1024);
+        fs::write(root.join("work-read-page.json"), bytes).unwrap();
+        let response = state
+            .list_project_work(
+                &project,
+                WorkListQuery {
+                    search: Some("fixture".into()),
+                    after: (start > 0).then(|| "next-page".into()),
+                    reader_id: (start > 0).then(|| reader.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(response.reader_id.as_deref(), Some(reader.as_str()));
+        let page = response.page.unwrap();
+        assert_eq!(page.items.len(), end - start);
+        assert_eq!(page.shown_before, start);
+        assert_eq!(page.total, 1000);
+        assert_eq!(page.more, end < 1000);
+        assert_eq!(
+            page.after.as_deref(),
+            if end < 1000 { Some("next-page") } else { None }
+        );
+        let wire = serde_json::to_value(page).unwrap();
+        assert!(
+            wire["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row.get("outcome").is_none())
+        );
+        let argv = fs::read_to_string(root.join("work-read-args.txt")).unwrap();
+        let argv: Vec<_> = argv.lines().collect();
+        assert!(
+            argv.windows(2)
+                .any(|pair| pair == ["--page-bytes", "1048576"])
+        );
+        assert!(argv.windows(2).any(|pair| pair == ["--limit", limit]));
+        assert!(argv.contains(&"--search=fixture"));
+    }
 }
 
 #[tokio::test]

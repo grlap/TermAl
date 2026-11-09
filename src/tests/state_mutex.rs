@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Instant;
 
 #[test]
 fn state_mutex_owner_probe_rejects_the_current_thread_only() {
@@ -36,49 +37,52 @@ fn state_mutex_wait_diagnostic_is_reported_before_the_waiting_guard_drops() {
         reporter,
     ));
     let first_guard = state.lock().expect("first state lock should succeed");
-    let initial_wait = diagnostic_receiver
-        .recv()
-        .expect("initial wait diagnostic should be emitted");
+    let initial_wait =
+        phase_sync::receive(&diagnostic_receiver, "initial state-lock wait diagnostic");
     assert_wait_diagnostic(initial_wait);
 
-    let (acquired_sender, acquired_receiver) = std::sync::mpsc::channel();
-    let (release_sender, release_receiver) = std::sync::mpsc::channel();
-    let waiting_state = Arc::clone(&state);
-    let waiter = std::thread::spawn(move || {
-        let waiting_guard = waiting_state
-            .lock()
-            .expect("waiting state lock should succeed");
-        acquired_sender
+    std::thread::scope(|scope| {
+        let (acquired_sender, acquired_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let waiting_state = Arc::clone(&state);
+        let waiter = scope.spawn(move || {
+            let waiting_guard = waiting_state
+                .lock()
+                .expect("waiting state lock should succeed");
+            acquired_sender
+                .send(())
+                .expect("acquisition receiver should remain connected");
+            release_receiver
+                .recv()
+                .expect("release sender should remain connected");
+            drop(waiting_guard);
+        });
+
+        drop(first_guard);
+        phase_sync::receive(&acquired_receiver, "waiting guard acquired the state lock");
+        let diagnostic_deadline = Instant::now() + phase_sync::DEADLOCK_GUARD;
+        let wait_diagnostic = loop {
+            let remaining = diagnostic_deadline
+                .checked_duration_since(Instant::now())
+                .expect("waiting state-lock diagnostic exceeded the fixture deadlock guard");
+            let diagnostic = diagnostic_receiver
+                .recv_timeout(remaining)
+                .expect("waiting state-lock diagnostic did not arrive before the fixture deadlock guard");
+            if matches!(diagnostic, StateMutexDiagnostic::Waited { .. }) {
+                break diagnostic;
+            }
+        };
+        assert_wait_diagnostic(wait_diagnostic);
+        assert!(
+            state.inner.try_lock().is_err(),
+            "waiter must still own the guard"
+        );
+
+        release_sender
             .send(())
-            .expect("acquisition receiver should remain connected");
-        release_receiver
-            .recv()
-            .expect("release sender should remain connected");
-        drop(waiting_guard);
+            .expect("waiting thread should remain connected");
+        waiter.join().expect("waiting thread should finish");
     });
-
-    drop(first_guard);
-    acquired_receiver
-        .recv()
-        .expect("waiting guard should acquire the state lock");
-    let wait_diagnostic = loop {
-        let diagnostic = diagnostic_receiver
-            .recv()
-            .expect("waiting diagnostic should be emitted");
-        if matches!(diagnostic, StateMutexDiagnostic::Waited { .. }) {
-            break diagnostic;
-        }
-    };
-    assert_wait_diagnostic(wait_diagnostic);
-    assert!(
-        state.inner.try_lock().is_err(),
-        "waiter must still own the guard"
-    );
-
-    release_sender
-        .send(())
-        .expect("waiting thread should remain connected");
-    waiter.join().expect("waiting thread should finish");
 }
 
 #[test]

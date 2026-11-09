@@ -1,13 +1,10 @@
-// Work presentation predicates over retained list rows. These fields never
-// become list query parameters or cause detail/notes reads.
+// Local presentation predicates over retained list rows. Catalog search is
+// owned by the list query; these filters cause no list or detail/notes reads.
 import type { Project } from "../types";
 import type { WorkFilters, WorkItem } from "../work-visualizer-api";
 
-export function matchesWorkDisplayFilters(row: WorkItem, filters: WorkFilters) {
-  const search = filters.search.trim().toLocaleLowerCase();
-  return (!search || [row.id, row.shortRef, row.title, ...row.labels, row.assignedTo ?? ""]
-    .some(value => value.toLocaleLowerCase().includes(search)))
-    && (!filters.label || row.labels.includes(filters.label))
+export function matchesWorkDisplayFilters(row: WorkItem, filters: Omit<WorkFilters, "search">) {
+  return (!filters.label || row.labels.includes(filters.label))
     && (!filters.availability || (row.lifecycle === "open" && row.availability === filters.availability));
 }
 

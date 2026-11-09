@@ -32,6 +32,9 @@ mod selection_edges;
 #[path = "acceptance_committed_source_owner.rs"]
 mod source_owner;
 
+#[path = "acceptance_committed_input_unheld.rs"]
+mod unheld;
+
 /// The run every case registers.
 const COMMITTED_RUN_ID: &str = "test-committed-input-admission";
 

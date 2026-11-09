@@ -58,9 +58,7 @@ describe("Work retained snapshot filters", () => {
     change("Label (loaded rows)", "other"); apply(); expect(row("beta")).toBeInTheDocument(); expect(row("alpha")).toBeNull();
     change("Label (loaded rows)", ""); change("Availability", "ready"); apply();
     expect(row("alpha")).toBeInTheDocument(); expect(row("beta")).toBeNull();
-    change("Availability", ""); change("Search", "BETA"); apply();
-    expect(row("beta")).toBeInTheDocument(); expect(row("alpha")).toBeNull();
-    change("Search", ""); apply(); change("Sort (loaded rows)", "title");
+    change("Availability", ""); apply(); change("Sort (loaded rows)", "title");
     fireEvent.click(screen.getByRole("button", { name: "Ascending" }));
     fireEvent.click(screen.getByRole("button", { name: "Table" }));
     fireEvent.click(screen.getByRole("button", { name: "Priority" }));
@@ -72,16 +70,18 @@ describe("Work retained snapshot filters", () => {
     expect(readProjectWork).toHaveBeenCalledWith("one", { search: "", label: "", availability: "" }, expect.any(AbortSignal), undefined);
   });
 
-  it.each(["uuid-token", "short-token", "title-token", "label-token", "owner-token"])("searches retained %s case-insensitively", async query => {
+  it.each(["short-token", "title-token", "label-token", "note-only-token"])("forwards full-catalog %s search and shows its source-selected rows", async query => {
     const matching = item("uuid-token", { shortRef: "short-token", title: "Title-token", labels: ["Label-token"], assignedTo: "Owner-token" });
-    vi.mocked(readProjectWork).mockResolvedValue(page([matching, item("other")]));
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page([matching, item("other")]))
+      .mockResolvedValueOnce(page([matching]));
     mount(); await screen.findByRole("button", { name: "short-token — Title-token" });
     change("Search", query.toUpperCase()); apply();
-    expect(screen.getByRole("button", { name: "short-token — Title-token" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "short-token — Title-token" })).toBeInTheDocument();
     expect(row("other")).toBeNull();
-    expect(readProjectWork).toHaveBeenCalledTimes(1);
+    expect(readProjectWork).toHaveBeenCalledTimes(2);
+    expect(readProjectWork).toHaveBeenLastCalledWith("one", { search: query.toUpperCase(), label: "", availability: "" }, expect.any(AbortSignal), undefined);
     expect(readWorkDetail).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Search")).toHaveAccessibleDescription(/does not search notes, gates or outcomes/);
+    expect(screen.getByLabelText("Search")).toHaveAccessibleDescription(/across the full Engram catalog/);
   });
 
   it("matches labels exactly and availability only on open rows", async () => {
@@ -100,7 +100,7 @@ describe("Work retained snapshot filters", () => {
     fireEvent.click(initial); await screen.findByRole("complementary");
     const viewport = screen.getByRole("region", { name: "Work list" });
     viewport.scrollTop = 123; fireEvent.scroll(viewport);
-    change("Search", "alpha"); apply();
+    change("Label (loaded rows)", "topic"); apply();
     expect(row("alpha")).toBe(initial); expect(row("beta")).toBeNull();
     expect(screen.getByRole("complementary")).toBeInTheDocument(); expect(viewport.scrollTop).toBe(123);
     change("Sort (loaded rows)", "title");
@@ -115,18 +115,18 @@ describe("Work retained snapshot filters", () => {
       }
     }
     expect(readProjectWork).toHaveBeenCalledTimes(1);
-    change("Search", "beta"); apply();
+    change("Label (loaded rows)", "other"); apply();
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
   it("filters loaded rows while a continuation is pending without aborting or duplicating it", async () => {
     const next = deferred<WorkListResponse>();
-    vi.mocked(readProjectWork).mockResolvedValueOnce(page([item("alpha"), item("beta")], { total: 3, more: true, after: "next" }))
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page([item("alpha"), item("beta", { labels: ["other"] })], { total: 3, more: true, after: "next" }))
       .mockReturnValueOnce(next.promise);
     mount(); await screen.findByRole("button", { name: "alpha — Title alpha" });
     expect(readProjectWork).toHaveBeenCalledTimes(2);
     const signal = vi.mocked(readProjectWork).mock.calls[1][2];
-    change("Search", "alpha"); apply();
+    change("Label (loaded rows)", "topic"); apply();
     expect(signal.aborted).toBe(false); expect(readProjectWork).toHaveBeenCalledTimes(2);
     expect(row("alpha")).toBeInTheDocument(); expect(row("beta")).toBeNull();
     await act(async () => next.resolve(page([item("alpha-later")], { total: 3, shownBefore: 2 })));
@@ -176,7 +176,7 @@ describe("Work retained snapshot filters", () => {
     expect(vi.mocked(readProjectWork).mock.calls.every(call => call[3] === undefined)).toBe(true);
   });
 
-  it.each(["initial 409", "continuation 409", "generation mismatch"])("recovers %s only through one explicit Refresh", async failure => {
+  it.each(["initial 409", "continuation 409", "generation mismatch"])("keeps %s across local filters until one explicit Refresh", async failure => {
     const invalid = new ApiRequestError("request-failed", "work_catalog_cursor_invalid", { status: 409 });
     if (failure === "initial 409") vi.mocked(readProjectWork).mockRejectedValueOnce(invalid);
     else {
@@ -187,12 +187,93 @@ describe("Work retained snapshot filters", () => {
     vi.mocked(readProjectWork).mockResolvedValueOnce(page([item("fresh")]));
     mount(); await screen.findByRole("alert");
     const failedCount = failure === "initial 409" ? 1 : 2;
-    change("Search", "fresh"); apply(); await flush();
+    change("Label (loaded rows)", "topic"); apply(); await flush();
     expect(readProjectWork).toHaveBeenCalledTimes(failedCount); expect(row("old")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Refresh work" }));
     await screen.findByRole("button", { name: "fresh — Title fresh" });
     expect(readProjectWork).toHaveBeenCalledTimes(failedCount + 1);
     expect(vi.mocked(readProjectWork).mock.lastCall?.[3]).toBeUndefined();
     expect(within(screen.getByRole("region", { name: "Work list" })).queryByText(/old/)).toBeNull();
+  });
+
+  it("identifies an empty search result without calling the project empty", async () => {
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page()).mockResolvedValueOnce(page([]));
+    mount(); await screen.findByRole("button", { name: "alpha — Title alpha" });
+    change("Search", "missing words"); apply();
+    expect(await screen.findByText('No work items match "missing words".')).toBeInTheDocument();
+    expect(screen.getByText(/0 of 0 Engram items loaded matching the search; 0 visible/)).toBeInTheDocument();
+    expect(screen.queryByText("No work items in this snapshot.")).not.toBeInTheDocument();
+  });
+
+  it.each(["uuid-token", "owner-token"])("does not invent %s matches when an older Engram search returns none", async query => {
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page([item("uuid-token", { assignedTo: "owner-token" })]))
+      .mockResolvedValueOnce(page([]));
+    mount(); await screen.findByRole("button", { name: "uuid-token — Title uuid-token" });
+    change("Search", query); apply();
+    await screen.findByText(`No work items match "${query}".`);
+    expect(row("uuid-token")).toBeNull();
+    expect(readProjectWork).toHaveBeenLastCalledWith("one", { search: query, label: "", availability: "" }, expect.any(AbortSignal), undefined);
+    expect(screen.getByLabelText("Search")).toHaveAccessibleDescription(/Full UUID and assignee matching requires support/);
+  });
+
+  it.each(["search", "Refresh"])("discards details and the old scroll offset when %s replaces the snapshot", async replacement => {
+    const next = deferred<WorkListResponse>();
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page()).mockReturnValueOnce(next.promise);
+    mount(); fireEvent.click(await screen.findByRole("button", { name: "alpha — Title alpha" }));
+    await screen.findByRole("complementary");
+    const oldViewport = screen.getByRole("region", { name: "Work list" });
+    oldViewport.scrollTop = 300; fireEvent.scroll(oldViewport);
+    if (replacement === "search") { change("Search", "recorded text"); apply(); }
+    else fireEvent.click(screen.getByRole("button", { name: "Refresh work" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    await act(async () => next.resolve(page()));
+    expect(row("alpha")).toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    const viewport = screen.getByRole("region", { name: "Work list" });
+    expect(viewport).not.toBe(oldViewport); expect(viewport.scrollTop).toBe(0);
+    change("Kind (loaded rows)", "task"); expect(viewport.scrollTop).toBe(0);
+    change("Sort (loaded rows)", "title"); expect(viewport.scrollTop).toBe(0);
+    for (const name of ["Memories", "Dependencies"]) fireEvent.click(screen.getByRole("button", { name }));
+    expect(viewport.scrollTop).toBe(0); expect(readWorkDetail).toHaveBeenCalledTimes(1);
+    expect(readProjectWork).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["source error", "stale catalog"])("starts a clean searched generation after a %s and clearing it restores the full query", async failure => {
+    const next = deferred<WorkListResponse>();
+    vi.mocked(readProjectWork).mockRejectedValueOnce(failure === "source error" ? new Error("Offline")
+      : new ApiRequestError("request-failed", "work_catalog_cursor_invalid", { status: 409 }))
+      .mockReturnValueOnce(next.promise).mockResolvedValueOnce(page());
+    mount(); await screen.findByRole("alert");
+    change("Search", "source match"); apply();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Use Refresh work for a new snapshot.")).not.toBeInTheDocument();
+    expect(readProjectWork).toHaveBeenLastCalledWith("one", { search: "source match", label: "", availability: "" }, expect.any(AbortSignal), undefined);
+    await act(async () => next.resolve(page([item("matched")])));
+    expect(row("matched")).toBeInTheDocument();
+    change("Search", ""); apply();
+    await screen.findByRole("button", { name: "alpha — Title alpha" });
+    expect(row("matched")).toBeNull(); expect(readProjectWork).toHaveBeenCalledTimes(3);
+    expect(readProjectWork).toHaveBeenLastCalledWith("one", { search: "", label: "", availability: "" }, expect.any(AbortSignal), undefined);
+    expect(screen.queryByText(/Engram items loaded matching the search/)).not.toBeInTheDocument();
+  });
+
+  it.each(["409", "zero progress"])("stops a searched continuation on %s and clears it for a new query", async failure => {
+    const firstSearch = page([item("matched")], { total: 2, more: true, after: "search-next" });
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page()).mockResolvedValueOnce(firstSearch);
+    if (failure === "409") vi.mocked(readProjectWork).mockRejectedValueOnce(
+      new ApiRequestError("request-failed", "work_catalog_cursor_invalid", { status: 409 }));
+    else vi.mocked(readProjectWork).mockResolvedValueOnce(page([], { total: 2, shownBefore: 1, more: true, after: "search-next" }));
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page([item("fresh")]));
+    mount(); await screen.findByRole("button", { name: "alpha — Title alpha" });
+    change("Search", "first query"); apply(); await screen.findByRole("alert");
+    expect(readProjectWork).toHaveBeenCalledTimes(3);
+    expect(readProjectWork).toHaveBeenNthCalledWith(3, "one", { search: "first query", label: "", availability: "" },
+      expect.any(AbortSignal), { after: "search-next", readerId: "reader" });
+    expect(row("matched") !== null).toBe(failure === "zero progress");
+    await flush(); expect(readProjectWork).toHaveBeenCalledTimes(3);
+    change("Search", "second query"); apply(); await screen.findByRole("button", { name: "fresh — Title fresh" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument(); expect(row("matched")).toBeNull();
+    expect(readProjectWork).toHaveBeenCalledTimes(4);
+    expect(readProjectWork).toHaveBeenLastCalledWith("one", { search: "second query", label: "", availability: "" }, expect.any(AbortSignal), undefined);
   });
 });

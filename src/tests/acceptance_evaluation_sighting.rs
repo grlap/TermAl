@@ -12,6 +12,9 @@ use super::*;
 #[path = "acceptance_evaluation_committed_input.rs"]
 mod committed_input;
 
+#[path = "acceptance_evaluation_successor.rs"]
+mod successor;
+
 const SIGHTED_WORK_ID: &str = "01a0b6c5-4b4f-7b41-9e32-edc597077acf";
 
 /// A parent session bound to the claim that named a worktree as the work's

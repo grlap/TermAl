@@ -198,19 +198,48 @@ describe("Work serial paging", () => {
     expect(readProjectWork).toHaveBeenCalledTimes(60);
   });
 
-  it.each(["Search", "Label (loaded rows)", "Availability"])("keeps the pending continuation across %s changes", async name => {
+  it.each(["Label (loaded rows)", "Availability"])("keeps the pending continuation across %s changes", async name => {
     const next = deferred<WorkListResponse>();
     vi.mocked(readProjectWork).mockResolvedValueOnce(page()).mockReturnValueOnce(next.promise);
     mount(); await loaded(20);
     const signal = vi.mocked(readProjectWork).mock.calls[1][2];
-    fireEvent.change(screen.getByLabelText(name), { target: { value: name === "Availability" ? "ready" : name === "Search" ? "Task 2" : "topic" } });
+    fireEvent.change(screen.getByLabelText(name), { target: { value: name === "Availability" ? "ready" : "topic" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(signal.aborted).toBe(false);
     expect(readProjectWork).toHaveBeenCalledTimes(2);
     await act(async () => next.resolve(page(20)));
     await loaded(40);
     expect(screen.getByRole("button", { name: "item-20 — Task 20" })).toBeInTheDocument();
-    if (name === "Search") expect(screen.queryByRole("button", { name: "item-0 — Task 0" })).not.toBeInTheDocument();
     expect(readProjectWork).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces a pending catalog query on submitted search and ignores its late continuation", async () => {
+    const oldNext = deferred<WorkListResponse>(), searchFirst = deferred<WorkListResponse>();
+    const searchNext = deferred<WorkListResponse>();
+    vi.mocked(readProjectWork).mockResolvedValueOnce(page())
+      .mockReturnValueOnce(oldNext.promise).mockReturnValueOnce(searchFirst.promise)
+      .mockReturnValueOnce(searchNext.promise);
+    mount(); await loaded(20);
+    const oldSignal = vi.mocked(readProjectWork).mock.calls[1][2];
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "  note-only match  " } });
+    expect(readProjectWork).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(oldSignal.aborted).toBe(true);
+    expect(readProjectWork).toHaveBeenNthCalledWith(3, "project",
+      { search: "note-only match", label: "", availability: "" }, expect.any(AbortSignal), undefined);
+    expect(screen.queryByRole("button", { name: "item-0 — Task 0" })).not.toBeInTheDocument();
+    await act(async () => oldNext.resolve(page(20)));
+    expect(screen.queryByRole("button", { name: "item-20 — Task 20" })).not.toBeInTheDocument();
+    await act(async () => searchFirst.resolve(page(0, 40, "matched-")));
+    // Neither metadata contains the search: Engram may have matched a note.
+    expect(screen.getByRole("button", { name: "matched-0 — Task 0" })).toBeInTheDocument();
+    expect(screen.getByText(/20 of 40 Engram items loaded matching the search/)).toBeInTheDocument();
+    expect(readProjectWork).toHaveBeenNthCalledWith(4, "project",
+      { search: "note-only match", label: "", availability: "" }, expect.any(AbortSignal),
+      { after: "c20", readerId: "reader" });
+    await act(async () => searchNext.resolve(page(20, 40, "matched-")));
+    expect(screen.getByText(/40 of 40 Engram items loaded matching the search/)).toBeInTheDocument();
+    expect(screen.getByText("End of work list.")).toBeInTheDocument();
+    expect(readProjectWork).toHaveBeenCalledTimes(4);
   });
 });

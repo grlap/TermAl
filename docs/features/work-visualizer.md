@@ -26,7 +26,8 @@ single-state model and its assumptions about holder identities and zero writes.
 The implemented scope is 1a, the tree half of 1b and retained project memories, all with **explicit refresh**, not a live activity subscription. Project
 and source configuration changes start fresh reads; source markers and integration
 settings are rechecked on every read. Display filters and sorting reuse the
-retained full-set snapshot, including across a trip to Memories and back. Refresh
+retained query snapshot, including across a trip to Memories and back. A submitted
+catalog search starts a fresh query; changing local display filters does not. Refresh
 or recovery from a changed list starts a new snapshot. Automatic refresh on file/activity
 changes, the decision/live-holder badge, Response Board pins, holder-to-session
 navigation remain follow-ups. The Memories view reads retained project memories
@@ -98,12 +99,20 @@ Paging adds rows and label options without restarting when a filter changes.
 Empty labels, if emitted, are displayed explicitly as `(empty label)`, not
 regarded as Unlabelled.
 
-All task filters and sorting apply to retained rows only and issue no list read.
-Search is a case-insensitive substring match within each loaded ID, reference,
-title, label or assignment. It does not search note, gate or outcome text, unlike
-Engram's server-side search. Search, exact label and availability apply on
+Search is sent to Engram's full-catalog search for refs, titles, outcomes, labels
+and recorded text, rather than matching only loaded rows. Full work UUID and
+assignee matching depends on support in the configured Engram version; older
+versions may return no matches for these fields. Use a short ref to locate work
+on those versions. A new submitted
+search cancels the previous query and discards its pages and details; a late old
+response cannot join the new result. Search results retain source matches in notes
+or outcomes even when the displayed title contains no match. All other task filters
+and sorting apply to retained result rows only and issue no list read. Search,
+exact label and availability apply on
 **Apply filters**; kind, lifecycle, label-picker and sorting controls apply
-immediately. Visible selection and scroll position survive display changes
+immediately. An empty searched result is identified as no matches, not as an
+empty project. New queries and Refresh discard the previous scroll offset.
+Visible selection and scroll position survive display changes
 (subject to the browser's scroll extent when fewer rows remain).
 Sorting defaults to Priority ascending (P0 first; equal rows keep their order by
 id), so the most urgent work leads every view however large the project is;
@@ -122,7 +131,7 @@ item's collapsed tree ancestors, or its first label group in Labels.
 Lifecycle defaults to Open; Closed includes completed, cancelled and superseded
 work. All also includes Proposed. The existing Updated sort orders rows newest
 first. Ready and Blocked include only open work. Only explicit Refresh, a
-project/source identity change or changed-list recovery replaces the snapshot.
+project/source identity change, submitted search or changed-list recovery replaces the snapshot.
 Each row shows muted Last updated metadata beside its labels, in the viewer's
 local time, with the exact source timestamp in its title. Selecting a row opens its
 details beside the list: Engram details need the list's reader key.
@@ -247,7 +256,10 @@ as instructions, or render it as HTML.
 Verified by Engram::Codex on `d0182e7`, recorded in the comments on `tm-m6r1`.
 
 List: `engram --home ABS --project-file ABS work --actor-id {developer}/termal
---session-id termal-work-view ls --all --verbose --json --limit 200` — all
+--session-id termal-work-view ls --all --verbose --json --limit 200
+--page-bytes 1048576` on the first page, then `--limit 1000` with the same
+filters and continuation. The machine-page budget is supported by Engram
+8fc84451. All
 lifecycles are fetched; the loaded-row lifecycle filter defaults to Open.
 Verbose rows contain `work` and a separate readiness overlay. Compact output
 truncates titles and is not a replacement for the verbose model.
@@ -268,8 +280,11 @@ Continue using the raw token and exactly the same filters and reader key.
 `work_catalog_cursor_invalid` means discard the loaded generation and offer
 a fresh read, never merge generations. A byte-limited page can have zero rows,
 `more=true` and no cursor: show the hint, never automatically retry in a loop.
-Engram fits every receipt into 12 KiB, so a verbose page holds about a dozen
-rows however large `--limit` is (it accepts up to 1 000). The UI therefore
+Engram's default agent receipt budget is 12 KiB, which would fit only a few
+verbose rows. This internal host read requests the existing 1 MiB JSON page
+budget instead; the host's bounded stdout reader accepts up to 8 MiB. Neither
+the raw receipt nor its unused verbose fields are sent to an agent prompt.
+The host still normalizes only the Work row fields. The UI
 follows the continuation cursor automatically and serially to the end, with
 one request in flight and no cumulative row or page cap. A progress status
 updates after every page. A page without a cursor, an error, or a dropped

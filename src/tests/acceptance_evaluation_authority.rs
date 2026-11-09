@@ -118,55 +118,62 @@ fn fixture_authority_final_recovery_publication_rechecks_the_enclosing_deadline(
     final_publication_expiry_keeps_candidate(true);
 }
 
-#[test]
-fn fixture_authority_scripted_budget_survives_delta_and_owner_lock_waits() {
+fn authority_lock_wait_fixture(panic_before_release: bool) {
     for boundary in ["before_delta", "before_owner_check"] {
         let (state, project, _, root) = fixture();
         install_store(&state, &project, &root);
         let store = established_store(&state, &project).unwrap();
         let clock = state.engram_budget_clock();
         let started = clock.now();
-        let gate = Arc::new((Mutex::new(false), Condvar::new()));
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
-        let hook_gate = gate.clone();
-        let once = std::sync::atomic::AtomicBool::new(false);
-        state
-            .inner
-            .lock()
-            .unwrap()
-            .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
-            if phase == boundary && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                entered_tx.send(()).unwrap();
-                let (ready, changed) = &*hook_gate;
-                let mut ready = ready.lock().unwrap();
-                while !*ready {
-                    ready = changed.wait(ready).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            std::thread::scope(|scope| {
+                let release = crate::tests::phase_sync::ReleaseGateOnDrop::new();
+                let hook_gate = release.gate();
+                let once = std::sync::atomic::AtomicBool::new(false);
+                state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+                    if phase == boundary && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        entered_tx.send(()).unwrap();
+                        crate::tests::phase_sync::wait_for_gate(&hook_gate, true);
+                    }
+                }));
+                let worker = state.clone();
+                let worker_store = store.clone();
+                let task = scope.spawn(move || {
+                    acknowledge_fixture_work(
+                        &worker,
+                        &worker_store,
+                        &evidence_selection::canonical_core_receipt(),
+                    );
+                });
+                entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+                if panic_before_release {
+                    panic!("driver assertion before authority gate release");
                 }
-            }
+                let held = state.inner.lock().unwrap();
+                release.release();
+                // The worker's next operation needs this actual StateInner lock.
+                // Hold it beyond the old total allowance, including time outside SQLite.
+                std::thread::sleep(Duration::from_secs(2));
+                assert_eq!(clock.now(), started);
+                drop(held);
+                task.join()
+                    .expect("positive scripted setup survives real lock scheduling");
+            });
         }));
-        let worker = state.clone();
-        let worker_store = store.clone();
-        let task = std::thread::spawn(move || {
-            acknowledge_fixture_work(
-                &worker,
-                &worker_store,
-                &evidence_selection::canonical_core_receipt(),
+        if panic_before_release {
+            let payload = result.expect_err("the driver assertion must survive scoped cleanup");
+            assert_eq!(
+                payload.downcast_ref::<&str>(),
+                Some(&"driver assertion before authority gate release"),
             );
-        });
-        entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
-        let held = state.inner.lock().unwrap();
-        {
-            let (ready, changed) = &*gate;
-            *ready.lock().unwrap() = true;
-            changed.notify_all();
+        } else if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
         }
-        // The worker's next operation needs this actual StateInner lock.
-        // Hold it beyond the old total allowance, including time outside SQLite.
-        std::thread::sleep(Duration::from_secs(2));
-        assert_eq!(clock.now(), started);
-        drop(held);
-        task.join()
-            .expect("positive scripted setup survives real lock scheduling");
         let mut inner = state.inner.lock().unwrap();
         inner.test_engram_authority_ack_boundary = None;
         assert_eq!(
@@ -178,6 +185,16 @@ fn fixture_authority_scripted_budget_survives_delta_and_owner_lock_waits() {
             EngramAuthorityPhase::Published
         );
     }
+}
+
+#[test]
+fn fixture_authority_scripted_budget_survives_delta_and_owner_lock_waits() {
+    authority_lock_wait_fixture(false);
+}
+
+#[test]
+fn fixture_authority_driver_unwind_releases_and_joins_the_acknowledgement_worker() {
+    authority_lock_wait_fixture(true);
 }
 
 #[test]

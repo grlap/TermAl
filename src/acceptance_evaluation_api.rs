@@ -1400,16 +1400,11 @@ impl AppState {
         // evaluator's own turn admission, typically) may learn that very
         // naming and move the history once; the token records the binding,
         // as the same snapshot names it, so that step can be proved.
-        let named_binding = requested_claim
-            .as_ref()
-            .and_then(|claim| {
-                engram_work_source_root_for_claim(
-                    &roots_snapshot,
-                    &target.store,
-                    canonical_work,
-                    &claim.claim_id,
-                )
-            })
+        let named_binding = match requested_claim.as_ref() {
+            Some(claim) => engram_work_source_root_for_claim(
+                &roots_snapshot, &target.store, canonical_work, &claim.claim_id),
+            None => engram_work_source_root_for_work(&roots_snapshot, &target.store, canonical_work),
+        }
             .and_then(|entry| EngramWorkNamingBound::of_entry(entry, captured_history));
         let naming_history = EngramWorkNamingToken {
             epoch: captured_history.epoch,
@@ -1578,9 +1573,10 @@ impl AppState {
         }
         // The declared source identity is taken only by the modes that use it,
         // after the reads, on the worktree the evaluator reads: the work's
-        // named source root when the requesting session holds its claim
-        // (`engram_source_roots.rs`), where the evaluator child then runs;
-        // otherwise the parent's workdir, which is also the child's (cwd None).
+        // named source root for its held claim, or the retained task root for
+        // an unheld requester after canonical sighting validation, where the
+        // evaluator child then runs (`engram_source_roots.rs`). With neither,
+        // use the parent's workdir, which is also the child's (cwd None).
         // With no root named, the requested work's claim is kept, so
         // a root named for it later refuses the submission whatever the
         // session is bound to by then.
@@ -1614,6 +1610,17 @@ impl AppState {
                 &task.work_ref,
                 task.canonical_work_id(),
             );
+            let retained_claim = source_root.as_ref().map(|root| AcceptanceEvaluationSourceClaim {
+                work_id: root.work_id.clone(), claim_id: root.claim_id.clone(),
+                named_generation_at_request: None,
+            });
+            if requested_claim.is_none() && acceptance_evaluation_claim_unconfirmed_locked(
+                &inner, parent_session_id, &target.store, retained_claim.as_ref())
+            {
+                return Err(ApiError::conflict(
+                    "the retained task's named-root binding is unconfirmed; settle its transition before requesting acceptance evaluation",
+                ));
+            }
             let source_claim = source_root
                 .is_none()
                 .then(|| requested_claim.clone())
@@ -1624,6 +1631,10 @@ impl AppState {
             });
             (source_root, source_claim)
         };
+        let retained_source_claim = source_root.as_ref().map(|root| AcceptanceEvaluationSourceClaim {
+            work_id: root.work_id.clone(), claim_id: root.claim_id.clone(),
+            named_generation_at_request: None,
+        });
         // Before either mode creates an evaluator or a brief, whether or not a
         // root is named here: Engram refuses to record an evaluation of a
         // named root it has not sighted at the task's evidence basis, and a
@@ -1685,6 +1696,13 @@ impl AppState {
         } else {
             None
         };
+        if requested_claim.is_none() && source_root.is_some()
+            && same_session_source.as_ref().is_some_and(|(basis, _, _)| basis.is_none())
+        {
+            return Err(ApiError::conflict(
+                "the retained task source root could not be captured; no evaluator or brief was started",
+            ));
+        }
         if mode == AcceptanceEvaluationMode::SameSession
             && task.pinned_mode.is_none()
             && same_session_source.as_ref().is_some_and(|(basis, _, _)|
@@ -1718,6 +1736,14 @@ impl AppState {
                     None => self.acceptance_owner_judged_source(parent_session_id, &place,
                         committed_admission.as_ref().map(|admission| admission.commit.as_str()))?,
                 };
+                // A coordinator has no claim-local workdir basis to substitute
+                // for the retained task root. Admit this new path only when
+                // the owner actually captured that tree, never as unmeasured.
+                if requested_claim.is_none() && source_root.is_some() && source_basis.is_none() {
+                    return Err(ApiError::conflict(
+                        "the retained task source root could not be captured; no evaluator was started",
+                    ));
+                }
                 // The brief marks records of any other source context only.
                 task.judged_source_basis = source_basis;
                 task.judged_revision = source_fingerprint.clone();
@@ -1869,7 +1895,7 @@ impl AppState {
                         &inner,
                         parent_session_id,
                         &target.store,
-                        requested_claim.as_ref(),
+                        requested_claim.as_ref().or(retained_source_claim.as_ref()),
                     ) {
                         return Err(ApiError::conflict(
                             "the requested claim's source root changed during capture; request a fresh acceptance evaluation",

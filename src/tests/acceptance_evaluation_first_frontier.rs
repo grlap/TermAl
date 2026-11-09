@@ -67,6 +67,16 @@ fn history_revision(state: &AppState) -> u64 {
 
 #[test]
 fn an_evaluation_whose_admission_learns_the_named_binding_is_still_admitted() {
+    evaluation_first_frontier(true);
+}
+
+#[test]
+fn an_unheld_evaluation_keeps_the_same_binding_first_frontier_exception() {
+    evaluation_first_frontier(false);
+}
+
+fn evaluation_first_frontier(held: bool) {
+    let _placement = TestTempRootDirectoryScope::repository_local();
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     super::source::make_workdir_a_worktree(&root);
@@ -135,13 +145,26 @@ fn an_evaluation_whose_admission_learns_the_named_binding_is_still_admitted() {
         1,
         super::sighting::present_sighting(),
     );
+    if !held {
+        // The new unheld route requires the owner's complete capture. The
+        // historical held fixture intentionally allowed an unmeasured source.
+        let mut source = super::shared_source::identity();
+        source.commit = run_git_test_command_output(&worktree, &["rev-parse", "HEAD"]);
+        source.tree = run_git_test_command_output(&worktree, &["show", "-s", "--format=%T", "HEAD"]);
+        let canonical = fs::canonicalize(&worktree).unwrap();
+        super::shared_source::install_owner(&state, &project, move |path| {
+            (fs::canonicalize(path).ok().as_ref() == Some(&canonical)).then(|| source.clone())
+        });
+    }
     let response = state
         .request_acceptance_evaluation_with_runner(
             &parent,
             evaluation_request(Some(Agent::Codex)),
             |connection, args, timeout| {
                 if args.iter().any(|arg| arg == "held") {
-                    Ok(json!({"items":[{"work_id":"01a0b6c5-4b4f-7b41-9e32-edc597077acf","short_ref":"w-task","claim_id":"claim-task","claim_fence":1}],"omitted":0}))
+                    Ok(if held {
+                        json!({"items":[{"work_id":"01a0b6c5-4b4f-7b41-9e32-edc597077acf","short_ref":"w-task","claim_id":"claim-task","claim_fence":1}],"omitted":0})
+                    } else { json!({"items":[],"omitted":0}) })
                 } else {
                     fixture_reader(Arc::default(), show_receipt(None), Ok(policy_receipt(Some(&["independent_session"]))))(connection, args, timeout)
                 }
@@ -152,6 +175,10 @@ fn an_evaluation_whose_admission_learns_the_named_binding_is_still_admitted() {
         panic!("an independent evaluation spawns an evaluator");
     };
     let child = delegation.delegation.child_session_id.clone();
+    if !held {
+        assert!(delegation.delegation.acceptance_evaluation.as_ref().unwrap().source_id.is_some(),
+            "the unheld first-frontier attempt must carry its captured tree");
+    }
     // The evaluator echoes the attempt key its host-authored brief names.
     let attempt_key = delegation
         .delegation

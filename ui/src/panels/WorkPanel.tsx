@@ -79,7 +79,7 @@ function WorkProjectView({ projectId }: { projectId: string }) {
       <button type="submit">Apply filters</button>
       {filters.availability && <small>Ready and Blocked include only open work.</small>}
     </form>
-    <p id={searchHint} className="work-panel-caption">Search matches loaded IDs, titles, labels and assignment, ignoring case. It does not search notes, gates or outcomes.</p>
+    <p id={searchHint} className="work-panel-caption">Search reads refs, titles, outcomes, labels and recorded text across the full Engram catalog. Full UUID and assignee matching requires support from the configured Engram version; older versions may return no matches for those fields. Other filters apply to the returned rows as they load.</p>
     <WorkResults projectId={projectId} filters={filters}
       view={view} active={!memories} sort={sort} onSortChange={setSort} />
     </div>
@@ -90,7 +90,8 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
   projectId: string; filters: WorkFilters; view: Exclude<WorkView, "memories">;
   active: boolean; sort: WorkSort | null; onSortChange: (sort: WorkSort | null) => void;
 }) {
-  const { result, busy, error, needsReload, reload, retry } = useWorkList(projectId);
+  const search = filters.search.trim();
+  const { result, busy, error, needsReload, reload, retry } = useWorkList(projectId, search);
   const [kind, setKind] = useState("");
   const [lifecycle, setLifecycle] = useState("open");
   const [labels, setLabels] = useState<string[]>([]);
@@ -102,6 +103,9 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
   useEffect(() => { focusNewSelection.current = false; });
   const listContainer = useRef<HTMLDivElement | null>(null);
   const scrollPosition = useRef(0);
+  // A replaced query has no viewport yet. Discard its saved offset before
+  // a later display control can restore it onto the new snapshot.
+  useLayoutEffect(() => { if (!result?.page) scrollPosition.current = 0; }, [result?.page]);
   // Child windows may restore a row anchor when rows reorder. A display
   // action keeps the viewport position instead, bounded by browser geometry.
   useLayoutEffect(() => {
@@ -125,6 +129,8 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
   );
   // One sort model serves the control below and the table headers; it orders
   // loaded rows only and never touches the sources' pages or identities.
+  // The source already selected the search result. A local title/label test
+  // would hide legitimate matches that Engram found in notes or outcomes.
   const rows = useMemo(() => sortWorkRows(loaded.filter(row => matchesWorkDisplayFilters(row, filters) && (!kind || row.kind === kind)
     && (!lifecycle || (lifecycle === "closed" ? ["completed", "cancelled", "superseded"].includes(row.lifecycle) : row.lifecycle === lifecycle))
     && matchesWorkLabels(row, labels, labelMode)), sort), [loaded, filters, kind, lifecycle, labels, labelMode, sort]);
@@ -134,7 +140,7 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
     : undefined } : null;
   const total = page?.total ?? 0;
   const loadedSummary = [
-    page && `${page.items.length} of ${page.total} Engram items loaded`,
+    page && `${page.items.length} of ${page.total} Engram items loaded${search ? " matching the search" : ""}`,
   ].filter(Boolean).join(" · ");
   const select = (item: WorkItem, trigger: HTMLButtonElement, group?: string) => {
     if (detailTrigger.current === trigger && selection) { closeDetails(); return; }
@@ -228,7 +234,8 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
               : <WorkTree key={view} viewport={listContainer} rows={rows} universe={loaded} mode={view} selection={visibleSelection} onSelect={select} onLabel={filterLabel} renderDetails={renderDetails} onHideSelection={hideSelection} reveal={stripReveal} />}
           {rows.length === 0 && <p>{result.sources.some(source => source.state === "error")
             ? "No rows from the readable sources. A source failed (see its status above), so this is not a complete tracker view."
-            : total === 0 ? "No work items in this snapshot." : "No matching rows in the loaded page(s). More source items may exist."}</p>}
+            : total === 0 ? search ? `No work items match "${search}".` : "No work items in this snapshot."
+              : "No matching rows in the loaded page(s). More source items may exist."}</p>}
           <WorkPaging page={page} busy={busy} error={error} />
         </div>
       </div>

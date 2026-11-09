@@ -366,7 +366,7 @@ fn refresh_engram_source_root_prompt_locked(
     lines.extend(native_notice);
     if let Some(reason) = opening_unconfirmed {
         lines.push(format!(
-            "[TermAl] This turn's source root is unconfirmed. Any shown path is the last acknowledged local selection. Source, check and evaluation evidence is withheld; the prompt proceeds. Refresh authority or name the worktree for a later turn. Reason: {}.",
+            "[TermAl] This turn's source root is unconfirmed. Your work is not blocked: Git, build, test and tool actions run normally. Only this turn's source, check and evaluation evidence is withheld from credit. Any shown path is the last acknowledged local selection. To earn credit in a later turn, name the worktree or refresh its authority; neither takes effect in this turn. Reason: {}.",
             reason.sentence()
         ));
     }
@@ -975,8 +975,10 @@ fn acceptance_evaluation_source_root_changed_error(
 
 /// The source root of the work an acceptance evaluation of `work_ref` (with
 /// `work_id` when the tracker's receipt carried it) judges, as the requesting
-/// session holds it: the entry of the requested work's live claim. The
-/// control session's bound claim does not select an evaluation's tree.
+/// session holds it: the entry of the requested work's live claim. When an
+/// independent requester holds no claim, retain the canonical work's entry;
+/// Engram's sighting preflight must still confirm its exact path/generation.
+/// The control session's bound claim does not select an evaluation's tree.
 fn engram_evaluation_source_root(
     entries: &[EngramWorkSourceRoot],
     store: &EngramAuthorityStoreKey,
@@ -984,8 +986,11 @@ fn engram_evaluation_source_root(
     work_ref: &str,
     work_id: Option<&str>,
 ) -> Option<AcceptanceEvaluationSourceRoot> {
-    let claim = claim?;
-    engram_work_source_root_for_claim(entries, store, &claim.work_id, &claim.claim_id)
+    let selected = match claim {
+        Some(claim) => engram_work_source_root_for_claim(entries, store, &claim.work_id, &claim.claim_id),
+        None => work_id.and_then(|work| engram_work_source_root_for_work(entries, store, work)),
+    };
+    selected
         .filter(|entry| {
             work_id.map_or(entry.short_ref == work_ref, |work_id| {
                 entry.work_id == work_id

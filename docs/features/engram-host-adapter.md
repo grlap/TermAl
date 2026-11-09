@@ -1158,7 +1158,10 @@ happens elsewhere. The agent therefore names the item's worktree once with
   seals gain no Engram source-bearing wire field.
 - **Invalidation.** An evaluation by an evaluator child records the root,
   claim and generation it was requested on, or, with no root named, the
-  claim the requesting session was bound to. Its first submission is
+  requested claim resolved by the requester's held-list read. A requester
+  holding no claim can use the retained exact-store/work root only after
+  canonical sighting confirmation; its recorded naming claim and generation
+  fence that evaluation too. Its first submission is
   refused, finally, when the work no longer names that root under that
   claim and generation, or when a root has since been named for the
   recorded claim on the evaluated work, whatever the requesting session is
@@ -2349,8 +2352,11 @@ the original argument list for identical replay.
 Engram source owner for the complete existing `source_id` of the worktree the
 evaluator reads:
 the work's named [source root](#source-root) when the requesting session is
-holding the claim that named it (the evaluator child then runs there), else
-the parent's worktree (it runs in the parent's workdir). The host resolves
+holding its naming claim, or the retained exact-store/work root when the
+requester holds no claim. Engram's canonical sighting must confirm the latter's
+path and generation, and unavailable owner capture refuses that request.
+The evaluator child runs in the selected root. With neither selection it
+uses the parent's worktree. The host resolves
 that claim from a live `work core held` read under the requesting session's
 own identity, independently of its turn's bound item. A held requested
 item without a named root uses the workdir and receives an explicit notice;

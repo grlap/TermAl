@@ -185,18 +185,40 @@ fn a_journal_names_exactly_the_reconciliation_it_requires() {
 #[test]
 fn an_unconfirmed_opening_notice_names_its_reason() {
     let fixture = named("unconfirmed-opening-reason");
-    {
+    let (named_root, confirmed) = {
         let mut inner = fixture.claimed.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.claimed.session_id).unwrap();
-        inner.sessions[index].engram.named_root = None;
-        journal_of(&mut inner, &fixture).confirmed = None;
-    }
+        let named_root = inner.sessions[index].engram.named_root.take();
+        let confirmed = journal_of(&mut inner, &fixture).confirmed.take();
+        (named_root, confirmed)
+    };
     let prompt = fixture.claimed.begin_prompt("Work in the named root.");
+    assert!(prompt.prompt.ends_with("Work in the named root."), "the user's work reaches the provider");
+    assert_eq!(fixture.claimed.record(|record| record.session.status), SessionStatus::Active);
+    assert_eq!(fixture.claimed.state.engram_root_capture(&fixture.claimed.session_id), EngramRootCapture::Unconfirmed);
     assert!(prompt.prompt.contains("source root is unconfirmed"), "{}", prompt.prompt);
     assert!(prompt.prompt.contains(&format!("Reason: {}.",
         EngramUnconfirmedRootReason::LocalEntryWithoutEvent.sentence())), "{}", prompt.prompt);
     let worktree = fixture.worktree.to_string_lossy().into_owned();
     let reason_line = prompt.prompt.lines().find(|line| line.contains("Reason:")).unwrap();
     assert!(!reason_line.contains(&worktree), "the reason names no path: {reason_line}");
+    for phrase in [
+        "Your work is not blocked: Git, build, test and tool actions run normally.",
+        "Only this turn's source, check and evaluation evidence is withheld from credit.",
+        "To earn credit in a later turn, name the worktree or refresh its authority; neither takes effect in this turn.",
+    ] {
+        assert!(reason_line.contains(phrase), "missing {phrase:?}: {reason_line}");
+    }
+    {
+        let mut inner = fixture.claimed.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.claimed.session_id).unwrap();
+        inner.sessions[index].engram.named_root = named_root;
+        journal_of(&mut inner, &fixture).confirmed = confirmed;
+        assert!(matches!(engram_root_capture_explained_locked(&inner, &fixture.claimed.session_id),
+            Ok(EngramRootCapture::Recorded { state: EngramSourceRootState::Named, .. })),
+            "the repaired authority is available for a later opening");
+        assert_eq!(engram_turn_root_capture_locked(&inner, &fixture.claimed.session_id),
+            EngramRootCapture::Unconfirmed, "repair cannot relabel this turn's opening");
+    }
     fixture.claimed.end();
 }

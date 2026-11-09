@@ -614,7 +614,7 @@ describe("WorkPanel", () => {
     expect(screen.getByText(/engram: error/)).toBeInTheDocument();
   });
 
-  it("applies search locally on submit and labels filtering as loaded-row filtering", async () => {
+  it("submits catalog search once and keeps source matches that only occur in recorded text", async () => {
     vi.mocked(readProjectWork).mockResolvedValue(page());
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "w-one — Visible task" });
@@ -622,11 +622,12 @@ describe("WorkPanel", () => {
     expect(readProjectWork).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await act(async () => {});
-    expect(screen.queryByRole("button", { name: /Visible task/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "w-one — Visible task" })).toBeInTheDocument();
     fireEvent.change(await screen.findByRole("combobox", { name: "Kind (loaded rows)" }), { target: { value: "task" } });
-    expect(screen.queryByRole("button", { name: /Visible task/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/1 of 1 Engram items loaded; 0 visible/)).toBeInTheDocument();
-    expect(readProjectWork).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "w-one — Visible task" })).not.toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 Engram items loaded matching the search; 0 visible/)).toBeInTheDocument();
+    expect(readProjectWork).toHaveBeenCalledTimes(2);
+    expect(readProjectWork).toHaveBeenLastCalledWith("p-one", { search: "a query", label: "", availability: "" }, expect.any(AbortSignal), undefined);
   });
 
   it("renders receipt text as inert data and reads details only on demand", async () => {

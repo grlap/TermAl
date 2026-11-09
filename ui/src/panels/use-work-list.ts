@@ -1,5 +1,6 @@
 // New Work list lifetime and pagination owner. Does not render rows or change
-// source data. Display filters never own or restart a loading generation.
+// source data. Only the submitted catalog search owns a new query generation;
+// local display filters never restart it.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../api-request";
 import { readProjectWork, type WorkListResponse } from "../work-visualizer-api";
@@ -15,12 +16,13 @@ function withoutEngramGeneration(previous: WorkListResult | null, message: strin
   };
 }
 
-export function useWorkList(projectId: string) {
+export function useWorkList(projectId: string, search = "") {
   const [result, setResult] = useState<WorkListResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [needsReload, setNeedsReload] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [generationSearch, setGenerationSearch] = useState(search);
   const owner = useRef<{ controller: AbortController; busy: boolean; failed: boolean } | null>(null);
   const current = useRef<WorkListResult | null>(null);
 
@@ -30,7 +32,7 @@ export function useWorkList(projectId: string) {
     if (more && (!previous?.page?.more || !previous.page.after || !previous.readerId)) return;
     identity.busy = true; identity.failed = false; setBusy(true); setError(null);
     try {
-      let next: WorkListResult = await readProjectWork(projectId, { search: "", label: "", availability: "" }, identity.controller.signal,
+      let next: WorkListResult = await readProjectWork(projectId, { search, label: "", availability: "" }, identity.controller.signal,
         more ? { after: previous!.page!.after!, readerId: previous!.readerId! } : undefined);
       if (owner.current !== identity || identity.controller.signal.aborted) return;
       if (more) {
@@ -67,14 +69,15 @@ export function useWorkList(projectId: string) {
       identity.busy = false;
       if (owner.current === identity && !identity.controller.signal.aborted) setBusy(false);
     }
-  }, [projectId]);
+  }, [projectId, search]);
 
   useEffect(() => {
     const identity = { controller: new AbortController(), busy: false, failed: false };
     owner.current = identity; current.current = null; setResult(null); setError(null); setBusy(false); setNeedsReload(false);
+    setGenerationSearch(search);
     if (projectId) void load(identity, false);
     return () => { identity.controller.abort(); if (owner.current === identity) owner.current = null; };
-  }, [load, projectId, refresh]);
+  }, [load, projectId, search, refresh]);
 
   const more = useCallback(() => { if (owner.current) void load(owner.current, true); }, [load]);
   // Receipts can be shorter than the requested limit. Only the cursor's own
@@ -83,5 +86,10 @@ export function useWorkList(projectId: string) {
     if (!error && result?.page?.more && result.page.after) more();
   }, [result, error, more]);
   const retry = () => { if (owner.current && !needsReload) void load(owner.current, !!current.current?.page?.after, true); };
-  return { result, error, busy, needsReload, retry, reload: () => setRefresh(v => v + 1) };
+  // Hide the old query's rows/details and errors on the first render of a
+  // new search, before the effect installs its new controller and snapshot.
+  const sameSearch = generationSearch === search;
+  return { result: sameSearch ? result : null, error: sameSearch ? error : null,
+    busy: !sameSearch || busy, needsReload: sameSearch && needsReload, retry,
+    reload: () => setRefresh(v => v + 1) };
 }

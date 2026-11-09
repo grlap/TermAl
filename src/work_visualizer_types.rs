@@ -44,10 +44,23 @@ impl WorkListQuery {
     fn arguments(&self) -> Vec<String> {
         // Fetch all lifecycles once; the UI defaults to Open and filters the
         // loaded set. Ready/blocked remain Engram's open-only source filters.
-        let mut args = vec!["ls", "--all", "--verbose", "--json", "--limit", "200"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
+        // This host-to-Engram JSON page never enters an agent prompt. Use the
+        // existing machine-page budget rather than the 12 KiB agent budget.
+        // A smaller first page is usable while larger continuations drain.
+        let limit = if self.after.is_some() { "1000" } else { "200" };
+        let mut args = vec![
+            "ls",
+            "--all",
+            "--verbose",
+            "--json",
+            "--limit",
+            limit,
+            "--page-bytes",
+            "1048576",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
         for (flag, value) in [
             ("--search", &self.search),
             ("--label", &self.label),

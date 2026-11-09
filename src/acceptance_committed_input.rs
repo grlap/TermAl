@@ -419,8 +419,20 @@ fn acceptance_committed_input_registration_matches(
     entry: &EngramWorkSourceRoot,
     current: &AcceptanceCurrentClaim,
 ) -> bool {
+    acceptance_committed_input_registration_matches_requester(registration, store, work_id, entry, Some(current))
+}
+
+// An unheld requester can inspect retained evidence without claiming its
+// live fence. The original naming claim/fence and exact root still apply.
+fn acceptance_committed_input_registration_matches_requester(
+    registration: &TestRunRegistration,
+    store: &EngramAuthorityStoreKey,
+    work_id: &str,
+    entry: &EngramWorkSourceRoot,
+    current: Option<&AcceptanceCurrentClaim>,
+) -> bool {
     registration.authority_store.as_ref() == Some(store)
-        && current.same_claim(entry)
+        && current.is_none_or(|current| current.same_claim(entry))
         && registration.named_root.as_ref().is_some_and(|named| {
             named.workspace_id == entry.root && named.generation == entry.generation
         })
@@ -428,7 +440,7 @@ fn acceptance_committed_input_registration_matches(
             binding.work_id == work_id
                 && binding.claim_id == entry.claim_id
                 && binding.claim_fence == entry.claim_fence
-                && current.binding.as_ref().map_or(
+                && current.is_none_or(|current| current.binding.as_ref().map_or(
                     current.claim_fence == binding.claim_fence,
                     |live| {
                         engram_same_recovery_run(live, binding)
@@ -436,7 +448,7 @@ fn acceptance_committed_input_registration_matches(
                             && live.claim_fence >= binding.claim_fence
                             && live.work_revision >= binding.work_revision
                     },
-                )
+                ))
         })
 }
 
@@ -511,7 +523,16 @@ impl AppState {
             )
             .map_err(|refusal| refusal.into_api_error(&task.work_ref))?
         {
-            AcceptanceCommittedInputDecision::Admitted(admission) => Ok(Some(admission)),
+            AcceptanceCommittedInputDecision::Admitted(admission) => {
+                // A coordinator's retained selection is also confirmed by
+                // Engram's canonical sighting; a passing run cannot replace
+                // that path/generation check for this newly admitted route.
+                if task.current_claim.is_none() {
+                    self.require_acceptance_named_root_sighting(
+                        parent_session_id, reader, store, task, root, deadline, now)?;
+                }
+                Ok(Some(admission))
+            }
             AcceptanceCommittedInputDecision::Legacy => self
                 .require_acceptance_named_root_sighting(
                     parent_session_id,
@@ -536,8 +557,9 @@ impl AppState {
     /// whose results show it started on a clean checkout
     /// (`acceptance_committed_input_run_start`), exists, and every matching
     /// run read was shown never to have started (or no root is named, or the session's tracker is no longer
-    /// `reader` and `store`, or the task's current claim is unknown or is
-    /// not the claim that named the root).
+    /// `reader` and `store`, or a held claim is not the naming claim).
+    /// An unheld requester scans the retained naming claim/fence instead;
+    /// absence from its held list does not waive committed-input admission.
     /// Otherwise the request is in the committed flow: `Admitted` when the
     /// root is clean at HEAD, the newest applicable terminal result passed
     /// eligibly and cleanly on that very commit, and Engram acknowledged its
@@ -577,9 +599,7 @@ impl AppState {
         else {
             return Ok(Decision::Legacy);
         };
-        let Some(claim) = task.current_claim.as_ref() else {
-            return Ok(Decision::Legacy);
-        };
+        let claim = task.current_claim.as_ref();
         let current = |inner: &StateInner| -> bool {
             acceptance_evaluation_host_target_locked(inner, parent_session_id)
                 .is_ok_and(|target| target.store == *store && target.connection == *reader)
@@ -590,7 +610,7 @@ impl AppState {
                     &root.work_id,
                     &root.claim_id,
                 )
-                .is_some_and(|entry| claim.same_claim(entry))
+                .is_some_and(|entry| claim.is_none_or(|claim| claim.same_claim(entry)))
         };
         let candidates = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -625,7 +645,7 @@ impl AppState {
                         .filter_map(|row| row.registration.as_ref()),
                 )
                 .filter(|registration| {
-                    acceptance_committed_input_registration_matches(
+                    acceptance_committed_input_registration_matches_requester(
                         registration,
                         store,
                         work_id,

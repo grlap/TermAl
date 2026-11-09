@@ -23,4 +23,8 @@ if ($args -contains 'show') {
   [Console]::WriteLine(('{' + $fixtureStatus + '"notes":[],"notes_window":{"total":0,"shown":0,"newer":0,"older":0,"read_cut":{"project_position":1,"observed_at":"now"}}}'))
   exit 0
 }
+$fixturePage = Join-Path $fixtureHome 'work-read-page.json'
+if (Test-Path -LiteralPath $fixturePage) {
+  [Console]::WriteLine((Get-Content -Raw -LiteralPath $fixturePage)); exit 0
+}
 [Console]::WriteLine('{"items":[{"work":{"work_id":"fixture-id","short_ref":"w-test","title":"Fixture","kind":"bug","lifecycle":"open","priority":2,"labels":[],"assigned_to":null,"parent_id":null,"updated_at":"2026-09-13T00:00:00Z"},"availability":"ready","blocked_by":[]}],"total":1,"shown_before":0,"more":false}')
