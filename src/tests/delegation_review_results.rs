@@ -1552,6 +1552,69 @@ fn completed_structured_review_survives_child_session_removal() {
 }
 
 #[test]
+fn structured_no_input_review_stays_failed_in_result_and_parent_fan_in() {
+    for reason in [
+        "No change set was available to review.",
+        "No input was supplied for review.",
+    ] {
+        let (state, _sender, parent) = mailbox_test_state();
+        let (id, child) = install_required_review_delegation(&state, &parent);
+        let mut request = structured_review_request();
+        request.status = DelegationStatus::Failed;
+        request.summary = reason.to_owned();
+        request.findings.clear();
+        request.files_inspected.clear();
+        request.notes.clear();
+        request.suggested_tracker_updates.clear();
+        state.submit_delegation_review_result(&child, request).unwrap();
+        finish_delegation_child_with_assistant_text(
+            &state,
+            &child,
+            "## Result\nStatus: completed\nSummary: Clean review.\nFindings:\n- None",
+        );
+
+        let result = state.get_delegation_result(&parent, &id).unwrap().result;
+        assert_eq!(result.status, DelegationStatus::Failed);
+        assert_eq!(result.summary, reason);
+        assert!(result.findings.is_empty());
+        assert!(result.files_inspected.is_empty());
+        let status = state.get_delegation(&parent, &id).unwrap();
+        assert_eq!(status.delegation.status, DelegationStatus::Failed);
+
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&parent).unwrap();
+            inner.sessions[index].session.status = SessionStatus::Active;
+        }
+        let wait = state.create_delegation_wait(
+            &parent,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![id.clone()],
+                mode: DelegationWaitMode::All,
+                title: None,
+            },
+        ).unwrap();
+        assert!(wait.resume_prompt_queued);
+        let inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&parent).unwrap();
+        let resume = inner.sessions[index].queued_prompts.iter()
+            .find(|queued| queued.pending_prompt.text.contains(&id))
+            .expect("parent receives its terminal review result");
+        assert!(resume.pending_prompt.text.contains("Status: failed"));
+        assert!(resume.pending_prompt.text.contains(reason));
+        assert!(!resume.pending_prompt.text.contains("Status: completed"));
+        assert!(!resume.pending_prompt.text.contains("Clean review."));
+        drop(inner);
+
+        let stored = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+        let saved = stored.delegations.iter().find(|record| record.id == id).unwrap();
+        assert_eq!(saved.status, DelegationStatus::Failed);
+        assert_eq!(saved.result.as_ref().unwrap().status, DelegationStatus::Failed);
+        assert_eq!(saved.result.as_ref().unwrap().summary, reason);
+    }
+}
+
+#[test]
 fn structured_failed_review_preserves_typed_blocker() {
     let (state, _root_sender_id, parent_session_id) = mailbox_test_state();
     let (delegation_id, child_session_id) =

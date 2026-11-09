@@ -57,7 +57,8 @@ TermAl reviewer result protocol (TERMAL_STRUCTURED_REVIEW_RESULT_V1):
 - Submit every required array even when it is empty. Use `status: completed` after a completed review and `status: failed` only when the review could not be completed.
 - Finding severity must be exactly `Critical`, `High`, `Medium`, `Low`, or `Note`. Omit `file` and `line` only when no meaningful source location exists.
 - Command status must be exactly `success` or `error`.
-- If there are no changes or no findings, still submit a completed result with an explanatory summary and an empty findings array.
+- If you reviewed a real change set and found no issues, submit a completed result with an explanatory summary and an empty findings array.
+- If there is no change set or no supplied input to review, submit status failed with the reason; do not report a clean completed review.
 - Read-only startup recovery required by project instructions is allowed. Do not mutate the tracker or query it to reconcile review findings; the parent owns that work. Do not include tracker identifiers in review findings.
 - If submission validation fails, correct the payload and retry. Do not replace the tool call with prose or a JSON code block.
 

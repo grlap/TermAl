@@ -87,6 +87,8 @@ enum AcceptanceCommittedInputRefusal {
         commit: String,
         state: String,
     },
+    /// The producer cannot build a record for these unsupported check stages.
+    UnclassifiedStages { run_id: String, commit: String },
     /// The tracker, the named root or the admitting run changed while it was
     /// checked.
     Changed,
@@ -104,6 +106,7 @@ impl AcceptanceCommittedInputRefusal {
             Self::NotClean => "committed_input_not_clean",
             Self::NoEligibleRun { .. } => "committed_input_no_eligible_run",
             Self::RecordNotAcknowledged { .. } => "verification_record_not_acknowledged",
+            Self::UnclassifiedStages { .. } => "verification_record_unclassified_stages",
             Self::Changed => "committed_input_changed",
             Self::ScanIncomplete => "committed_input_scan_incomplete",
         }
@@ -127,6 +130,15 @@ impl AcceptanceCommittedInputRefusal {
             } => format!(
                 "the verification record of run {run_id} at {commit} is not yet acknowledged \
                  by Engram ({state}); request again once Engram has received it"
+            ),
+            Self::UnclassifiedStages { run_id, commit } => format!(
+                "run {run_id} at {commit} contains checks TermAl cannot record as test or build; \
+                 this run has no classified verification route today. Waiting or requesting \
+                 evaluation again will not send its record. For supported verification, run a \
+                 recognized real test or build on this commit as a new registered run. \
+                 termal-tests.toml supports native \
+                 declared tests with supported result artifacts, not arbitrary focused checks; \
+                 do not relabel this check as a test or build"
             ),
             Self::Changed => format!(
                 "`{work_ref}`'s named source root or its committed-input run changed during \
@@ -329,25 +341,43 @@ fn acceptance_committed_input_result_start(
 /// the host's own record of `registration` (rebuilt from it and the run's
 /// files, never trusted as written) and names this run and this commit as its
 /// input, it is the very body the receipt answered (the digest the host kept
-/// with the receipt), and that receipt answers that body. `Err` says where the record
-/// stands otherwise; a pending reason is read from the state file for that
-/// message alone.
+/// with the receipt), and that receipt answers that body. Unsupported stages
+/// are read directly from the run's request and terminal results, without
+/// waiting for or writing sender progress. Other pending reasons come from
+/// the state file and affect refusal guidance only.
 fn acceptance_committed_input_record_acknowledged(
     registration: &TestRunRegistration,
     commit: &str,
-) -> Result<(), String> {
+) -> Result<(), AcceptanceCommittedInputRefusal> {
     let run_id = registration.run_id.as_str();
     let run_dir = FsPath::new(&registration.run_directory);
+    let unacknowledged = |state: String| AcceptanceCommittedInputRefusal::RecordNotAcknowledged {
+        run_id: run_id.to_owned(), commit: commit.to_owned(), state,
+    };
     let (receipt, body_digest) = match &registration.verification_record {
         Some(
             TestRunVerificationAck::Received { receipt, body_digest }
             | TestRunVerificationAck::Settled { receipt, body_digest },
         ) => (receipt.clone(), body_digest.clone()),
         Some(TestRunVerificationAck::Rejected { detail }) => {
-            return Err(format!("rejected: {detail}"));
+            return Err(unacknowledged(format!("rejected: {detail}")));
         }
         None => {
-            return Err(match engram_verification_record_progress(run_dir) {
+            let request = test_run_read_json(&run_dir.join("request.json"));
+            let results = test_run_read_json(&run_dir.join("results.json"));
+            if let (TestRunJson::Parsed(request, _, _), TestRunJson::Parsed(results, _, _)) =
+                (request, results)
+                && test_run_registration_identity(&request).ok().as_ref()
+                    == Some(&registration.request_identity)
+                && engram_verification_record_results_are_terminal(registration, &results)
+                && !engram_verification_record_registration_unclassified_stages(
+                    registration, &request, &results).is_empty()
+            {
+                return Err(AcceptanceCommittedInputRefusal::UnclassifiedStages {
+                    run_id: run_id.to_owned(), commit: commit.to_owned(),
+                });
+            }
+            let state = match engram_verification_record_progress(run_dir) {
                 Some(EngramVerificationRecordProgress::Pending { reason }) => {
                     let kind = serde_json::to_value(&reason)
                         .ok()
@@ -356,27 +386,28 @@ fn acceptance_committed_input_record_acknowledged(
                     format!("pending: {kind}")
                 }
                 _ => "the host has received no receipt for it".to_owned(),
-            });
+            };
+            return Err(unacknowledged(state));
         }
     };
     let Some(frozen) = engram_verification_record_frozen(run_dir, run_id) else {
-        return Err("acknowledged, but its frozen body cannot be read back".to_owned());
+        return Err(unacknowledged("acknowledged, but its frozen body cannot be read back".to_owned()));
     };
     if !engram_verification_record_is_host_body(registration, &frozen.body) {
-        return Err("acknowledged, but its frozen body is not the host's own record of the run".to_owned());
+        return Err(unacknowledged("acknowledged, but its frozen body is not the host's own record of the run".to_owned()));
     }
     // The run's files and its body may have been rewritten together after
     // Engram's answer: only the very body the receipt answered is admitted.
     if !engram_verification_record_digest_answers(&body_digest, &frozen.body) {
-        return Err("acknowledged for another body: the frozen body changed after Engram's answer".to_owned());
+        return Err(unacknowledged("acknowledged for another body: the frozen body changed after Engram's answer".to_owned()));
     }
     if frozen.body.registration.host_run_id != run_id
         || frozen.body.input.clean_commit() != Some(commit)
     {
-        return Err("acknowledged for another run or input".to_owned());
+        return Err(unacknowledged("acknowledged for another run or input".to_owned()));
     }
     engram_verification_record_receipt_check(&frozen.body, &receipt)
-        .map_err(|error| format!("acknowledged with a receipt that does not answer it: {error}"))
+        .map_err(|error| unacknowledged(format!("acknowledged with a receipt that does not answer it: {error}")))
 }
 
 /// The evaluated work's claim as the requester's live held-claims read
@@ -727,13 +758,7 @@ impl AppState {
             if !admits {
                 return Err(Refusal::NoEligibleRun { commit });
             }
-            acceptance_committed_input_record_acknowledged(&registration, &commit).map_err(
-                |state| Refusal::RecordNotAcknowledged {
-                    run_id: registration.run_id.clone(),
-                    commit: commit.clone(),
-                    state,
-                },
-            )?;
+            acceptance_committed_input_record_acknowledged(&registration, &commit)?;
             admitting = Some(registration);
             break;
         }

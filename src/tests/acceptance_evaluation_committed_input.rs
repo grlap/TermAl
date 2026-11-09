@@ -724,6 +724,75 @@ fn a_sighted_request_without_a_registered_run_uses_the_complete_owner_identity()
 }
 
 #[test]
+fn an_unclassified_link_check_cannot_acknowledge_and_does_not_offer_a_wait() {
+    let (state, parent, _store, named_root) = named_root_parent();
+    let head = commit_named_root(&named_root);
+    acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
+    let transport = install_sighting_transport(&state, &named_root, 1, present_sighting());
+    let root = worktree(&named_root);
+    let directory = test_runs_git_common_dir(&root).unwrap()
+        .join("review-runs").join(COMMITTED_RUN_ID);
+    fs::create_dir_all(&directory).unwrap();
+    let command = json!(["node", "scripts/check-doc-links.mjs"]);
+    let request_record = json!({
+        "runId": COMMITTED_RUN_ID, "root": test_run_display_path(&root),
+        "full": false, "owner": parent, "input": "commit", "detached": false,
+        "started": "2026-10-30T10:00:00.000Z", "creatorPid": std::process::id(),
+        "stages": [{"name":"focused", "command":"node", "args":["scripts/check-doc-links.mjs"]}],
+    });
+    let mut results = committed_results("passed", input_record(&head, "clean"));
+    results["stages"][0]["name"] = json!("focused");
+    results["stages"][0]["command"] = command;
+    fs::write(directory.join("request.json"), request_record.to_string()).unwrap();
+    fs::write(directory.join("results.json"), results.to_string()).unwrap();
+    state.register_test_run(&parent, RegisterTestRunRequest {
+        run_id: COMMITTED_RUN_ID.to_owned(), run_directory: test_run_display_path(&directory),
+    }).unwrap();
+    let registration = current_registration(&state);
+    assert_eq!(registration.work_binding.as_ref().unwrap().claim_id, "claim-task");
+    assert_eq!(registration.named_root.as_ref().unwrap().workspace_id, named_root);
+    let pending = EngramVerificationRecordPending::UnclassifiedStages {
+        stages: vec!["focused".to_owned()],
+    };
+    let progress_path = directory.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE);
+    assert!(!progress_path.exists(), "the sender has not examined this run");
+    assert!(!directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE).exists(),
+        "a link check must not become a Test or Build record");
+    assert!(current_registration(&state).verification_record.is_none());
+    for phase in ["before sender", "after sender", "progress removed", "stale progress"] {
+        match phase {
+            "after sender" => {
+                assert!(matches!(engram_verification_record_prepare(&registration),
+                    EngramVerificationRecordPrepared::Pending(reason) if reason == pending));
+                assert_eq!(engram_verification_record_progress(&directory),
+                    Some(EngramVerificationRecordProgress::Pending { reason: pending.clone() }));
+            }
+            "progress removed" => fs::remove_file(&progress_path).unwrap(),
+            "stale progress" => fs::write(&progress_path,
+                json!({"state":"pending", "reason":{"kind":"no_connection"}}).to_string()).unwrap(),
+            _ => {}
+        }
+        let refused = assert_refused_without_a_sighting(&transport, decide(&state, &parent),
+            "verification_record_unclassified_stages", "an unsupported documentation check");
+        assert_eq!(refused, AcceptanceCommittedInputRefusal::UnclassifiedStages {
+            run_id: COMMITTED_RUN_ID.to_owned(), commit: head.clone(),
+        });
+        let error = refusal(&state, request(&state, &parent), "an unsupported documentation check");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(error.message.contains("no classified verification route today"), "{}", error.message);
+        assert!(error.message.contains("recognized real test or build on this commit"), "{}", error.message);
+        assert!(error.message.contains("termal-tests.toml supports native declared tests"), "{}", error.message);
+        assert!(!error.message.contains("request again once Engram has received it"));
+        assert_eq!(sighting_reads(&transport), 0);
+        assert!(!directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE).exists());
+        assert!(current_registration(&state).verification_record.is_none());
+        if phase == "before sender" {
+            assert!(!progress_path.exists(), "evaluation does not start or imitate the sender");
+        }
+    }
+}
+
+#[test]
 fn a_record_engram_has_not_acknowledged_at_head_is_refused_without_a_sighting() {
     for case in [
         "no record sent",
@@ -773,6 +842,11 @@ fn a_record_engram_has_not_acknowledged_at_head_is_refused_without_a_sighting() 
             ),
             "{case}: <details withheld>"
         );
+        if case == "pending" {
+            assert!(refusal.into_api_error("w-task").message
+                .contains("request again once Engram has received it"),
+                "a pending connection can still receive an acknowledgement");
+        }
     }
 }
 

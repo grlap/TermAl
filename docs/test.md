@@ -1172,6 +1172,28 @@ Flutter/.NET credit is reserved to the original host-observed native route;
 a generic focused launcher registration cannot adopt a declaration or a
 later artifact as that execution's evidence.
 
+A successful arbitrary command, such as `node scripts/check-doc-links.mjs`,
+can therefore leave a registered run at `pending: unclassified_stages`.
+TermAl builds no verification record for that run: waiting or repeating an
+evaluation request cannot make Engram acknowledge it. Evaluation refuses
+with `verification_record_unclassified_stages` and names the unsupported
+classification instead of asking the holder to wait for receipt. This
+decision reads the run's request and terminal results directly, including
+before the sender first examines it or if its progress file is missing;
+requesting evaluation does not prepare or send a record.
+
+There is currently no classified verification route for a documentation
+check that is neither a test nor a build. Do not label it as either one.
+The supported routes are actual recognized test/build commands, or a real
+test using [declared native verification](features/declared-test-commands.md#native-verification).
+The latter needs a committed `termal-tests.toml` entry, the exact declared
+command as the first tool action of a fresh turn, and a supported TRX or
+Dart test artifact, along with the native source and authority checks.
+Adding a declaration does not convert an old generic launcher run into
+that execution or supply its missing record. Supporting an honest additional
+check class requires a producer/consumer verification contract; it is not
+enabled by changing a stage label.
+
 A focused run, `node scripts/test-launcher.mjs focused -- COMMAND ARG...`,
 is a test check only when its wrapped command is itself one (a `cargo test`
 or a bounded native `node --test`, not a build or a `--no-run`). Its exit status alone says nothing about how

@@ -13,6 +13,9 @@ use super::*;
 use std::sync::atomic::AtomicUsize;
 use std::thread;
 
+#[path = "delegation_spawn_brief_tests.rs"]
+mod spawn_brief;
+
 const TEST_MCP_HTTP_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
 
 #[test]

@@ -342,11 +342,20 @@ fn resolve_agent_command_payload(
 
     let expanded_prompt = match command.kind {
         AgentCommandKind::PromptTemplate => {
-            let expanded = command
+            let mut expanded = command
                 .content
                 .split("$ARGUMENTS")
                 .collect::<Vec<_>>()
                 .join(arguments);
+            if !arguments.is_empty() && !command.content.contains("$ARGUMENTS") {
+                if !expanded.ends_with('\n') {
+                    expanded.push('\n');
+                }
+                if !expanded.ends_with("\n\n") {
+                    expanded.push('\n');
+                }
+                expanded.push_str(arguments);
+            }
             Some(append_resolved_agent_command_note(expanded, note))
         }
         AgentCommandKind::NativeSlash => {
