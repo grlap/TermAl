@@ -40,6 +40,115 @@ fn remote(text: &str) -> Vec<u8> {
     encode_receive(&intent(text), &proof()).unwrap()
 }
 
+#[test]
+fn remote_prompt_retired_identity_reload_keeps_retry_conflicts_without_a_body() {
+    let text = "private retirement canary\r\nwith exact trailing whitespace \n";
+    let original = intent(text);
+    let retained = encode_stored_identity(&original.retained_identity()).unwrap();
+    drop(original);
+    let loaded = decode_stored_identity(&retained).unwrap();
+    assert!(loaded.matches(&intent(text)));
+    assert!(!loaded.matches(&intent(&text.replace("\r\n", "\n"))));
+    assert!(!loaded.matches(&intent(text.trim_end())));
+    assert!(
+        !String::from_utf8(retained.clone())
+            .unwrap()
+            .contains("private retirement canary")
+    );
+    assert!(decode_stored_intent(&retained).is_err());
+    assert!(decode_receive(&retained).is_err());
+    assert!(decode_stored_identity(&encode_stored_intent(&intent(text)).unwrap()).is_err());
+    assert!(decode_stored_identity(&remote(text)).is_err());
+
+    let retry = intent(text);
+    let (basis, reference, key, _) = retry.components();
+    // Changed authority is still conflicting even with identical text and key.
+    let mut changed = basis.clone();
+    changed.target = NativeRoot::new(id(2), 1, "session-22".into(), id(99)).unwrap();
+    assert!(!loaded.matches(&Intent::new(changed, reference, key.into(), text.into()).unwrap()));
+    let mut changed = basis.clone();
+    changed.consent = DecisionIdentity::new(id(4), 2).unwrap();
+    assert!(!loaded.matches(&Intent::new(changed, reference, key.into(), text.into()).unwrap()));
+}
+
+#[test]
+fn remote_prompt_retired_identity_rejects_corruption_and_runnable_fields() {
+    let bytes = encode_stored_identity(&intent("body").retained_identity()).unwrap();
+    let baseline: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        decode_stored_identity(&serde_json::to_vec(&baseline).unwrap()).unwrap(),
+        intent("body").retained_identity()
+    );
+    for field in [
+        "source",
+        "target",
+        "grant",
+        "consent",
+        "placementGeneration",
+        "intentDigest",
+    ] {
+        let mut changed = baseline.clone();
+        changed.as_object_mut().unwrap().remove(field);
+        assert!(decode_stored_identity(&serde_json::to_vec(&changed).unwrap()).is_err());
+    }
+    for digest in [
+        "".into(),
+        "a".repeat(63),
+        "a".repeat(65),
+        "A".repeat(64),
+        "z".repeat(64),
+    ] {
+        let mut changed = baseline.clone();
+        changed["intentDigest"] = digest.into();
+        assert!(decode_stored_identity(&serde_json::to_vec(&changed).unwrap()).is_err());
+    }
+    for (path, value, expected) in [
+        (
+            "schemaVersion",
+            serde_json::json!(2),
+            DecodeError::UnsupportedVersion,
+        ),
+        (
+            "enrollmentGeneration",
+            serde_json::json!(0),
+            DecodeError::InvalidIdentity,
+        ),
+        (
+            "placementGeneration",
+            serde_json::json!(0),
+            DecodeError::InvalidIdentity,
+        ),
+        (
+            "referenceId",
+            serde_json::json!(Uuid::nil().to_string()),
+            DecodeError::InvalidIdentity,
+        ),
+        (
+            "idempotencyKey",
+            serde_json::json!("bad\nkey"),
+            DecodeError::InvalidIdentity,
+        ),
+        (
+            "text",
+            serde_json::json!("a retired identity cannot carry a runnable body"),
+            DecodeError::InvalidJson,
+        ),
+    ] {
+        let mut changed = baseline.clone();
+        changed[path] = value;
+        assert_eq!(
+            decode_stored_identity(&serde_json::to_vec(&changed).unwrap()),
+            Err(expected)
+        );
+    }
+    let mut oversized = bytes;
+    oversized.resize(METADATA_BYTES + 1, b' ');
+    assert_eq!(
+        decode_stored_identity(&oversized),
+        Err(DecodeError::MetadataTooLarge)
+    );
+}
+
 fn add_metadata_padding(mut bytes: Vec<u8>, current: usize, desired: usize) -> Vec<u8> {
     assert!(current <= desired);
     bytes.extend(std::iter::repeat_n(b' ', desired - current));

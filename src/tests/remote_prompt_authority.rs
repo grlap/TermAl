@@ -100,3 +100,14 @@ fn remote_prompt_identity_refuses_same_host_and_invalid_key_without_granting_per
         .is_err()
     );
 }
+
+#[test]
+fn remote_prompt_retained_identity_debug_omits_key_body_and_digest() {
+    let original = intent();
+    let retained = original.retained_identity();
+    let debug = format!("{retained:?}");
+    assert!(!debug.contains(original.components().2));
+    assert!(!debug.contains(original.components().3));
+    assert!(!debug.contains(&format!("{:?}", original.digest())));
+    assert!(debug.contains("RetainedIdentity"));
+}

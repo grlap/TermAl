@@ -88,6 +88,70 @@ pub(super) struct Intent {
     text: String,
 }
 
+/// The immutable part retained after the delivery owner retires the payload.
+/// This value can compare a retry, but cannot reconstruct or schedule a prompt.
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct RetainedIdentity {
+    basis: AuthorityBasis,
+    reference: Uuid,
+    client_key: String,
+    digest: [u8; 32],
+}
+
+impl std::fmt::Debug for RetainedIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RetainedIdentity")
+            .field("basis", &self.basis)
+            .field("reference", &self.reference)
+            .finish_non_exhaustive()
+    }
+}
+
+fn validate_intent_identity(
+    basis: &AuthorityBasis,
+    reference: Uuid,
+    client_key: &str,
+) -> Result<(), Refusal> {
+    if reference.is_nil()
+        || basis.source.host == basis.target.host
+        || client_key.is_empty()
+        || client_key.len() > 160
+        || client_key.chars().any(char::is_control)
+    {
+        return Err(Refusal::InvalidIdentity);
+    }
+    Ok(())
+}
+
+impl RetainedIdentity {
+    pub(super) fn new(
+        basis: AuthorityBasis,
+        reference: Uuid,
+        client_key: String,
+        digest: [u8; 32],
+    ) -> Result<Self, Refusal> {
+        validate_intent_identity(&basis, reference, &client_key)?;
+        Ok(Self {
+            basis,
+            reference,
+            client_key,
+            digest,
+        })
+    }
+
+    pub(super) fn components(&self) -> (&AuthorityBasis, Uuid, &str, &[u8; 32]) {
+        (&self.basis, self.reference, &self.client_key, &self.digest)
+    }
+
+    pub(super) fn matches(&self, intent: &Intent) -> bool {
+        self.basis == intent.basis
+            && self.reference == intent.reference
+            && self.client_key == intent.client_key
+            && self.digest == intent.digest()
+    }
+}
+
 impl std::fmt::Debug for Intent {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -104,20 +168,22 @@ impl Intent {
         (&self.basis, self.reference, &self.client_key, &self.text)
     }
 
+    pub(super) fn retained_identity(&self) -> RetainedIdentity {
+        RetainedIdentity {
+            basis: self.basis.clone(),
+            reference: self.reference,
+            client_key: self.client_key.clone(),
+            digest: self.digest(),
+        }
+    }
+
     pub(super) fn new(
         basis: AuthorityBasis,
         reference: Uuid,
         client_key: String,
         text: String,
     ) -> Result<Self, Refusal> {
-        if reference.is_nil()
-            || basis.source.host == basis.target.host
-            || client_key.is_empty()
-            || client_key.len() > 160
-            || client_key.chars().any(char::is_control)
-        {
-            return Err(Refusal::InvalidIdentity);
-        }
+        validate_intent_identity(&basis, reference, &client_key)?;
         Ok(Self {
             basis,
             reference,

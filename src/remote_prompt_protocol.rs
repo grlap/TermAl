@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::{RawValue, to_raw_value};
 use uuid::Uuid;
 
-use super::remote_prompt_authority::{AuthorityBasis, DecisionIdentity, Intent, NativeRoot};
+use super::remote_prompt_authority::{
+    AuthorityBasis, DecisionIdentity, Intent, NativeRoot, RetainedIdentity,
+};
 
 pub(super) const TEXT_BYTES: usize = 65_536;
 pub(super) const REQUEST_BYTES: usize = 524_288;
@@ -92,6 +94,51 @@ impl Decision {
             generation,
         }
     }
+}
+
+// Shared conversions without serde flatten: each envelope still has its strict
+// field inventory and rejects unknown or duplicate fields before conversion.
+struct AuthorityFields {
+    source: Root,
+    target: Root,
+    grant: Decision,
+    consent: Decision,
+    enrollment_generation: u64,
+    placement_generation: Option<u64>,
+}
+
+impl AuthorityFields {
+    fn from_native(basis: &AuthorityBasis) -> Self {
+        Self {
+            source: Root::from_native(&basis.source),
+            target: Root::from_native(&basis.target),
+            grant: Decision::from_identity(&basis.grant),
+            consent: Decision::from_identity(&basis.consent),
+            enrollment_generation: basis.enrollment_generation.get(),
+            placement_generation: basis.placement_generation.map(NonZeroU64::get),
+        }
+    }
+}
+
+fn decode_authority(
+    source: Root,
+    target: Root,
+    grant: Decision,
+    consent: Decision,
+    enrollment_generation: u64,
+    placement_generation: Option<u64>,
+) -> Result<AuthorityBasis, DecodeError> {
+    Ok(AuthorityBasis {
+        source: source.native()?,
+        target: target.native()?,
+        grant: grant.identity()?,
+        consent: consent.identity()?,
+        enrollment_generation: NonZeroU64::new(enrollment_generation)
+            .ok_or(DecodeError::InvalidIdentity)?,
+        placement_generation: placement_generation
+            .map(|value| NonZeroU64::new(value).ok_or(DecodeError::InvalidIdentity))
+            .transpose()?,
+    })
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -186,18 +233,14 @@ impl StoredIntent {
             return Err(DecodeError::UnsupportedVersion);
         }
         let text = decoded_text(&self.text, bytes)?;
-        let basis = AuthorityBasis {
-            source: self.source.native()?,
-            target: self.target.native()?,
-            grant: self.grant.identity()?,
-            consent: self.consent.identity()?,
-            enrollment_generation: NonZeroU64::new(self.enrollment_generation)
-                .ok_or(DecodeError::InvalidIdentity)?,
-            placement_generation: self
-                .placement_generation
-                .map(|value| NonZeroU64::new(value).ok_or(DecodeError::InvalidIdentity))
-                .transpose()?,
-        };
+        let basis = decode_authority(
+            self.source,
+            self.target,
+            self.grant,
+            self.consent,
+            self.enrollment_generation,
+            self.placement_generation,
+        )?;
         Intent::new(basis, uuid(&self.reference_id)?, self.idempotency_key, text)
             .map_err(|_| DecodeError::InvalidIdentity)
     }
@@ -207,14 +250,15 @@ impl StoredIntent {
 /// retained as authority. Validation is identical to the route's durable fields.
 pub(super) fn encode_stored_intent(intent: &Intent) -> Result<Vec<u8>, DecodeError> {
     let (basis, reference, key, text) = intent.components();
+    let fields = AuthorityFields::from_native(basis);
     let value = StoredIntent {
         schema_version: 1,
-        source: Root::from_native(&basis.source),
-        target: Root::from_native(&basis.target),
-        grant: Decision::from_identity(&basis.grant),
-        consent: Decision::from_identity(&basis.consent),
-        enrollment_generation: basis.enrollment_generation.get(),
-        placement_generation: basis.placement_generation.map(NonZeroU64::get),
+        source: fields.source,
+        target: fields.target,
+        grant: fields.grant,
+        consent: fields.consent,
+        enrollment_generation: fields.enrollment_generation,
+        placement_generation: fields.placement_generation,
         reference_id: reference.to_string(),
         idempotency_key: key.into(),
         text: to_raw_value(text).map_err(|_| DecodeError::InvalidJson)?,
@@ -231,6 +275,94 @@ pub(super) fn decode_stored_intent(bytes: &[u8]) -> Result<Intent, DecodeError> 
     let value: StoredIntent =
         serde_json::from_slice(bytes).map_err(|_| DecodeError::InvalidJson)?;
     value.intent(bytes.len())
+}
+
+/// Separate body-free format, never accepted as a runnable stored intent.
+/// Its digest is a comparison value, not proof that retirement is permitted.
+/// Version 1 binds to Intent::digest's termal.direct-prompt.intent.v1 domain;
+/// a different digest domain requires a new retained format version.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StoredIdentity {
+    schema_version: u8,
+    source: Root,
+    target: Root,
+    grant: Decision,
+    consent: Decision,
+    enrollment_generation: u64,
+    #[serde(deserialize_with = "required_optional_generation")]
+    placement_generation: Option<u64>,
+    reference_id: String,
+    idempotency_key: String,
+    intent_digest: String,
+}
+
+pub(super) fn encode_stored_identity(identity: &RetainedIdentity) -> Result<Vec<u8>, DecodeError> {
+    let (basis, reference, key, digest) = identity.components();
+    let fields = AuthorityFields::from_native(basis);
+    let value = StoredIdentity {
+        schema_version: 1,
+        source: fields.source,
+        target: fields.target,
+        grant: fields.grant,
+        consent: fields.consent,
+        enrollment_generation: fields.enrollment_generation,
+        placement_generation: fields.placement_generation,
+        reference_id: reference.to_string(),
+        idempotency_key: key.into(),
+        intent_digest: digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+    };
+    let bytes = serde_json::to_vec(&value).map_err(|_| DecodeError::InvalidJson)?;
+    decode_stored_identity(&bytes)?;
+    Ok(bytes)
+}
+
+pub(super) fn decode_stored_identity(bytes: &[u8]) -> Result<RetainedIdentity, DecodeError> {
+    if bytes.len() > METADATA_BYTES {
+        return Err(DecodeError::MetadataTooLarge);
+    }
+    let value: StoredIdentity =
+        serde_json::from_slice(bytes).map_err(|_| DecodeError::InvalidJson)?;
+    if value.schema_version != 1 {
+        return Err(DecodeError::UnsupportedVersion);
+    }
+    if value.intent_digest.len() != 64
+        || !value
+            .intent_digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(DecodeError::InvalidIdentity);
+    }
+    let mut digest = [0; 32];
+    for (slot, pair) in digest
+        .iter_mut()
+        .zip(value.intent_digest.as_bytes().chunks_exact(2))
+    {
+        let nibble = |byte: u8| {
+            if byte.is_ascii_digit() {
+                byte - b'0'
+            } else {
+                byte - b'a' + 10
+            }
+        };
+        *slot = (nibble(pair[0]) << 4) | nibble(pair[1]);
+    }
+    let basis = decode_authority(
+        value.source,
+        value.target,
+        value.grant,
+        value.consent,
+        value.enrollment_generation,
+        value.placement_generation,
+    )?;
+    RetainedIdentity::new(
+        basis,
+        uuid(&value.reference_id)?,
+        value.idempotency_key,
+        digest,
+    )
+    .map_err(|_| DecodeError::InvalidIdentity)
 }
 
 fn decoded_text(raw: &RawValue, envelope_bytes: usize) -> Result<String, DecodeError> {
@@ -264,20 +396,14 @@ pub(super) fn decode_receive(bytes: &[u8]) -> Result<DecodedRequest, DecodeError
     }
     let text = decoded_text(&request.text, bytes.len())?;
     request.proof.validate()?;
-    let enrollment_generation =
-        NonZeroU64::new(request.enrollment_generation).ok_or(DecodeError::InvalidIdentity)?;
-    let placement_generation = request
-        .placement_generation
-        .map(|value| NonZeroU64::new(value).ok_or(DecodeError::InvalidIdentity))
-        .transpose()?;
-    let basis = AuthorityBasis {
-        source: request.source.native()?,
-        target: request.target.native()?,
-        grant: request.grant.identity()?,
-        consent: request.consent.identity()?,
-        enrollment_generation,
-        placement_generation,
-    };
+    let basis = decode_authority(
+        request.source,
+        request.target,
+        request.grant,
+        request.consent,
+        request.enrollment_generation,
+        request.placement_generation,
+    )?;
     let intent = Intent::new(
         basis,
         uuid(&request.reference_id)?,
@@ -303,14 +429,15 @@ pub(super) fn encode_receive(
         return Err(DecodeError::TextTooLarge);
     }
     proof.validate()?;
+    let fields = AuthorityFields::from_native(basis);
     let request = ReceiveRequest {
         protocol_version: 1,
-        source: Root::from_native(&basis.source),
-        target: Root::from_native(&basis.target),
-        grant: Decision::from_identity(&basis.grant),
-        consent: Decision::from_identity(&basis.consent),
-        enrollment_generation: basis.enrollment_generation.get(),
-        placement_generation: basis.placement_generation.map(NonZeroU64::get),
+        source: fields.source,
+        target: fields.target,
+        grant: fields.grant,
+        consent: fields.consent,
+        enrollment_generation: fields.enrollment_generation,
+        placement_generation: fields.placement_generation,
         reference_id: reference.to_string(),
         idempotency_key: key.into(),
         text: to_raw_value(text).map_err(|_| DecodeError::InvalidJson)?,
