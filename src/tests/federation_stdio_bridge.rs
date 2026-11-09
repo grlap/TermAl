@@ -325,11 +325,13 @@ async fn federation_stdio_cleanup_reaps_live_child_despite_poisoned_diagnostics(
     let alive = !child.child_exited().unwrap();
     // Poison only the optional diagnostic owner, never the authority state.
     let poison = diagnostic.clone();
-    assert!(std::panic::catch_unwind(move || {
-        let _held = poison.lock().unwrap();
-        panic!("injected diagnostic writer failure");
-    })
-    .is_err());
+    assert!(
+        std::panic::catch_unwind(move || {
+            let _held = poison.lock().unwrap();
+            panic!("injected diagnostic writer failure");
+        })
+        .is_err()
+    );
     tokio::time::timeout(
         phase_sync::DEADLOCK_GUARD,
         tokio::task::spawn_blocking(move || child.shutdown()),

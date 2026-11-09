@@ -36,12 +36,13 @@ mod turn_observations;
 #[path = "engram_turn_checks.rs"]
 mod turn_checks;
 
-use self::turn_checks::{EOCheckedTurn, SIZE_TEST,
-    assert_ordinary_observation_has_no_native_credit, assert_ordinary_turn_has_no_native_requests};
+use self::turn_checks::{
+    EOCheckedTurn, SIZE_TEST, assert_ordinary_observation_has_no_native_credit,
+    assert_ordinary_turn_has_no_native_requests,
+};
 
 #[path = "engram_held_claims.rs"]
 mod held_claims;
-
 
 #[path = "engram_unqueued_bind_budget.rs"]
 mod unqueued_bind_budget;
@@ -85,13 +86,21 @@ fn install_control_only_transport(state: &AppState, control: Arc<dyn EngramContr
     // No SessionBind publication or removed dispatch budget is involved.
     {
         let mut inner = state.inner.lock().expect("fixture state mutex poisoned");
-        let synthetic = inner.sessions.iter().filter(|record|
-            engram_project_for_session_locked(&inner, &record.session.id)
-                .and_then(|project| project.engram.as_ref())
-                .and_then(|settings| settings.binary_path.as_deref())
-                .is_some_and(|path| FsPath::new(path).file_name()
-                    .is_some_and(|name| name == "engram-fixture")))
-            .map(|record| record.session.id.clone()).collect::<Vec<_>>();
+        let synthetic = inner
+            .sessions
+            .iter()
+            .filter(|record| {
+                engram_project_for_session_locked(&inner, &record.session.id)
+                    .and_then(|project| project.engram.as_ref())
+                    .and_then(|settings| settings.binary_path.as_deref())
+                    .is_some_and(|path| {
+                        FsPath::new(path)
+                            .file_name()
+                            .is_some_and(|name| name == "engram-fixture")
+                    })
+            })
+            .map(|record| record.session.id.clone())
+            .collect::<Vec<_>>();
         for session in synthetic {
             let record = inner.session_mut(&session).unwrap();
             assert!(!record.engram.context_nudge_in_progress);
@@ -564,34 +573,58 @@ fn never_enabled_engram_project_with_a_delegation_child_can_be_deleted() {
         let inner = state.inner.lock().unwrap();
         [&parent_session_id, &created.delegation.child_session_id].map(|session_id| {
             let record = &inner.sessions[inner.find_session_index(session_id).unwrap()];
-            assert!(!AppState::engram_session_is_enabled_locked(&inner, session_id));
-            assert!(AppState::engram_source_root_target_locked(&inner, session_id).unwrap().is_none());
+            assert!(!AppState::engram_session_is_enabled_locked(
+                &inner, session_id
+            ));
+            assert!(
+                AppState::engram_source_root_target_locked(&inner, session_id)
+                    .unwrap()
+                    .is_none()
+            );
             assert!(engram_mcp_runtime_config_for_session_locked(&inner, session_id).is_none());
             assert!(record.engram_mcp_installed.is_none());
             record.runtime.runtime_token()
         })
     };
-    assert!(runtime_tokens[1].is_some(), "the ordinary child has a provider runtime");
+    assert!(
+        runtime_tokens[1].is_some(),
+        "the ordinary child has a provider runtime"
+    );
 
     state
         .delete_project(&project_id)
         .expect("a never-enabled Engram project should delete without connection settings");
 
     assert!(transport.requests().is_empty());
-    assert!(transport.shutdowns().is_empty(), "no never-enabled control process existed");
+    assert!(
+        transport.shutdowns().is_empty(),
+        "no never-enabled control process existed"
+    );
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert!(inner.find_project(&project_id).is_none());
     for (session_id, token) in [&parent_session_id, &created.delegation.child_session_id]
-        .into_iter().zip(runtime_tokens) {
+        .into_iter()
+        .zip(runtime_tokens)
+    {
         let record = inner
             .sessions
             .iter()
             .find(|record| record.session.id == *session_id)
             .expect("deleted-project sessions should remain visible");
         assert!(record.session.project_id.is_none());
-        assert_eq!(record.runtime.runtime_token(), token, "ordinary provider ownership is preserved");
-        assert!(!AppState::engram_session_is_enabled_locked(&inner, session_id));
-        assert!(AppState::engram_source_root_target_locked(&inner, session_id).unwrap().is_none());
+        assert_eq!(
+            record.runtime.runtime_token(),
+            token,
+            "ordinary provider ownership is preserved"
+        );
+        assert!(!AppState::engram_session_is_enabled_locked(
+            &inner, session_id
+        ));
+        assert!(
+            AppState::engram_source_root_target_locked(&inner, session_id)
+                .unwrap()
+                .is_none()
+        );
         assert!(engram_mcp_runtime_config_for_session_locked(&inner, session_id).is_none());
         assert!(record.engram_mcp_installed.is_none());
         assert!(!record.engram_mcp_runtime_quarantined);
@@ -599,8 +632,6 @@ fn never_enabled_engram_project_with_a_delegation_child_can_be_deleted() {
         assert!(record.runtime_stop_owner.is_none());
     }
 }
-
-
 
 fn test_control_work_binding(label: &str, revision: i64) -> EngramControlWorkBinding {
     EngramControlWorkBinding {
@@ -657,7 +688,6 @@ fn engram_context_prompt_escapes_a_forged_closing_fence() {
     assert!(prompt.contains("&lt;/engram-work-context>"));
     assert!(prompt.ends_with("\n\nuser prompt"));
 }
-
 
 fn queue_test_engram_prompt(
     state: &AppState,
@@ -717,7 +747,6 @@ pub(super) fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettin
         deadline_ms: Some(250),
     }
 }
-
 
 fn install_fixture_engram_host_settings(state: &AppState, home: &FsPath) {
     let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -905,7 +934,10 @@ fn project_engram_patch_without_observability_keeps_the_stored_choice() {
     assert!(saved.enabled && !saved.execution_observability);
     let disabled = patch(json!({"enabled": false}));
     assert!(!disabled.enabled);
-    assert!(!disabled.execution_observability, "disable keeps observations off");
+    assert!(
+        !disabled.execution_observability,
+        "disable keeps observations off"
+    );
     let enabled = patch(json!({"enabled": true}));
     assert!(enabled.enabled);
     assert!(
@@ -914,11 +946,17 @@ fn project_engram_patch_without_observability_keeps_the_stored_choice() {
     );
     for observing in [true, false, true] {
         let saved = patch(json!({"enabled": true, "executionObservability": observing}));
-        assert_eq!(saved.execution_observability, observing, "an explicit value is applied");
+        assert_eq!(
+            saved.execution_observability, observing,
+            "an explicit value is applied"
+        );
     }
     let disabled = patch(json!({"enabled": false}));
     assert!(!disabled.enabled);
-    assert!(disabled.execution_observability, "disable keeps an explicit ON as well");
+    assert!(
+        disabled.execution_observability,
+        "disable keeps an explicit ON as well"
+    );
 }
 
 #[test]
@@ -979,7 +1017,7 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
                 .to_string_lossy()
                 .into_owned(),
             home: root.to_string_lossy().into_owned(),
-            })
+        })
         .expect("host Engram settings should persist");
     assert_eq!(
         state
@@ -1220,36 +1258,50 @@ fn link_engram_mcp_test_descendant(
 fn record_test_project_runtime_descriptors(state: &AppState, project_id: &str) {
     let runtimes = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        project_engram_session_ids_locked(&inner, project_id).into_iter()
+        project_engram_session_ids_locked(&inner, project_id)
+            .into_iter()
             .filter_map(|id| {
-                let record = inner.find_session_index(&id).and_then(|i| inner.sessions.get(i))?;
+                let record = inner
+                    .find_session_index(&id)
+                    .and_then(|i| inner.sessions.get(i))?;
                 Some((id, record.session.agent, record.runtime.runtime_token()?))
-            }).collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
     };
     for (id, agent, token) in runtimes {
         match agent {
-            Agent::Claude => { state.engram_mcp_stdio_config_for_runtime(&id, &token)
-                .expect("fixture must install its actual Engram MCP descriptor"); }
-            agent if agent.supports_codex_prompt_settings() => {
-                state.termal_delegation_mcp_codex_config_for_runtime(&id, &token)
+            Agent::Claude => {
+                state
+                    .engram_mcp_stdio_config_for_runtime(&id, &token)
                     .expect("fixture must install its actual Engram MCP descriptor");
             }
-            _ => { state.termal_delegation_mcp_acp_servers_for_runtime(&id, &token)
-                .expect("fixture must install its actual Engram MCP descriptor"); }
+            agent if agent.supports_codex_prompt_settings() => {
+                state
+                    .termal_delegation_mcp_codex_config_for_runtime(&id, &token)
+                    .expect("fixture must install its actual Engram MCP descriptor");
+            }
+            _ => {
+                state
+                    .termal_delegation_mcp_acp_servers_for_runtime(&id, &token)
+                    .expect("fixture must install its actual Engram MCP descriptor");
+            }
         }
     }
 }
 
-fn ordinary_runtime_family_fixture(
-    suffix: &str,
-) -> (AppState, PathBuf, String, Vec<String>) {
+fn ordinary_runtime_family_fixture(suffix: &str) -> (AppState, PathBuf, String, Vec<String>) {
     let state = test_app_state();
-    let root = state.test_temp_root.as_ref().unwrap().path()
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
         .join(format!("engram-mcp-runtime-{suffix}"));
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join(".engram-project"), "fixture-ready\n").unwrap();
     let project_id = create_test_project(&state, &root, "Engram MCP runtime lifecycle");
-    state.update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+    state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
         .expect("ordinary connection should enable");
     let claude = create_test_project_session(&state, Agent::Claude, &project_id, &root);
     let codex = create_test_project_session(&state, Agent::Codex, &project_id, &root);
@@ -1257,13 +1309,16 @@ fn ordinary_runtime_family_fixture(
     let descendant = test_session_id(&state, Agent::Cursor);
     link_engram_mcp_test_descendant(&state, &codex, &descendant, &root);
     let ids = vec![claude, codex, cursor, descendant];
-    for id in &ids { attach_engram_mcp_test_runtime(&state, id); }
+    for id in &ids {
+        attach_engram_mcp_test_runtime(&state, id);
+    }
     record_test_project_runtime_descriptors(&state, &project_id);
     (state, root, project_id, ids)
 }
 #[test]
 fn runtime_mcp_composition_records_the_exact_installed_engram_descriptor() {
-    let (state, root, _project_id, session_ids) = ordinary_runtime_family_fixture("installed-descriptor");
+    let (state, root, _project_id, session_ids) =
+        ordinary_runtime_family_fixture("installed-descriptor");
     for session_id in &session_ids {
         let (agent, runtime_token) = {
             let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1312,8 +1367,13 @@ fn runtime_mcp_composition_records_the_exact_installed_engram_descriptor() {
             .expect("runtime config composition should record its descriptor");
         assert_eq!(descriptor.binary_path, expected_binary);
         assert_eq!(descriptor.home, expected_home);
-        assert_eq!(descriptor.actor_id, engram_seat_id("dev",
-            &inner.sessions[inner.find_session_index(&session_id).unwrap()].session));
+        assert_eq!(
+            descriptor.actor_id,
+            engram_seat_id(
+                "dev",
+                &inner.sessions[inner.find_session_index(&session_id).unwrap()].session
+            )
+        );
     }
     drop(inner);
 }
@@ -1386,7 +1446,7 @@ fn engram_enabled_settings_default_blank_home_and_reject_relative_home() {
                 "unexpected relative-home validation error: {}",
                 error.message
             );
-                },
+        },
     );
 }
 
@@ -1621,16 +1681,18 @@ fn set_test_project_engram_mcp_settings(
     }
     // Historical credentials stay passive and must never enter MCP argv or env.
     if let Some(secret) = historical_grant {
-        inner.engram_retired_work_authority_grants.push(EngramRetiredWorkAuthorityGrant {
-            home: "C:/engram-home".to_owned(),
-            project_root: String::new(),
-            store_key: None,
-            project_id: project_id.to_owned(),
-            grant_hash: secret.to_owned(),
-            retired_at: "2026-08-29T00:00:00Z".to_owned(),
-            reason: "passive fixture history".to_owned(),
-            revoke_confirmed: false,
-        });
+        inner
+            .engram_retired_work_authority_grants
+            .push(EngramRetiredWorkAuthorityGrant {
+                home: "C:/engram-home".to_owned(),
+                project_root: String::new(),
+                store_key: None,
+                project_id: project_id.to_owned(),
+                grant_hash: secret.to_owned(),
+                retired_at: "2026-08-29T00:00:00Z".to_owned(),
+                reason: "passive fixture history".to_owned(),
+                revoke_confirmed: false,
+            });
     }
     if enabled {
         inner
@@ -2884,7 +2946,8 @@ fn doctor_transport_drains_a_report_larger_than_the_pipe_buffer() {
 }
 #[test]
 fn engram_mcp_disable_immediately_tears_down_all_runtime_families_and_descendants() {
-    let (state, root, project_id, session_ids) = ordinary_runtime_family_fixture("disable-all-families");
+    let (state, root, project_id, session_ids) =
+        ordinary_runtime_family_fixture("disable-all-families");
     let settings = EngramProjectSettings::default();
 
     state
@@ -3039,7 +3102,8 @@ fn engram_mcp_disable_gracefully_cancels_opencode_before_teardown() {
             .find_session_index(&session_id)
             .expect("OpenCode session should exist");
         let descriptor = engram_mcp_runtime_config_for_session_locked(&inner, &session_id)
-            .expect("the enabled declared project has an MCP configuration").installed;
+            .expect("the enabled declared project has an MCP configuration")
+            .installed;
         let record = inner
             .session_mut_by_index(index)
             .expect("OpenCode session index should be valid");
@@ -3130,9 +3194,14 @@ fn engram_mcp_disable_defers_behind_existing_stop_owner_without_waiting() {
     record_test_project_runtime_descriptors(&state, &project_id);
     let error = state
         .update_project_engram_settings(&project_id, EngramProjectSettings::default())
-        .err().expect("pending cleanup must be visible after settings persist");
+        .err()
+        .expect("pending cleanup must be visible after settings persist");
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("runtime cleanup is pending behind an existing Stop"));
+    assert!(
+        error
+            .message
+            .contains("runtime cleanup is pending behind an existing Stop")
+    );
 
     let target = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -3245,17 +3314,22 @@ fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automati
     stop_gate.wait_until_claimed();
 
     record_test_project_runtime_descriptors(&state, &project_id);
-    let error = state.update_project_engram_settings(&project_id, cleared)
-        .err().expect("pending cleanup must be reported");
+    let error = state
+        .update_project_engram_settings(&project_id, cleared)
+        .err()
+        .expect("pending cleanup must be reported");
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("runtime cleanup is pending behind an existing Stop"));
+    assert!(
+        error
+            .message
+            .contains("runtime cleanup is pending behind an existing Stop")
+    );
     stop_gate.release();
     stop_thread
         .join()
         .expect("Stop thread should finish")
         .expect("successful transferred revocation should satisfy Stop");
     drop(failure_guard);
-
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let record = inner
@@ -3376,10 +3450,16 @@ fn engram_mcp_pending_revocation_surfaces_shared_codex_stop_interrupt_failure() 
     stop_gate.wait_until_claimed();
 
     record_test_project_runtime_descriptors(&state, &project_id);
-    let error = state.update_project_engram_settings(&project_id, cleared)
-        .err().expect("pending cleanup must be reported");
+    let error = state
+        .update_project_engram_settings(&project_id, cleared)
+        .err()
+        .expect("pending cleanup must be reported");
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("runtime cleanup is pending behind an existing Stop"));
+    assert!(
+        error
+            .message
+            .contains("runtime cleanup is pending behind an existing Stop")
+    );
     stop_gate.release();
     let error = match stop_thread.join().expect("Stop thread should finish") {
         Ok(_) => panic!("failed shared Codex interrupt must remain visible"),
@@ -3789,12 +3869,11 @@ fn engram_mcp_disable_surfaces_shutdown_failure_and_blocks_resume() {
 
     record_test_project_runtime_descriptors(&state, &project_id);
     let failure_guard = force_test_kill_child_process_failure(&process, "Claude");
-    let error = match state
-        .update_project_engram_settings(&project_id, EngramProjectSettings::default())
-    {
-        Ok(_) => panic!("failed runtime shutdown must be visible to the caller"),
-        Err(error) => error,
-    };
+    let error =
+        match state.update_project_engram_settings(&project_id, EngramProjectSettings::default()) {
+            Ok(_) => panic!("failed runtime shutdown must be visible to the caller"),
+            Err(error) => error,
+        };
     assert!(
         error.message.contains("runtime cleanup was degraded"),
         "unexpected revocation error: {}",
@@ -3829,10 +3908,7 @@ fn engram_mcp_disable_surfaces_shutdown_failure_and_blocks_resume() {
             .find_project(&project_id)
             .expect("project should remain after disable");
         assert_eq!(
-            project
-                .engram
-                .as_ref()
-                .map(|settings| settings.enabled),
+            project.engram.as_ref().map(|settings| settings.enabled),
             Some(false),
             "disabled settings must remain durable even when process cleanup fails"
         );
@@ -4112,12 +4188,11 @@ fn engram_mcp_mixed_cleanup_error_preserves_pending_session_observability() {
 
     record_test_project_runtime_descriptors(&state, &project_id);
     let failure_guard = force_test_kill_child_process_failure(&failing_process, "Claude");
-    let error = match state
-        .update_project_engram_settings(&project_id, EngramProjectSettings::default())
-    {
-        Ok(_) => panic!("mixed cleanup degradation must be visible"),
-        Err(error) => error,
-    };
+    let error =
+        match state.update_project_engram_settings(&project_id, EngramProjectSettings::default()) {
+            Ok(_) => panic!("mixed cleanup degradation must be visible"),
+            Err(error) => error,
+        };
     assert!(
         error.message.contains(&pending_session_id),
         "cleanup error should retain pending ids: {}",
@@ -4225,12 +4300,11 @@ fn engram_mcp_shared_codex_interrupt_failure_detaches_thread_and_surfaces_degrad
     }
     record_test_project_runtime_descriptors(&state, &project_id);
 
-    let error = match state
-        .update_project_engram_settings(&project_id, EngramProjectSettings::default())
-    {
-        Ok(_) => panic!("unconfirmed shared interrupt should remain user-visible"),
-        Err(error) => error,
-    };
+    let error =
+        match state.update_project_engram_settings(&project_id, EngramProjectSettings::default()) {
+            Ok(_) => panic!("unconfirmed shared interrupt should remain user-visible"),
+            Err(error) => error,
+        };
     assert!(
         error
             .message
@@ -4354,15 +4428,25 @@ fn engram_mcp_buffered_runtime_exit_avoids_quarantining_a_dead_runtime() {
     drop(inner);
 }
 
-
 fn assert_no_admission_or_native_credit_requests(transport: &ScriptedEngramControlTransport) {
     for request in transport.requests() {
-        assert!(!matches!(request.request["operation"].as_str(),
-            Some("session_bind" | "session_status" | "turn_grant_read" |
-                "turn_evaluate" | "turn_begin" | "turn_checkpoint" |
-                "verification_bind" | "verification_record")),
+        assert!(
+            !matches!(
+                request.request["operation"].as_str(),
+                Some(
+                    "session_bind"
+                        | "session_status"
+                        | "turn_grant_read"
+                        | "turn_evaluate"
+                        | "turn_begin"
+                        | "turn_checkpoint"
+                        | "verification_bind"
+                        | "verification_record"
+                )
+            ),
             "ordinary adapter work must not acquire admission or native credit: {}",
-            request.request);
+            request.request
+        );
     }
 }
 
@@ -4398,47 +4482,67 @@ fn ordinary_work_session_requires_exact_current_identity_and_explicit_support() 
         json!({"project_id": store.project_id, "session_id": connection.session_id,
             "work_session": true, "capabilities": []}),
     ] {
-        let transport = ScriptedEngramControlTransport::new([
-            ScriptedEngramControlResponse::Reply(Ok(answer)),
-        ]);
+        let transport =
+            ScriptedEngramControlTransport::new([ScriptedEngramControlResponse::Reply(Ok(answer))]);
         let adapter = EngramHostAdapter {
             host_workdir: PathBuf::from("fixture"),
-            transport: transport.clone(), capabilities: Arc::default(),
+            transport: transport.clone(),
+            capabilities: Arc::default(),
         };
-        assert!(adapter.read_work_session(&connection, &store, DEADLOCK_GUARD).is_err());
+        assert!(
+            adapter
+                .read_work_session(&connection, &store, DEADLOCK_GUARD)
+                .is_err()
+        );
         assert_eq!(transport.requests().len(), 1);
         assert_no_admission_or_native_credit_requests(&transport);
     }
-    let transport = ScriptedEngramControlTransport::new([
-        ScriptedEngramControlResponse::Reply(Ok(valid.clone())),
-    ]);
+    let transport = ScriptedEngramControlTransport::new([ScriptedEngramControlResponse::Reply(
+        Ok(valid.clone()),
+    )]);
     let adapter = EngramHostAdapter {
         host_workdir: PathBuf::from("fixture"),
-        transport: transport.clone(), capabilities: Arc::default(),
+        transport: transport.clone(),
+        capabilities: Arc::default(),
     };
-    assert_eq!(adapter.read_work_session(&connection, &store, DEADLOCK_GUARD).unwrap(),
-        connection.session_id);
-    assert_eq!(transport.requests().len(), 1,
-        "the scripted child has one stable current generation");
+    assert_eq!(
+        adapter
+            .read_work_session(&connection, &store, DEADLOCK_GUARD)
+            .unwrap(),
+        connection.session_id
+    );
+    assert_eq!(
+        transport.requests().len(),
+        1,
+        "the scripted child has one stable current generation"
+    );
     assert_no_admission_or_native_credit_requests(&transport);
 
-    let exhausted = ScriptedEngramControlTransport::new([
-        ScriptedEngramControlResponse::Reply(Ok(valid)),
-    ]);
+    let exhausted =
+        ScriptedEngramControlTransport::new([ScriptedEngramControlResponse::Reply(Ok(valid))]);
     let adapter = EngramHostAdapter {
         host_workdir: PathBuf::from("fixture"),
         transport: Arc::new(UnknownGenerationWorkTransport(exhausted.clone())),
         capabilities: Arc::default(),
     };
-    assert!(adapter.read_work_session(&connection, &store, DEADLOCK_GUARD).is_err(),
-        "an exhausted current-service script is never an implicit positive answer");
+    assert!(
+        adapter
+            .read_work_session(&connection, &store, DEADLOCK_GUARD)
+            .is_err(),
+        "an exhausted current-service script is never an implicit positive answer"
+    );
     assert_eq!(exhausted.requests().len(), 2);
 }
 
 #[test]
 fn ordinary_turn_emits_observation_without_native_verification_credit() {
     let turn = EOCheckedTurn::start("generic-ordinary-observation", true);
-    turn.run("generic-ordinary-check", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    turn.run(
+        "generic-ordinary-check",
+        SIZE_TEST,
+        EngramCommandExit::Code(0),
+        || {},
+    );
     let request = turn.finish();
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
     assert_ordinary_turn_has_no_native_requests(&turn);
@@ -4551,11 +4655,17 @@ fn ordinary_user_mailbox_and_orchestrator_sources_deliver_once_without_admission
         .expect("orchestrator turn should finish");
 
     assert_no_admission_or_native_credit_requests(&transport);
-    assert!(matches!(runtime_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "each source must deliver exactly one provider command");
+    assert!(
+        matches!(runtime_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "each source must deliver exactly one provider command"
+    );
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&child_id).unwrap()];
-    for text in [initial_prompt.as_str(), "Mailbox source wake.", "Orchestrator source wake."] {
+    for text in [
+        initial_prompt.as_str(),
+        "Mailbox source wake.",
+        "Orchestrator source wake.",
+    ] {
         assert_eq!(record.session.messages.iter().filter(|message|
             matches!(message, Message::Text { text: actual, .. } if actual == text)).count(), 1);
     }
@@ -4632,29 +4742,43 @@ fn remote_proxy_dispatch_never_enters_the_local_engram_adapter() {
     assert_eq!(transport.requests().len(), calls_before_proxy);
 }
 
-
 #[test]
 fn ordinary_approval_pause_preserves_runtime_and_does_not_promote_queued_work() {
     let turn = uncertain_begin::OrdinaryRoot::new("ordinary-approval-pause");
     let dispatch = turn.prepare("Pause this begun turn for an approval.");
     deliver_turn_dispatch(&turn.state, dispatch).expect("initial prompt reaches the runtime");
-    assert!(turn.prompt().prompt.contains("Pause this begun turn for an approval."));
+    assert!(
+        turn.prompt()
+            .prompt
+            .contains("Pause this begun turn for an approval.")
+    );
     let runtime_token = turn.record(|record| record.runtime.runtime_token().unwrap());
     turn.edit(|record| record.session.status = SessionStatus::Approval);
     let queued = turn.enqueue("wait for approval", QueuedPromptSource::User);
-    assert!(turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().is_none());
+    assert!(
+        turn.state
+            .start_next_queued_turn_off_lock(&turn.session, false, false)
+            .unwrap()
+            .is_none()
+    );
     turn.assert_no_prompt();
     turn.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Approval);
         assert!(record.runtime.matches_runtime_token(&runtime_token));
         assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(record.queued_prompts[0].pending_prompt.id, queued);
-        assert_eq!(record.queued_prompts[0].pending_prompt.text, "wait for approval");
+        assert_eq!(
+            record.queued_prompts[0].pending_prompt.text,
+            "wait for approval"
+        );
     });
     // Remove only this fixture's queued follow-up before completing the turn.
-    turn.state.cancel_queued_prompt(&turn.session, &queued).unwrap();
+    turn.state
+        .cancel_queued_prompt(&turn.session, &queued)
+        .unwrap();
     turn.edit(|record| record.session.status = SessionStatus::Active);
-    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &runtime_token)
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&turn.session, &runtime_token)
         .expect("ordinary turn finishes after approval resumes it");
     turn.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Idle);
@@ -4681,7 +4805,6 @@ fn global_disable_values_are_explicit() {
         );
     }
 }
-
 
 #[derive(Clone, Copy)]
 enum EngramTerminationCase {
@@ -4780,7 +4903,10 @@ fn assert_ordinary_terminal_case(case: EngramTerminationCase, label: &str) {
     assert_no_admission_or_native_credit_requests(&transport);
     let inner = state.inner.lock().unwrap();
     if matches!(case, EngramTerminationCase::Kill) {
-        assert!(inner.find_session_index(&child_id).is_none(), "Kill removes its session");
+        assert!(
+            inner.find_session_index(&child_id).is_none(),
+            "Kill removes its session"
+        );
         return;
     }
     let child = &inner.sessions[inner.find_session_index(&child_id).unwrap()];
@@ -4797,7 +4923,9 @@ fn ordinary_terminal_paths_do_not_need_an_engram_checkpoint() {
         (EngramTerminationCase::FailTurn, "failed-delivery"),
         (EngramTerminationCase::MarkError, "error"),
         (EngramTerminationCase::RuntimeExit, "runtime-exit"),
-    ] { assert_ordinary_terminal_case(case, label); }
+    ] {
+        assert_ordinary_terminal_case(case, label);
+    }
 }
 
 #[test]
@@ -4875,14 +5003,23 @@ fn ordinary_stop_then_identical_followup_has_a_new_provider_turn() {
     deliver_turn_dispatch(&state, followup_dispatch)
         .expect("the granted follow-up should reach the resumed runtime");
 
-    match receive(&fresh_rx, "identical follow-up reaches the new provider turn") {
-        CodexRuntimeCommand::Prompt { session_id, command } => {
+    match receive(
+        &fresh_rx,
+        "identical follow-up reaches the new provider turn",
+    ) {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
             assert_eq!(session_id, child_id);
             assert!(command.prompt.ends_with(prompt));
         }
         _ => panic!("expected the ordinary follow-up"),
     }
-    assert!(matches!(fresh_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        fresh_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&child_id).unwrap()];
     assert!(record.active_turn_generation > generation);
@@ -4892,7 +5029,6 @@ fn ordinary_stop_then_identical_followup_has_a_new_provider_turn() {
     }
     assert_no_admission_or_native_credit_requests(&transport);
 }
-
 
 #[test]
 fn nested_child_inherits_engram_project_through_an_isolated_parent_chain() {
@@ -5003,28 +5139,48 @@ fn nested_child_inherits_engram_project_through_an_isolated_parent_chain() {
         .iter()
         .find(|record| record.session.id == nested_id)
         .expect("nested child should exist");
-    assert!(engram_mcp_stdio_config_for_session_locked(&inner, &nested_record.session.id).is_some());
+    assert!(
+        engram_mcp_stdio_config_for_session_locked(&inner, &nested_record.session.id).is_some()
+    );
 }
-
 
 #[test]
 fn historical_control_survives_restart_as_passive_redacted_data() {
     let state = test_app_state();
     let session = test_session_id(&state, Agent::Codex);
     let operation = turn_checks::checkpoint_result_recovery::passive_checkpoint(
-        FsPath::new(&state.default_workdir), &session);
+        FsPath::new(&state.default_workdir),
+        &session,
+    );
     let history = BTreeMap::from([
-        ("engramRoutingToken".to_owned(), json!("historical-routing-secret")),
-        ("engramOpenGrantId".to_owned(), json!("historical-grant-secret")),
-        ("engramCheckpointOperation".to_owned(), serde_json::to_value(&operation).unwrap()),
+        (
+            "engramRoutingToken".to_owned(),
+            json!("historical-routing-secret"),
+        ),
+        (
+            "engramOpenGrantId".to_owned(),
+            json!("historical-grant-secret"),
+        ),
+        (
+            "engramCheckpointOperation".to_owned(),
+            serde_json::to_value(&operation).unwrap(),
+        ),
     ]);
-    assert_eq!(history["engramCheckpointOperation"]["original"]["request"]["observations"][0]["unknown_nested"],
-        json!([1, null, {"x": true}]), "unknown original report bytes stay part of the valid stored image");
+    assert_eq!(
+        history["engramCheckpointOperation"]["original"]["request"]["observations"][0]["unknown_nested"],
+        json!([1, null, {"x": true}]),
+        "unknown original report bytes stay part of the valid stored image"
+    );
     {
         let mut inner = state.inner.lock().unwrap();
         turn_checks::checkpoint_result_recovery::install_historical_checkpoint(
-            &mut inner, &session, &operation);
-        inner.session_mut(&session).unwrap().engram.historical_control = history.clone();
+            &mut inner, &session, &operation,
+        );
+        inner
+            .session_mut(&session)
+            .unwrap()
+            .engram
+            .historical_control = history.clone();
         state.commit_locked(&mut inner).unwrap();
         let debug = format!("{:?}", inner.session_mut(&session).unwrap().engram);
         assert!(!debug.contains("historical-routing-secret"));
@@ -5035,91 +5191,148 @@ fn historical_control_survives_restart_as_passive_redacted_data() {
     assert!(!client.contains("historical-grant-secret"));
     state.shutdown_persist_blocking();
     let persisted: Value = serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
-    for (key, value) in &history { assert_eq!(&persisted[key], value); }
+    for (key, value) in &history {
+        assert_eq!(&persisted[key], value);
+    }
 
     let restarted = AppState::new_with_paths(
         state.default_workdir.clone(),
         state.persistence_path.as_path().to_path_buf(),
         state.orchestrator_templates_path.as_path().to_path_buf(),
-    ).unwrap();
+    )
+    .unwrap();
     {
         let inner = restarted.inner.lock().unwrap();
-        assert_eq!(inner.sessions[inner.find_session_index(&session).unwrap()]
-            .engram.historical_control, history);
+        assert_eq!(
+            inner.sessions[inner.find_session_index(&session).unwrap()]
+                .engram
+                .historical_control,
+            history
+        );
     }
     restarted.shutdown_persist_blocking();
-    let reloaded: Value = serde_json::from_str(&persisted_session_json(&restarted, &session)).unwrap();
-    for (key, value) in &history { assert_eq!(&reloaded[key], value); }
+    let reloaded: Value =
+        serde_json::from_str(&persisted_session_json(&restarted, &session)).unwrap();
+    for (key, value) in &history {
+        assert_eq!(&reloaded[key], value);
+    }
 }
 
 #[test]
 fn historical_control_does_not_admit_block_or_credit_an_ordinary_turn() {
     let turn = EOCheckedTurn::idle("generic-passive-history", true);
-    let operation = turn_checks::checkpoint_result_recovery::passive_checkpoint(
-        &turn.root, &turn.session_id);
+    let operation =
+        turn_checks::checkpoint_result_recovery::passive_checkpoint(&turn.root, &turn.session_id);
     {
         let mut inner = turn.state.inner.lock().unwrap();
         turn_checks::checkpoint_result_recovery::install_historical_checkpoint(
-            &mut inner, &turn.session_id, &operation);
-        inner.session_mut(&turn.session_id).unwrap().engram.historical_control.insert("engramOpenGrantId".to_owned(),
-            json!("old-open-grant"));
+            &mut inner,
+            &turn.session_id,
+            &operation,
+        );
+        inner
+            .session_mut(&turn.session_id)
+            .unwrap()
+            .engram
+            .historical_control
+            .insert("engramOpenGrantId".to_owned(), json!("old-open-grant"));
         turn.state.commit_locked(&mut inner).unwrap();
     }
     let before = turn.record(|record| record.engram.historical_control.clone());
     let command = turn.begin_prompt("Run despite passive legacy control.");
-    assert!(command.prompt.ends_with("Run despite passive legacy control."));
+    assert!(
+        command
+            .prompt
+            .ends_with("Run despite passive legacy control.")
+    );
     let request = turn.finish();
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
-    assert_eq!(turn.record(|record| record.engram.historical_control.clone()), before);
+    assert_eq!(
+        turn.record(|record| record.engram.historical_control.clone()),
+        before
+    );
 }
 
 #[test]
 fn observability_toggle_is_metadata_only_and_preserves_live_runtime_and_queue() {
     let (state, _root, project, ids) = ordinary_runtime_family_fixture("metadata-toggle");
     let session = &ids[0];
-    queue_test_engram_prompt(&state, session, "preserved user follow-up",
-        QueuedPromptSource::User, None);
+    queue_test_engram_prompt(
+        &state,
+        session,
+        "preserved user follow-up",
+        QueuedPromptSource::User,
+        None,
+    );
     let (mut settings, token, queued) = {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(session).unwrap()];
-        (inner.find_project(&project).unwrap().engram.clone().unwrap(),
+        (
+            inner
+                .find_project(&project)
+                .unwrap()
+                .engram
+                .clone()
+                .unwrap(),
             record.runtime.runtime_token().unwrap(),
-            serde_json::to_value(&record.session.pending_prompts).unwrap())
+            serde_json::to_value(&record.session.pending_prompts).unwrap(),
+        )
     };
     for enabled in [false, true] {
         settings.execution_observability = enabled;
-        state.update_project_engram_settings(&project, settings.clone()).unwrap();
+        state
+            .update_project_engram_settings(&project, settings.clone())
+            .unwrap();
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(session).unwrap()];
         assert!(record.runtime.matches_runtime_token(&token));
         assert!(!record.runtime_reset_required);
         assert!(!record.runtime_stop_in_progress);
-        assert_eq!(serde_json::to_value(&record.session.pending_prompts).unwrap(), queued);
+        assert_eq!(
+            serde_json::to_value(&record.session.pending_prompts).unwrap(),
+            queued
+        );
         assert!(!inner.engram_project_resets.contains(&project));
     }
 }
 
 fn assert_ordinary_rotation_replans_quarantine(initial: bool, final_state: bool) {
-    let (state, root, project, ids) = ordinary_runtime_family_fixture(
-        if final_state { "quarantine-appears" } else { "quarantine-disappears" });
+    let (state, root, project, ids) = ordinary_runtime_family_fixture(if final_state {
+        "quarantine-appears"
+    } else {
+        "quarantine-disappears"
+    });
     {
         let mut inner = state.inner.lock().unwrap();
-        inner.session_mut(&ids[0]).unwrap().engram_mcp_runtime_quarantined = initial;
+        inner
+            .session_mut(&ids[0])
+            .unwrap()
+            .engram_mcp_runtime_quarantined = initial;
     }
     let hook_state = state.clone();
     let hook_session = ids[0].clone();
     let changed_session = hook_session.clone();
     TEST_ENGRAM_SETTINGS_MUTATION_BOUNDARY.with(|slot| {
-        *slot.borrow_mut() = Some(("before_commit", Box::new(move || {
-            hook_state.inner.lock().unwrap().session_mut(&changed_session).unwrap()
-                .engram_mcp_runtime_quarantined = final_state;
-        })));
+        *slot.borrow_mut() = Some((
+            "before_commit",
+            Box::new(move || {
+                hook_state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .session_mut(&changed_session)
+                    .unwrap()
+                    .engram_mcp_runtime_quarantined = final_state;
+            }),
+        ));
     });
     let next_home = root.join("next-home");
     fs::create_dir_all(&next_home).unwrap();
     let mut next = real_fixture_engram_settings(&root);
     next.home = Some(next_home.to_string_lossy().into_owned());
-    state.update_project_engram_settings(&project, next).unwrap();
+    state
+        .update_project_engram_settings(&project, next)
+        .unwrap();
     let inner = state.inner.lock().unwrap();
     assert!(!inner.engram_project_resets.contains(&project));
     for id in ids {
@@ -5151,14 +5364,22 @@ fn ordinary_connection_rotation_marks_all_runtime_families_for_the_next_send() {
     let (state, root, project, ids) = ordinary_runtime_family_fixture("connection-rotation");
     let old_tokens = {
         let inner = state.inner.lock().unwrap();
-        ids.iter().map(|id| inner.sessions[inner.find_session_index(id).unwrap()]
-            .runtime.runtime_token().unwrap()).collect::<Vec<_>>()
+        ids.iter()
+            .map(|id| {
+                inner.sessions[inner.find_session_index(id).unwrap()]
+                    .runtime
+                    .runtime_token()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
     };
     let next_home = root.join("new-home");
     fs::create_dir_all(&next_home).unwrap();
     let mut next = real_fixture_engram_settings(&root);
     next.home = Some(next_home.to_string_lossy().into_owned());
-    state.update_project_engram_settings(&project, next).unwrap();
+    state
+        .update_project_engram_settings(&project, next)
+        .unwrap();
     let inner = state.inner.lock().unwrap();
     for (id, token) in ids.iter().zip(old_tokens) {
         let record = &inner.sessions[inner.find_session_index(id).unwrap()];
@@ -5178,24 +5399,35 @@ fn connection_generation_fences_overlap_and_stale_release_preserves_the_new_owne
     let (old, newer, batch) = {
         let mut inner = state.inner.lock().unwrap();
         let old = inner.claim_engram_project_reset(&project).unwrap();
-        let batch = claim_engram_mcp_runtime_revocations_locked(&mut inner,
-            std::slice::from_ref(&ids[0]));
+        let batch =
+            claim_engram_mcp_runtime_revocations_locked(&mut inner, std::slice::from_ref(&ids[0]));
         assert!(inner.engram_project_resets.release(&project, old));
         let newer = inner.claim_engram_project_reset(&project).unwrap();
         (old, newer, batch)
     };
-    for settings in [real_fixture_engram_settings(&root), EngramProjectSettings::default()] {
-        let error = state.update_project_engram_settings(&project, settings)
-            .err().expect("overlapping connection changes must refuse");
+    for settings in [
+        real_fixture_engram_settings(&root),
+        EngramProjectSettings::default(),
+    ] {
+        let error = state
+            .update_project_engram_settings(&project, settings)
+            .err()
+            .expect("overlapping connection changes must refuse");
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert_eq!(error.message, "Engram connection change is already in progress");
+        assert_eq!(
+            error.message,
+            "Engram connection change is already in progress"
+        );
     }
-    assert_eq!(state.delete_project(&project).err().unwrap().status, StatusCode::CONFLICT);
+    assert_eq!(
+        state.delete_project(&project).err().unwrap().status,
+        StatusCode::CONFLICT
+    );
     {
         let mut inner = state.inner.lock().unwrap();
         assert!(!inner.engram_project_resets.release(&project, old));
-        let (_, changed) = release_engram_mcp_runtime_revocations_without_teardown_locked(
-            &mut inner, batch);
+        let (_, changed) =
+            release_engram_mcp_runtime_revocations_without_teardown_locked(&mut inner, batch);
         assert!(changed);
         assert!(inner.engram_project_resets.is_owned_by(&project, newer));
         let record = inner.session_mut(&ids[0]).unwrap();
@@ -5208,36 +5440,64 @@ fn connection_generation_fences_overlap_and_stale_release_preserves_the_new_owne
 #[test]
 fn readiness_validation_failure_returns_its_own_error_before_a_connection_claim() {
     let state = test_app_state();
-    let root = state.test_temp_root.as_ref().unwrap().path().join("missing-project-marker");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("missing-project-marker");
     fs::create_dir_all(&root).unwrap();
     let project = create_test_project(&state, &root, "Missing Engram declaration");
-    let error = state.update_project_engram_settings(&project, real_fixture_engram_settings(&root))
-        .err().expect("a missing declaration must refuse enablement");
-    assert!(error.message.contains("is missing or unreadable"), "{}", error.message);
+    let error = state
+        .update_project_engram_settings(&project, real_fixture_engram_settings(&root))
+        .err()
+        .expect("a missing declaration must refuse enablement");
+    assert!(
+        error.message.contains("is missing or unreadable"),
+        "{}",
+        error.message
+    );
     let inner = state.inner.lock().unwrap();
     assert!(!inner.engram_project_resets.contains(&project));
     assert!(inner.find_project(&project).unwrap().engram.is_none());
 }
 
 fn assert_ordinary_settings_persistence_rollback(disable: bool) {
-    let (mut state, root, project, ids) = ordinary_runtime_family_fixture(
-        if disable { "disable-rollback" } else { "rotation-rollback" });
+    let (mut state, root, project, ids) = ordinary_runtime_family_fixture(if disable {
+        "disable-rollback"
+    } else {
+        "rotation-rollback"
+    });
     let id = &ids[0];
-    queue_test_engram_prompt(&state, id, "pending through settings rollback",
-        QueuedPromptSource::User, None);
+    queue_test_engram_prompt(
+        &state,
+        id,
+        "pending through settings rollback",
+        QueuedPromptSource::User,
+        None,
+    );
     let (old_settings, old_token, old_messages, old_pending) = {
         let mut inner = state.inner.lock().unwrap();
-        let settings = inner.find_project(&project).unwrap().engram.clone().unwrap();
+        let settings = inner
+            .find_project(&project)
+            .unwrap()
+            .engram
+            .clone()
+            .unwrap();
         let record = inner.session_mut(id).unwrap();
         record.engram.pending_context_nudge = Some("undelivered context".to_owned());
         record.engram.context_refresh_needed = true;
-        (settings, record.runtime.runtime_token().unwrap(),
+        (
+            settings,
+            record.runtime.runtime_token().unwrap(),
             serde_json::to_value(&record.session.messages).unwrap(),
-            serde_json::to_value(&record.session.pending_prompts).unwrap())
+            serde_json::to_value(&record.session.pending_prompts).unwrap(),
+        )
     };
     let mut next = old_settings.clone();
-    if disable { next.enabled = false; }
-    else {
+    if disable {
+        next.enabled = false;
+    } else {
         let next_home = root.join("next-home");
         fs::create_dir_all(&next_home).unwrap();
         next.home = Some(next_home.to_string_lossy().into_owned());
@@ -5246,12 +5506,21 @@ fn assert_ordinary_settings_persistence_rollback(disable: bool) {
     let invalid_store = root.join("settings-persistence-is-a-directory.sqlite");
     fs::create_dir_all(&invalid_store).unwrap();
     state.persistence_path = Arc::new(invalid_store);
-    let error = state.update_project_engram_settings(&project, next)
-        .err().expect("settings persistence failure must remain visible");
+    let error = state
+        .update_project_engram_settings(&project, next)
+        .err()
+        .expect("settings persistence failure must remain visible");
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(error.message.contains("failed to persist Engram project settings"));
+    assert!(
+        error
+            .message
+            .contains("failed to persist Engram project settings")
+    );
     let inner = state.inner.lock().unwrap();
-    assert_eq!(inner.find_project(&project).unwrap().engram.as_ref(), Some(&old_settings));
+    assert_eq!(
+        inner.find_project(&project).unwrap().engram.as_ref(),
+        Some(&old_settings)
+    );
     assert!(!inner.engram_project_resets.contains(&project));
     let record = &inner.sessions[inner.find_session_index(id).unwrap()];
     assert!(record.runtime.matches_runtime_token(&old_token));
@@ -5259,9 +5528,18 @@ fn assert_ordinary_settings_persistence_rollback(disable: bool) {
     assert!(!record.runtime_stop_in_progress);
     assert!(record.runtime_stop_owner.is_none());
     assert!(!record.engram_mcp_revocation_pending);
-    assert_eq!(serde_json::to_value(&record.session.messages).unwrap(), old_messages);
-    assert_eq!(serde_json::to_value(&record.session.pending_prompts).unwrap(), old_pending);
-    assert_eq!(record.engram.pending_context_nudge.as_deref(), Some("undelivered context"));
+    assert_eq!(
+        serde_json::to_value(&record.session.messages).unwrap(),
+        old_messages
+    );
+    assert_eq!(
+        serde_json::to_value(&record.session.pending_prompts).unwrap(),
+        old_pending
+    );
+    assert_eq!(
+        record.engram.pending_context_nudge.as_deref(),
+        Some("undelivered context")
+    );
     assert!(record.engram.context_refresh_needed);
 }
 
@@ -5286,9 +5564,16 @@ fn project_deletion_persist_failure_keeps_its_connection_and_sessions_attached()
     let invalid_store = root.join("deletion-persistence-is-a-directory.sqlite");
     fs::create_dir_all(&invalid_store).unwrap();
     state.persistence_path = Arc::new(invalid_store);
-    let error = state.delete_project(&project).err().expect("deletion must report failed durability");
+    let error = state
+        .delete_project(&project)
+        .err()
+        .expect("deletion must report failed durability");
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(error.message.contains("failed to persist Engram project settings"));
+    assert!(
+        error
+            .message
+            .contains("failed to persist Engram project settings")
+    );
     let inner = state.inner.lock().unwrap();
     assert_eq!(inner.find_project(&project).unwrap().engram, before);
     assert!(!inner.engram_project_resets.contains(&project));
@@ -5307,13 +5592,27 @@ fn project_deletion_persist_failure_keeps_its_connection_and_sessions_attached()
 #[test]
 fn ordinary_cleanup_warnings_are_deduplicated_durable_and_cleared_by_exact_kind() {
     let state = test_app_state();
-    let root = state.test_temp_root.as_ref().unwrap().path().join("cleanup-warning");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("cleanup-warning");
     fs::create_dir_all(&root).unwrap();
     let project = create_test_project(&state, &root, "Cleanup warning without sessions");
     state.note_engram_cleanup_degraded(&project, "cleanup A", "fixture");
     state.note_engram_cleanup_degraded(&project, "cleanup A", "fixture duplicate");
-    assert_eq!(state.inner.lock().unwrap().find_project(&project).unwrap()
-        .engram_cleanup_warning.as_deref(), Some("cleanup A"));
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .find_project(&project)
+            .unwrap()
+            .engram_cleanup_warning
+            .as_deref(),
+        Some("cleanup A")
+    );
     let session = create_test_project_session(&state, Agent::Claude, &project, &root);
     state.note_engram_cleanup_degraded(&project, "cleanup A", "fixture session");
     state.note_engram_cleanup_degraded(&project, "cleanup A", "fixture session duplicate");
@@ -5322,25 +5621,52 @@ fn ordinary_cleanup_warnings_are_deduplicated_durable_and_cleared_by_exact_kind(
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
         for notice in ["cleanup A", "cleanup B"] {
-            assert_eq!(record.session.messages.iter().filter(|message|
-                matches!(message, Message::Text { text, .. } if text == notice)).count(), 1);
+            assert_eq!(
+                record
+                    .session
+                    .messages
+                    .iter()
+                    .filter(
+                        |message| matches!(message, Message::Text { text, .. } if text == notice)
+                    )
+                    .count(),
+                1
+            );
         }
     }
     {
         let inner = state.inner.lock().unwrap();
-        assert_eq!(inner.find_project(&project).unwrap().engram_cleanup_warning.as_deref(),
-            Some("cleanup A\n\ncleanup B"));
+        assert_eq!(
+            inner
+                .find_project(&project)
+                .unwrap()
+                .engram_cleanup_warning
+                .as_deref(),
+            Some("cleanup A\n\ncleanup B")
+        );
     }
     state.clear_engram_cleanup_warning_if_matches(&project, "unrelated", "fixture");
     state.clear_engram_cleanup_warning_if_matches(&project, "cleanup A", "fixture");
     state.shutdown_persist_blocking();
     let persisted = sqlite_metadata_state_value(&state.persistence_path);
-    let saved = persisted["projects"].as_array().unwrap().iter()
-        .find(|value| value["id"] == project).unwrap();
+    let saved = persisted["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|value| value["id"] == project)
+        .unwrap();
     assert_eq!(saved["engramCleanupWarning"], "cleanup B");
     state.clear_engram_cleanup_warning_if_matches(&project, "cleanup B", "fixture");
-    assert!(state.inner.lock().unwrap().find_project(&project).unwrap()
-        .engram_cleanup_warning.is_none());
+    assert!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .find_project(&project)
+            .unwrap()
+            .engram_cleanup_warning
+            .is_none()
+    );
 }
 
 #[test]
@@ -5349,7 +5675,8 @@ fn current_project_settings_reject_removed_control_fields() {
         let mut input = json!({"enabled": true, "executionObservability": true});
         input[field] = json!(true);
         let error = serde_json::from_value::<UpdateProjectEngramSettingsRequest>(input)
-            .err().expect("removed admission settings must be rejected");
+            .err()
+            .expect("removed admission settings must be rejected");
         assert!(error.to_string().contains(field));
     }
 }
@@ -5357,17 +5684,34 @@ fn current_project_settings_reject_removed_control_fields() {
 #[test]
 fn ordinary_readiness_adopts_store_identity_without_assurance_tier() {
     let state = test_app_state();
-    let root = state.test_temp_root.as_ref().unwrap().path().join("ordinary-readiness");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("ordinary-readiness");
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join(".engram-project"), "fixture-ready\n").unwrap();
     let project = create_test_project(&state, &root, "Ordinary readiness");
-    state.update_project_engram_settings(&project, real_fixture_engram_settings(&root)).unwrap();
+    state
+        .update_project_engram_settings(&project, real_fixture_engram_settings(&root))
+        .unwrap();
     let inner = state.inner.lock().unwrap();
-    let settings = inner.find_project(&project).unwrap().engram.as_ref().unwrap();
+    let settings = inner
+        .find_project(&project)
+        .unwrap()
+        .engram
+        .as_ref()
+        .unwrap();
     assert!(settings.enabled);
-    assert_eq!(settings.authority_store_key.as_ref().unwrap().project_id, "fixture-ready");
-    assert_eq!(settings.authority_store_key.as_ref().unwrap().database_path,
-        normalize_user_facing_path(&work_database_path(&root, "fixture-ready")));
+    assert_eq!(
+        settings.authority_store_key.as_ref().unwrap().project_id,
+        "fixture-ready"
+    );
+    assert_eq!(
+        settings.authority_store_key.as_ref().unwrap().database_path,
+        normalize_user_facing_path(&work_database_path(&root, "fixture-ready"))
+    );
 }
 
 #[test]
@@ -5378,8 +5722,10 @@ fn ordinary_readiness_rejects_malformed_and_failed_replies_without_mutating_sett
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join(".engram-project"), format!("{mode}\n")).unwrap();
         let project = create_test_project(&state, &root, "Invalid readiness");
-        let error = state.update_project_engram_settings(&project,
-            real_fixture_engram_settings(&root)).err().expect("invalid readiness must refuse");
+        let error = state
+            .update_project_engram_settings(&project, real_fixture_engram_settings(&root))
+            .err()
+            .expect("invalid readiness must refuse");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         let inner = state.inner.lock().unwrap();
         assert!(inner.find_project(&project).unwrap().engram.is_none());
@@ -5390,12 +5736,20 @@ fn ordinary_readiness_rejects_malformed_and_failed_replies_without_mutating_sett
 struct UnknownGenerationWorkTransport(Arc<ScriptedEngramControlTransport>);
 
 impl EngramControlTransport for UnknownGenerationWorkTransport {
-    fn request(&self, connection: &EngramConnectionConfig, request: &EngramControlRequest,
-        timeout: Duration) -> Result<Value, EngramTransportError> {
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        timeout: Duration,
+    ) -> Result<Value, EngramTransportError> {
         self.0.request(connection, request, timeout)
     }
-    fn shutdown_session(&self, session: &str) { self.0.shutdown_session(session); }
-    fn connection_generation(&self, _session: &str) -> Option<u64> { None }
+    fn shutdown_session(&self, session: &str) {
+        self.0.shutdown_session(session);
+    }
+    fn connection_generation(&self, _session: &str) -> Option<u64> {
+        None
+    }
 }
 
 struct PausedOrdinaryWorkTransport {
@@ -5405,35 +5759,59 @@ struct PausedOrdinaryWorkTransport {
 }
 
 impl EngramControlTransport for PausedOrdinaryWorkTransport {
-    fn request(&self, connection: &EngramConnectionConfig, request: &EngramControlRequest,
-        timeout: Duration) -> Result<Value, EngramTransportError> {
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        timeout: Duration,
+    ) -> Result<Value, EngramTransportError> {
         if matches!(request, EngramControlRequest::WorkSessionRead {}) {
             let entered = self.entered.lock().unwrap().take();
             if let Some(entered) = entered {
                 entered.send(()).unwrap();
                 self.release.lock().unwrap().recv().unwrap();
-                return Err(EngramTransportError::deadline("fixture ordinary service unavailable"));
+                return Err(EngramTransportError::deadline(
+                    "fixture ordinary service unavailable",
+                ));
             }
         }
         self.inner.request(connection, request, timeout)
     }
-    fn read_observation_policy(&self, connection: &EngramConnectionConfig,
-        store: &EngramAuthorityStoreKey, timeout: Duration, host_workdir: &FsPath)
-        -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.inner.read_observation_policy(connection, store, timeout, host_workdir)
+    fn read_observation_policy(
+        &self,
+        connection: &EngramConnectionConfig,
+        store: &EngramAuthorityStoreKey,
+        timeout: Duration,
+        host_workdir: &FsPath,
+    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.inner
+            .read_observation_policy(connection, store, timeout, host_workdir)
     }
-    fn read_work_binding(&self, connection: &EngramConnectionConfig,
-        preference: EngramBindingPreference<'_>, timeout: Duration)
-        -> Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner.read_work_binding(connection, preference, timeout)
+    fn read_work_binding(
+        &self,
+        connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
+        timeout: Duration,
+    ) -> Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.inner
+            .read_work_binding(connection, preference, timeout)
     }
-    fn read_held_claims(&self, connection: &EngramConnectionConfig, timeout: Duration)
-        -> Result<EngramHeldClaims, EngramTransportError> {
+    fn read_held_claims(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> Result<EngramHeldClaims, EngramTransportError> {
         self.inner.read_held_claims(connection, timeout)
     }
-    fn shutdown_session(&self, session: &str) { self.inner.shutdown_session(session); }
-    fn shutdown_session_until(&self, session: &str, clock: &EngramBudgetClock,
-        deadline: std::time::Instant) -> Result<(), EngramTransportError> {
+    fn shutdown_session(&self, session: &str) {
+        self.inner.shutdown_session(session);
+    }
+    fn shutdown_session_until(
+        &self,
+        session: &str,
+        clock: &EngramBudgetClock,
+        deadline: std::time::Instant,
+    ) -> Result<(), EngramTransportError> {
         self.inner.shutdown_session_until(session, clock, deadline)
     }
 }
@@ -5442,7 +5820,9 @@ struct OrdinaryRequestRelease(Option<mpsc::Sender<()>>);
 
 impl Drop for OrdinaryRequestRelease {
     fn drop(&mut self) {
-        if let Some(sender) = self.0.take() { let _ = sender.send(()); }
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
     }
 }
 
@@ -5453,7 +5833,8 @@ fn slow_ordinary_work_service_holds_no_state_lock_and_does_not_gate_provider_del
     let (release_tx, release_rx) = mpsc::channel();
     let mut release = OrdinaryRequestRelease(Some(release_tx));
     let transport = Arc::new(PausedOrdinaryWorkTransport {
-        inner: turn.transport.clone(), entered: Mutex::new(Some(entered_tx)),
+        inner: turn.transport.clone(),
+        entered: Mutex::new(Some(entered_tx)),
         release: Mutex::new(release_rx),
     });
     turn.state.install_control_test_transport(transport);
@@ -5461,14 +5842,31 @@ fn slow_ordinary_work_service_holds_no_state_lock_and_does_not_gate_provider_del
     let naming_session = turn.session_id.clone();
     let path = turn.root.to_string_lossy().into_owned();
     let work = turn.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
-    let naming = std::thread::spawn(move || naming_state.name_engram_source_root(
-        &naming_session, EngramSourceRootRequest { work, path: Some(Some(path)) }));
+    let naming = std::thread::spawn(move || {
+        naming_state.name_engram_source_root(
+            &naming_session,
+            EngramSourceRootRequest {
+                work,
+                path: Some(Some(path)),
+            },
+        )
+    });
     receive(&entered_rx, "ordinary work service reached its request");
-    assert!(turn.state.inner.try_lock_now().is_some(), "work-service I/O must run off-lock");
+    assert!(
+        turn.state.inner.try_lock_now().is_some(),
+        "work-service I/O must run off-lock"
+    );
     let command = turn.begin_prompt("Provider delivery is independent of the naming read.");
-    assert!(command.prompt.ends_with("Provider delivery is independent of the naming read."));
+    assert!(
+        command
+            .prompt
+            .ends_with("Provider delivery is independent of the naming read.")
+    );
     release.0.take().unwrap().send(()).unwrap();
-    assert!(naming.join().unwrap().is_err(), "the simulated service failure stays visible");
+    assert!(
+        naming.join().unwrap().is_err(),
+        "the simulated service failure stays visible"
+    );
     let request = turn.finish();
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
@@ -5487,22 +5885,45 @@ async fn asynchronous_ordinary_stop_publishes_stopping_before_runtime_cleanup() 
     let gate = install_test_stop_fence_gate(&state, &id);
     let mut events = state.subscribe_events();
     let response = state.request_stop_session(&id).unwrap();
-    assert_eq!(response.sessions.iter().find(|session| session.id == id).unwrap().status,
-        SessionStatus::Stopping);
+    assert_eq!(
+        response
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .unwrap()
+            .status,
+        SessionStatus::Stopping
+    );
     gate.wait_until_claimed();
-    assert_eq!(state.snapshot().sessions.iter().find(|session| session.id == id).unwrap().status,
-        SessionStatus::Stopping);
+    assert_eq!(
+        state
+            .snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .unwrap()
+            .status,
+        SessionStatus::Stopping
+    );
     gate.release();
     tokio::time::timeout(DEADLOCK_GUARD, async {
         loop {
-            let status = state.snapshot().sessions.iter().find(|session| session.id == id).unwrap().status;
+            let status = state
+                .snapshot()
+                .sessions
+                .iter()
+                .find(|session| session.id == id)
+                .unwrap()
+                .status;
             if status != SessionStatus::Stopping {
                 assert_eq!(status, SessionStatus::Idle);
                 break;
             }
             events.recv().await.unwrap();
         }
-    }).await.expect("ordinary Stop must publish its terminal outcome");
+    })
+    .await
+    .expect("ordinary Stop must publish its terminal outcome");
     assert_no_admission_or_native_credit_requests(&transport);
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&id).unwrap()];
@@ -5512,8 +5933,7 @@ async fn asynchronous_ordinary_stop_publishes_stopping_before_runtime_cleanup() 
 
 fn assert_engram_mcp_disable_or_delete_revokes_existing_runtimes(delete_project: bool) {
     let suffix = if delete_project { "delete" } else { "disable" };
-    let (state, root, project_id, session_ids) =
-        ordinary_runtime_family_fixture(suffix);
+    let (state, root, project_id, session_ids) = ordinary_runtime_family_fixture(suffix);
     if delete_project {
         state
             .delete_project(&project_id)
@@ -5523,7 +5943,6 @@ fn assert_engram_mcp_disable_or_delete_revokes_existing_runtimes(delete_project:
             .update_project_engram_settings(&project_id, EngramProjectSettings::default())
             .expect("disable should revoke MCP runtimes");
     }
-
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     if !delete_project {
@@ -5675,7 +6094,6 @@ fn engram_mcp_disabled_settings_edit_retries_a_quarantined_runtime() {
     assert_engram_mcp_quarantined_runtime_retried_by_followup(false);
 }
 
-
 #[test]
 fn ordinary_home_alias_preserves_verified_store_identity_and_runtime() {
     let state = test_app_state();
@@ -5736,25 +6154,43 @@ fn ordinary_home_alias_preserves_verified_store_identity_and_runtime() {
     drop(inner);
 }
 
-
 #[test]
 fn disabled_connection_rejects_a_relative_home_and_keeps_distinct_absolute_homes() {
     let state = test_app_state();
-    let root = state.test_temp_root.as_ref().unwrap().path().join("disabled-home-validation");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("disabled-home-validation");
     fs::create_dir_all(&root).unwrap();
     let project = create_test_project(&state, &root, "Disabled home validation");
     let mut settings = EngramProjectSettings::default();
     settings.home = Some("relative/home".to_owned());
-    let error = state.update_project_engram_settings(&project, settings.clone()).err().unwrap();
+    let error = state
+        .update_project_engram_settings(&project, settings.clone())
+        .err()
+        .unwrap();
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("non-empty absolute path"));
     for suffix in ["home-a", "home-b"] {
         let path = root.join(suffix).to_string_lossy().into_owned();
         settings.home = Some(path.clone());
-        state.update_project_engram_settings(&project, settings.clone()).unwrap();
+        state
+            .update_project_engram_settings(&project, settings.clone())
+            .unwrap();
         let inner = state.inner.lock().unwrap();
-        assert_eq!(inner.find_project(&project).unwrap().engram.as_ref().unwrap()
-            .home.as_deref(), Some(path.as_str()));
+        assert_eq!(
+            inner
+                .find_project(&project)
+                .unwrap()
+                .engram
+                .as_ref()
+                .unwrap()
+                .home
+                .as_deref(),
+            Some(path.as_str())
+        );
     }
 }
 
@@ -5762,7 +6198,9 @@ fn disabled_connection_rejects_a_relative_home_and_keeps_distinct_absolute_homes
 fn disabling_installed_mcp_does_not_need_the_repository_marker() {
     let (state, root, project, ids) = ordinary_runtime_family_fixture("disable-missing-marker");
     fs::remove_file(root.join(".engram-project")).unwrap();
-    state.update_project_engram_settings(&project, EngramProjectSettings::default()).unwrap();
+    state
+        .update_project_engram_settings(&project, EngramProjectSettings::default())
+        .unwrap();
     let inner = state.inner.lock().unwrap();
     for id in ids {
         let record = &inner.sessions[inner.find_session_index(&id).unwrap()];
@@ -5777,8 +6215,15 @@ fn project_deletion_uses_the_installed_descriptor_when_current_binary_is_missing
     let (state, _root, project, ids) = ordinary_runtime_family_fixture("delete-missing-binary");
     {
         let mut inner = state.inner.lock().unwrap();
-        inner.projects.iter_mut().find(|item| item.id == project).unwrap()
-            .engram.as_mut().unwrap().binary_path = None;
+        inner
+            .projects
+            .iter_mut()
+            .find(|item| item.id == project)
+            .unwrap()
+            .engram
+            .as_mut()
+            .unwrap()
+            .binary_path = None;
     }
     state.delete_project(&project).unwrap();
     let inner = state.inner.lock().unwrap();
@@ -5800,8 +6245,12 @@ fn global_disable_keeps_ordinary_stop_and_installed_descriptor_cleanup_available
             .arg("--nocapture")
             .env(MARKER, "1").env(ENGRAM_GLOBAL_DISABLE_ENV, "1")
             .output().unwrap();
-        assert!(output.status.success(), "{}\n{}",
-            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
         return;
     }
@@ -5831,36 +6280,63 @@ fn global_disable_keeps_ordinary_stop_and_installed_descriptor_cleanup_available
 #[test]
 fn ordinary_queued_prompt_persist_failure_keeps_the_head_and_never_reaches_the_provider() {
     let mut turn = EOCheckedTurn::idle("generic-queue-persist-failure", true);
-    queue_test_engram_prompt(&turn.state, &turn.session_id, "retain the exact queue head",
-        QueuedPromptSource::User, None);
+    queue_test_engram_prompt(
+        &turn.state,
+        &turn.session_id,
+        "retain the exact queue head",
+        QueuedPromptSource::User,
+        None,
+    );
     let before = turn.record(|record| {
         let head = record.queued_prompts.front().unwrap();
-        (head.pending_prompt.id.clone(), head.pending_prompt.text.clone(),
-            serde_json::to_value(&record.session.pending_prompts).unwrap())
+        (
+            head.pending_prompt.id.clone(),
+            head.pending_prompt.text.clone(),
+            serde_json::to_value(&record.session.pending_prompts).unwrap(),
+        )
     });
     turn.state.shutdown_persist_blocking();
     let invalid_store = turn.root.join("queue-persistence-is-a-directory.sqlite");
     fs::create_dir_all(&invalid_store).unwrap();
     turn.state.persistence_path = Arc::new(invalid_store);
-    assert!(turn.state.start_next_queued_turn_off_lock(&turn.session_id, false, false).is_err());
-    assert!(matches!(turn._runtime_rx.lock().unwrap().try_recv(),
-        Err(mpsc::TryRecvError::Empty)));
+    assert!(
+        turn.state
+            .start_next_queued_turn_off_lock(&turn.session_id, false, false)
+            .is_err()
+    );
+    assert!(matches!(
+        turn._runtime_rx.lock().unwrap().try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     turn.record(|record| {
         assert_eq!(record.queued_prompts.len(), 1);
         let head = record.queued_prompts.front().unwrap();
         assert_eq!(head.pending_prompt.id, before.0);
         assert_eq!(head.pending_prompt.text, before.1);
-        assert_eq!(serde_json::to_value(&record.session.pending_prompts).unwrap(), before.2);
+        assert_eq!(
+            serde_json::to_value(&record.session.pending_prompts).unwrap(),
+            before.2
+        );
     });
     assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
 fn prepare_ordinary_prompt(state: &AppState, session: &str, text: &str) -> TurnDispatch {
-    match state.dispatch_turn(session, SendMessageRequest {
-        text: text.to_owned(), expanded_text: None, attachments: Vec::new(),
-        source_session_id: None, source_mailbox: None,
-    }).unwrap() {
-        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+    match state
+        .dispatch_turn(
+            session,
+            SendMessageRequest {
+                text: text.to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .unwrap()
+    {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
         DispatchTurnResult::Queued => panic!("the explicit idle prompt should prepare"),
     }
 }
@@ -5869,20 +6345,38 @@ fn prepare_ordinary_prompt(state: &AppState, session: &str, text: &str) -> TurnD
 fn stale_ordinary_dispatch_and_terminal_callbacks_cannot_overwrite_a_live_successor() {
     let turn = EOCheckedTurn::idle("generic-stale-provider-dispatch", true);
     let old = prepare_ordinary_prompt(&turn.state, &turn.session_id, "old prepared prompt");
-    let (old_token, old_generation) = turn.record(|record|
-        (record.runtime.runtime_token().unwrap(), record.active_turn_generation));
+    let (old_token, old_generation) = turn.record(|record| {
+        (
+            record.runtime.runtime_token().unwrap(),
+            record.active_turn_generation,
+        )
+    });
     turn.state.stop_session(&turn.session_id).unwrap();
-    let (fresh_runtime, fresh_rx, _process) = test_shared_codex_runtime("generic-successor-provider");
+    let (fresh_runtime, fresh_rx, _process) =
+        test_shared_codex_runtime("generic-successor-provider");
     install_single_wire_codex_fixture(&turn.state, Some(fresh_runtime));
     let successor = prepare_ordinary_prompt(&turn.state, &turn.session_id, "live successor prompt");
     let generation = turn.record(|record| record.active_turn_generation);
     assert!(generation > old_generation);
-    assert!(matches!(deliver_turn_dispatch(&turn.state, old),
-        TurnDispatchDeliveryOutcome::Superseded));
-    turn.state.fail_rejected_turn_delivery(&turn.session_id, &old_token,
-        old_generation, "stale rejected handoff").unwrap();
-    turn.state.finish_turn_ok_if_runtime_and_generation_match(
-        &turn.session_id, &old_token, old_generation).unwrap();
+    assert!(matches!(
+        deliver_turn_dispatch(&turn.state, old),
+        TurnDispatchDeliveryOutcome::Superseded
+    ));
+    turn.state
+        .fail_rejected_turn_delivery(
+            &turn.session_id,
+            &old_token,
+            old_generation,
+            "stale rejected handoff",
+        )
+        .unwrap();
+    turn.state
+        .finish_turn_ok_if_runtime_and_generation_match(
+            &turn.session_id,
+            &old_token,
+            old_generation,
+        )
+        .unwrap();
     turn.record(|record| {
         assert_eq!(record.active_turn_generation, generation);
         assert_eq!(record.session.status, SessionStatus::Active);
@@ -5891,21 +6385,32 @@ fn stale_ordinary_dispatch_and_terminal_callbacks_cannot_overwrite_a_live_succes
     });
     loop {
         match turn._runtime_rx.lock().unwrap().try_recv() {
-            Ok(CodexRuntimeCommand::Prompt { .. }) => panic!("the retired runtime received an old prompt"),
+            Ok(CodexRuntimeCommand::Prompt { .. }) => {
+                panic!("the retired runtime received an old prompt")
+            }
             Ok(_) => {}
             Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
         }
     }
-    assert!(matches!(fresh_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        fresh_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     deliver_turn_dispatch(&turn.state, successor).unwrap();
     match receive(&fresh_rx, "only the live successor may reach the provider") {
-        CodexRuntimeCommand::Prompt { session_id, command } => {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
             assert_eq!(session_id, turn.session_id);
             assert!(command.prompt.ends_with("live successor prompt"));
         }
         _ => panic!("expected the successor prompt"),
     }
-    assert!(matches!(fresh_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        fresh_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
@@ -5918,16 +6423,33 @@ fn ordinary_naming_claim_mismatch_is_visible_without_withholding_provider_work()
     changed.claim_fence += 1;
     turn.transport.replace_held_claims([Ok(EngramHeldClaims {
         items: vec![EngramHeldClaim {
-            work_id: work.clone(), short_ref: work.clone(), claim_id: binding.claim_id,
-            claim_fence: binding.claim_fence, focused: true, control_binding: Some(changed),
+            work_id: work.clone(),
+            short_ref: work.clone(),
+            claim_id: binding.claim_id,
+            claim_fence: binding.claim_fence,
+            focused: true,
+            control_binding: Some(changed),
         }],
         omitted: 0,
     })]);
-    assert!(turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
-        work, path: Some(Some(turn.root.to_string_lossy().into_owned())),
-    }).is_err(), "naming cannot use a held row whose exact binding fence differs");
+    assert!(
+        turn.state
+            .name_engram_source_root(
+                &turn.session_id,
+                EngramSourceRootRequest {
+                    work,
+                    path: Some(Some(turn.root.to_string_lossy().into_owned())),
+                }
+            )
+            .is_err(),
+        "naming cannot use a held row whose exact binding fence differs"
+    );
     let command = turn.begin_prompt("Continue ordinary work after the naming refusal.");
-    assert!(command.prompt.ends_with("Continue ordinary work after the naming refusal."));
+    assert!(
+        command
+            .prompt
+            .ends_with("Continue ordinary work after the naming refusal.")
+    );
     assert_ordinary_turn_has_no_native_requests(&turn);
     turn.end();
 }
@@ -5938,13 +6460,23 @@ struct PausedConnectionShutdownTransport {
 }
 
 impl EngramControlTransport for PausedConnectionShutdownTransport {
-    fn request(&self, _connection: &EngramConnectionConfig, _request: &EngramControlRequest,
-        _timeout: Duration) -> Result<Value, EngramTransportError> {
-        Err(EngramTransportError::protocol("no work request scripted during connection cleanup"))
+    fn request(
+        &self,
+        _connection: &EngramConnectionConfig,
+        _request: &EngramControlRequest,
+        _timeout: Duration,
+    ) -> Result<Value, EngramTransportError> {
+        Err(EngramTransportError::protocol(
+            "no work request scripted during connection cleanup",
+        ))
     }
     fn shutdown_session(&self, _session: &str) {}
-    fn shutdown_session_until(&self, _session: &str, _clock: &EngramBudgetClock,
-        _deadline: std::time::Instant) -> Result<(), EngramTransportError> {
+    fn shutdown_session_until(
+        &self,
+        _session: &str,
+        _clock: &EngramBudgetClock,
+        _deadline: std::time::Instant,
+    ) -> Result<(), EngramTransportError> {
         if let Some(entered) = self.entered.lock().unwrap().take() {
             entered.send(()).unwrap();
             self.release.lock().unwrap().recv().unwrap();
@@ -5954,8 +6486,12 @@ impl EngramControlTransport for PausedConnectionShutdownTransport {
 }
 
 fn assert_ordinary_connection_cleanup_fences(lose_project_generation: bool) {
-    let (state, _root, project, ids) = ordinary_runtime_family_fixture(
-        if lose_project_generation { "lost-live-connection-generation" } else { "live-connection-fences" });
+    let (state, _root, project, ids) =
+        ordinary_runtime_family_fixture(if lose_project_generation {
+            "lost-live-connection-generation"
+        } else {
+            "live-connection-fences"
+        });
     let token = {
         let mut inner = state.inner.lock().unwrap();
         let record = inner.session_mut(&ids[0]).unwrap();
@@ -5966,46 +6502,88 @@ fn assert_ordinary_connection_cleanup_fences(lose_project_generation: bool) {
     let (release_tx, release_rx) = mpsc::channel();
     let mut release = OrdinaryRequestRelease(Some(release_tx));
     state.install_control_test_transport(Arc::new(PausedConnectionShutdownTransport {
-        entered: Mutex::new(Some(entered_tx)), release: Mutex::new(release_rx),
+        entered: Mutex::new(Some(entered_tx)),
+        release: Mutex::new(release_rx),
     }));
     let worker_state = state.clone();
     let worker_project = project.clone();
-    let worker = std::thread::spawn(move || worker_state.update_project_engram_settings(
-        &worker_project, EngramProjectSettings::default()));
-    receive(&entered_rx, "connection cleanup reached its off-lock child shutdown");
-    assert!(state.inner.try_lock_now().is_some(), "shutdown must not hold StateInner");
+    let worker = std::thread::spawn(move || {
+        worker_state
+            .update_project_engram_settings(&worker_project, EngramProjectSettings::default())
+    });
+    receive(
+        &entered_rx,
+        "connection cleanup reached its off-lock child shutdown",
+    );
+    assert!(
+        state.inner.try_lock_now().is_some(),
+        "shutdown must not hold StateInner"
+    );
     {
         let inner = state.inner.lock().unwrap();
         assert!(inner.engram_project_resets.contains(&project));
-        assert!(ids.iter().all(|id|
-            inner.sessions[inner.find_session_index(id).unwrap()].runtime_stop_in_progress));
+        assert!(ids.iter().all(|id| {
+            inner.sessions[inner.find_session_index(id).unwrap()].runtime_stop_in_progress
+        }));
     }
-    let overlap = state.update_project_engram_settings(&project, EngramProjectSettings::default())
-        .err().expect("the in-flight ordinary connection generation must fence overlap");
+    let overlap = state
+        .update_project_engram_settings(&project, EngramProjectSettings::default())
+        .err()
+        .expect("the in-flight ordinary connection generation must fence overlap");
     assert_eq!(overlap.status, StatusCode::CONFLICT);
-    state.finish_turn_ok_if_runtime_matches(&ids[0], &token).unwrap();
+    state
+        .finish_turn_ok_if_runtime_matches(&ids[0], &token)
+        .unwrap();
     let newer = {
         let mut inner = state.inner.lock().unwrap();
         let record = inner.session_mut(&ids[0]).unwrap();
-        assert!(record.deferred_stop_callbacks.iter().any(|callback|
-            matches!(callback, DeferredStopCallback::TurnCompleted { .. })));
+        assert!(
+            record
+                .deferred_stop_callbacks
+                .iter()
+                .any(|callback| matches!(callback, DeferredStopCallback::TurnCompleted { .. }))
+        );
         record.set_auto_dispatch_blocked(true);
         if lose_project_generation {
-            let old = inner.engram_project_resets.claimed_at.get(&project).unwrap().generation;
+            let old = inner
+                .engram_project_resets
+                .claimed_at
+                .get(&project)
+                .unwrap()
+                .generation;
             assert!(inner.engram_project_resets.release(&project, old));
             Some(inner.claim_engram_project_reset(&project).unwrap())
-        } else { None }
+        } else {
+            None
+        }
     };
-    queue_test_engram_prompt(&state, &ids[0], "preserve while connection teardown owns callbacks",
-        QueuedPromptSource::User, None);
+    queue_test_engram_prompt(
+        &state,
+        &ids[0],
+        "preserve while connection teardown owns callbacks",
+        QueuedPromptSource::User,
+        None,
+    );
     release.0.take().unwrap().send(()).unwrap();
     let outcome = worker.join().unwrap();
     if lose_project_generation {
-        let error = outcome.err().expect("lost project ownership must remain visible");
+        let error = outcome
+            .err()
+            .expect("lost project ownership must remain visible");
         assert!(error.message.contains("ownership changed during cleanup"));
-    } else { outcome.unwrap(); }
+    } else {
+        outcome.unwrap();
+    }
     let mut inner = state.inner.lock().unwrap();
-    assert!(!inner.find_project(&project).unwrap().engram.as_ref().unwrap().enabled);
+    assert!(
+        !inner
+            .find_project(&project)
+            .unwrap()
+            .engram
+            .as_ref()
+            .unwrap()
+            .enabled
+    );
     for id in &ids {
         let record = &inner.sessions[inner.find_session_index(id).unwrap()];
         assert!(matches!(record.runtime, SessionRuntime::None));
@@ -6017,12 +6595,16 @@ fn assert_ordinary_connection_cleanup_fences(lose_project_generation: bool) {
     assert!(record.orchestrator_auto_dispatch_blocked);
     assert!(record.session.queue_paused);
     assert_eq!(record.queued_prompts.len(), 1);
-    assert_eq!(record.queued_prompts.front().unwrap().pending_prompt.text,
-        "preserve while connection teardown owns callbacks");
+    assert_eq!(
+        record.queued_prompts.front().unwrap().pending_prompt.text,
+        "preserve while connection teardown owns callbacks"
+    );
     if let Some(newer) = newer {
         assert!(inner.engram_project_resets.is_owned_by(&project, newer));
         assert!(inner.engram_project_resets.release(&project, newer));
-    } else { assert!(!inner.engram_project_resets.contains(&project)); }
+    } else {
+        assert!(!inner.engram_project_resets.contains(&project));
+    }
 }
 
 #[test]
@@ -6037,44 +6619,84 @@ fn ordinary_lost_project_generation_still_releases_its_exact_runtime_fences() {
 
 #[test]
 fn a_new_delegation_stays_queued_while_the_connection_generation_is_owned() {
-    let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("ordinary-new-child-fence");
-    let root = state.test_temp_root.as_ref().unwrap().path().join("new-child-connection-fence");
+    let (state, runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("ordinary-new-child-fence");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("new-child-connection-fence");
     fs::create_dir_all(&root).unwrap();
     let project = create_test_project(&state, &root, "Connection-fenced child");
     let parent = create_test_project_session(&state, Agent::Codex, &project, &root);
     enable_test_project_engram(&state, &project, &root);
     let transport = ScriptedEngramControlTransport::new([]);
     state.install_control_test_transport(transport.clone());
-    let generation = state.inner.lock().unwrap().claim_engram_project_reset(&project).unwrap();
-    let created = state.create_read_only_delegation(&parent, CreateDelegationRequest {
-        prompt: "Keep this new child's exact prompt.".to_owned(),
-        title: Some("Ordinary connection-fenced child".to_owned()),
-        cwd: None, agent: Some(Agent::Codex), model: None,
-        mode: Some(DelegationMode::Reviewer), write_policy: Some(DelegationWritePolicy::ReadOnly),
-    }).unwrap();
+    let generation = state
+        .inner
+        .lock()
+        .unwrap()
+        .claim_engram_project_reset(&project)
+        .unwrap();
+    let created = state
+        .create_read_only_delegation(
+            &parent,
+            CreateDelegationRequest {
+                prompt: "Keep this new child's exact prompt.".to_owned(),
+                title: Some("Ordinary connection-fenced child".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
     let initial_prompt = build_delegation_prompt(&created.delegation);
     let child = created.delegation.child_session_id;
-    assert!(matches!(runtime_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        runtime_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&child).unwrap();
-        assert!(session_resource_reset_in_progress(&inner, &inner.sessions[index]));
+        assert!(session_resource_reset_in_progress(
+            &inner,
+            &inner.sessions[index]
+        ));
         let record = inner.session_mut(&child).unwrap();
         assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(record.queued_prompts.front().unwrap().pending_prompt.text,
-            initial_prompt);
+        assert_eq!(
+            record.queued_prompts.front().unwrap().pending_prompt.text,
+            initial_prompt
+        );
         assert!(inner.engram_project_resets.release(&project, generation));
     }
-    let dispatch = state.start_next_queued_turn_off_lock(&child, false, false).unwrap().unwrap().dispatch;
+    let dispatch = state
+        .start_next_queued_turn_off_lock(&child, false, false)
+        .unwrap()
+        .unwrap()
+        .dispatch;
     deliver_turn_dispatch(&state, dispatch).unwrap();
-    match receive(&runtime_rx, "the queued child reaches the ordinary provider after release") {
-        CodexRuntimeCommand::Prompt { session_id, command } => {
+    match receive(
+        &runtime_rx,
+        "the queued child reaches the ordinary provider after release",
+    ) {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
             assert_eq!(session_id, child);
             assert!(command.prompt.ends_with(&initial_prompt));
         }
         _ => panic!("expected the child prompt"),
     }
-    assert!(matches!(runtime_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        runtime_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     assert_no_admission_or_native_credit_requests(&transport);
 }
 
@@ -6083,12 +6705,29 @@ fn ordinary_binary_spelling_change_uses_current_settings_without_retiring_author
     let (state, root, project, ids) = ordinary_runtime_family_fixture("binary-spelling");
     let binary = real_engram_control_fixture_path();
     let mut next = real_fixture_engram_settings(&root);
-    next.binary_path = Some(binary.parent().unwrap().join(".")
-        .join(binary.file_name().unwrap()).to_string_lossy().into_owned());
-    state.update_project_engram_settings(&project, next.clone()).unwrap();
+    next.binary_path = Some(
+        binary
+            .parent()
+            .unwrap()
+            .join(".")
+            .join(binary.file_name().unwrap())
+            .to_string_lossy()
+            .into_owned(),
+    );
+    state
+        .update_project_engram_settings(&project, next.clone())
+        .unwrap();
     let inner = state.inner.lock().unwrap();
-    assert_eq!(inner.find_project(&project).unwrap().engram.as_ref().unwrap().binary_path,
-        next.binary_path);
+    assert_eq!(
+        inner
+            .find_project(&project)
+            .unwrap()
+            .engram
+            .as_ref()
+            .unwrap()
+            .binary_path,
+        next.binary_path
+    );
     assert!(inner.engram_retired_work_authority_grants.is_empty());
     for id in ids {
         let record = &inner.sessions[inner.find_session_index(&id).unwrap()];
@@ -6100,13 +6739,18 @@ fn ordinary_binary_spelling_change_uses_current_settings_without_retiring_author
 #[test]
 fn historical_retired_authority_is_preserved_without_eviction_or_settlement() {
     let state = test_app_state();
-    let entries = (0..256).map(|index| EngramRetiredWorkAuthorityGrant {
-        home: "historical-home".to_owned(), project_root: "historical-project".to_owned(),
-        store_key: None, project_id: "historical-project".to_owned(),
-        grant_hash: format!("passive-secret-{index}"),
-        retired_at: "2026-08-30T00:00:00Z".to_owned(), reason: "historical".to_owned(),
-        revoke_confirmed: index % 2 == 0,
-    }).collect::<Vec<_>>();
+    let entries = (0..256)
+        .map(|index| EngramRetiredWorkAuthorityGrant {
+            home: "historical-home".to_owned(),
+            project_root: "historical-project".to_owned(),
+            store_key: None,
+            project_id: "historical-project".to_owned(),
+            grant_hash: format!("passive-secret-{index}"),
+            retired_at: "2026-08-30T00:00:00Z".to_owned(),
+            reason: "historical".to_owned(),
+            revoke_confirmed: index % 2 == 0,
+        })
+        .collect::<Vec<_>>();
     {
         let mut inner = state.inner.lock().unwrap();
         *inner.engram_retired_work_authority_grants = entries.clone();
@@ -6116,10 +6760,23 @@ fn historical_retired_authority_is_preserved_without_eviction_or_settlement() {
     }
     state.shutdown_persist_blocking();
     let saved = sqlite_metadata_state_value(&state.persistence_path);
-    assert_eq!(saved["engramRetiredWorkAuthorityGrants"], serde_json::to_value(&entries).unwrap());
-    let reloaded = AppState::new_with_paths(state.default_workdir.clone(),
+    assert_eq!(
+        saved["engramRetiredWorkAuthorityGrants"],
+        serde_json::to_value(&entries).unwrap()
+    );
+    let reloaded = AppState::new_with_paths(
+        state.default_workdir.clone(),
         state.persistence_path.as_path().to_path_buf(),
-        state.orchestrator_templates_path.as_path().to_path_buf()).unwrap();
-    assert_eq!(reloaded.inner.lock().unwrap().engram_retired_work_authority_grants, entries);
+        state.orchestrator_templates_path.as_path().to_path_buf(),
+    )
+    .unwrap();
+    assert_eq!(
+        reloaded
+            .inner
+            .lock()
+            .unwrap()
+            .engram_retired_work_authority_grants,
+        entries
+    );
     reloaded.shutdown_persist_blocking();
 }

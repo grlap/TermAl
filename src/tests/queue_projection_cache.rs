@@ -66,7 +66,10 @@ fn public_queue_hash_keeps_its_ordered_identity_and_disposition_contract() {
     }
     let embedded = current_cut(&state).materialize();
     let expected = sha256_hex(br#"[false,[["first",false,false],["second",true,true]]]"#);
-    assert_eq!(embedded.sessions[0].queue_projection_hash.as_deref(), Some(expected.as_str()));
+    assert_eq!(
+        embedded.sessions[0].queue_projection_hash.as_deref(),
+        Some(expected.as_str())
+    );
     {
         let mut inner = state.inner.lock().unwrap();
         let record = &mut inner.sessions[0];
@@ -78,13 +81,21 @@ fn public_queue_hash_keeps_its_ordered_identity_and_disposition_contract() {
         record.session.pending_prompts[0].id = "stale-embedded-id".to_owned();
     }
     let authoritative = current_cut(&state).materialize();
-    assert_eq!(authoritative.sessions[0].queue_projection_hash, embedded.sessions[0].queue_projection_hash);
+    assert_eq!(
+        authoritative.sessions[0].queue_projection_hash,
+        embedded.sessions[0].queue_projection_hash
+    );
     {
         let mut inner = state.inner.lock().unwrap();
-        inner.sessions[0].queued_prompts[0].pending_prompt.text.push_str(" body-only change");
+        inner.sessions[0].queued_prompts[0]
+            .pending_prompt
+            .text
+            .push_str(" body-only change");
     }
-    assert_eq!(current_cut(&state).materialize().sessions[0].queue_projection_hash,
-        authoritative.sessions[0].queue_projection_hash);
+    assert_eq!(
+        current_cut(&state).materialize().sessions[0].queue_projection_hash,
+        authoritative.sessions[0].queue_projection_hash
+    );
 }
 
 #[test]
@@ -95,10 +106,19 @@ fn warm_cuts_reuse_queue_hashes_and_only_rebuild_changed_summaries() {
     for _ in 0..3 {
         metadata_commit(&state);
     }
-    assert_eq!(count.load(Ordering::SeqCst), 0, "warm cuts must not hash unchanged queues");
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        0,
+        "warm cuts must not hash unchanged queues"
+    );
     {
         let mut inner = state.inner.lock().unwrap();
-        inner.session_mut(&session).unwrap().session.pending_prompts.push(prompt("new"));
+        inner
+            .session_mut(&session)
+            .unwrap()
+            .session
+            .pending_prompts
+            .push(prompt("new"));
         state.commit_locked(&mut inner).unwrap();
     }
     let rebuilt = count.load(Ordering::SeqCst);
@@ -107,8 +127,14 @@ fn warm_cuts_reuse_queue_hashes_and_only_rebuild_changed_summaries() {
     assert_eq!(count.load(Ordering::SeqCst), rebuilt);
     let cached = materialize(mailbox.take_pending_for_test().pop().unwrap());
     let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
-    assert!(count.load(Ordering::SeqCst) > rebuilt, "fresh projection is the positive control");
-    assert_eq!(serde_json::to_value(cached).unwrap(), serde_json::to_value(fresh).unwrap());
+    assert!(
+        count.load(Ordering::SeqCst) > rebuilt,
+        "fresh projection is the positive control"
+    );
+    assert_eq!(
+        serde_json::to_value(cached).unwrap(),
+        serde_json::to_value(fresh).unwrap()
+    );
 }
 
 #[test]
@@ -118,17 +144,33 @@ fn unstamped_authoritative_queue_changes_refresh_hashes_without_changing_old_cut
     baseline.queued_prompts = vec![queued("first"), queued("second")].into();
     baseline.session.pending_prompts = vec![prompt("embedded-fallback")];
     let mutations: &[(&str, fn(&mut SessionRecord))] = &[
-        ("identity", |r| r.queued_prompts[0].pending_prompt.id = "replacement".to_owned()),
+        ("identity", |r| {
+            r.queued_prompts[0].pending_prompt.id = "replacement".to_owned()
+        }),
         ("order", |r| r.queued_prompts.swap(0, 1)),
-        ("removed", |r| { r.queued_prompts.pop_back(); }),
+        ("removed", |r| {
+            r.queued_prompts.pop_back();
+        }),
         ("fallback", |r| r.queued_prompts.clear()),
-        ("interrupted", |r| r.queued_prompts[0].engram_interrupted = true),
-        ("handoff", |r| r.queued_prompts[0].engram_ordinary_handoff = true),
-        ("legacy", |r| r.queued_prompts[0].promotion_disposition_known = false),
+        ("interrupted", |r| {
+            r.queued_prompts[0].engram_interrupted = true
+        }),
+        ("handoff", |r| {
+            r.queued_prompts[0].engram_ordinary_handoff = true
+        }),
+        ("legacy", |r| {
+            r.queued_prompts[0].promotion_disposition_known = false
+        }),
         ("waiting", |r| r.queued_prompts[0].engram_waiting = true),
-        ("binding", |r| r.queued_prompts[0].engram_bind = Some(json!({}))),
-        ("evaluation", |r| r.queued_prompts[0].engram_evaluate = Some(json!({}))),
-        ("promoted", |r| r.queued_prompts[0].promoted_message_index = Some(0)),
+        ("binding", |r| {
+            r.queued_prompts[0].engram_bind = Some(json!({}))
+        }),
+        ("evaluation", |r| {
+            r.queued_prompts[0].engram_evaluate = Some(json!({}))
+        }),
+        ("promoted", |r| {
+            r.queued_prompts[0].promoted_message_index = Some(0)
+        }),
         ("pause", |r| r.orchestrator_auto_dispatch_blocked = true),
     ];
     for (label, mutate) in mutations {
@@ -143,7 +185,11 @@ fn unstamped_authoritative_queue_changes_refresh_hashes_without_changing_old_cut
         let cut = current_cut(&state).materialize();
         let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
         assert_ne!(cut.sessions[0].queue_projection_hash, old_hash, "{label}");
-        assert_eq!(serde_json::to_value(cut).unwrap(), serde_json::to_value(fresh).unwrap(), "{label}");
+        assert_eq!(
+            serde_json::to_value(cut).unwrap(),
+            serde_json::to_value(fresh).unwrap(),
+            "{label}"
+        );
         assert_eq!(old.sessions[0].queue_projection_hash, old_hash, "{label}");
     }
 }
@@ -154,10 +200,16 @@ fn unstamped_embedded_queue_dispositions_refresh_a_warm_cut() {
     let mut baseline = state.inner.lock().unwrap().sessions[0].clone();
     baseline.session.pending_prompts = vec![prompt("first"), prompt("second")];
     let mutations: &[(&str, fn(&mut SessionRecord))] = &[
-        ("identity", |r| r.session.pending_prompts[0].id = "replacement".to_owned()),
+        ("identity", |r| {
+            r.session.pending_prompts[0].id = "replacement".to_owned()
+        }),
         ("order", |r| r.session.pending_prompts.swap(0, 1)),
-        ("interrupted", |r| r.session.pending_prompts[0].engram_interrupted = true),
-        ("retained", |r| r.session.pending_prompts[0].is_engram_retained = true),
+        ("interrupted", |r| {
+            r.session.pending_prompts[0].engram_interrupted = true
+        }),
+        ("retained", |r| {
+            r.session.pending_prompts[0].is_engram_retained = true
+        }),
         ("empty", |r| r.session.pending_prompts.clear()),
     ];
     for (label, mutate) in mutations {
@@ -172,7 +224,11 @@ fn unstamped_embedded_queue_dispositions_refresh_a_warm_cut() {
         let cut = current_cut(&state).materialize();
         let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
         assert_ne!(cut.sessions[0].queue_projection_hash, old_hash, "{label}");
-        assert_eq!(serde_json::to_value(cut).unwrap(), serde_json::to_value(fresh).unwrap(), "{label}");
+        assert_eq!(
+            serde_json::to_value(cut).unwrap(),
+            serde_json::to_value(fresh).unwrap(),
+            "{label}"
+        );
         assert_eq!(old.sessions[0].queue_projection_hash, old_hash, "{label}");
     }
 }
@@ -209,7 +265,10 @@ fn repairing_an_unstamped_partial_identity_rebuilds_an_empty_local_queue() {
     let repaired = current_cut(&state).materialize();
     let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
     assert!(repaired.sessions[0].queue_projection_hash.is_some());
-    assert_eq!(serde_json::to_value(repaired).unwrap(), serde_json::to_value(fresh).unwrap());
+    assert_eq!(
+        serde_json::to_value(repaired).unwrap(),
+        serde_json::to_value(fresh).unwrap()
+    );
 }
 
 #[test]
@@ -224,8 +283,16 @@ fn remote_queue_hash_remains_remote_authority_even_with_an_embedded_queue() {
         record.session.queue_projection_hash = Some("remote-hash-before".to_owned());
     }
     let old = current_cut(&state);
-    state.inner.lock().unwrap().sessions[0].session.queue_projection_hash = Some("remote-hash-after".to_owned());
+    state.inner.lock().unwrap().sessions[0]
+        .session
+        .queue_projection_hash = Some("remote-hash-after".to_owned());
     let new = current_cut(&state).materialize();
-    assert_eq!(old.sessions[0].queue_projection_hash.as_deref(), Some("remote-hash-before"));
-    assert_eq!(new.sessions[0].queue_projection_hash.as_deref(), Some("remote-hash-after"));
+    assert_eq!(
+        old.sessions[0].queue_projection_hash.as_deref(),
+        Some("remote-hash-before")
+    );
+    assert_eq!(
+        new.sessions[0].queue_projection_hash.as_deref(),
+        Some("remote-hash-after")
+    );
 }

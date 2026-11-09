@@ -86,8 +86,10 @@ fn delayed_predecessor_three_turn_check_attribution() {
         core["run"]["completion_seal"].is_null(),
         "no seal on the unchecked input: <core withheld>"
     );
-    assert!(fs::read(check.directory.join("results.json")).unwrap() == original,
-        "the complete original result is unchanged");
+    assert!(
+        fs::read(check.directory.join("results.json")).unwrap() == original,
+        "the complete original result is unchanged"
+    );
 }
 
 #[test]
@@ -112,8 +114,10 @@ fn check_a_edit_commit_check_b_in_one_turn_accepts_last_input() {
     matrix.close();
     matrix.settle();
     matrix.accept(&last, || {});
-    assert!(fs::read(first.directory.join("results.json")).unwrap() == original_results,
-        "later checks preserve every original result byte");
+    assert!(
+        fs::read(first.directory.join("results.json")).unwrap() == original_results,
+        "later checks preserve every original result byte"
+    );
     for (id, original) in first.records.iter().zip(original_records) {
         assert!(
             matrix.fixture.object(id) == original,
@@ -161,8 +165,10 @@ fn late_close_a_after_successor_edit_commit_check_b_accepts_b() {
     );
     matrix.close();
     matrix.accept_after_done(&last, || {}, || gate.release());
-    assert!(fs::read(first.directory.join("results.json")).unwrap() == original_results,
-        "the complete earlier result is unchanged");
+    assert!(
+        fs::read(first.directory.join("results.json")).unwrap() == original_results,
+        "the complete earlier result is unchanged"
+    );
 }
 
 #[test]
@@ -224,7 +230,10 @@ fn note_citing_judgment_after_measured_change_cannot_seal() {
         }
     };
     let current = matrix.source_id_now();
-    assert!(current.changes.is_empty(), "negative completion measures the clean new input");
+    assert!(
+        current.changes.is_empty(),
+        "negative completion measures the clean new input"
+    );
     let output = matrix.done_output_source(&current);
     eprintln!(
         "MATRIX_CHANGED_NOTE_DONE exit={:?} <body withheld>",
@@ -592,7 +601,8 @@ live_row!(real_edit_during_independent_evaluator_is_refused, {
             .fixture
             .live
             .transport
-            .requests_for("execution_observe") == reports,
+            .requests_for("execution_observe")
+            == reports,
         "the submission cannot rely on a new turn report"
     );
 });
@@ -608,8 +618,10 @@ live_row!(cached_original_completion_after_real_edit_is_refused, {
     matrix.close();
     matrix.settle();
     matrix.refuse(&check, || {});
-    assert!(fs::read(check.directory.join("results.json")).unwrap() == original,
-        "the complete cached result is unchanged");
+    assert!(
+        fs::read(check.directory.join("results.json")).unwrap() == original,
+        "the complete cached result is unchanged"
+    );
 });
 
 live_row!(check_on_another_commit_is_refused, {
@@ -684,7 +696,9 @@ live_row!(
         // real task remains test-bound, and the real registered record remains.
         matrix.citation = Citation::UnboundNote;
         let (child, _cleanup) = matrix.request(&check).unwrap_or_else(|_| {
-            panic!("the evaluation request must reach the actual citation judgment: <details withheld>")
+            panic!(
+                "the evaluation request must reach the actual citation judgment: <details withheld>"
+            )
         });
         let (status, body) = matrix.submit(&child, &check);
         assert!(

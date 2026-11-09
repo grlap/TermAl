@@ -322,21 +322,28 @@ fn live_verifications(gate: &LiveCarriedGate) -> Vec<Value> {
     found
 }
 
-
 fn finish_carried_turn(gate: &LiveCarriedGate) {
     finish_live_root(&gate.fixture.state, &gate.fixture.session_id);
-    gate.fixture.state.start_runtime_observation_worker(&gate.fixture.session_id);
+    gate.fixture
+        .state
+        .start_runtime_observation_worker(&gate.fixture.session_id);
     let guard = phase_sync::PollGuard::new();
     loop {
         let done = live_record(gate, |record| {
             record.engram.unadmitted_closing_jobs.is_empty()
                 && !record.engram.unadmitted_worker_running
                 && record.engram.unadmitted_reports.iter().all(|report| {
-                    report.envelopes.iter().all(|envelope|
-                        matches!(envelope.delivery, EngramRuntimeObservationDelivery::Recorded { .. }))
+                    report.envelopes.iter().all(|envelope| {
+                        matches!(
+                            envelope.delivery,
+                            EngramRuntimeObservationDelivery::Recorded { .. }
+                        )
+                    })
                 })
         });
-        if done { break; }
+        if done {
+            break;
+        }
         guard.wait("real carried-launch ordinary report and worker finish before process cleanup");
     }
 }
@@ -354,16 +361,28 @@ fn live_carried_background_gate_keeps_artifact_custody_without_automatic_native_
     gate.fixture.state.poll_engram_carried_runs();
     let (run, digest) = live_record(&gate, |record| {
         let carried = &record.engram.carried_checks[0];
-        (carried.run_directory.clone().unwrap(), carried.terminal_digest.clone().unwrap())
+        (
+            carried.run_directory.clone().unwrap(),
+            carried.terminal_digest.clone().unwrap(),
+        )
     });
-    assert!(engram_read_carried_run(&run, &digest).unwrap().passed, "actual artifact reader");
+    assert!(
+        engram_read_carried_run(&run, &digest).unwrap().passed,
+        "actual artifact reader"
+    );
     begin_live_turn(&gate, "Read the gate's summary.");
     finish_carried_turn(&gate);
     gate.fixture.state.poll_engram_carried_runs();
-    assert!(live_verifications(&gate).is_empty(), "a launch artifact is not registered native verification");
+    assert!(
+        live_verifications(&gate).is_empty(),
+        "a launch artifact is not registered native verification"
+    );
     live_record(&gate, |record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
-        assert_eq!(record.engram.carried_checks[0].terminal_digest.as_deref(), Some(digest.as_str()));
+        assert_eq!(
+            record.engram.carried_checks[0].terminal_digest.as_deref(),
+            Some(digest.as_str())
+        );
         assert!(record.engram.carried_consumed_runs.is_empty());
     });
     assert_no_live_turn_gate(&gate.fixture.transport);
@@ -376,18 +395,27 @@ fn live_carried_gate_fenced_by_a_write_keeps_its_cause_and_no_native_verificatio
     name_live_root(&gate);
     begin_live_turn(&gate, "Launch the gate.");
     launch_live_gate(&gate);
-    let cwd = fs::canonicalize(&gate.worktree).unwrap().to_string_lossy().into_owned();
+    let cwd = fs::canonicalize(&gate.worktree)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     SessionRecorder::new(gate.fixture.state.clone(), gate.fixture.session_id.clone())
-        .command_started_in("build", "cargo build", Some("cargo build"), Some(&cwd)).unwrap();
+        .command_started_in("build", "cargo build", Some("cargo build"), Some(&cwd))
+        .unwrap();
     finish_live_run(&gate);
     gate.fixture.state.poll_engram_carried_runs();
-    let cause = live_record(&gate, |record| record.engram.carried_checks[0].fence.clone().unwrap());
+    let cause = live_record(&gate, |record| {
+        record.engram.carried_checks[0].fence.clone().unwrap()
+    });
     assert!(cause.contains("cargo"), "{cause}");
     finish_carried_turn(&gate);
     assert!(live_verifications(&gate).is_empty());
     live_record(&gate, |record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
-        assert_eq!(record.engram.carried_checks[0].fence.as_deref(), Some(cause.as_str()));
+        assert_eq!(
+            record.engram.carried_checks[0].fence.as_deref(),
+            Some(cause.as_str())
+        );
         assert!(record.engram.carried_consumed_runs.is_empty());
     });
     assert_no_live_turn_gate(&gate.fixture.transport);

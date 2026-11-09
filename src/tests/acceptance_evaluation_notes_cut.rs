@@ -220,8 +220,10 @@ fn binding_pages(criteria: usize, all_bound: bool) -> Vec<Value> {
                     if all_bound || index == 1 {
                         let mut row = bound_row.clone();
                         row["criterion"] = json!(index + 1);
-                        row["binding"]["obligation"]["rule"]["rule_id"] =
-                            json!(format!("acceptance_criterion_requires_verification:{}", index + 1));
+                        row["binding"]["obligation"]["rule"]["rule_id"] = json!(format!(
+                            "acceptance_criterion_requires_verification:{}",
+                            index + 1
+                        ));
                         row
                     } else {
                         json!({"criterion": index + 1, "binding": null})
@@ -275,22 +277,29 @@ impl EngramControlTransport for SlowBindingTransport {
                 "session_id":connection.session_id, "work_session":true,
                 "capabilities":["host_work_v1", "verification_record_v1"]}));
         }
-        if let EngramControlRequest::AcceptanceVerificationRead { criterion, after, .. } = request {
+        if let EngramControlRequest::AcceptanceVerificationRead {
+            criterion, after, ..
+        } = request
+        {
             self.private_reads.fetch_add(1, Ordering::SeqCst);
             if let Err(error) = self.clock.read(timeout) {
                 self.timed_out.fetch_add(1, Ordering::SeqCst);
                 return Err(error);
             }
             if let Some(pages) = &self.private_pages {
-                let (expected_criterion, page) = pages.lock().unwrap().pop_front()
+                let (expected_criterion, page) = pages
+                    .lock()
+                    .unwrap()
+                    .pop_front()
                     .expect("unexpected extra private verification page");
                 assert_eq!(*criterion, expected_criterion);
                 assert_eq!(after.is_some(), page["earlier"].as_u64().unwrap() > 0);
                 return Ok(page);
             }
             return Err(EngramTransportError::remote(EngramControlErrorBody {
-                code:"unsupported_operation".to_owned(),
-                message:"this slow historical producer has no private verification index".to_owned(),
+                code: "unsupported_operation".to_owned(),
+                message: "this slow historical producer has no private verification index"
+                    .to_owned(),
             }));
         }
         assert!(matches!(
@@ -362,7 +371,8 @@ fn long_history_with_private_producer(
     }
     full["work"]["acceptance"] = json!(acceptance);
     if private_page_count.is_some() {
-        full["work"]["acceptance_bindings"] = json!((1..=criteria)
+        full["work"]["acceptance_bindings"] =
+            json!((1..=criteria)
             .map(|criterion| json!({"criterion":criterion,"requirement":{"check_kind":"test"}}))
             .collect::<Vec<_>>());
     }
@@ -476,8 +486,10 @@ fn assert_paging_stopped_on_time_and_evaluated(outcome: SlowStoreOutcome) -> Val
         outcome.timed_out, 0,
         "no read that decides the request may outrun the time it was funded"
     );
-    assert_eq!(outcome.private_reads, outcome.expected_private_reads,
-        "every private verification page must be funded, not skipped");
+    assert_eq!(
+        outcome.private_reads, outcome.expected_private_reads,
+        "every private verification page must be funded, not skipped"
+    );
     let wire = serde_json::to_value(response).unwrap();
     let unread = &wire["evidenceOmissions"]["unread"];
     assert_eq!(unread["reason"], "time_budget", "{unread}");
@@ -514,13 +526,12 @@ fn a_long_note_history_on_a_slow_store_stops_paging_and_still_evaluates() {
 fn a_long_note_history_keeps_every_binding_page_funded() {
     // Until the binding index is read, all criteria may require private scans.
     // Keep the slow cases and a faster store with room for optional history.
-    for latency in [Duration::from_millis(230), Duration::from_secs(3), Duration::from_secs(4)] {
-        let outcome = long_history_on_a_slow_store(
-            latency,
-            &[],
-            10,
-            VisibleCriteria::All,
-        );
+    for latency in [
+        Duration::from_millis(230),
+        Duration::from_secs(3),
+        Duration::from_secs(4),
+    ] {
+        let outcome = long_history_on_a_slow_store(latency, &[], 10, VisibleCriteria::All);
         let (pages, binding_pages) = (outcome.pages, outcome.binding_pages);
         assert_paging_stopped_on_time_and_evaluated(outcome);
         if latency < Duration::from_secs(1) {
@@ -534,13 +545,12 @@ fn a_long_note_history_keeps_every_binding_page_funded() {
 /// criteria: the binding index pages over all of them.
 #[test]
 fn a_clipped_criteria_list_still_funds_every_binding_page() {
-    for latency in [Duration::from_millis(230), Duration::from_secs(3), Duration::from_secs(4)] {
-        let outcome = long_history_on_a_slow_store(
-            latency,
-            &[],
-            10,
-            VisibleCriteria::First(3),
-        );
+    for latency in [
+        Duration::from_millis(230),
+        Duration::from_secs(3),
+        Duration::from_secs(4),
+    ] {
+        let outcome = long_history_on_a_slow_store(latency, &[], 10, VisibleCriteria::First(3));
         let (pages, binding_pages) = (outcome.pages, outcome.binding_pages);
         assert_paging_stopped_on_time_and_evaluated(outcome);
         if latency < Duration::from_secs(1) {
@@ -584,13 +594,29 @@ fn a_long_note_history_keeps_the_selected_evidence_reads_funded() {
 
 #[test]
 fn optional_history_cannot_starve_supported_private_scans_across_criteria_and_pages() {
-    for visible in [VisibleCriteria::All, VisibleCriteria::First(1), VisibleCriteria::Absent] {
-        for (latency, pages_per_criterion) in [(Duration::from_secs(3), 1), (Duration::from_millis(2500), 2)] {
-            let outcome = long_history_with_private_producer(latency, &[], 4, visible, Some(pages_per_criterion));
+    for visible in [
+        VisibleCriteria::All,
+        VisibleCriteria::First(1),
+        VisibleCriteria::Absent,
+    ] {
+        for (latency, pages_per_criterion) in [
+            (Duration::from_secs(3), 1),
+            (Duration::from_millis(2500), 2),
+        ] {
+            let outcome = long_history_with_private_producer(
+                latency,
+                &[],
+                4,
+                visible,
+                Some(pages_per_criterion),
+            );
             assert_eq!(outcome.binding_pages, 1);
             let wire = assert_paging_stopped_on_time_and_evaluated(outcome);
             let brief = wire["brief"].as_str().unwrap();
-            assert!(brief.contains("verification test passed"), "supported metadata reaches the brief");
+            assert!(
+                brief.contains("verification test passed"),
+                "supported metadata reaches the brief"
+            );
         }
     }
 }

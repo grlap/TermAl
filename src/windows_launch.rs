@@ -330,7 +330,9 @@ impl Drop for PreparedLaunch {
     fn drop(&mut self) {
         let had_job = self.job.get_mut().unwrap().take().is_some();
         if self.thread.get_mut().unwrap().is_some()
-            && !self.capture_cleanup_owned.load(std::sync::atomic::Ordering::Acquire)
+            && !self
+                .capture_cleanup_owned
+                .load(std::sync::atomic::Ordering::Acquire)
         {
             if !had_job {
                 let _ = self.process.kill();
@@ -728,7 +730,11 @@ fn prepare_with_hook(
 ) -> io::Result<PreparedLaunch> {
     let mut lock_wait = Duration::ZERO;
     prepare_with_hook_and_lock_timing(
-        spec, force_unavailable, force_atomic_refusal, before_create, &mut lock_wait,
+        spec,
+        force_unavailable,
+        force_atomic_refusal,
+        before_create,
+        &mut lock_wait,
     )
 }
 
@@ -993,8 +999,18 @@ fn prepare_with_hook_and_lock_timing(
     if let Some(observer) = &spec.job_lease_observer {
         if let Some(job) = launch.job.lock().unwrap().as_ref() {
             let mut duplicate = null_mut();
-            if unsafe { DuplicateHandle(GetCurrentProcess(), job.as_raw_handle(),
-                GetCurrentProcess(), &mut duplicate, 0, 0, DUPLICATE_SAME_ACCESS) } == 0 {
+            if unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    job.as_raw_handle(),
+                    GetCurrentProcess(),
+                    &mut duplicate,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            } == 0
+            {
                 return Err(io::Error::last_os_error());
             }
             *observer.lock().unwrap() = Some(owned(duplicate)?);

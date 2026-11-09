@@ -74,7 +74,11 @@ async fn federation_onboarding_receiver_expiry_also_maps_to_a_stale_next_link() 
 }
 
 async fn rpc_expiry(expire_receiver: bool) {
-    let pair = Pair::new(federation_registry::central(), federation_onboarding_fixture::io()).await;
+    let pair = Pair::new(
+        federation_registry::central(),
+        federation_onboarding_fixture::io(),
+    )
+    .await;
     let mut channel = pair.lease.channel.clone();
     channel.control.clock = FederationControlClock::scripted_io();
     let clock = channel.control.clock.clone();
@@ -84,15 +88,18 @@ async fn rpc_expiry(expire_receiver: bool) {
     let handler_release = release.clone();
     let router = federation_control_fixture::authenticated_router(
         pair.satellite_channel.clone(),
-        Router::new().route("/federation/v1/health", get(move || {
-            let entered = handler_entered.clone();
-            let release = handler_release.clone();
-            async move {
-                entered.notify_one();
-                release.notified().await;
-                StatusCode::NO_CONTENT
-            }
-        })),
+        Router::new().route(
+            "/federation/v1/health",
+            get(move || {
+                let entered = handler_entered.clone();
+                let release = handler_release.clone();
+                async move {
+                    entered.notify_one();
+                    release.notified().await;
+                    StatusCode::NO_CONTENT
+                }
+            }),
+        ),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -122,7 +129,10 @@ async fn rpc_expiry(expire_receiver: bool) {
     .await
     .unwrap();
     let error = if expire_receiver {
-        pair.satellite_channel.control.clock.advance(Duration::from_secs(5));
+        pair.satellite_channel
+            .control
+            .clock
+            .advance(Duration::from_secs(5));
         tokio::time::timeout(phase_sync::DEADLOCK_GUARD, &mut request)
             .await
             .unwrap()
@@ -143,7 +153,10 @@ async fn rpc_expiry(expire_receiver: bool) {
     let receiver_fenced = pair.satellite_channel.current_lease().is_err();
     release.notify_waiters();
     stop.send_replace(true);
-    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, server).await.unwrap().unwrap();
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, server)
+        .await
+        .unwrap()
+        .unwrap();
     pair.finish().await;
     let error = error.expect("logical request expiry must fence without waiting for wall time");
     assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);

@@ -44,18 +44,18 @@ mod codex_home;
 mod codex_profile_routing;
 mod codex_protocol;
 mod codex_read_guidance;
-mod commit_hidden_retain_cost;
 mod codex_read_only_profile;
 mod codex_read_only_tracker;
-mod codex_root_mcp_approvals;
 mod codex_reviewer_mcp_startup;
+mod codex_root_mcp_approvals;
+mod commit_hidden_retain_cost;
 pub(crate) use codex_reviewer_mcp_startup::run_settlement_gap_hook;
+mod capture_lifetime;
+mod capture_shutdown_regressions;
 mod codex_terminal_reset;
 mod codex_thread_recovery;
 mod codex_threads;
 mod content_revision;
-mod capture_lifetime;
-mod capture_shutdown_regressions;
 mod conversation_markers;
 mod coordination_board_routes;
 mod coordination_instructions;
@@ -67,16 +67,16 @@ mod delegation_lifecycle;
 mod delegation_metadata;
 mod delegation_outcome_recovery;
 mod delegation_persistence;
-mod delegation_refresh_cut;
 #[cfg(windows)]
 mod delegation_process_cleanup;
 mod delegation_read_only;
+mod delegation_refresh_cut;
 mod delegation_result_parser;
-mod delegation_review_results;
-mod delegation_review_attempts;
 mod delegation_review_access;
-mod delegation_support;
+mod delegation_review_attempts;
+mod delegation_review_results;
 mod delegation_startup_budget;
+mod delegation_support;
 mod delegation_validation;
 mod delegation_wait;
 mod delegation_worker;
@@ -109,20 +109,19 @@ mod engram_source_roots;
 fn launcher_source_id_fixture() -> Value {
     json!({"commit":"a".repeat(40),"tree":"b".repeat(40),"submodules":[],"changes":[]})
 }
+mod engram_declared_source_fixture;
 mod engram_source_command;
 mod engram_source_id;
 mod engram_source_id_capture;
 mod engram_source_id_live;
-mod engram_declared_source_fixture;
 mod engram_source_owner;
 mod engram_unadmitted_capture_diagnostic;
 mod engram_verification_bind;
 mod evaluator_tool_access;
-mod federation_onboarding;
 mod federation_build_compatibility;
-mod federation_build_requalification_controls;
 mod federation_build_recovery_availability;
 mod federation_build_recovery_races;
+mod federation_build_requalification_controls;
 mod federation_entrypoints;
 mod federation_entrypoints_child;
 mod federation_entrypoints_control;
@@ -130,12 +129,13 @@ mod federation_entrypoints_fixture;
 mod federation_entrypoints_regressions;
 mod federation_entrypoints_writer;
 mod federation_entrypoints_writer_observer;
+mod federation_onboarding;
 mod federation_onboarding_atomic;
 mod federation_onboarding_boundaries;
 mod federation_onboarding_child;
+mod federation_onboarding_deadlines;
 mod federation_onboarding_external;
 mod federation_onboarding_fixture;
-mod federation_onboarding_deadlines;
 #[cfg(windows)]
 mod federation_onboarding_image;
 mod federation_onboarding_image_controls;
@@ -156,10 +156,10 @@ mod kimi_approvals;
 mod kimi_read_only;
 mod load_sensitive_limits;
 mod mailbox_acknowledged_wake;
-mod mailboxes;
 mod mailbox_relay_protocol;
 mod mailbox_relay_schema;
 mod mailbox_relay_store;
+mod mailboxes;
 mod opencode_approvals;
 mod opencode_config;
 mod orchestrator;
@@ -175,73 +175,74 @@ mod work_memories;
 pub use orchestrator::{
     sample_deadlocked_orchestrator_template_draft, sample_orchestrator_template_draft,
 };
+mod federation_bootstrap;
+mod federation_bounds;
+mod federation_control_fixture;
+mod federation_credentials;
+mod federation_delivery_schema;
+mod federation_enrollment;
+mod federation_executor_delivery;
+mod federation_executor_journal;
+mod federation_executor_store;
+mod federation_link;
+mod federation_link_diagnostics;
+mod federation_listener_io;
+mod federation_loopback;
+mod federation_mailbox_alias_grammar;
+mod federation_mailbox_append_atomic;
+mod federation_mailbox_authority;
+mod federation_mailbox_boundaries;
+mod federation_mailbox_child;
+mod federation_mailbox_delivery_capability;
+mod federation_mailbox_delivery_crash;
+mod federation_mailbox_delivery_process;
+mod federation_mailbox_delivery_review_r1;
+mod federation_mailbox_intent_lifecycle;
+mod federation_mailbox_intent_remote;
+mod federation_mailbox_intents;
+mod federation_mailbox_loopback;
+mod federation_mailbox_native_link;
+mod federation_mailbox_participation;
+mod federation_mailbox_process;
+mod federation_mailbox_protocol;
+mod federation_mailbox_timeout;
+mod federation_mailboxes;
+mod federation_native_binding_proof;
+mod federation_prompt_policy;
+mod federation_registry;
+mod federation_rpc;
+mod federation_runtime;
+mod federation_security;
+mod federation_ssh;
+mod federation_stdio_bridge;
 mod handoffs;
+mod host_lifecycle;
 mod peer_messages;
 mod persist;
 mod persist_delta;
-mod session_stamp_delta;
-mod persist_message_delta;
 mod persist_fence;
+mod persist_message_delta;
 mod persist_observer;
-mod host_lifecycle;
 mod project_creation_races;
 mod project_digest;
+mod project_environment;
 mod projects;
 mod prompt_delivery;
 mod prompt_delivery_codex_write;
+mod prompt_target_parity;
 mod provider_capacity_retry;
 mod queued_prompt_durability;
 mod read_only_quoted_separators;
 mod read_only_refusal_rules;
 mod remote;
-mod federation_control_fixture;
-mod federation_link_diagnostics;
-mod federation_security;
-mod federation_bootstrap;
-mod federation_registry;
-mod federation_mailbox_protocol;
-mod federation_mailboxes;
-mod federation_prompt_policy;
-mod remote_prompt_journal;
-mod remote_prompt_projection;
-mod federation_mailbox_participation;
-mod federation_mailbox_alias_grammar;
-mod federation_mailbox_process;
-mod federation_mailbox_native_link;
-mod federation_mailbox_child;
-mod federation_mailbox_loopback;
-mod federation_mailbox_authority;
-mod federation_mailbox_boundaries;
-mod federation_mailbox_timeout;
-mod federation_mailbox_intents;
-mod federation_mailbox_append_atomic;
-mod federation_mailbox_intent_lifecycle;
-mod federation_mailbox_intent_remote;
-mod federation_mailbox_delivery_review_r1;
-mod federation_mailbox_delivery_capability;
-mod federation_mailbox_delivery_process;
-mod federation_mailbox_delivery_crash;
-mod federation_delivery_schema;
-mod federation_executor_journal;
-mod federation_executor_store;
-mod federation_native_binding_proof;
-mod federation_executor_delivery;
-mod federation_ssh;
-mod federation_runtime;
-mod federation_rpc;
-mod federation_loopback;
-mod federation_listener_io;
-mod federation_link;
-mod federation_stdio_bridge;
-mod federation_enrollment;
-mod federation_credentials;
-mod federation_bounds;
 mod remote_authority_races;
 mod remote_delta_replay;
 mod remote_hydration;
-mod remote_session_workdir;
-mod remote_proxy_rebase_collision;
 mod remote_orchestrator;
+mod remote_prompt_journal;
+mod remote_prompt_projection;
+mod remote_proxy_rebase_collision;
+mod remote_session_workdir;
 mod remote_state_events;
 mod remote_terminal;
 mod response_board;
@@ -253,15 +254,15 @@ mod session_body_sequence;
 mod session_history_snapshot;
 mod session_lifecycle;
 mod session_settings;
-mod project_environment;
+mod session_stamp_delta;
 mod session_stop;
 mod session_stop_idle_wait;
 mod session_stop_runtime;
 mod shared_codex;
 mod shared_codex_events;
 mod shared_codex_thread_setup;
-mod state_mutex;
 mod state_lock_registration;
+mod state_mutex;
 mod telegram;
 mod telegram_documents;
 mod telegram_forwarding;
@@ -278,7 +279,6 @@ mod turns;
 mod work_visualizer;
 mod workspace;
 mod workspace_labels;
-mod prompt_target_parity;
 
 #[derive(Default)]
 struct TestRecorder {
@@ -440,7 +440,8 @@ fn shared_codex_bad_json_streak_failure_detail_trips_at_threshold() {
 
 impl TurnRecorder for TestRecorder {
     fn native_tool_activity(&mut self, key: Option<&str>, is_command: bool) -> Result<()> {
-        self.native_tool_activities.push((key.map(str::to_owned), is_command));
+        self.native_tool_activities
+            .push((key.map(str::to_owned), is_command));
         Ok(())
     }
     fn note_external_session(&mut self, _session_id: &str) -> Result<()> {
@@ -975,7 +976,10 @@ pub(crate) fn test_app_state() -> AppState {
     let mut inner = StateInner::new();
     let connection = open_sqlite_state_connection_unconfigured(&persistence_path).unwrap();
     ensure_sqlite_state_schema_for_path(&connection, &persistence_path).unwrap();
-    inner.metadata_predecessor.store(metadata_unit_generation(&connection).unwrap(), std::sync::atomic::Ordering::Release);
+    inner.metadata_predecessor.store(
+        metadata_unit_generation(&connection).unwrap(),
+        std::sync::atomic::Ordering::Release,
+    );
     drop(connection);
     inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(
         engram_host_workdir(&persistence_path).expect("fixture persistence directory"),
@@ -1018,7 +1022,9 @@ pub(crate) fn test_app_state() -> AppState {
         persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
         runtime_observation_lifetime: Arc::new(EngramRuntimeObservationLifetime::default()),
-        capture_lifetime: Arc::new(CaptureLifetime::with_test_root(Some(test_temp_root.clone()))),
+        capture_lifetime: Arc::new(CaptureLifetime::with_test_root(Some(
+            test_temp_root.clone(),
+        ))),
         state_broadcast_mailbox: None,
         state_broadcast_worker: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
@@ -1085,7 +1091,6 @@ impl ScopedEnvVar {
         }
         Self { key, original }
     }
-
 
     /// Unsets `key` for the scope of the returned guard, saving any
     /// current value so it is restored on drop. Used by tests that assert

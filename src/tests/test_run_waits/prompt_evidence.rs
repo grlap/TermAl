@@ -31,10 +31,21 @@ fn resume_evidence_regression_counts_all_states_and_stages_beyond_the_summary_ca
     fixture.register(&["test-totals"], "all").unwrap();
     let prompts = fixture.queued_prompts();
     assert_eq!(prompts.len(), 1);
-    assert!(prompts[0].contains("Stage totals: passed 65, failed 1, interrupted 1, running 1, unrun 1, unknown 2"), "{}", prompts[0]);
-    assert!(prompts[0].contains("Preflight totals: passed 1, failed 1, interrupted 1, running 1, unrun 1, unknown 2"));
+    assert!(
+        prompts[0].contains(
+            "Stage totals: passed 65, failed 1, interrupted 1, running 1, unrun 1, unknown 2"
+        ),
+        "{}",
+        prompts[0]
+    );
+    assert!(prompts[0].contains(
+        "Preflight totals: passed 1, failed 1, interrupted 1, running 1, unrun 1, unknown 2"
+    ));
     assert!(prompts[0].contains("Before/after source_id: matched"));
-    assert!(prompts[0].contains("- `test-totals`: PASS"), "diagnostics do not redefine the verdict");
+    assert!(
+        prompts[0].contains("- `test-totals`: PASS"),
+        "diagnostics do not redefine the verdict"
+    );
     fixture.state.refresh_test_run_waits();
     assert_eq!(fixture.queued_prompts(), prompts);
 }
@@ -61,8 +72,13 @@ fn resume_evidence_regression_compares_before_and_after_conservatively() {
         fixture.busy();
         fixture.register(&["test-source-input"], "all").unwrap();
         let prompt = fixture.queued_prompts().pop().unwrap();
-        assert!(prompt.contains(&format!("Before/after source_id: {expected}")), "{prompt}");
-        assert!(prompt.contains("Preflight totals: passed 0, failed 0, interrupted 0, running 0, unrun 0, unknown 0"));
+        assert!(
+            prompt.contains(&format!("Before/after source_id: {expected}")),
+            "{prompt}"
+        );
+        assert!(prompt.contains(
+            "Preflight totals: passed 0, failed 0, interrupted 0, running 0, unrun 0, unknown 0"
+        ));
         assert!(prompt.contains("- `test-source-input`: PASS"));
     }
 }
@@ -73,18 +89,34 @@ fn resume_evidence_regression_unavailable_results_do_not_invent_zero_totals() {
         let fixture = WaitFixture::new(&format!("prompt-{unavailable}"));
         let directory = fixture.write("test-unavailable", None);
         if unavailable != "missing" {
-            fs::write(directory.join("results.json"), if unavailable == "malformed" {
-                b"{malformed".to_vec()
-            } else { vec![b' '; TEST_RUN_JSON_MAX_BYTES + 1] }).unwrap();
+            fs::write(
+                directory.join("results.json"),
+                if unavailable == "malformed" {
+                    b"{malformed".to_vec()
+                } else {
+                    vec![b' '; TEST_RUN_JSON_MAX_BYTES + 1]
+                },
+            )
+            .unwrap();
         }
         fixture.write("test-done", Some(passed()));
         fixture.scan(&[]);
         fixture.busy();
-        fixture.register(&["test-unavailable", "test-done"], "any").unwrap();
+        fixture
+            .register(&["test-unavailable", "test-done"], "any")
+            .unwrap();
         let prompt = fixture.queued_prompts().pop().unwrap();
-        let section = prompt.split("### Run `test-unavailable`").nth(1).unwrap()
-            .split("### Run `test-done`").next().unwrap();
-        assert!(section.contains("Stage totals: unknown (results unavailable)"), "{prompt}");
+        let section = prompt
+            .split("### Run `test-unavailable`")
+            .nth(1)
+            .unwrap()
+            .split("### Run `test-done`")
+            .next()
+            .unwrap();
+        assert!(
+            section.contains("Stage totals: unknown (results unavailable)"),
+            "{prompt}"
+        );
         assert!(section.contains("Preflight totals: unknown (results unavailable)"));
         assert!(section.contains("Before/after source_id: unknown"));
         assert!(!section.contains("passed 0"));
@@ -95,7 +127,9 @@ fn resume_evidence_regression_unavailable_results_do_not_invent_zero_totals() {
 #[test]
 fn resume_evidence_regression_keeps_all_run_totals_with_bounded_failure_excerpts() {
     let fixture = WaitFixture::new("prompt-evidence-budget");
-    let ids: Vec<String> = (0..16).map(|index| format!("test-budget-{index}")).collect();
+    let ids: Vec<String> = (0..16)
+        .map(|index| format!("test-budget-{index}"))
+        .collect();
     for id in &ids {
         let mut results = failed(&"x".repeat(TEST_RUN_WAIT_EXCERPT_MAX_BYTES));
         results["preflight"] = json!([]);
@@ -106,13 +140,26 @@ fn resume_evidence_regression_keeps_all_run_totals_with_bounded_failure_excerpts
     }
     fixture.scan(&[]);
     fixture.busy();
-    fixture.register(&ids.iter().map(String::as_str).collect::<Vec<_>>(), "all").unwrap();
+    fixture
+        .register(&ids.iter().map(String::as_str).collect::<Vec<_>>(), "all")
+        .unwrap();
     let prompt = fixture.queued_prompts().pop().unwrap();
     assert!(prompt.len() <= TEST_RUN_WAIT_PROMPT_MAX_BYTES);
     assert!(!prompt.contains(DELEGATION_WAIT_RESUME_TRUNCATED_MARKER));
-    assert_eq!(prompt.matches("Stage totals: passed 0, failed 1").count(), 16);
-    assert_eq!(prompt.matches("Preflight totals: passed 0, failed 0").count(), 16);
-    assert_eq!(prompt.matches("Before/after source_id: mismatched").count(), 16);
+    assert_eq!(
+        prompt.matches("Stage totals: passed 0, failed 1").count(),
+        16
+    );
+    assert_eq!(
+        prompt
+            .matches("Preflight totals: passed 0, failed 0")
+            .count(),
+        16
+    );
+    assert_eq!(
+        prompt.matches("Before/after source_id: mismatched").count(),
+        16
+    );
     for id in &ids {
         assert!(prompt.contains(&format!("### Run `{id}` (full)")));
     }
@@ -133,7 +180,12 @@ fn resume_evidence_regression_malformed_explicit_preflight_states_are_unknown() 
     fixture.busy();
     fixture.register(&["test-malformed"], "all").unwrap();
     let prompt = fixture.queued_prompts().pop().unwrap();
-    assert!(prompt.contains("Preflight totals: passed 1, failed 1, interrupted 1, running 0, unrun 0, unknown 5"), "{prompt}");
+    assert!(
+        prompt.contains(
+            "Preflight totals: passed 1, failed 1, interrupted 1, running 0, unrun 0, unknown 5"
+        ),
+        "{prompt}"
+    );
     assert!(prompt.contains("- `test-malformed`: PASS"));
 }
 
@@ -177,7 +229,8 @@ fn resume_evidence_regression_admission_reserves_totals_at_the_mandatory_limit()
             let prefix = test_run_display_path(&fixture.root);
             for position in 0..inner.test_runs.entries.len() {
                 inner.test_runs.entries.update(position, |entry| {
-                    entry.summary.run_dir = format!("{prefix}/{}", "x".repeat(path_bytes - prefix.len() - 1));
+                    entry.summary.run_dir =
+                        format!("{prefix}/{}", "x".repeat(path_bytes - prefix.len() - 1));
                     assert_eq!(entry.summary.run_dir.len(), path_bytes);
                 });
             }
@@ -186,9 +239,15 @@ fn resume_evidence_regression_admission_reserves_totals_at_the_mandatory_limit()
         if path_bytes == 600 {
             assert!(response.is_ok(), "the shorter control fits");
         } else {
-            let error = response.err().expect("mandatory evidence must count at admission");
+            let error = response
+                .err()
+                .expect("mandatory evidence must count at admission");
             assert_eq!(error.status, StatusCode::BAD_REQUEST);
-            assert!(error.message.contains("49152-byte limit"), "{}", error.message);
+            assert!(
+                error.message.contains("49152-byte limit"),
+                "{}",
+                error.message
+            );
             assert!(fixture.pending_waits().is_empty());
             assert!(fixture.queued_prompts().is_empty());
         }

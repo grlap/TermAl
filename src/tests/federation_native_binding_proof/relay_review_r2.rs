@@ -134,7 +134,8 @@ async fn mailbox_relay_review_r2_ordinary_user_send_survives_a_refused_relay_hea
         );
         assert!(
             result.is_ok(),
-            "{refusal}: unrelated wake authority must not refuse ordinary admission: {:?}", result.as_ref().err()
+            "{refusal}: unrelated wake authority must not refuse ordinary admission: {:?}",
+            result.as_ref().err()
         );
         if let Ok(
             DispatchTurnResult::Dispatched(dispatch)
@@ -157,7 +158,8 @@ async fn mailbox_relay_review_r2_ordinary_user_send_survives_a_refused_relay_hea
 // production delta persist must select its session, not only the synchronous
 // full save tests otherwise fall back to.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mailbox_relay_review_r2_prompt_queued_behind_a_refused_carrier_reaches_the_delta_persist() {
+async fn mailbox_relay_review_r2_prompt_queued_behind_a_refused_carrier_reaches_the_delta_persist()
+{
     use crate::tests::session_stamp_delta::DurableSessionSnapshot;
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::new(false).await;
@@ -185,7 +187,10 @@ async fn mailbox_relay_review_r2_prompt_queued_behind_a_refused_carrier_reaches_
     assert!(matches!(
         fixture
             .central
-            .dispatch_turn(&fixture.native, user_prompt("work behind a refused carrier"))
+            .dispatch_turn(
+                &fixture.native,
+                user_prompt("work behind a refused carrier")
+            )
             .unwrap(),
         DispatchTurnResult::Queued
     ));
@@ -193,10 +198,12 @@ async fn mailbox_relay_review_r2_prompt_queued_behind_a_refused_carrier_reaches_
     {
         let inner = fixture.central.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&fixture.native).unwrap()];
-        assert!(record
-            .queued_prompts
-            .iter()
-            .any(|queued| queued.pending_prompt.text == "work behind a refused carrier"));
+        assert!(
+            record
+                .queued_prompts
+                .iter()
+                .any(|queued| queued.pending_prompt.text == "work behind a refused carrier")
+        );
     }
     snapshot
         .lock()
@@ -269,61 +276,107 @@ async fn mailbox_relay_review_r2_remote_home_reconnect_redrives_without_new_mail
     let mut home_server = DomainServer::start(federation_router(
         channel,
         Arc::new(move || checked.current_authority().map(|_| ())),
-    )).await;
+    ))
+    .await;
     let channel = fixture.satellite_channel.clone();
     let checked = channel.clone();
     let rpc = FederationRpcClient::new(
         home_server.port,
         channel.clone(),
         Arc::new(move || checked.current_authority().map(|_| ())),
-    ).unwrap();
+    )
+    .unwrap();
     let _satellite_handle = RelayHandleGuard(vec![fixture.satellite.clone()]);
-    fixture.satellite.federation_peer_handles.lock().unwrap().insert(
-        channel.snapshot.peer.host_id.clone(),
-        Arc::new(FederationPeerHandle { channel, rpc }),
-    );
+    fixture
+        .satellite
+        .federation_peer_handles
+        .lock()
+        .unwrap()
+        .insert(
+            channel.snapshot.peer.host_id.clone(),
+            Arc::new(FederationPeerHandle { channel, rpc }),
+        );
     fixture.satellite.inner.lock().unwrap().sessions[0].orchestrator_auto_dispatch_blocked = true;
     let (append, receipt) = append_to_satellite(&fixture, "remote-home-reconnect");
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
-    assert_eq!(fixture.satellite.inner.lock().unwrap().sessions[0].queued_prompts.len(), 1);
+    assert_eq!(
+        fixture.satellite.inner.lock().unwrap().sessions[0]
+            .queued_prompts
+            .len(),
+        1
+    );
     let input = claude_input_for(&fixture.satellite, &fixture.native);
-    fixture.satellite.inner.lock().unwrap().sessions[0].session.status = SessionStatus::Active;
-    assert!(matches!(fixture.satellite.dispatch_turn(
-        &fixture.native, user_prompt("satellite user behind relay")
-    ).unwrap(), DispatchTurnResult::Queued));
-    let prior_membership = fixture.satellite.federation_peer_snapshot(
-        &fixture.satellite_channel.snapshot.peer.host_id).unwrap().membership;
+    fixture.satellite.inner.lock().unwrap().sessions[0]
+        .session
+        .status = SessionStatus::Active;
+    assert!(matches!(
+        fixture
+            .satellite
+            .dispatch_turn(&fixture.native, user_prompt("satellite user behind relay"))
+            .unwrap(),
+        DispatchTurnResult::Queued
+    ));
+    let prior_membership = fixture
+        .satellite
+        .federation_peer_snapshot(&fixture.satellite_channel.snapshot.peer.host_id)
+        .unwrap()
+        .membership;
     // Drop the actual proof owners, not enrollment or a mocked availability bit.
     // The runtime's completion occurs while the remote home has no current lease.
     drop(fixture.attested.lock().unwrap().take());
-    assert!(fixture.satellite.finish_turn_ok_if_runtime_matches(
-        &fixture.native, &RuntimeToken::Claude("relay-review-authority".into())
-    ).is_ok());
+    assert!(
+        fixture
+            .satellite
+            .finish_turn_ok_if_runtime_matches(
+                &fixture.native,
+                &RuntimeToken::Claude("relay-review-authority".into())
+            )
+            .is_ok()
+    );
     fixture.satellite.run_mailbox_relay_wake_batch(0, 0).await;
     assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
     fixture.reconnect().await;
     // A fresh proof retains membership; the actual current lease at the same
     // enrollment restores this remote-home wake without another ceremony.
-    let central = fixture.satellite.federation_peer_snapshot(&fixture.satellite_channel.snapshot.peer.host_id).unwrap();
+    let central = fixture
+        .satellite
+        .federation_peer_snapshot(&fixture.satellite_channel.snapshot.peer.host_id)
+        .unwrap();
     assert_eq!(central.membership, prior_membership);
-    let notification = fixture.satellite.mailbox_store.mailbox_relay_notification(
-        &append.target, &receipt.mailbox_id, receipt.sequence
-    ).unwrap().unwrap();
-    assert!(!notification.handed_off && notification.queued,
-        "a refused remote-home carrier must still be retained, not handed off");
-    fixture.satellite.mailbox_relay_dispatch_authority(
-        &notification.wake, notification.peer.clone(), None
-    ).expect("reconnected retained wake must have current authority");
-    fixture.satellite.mailbox_relay_peer(&append.target, &append.conversation)
+    let notification = fixture
+        .satellite
+        .mailbox_store
+        .mailbox_relay_notification(&append.target, &receipt.mailbox_id, receipt.sequence)
+        .unwrap()
+        .unwrap();
+    assert!(
+        !notification.handed_off && notification.queued,
+        "a refused remote-home carrier must still be retained, not handed off"
+    );
+    fixture
+        .satellite
+        .mailbox_relay_dispatch_authority(&notification.wake, notification.peer.clone(), None)
+        .expect("reconnected retained wake must have current authority");
+    fixture
+        .satellite
+        .mailbox_relay_peer(&append.target, &append.conversation)
         .expect("reconnected home route must use the current lease");
     fixture.satellite.run_mailbox_relay_wake_batch(0, 0).await;
-    assert!(matches!(input.try_recv(), Ok(ClaudeRuntimeCommand::Prompt(_))),
-        "a fresh mutual proof must re-drive the existing remote-home carrier");
-    fixture.satellite.finish_turn_ok_if_runtime_matches(
-        &fixture.native, &RuntimeToken::Claude("relay-review-authority".into())
-    ).unwrap();
+    assert!(
+        matches!(input.try_recv(), Ok(ClaudeRuntimeCommand::Prompt(_))),
+        "a fresh mutual proof must re-drive the existing remote-home carrier"
+    );
+    fixture
+        .satellite
+        .finish_turn_ok_if_runtime_matches(
+            &fixture.native,
+            &RuntimeToken::Claude("relay-review-authority".into()),
+        )
+        .unwrap();
     match recv_within_guard(&input, "satellite user after reconnect") {
-        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => assert_eq!(prompt.text, "satellite user behind relay"),
+        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => {
+            assert_eq!(prompt.text, "satellite user behind relay")
+        }
         _ => panic!("expected following satellite user prompt"),
     }
     home_server.finish().await;

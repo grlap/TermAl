@@ -6,8 +6,14 @@ use super::*;
 async fn federation_prompt_operator_routes_issue_content_fenced_records_and_derive_references() {
     let mut fixture = policy_fixture(true).await;
     let scope = scope(&fixture, true);
-    let mut satellite_api = DomainServer::start(federation_prompt_operator_routes().with_state(fixture.satellite.clone())).await;
-    let mut central_api = DomainServer::start(federation_prompt_operator_routes().with_state(fixture.central.clone())).await;
+    let mut satellite_api = DomainServer::start(
+        federation_prompt_operator_routes().with_state(fixture.satellite.clone()),
+    )
+    .await;
+    let mut central_api = DomainServer::start(
+        federation_prompt_operator_routes().with_state(fixture.central.clone()),
+    )
+    .await;
     fixture
         .central
         .federation_peer_handles
@@ -79,10 +85,12 @@ async fn federation_prompt_operator_routes_issue_content_fenced_records_and_deri
             .unwrap()["references"],
         json!([])
     );
-    assert!(fixture
-        .central
-        .remote_prompt_references_for_caller(&other, Some(&grant.identity.id))
-        .is_err());
+    assert!(
+        fixture
+            .central
+            .remote_prompt_references_for_caller(&other, Some(&grant.identity.id))
+            .is_err()
+    );
     let old_provision = fixture
         .client
         .post(format!(
@@ -150,11 +158,14 @@ async fn federation_prompt_operator_routes_issue_content_fenced_records_and_deri
 }
 
 #[tokio::test]
-async fn federation_prompt_operator_strict_metadata_refuses_unknown_duplicate_and_oversized_requests(
-) {
+async fn federation_prompt_operator_strict_metadata_refuses_unknown_duplicate_and_oversized_requests()
+ {
     let mut fixture = policy_fixture(false).await;
     let scope = scope(&fixture, false);
-    let mut api = DomainServer::start(federation_prompt_operator_routes().with_state(fixture.satellite.clone())).await;
+    let mut api = DomainServer::start(
+        federation_prompt_operator_routes().with_state(fixture.satellite.clone()),
+    )
+    .await;
     let url = format!(
         "http://127.0.0.1:{}/api/federation/prompt-consents",
         api.port
@@ -188,14 +199,16 @@ async fn federation_prompt_operator_strict_metadata_refuses_unknown_duplicate_an
         ));
     }
     assert_eq!(version(&fixture.satellite), current);
-    assert!(fixture
-        .satellite
-        .inner
-        .lock()
-        .unwrap()
-        .federation
-        .prompt_permissions
-        .is_none());
+    assert!(
+        fixture
+            .satellite
+            .inner
+            .lock()
+            .unwrap()
+            .federation
+            .prompt_permissions
+            .is_none()
+    );
     api.finish().await;
     fixture.server.finish().await;
 }

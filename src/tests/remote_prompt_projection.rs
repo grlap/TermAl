@@ -38,13 +38,15 @@ fn remote_prompt_projection_retains_exact_correlated_acceptance_and_completion()
     value["receiver"]["delivery"]["accepted"] = observation("codexTurnStartResponse");
     value["receiver"]["delivery"]["completed"] = observation("nativeTurnCompleted");
     let parsed = decode(&value).unwrap();
-    assert!(parsed
-        .receiver
-        .unwrap()
-        .delivery
-        .unwrap()
-        .completed
-        .is_some());
+    assert!(
+        parsed
+            .receiver
+            .unwrap()
+            .delivery
+            .unwrap()
+            .completed
+            .is_some()
+    );
     let mut acp = status();
     acp["receiver"]["delivery"]["accepted"] = observation("acpPromptResponse");
     acp["receiver"]["delivery"]["completed"] = observation("acpPromptResponse");
@@ -151,12 +153,16 @@ fn remote_prompt_projection_bounded_canonical_and_exact_owner_lookup() {
     parsed
         .validate_for_operation(parsed.operation_id, &parsed.intent_digest, "prompt-1")
         .unwrap();
-    assert!(parsed
-        .validate_for_operation(Uuid::new_v4(), &parsed.intent_digest, "prompt-1")
-        .is_err());
-    assert!(parsed
-        .validate_for_operation(parsed.operation_id, &parsed.intent_digest, "other")
-        .is_err());
+    assert!(
+        parsed
+            .validate_for_operation(Uuid::new_v4(), &parsed.intent_digest, "prompt-1")
+            .is_err()
+    );
+    assert!(
+        parsed
+            .validate_for_operation(parsed.operation_id, &parsed.intent_digest, "other")
+            .is_err()
+    );
     for bad in [
         "00000000-0000-0000-0000-000000000000",
         "12BC727C-9AF0-45FD-8C79-8DFE7CD12021",
@@ -168,9 +174,11 @@ fn remote_prompt_projection_bounded_canonical_and_exact_owner_lookup() {
     assert!(RemotePromptStatus::decode_bounded(&vec![b' '; 16_385]).is_err());
     assert!(RemotePromptStatus::decode_bounded(&[0xff]).is_err());
     assert!(RemotePromptStatus::decode_bounded(b"null").is_err());
-    assert!(RemotePromptStatus::decode_optional_bounded(b"null")
-        .unwrap()
-        .is_none());
+    assert!(
+        RemotePromptStatus::decode_optional_bounded(b"null")
+            .unwrap()
+            .is_none()
+    );
     assert!(
         RemotePromptStatus::decode_optional_bounded(&serde_json::to_vec(&value).unwrap())
             .unwrap()

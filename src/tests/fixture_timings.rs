@@ -65,7 +65,10 @@ impl FixtureTimings {
     }
 
     pub(super) fn phase(&self, phase: &'static str) {
-        self.data.lock().unwrap_or_else(|e| e.into_inner()).change(phase);
+        self.data
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .change(phase);
     }
 }
 
@@ -81,8 +84,10 @@ impl Drop for FixtureTimings {
             "waits":"StateMutex only; background sums overlap; plain mutex and async cleanup attribution unavailable",
             "backgroundPhase":"test-thread phase at lock release, not a causal wait attribution",
         });
-        let _ = std::io::Write::write_all(&mut std::io::stderr(),
-            format!("FIXTURE_PHASE_TIMING {report}\n").as_bytes());
+        let _ = std::io::Write::write_all(
+            &mut std::io::stderr(),
+            format!("FIXTURE_PHASE_TIMING {report}\n").as_bytes(),
+        );
     }
 }
 
@@ -91,10 +96,12 @@ pub(super) struct FixturePhase {
 }
 
 pub(super) fn fixture_phase(phase: &'static str) -> FixturePhase {
-    let previous = ACTIVE_TIMING.with(|slot| slot.borrow().clone()).map(|data| {
-        let previous = data.lock().unwrap_or_else(|e| e.into_inner()).change(phase);
-        (data, previous)
-    });
+    let previous = ACTIVE_TIMING
+        .with(|slot| slot.borrow().clone())
+        .map(|data| {
+            let previous = data.lock().unwrap_or_else(|e| e.into_inner()).change(phase);
+            (data, previous)
+        });
     FixturePhase { previous }
 }
 
@@ -108,7 +115,10 @@ impl Drop for FixturePhase {
 
 /// Install the existing test-only lock reporter before the state is shared.
 /// Inactive tests retain their original mutex and instance identity unchanged.
-pub(super) fn timed_fixture_state_mutex(value: StateInner, instance: &str) -> StateMutex<StateInner> {
+pub(super) fn timed_fixture_state_mutex(
+    value: StateInner,
+    instance: &str,
+) -> StateMutex<StateInner> {
     let mut mutex = StateMutex::new_for_instance(value, instance);
     if let Some(data) = ACTIVE_TIMING.with(|slot| slot.borrow().clone()) {
         mutex.warn_after = Duration::ZERO;

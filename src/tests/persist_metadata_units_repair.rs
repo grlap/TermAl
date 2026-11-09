@@ -5,7 +5,12 @@ use super::*;
 fn metadata_units_synchronous_source_captures_after_earlier_background_commit() {
     let mut fixture = FenceFixture::new();
     fixture.write(&fixture.collect()).unwrap();
-    fixture.inner.lock().unwrap().ignored_discovered_codex_thread_ids.insert("background".into());
+    fixture
+        .inner
+        .lock()
+        .unwrap()
+        .ignored_discovered_codex_thread_ids
+        .insert("background".into());
     let background_delta = fixture.collect();
     let path = fixture.root.path().join("termal.sqlite");
     let inner = fixture.inner.clone();
@@ -22,7 +27,9 @@ fn metadata_units_synchronous_source_captures_after_earlier_background_commit() 
     let sync_path = path.clone();
     let synchronous = std::thread::spawn(move || {
         let mut source = inner.lock().unwrap();
-        source.ignored_discovered_codex_thread_ids.insert("synchronous".into());
+        source
+            .ignored_discovered_codex_thread_ids
+            .insert("synchronous".into());
         persist_state(&sync_path, &source)
     });
     // This ticket is synchronous schema setup. The old implementation already
@@ -33,8 +40,10 @@ fn metadata_units_synchronous_source_captures_after_earlier_background_commit() 
     background_result.unwrap();
     synchronous.join().unwrap().unwrap();
     let restored = load_state(&path).unwrap().unwrap();
-    assert_eq!(restored.ignored_discovered_codex_thread_ids,
-        BTreeSet::from(["background".to_owned(), "synchronous".to_owned()]));
+    assert_eq!(
+        restored.ignored_discovered_codex_thread_ids,
+        BTreeSet::from(["background".to_owned(), "synchronous".to_owned()])
+    );
 }
 
 #[test]
@@ -45,50 +54,95 @@ fn metadata_units_unknown_versions_refuse_all_metadata_readback_without_legacy_f
     let connection = metadata_units_connection(&fixture);
     let legacy = read_persisted_metadata_json(connection).unwrap().unwrap();
     let federation = read_federation_persist_image(connection).unwrap().unwrap();
-    connection.execute("INSERT INTO app_state(key,value_json) VALUES(?1,?2)",
-        rusqlite::params![SQLITE_METADATA_KEY, &legacy]).unwrap();
+    connection
+        .execute(
+            "INSERT INTO app_state(key,value_json) VALUES(?1,?2)",
+            rusqlite::params![SQLITE_METADATA_KEY, &legacy],
+        )
+        .unwrap();
     let units = read_metadata_units_unchecked(connection).unwrap();
     let generation = metadata_unit_generation(connection).unwrap();
-    for version in [Some("1"), Some("3"), Some("2-metadata-units-3"), Some(""), None] {
+    for version in [
+        Some("1"),
+        Some("3"),
+        Some("2-metadata-units-3"),
+        Some(""),
+        None,
+    ] {
         match version {
-            Some(version) => { connection.execute(
-                "UPDATE meta SET value=?1 WHERE key='schema_version'", [version]).unwrap(); }
-            None => { connection.execute("DELETE FROM meta WHERE key='schema_version'", []).unwrap(); }
+            Some(version) => {
+                connection
+                    .execute(
+                        "UPDATE meta SET value=?1 WHERE key='schema_version'",
+                        [version],
+                    )
+                    .unwrap();
+            }
+            None => {
+                connection
+                    .execute("DELETE FROM meta WHERE key='schema_version'", [])
+                    .unwrap();
+            }
         }
         let changes = connection.total_changes();
         // This target deliberately answers false without reading metadata.
         // Its caller only retains an unmatched fence after a completed write;
         // false grants no write authority. Exercise a real metadata-reading
         // late fence below, and keep this non-reading path silent and negative.
-        assert!(!PersistFenceTarget::TestRunCardsEpoch("current-proof".into())
-            .is_already_durable(connection).unwrap());
-        assert_eq!(connection.total_changes(), changes,
-            "the false epoch answer must not write to an unknown-version store");
+        assert!(
+            !PersistFenceTarget::TestRunCardsEpoch("current-proof".into())
+                .is_already_durable(connection)
+                .unwrap()
+        );
+        assert_eq!(
+            connection.total_changes(),
+            changes,
+            "the false epoch answer must not write to an unknown-version store"
+        );
         let errors = [
             read_persisted_metadata_json(connection).unwrap_err(),
             read_persisted_metadata_field(connection, "testRunCardsEpoch").unwrap_err(),
-            read_metadata_for_fence(connection, &["testRunCardsEpoch"]).err().unwrap(),
+            read_metadata_for_fence(connection, &["testRunCardsEpoch"])
+                .err()
+                .unwrap(),
             read_federation_persist_image(connection).unwrap_err(),
             PersistFenceTarget::Federation(federation.clone())
-                .is_already_durable(connection).unwrap_err(),
+                .is_already_durable(connection)
+                .unwrap_err(),
             ensure_sqlite_state_schema(connection).unwrap_err(),
-            ensure_sqlite_state_schema_for_load(connection).err().unwrap(),
+            ensure_sqlite_state_schema_for_load(connection)
+                .err()
+                .unwrap(),
         ];
         for error in errors {
-            assert!(format!("{error:#}").contains("unsupported state database schema"),
-                "{version:?}: {error:#}");
+            assert!(
+                format!("{error:#}").contains("unsupported state database schema"),
+                "{version:?}: {error:#}"
+            );
         }
-        assert_eq!(connection.total_changes(), changes,
-            "neither false nor a refused readback authorizes a following write");
+        assert_eq!(
+            connection.total_changes(),
+            changes,
+            "neither false nor a refused readback authorizes a following write"
+        );
         assert_eq!(read_metadata_units_unchecked(connection).unwrap(), units);
         assert_eq!(metadata_unit_generation(connection).unwrap(), generation);
-        let stored: String = connection.query_row(
-            "SELECT value_json FROM app_state WHERE key=?1", [SQLITE_METADATA_KEY],
-            |row| row.get(0)).unwrap();
+        let stored: String = connection
+            .query_row(
+                "SELECT value_json FROM app_state WHERE key=?1",
+                [SQLITE_METADATA_KEY],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(stored, legacy);
-        let stored_version: Option<String> = connection.query_row(
-            "SELECT value FROM meta WHERE key='schema_version'", [], |row| row.get(0))
-            .optional().unwrap();
+        let stored_version: Option<String> = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
         assert_eq!(stored_version.as_deref(), version);
     }
 }
@@ -632,7 +686,8 @@ fn metadata_units_rollback_preserves_non_nul_object_keys_without_prefix_collisio
         connection
             .execute_batch(&metadata_units_rollback_sql())
             .unwrap();
-        let restored = metadata_units_predecessor_view(metadata_units_old_reader(connection).unwrap());
+        let restored =
+            metadata_units_predecessor_view(metadata_units_old_reader(connection).unwrap());
         assert_eq!(
             restored.pending_response_board_project_detachments, expected,
             "{encoding}"

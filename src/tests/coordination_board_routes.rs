@@ -58,11 +58,8 @@ fn assign_session_project(state: &AppState, session_id: &str, project_id: &str) 
 fn board_scope_resolves_for_a_local_root_session_in_a_local_project() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let project_id = create_test_project(
-        &state,
-        FsPath::new(&state.default_workdir),
-        "Board Project",
-    );
+    let project_id =
+        create_test_project(&state, FsPath::new(&state.default_workdir), "Board Project");
     assign_session_project(&state, &session_id, &project_id);
 
     let (scope, author_name) = resolve_board_scope_for_session(&state, &session_id)
@@ -75,11 +72,8 @@ fn board_scope_resolves_for_a_local_root_session_in_a_local_project() {
 fn board_scope_rejects_a_delegation_child_by_parent_marker() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let project_id = create_test_project(
-        &state,
-        FsPath::new(&state.default_workdir),
-        "Board Project",
-    );
+    let project_id =
+        create_test_project(&state, FsPath::new(&state.default_workdir), "Board Project");
     assign_session_project(&state, &session_id, &project_id);
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -107,11 +101,8 @@ fn board_scope_rejects_a_delegation_child_known_only_to_the_durable_index() {
     let state = test_app_state();
     let parent_id = test_session_id(&state, Agent::Codex);
     let child_id = test_session_id(&state, Agent::Claude);
-    let project_id = create_test_project(
-        &state,
-        FsPath::new(&state.default_workdir),
-        "Board Project",
-    );
+    let project_id =
+        create_test_project(&state, FsPath::new(&state.default_workdir), "Board Project");
     assign_session_project(&state, &child_id, &project_id);
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -135,11 +126,8 @@ fn board_scope_rejects_a_delegation_child_known_only_to_the_durable_index() {
 fn board_scope_rejects_a_remote_proxy_session() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let project_id = create_test_project(
-        &state,
-        FsPath::new(&state.default_workdir),
-        "Board Project",
-    );
+    let project_id =
+        create_test_project(&state, FsPath::new(&state.default_workdir), "Board Project");
     assign_session_project(&state, &session_id, &project_id);
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -462,11 +450,8 @@ fn project_deletion_persist_failure_preserves_board_data_for_restart_recovery() 
 fn board_scope_rejects_a_hidden_session() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let project_id = create_test_project(
-        &state,
-        FsPath::new(&state.default_workdir),
-        "Board Project",
-    );
+    let project_id =
+        create_test_project(&state, FsPath::new(&state.default_workdir), "Board Project");
     assign_session_project(&state, &session_id, &project_id);
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -500,11 +485,8 @@ fn board_route_test_state() -> (TestTempRoot, AppState, String) {
         ..base
     };
     let session_id = test_session_id(&state, Agent::Claude);
-    let project_id = create_test_project(
-        &state,
-        FsPath::new(&state.default_workdir),
-        "Wire Project",
-    );
+    let project_id =
+        create_test_project(&state, FsPath::new(&state.default_workdir), "Wire Project");
     assign_session_project(&state, &session_id, &project_id);
     (board_temp_root, state, session_id)
 }

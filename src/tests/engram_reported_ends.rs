@@ -160,17 +160,35 @@ fn next_turn_observation(turn: &EOCheckedTurn) -> Value {
 
 fn observed_checks(request: &Value) -> &[Value] {
     assert_eq!(request["operation"], "execution_observe", "{request:#}");
-    assert_eq!(request["occurrence"]["kind"], "unadmitted_turn", "{request:#}");
-    assert!(request.get("verification_evidence").is_none(), "{request:#}");
+    assert_eq!(
+        request["occurrence"]["kind"], "unadmitted_turn",
+        "{request:#}"
+    );
+    assert!(
+        request.get("verification_evidence").is_none(),
+        "{request:#}"
+    );
     request["occurrence"]["observed_checks"].as_array().unwrap()
 }
 
 fn assert_no_automatic_credit(turn: &EOCheckedTurn) {
     for request in turn.transport.requests() {
         let operation = request.request["operation"].as_str().unwrap_or_default();
-        assert!(!matches!(operation, "session_bind" | "session_status" | "turn_grant_read"
-            | "turn_evaluate" | "turn_begin" | "turn_checkpoint"
-            | "verification_record" | "verification_bind"), "{}", request.request);
+        assert!(
+            !matches!(
+                operation,
+                "session_bind"
+                    | "session_status"
+                    | "turn_grant_read"
+                    | "turn_evaluate"
+                    | "turn_begin"
+                    | "turn_checkpoint"
+                    | "verification_record"
+                    | "verification_bind"
+            ),
+            "{}",
+            request.request
+        );
     }
 }
 
@@ -267,13 +285,16 @@ fn a_legacy_carried_terminal_requires_its_exact_item_thread_and_terminal_state()
     ] {
         let mut rejected = terminal.clone();
         *rejected.pointer_mut(pointer).unwrap() = replacement;
-        assert!(!take_shared_codex_late_command_end(
-            &turn.state,
-            &turn.session_id,
-            Some(THREAD),
-            &rejected,
-            rejected.pointer("/params/msg/item").unwrap(),
-        ), "{rejected:#}");
+        assert!(
+            !take_shared_codex_late_command_end(
+                &turn.state,
+                &turn.session_id,
+                Some(THREAD),
+                &rejected,
+                rejected.pointer("/params/msg/item").unwrap(),
+            ),
+            "{rejected:#}"
+        );
         turn.record(|record| {
             assert!(record.engram.carried_checks[0].check.end.is_none());
             assert!(!record.engram.running_codex_tests.is_empty());
@@ -339,20 +360,28 @@ fn a_legacy_terminal_across_turns_closes_the_original_check_before_a_later_edit(
     });
 
     let edited = fs::canonicalize(&worktree).unwrap().join("README.md");
-    fs::write(&edited, "a source change after the terminal and closing capture\n").unwrap();
+    fs::write(
+        &edited,
+        "a source change after the terminal and closing capture\n",
+    )
+    .unwrap();
     // Report the new turn's own edit through its recorder. An untimed
     // watcher notification could describe an earlier write delivered late
     // and deliberately remains conservative even after a check has ended.
-    turn.recorder().push_diff(
-        &edited.to_string_lossy(),
-        "Edit after the carried command's closing capture",
-        "+a source change after the terminal and closing capture",
-        ChangeType::Edit,
-    ).unwrap();
+    turn.recorder()
+        .push_diff(
+            &edited.to_string_lossy(),
+            "Edit after the carried command's closing capture",
+            "+a source change after the terminal and closing capture",
+            ChangeType::Edit,
+        )
+        .unwrap();
     turn.record(|record| assert!(record.engram.carried_checks[0].fence.is_none()));
     let successor = turn.finish();
-    assert!(observed_checks(&successor).is_empty(),
-        "a late terminal is not the successor's command: {successor:#}");
+    assert!(
+        observed_checks(&successor).is_empty(),
+        "a late terminal is not the successor's command: {successor:#}"
+    );
     assert_no_automatic_credit(&turn);
 }
 
@@ -363,24 +392,34 @@ fn a_codex_test_that_outlives_its_turn_is_recorded_from_its_late_end() {
     assert_carried_at_close(&turn);
     let owner = turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
-        (carried.work_id.clone(), carried.claim_id.clone(), carried.claim_fence,
-            carried.check.key.clone())
+        (
+            carried.work_id.clone(),
+            carried.claim_id.clone(),
+            carried.claim_fence,
+            carried.check.key.clone(),
+        )
     });
     report_late_end(&turn, THREAD, ITEM, 0);
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
-        assert!(
-            carried.check.end.is_some(),
-            "the late end is taken"
+        assert!(carried.check.end.is_some(), "the late end is taken");
+        assert_eq!(
+            (
+                carried.work_id.clone(),
+                carried.claim_id.clone(),
+                carried.claim_fence,
+                carried.check.key.clone()
+            ),
+            owner,
+            "the late end retains its exact original claim and command"
         );
-        assert_eq!((carried.work_id.clone(), carried.claim_id.clone(),
-            carried.claim_fence, carried.check.key.clone()), owner,
-            "the late end retains its exact original claim and command");
     });
     wait_for_carried_snapshots(&turn);
     let successor = next_turn_observation(&turn);
-    assert!(observed_checks(&successor).is_empty(),
-        "no late fact is reassigned to the successor: {successor:#}");
+    assert!(
+        observed_checks(&successor).is_empty(),
+        "no late fact is reassigned to the successor: {successor:#}"
+    );
     assert_no_automatic_credit(&turn);
 }
 
@@ -473,8 +512,12 @@ fn a_command_in_the_worktree_before_the_late_end_refuses_the_carried_test() {
     wait_for_carried_snapshots(&turn);
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
-        assert!(carried.fence.as_deref().is_some_and(|cause|
-            cause.contains("this session ran a `git` command there")));
+        assert!(
+            carried
+                .fence
+                .as_deref()
+                .is_some_and(|cause| cause.contains("this session ran a `git` command there"))
+        );
     });
     let settling = turn.finish();
     assert!(observed_checks(&settling).is_empty(), "{settling:#}");
@@ -588,11 +631,18 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
     // The close carries it with the watcher's change as its fence; no
     // settlement refuses it there.
     turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1, "the fenced test is carried");
+        assert_eq!(
+            record.engram.carried_checks.len(),
+            1,
+            "the fenced test is carried"
+        );
         let carried = &record.engram.carried_checks[0];
         assert_eq!(carried.check.key, ITEM);
         assert!(carried.check.end.is_none());
-        assert_eq!(engram_check_fingerprint(&carried.check.command), fingerprint);
+        assert_eq!(
+            engram_check_fingerprint(&carried.check.command),
+            fingerprint
+        );
         let fence = carried.fence.as_deref().unwrap_or_default();
         assert!(
             fence.contains("a file in its worktree changed")
@@ -615,7 +665,9 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
         "the initial carry is announced: {notices:#?}"
     );
     assert!(
-        notices.iter().all(|line| !line.contains("earned no credit")),
+        notices
+            .iter()
+            .all(|line| !line.contains("earned no credit")),
         "the close issues no refusal for the fenced carry: {notices:#?}"
     );
     // The fence does not end its process: it still runs.
@@ -641,9 +693,16 @@ fn a_file_change_while_a_carried_full_gate_ran_in_its_turn_refuses_it() {
         "{settling:#}"
     );
     turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1, "no later turn settles it");
+        assert_eq!(
+            record.engram.carried_checks.len(),
+            1,
+            "no later turn settles it"
+        );
         let carried = &record.engram.carried_checks[0];
-        assert!(carried.check.end.is_some(), "its reported end is recorded on it");
+        assert!(
+            carried.check.end.is_some(),
+            "its reported end is recorded on it"
+        );
         assert!(carried.fence.is_some(), "its end keeps its fence");
     });
 }
@@ -727,8 +786,10 @@ fn a_runtime_exit_after_the_late_end_keeps_the_reported_result() {
     );
     let settling = next_turn_observation(&turn);
 
-    assert!(observed_checks(&settling).is_empty(),
-        "the original terminal is not a command of the new runtime: {settling:#}");
+    assert!(
+        observed_checks(&settling).is_empty(),
+        "the original terminal is not a command of the new runtime: {settling:#}"
+    );
     assert_no_automatic_credit(&turn);
 }
 
@@ -808,10 +869,7 @@ fn a_test_carried_under_a_replaced_runtime_is_closed_at_the_next_checkpoint() {
         1,
         "{line}"
     );
-    assert!(
-        line.contains(&runtime_gone_caveat("replaced")),
-        "{line}"
-    );
+    assert!(line.contains(&runtime_gone_caveat("replaced")), "{line}");
 }
 
 /// Codex can report a carried test's end, while the session's next turn
@@ -874,8 +932,10 @@ fn a_late_end_routed_to_the_running_turn_settles_the_carried_test() {
         });
         wait_for_carried_snapshots(&turn);
         let settling = turn.finish();
-        assert!(observed_checks(&settling).is_empty(),
-            "{label}: a routed late terminal cannot become successor evidence: {settling:#}");
+        assert!(
+            observed_checks(&settling).is_empty(),
+            "{label}: a routed late terminal cannot become successor evidence: {settling:#}"
+        );
         assert_no_automatic_credit(&turn);
     }
 }
@@ -940,7 +1000,11 @@ fn a_check_started_after_the_carried_tests_end_is_not_overlapped_by_it() {
     let checkpoint = second_test_observation(&turn, &worktree);
 
     let checks = observed_checks(&checkpoint);
-    assert_eq!(checks.len(), 1, "only the successor's check: {checkpoint:#}");
+    assert_eq!(
+        checks.len(),
+        1,
+        "only the successor's check: {checkpoint:#}"
+    );
     assert_eq!(checks[0]["observed_result"], "passed");
     assert_no_automatic_credit(&turn);
     let line = holder_line(&turn);
@@ -966,21 +1030,39 @@ fn another_checking_session(owner: &EOCheckedTurn, worktree: &FsPath) -> EOCheck
     transport.enable_named_roots(&session_id, &binding);
     // The ordinary work service answers for S2, as the main fixture's does
     // for its session, so naming can associate S2 with its held claim.
-    transport.named_roots.lock().unwrap().as_mut().unwrap().work_session_read_reply =
-        Some(Ok(json!({
-            "project_id": "github.com/example/source-root", "session_id": session_id,
-            "work_session": true, "capabilities": ["host_work_v1"],
-        })));
+    transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .work_session_read_reply = Some(Ok(json!({
+        "project_id": "github.com/example/source-root", "session_id": session_id,
+        "work_session": true, "capabilities": ["host_work_v1"],
+    })));
     transport.replace_held_claims([Ok(claim_deferral::held_snapshot(&[&binding], &binding))]);
-    owner.state.install_control_test_transport(transport.clone());
-    let mut other = EOCheckedTurn::from_session(owner.state.clone(), session_id,
-        owner.root.clone(), transport, owner._runtime_rx.clone());
+    owner
+        .state
+        .install_control_test_transport(transport.clone());
+    let mut other = EOCheckedTurn::from_session(
+        owner.state.clone(),
+        session_id,
+        owner.root.clone(),
+        transport,
+        owner._runtime_rx.clone(),
+    );
     other.host = owner.host.clone();
     // Naming the shared worktree is what associates S2 with its claim.
-    other.state.name_engram_source_root(&other.session_id, EngramSourceRootRequest {
-        work: binding.work_id.clone(),
-        path: Some(Some(worktree.to_string_lossy().into_owned())),
-    }).expect("ordinary work services name S2's root without admitting a turn");
+    other
+        .state
+        .name_engram_source_root(
+            &other.session_id,
+            EngramSourceRootRequest {
+                work: binding.work_id.clone(),
+                path: Some(Some(worktree.to_string_lossy().into_owned())),
+            },
+        )
+        .expect("ordinary work services name S2's root without admitting a turn");
     assert_eq!(
         other.record(|record| record.engram.work_binding.clone()),
         Some(binding),
@@ -1145,7 +1227,10 @@ fn a_refused_carried_test_still_overlaps_later_checks_until_its_end() {
     start_test(&turn, &worktree, ITEM);
     assert_carried_at_close(&turn);
     let checkpoint = passing_test_observation(&turn, &worktree, "exec-b");
-    assert!(checkpoint.get("verification_evidence").is_none(), "{checkpoint:#}");
+    assert!(
+        checkpoint.get("verification_evidence").is_none(),
+        "{checkpoint:#}"
+    );
     assert_overlapped_by(&turn, "exec-b", ITEM);
     // B's command fenced the carry; no turn settles or refuses it, and its
     // process still counts as running.
@@ -1155,17 +1240,24 @@ fn a_refused_carried_test_still_overlaps_later_checks_until_its_end() {
         assert_eq!(carried.check.key, ITEM);
         assert!(carried.check.end.is_none());
         assert!(
-            carried.fence.as_deref().is_some_and(|cause|
-                cause.contains("this session ran a `cargo` command there")),
+            carried
+                .fence
+                .as_deref()
+                .is_some_and(|cause| cause.contains("this session ran a `cargo` command there")),
             "B's command fenced it: {:?}",
             carried.fence
         );
-        assert!(record.engram.running_codex_tests.iter().any(|running| running.key == ITEM));
+        assert!(
+            record
+                .engram
+                .running_codex_tests
+                .iter()
+                .any(|running| running.key == ITEM)
+        );
     });
     let refused = holder_line(&turn);
     assert!(
-        !refused.contains("earned no credit")
-            && !refused.contains(STILL_RUNNING_AFTER_REFUSAL),
+        !refused.contains("earned no credit") && !refused.contains(STILL_RUNNING_AFTER_REFUSAL),
         "no refusal is issued for the fenced carry: {refused}"
     );
 
@@ -1217,7 +1309,10 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
     });
 
     let expiring = next_turn_observation(&turn);
-    assert!(expiring.get("verification_evidence").is_none(), "{expiring:#}");
+    assert!(
+        expiring.get("verification_evidence").is_none(),
+        "{expiring:#}"
+    );
     // Past its age bound it is still carried: only its reported end or its
     // runtime's going removes it, and its process still counts as running.
     turn.record(|record| {
@@ -1229,7 +1324,13 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
             engram_carried_check_expired(carried, chrono::Utc::now()),
             "its launch is past the carried-check age bound"
         );
-        assert!(record.engram.running_codex_tests.iter().any(|running| running.key == ITEM));
+        assert!(
+            record
+                .engram
+                .running_codex_tests
+                .iter()
+                .any(|running| running.key == ITEM)
+        );
     });
     let expired = holder_line(&turn);
     assert!(
@@ -1239,7 +1340,10 @@ fn an_expired_carried_test_still_overlaps_later_checks() {
     );
 
     let checkpoint = passing_test_observation(&turn, &worktree, "exec-after-expiry");
-    assert!(checkpoint.get("verification_evidence").is_none(), "{checkpoint:#}");
+    assert!(
+        checkpoint.get("verification_evidence").is_none(),
+        "{checkpoint:#}"
+    );
     assert_overlapped_by(&turn, "exec-after-expiry", ITEM);
 }
 
@@ -1257,9 +1361,8 @@ fn a_carried_test_whose_end_never_comes_stays_carried_across_later_turns() {
     assert!(
         carried.contains("remains owned by its original turn until its end is reported")
             && carried.contains("Later checks in its worktree remain overlapped while it runs")
-            && carried.contains(
-                "stopping the session closes this observation with an unknown outcome"
-            ),
+            && carried
+                .contains("stopping the session closes this observation with an unknown outcome"),
         "{carried}"
     );
 
@@ -1297,14 +1400,14 @@ fn a_replaced_runtime_clears_only_its_own_running_tests() {
     assert_carried_at_close(&turn);
     let root_key = turn.record(|record| record.engram.running_codex_tests[0].root_key.clone());
     turn.record_mut(|record| {
-        record
-            .engram
-            .running_codex_tests
-            .insert(0, EngramRunningCodexTest {
+        record.engram.running_codex_tests.insert(
+            0,
+            EngramRunningCodexTest {
                 key: "exec-earlier-runtime".to_owned(),
                 runtime: RuntimeToken::Codex("replaced-runtime".to_owned()),
                 root_key: root_key.clone(),
-            });
+            },
+        );
     });
     let current = turn.record(|record| record.runtime.runtime_token());
     turn.record(|record| {
@@ -1325,7 +1428,11 @@ fn a_replaced_runtime_clears_only_its_own_running_tests() {
             .iter()
             .map(|running| running.key.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(keys, [ITEM], "the replaced runtime's test is gone, the current one stays");
+        assert_eq!(
+            keys,
+            [ITEM],
+            "the replaced runtime's test is gone, the current one stays"
+        );
         assert_eq!(record.engram.carried_checks.len(), 1, "its carry stays too");
     });
 }

@@ -20,14 +20,18 @@ async fn ordinary_root_acknowledged_mid_turn_mail_starts_one_continuation_withou
     assert_eq!(receipt.notification_disposition, "queuedBehindActiveTurn");
     read_and_acknowledge(&turn.state, &turn.session, &receipt.mailbox_id).await;
     let token = turn.record(|record| record.runtime.runtime_token().unwrap());
-    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&turn.session, &token)
+        .unwrap();
     let command = turn.prompt();
     assert_continuation_text(&command.prompt, &receipt.mailbox_id, receipt.sequence);
     turn.assert_no_prompt();
     turn.assert_no_control();
 
     // The fulfilled boundary cannot produce another wake on the next finish.
-    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&turn.session, &token)
+        .unwrap();
     turn.assert_no_prompt();
     turn.record(|record| {
         assert!(record.queued_prompts.is_empty());

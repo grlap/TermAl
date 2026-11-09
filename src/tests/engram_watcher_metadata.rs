@@ -24,8 +24,12 @@ fn deliver_raw(
     kind: NotifyEventKind,
 ) -> Vec<WorkspaceFileChangeEvent> {
     let event = NotifyEvent::new(kind).add_path(path.to_path_buf());
-    turn.state.process_workspace_watch_event(&event, &WorkspaceWatchObservation::capture(&event),
-        EngramHost::watcher_arrival_now(), &[])
+    turn.state.process_workspace_watch_event(
+        &event,
+        &WorkspaceWatchObservation::capture(&event),
+        EngramHost::watcher_arrival_now(),
+        &[],
+    )
 }
 
 #[test]
@@ -211,8 +215,12 @@ fn watcher_metadata_child_create_delete_or_rename_remains_observable() {
             }
             _ => unreachable!(),
         };
-        let changes = turn.state.process_workspace_watch_event(&event, &WorkspaceWatchObservation::capture(&event),
-            EngramHost::watcher_arrival_now(), &[]);
+        let changes = turn.state.process_workspace_watch_event(
+            &event,
+            &WorkspaceWatchObservation::capture(&event),
+            EngramHost::watcher_arrival_now(),
+            &[],
+        );
         assert_eq!(changes.len(), event.paths.len());
         // Equal final file contents must not cancel an already witnessed write.
         match action {
@@ -234,8 +242,12 @@ fn watcher_metadata_mixed_batch_keeps_the_file_event() {
     let event = NotifyEvent::new(NotifyEventKind::Modify(ModifyKind::Any))
         .add_path(directory)
         .add_path(path.clone());
-    let changes = turn.state.process_workspace_watch_event(&event, &WorkspaceWatchObservation::capture(&event),
-        EngramHost::watcher_arrival_now(), &[]);
+    let changes = turn.state.process_workspace_watch_event(
+        &event,
+        &WorkspaceWatchObservation::capture(&event),
+        EngramHost::watcher_arrival_now(),
+        &[],
+    );
     assert_eq!(changes.len(), 1);
     assert_eq!(
         changes[0].path,
@@ -254,13 +266,22 @@ fn watcher_metadata_parent_and_child_events_coalesce_without_fabricating_parent(
     let child = directory.join("commands/new.md");
     let mut pending = WorkspacePendingChanges::default();
     let now = std::time::Instant::now();
-    pending.ingest(Ok(NotifyEvent::new(NotifyEventKind::Modify(ModifyKind::Any)).add_path(directory)),
-        EngramHost::watcher_arrival_now(), now);
-    pending.ingest(Ok(NotifyEvent::new(NotifyEventKind::Create(CreateKind::File)).add_path(child.clone())),
-        EngramHost::watcher_arrival_now(), now);
+    pending.ingest(
+        Ok(NotifyEvent::new(NotifyEventKind::Modify(ModifyKind::Any)).add_path(directory)),
+        EngramHost::watcher_arrival_now(),
+        now,
+    );
+    pending.ingest(
+        Ok(NotifyEvent::new(NotifyEventKind::Create(CreateKind::File)).add_path(child.clone())),
+        EngramHost::watcher_arrival_now(),
+        now,
+    );
     let changes = turn.state.process_workspace_dirty_batch(pending.take());
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].path, normalize_user_facing_path(&child).to_string_lossy());
+    assert_eq!(
+        changes[0].path,
+        normalize_user_facing_path(&child).to_string_lossy()
+    );
     assert_eq!(changes[0].kind, WorkspaceFileChangeKind::Created);
     assert_carried_fence_custody(&turn, "a file in its worktree changed");
 }

@@ -1022,11 +1022,18 @@ impl EngramControlTransport for BindingEvidenceTransport {
             ));
         }
         if let EngramControlRequest::AcceptanceVerificationRead {
-            work_id, expected_work_revision, run_id, run_cut, criterion, ..
-        } = request {
+            work_id,
+            expected_work_revision,
+            run_id,
+            run_cut,
+            criterion,
+            ..
+        } = request
+        {
             let Some(requirement) = self.requirements.get(criterion) else {
                 return Err(EngramTransportError::remote(EngramControlErrorBody {
-                    code: "unsupported_operation".into(), message: "no private verification read scripted in this fixture".into(),
+                    code: "unsupported_operation".into(),
+                    message: "no private verification read scripted in this fixture".into(),
                 }));
             };
             return Ok(json!({
@@ -1071,9 +1078,16 @@ pub(super) fn install_binding_evidence_transport(
     pages: Vec<Value>,
 ) -> Arc<BindingEvidenceTransport> {
     let transport = Arc::new(BindingEvidenceTransport {
-        requirements: pages.iter().filter_map(|page| page["rows"].as_array()).flatten()
-            .filter_map(|row| Some((usize::try_from(row["criterion"].as_u64()?).ok()?,
-                row["binding"]["requirement"].clone())))
+        requirements: pages
+            .iter()
+            .filter_map(|page| page["rows"].as_array())
+            .flatten()
+            .filter_map(|row| {
+                Some((
+                    usize::try_from(row["criterion"].as_u64()?).ok()?,
+                    row["binding"]["requirement"].clone(),
+                ))
+            })
             .collect(),
         pages: Mutex::new(pages.into()),
         requests: Mutex::new(Vec::new()),
@@ -1179,12 +1193,16 @@ fn criterion_evidence_request_discovers_original_bound_check_outside_the_window(
     let requests = transport.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0]["operation"], "acceptance_binding_read");
-    assert_eq!(requests[0], json!({
-        "operation": "acceptance_binding_read",
-        "work_id": "01a0b6c5-4b4f-7b41-9e32-edc597077acf",
-        "expected_work_revision": 7,
-        "run_id": "01a0b6c5-4b4f-7b41-9e32-edd7dea8b369"
-    }), "ordinary discovery carries only its exact work/run/revision and cursor contract");
+    assert_eq!(
+        requests[0],
+        json!({
+            "operation": "acceptance_binding_read",
+            "work_id": "01a0b6c5-4b4f-7b41-9e32-edc597077acf",
+            "expected_work_revision": 7,
+            "run_id": "01a0b6c5-4b4f-7b41-9e32-edd7dea8b369"
+        }),
+        "ordinary discovery carries only its exact work/run/revision and cursor contract"
+    );
     assert_eq!(requests[0]["expected_work_revision"], 7);
     assert!(
         requests[0].get("run_cut").is_none(),
@@ -1427,14 +1445,31 @@ fn criterion_evidence_request_discloses_unsupported_ordinary_closure_discovery()
     );
     let response = request_canonical_fixture(&state, &parent, &show, &full).unwrap();
     let wire = serde_json::to_value(response).unwrap();
-    assert!(wire["brief"].as_str().unwrap().contains("canonical index unavailable"));
-    assert!(wire["criterionEvidence"][0]["association"]
-        .as_str().unwrap().contains("does not support canonical closure discovery"));
-    assert!(wire["criterionEvidence"][0]["locators"].as_array().unwrap().is_empty(),
-        "an unavailable index must not borrow a verification");
+    assert!(
+        wire["brief"]
+            .as_str()
+            .unwrap()
+            .contains("canonical index unavailable")
+    );
+    assert!(
+        wire["criterionEvidence"][0]["association"]
+            .as_str()
+            .unwrap()
+            .contains("does not support canonical closure discovery")
+    );
+    assert!(
+        wire["criterionEvidence"][0]["locators"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "an unavailable index must not borrow a verification"
+    );
     assert!(!wire["brief"].as_str().unwrap().contains("git:older"));
-    assert_eq!(transport.requests.lock().unwrap().len(), 1,
-        "ordinary discovery is attempted before its unavailability is disclosed");
+    assert_eq!(
+        transport.requests.lock().unwrap().len(),
+        1,
+        "ordinary discovery is attempted before its unavailability is disclosed"
+    );
 }
 
 #[test]
@@ -1754,7 +1789,8 @@ fn criterion_evidence_page_limits_refuse_before_admission() {
                 vec![first]
             }
             "oversize_page" => {
-                first["rows"][0]["binding"] = json!({"padding": "a".repeat(ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES)});
+                first["rows"][0]["binding"] =
+                    json!({"padding": "a".repeat(ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES)});
                 vec![first]
             }
             "repeated_cursor" => {

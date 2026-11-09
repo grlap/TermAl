@@ -18,7 +18,10 @@ struct CardFixture {
 impl CardFixture {
     fn new(label: &str) -> Self {
         let fixture = Self::new_without_epoch(label);
-        assert!(fixture.state.ensure_test_run_cards_epoch(), "the epoch is durable");
+        assert!(
+            fixture.state.ensure_test_run_cards_epoch(),
+            "the epoch is durable"
+        );
         fixture
     }
 
@@ -76,7 +79,9 @@ impl CardFixture {
         inner.sessions[inner.find_session_index(&self.owner).unwrap()]
             .session
             .messages
-            .iter().cloned().collect()
+            .iter()
+            .cloned()
+            .collect()
     }
 
     fn cards(&self) -> Vec<(String, TestRunCardSnapshot)> {
@@ -98,7 +103,13 @@ impl CardFixture {
     }
 
     fn card_ref(&self, run_id: &str) -> Option<TestRunCardRef> {
-        self.state.inner.lock().unwrap().test_run_cards.get(run_id).cloned()
+        self.state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_cards
+            .get(run_id)
+            .cloned()
     }
 
     fn write(&self, run_id: &str, request: Value, results: Option<Value>) -> PathBuf {
@@ -196,8 +207,13 @@ fn an_owned_run_gets_one_card_updated_in_place() {
         },
         "Test run (full): running"
     );
-    let card_ref = fixture.card_ref("test-life").expect("the map records the card");
-    assert_eq!((card_ref.session_id.as_str(), card_ref.message_id.as_str()), (fixture.owner.as_str(), message_id.as_str()));
+    let card_ref = fixture
+        .card_ref("test-life")
+        .expect("the map records the card");
+    assert_eq!(
+        (card_ref.session_id.as_str(), card_ref.message_id.as_str()),
+        (fixture.owner.as_str(), message_id.as_str())
+    );
     assert!(!card_ref.terminal);
     let messages_after_create = fixture.owner_messages().len();
 
@@ -211,10 +227,17 @@ fn an_owned_run_gets_one_card_updated_in_place() {
     fs::write(run_dir.join("results.json"), results.to_string()).unwrap();
     fixture.refresh(&[7]);
     assert!(
-        fixture.events.borrow().iter().any(|event| matches!(event, DeltaEvent::TestRunChanged { .. })),
+        fixture
+            .events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, DeltaEvent::TestRunChanged { .. })),
         "the summary's detail version moved"
     );
-    assert!(fixture.card_events().is_empty(), "detail-only change rewrites no card");
+    assert!(
+        fixture.card_events().is_empty(),
+        "detail-only change rewrites no card"
+    );
 
     // Progress updates the same message in place.
     let mut results = running(7, "rust-tests");
@@ -228,7 +251,11 @@ fn an_owned_run_gets_one_card_updated_in_place() {
         "{}",
         updated.len()
     );
-    assert_eq!(fixture.owner_messages().len(), messages_after_create, "never a second card");
+    assert_eq!(
+        fixture.owner_messages().len(),
+        messages_after_create,
+        "never a second card"
+    );
 
     // The verdict lands in the same card, which is then terminal.
     let mut results = passed();
@@ -244,22 +271,42 @@ fn an_owned_run_gets_one_card_updated_in_place() {
 fn only_an_owned_run_started_after_the_epoch_gets_a_card() {
     let fixture = CardFixture::new("eligibility");
     let before_epoch = iso(chrono::Utc::now() - chrono::TimeDelta::hours(1));
-    fixture.write("test-old", fixture.request(&before_epoch), Some(running(7, "cargo-check")));
+    fixture.write(
+        "test-old",
+        fixture.request(&before_epoch),
+        Some(running(7, "cargo-check")),
+    );
     let mut no_owner = fixture.request(&after_epoch());
     no_owner.as_object_mut().unwrap().remove("owner");
     fixture.write("test-no-owner", no_owner, Some(running(7, "cargo-check")));
     let mut notify_only = fixture.request(&after_epoch());
     notify_only.as_object_mut().unwrap().remove("owner");
     notify_only["notifyTo"] = json!(fixture.owner);
-    fixture.write("test-notify-only", notify_only, Some(running(7, "cargo-check")));
+    fixture.write(
+        "test-notify-only",
+        notify_only,
+        Some(running(7, "cargo-check")),
+    );
     let mut unknown_owner = fixture.request(&after_epoch());
     unknown_owner["owner"] = json!("session-does-not-exist");
-    fixture.write("test-unknown-owner", unknown_owner, Some(running(7, "cargo-check")));
+    fixture.write(
+        "test-unknown-owner",
+        unknown_owner,
+        Some(running(7, "cargo-check")),
+    );
 
     fixture.refresh(&[7]);
 
     assert!(fixture.cards().is_empty(), "{:?}", fixture.cards());
-    assert!(fixture.state.inner.lock().unwrap().test_run_cards.is_empty());
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_cards
+            .is_empty()
+    );
 }
 
 #[test]
@@ -272,11 +319,19 @@ fn a_run_terminal_at_first_sight_gets_a_card_only_if_it_started_recently() {
     let long_ago = iso(chrono::Utc::now() - chrono::TimeDelta::minutes(20));
     fixture.write("test-short", fixture.request(&recently), Some(passed()));
     fixture.write("test-long-done", fixture.request(&long_ago), Some(passed()));
-    fixture.write("test-long-live", fixture.request(&long_ago), Some(running(7, "rust-tests")));
+    fixture.write(
+        "test-long-live",
+        fixture.request(&long_ago),
+        Some(running(7, "rust-tests")),
+    );
 
     fixture.refresh(&[7]);
 
-    let carded: HashSet<String> = fixture.cards().into_iter().map(|(_, run)| run.run_id).collect();
+    let carded: HashSet<String> = fixture
+        .cards()
+        .into_iter()
+        .map(|(_, run)| run.run_id)
+        .collect();
     assert_eq!(
         carded,
         HashSet::from(["test-short".to_owned(), "test-long-live".to_owned()]),
@@ -287,7 +342,11 @@ fn a_run_terminal_at_first_sight_gets_a_card_only_if_it_started_recently() {
 #[test]
 fn a_card_that_is_not_terminal_reads_not_indexed_when_its_run_leaves() {
     let fixture = CardFixture::new("not-indexed");
-    let run_dir = fixture.write("test-gone", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
+    let run_dir = fixture.write(
+        "test-gone",
+        fixture.request(&after_epoch()),
+        Some(running(7, "rust-tests")),
+    );
     fixture.refresh(&[7]);
     assert_eq!(fixture.card("test-gone").state, TestRunState::Running);
 
@@ -295,8 +354,15 @@ fn a_card_that_is_not_terminal_reads_not_indexed_when_its_run_leaves() {
     fixture.refresh(&[7]);
     let card = fixture.card("test-gone");
     assert_eq!(card.state, TestRunState::Unknown);
-    assert_eq!(card.unknown_reason, Some(TestRunCardUnknownReason::NotIndexed));
-    assert_eq!(card.current_stage.as_deref(), Some("rust-tests"), "the last observation stays");
+    assert_eq!(
+        card.unknown_reason,
+        Some(TestRunCardUnknownReason::NotIndexed)
+    );
+    assert_eq!(
+        card.current_stage.as_deref(),
+        Some("rust-tests"),
+        "the last observation stays"
+    );
     assert!(!fixture.card_ref("test-gone").unwrap().terminal);
 
     // Indexed again, its summary updates the card again.
@@ -310,7 +376,11 @@ fn a_card_that_is_not_terminal_reads_not_indexed_when_its_run_leaves() {
 fn a_failed_card_carries_its_first_failure_cut_to_four_kib() {
     let fixture = CardFixture::new("failure");
     let long = "é".repeat(3000); // 6000 bytes of two-byte characters
-    fixture.write("test-failed", fixture.request(&after_epoch()), Some(failed_with(&long, false)));
+    fixture.write(
+        "test-failed",
+        fixture.request(&after_epoch()),
+        Some(failed_with(&long, false)),
+    );
     fixture.refresh(&[]);
     let card = fixture.card("test-failed");
     assert_eq!(card.state, TestRunState::Failed);
@@ -319,10 +389,16 @@ fn a_failed_card_carries_its_first_failure_cut_to_four_kib() {
     assert_eq!(failure.name, "rust-tests");
     assert!(failure.truncated);
     assert!(failure.excerpt.len() <= 4 * 1024);
-    assert!(long.starts_with(&failure.excerpt), "cut at a character boundary");
+    assert!(
+        long.starts_with(&failure.excerpt),
+        "cut at a character boundary"
+    );
     assert_eq!(card.error.as_deref(), Some("rust-tests failed"));
     assert_eq!(
-        fixture.card_ref("test-failed").unwrap().failure_detail_version,
+        fixture
+            .card_ref("test-failed")
+            .unwrap()
+            .failure_detail_version,
         fixture.state.test_run_summaries(None)[0].detail_version,
         "the excerpt's source version is recorded"
     );
@@ -342,8 +418,18 @@ fn a_failed_card_carries_its_first_failure_cut_to_four_kib() {
     preflight.refresh(&[]);
     let failure = preflight.card("test-preflight").failure.unwrap();
     assert_eq!(
-        (failure.phase, failure.name.as_str(), failure.excerpt.as_str(), failure.truncated),
-        (TestRunCardFailurePhase::Preflight, "cargo", "not found", false)
+        (
+            failure.phase,
+            failure.name.as_str(),
+            failure.excerpt.as_str(),
+            failure.truncated
+        ),
+        (
+            TestRunCardFailurePhase::Preflight,
+            "cargo",
+            "not found",
+            false
+        )
     );
 }
 
@@ -366,7 +452,11 @@ fn the_snapshot_fills_its_optional_part_in_the_fixed_order_within_eight_kib() {
     let mut results = failed_with(&"d".repeat(6000), false);
     results["stages"] = json!(stages);
     results["stages"][40]["diagnostics"] = json!({ "text": "d".repeat(6000), "truncated": false });
-    fixture.write("test-budget", fixture.request(&after_epoch()), Some(results));
+    fixture.write(
+        "test-budget",
+        fixture.request(&after_epoch()),
+        Some(results),
+    );
     fixture.refresh(&[]);
 
     let card = fixture.card("test-budget");
@@ -383,12 +473,26 @@ fn the_snapshot_fills_its_optional_part_in_the_fixed_order_within_eight_kib() {
     })
     .unwrap()
     .len();
-    assert!(full - core <= 8 * 1024, "optional part {} bytes", full - core);
-    assert!(card.stages.iter().any(|stage| stage.name == "stage-40"), "the failed stage first");
-    assert!(card.failure.is_some(), "the failure outranks passed stage rows");
+    assert!(
+        full - core <= 8 * 1024,
+        "optional part {} bytes",
+        full - core
+    );
+    assert!(
+        card.stages.iter().any(|stage| stage.name == "stage-40"),
+        "the failed stage first"
+    );
+    assert!(
+        card.failure.is_some(),
+        "the failure outranks passed stage rows"
+    );
     assert!(card.stages_omitted > 0);
     assert_eq!(card.stages.len() + card.stages_omitted, 64);
-    let names: Vec<&str> = card.stages.iter().map(|stage| stage.name.as_str()).collect();
+    let names: Vec<&str> = card
+        .stages
+        .iter()
+        .map(|stage| stage.name.as_str())
+        .collect();
     let mut sorted = names.clone();
     sorted.sort();
     assert_eq!(names, sorted, "stages stay in plan order");
@@ -402,7 +506,10 @@ fn the_snapshot_fills_its_optional_part_in_the_fixed_order_within_eight_kib() {
         .find("test-budget")
         .cloned()
         .unwrap();
-    assert_eq!(test_run_card_snapshot(&entry, card.failure.clone()), Some(card));
+    assert_eq!(
+        test_run_card_snapshot(&entry, card.failure.clone()),
+        Some(card)
+    );
 }
 
 #[test]
@@ -423,7 +530,11 @@ fn unresolved_evidence_holds_terminal_run_even_after_its_card_leaves_the_residen
         fixture.state.inner.lock().unwrap().test_run_cards_epoch =
             Some(iso(chrono::Utc::now() - chrono::TimeDelta::days(2)));
         let long_ago = iso(chrono::Utc::now() - chrono::TimeDelta::days(1));
-        let run_dir = fixture.write("test-carded", fixture.request(&long_ago), Some(running(7, "rust-tests")));
+        let run_dir = fixture.write(
+            "test-carded",
+            fixture.request(&long_ago),
+            Some(running(7, "rust-tests")),
+        );
         fixture.refresh(&[7]);
         assert!(fixture.card_ref("test-carded").is_some());
         if cold {
@@ -451,7 +562,9 @@ fn unresolved_evidence_holds_terminal_run_even_after_its_card_leaves_the_residen
         for index in 0..TEST_RUN_TERMINAL_RUNS_PER_PROJECT {
             fixture.write(
                 &format!("test-newer-{index:02}"),
-                fixture.request(&iso(chrono::Utc::now() - chrono::TimeDelta::minutes(index as i64 + 30))),
+                fixture.request(&iso(
+                    chrono::Utc::now() - chrono::TimeDelta::minutes(index as i64 + 30)
+                )),
                 Some(passed()),
             );
         }
@@ -464,22 +577,39 @@ fn unresolved_evidence_holds_terminal_run_even_after_its_card_leaves_the_residen
                 .any(|run| run.run_id == "test-carded")
         };
         if cold {
-            assert!(indexed(&fixture), "unknown evidence risk outlives the resident card");
+            assert!(
+                indexed(&fixture),
+                "unknown evidence risk outlives the resident card"
+            );
             continue;
         }
         assert!(indexed(&fixture), "held until its card has the verdict");
         assert_eq!(fixture.card("test-carded").state, TestRunState::Passed);
         fixture.refresh(&[]);
-        assert!(indexed(&fixture), "artifact PASS does not establish evidence-safe aging");
-        assert!(fixture.card_ref("test-carded").is_some(), "the unresolved run remains indexed");
-        assert_eq!(fixture.card("test-carded").state, TestRunState::Passed, "the card stays");
+        assert!(
+            indexed(&fixture),
+            "artifact PASS does not establish evidence-safe aging"
+        );
+        assert!(
+            fixture.card_ref("test-carded").is_some(),
+            "the unresolved run remains indexed"
+        );
+        assert_eq!(
+            fixture.card("test-carded").state,
+            TestRunState::Passed,
+            "the card stays"
+        );
     }
 }
 
 #[test]
 fn a_recent_terminal_card_keeps_its_entry_after_its_run_leaves() {
     let fixture = CardFixture::new("recent-prune");
-    let run_dir = fixture.write("test-recent", fixture.request(&after_epoch()), Some(passed()));
+    let run_dir = fixture.write(
+        "test-recent",
+        fixture.request(&after_epoch()),
+        Some(passed()),
+    );
     fixture.refresh(&[]);
     assert!(fixture.card_ref("test-recent").unwrap().terminal);
     fs::remove_dir_all(&run_dir).unwrap();
@@ -488,7 +618,11 @@ fn a_recent_terminal_card_keeps_its_entry_after_its_run_leaves() {
         fixture.card_ref("test-recent").is_some(),
         "a returning run could still qualify within 10 minutes of its start"
     );
-    fixture.write("test-recent", fixture.request(&after_epoch()), Some(passed()));
+    fixture.write(
+        "test-recent",
+        fixture.request(&after_epoch()),
+        Some(passed()),
+    );
     fixture.refresh(&[]);
     assert_eq!(fixture.cards().len(), 1, "never a second card");
 }
@@ -503,7 +637,11 @@ fn an_unreadable_failure_read_keeps_the_excerpt_and_is_retried() {
     );
     // A live run sorted after it: its liveness check runs between the index
     // read of the failed run and the excerpt read.
-    fixture.write("test-b-live", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
+    fixture.write(
+        "test-b-live",
+        fixture.request(&after_epoch()),
+        Some(running(7, "rust-tests")),
+    );
     let results_path = flaky_dir.join("results.json");
     let armed = std::rc::Rc::new(std::cell::Cell::new(false));
     let refresh = |armed_now: bool| {
@@ -525,7 +663,10 @@ fn an_unreadable_failure_read_keeps_the_excerpt_and_is_retried() {
         );
     };
     refresh(false);
-    let first_version = fixture.card_ref("test-a-flaky").unwrap().failure_detail_version;
+    let first_version = fixture
+        .card_ref("test-a-flaky")
+        .unwrap()
+        .failure_detail_version;
     assert_eq!(
         fixture.card("test-a-flaky").failure.unwrap().excerpt,
         "first diagnostics"
@@ -542,7 +683,10 @@ fn an_unreadable_failure_read_keeps_the_excerpt_and_is_retried() {
         "an unreadable read never empties the excerpt"
     );
     assert_eq!(
-        fixture.card_ref("test-a-flaky").unwrap().failure_detail_version,
+        fixture
+            .card_ref("test-a-flaky")
+            .unwrap()
+            .failure_detail_version,
         first_version,
         "and is never recorded as read"
     );
@@ -563,7 +707,10 @@ fn an_unreadable_failure_read_keeps_the_excerpt_and_is_retried() {
         .unwrap()
         .detail_version;
     assert_eq!(
-        fixture.card_ref("test-a-flaky").unwrap().failure_detail_version,
+        fixture
+            .card_ref("test-a-flaky")
+            .unwrap()
+            .failure_detail_version,
         summary_version,
         "the version of the bytes read"
     );
@@ -572,7 +719,11 @@ fn an_unreadable_failure_read_keeps_the_excerpt_and_is_retried() {
 #[test]
 fn a_detail_only_change_of_a_failed_run_is_recorded_without_a_card_update() {
     let fixture = CardFixture::new("failed-detail-only");
-    let run_dir = fixture.write("test-failed", fixture.request(&after_epoch()), Some(failed_with("boom", false)));
+    let run_dir = fixture.write(
+        "test-failed",
+        fixture.request(&after_epoch()),
+        Some(failed_with("boom", false)),
+    );
     fixture.refresh(&[]);
     fixture.card_events();
     let mut results = failed_with("boom", false);
@@ -581,9 +732,14 @@ fn a_detail_only_change_of_a_failed_run_is_recorded_without_a_card_update() {
     fs::write(run_dir.join("results.json"), results.to_string()).unwrap();
     fixture.refresh(&[]);
     assert!(fixture.card_events().is_empty(), "the card is unchanged");
-    let summary_version = fixture.state.test_run_summaries(None)[0].detail_version.clone();
+    let summary_version = fixture.state.test_run_summaries(None)[0]
+        .detail_version
+        .clone();
     assert_eq!(
-        fixture.card_ref("test-failed").unwrap().failure_detail_version,
+        fixture
+            .card_ref("test-failed")
+            .unwrap()
+            .failure_detail_version,
         summary_version,
         "the read is recorded, so it is not repeated on every rescan"
     );
@@ -596,9 +752,16 @@ fn a_run_whose_delta_was_not_committed_gets_no_card() {
     let failing = TestTempRoot::create("termal-cards-persist-failure");
     fixture.state.shutdown_persist_blocking();
     fixture.state.persistence_path = Arc::new(failing.to_path_buf());
-    fixture.write("test-unsent", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
+    fixture.write(
+        "test-unsent",
+        fixture.request(&after_epoch()),
+        Some(running(7, "rust-tests")),
+    );
     fixture.refresh(&[7]);
-    assert!(fixture.cards().is_empty(), "cards follow published summaries only");
+    assert!(
+        fixture.cards().is_empty(),
+        "cards follow published summaries only"
+    );
 
     fixture.state.persistence_path = persistence_path;
     fixture.refresh(&[7]);
@@ -615,16 +778,19 @@ fn after_a_restart_the_transcript_decides_whether_a_card_is_terminal() {
         super::delegation_support::temp_delegation_state_paths();
     run_git_test_command(&project_root, &["init", "--quiet"]);
     let boot = || {
-        super::delegation_support::boot_on_delegation_root(&temp_root, ||
+        super::delegation_support::boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        )
+        })
     };
-    let run_dir = project_root.join(".git").join("review-runs").join("test-crash");
+    let run_dir = project_root
+        .join(".git")
+        .join("review-runs")
+        .join("test-crash");
     let owner = {
         let state = boot();
         assert!(state.ensure_test_run_cards_epoch());
@@ -669,7 +835,10 @@ fn after_a_restart_the_transcript_decides_whether_a_card_is_terminal() {
         })
         .unwrap();
     assert_eq!(card.state, TestRunState::Unknown);
-    assert_eq!(card.unknown_reason, Some(TestRunCardUnknownReason::NotIndexed));
+    assert_eq!(
+        card.unknown_reason,
+        Some(TestRunCardUnknownReason::NotIndexed)
+    );
     drop(inner);
     restarted.shutdown_persist_blocking();
 }
@@ -687,15 +856,27 @@ fn the_epoch_is_stored_once_and_reloads_as_durable() {
         .expect("the first boot stores an epoch");
     assert!(fixture.state.ensure_test_run_cards_epoch());
     assert_eq!(
-        fixture.state.inner.lock().unwrap().test_run_cards_epoch.as_deref(),
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_cards_epoch
+            .as_deref(),
         Some(epoch.as_str()),
         "never derived from now again"
     );
     let reloaded = load_state(fixture.state.persistence_path.as_path())
         .unwrap()
         .unwrap();
-    assert_eq!(reloaded.test_run_cards_epoch.as_deref(), Some(epoch.as_str()));
-    assert!(reloaded.test_runs.cards_enabled, "a loaded epoch is durable");
+    assert_eq!(
+        reloaded.test_run_cards_epoch.as_deref(),
+        Some(epoch.as_str())
+    );
+    assert!(
+        reloaded.test_runs.cards_enabled,
+        "a loaded epoch is durable"
+    );
 
     // A fresh state has no epoch and creates no card until it is durable.
     let fresh = CardFixture::new("no-epoch-yet");
@@ -704,7 +885,11 @@ fn the_epoch_is_stored_once_and_reloads_as_durable() {
         inner.test_runs.cards_enabled = false;
         inner.test_run_cards_epoch = Some(iso(chrono::Utc::now() - chrono::TimeDelta::hours(1)));
     }
-    fresh.write("test-early", fresh.request(&after_epoch()), Some(running(7, "rust-tests")));
+    fresh.write(
+        "test-early",
+        fresh.request(&after_epoch()),
+        Some(running(7, "rust-tests")),
+    );
     fresh.refresh(&[7]);
     assert!(fresh.cards().is_empty());
 }
@@ -740,10 +925,21 @@ fn the_epoch_never_blocks_rescans_and_cards_follow_once_it_is_durable() {
         .expect("the epoch is set at once");
 
     // A run that starts after the epoch, published while it is not durable.
-    let run_dir = fixture.write("test-early", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
+    let run_dir = fixture.write(
+        "test-early",
+        fixture.request(&after_epoch()),
+        Some(running(7, "rust-tests")),
+    );
     fixture.refresh(&[7]);
-    assert_eq!(fixture.state.test_run_summaries(None).len(), 1, "rescans publish runs");
-    assert!(!fixture.state.step_test_run_cards_epoch(&mut pending), "still pending, never waits");
+    assert_eq!(
+        fixture.state.test_run_summaries(None).len(),
+        1,
+        "rescans publish runs"
+    );
+    assert!(
+        !fixture.state.step_test_run_cards_epoch(&mut pending),
+        "still pending, never waits"
+    );
     // It ends before the epoch is durable, so its summary changes no more.
     let mut results = passed();
     results["runId"] = json!("test-early");
@@ -755,13 +951,22 @@ fn the_epoch_never_blocks_rescans_and_cards_follow_once_it_is_durable() {
         Some(failed_with("early failure", false)),
     );
     fixture.refresh(&[]);
-    assert!(fixture.cards().is_empty(), "no card before the epoch is durable");
+    assert!(
+        fixture.cards().is_empty(),
+        "no card before the epoch is durable"
+    );
 
     // A failed fence is retried with the same epoch.
     next_fence(&persist_rx).finish(Err(PersistFenceError::WriteFailed("disk".to_owned())));
     assert!(!fixture.state.step_test_run_cards_epoch(&mut pending));
     assert_eq!(
-        fixture.state.inner.lock().unwrap().test_run_cards_epoch.as_deref(),
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_cards_epoch
+            .as_deref(),
         Some(epoch.as_str())
     );
     // Durable now: the next scan re-evaluates the run it already published.
@@ -770,7 +975,11 @@ fn the_epoch_never_blocks_rescans_and_cards_follow_once_it_is_durable() {
     fixture.refresh(&[]);
     assert_eq!(fixture.card("test-early").state, TestRunState::Passed);
     assert_eq!(
-        fixture.card("test-early-failed").failure.map(|failure| failure.excerpt).as_deref(),
+        fixture
+            .card("test-early-failed")
+            .failure
+            .map(|failure| failure.excerpt)
+            .as_deref(),
         Some("early failure"),
         "the re-evaluating scan reads the excerpt too"
     );
@@ -791,7 +1000,11 @@ fn a_hidden_or_remote_proxy_owner_gets_no_card() {
                 record.remote_session_id = Some("remote-session-1".to_owned());
             }
         }
-        fixture.write("test-owned", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
+        fixture.write(
+            "test-owned",
+            fixture.request(&after_epoch()),
+            Some(running(7, "rust-tests")),
+        );
         fixture.refresh(&[7]);
         assert!(fixture.cards().is_empty(), "{label}");
         assert!(fixture.card_ref("test-owned").is_none(), "{label}");
@@ -804,14 +1017,14 @@ fn cards_are_reconciled_by_the_first_scan_after_a_restart() {
         super::delegation_support::temp_delegation_state_paths();
     run_git_test_command(&project_root, &["init", "--quiet"]);
     let boot = || {
-        super::delegation_support::boot_on_delegation_root(&temp_root, ||
+        super::delegation_support::boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        )
+        })
     };
     let runs_dir = project_root.join(".git").join("review-runs");
     let write = |run_id: &str, owner: &str, results: Value| {
@@ -868,20 +1081,33 @@ fn cards_are_reconciled_by_the_first_scan_after_a_restart() {
     write("test-cold", &cold_owner, passed());
 
     let restarted = boot();
-    assert!(restarted.inner.lock().unwrap().test_runs.cards_enabled, "a loaded epoch is durable");
+    assert!(
+        restarted.inner.lock().unwrap().test_runs.cards_enabled,
+        "a loaded epoch is durable"
+    );
     refresh(&restarted, &[]);
     let inner = restarted.inner.lock().unwrap();
     let card = |owner: &str| {
         let record = &inner.sessions[inner.find_session_index(owner).unwrap()];
-        record.session.messages.iter().find_map(|message| match message {
-            Message::TestRun { run, .. } => Some(run.clone()),
-            _ => None,
-        })
+        record
+            .session
+            .messages
+            .iter()
+            .find_map(|message| match message {
+                Message::TestRun { run, .. } => Some(run.clone()),
+                _ => None,
+            })
     };
-    assert_eq!(card(&resident_owner).map(|run| run.state), Some(TestRunState::Passed));
+    assert_eq!(
+        card(&resident_owner).map(|run| run.state),
+        Some(TestRunState::Passed)
+    );
     assert!(inner.test_run_cards["test-resident"].terminal);
     assert!(card(&cold_owner).is_none(), "outside the reloaded tail");
-    assert!(!inner.test_run_cards["test-cold"].terminal, "kept for a later pass");
+    assert!(
+        !inner.test_run_cards["test-cold"].terminal,
+        "kept for a later pass"
+    );
     drop(inner);
     restarted.shutdown_persist_blocking();
 }
@@ -889,7 +1115,11 @@ fn cards_are_reconciled_by_the_first_scan_after_a_restart() {
 #[test]
 fn a_card_whose_session_is_gone_leaves_the_map() {
     let fixture = CardFixture::new("session-gone");
-    let run_dir = fixture.write("test-orphan", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
+    let run_dir = fixture.write(
+        "test-orphan",
+        fixture.request(&after_epoch()),
+        Some(running(7, "rust-tests")),
+    );
     fixture.refresh(&[7]);
     assert!(fixture.card_ref("test-orphan").is_some());
     {
@@ -910,7 +1140,11 @@ fn a_card_outside_the_in_memory_window_is_not_updated_yet() {
     // session's in-memory transcript window keeps its entry and is not
     // updated, and nothing else is touched.
     let fixture = CardFixture::new("cold");
-    let run_dir = fixture.write("test-cold", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
+    let run_dir = fixture.write(
+        "test-cold",
+        fixture.request(&after_epoch()),
+        Some(running(7, "rust-tests")),
+    );
     fixture.refresh(&[7]);
     {
         let mut inner = fixture.state.inner.lock().unwrap();
@@ -934,15 +1168,26 @@ fn a_card_outside_the_in_memory_window_is_not_updated_yet() {
     results["runId"] = json!("test-cold");
     fs::write(run_dir.join("results.json"), results.to_string()).unwrap();
     fixture.refresh(&[]);
-    assert!(fixture.card_events().iter().all(|event| !matches!(event, DeltaEvent::TestRunCardUpdated { .. })));
-    let card_ref = fixture.card_ref("test-cold").expect("kept for a later pass");
+    assert!(
+        fixture
+            .card_events()
+            .iter()
+            .all(|event| !matches!(event, DeltaEvent::TestRunCardUpdated { .. }))
+    );
+    let card_ref = fixture
+        .card_ref("test-cold")
+        .expect("kept for a later pass");
     assert!(!card_ref.terminal);
 }
 
 #[test]
 fn the_card_and_its_update_have_the_contract_wire_shape() {
     let fixture = CardFixture::new("wire");
-    fixture.write("test-wire", fixture.request(&after_epoch()), Some(running(7, "rust-tests")));
+    fixture.write(
+        "test-wire",
+        fixture.request(&after_epoch()),
+        Some(running(7, "rust-tests")),
+    );
     fixture.refresh(&[7]);
     let message = fixture
         .owner_messages()
@@ -954,17 +1199,37 @@ fn the_card_and_its_update_have_the_contract_wire_shape() {
     assert_eq!(wire["author"], "system");
     assert_eq!(wire["schemaVersion"], 1);
     for key in [
-        "runId", "worktree", "runDir", "preset", "detached", "state", "interrupted",
-        "currentStage", "startedAt", "endedAt", "exitCode", "stages", "stagesOmitted",
-        "error", "errorTruncated", "failure", "command", "commandTruncated",
+        "runId",
+        "worktree",
+        "runDir",
+        "preset",
+        "detached",
+        "state",
+        "interrupted",
+        "currentStage",
+        "startedAt",
+        "endedAt",
+        "exitCode",
+        "stages",
+        "stagesOmitted",
+        "error",
+        "errorTruncated",
+        "failure",
+        "command",
+        "commandTruncated",
     ] {
         assert!(wire["run"].get(key).is_some(), "{key}: {wire}");
     }
-    assert!(wire["run"].get("unknownReason").is_none(), "only when unknown");
+    assert!(
+        wire["run"].get("unknownReason").is_none(),
+        "only when unknown"
+    );
     let round_trip: Message = serde_json::from_value(wire).unwrap();
     assert_eq!(round_trip.id(), message.id());
 
-    let Message::TestRun { run, .. } = message else { unreachable!() };
+    let Message::TestRun { run, .. } = message else {
+        unreachable!()
+    };
     let update = serde_json::to_value(DeltaEvent::TestRunCardUpdated {
         session_seq: None,
         body_seq_epoch: None,
@@ -979,7 +1244,15 @@ fn the_card_and_its_update_have_the_contract_wire_shape() {
     })
     .unwrap();
     assert_eq!(update["type"], "testRunCardUpdated");
-    for key in ["revision", "sessionId", "messageId", "messageIndex", "messageCount", "preview", "run"] {
+    for key in [
+        "revision",
+        "sessionId",
+        "messageId",
+        "messageIndex",
+        "messageCount",
+        "preview",
+        "run",
+    ] {
         assert!(update.get(key).is_some(), "{key}: {update}");
     }
     assert!(update.get("sessionMutationStamp").is_none());

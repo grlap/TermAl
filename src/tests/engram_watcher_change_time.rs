@@ -71,9 +71,17 @@ fn coalesced_path_crossing_launch_uses_latest_arrival_and_keeps_first_provenance
     let mut pending = WorkspacePendingChanges::default();
     let path = fs::canonicalize(&worktree).unwrap().join("README.md");
     for arrival in [before, after] {
-        pending.insert(&path, WorkspaceDirtyFact {
-            kind: WorkspaceFileChangeKind::Modified, first: arrival, last: arrival, raw_kind: None, observation: None,
-        }, std::time::Instant::now());
+        pending.insert(
+            &path,
+            WorkspaceDirtyFact {
+                kind: WorkspaceFileChangeKind::Modified,
+                first: arrival,
+                last: arrival,
+                raw_kind: None,
+                observation: None,
+            },
+            std::time::Instant::now(),
+        );
     }
     let batch = pending.take();
     assert_eq!(batch.len(), 1);
@@ -88,10 +96,21 @@ fn covering_parent_marker_reaches_check_in_nested_worktree_without_scratch_exemp
     let (turn, worktree) = ordinary_carried_turn("coalesced-watcher-directory");
     ordinary_launch_gate(&turn, &worktree, false);
     let arrival = engram_watcher_arrival_now();
-    let parent = fs::canonicalize(&worktree).unwrap().parent().unwrap().to_path_buf();
-    turn.state.process_workspace_dirty_batch(vec![(parent, WorkspaceDirtyFact {
-        kind: WorkspaceFileChangeKind::Subtree, first: arrival, last: arrival, raw_kind: None, observation: None,
-    })]);
+    let parent = fs::canonicalize(&worktree)
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    turn.state.process_workspace_dirty_batch(vec![(
+        parent,
+        WorkspaceDirtyFact {
+            kind: WorkspaceFileChangeKind::Subtree,
+            first: arrival,
+            last: arrival,
+            raw_kind: None,
+            observation: None,
+        },
+    )]);
     assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_some()));
 }
 
@@ -222,12 +241,19 @@ fn a_pre_stamp_exemption_preserves_registration_before_arrival_without_verificat
     ordinary_launch_gate(&turn, &worktree, false);
     let (launch_order, launch) = turn.record(|record| {
         let check = &record.engram.carried_checks[0].check;
-        (check.started_order.expect("actual command start has a host order"), launch_ms(&check.started_at))
+        (
+            check
+                .started_order
+                .expect("actual command start has a host order"),
+            launch_ms(&check.started_at),
+        )
     });
     assert!(registration < arrival.order && arrival.order < launch_order);
     let changed = fs::canonicalize(&worktree).unwrap().join("README.md");
     turn.state.note_engram_workspace_file_changes_observed(
-        &[watched_change(&changed, Some(launch - 2_000))], Some(arrival));
+        &[watched_change(&changed, Some(launch - 2_000))],
+        Some(arrival),
+    );
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
         assert!(carried.fence.is_none());
@@ -249,14 +275,22 @@ fn an_exemption_with_unknown_registration_remains_uncredited_custody() {
     let launch = carried_launch_ms(&turn);
     let changed = fs::canonicalize(&worktree).unwrap().join("README.md");
     turn.state.note_engram_workspace_file_changes_observed(
-        &[watched_change(&changed, Some(launch - 2_000))], Some(arrival));
+        &[watched_change(&changed, Some(launch - 2_000))],
+        Some(arrival),
+    );
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    assert_eq!(engram_run_registration_order(&run), None,
-        "filesystem discovery cannot invent this host's registration order");
+    assert_eq!(
+        engram_run_registration_order(&run),
+        None,
+        "filesystem discovery cannot invent this host's registration order"
+    );
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
         assert!(carried.fence.is_none());
-        assert_eq!(carried.check.watcher_exempted.as_ref().unwrap().1, arrival.order);
+        assert_eq!(
+            carried.check.watcher_exempted.as_ref().unwrap().1,
+            arrival.order
+        );
     });
     assert_carried_artifact_custody(&turn, &run, true);
 }
@@ -267,20 +301,26 @@ fn a_reported_end_retains_prior_exemption_but_new_delivery_fences_it() {
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     let cwd = watched.to_string_lossy().into_owned();
     let arrival = engram_watcher_arrival_now();
-    turn.recorder().command_started_in(
-        "reported-test", GATE, Some(GATE), Some(&cwd)).unwrap();
+    turn.recorder()
+        .command_started_in("reported-test", GATE, Some(GATE), Some(&cwd))
+        .unwrap();
     turn.wait_for_snapshots();
     let change = watched_change(&watched.join("README.md"), Some(0));
-    turn.state.note_engram_workspace_file_changes_observed(&[change.clone()], Some(arrival));
+    turn.state
+        .note_engram_workspace_file_changes_observed(&[change.clone()], Some(arrival));
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
         assert!(carried.ends_by_report && carried.fence.is_none());
-        assert_eq!(carried.check.watcher_exempted.as_ref().unwrap().1, arrival.order);
+        assert_eq!(
+            carried.check.watcher_exempted.as_ref().unwrap().1,
+            arrival.order
+        );
     });
     // Even a pre-launch arrival delivered after ordinary closing is fenced:
     // a reported end has no artifact-registration boundary to excuse it.
-    turn.state.note_engram_workspace_file_changes_observed(&[change], Some(arrival));
+    turn.state
+        .note_engram_workspace_file_changes_observed(&[change], Some(arrival));
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
         assert!(carried.ends_by_report);
@@ -304,10 +344,16 @@ fn an_exemption_delivered_during_off_lock_artifact_read_is_not_lost() {
         let state = turn.state.clone();
         std::thread::spawn(move || state.poll_engram_carried_runs())
     };
-    paused.recv_timeout(DEADLOCK_GUARD).expect("real poll paused after off-lock reads");
+    paused
+        .recv_timeout(DEADLOCK_GUARD)
+        .expect("real poll paused after off-lock reads");
     turn.state.note_engram_workspace_file_changes_observed(
-        &[watched_change(&canonical.join("README.md"), Some(launch - 2_000))],
-        Some(arrival));
+        &[watched_change(
+            &canonical.join("README.md"),
+            Some(launch - 2_000),
+        )],
+        Some(arrival),
+    );
     release.send(()).unwrap();
     polling.join().unwrap();
     turn.record(|record| {
@@ -315,7 +361,14 @@ fn an_exemption_delivered_during_off_lock_artifact_read_is_not_lost() {
         let (cause, order) = carried.check.watcher_exempted.as_ref().unwrap();
         assert!(cause.contains("README.md"), "{cause}");
         assert_eq!(*order, arrival.order);
-        assert!(registration < *order && *order < carried.check.started_order.expect("actual command start has a host order"));
+        assert!(
+            registration < *order
+                && *order
+                    < carried
+                        .check
+                        .started_order
+                        .expect("actual command start has a host order")
+        );
         assert!(carried.fence.is_none());
     });
     assert_carried_artifact_custody(&turn, &run, true);

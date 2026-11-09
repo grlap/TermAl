@@ -22,8 +22,12 @@ pub(super) fn source_envelope(root: &FsPath, status: &str) -> Value {
 }
 
 fn decode(root: &FsPath, value: &Value, code: Option<i32>) -> Result<EngramSourceObservation> {
-    parse_engram_source_observation(&serde_json::to_vec(value).unwrap(), code, root,
-        std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET)
+    parse_engram_source_observation(
+        &serde_json::to_vec(value).unwrap(),
+        code,
+        root,
+        std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET,
+    )
 }
 
 #[test]
@@ -45,7 +49,13 @@ fn source_owner_envelopes_preserve_clean_dirty_and_exit_one_refusals() {
         let unavailable = decode(&root, &value, Some(1)).unwrap();
         assert_eq!(unavailable.status, EngramSourceStatus::Unavailable);
         assert!(unavailable.source_id.is_none());
-        assert!(unavailable.refusal.unwrap().message.contains("cannot read input"));
+        assert!(
+            unavailable
+                .refusal
+                .unwrap()
+                .message
+                .contains("cannot read input")
+        );
     }
 }
 
@@ -54,18 +64,33 @@ fn source_owner_envelopes_refuse_schema_root_and_exit_incoherence() {
     let root = TestTempRoot::create("source-envelope-invalid");
     let clean = source_envelope(&root, "clean");
     assert!(decode(&root, &clean, Some(0)).is_ok());
-    for field in ["version", "status", "root", "source", "tree", "entries", "refusal", "source_id"] {
+    for field in [
+        "version",
+        "status",
+        "root",
+        "source",
+        "tree",
+        "entries",
+        "refusal",
+        "source_id",
+    ] {
         let mut missing = clean.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(decode(&root, &missing, Some(0)).is_err(), "missing {field}");
     }
     for (field, value) in [
-        ("version", json!(2)), ("status", json!("unknown")), ("root", Value::Null),
-        ("root", json!("relative")), ("root", json!(engram_exact_path_key(&root.join("other")))),
-        ("source", Value::Null), ("source", json!(format!("content-v1:{}", "a".repeat(64)))),
+        ("version", json!(2)),
+        ("status", json!("unknown")),
+        ("root", Value::Null),
+        ("root", json!("relative")),
+        ("root", json!(engram_exact_path_key(&root.join("other")))),
+        ("source", Value::Null),
+        ("source", json!(format!("content-v1:{}", "a".repeat(64)))),
         ("source", json!(format!("git-commit:{}", "a".repeat(64)))),
-        ("tree", json!("B".repeat(40))), ("entries", json!([{"status":"??","path":"x"}])),
-        ("refusal", json!({"code":"deadline","message":"expired"})), ("extra", json!(true)),
+        ("tree", json!("B".repeat(40))),
+        ("entries", json!([{"status":"??","path":"x"}])),
+        ("refusal", json!({"code":"deadline","message":"expired"})),
+        ("extra", json!(true)),
     ] {
         let mut invalid = clean.clone();
         invalid[field] = value;
@@ -77,12 +102,19 @@ fn source_owner_envelopes_refuse_schema_root_and_exit_incoherence() {
     let unavailable = source_envelope(&root, "unavailable");
     for (field, value) in [
         ("source", json!(format!("git-commit:{}", "a".repeat(40)))),
-        ("tree", json!("b".repeat(40))), ("entries", json!([{"status":"??","path":"x"}])),
+        ("tree", json!("b".repeat(40))),
+        ("entries", json!([{"status":"??","path":"x"}])),
         ("refusal", Value::Null),
         ("refusal", json!({"code":"new_code","message":"unknown"})),
         ("refusal", json!({"code":"deadline","message":""})),
-        ("refusal", json!({"code":"deadline","message":"x".repeat(4097)})),
-        ("refusal", json!({"code":"deadline","message":"expired","extra":true})),
+        (
+            "refusal",
+            json!({"code":"deadline","message":"x".repeat(4097)}),
+        ),
+        (
+            "refusal",
+            json!({"code":"deadline","message":"expired","extra":true}),
+        ),
     ] {
         let mut invalid = unavailable.clone();
         invalid[field] = value;
@@ -104,8 +136,10 @@ fn source_owner_entries_require_a_valid_rename_origin_and_closed_fields() {
         json!({"status":"??","path":"x","origin":"old.txt"}),
         json!({"status":"R ","path":"new.txt","origin":""}),
         json!({"status":"??","path":"x","extra":true}),
-        json!({"status":"??","path":""}), json!({"status":"??","path":"bad\u{0}name"}),
-        json!({"status":"  ","path":"x"}), json!({"status":"Z?","path":"x"}),
+        json!({"status":"??","path":""}),
+        json!({"status":"??","path":"bad\u{0}name"}),
+        json!({"status":"  ","path":"x"}),
+        json!({"status":"Z?","path":"x"}),
     ] {
         let mut invalid = dirty.clone();
         invalid["entries"] = json!([entry]);
@@ -118,13 +152,31 @@ fn source_owner_parser_is_bounded_utf8_strict_and_deadline_checked() {
     let root = TestTempRoot::create("source-envelope-bounds");
     let clean = serde_json::to_vec(&source_envelope(&root, "clean")).unwrap();
     let future = || std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
-    assert!(parse_engram_source_observation(&[clean.clone(), vec![b'\n']].concat(), Some(0), &root, future()).is_ok());
-    for bytes in [vec![b' '; ENGRAM_SOURCE_JSON_LIMIT + 2], b"not JSON".to_vec(), vec![0xff]] {
+    assert!(
+        parse_engram_source_observation(
+            &[clean.clone(), vec![b'\n']].concat(),
+            Some(0),
+            &root,
+            future()
+        )
+        .is_ok()
+    );
+    for bytes in [
+        vec![b' '; ENGRAM_SOURCE_JSON_LIMIT + 2],
+        b"not JSON".to_vec(),
+        vec![0xff],
+    ] {
         assert!(parse_engram_source_observation(&bytes, Some(0), &root, future()).is_err());
     }
-    let duplicate = String::from_utf8(clean.clone()).unwrap().replace("\"version\":1", "\"version\":1,\"version\":1");
-    assert!(parse_engram_source_observation(duplicate.as_bytes(), Some(0), &root, future()).is_err());
-    assert!(parse_engram_source_observation(&clean, Some(0), &root, std::time::Instant::now()).is_err());
+    let duplicate = String::from_utf8(clean.clone())
+        .unwrap()
+        .replace("\"version\":1", "\"version\":1,\"version\":1");
+    assert!(
+        parse_engram_source_observation(duplicate.as_bytes(), Some(0), &root, future()).is_err()
+    );
+    assert!(
+        parse_engram_source_observation(&clean, Some(0), &root, std::time::Instant::now()).is_err()
+    );
 }
 
 #[test]

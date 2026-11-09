@@ -16,7 +16,9 @@ fn peer_messages(ids: &[&str]) -> MessageSequence {
 
 fn durable_rows(connection: &rusqlite::Connection, session_id: &str) -> Vec<(i64, String)> {
     connection
-        .prepare("SELECT position, message_id FROM messages WHERE session_id = ?1 ORDER BY position")
+        .prepare(
+            "SELECT position, message_id FROM messages WHERE session_id = ?1 ORDER BY position",
+        )
         .unwrap()
         .query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
@@ -199,7 +201,13 @@ fn write_shifted_window_with(
     let mut durable = window(
         local_identity_namespace,
         0,
-        &["message-0", "message-1", "message-2", "message-3", "message-4"],
+        &[
+            "message-0",
+            "message-1",
+            "message-2",
+            "message-3",
+            "message-4",
+        ],
         5,
     );
     durable.messages[2].value_json = durable_message_two;
@@ -268,7 +276,10 @@ fn assert_refused_and_preserved(connection: &rusqlite::Connection, result: Resul
 #[test]
 fn a_local_transcript_in_the_shifted_shape_still_refuses_the_duplicate_identity() {
     let (connection, result) = write_shifted_window(true);
-    let error = format!("{:#}", result.expect_err("a local identity must not move silently"));
+    let error = format!(
+        "{:#}",
+        result.expect_err("a local identity must not move silently")
+    );
     assert!(
         error.contains("failed to write transcript position 3 for `session-shifted-window`"),
         "{error}"
@@ -354,7 +365,13 @@ fn a_duplicate_peer_identity_inside_the_window_fails_and_keeps_the_durable_rows(
         &window(
             false,
             0,
-            &["message-0", "message-1", "message-2", "message-3", "message-4"],
+            &[
+                "message-0",
+                "message-1",
+                "message-2",
+                "message-3",
+                "message-4",
+            ],
             5,
         ),
     )
@@ -370,7 +387,13 @@ fn a_duplicate_peer_identity_inside_the_window_fails_and_keeps_the_durable_rows(
             &window(
                 false,
                 0,
-                &["message-0", "message-1", "message-2", "message-2", "message-4"],
+                &[
+                    "message-0",
+                    "message-1",
+                    "message-2",
+                    "message-2",
+                    "message-4",
+                ],
                 5,
             ),
         )

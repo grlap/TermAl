@@ -730,18 +730,31 @@ async fn mailbox_relay_review_disabled_domain_without_history_reports_its_refusa
         .await
         .unwrap();
     assert!(listing.mailboxes.is_empty());
-    let unavailable = listing.unavailable_central_domain
+    let unavailable = listing
+        .unavailable_central_domain
         .expect("an empty local listing must expose the separate domain refusal");
     assert_eq!(unavailable.status, 409);
     assert!(!unavailable.error.is_empty());
-    let error = fixture.central.federation_mailbox_operation::<Vec<MailboxSummary>>(
-        &fixture.native, FederationMailboxOperation::List,
-    ).await.unwrap_err();
+    let error = fixture
+        .central
+        .federation_mailbox_operation::<Vec<MailboxSummary>>(
+            &fixture.native,
+            FederationMailboxOperation::List,
+        )
+        .await
+        .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
     let response = list_mailboxes_api(
-        AxumPath(fixture.native.clone()), State(fixture.central.clone()), Query(HashMap::new()),
-    ).await.unwrap();
-    assert_eq!(response.headers()["x-termal-unavailable-central-domain"], "1");
+        AxumPath(fixture.native.clone()),
+        State(fixture.central.clone()),
+        Query(HashMap::new()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        response.headers()["x-termal-unavailable-central-domain"],
+        "1"
+    );
     assert!(response.headers().contains_key("link"));
     fixture.finish().await;
 }

@@ -233,13 +233,17 @@ mod tests {
         ];
         let mut text = String::from("Inter-| Receive | Transmit\n face |bytes |bytes\n");
         for (name, _, _) in &interfaces {
-            text.push_str(&format!(
-                "{name}: 1234 1 0 0 0 0 0 0 5678 2 0 0 0 0 0 0\n"
-            ));
+            text.push_str(&format!("{name}: 1234 1 0 0 0 0 0 0 5678 2 0 0 0 0 0 0\n"));
         }
         let rows = parse_network(&text, |path, limit| {
             assert_eq!(limit, 64);
-            let name = path.parent().unwrap().file_name().unwrap().to_str().unwrap();
+            let name = path
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap();
             let index = interfaces
                 .iter()
                 .position(|(candidate, _, _)| *candidate == name)

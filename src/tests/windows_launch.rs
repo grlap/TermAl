@@ -10,61 +10,103 @@ fn expired_read_cleanup_control(withhold_certificate: bool) {
     let cleaned = root_lease.observe_cleanup();
     let lifetime = Arc::new(crate::CaptureLifetime::with_test_root(Some(root_lease)));
     let probe = capture_job::CleanupProbe::blocked();
-    if !withhold_certificate { probe.release(); }
+    if !withhold_certificate {
+        probe.release();
+    }
     let worker_probe = probe.clone();
     let marker = directory.join("ready.json");
     let (members_tx, members_rx) = std::sync::mpsc::channel();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
-    lifetime.spawn("expired-read-cleanup-control", move || {
-        let mut spec = node_spec("root-independent");
-        spec.arg(&marker).current_dir(directory);
-        spec.capture_cleanup_probe = Some(worker_probe);
-        let error = crate::run_bounded_read_windows_with_setup(
-            &mut spec, Instant::now() + GUARD, 4096, |process| {
-                let members = identities(&ready(&marker, process), creation(process.handle.as_raw_handle()));
-                // Expire only after the real member handles are held. No
-                // launch-speed margin or sleeping determines this failure.
-                let expired = Instant::now() - Duration::from_secs(1);
-                crate::TEST_BOUNDED_READ_DEADLINE_AFTER_SETUP.with(|deadline| deadline.set(Some(expired)));
-                members_tx.send((members, expired)).unwrap();
-                Ok(())
-            },
-        ).unwrap_err();
-        done_tx.send(format!("{error:#}")).unwrap();
-    }).unwrap();
+    lifetime
+        .spawn("expired-read-cleanup-control", move || {
+            let mut spec = node_spec("root-independent");
+            spec.arg(&marker).current_dir(directory);
+            spec.capture_cleanup_probe = Some(worker_probe);
+            let error = crate::run_bounded_read_windows_with_setup(
+                &mut spec,
+                Instant::now() + GUARD,
+                4096,
+                |process| {
+                    let members = identities(
+                        &ready(&marker, process),
+                        creation(process.handle.as_raw_handle()),
+                    );
+                    // Expire only after the real member handles are held. No
+                    // launch-speed margin or sleeping determines this failure.
+                    let expired = Instant::now() - Duration::from_secs(1);
+                    crate::TEST_BOUNDED_READ_DEADLINE_AFTER_SETUP
+                        .with(|deadline| deadline.set(Some(expired)));
+                    members_tx.send((members, expired)).unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+            done_tx.send(format!("{error:#}")).unwrap();
+        })
+        .unwrap();
     let (members, expired) = members_rx.recv_timeout(GUARD).unwrap();
     let error = done_rx.recv_timeout(GUARD).unwrap();
     let entries = probe.finish_entries();
     if withhold_certificate {
-        lifetime.expire_shutdown.store(true, std::sync::atomic::Ordering::Release);
+        lifetime
+            .expire_shutdown
+            .store(true, std::sync::atomic::Ordering::Release);
     }
     let joined = lifetime.stop_and_join();
     drop(lifetime);
     let retained = withhold_certificate
-        && matches!(cleaned.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
+        && matches!(
+            cleaned.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        );
     // Always release the injected unknown and retire exact held objects
     // before asserting. No RED case abandons a descendant or retained root.
     probe.release();
     for member in &members {
         if unsafe { WaitForSingleObject(member.handle.as_raw_handle(), 0) } == WAIT_TIMEOUT {
-            unsafe { TerminateProcess(member.handle.as_raw_handle(), 1); }
+            unsafe {
+                TerminateProcess(member.handle.as_raw_handle(), 1);
+            }
         }
         member.assert_ended();
     }
     drop(members);
     cleaned.recv_timeout(GUARD).unwrap().unwrap();
-    assert!(error.contains("kind=TimedOut"), "expired capture cannot become a late success: {error}");
-    assert!(error.contains("read_expired_at_return=Some(true)"), "{error}");
-    let cleanup_deadline = entries.first().and_then(|entry| entry.0).expect("cleanup was observed");
-    assert!(cleanup_deadline > expired, "cleanup must not inherit the expired read deadline: {entries:?}");
-    assert!(entries.iter().filter_map(|entry| entry.0).all(|deadline| deadline == cleanup_deadline),
-        "error cleanup must not renew its allowance: {entries:?}");
+    assert!(
+        error.contains("kind=TimedOut"),
+        "expired capture cannot become a late success: {error}"
+    );
+    assert!(
+        error.contains("read_expired_at_return=Some(true)"),
+        "{error}"
+    );
+    let cleanup_deadline = entries
+        .first()
+        .and_then(|entry| entry.0)
+        .expect("cleanup was observed");
+    assert!(
+        cleanup_deadline > expired,
+        "cleanup must not inherit the expired read deadline: {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .filter_map(|entry| entry.0)
+            .all(|deadline| deadline == cleanup_deadline),
+        "error cleanup must not renew its allowance: {entries:?}"
+    );
     if withhold_certificate {
         assert!(error.contains("cleanup_certified=Some(false)"), "{error}");
-        assert!(!joined && retained, "an uncertified job must keep root custody");
+        assert!(
+            !joined && retained,
+            "an uncertified job must keep root custody"
+        );
     } else {
         assert!(error.contains("cleanup_certified=Some(true)"), "{error}");
-        assert!(joined, "a certified expired read must retire without pending custody");
+        assert!(
+            joined,
+            "a certified expired read must retire without pending custody"
+        );
     }
 }
 
@@ -89,33 +131,46 @@ fn native_windows_capture_waits_for_descendant_completion_not_job_close() {
     let lease = observer.clone();
     let (members_tx, members_rx) = std::sync::mpsc::channel();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
-    lifetime.spawn("capture-job-completion-control", move || {
-        let mut spec = node_spec("root-independent");
-        spec.arg(&marker).current_dir(directory);
-        // Retaining a duplicate deterministically delays kill-on-close. An
-        // explicit job termination/completion barrier must work regardless.
-        spec.job_lease_observer = Some(lease);
-        let _ = crate::run_bounded_read_windows_with_setup(&mut spec,
-            Instant::now() + GUARD, 4096, |process| {
-                members_tx.send(identities(&ready(&marker, process),
-                    creation(process.handle.as_raw_handle()))).unwrap();
-                process.kill()?;
-                Ok(())
-            });
-        done_tx.send(()).unwrap();
-    }).unwrap();
+    lifetime
+        .spawn("capture-job-completion-control", move || {
+            let mut spec = node_spec("root-independent");
+            spec.arg(&marker).current_dir(directory);
+            // Retaining a duplicate deterministically delays kill-on-close. An
+            // explicit job termination/completion barrier must work regardless.
+            spec.job_lease_observer = Some(lease);
+            let _ = crate::run_bounded_read_windows_with_setup(
+                &mut spec,
+                Instant::now() + GUARD,
+                4096,
+                |process| {
+                    members_tx
+                        .send(identities(
+                            &ready(&marker, process),
+                            creation(process.handle.as_raw_handle()),
+                        ))
+                        .unwrap();
+                    process.kill()?;
+                    Ok(())
+                },
+            );
+            done_tx.send(()).unwrap();
+        })
+        .unwrap();
     let members = members_rx.recv_timeout(GUARD).unwrap();
     done_rx.recv_timeout(GUARD).unwrap();
-    let states: Vec<_> = members.iter().map(|member| unsafe {
-        WaitForSingleObject(member.handle.as_raw_handle(), 0)
-    }).collect();
+    let states: Vec<_> = members
+        .iter()
+        .map(|member| unsafe { WaitForSingleObject(member.handle.as_raw_handle(), 0) })
+        .collect();
     let all_ended = states.iter().all(|state| *state == WAIT_OBJECT_0);
     let joined = lifetime.stop_and_join();
     // Every RED fixture is retired through its retained handles before the
     // assertion. No leaked descendant can turn a later test green.
     for member in &members {
         if unsafe { WaitForSingleObject(member.handle.as_raw_handle(), 0) } == WAIT_TIMEOUT {
-            unsafe { TerminateProcess(member.handle.as_raw_handle(), 1); }
+            unsafe {
+                TerminateProcess(member.handle.as_raw_handle(), 1);
+            }
         }
         member.assert_ended();
     }
@@ -123,8 +178,10 @@ fn native_windows_capture_waits_for_descendant_completion_not_job_close() {
     observer.lock().unwrap().take();
     drop(lifetime);
     cleaned.recv_timeout(GUARD).unwrap().unwrap();
-    assert!(joined && all_ended,
-        "capture completion must certify descendants, not only close a job lease; joined={joined} states={states:?}");
+    assert!(
+        joined && all_ended,
+        "capture completion must certify descendants, not only close a job lease; joined={joined} states={states:?}"
+    );
 }
 
 #[test]
@@ -136,25 +193,38 @@ fn native_windows_uncertified_job_keeps_shutdown_pending_and_root_owned() {
     let probe = capture_job::CleanupProbe::blocked();
     let worker_probe = probe.clone();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
-    lifetime.spawn("capture-job-certificate-control", move || {
-        let mut spec = node_spec("parity");
-        spec.capture_cleanup_probe = Some(worker_probe);
-        let error = crate::run_bounded_read_command(&mut spec,
-            Instant::now() + GUARD, 4096, true).unwrap_err();
-        done_tx.send(format!("{error:#}")).unwrap();
-    }).unwrap();
+    lifetime
+        .spawn("capture-job-certificate-control", move || {
+            let mut spec = node_spec("parity");
+            spec.capture_cleanup_probe = Some(worker_probe);
+            let error =
+                crate::run_bounded_read_command(&mut spec, Instant::now() + GUARD, 4096, true)
+                    .unwrap_err();
+            done_tx.send(format!("{error:#}")).unwrap();
+        })
+        .unwrap();
     let error = done_rx.recv_timeout(GUARD).unwrap();
-    assert!(error.contains("capture job cleanup not certified"), "{error}");
-    lifetime.expire_shutdown.store(true, std::sync::atomic::Ordering::Release);
+    assert!(
+        error.contains("capture job cleanup not certified"),
+        "{error}"
+    );
+    lifetime
+        .expire_shutdown
+        .store(true, std::sync::atomic::Ordering::Release);
     let joined = lifetime.stop_and_join();
     drop(lifetime);
-    let retained = matches!(cleaned.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty))
-        && directory.exists();
+    let retained = matches!(
+        cleaned.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ) && directory.exists();
     // Only the positive native query, after releasing this injected unknown
     // certificate, can retire the drainer and its root lease.
     probe.release();
     cleaned.recv_timeout(GUARD).unwrap().unwrap();
-    assert!(!joined && retained, "unfinished job cleanup must retain the host root");
+    assert!(
+        !joined && retained,
+        "unfinished job cleanup must retain the host root"
+    );
 }
 
 #[test]
@@ -162,21 +232,32 @@ fn native_windows_bounded_read_reports_inheritance_lock_budget() {
     // Deliberate contention belongs in its own process: holding this suite's
     // launch lock would make unrelated bounded-reader tests time out too.
     let mut command = LaunchSpec::new(std::env::current_exe().unwrap());
-    command.args([
-        "--exact", "windows_launch::tests::native_windows_lock_budget_child",
-        "--nocapture", "--test-threads=1",
-    ]).env("TERMAL_TEST_LOCK_BUDGET_CHILD", "1").current_dir(root());
-    let output = crate::run_bounded_read_command(
-        &mut command, Instant::now() + GUARD, 64 * 1024, true,
-    ).unwrap();
-    assert!(output.status.success(), "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    command
+        .args([
+            "--exact",
+            "windows_launch::tests::native_windows_lock_budget_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("TERMAL_TEST_LOCK_BUDGET_CHILD", "1")
+        .current_dir(root());
+    let output =
+        crate::run_bounded_read_command(&mut command, Instant::now() + GUARD, 64 * 1024, true)
+            .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(String::from_utf8_lossy(&output.stdout).contains("lock-budget-observed"));
 }
 
 #[test]
 fn native_windows_lock_budget_child() {
-    if std::env::var_os("TERMAL_TEST_LOCK_BUDGET_CHILD").is_none() { return; }
+    if std::env::var_os("TERMAL_TEST_LOCK_BUDGET_CHILD").is_none() {
+        return;
+    }
     let directory = scratch();
     let marker = directory.join("parked.json");
     let (start_tx, start_rx) = std::sync::mpsc::channel();
@@ -192,12 +273,12 @@ fn native_windows_lock_budget_child() {
         });
         let mut command = node_spec("hold");
         command.arg(marker);
-        let error = crate::run_bounded_read_windows_with_setup(
-            &mut command, deadline, 4096, |child| {
+        let error =
+            crate::run_bounded_read_windows_with_setup(&mut command, deadline, 4096, |child| {
                 *worker_process.lock().unwrap() = Some(child.clone());
                 Ok(())
-            },
-        ).unwrap_err();
+            })
+            .unwrap_err();
         (error, budget)
     });
     let blocker = prepare_with_hook(&node_spec("parity"), false, false, |_| {
@@ -210,18 +291,33 @@ fn native_windows_lock_budget_child() {
         while let Some(remaining) = release.checked_duration_since(Instant::now()) {
             std::thread::sleep(remaining);
         }
-    }).unwrap();
+    })
+    .unwrap();
     let (error, budget) = worker.join().unwrap();
     drop(blocker);
     let detail = error.downcast_ref::<crate::BoundedReadFailure>().unwrap();
     assert_eq!(detail.stage, "wait", "{error:#}");
     assert_eq!(detail.kind, "TimedOut", "{error:#}");
-    assert!(detail.launch_lock_wait.is_some_and(|wait| wait >= budget), "{error:#}");
+    assert!(
+        detail.launch_lock_wait.is_some_and(|wait| wait >= budget),
+        "{error:#}"
+    );
     assert!(detail.elapsed >= budget, "{error:#}");
-    assert!(error.chain().any(|cause| cause.downcast_ref::<io::Error>()
-        .is_some_and(|error| error.kind() == io::ErrorKind::TimedOut)), "{error:#}");
-    let child = process.lock().unwrap().take().expect("the parked child was resumed");
-    assert!(child.try_wait().unwrap().is_some(), "failed read must reap its exact child");
+    assert!(
+        error.chain().any(|cause| cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|error| error.kind() == io::ErrorKind::TimedOut)),
+        "{error:#}"
+    );
+    let child = process
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the parked child was resumed");
+    assert!(
+        child.try_wait().unwrap().is_some(),
+        "failed read must reap its exact child"
+    );
     println!("lock-budget-observed: {error:#}");
 }
 

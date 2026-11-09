@@ -25,16 +25,19 @@ async fn an_older_index_request_at_the_same_locator_cannot_replace_the_registere
         .write(true)
         .open(&path)
         .unwrap()
-        .set_times(fs::FileTimes::new().set_modified(
-            std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
-        ))
+        .set_times(
+            fs::FileTimes::new()
+                .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
+        )
         .unwrap();
     fixture.refresh(&[std::process::id()]);
     let app = app_router(fixture.state.clone());
-    let query = || Request::builder()
-        .uri(format!("/api/test-runs/{run_id}"))
-        .body(Body::empty())
-        .unwrap();
+    let query = || {
+        Request::builder()
+            .uri(format!("/api/test-runs/{run_id}"))
+            .body(Body::empty())
+            .unwrap()
+    };
     let (status, response): (StatusCode, Value) = request_json(&app, query()).await;
     assert_eq!(status, StatusCode::OK, "{response}");
     assert_eq!(response["source"], "registration");
@@ -64,15 +67,21 @@ fn exact_query_rechecks_the_captured_registration_after_the_off_lock_path_check(
     let changed_state = fixture.state.clone();
     TEST_TEST_RUN_QUERY_CANONICALIZED.with(|slot| {
         *slot.borrow_mut() = Some(Box::new(move || {
-            let mut inner = changed_state.inner.try_lock_now()
+            let mut inner = changed_state
+                .inner
+                .try_lock_now()
                 .expect("native path checks must run outside StateInner");
-            inner.test_run_registrations.get_mut(run_id).unwrap().monitoring_interrupted_at =
-                Some("2026-10-14T01:01:00.000Z".to_owned());
+            inner
+                .test_run_registrations
+                .get_mut(run_id)
+                .unwrap()
+                .monitoring_interrupted_at = Some("2026-10-14T01:01:00.000Z".to_owned());
         }));
     });
     let mut diagnostics = TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
     let error = test_run_exact_query(&fixture.state, run_id, &mut diagnostics)
-        .err().expect("a superseded content fence must not select the old index entry");
+        .err()
+        .expect("a superseded content fence must not select the old index entry");
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(TEST_TEST_RUN_QUERY_CANONICALIZED.with(|slot| slot.borrow().is_none()));
 }

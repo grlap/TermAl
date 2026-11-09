@@ -6,15 +6,29 @@ use crate::tests::prompt_delivery::{DeliveryWriter, HeldFence};
 
 fn with_mailbox(state: AppState) -> AppState {
     let path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
-    AppState { mailbox_store: Arc::new(MailboxStore::open(&path).unwrap()), ..state }
+    AppState {
+        mailbox_store: Arc::new(MailboxStore::open(&path).unwrap()),
+        ..state
+    }
 }
 
 fn assert_plain_pause(turn: &OrdinaryRoot) {
-    assert_eq!(turn.state.mailbox_queued_wake_disposition(&turn.session), "heldBehindPausedQueue");
+    assert_eq!(
+        turn.state.mailbox_queued_wake_disposition(&turn.session),
+        "heldBehindPausedQueue"
+    );
     turn.record(|record| {
         assert!(record.orchestrator_auto_dispatch_blocked);
-        let full = serde_json::to_value(AppState::wire_session_from_record(&turn.state.server_instance_id, record)).unwrap();
-        let summary = serde_json::to_value(AppState::wire_session_summary_from_record(&turn.state.server_instance_id, record)).unwrap();
+        let full = serde_json::to_value(AppState::wire_session_from_record(
+            &turn.state.server_instance_id,
+            record,
+        ))
+        .unwrap();
+        let summary = serde_json::to_value(AppState::wire_session_summary_from_record(
+            &turn.state.server_instance_id,
+            record,
+        ))
+        .unwrap();
         assert!(full["queueHold"].is_null());
         assert!(summary["queueHold"].is_null());
     });
@@ -29,7 +43,9 @@ fn an_ordinary_mailbox_wake_queued_behind_a_turn_delivers_once_without_resume() 
     let sender = test_session_id(&turn.state, Agent::Claude);
     let dispatch = turn.prepare("first ordinary turn");
     let token = dispatch.runtime_token().clone();
-    deliver_turn_dispatch(&turn.state, dispatch).into_public_result().unwrap();
+    deliver_turn_dispatch(&turn.state, dispatch)
+        .into_public_result()
+        .unwrap();
     turn.prompt();
     let queued = send(&turn.state, &sender, &turn.session, "ordinary-followup");
     assert_eq!(queued.notification_disposition, "queuedBehindActiveTurn");
@@ -38,7 +54,9 @@ fn an_ordinary_mailbox_wake_queued_behind_a_turn_delivers_once_without_resume() 
         record.queued_prompts[0].pending_prompt.text.clone()
     });
     turn.assert_no_prompt();
-    turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&turn.session, &token)
+        .unwrap();
     let command = turn.prompt();
     assert!(command.prompt.contains(&expected));
     turn.record(|record| {
@@ -51,14 +69,21 @@ fn an_ordinary_mailbox_wake_queued_behind_a_turn_delivers_once_without_resume() 
 
 #[test]
 fn an_operator_pause_keeps_mailbox_wakes_queued_without_an_automatic_retry() {
-    for code in ["deadline_exceeded", "begin_preparation_pending", "control_unavailable"] {
+    for code in [
+        "deadline_exceeded",
+        "begin_preparation_pending",
+        "control_unavailable",
+    ] {
         let mut turn = OrdinaryRoot::new("paused-ordinary-mailbox");
         turn.state = with_mailbox(turn.state.clone());
         let sender = test_session_id(&turn.state, Agent::Claude);
         let history = json!({"code":code,"dueAt":"2026-10-20T10:00:00Z","attempts":8});
         turn.edit(|record| {
             record.set_auto_dispatch_blocked(true);
-            record.engram.historical_control.insert("engramAdmissionRetry".into(), history.clone());
+            record
+                .engram
+                .historical_control
+                .insert("engramAdmissionRetry".into(), history.clone());
         });
         let queued = send(&turn.state, &sender, &turn.session, "paused-followup");
         assert_eq!(queued.notification_disposition, "heldBehindPausedQueue");
@@ -66,8 +91,14 @@ fn an_operator_pause_keeps_mailbox_wakes_queued_without_an_automatic_retry() {
         turn.state.dispatch_orphaned_workflow_prompts();
         turn.state.dispatch_orphaned_workflow_prompts();
         turn.record(|record| {
-            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), head);
-            assert_eq!(record.engram.historical_control["engramAdmissionRetry"], history);
+            assert_eq!(
+                serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+                head
+            );
+            assert_eq!(
+                record.engram.historical_control["engramAdmissionRetry"],
+                history
+            );
         });
         assert_plain_pause(&turn);
     }
@@ -77,9 +108,14 @@ fn an_operator_pause_keeps_mailbox_wakes_queued_without_an_automatic_retry() {
 fn a_public_stop_keeps_an_ordinary_queued_head_paused() {
     let turn = OrdinaryRoot::new("ordinary-stop-queued-head");
     let dispatch = turn.prepare("active ordinary turn before Stop");
-    deliver_turn_dispatch(&turn.state, dispatch).into_public_result().unwrap();
+    deliver_turn_dispatch(&turn.state, dispatch)
+        .into_public_result()
+        .unwrap();
     turn.prompt();
-    let id = turn.enqueue("ordinary queued content before Stop", QueuedPromptSource::Mailbox);
+    let id = turn.enqueue(
+        "ordinary queued content before Stop",
+        QueuedPromptSource::Mailbox,
+    );
     turn.state.request_stop_session(&turn.session).unwrap();
     let settled = phase_sync::PollGuard::new();
     while turn.record(|record| record.runtime_stop_in_progress) {
@@ -88,7 +124,10 @@ fn a_public_stop_keeps_an_ordinary_queued_head_paused() {
     turn.state.dispatch_orphaned_workflow_prompts();
     turn.record(|record| {
         assert_eq!(record.queued_prompts[0].pending_prompt.id, id);
-        assert_eq!(record.queued_prompts[0].pending_prompt.text, "ordinary queued content before Stop");
+        assert_eq!(
+            record.queued_prompts[0].pending_prompt.text,
+            "ordinary queued content before Stop"
+        );
     });
     assert_plain_pause(&turn);
 }
@@ -100,16 +139,26 @@ fn a_settings_authority_change_does_not_bypass_an_ordinary_pause() {
     let id = turn.enqueue("exact paused content", QueuedPromptSource::User);
     let mut settings = {
         let mut inner = turn.state.inner.lock().unwrap();
-        let project = inner.projects.iter_mut().find(|entry| entry.id == turn.project).unwrap();
+        let project = inner
+            .projects
+            .iter_mut()
+            .find(|entry| entry.id == turn.project)
+            .unwrap();
         let settings = project.engram.as_mut().unwrap();
-        settings.binary_path = Some(real_engram_control_fixture_path().to_string_lossy().into_owned());
+        settings.binary_path = Some(
+            real_engram_control_fixture_path()
+                .to_string_lossy()
+                .into_owned(),
+        );
         settings.clone()
     };
     fs::write(turn.root.join(".engram-project"), "fixture-ok\n").unwrap();
     let home = turn.root.join("changed-authority-home");
     fs::create_dir_all(&home).unwrap();
     settings.home = Some(home.to_string_lossy().into_owned());
-    turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
+    turn.state
+        .update_project_engram_settings(&turn.project, settings)
+        .unwrap();
     turn.state.dispatch_orphaned_workflow_prompts();
     turn.record(|record| assert_eq!(record.queued_prompts[0].pending_prompt.id, id));
     assert_plain_pause(&turn);
@@ -125,13 +174,22 @@ fn cancel_retires_only_the_selected_paused_mailbox_head() {
     let first = turn.record(|record| record.queued_prompts[0].pending_prompt.id.clone());
     let successor = turn.enqueue("independent paused user content", QueuedPromptSource::User);
     let next = turn.record(|record| {
-        let queued = record.queued_prompts.iter().find(|queued| queued.pending_prompt.id == successor).unwrap();
+        let queued = record
+            .queued_prompts
+            .iter()
+            .find(|queued| queued.pending_prompt.id == successor)
+            .unwrap();
         serde_json::to_value(&queued.pending_prompt).unwrap()
     });
-    turn.state.cancel_queued_prompt(&turn.session, &first).unwrap();
+    turn.state
+        .cancel_queued_prompt(&turn.session, &first)
+        .unwrap();
     turn.record(|record| {
         assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(serde_json::to_value(&record.queued_prompts[0].pending_prompt).unwrap(), next);
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts[0].pending_prompt).unwrap(),
+            next
+        );
     });
     assert_plain_pause(&turn);
 }
@@ -142,15 +200,26 @@ fn a_real_receipted_head_stays_paused_until_explicit_resume_then_sends_once() {
     let writer = DeliveryWriter::attach(&mut turn.state);
     turn.edit(|record| record.set_auto_dispatch_blocked(true));
     let id = turn.enqueue_durable("exact receipted ordinary content", true);
-    assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+    assert!(
+        turn.state
+            .request_queued_prompt_durability(&turn.session, &id)
+    );
     turn.assert_no_prompt();
     writer.take(HeldFence::Durability).finish(Ok(()));
     let acknowledged = phase_sync::PollGuard::new();
-    while !turn.record(|record| record.queued_prompt_durability_holds.get(&id).is_some_and(|hold| hold.acknowledged)) {
+    while !turn.record(|record| {
+        record
+            .queued_prompt_durability_holds
+            .get(&id)
+            .is_some_and(|hold| hold.acknowledged)
+    }) {
         acknowledged.wait("the content fence acknowledgement settles");
     }
     turn.record(|record| {
-        assert_eq!(record.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Pending);
+        assert_eq!(
+            record.prompt_deliveries[&id].disposition,
+            PromptDeliveryDisposition::Pending
+        );
         assert!(record.prompt_deliveries[&id].turn_generation.is_none());
     });
     turn.state.dispatch_orphaned_workflow_prompts();
@@ -171,7 +240,10 @@ fn a_real_receipted_head_stays_paused_until_explicit_resume_then_sends_once() {
     assert_eq!(command.delivery_receipt.as_ref().unwrap().prompt_id, id);
     turn.record(|record| {
         assert!(!record.orchestrator_auto_dispatch_blocked);
-        assert_eq!(record.prompt_deliveries[&id].turn_generation, Some(command.active_turn_generation));
+        assert_eq!(
+            record.prompt_deliveries[&id].turn_generation,
+            Some(command.active_turn_generation)
+        );
         assert!(record.queued_prompts.is_empty());
     });
     turn.assert_no_prompt();

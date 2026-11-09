@@ -32,14 +32,14 @@ struct Fixture {
 }
 
 fn boot(paths: &(PathBuf, PathBuf, PathBuf), root: &Arc<TestTempRoot>) -> AppState {
-    super::delegation_support::boot_on_delegation_root(root, ||
+    super::delegation_support::boot_on_delegation_root(root, || {
         AppState::new_with_paths(
             paths.0.to_string_lossy().into_owned(),
             paths.1.clone(),
             paths.2.clone(),
         )
         .expect("state should boot")
-    )
+    })
 }
 
 fn idle_session(
@@ -104,12 +104,21 @@ impl Fixture {
         self.state
             .register_handoff(
                 &self.primary,
-                self.spec(key, HandoffPrerequisite::Terminal { run_id: LIVE_RUN.to_owned() }),
+                self.spec(
+                    key,
+                    HandoffPrerequisite::Terminal {
+                        run_id: LIVE_RUN.to_owned(),
+                    },
+                ),
             )
             .expect("the handoff registers")
     }
 
-    fn tick(&self, now: chrono::DateTime<chrono::Utc>, outcome: HandoffPrerequisiteOutcome) -> HandoffTickReport {
+    fn tick(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        outcome: HandoffPrerequisiteOutcome,
+    ) -> HandoffTickReport {
         self.state
             .handoff_watchdog_tick_with(now, &|_| outcome.clone())
     }
@@ -209,8 +218,14 @@ fn a_missed_wake_handoff_is_offered_accepted_and_completed_without_a_user_prompt
     assert_eq!(handoff.state, HandoffState::WaitingPrerequisite);
 
     let report = fixture.tick(at(0), HandoffPrerequisiteOutcome::Pending);
-    assert!(report.offered.is_empty(), "nothing is offered before the run ends");
-    assert_eq!(fixture.record(&handoff.handoff_id).state, HandoffState::WaitingPrerequisite);
+    assert!(
+        report.offered.is_empty(),
+        "nothing is offered before the run ends"
+    );
+    assert_eq!(
+        fixture.record(&handoff.handoff_id).state,
+        HandoffState::WaitingPrerequisite
+    );
 
     let report = fixture.tick(at(2), HandoffPrerequisiteOutcome::Met);
     assert_eq!(
@@ -218,9 +233,18 @@ fn a_missed_wake_handoff_is_offered_accepted_and_completed_without_a_user_prompt
         vec![(handoff.handoff_id.clone(), fixture.primary.clone(), 1)],
         "the step is offered to its primary owner at once"
     );
-    let text = received_prompt(&fixture.primary_prompts, "the primary owner is woken by the host");
-    assert!(text.contains(&handoff.handoff_id), "the offer names the handoff: {text}");
-    assert!(text.contains("prepare the landing package"), "the offer carries the action: {text}");
+    let text = received_prompt(
+        &fixture.primary_prompts,
+        "the primary owner is woken by the host",
+    );
+    assert!(
+        text.contains(&handoff.handoff_id),
+        "the offer names the handoff: {text}"
+    );
+    assert!(
+        text.contains("prepare the landing package"),
+        "the offer carries the action: {text}"
+    );
     assert!(
         text.contains(&format!("registered by session `{}`", fixture.primary)),
         "the offer names who asked: {text}"
@@ -233,10 +257,22 @@ fn a_missed_wake_handoff_is_offered_accepted_and_completed_without_a_user_prompt
         "/api/sessions/{}/handoffs/{}/accept",
         fixture.primary, handoff.handoff_id
     );
-    assert!(text.contains(&accept_path), "the offer carries the exact accept call: {text}");
-    assert!(text.contains("\"offerGeneration\": 1"), "the accept call names its offer: {text}");
-    assert!(text.contains("/complete"), "the offer carries the complete call: {text}");
-    assert!(text.contains("Accept first"), "the offer says to accept before acting: {text}");
+    assert!(
+        text.contains(&accept_path),
+        "the offer carries the exact accept call: {text}"
+    );
+    assert!(
+        text.contains("\"offerGeneration\": 1"),
+        "the accept call names its offer: {text}"
+    );
+    assert!(
+        text.contains("/complete"),
+        "the offer carries the complete call: {text}"
+    );
+    assert!(
+        text.contains("Accept first"),
+        "the offer says to accept before acting: {text}"
+    );
     assert!(
         text.contains("grants no land, push or install authority"),
         "the offer grants nothing beyond the step: {text}"
@@ -245,13 +281,24 @@ fn a_missed_wake_handoff_is_offered_accepted_and_completed_without_a_user_prompt
     let offered = fixture.record(&handoff.handoff_id);
     assert_eq!(offered.state, HandoffState::Offered);
     assert_eq!(offered.offer_generation, 1);
-    assert_eq!(offered.offered_to.as_deref(), Some(fixture.primary.as_str()));
-    assert!(offered.offered_prompt_id.is_some(), "the row holds the exact queued prompt id");
+    assert_eq!(
+        offered.offered_to.as_deref(),
+        Some(fixture.primary.as_str())
+    );
+    assert!(
+        offered.offered_prompt_id.is_some(),
+        "the row holds the exact queued prompt id"
+    );
 
     assert!(
         fixture
             .state
-            .complete_handoff(&fixture.primary, &handoff.handoff_id, "no-fence", json!({ "early": true }))
+            .complete_handoff(
+                &fixture.primary,
+                &handoff.handoff_id,
+                "no-fence",
+                json!({ "early": true })
+            )
             .is_err(),
         "nothing completes without the acceptance fence"
     );
@@ -260,7 +307,10 @@ fn a_missed_wake_handoff_is_offered_accepted_and_completed_without_a_user_prompt
         .accept_handoff(&fixture.primary, &handoff.handoff_id, 1)
         .expect("the primary accepts its offer");
     assert_eq!(accepted.state, HandoffState::Accepted);
-    let fence = accepted.accept_fence.clone().expect("acceptance returns a fence");
+    let fence = accepted
+        .accept_fence
+        .clone()
+        .expect("acceptance returns a fence");
 
     assert_eq!(
         fixture.record(&handoff.handoff_id).accept_fence,
@@ -285,13 +335,25 @@ fn a_missed_wake_handoff_is_offered_accepted_and_completed_without_a_user_prompt
     assert!(
         fixture
             .state
-            .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, json!({ "again": true }))
+            .complete_handoff(
+                &fixture.primary,
+                &handoff.handoff_id,
+                &fence,
+                json!({ "again": true })
+            )
             .is_err(),
         "a completed handoff never completes twice"
     );
     let report = fixture.tick(at(200), HandoffPrerequisiteOutcome::Met);
-    assert!(report.offered.is_empty(), "a completed handoff is never offered again");
-    assert_eq!(prompts_waiting(&fixture.recovery_prompts), 0, "the recovery owner was never needed");
+    assert!(
+        report.offered.is_empty(),
+        "a completed handoff is never offered again"
+    );
+    assert_eq!(
+        prompts_waiting(&fixture.recovery_prompts),
+        0,
+        "the recovery owner was never needed"
+    );
     fixture.state.shutdown_persist_blocking();
 }
 
@@ -302,11 +364,22 @@ fn duplicate_registrations_and_repeated_triggers_make_one_handoff_and_one_offer(
     let fixture = Fixture::new("duplicates");
     let first = fixture.register("same-key");
     let again = fixture.register("same-key");
-    assert_eq!(again.handoff_id, first.handoff_id, "the same body returns the same record");
-    let mut other = fixture.spec("same-key", HandoffPrerequisite::Terminal { run_id: LIVE_RUN.to_owned() });
+    assert_eq!(
+        again.handoff_id, first.handoff_id,
+        "the same body returns the same record"
+    );
+    let mut other = fixture.spec(
+        "same-key",
+        HandoffPrerequisite::Terminal {
+            run_id: LIVE_RUN.to_owned(),
+        },
+    );
     other.next_action.text = "something else".to_owned();
     assert!(
-        fixture.state.register_handoff(&fixture.primary, other).is_err(),
+        fixture
+            .state
+            .register_handoff(&fixture.primary, other)
+            .is_err(),
         "the same key with another body is refused"
     );
 
@@ -315,7 +388,11 @@ fn duplicate_registrations_and_repeated_triggers_make_one_handoff_and_one_offer(
     received_prompt(&fixture.primary_prompts, "the one offer");
     fixture.tick(at(2), HandoffPrerequisiteOutcome::Met);
     fixture.tick(at(4), HandoffPrerequisiteOutcome::Met);
-    assert_eq!(prompts_waiting(&fixture.primary_prompts), 0, "one offer, however many passes");
+    assert_eq!(
+        prompts_waiting(&fixture.primary_prompts),
+        0,
+        "one offer, however many passes"
+    );
     assert_eq!(fixture.record(&first.handoff_id).offer_generation, 1);
     fixture.state.shutdown_persist_blocking();
 }
@@ -375,24 +452,48 @@ fn a_completed_handoff_keeps_its_evidence_and_history_across_a_restart() {
     let evidence = json!({ "prepared": "landing package", "commit": "abc123" });
     let completed = fixture
         .state
-        .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, evidence.clone())
+        .complete_handoff(
+            &fixture.primary,
+            &handoff.handoff_id,
+            &fence,
+            evidence.clone(),
+        )
         .expect("the owner completes it");
     let retried = fixture
         .state
-        .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, evidence.clone())
+        .complete_handoff(
+            &fixture.primary,
+            &handoff.handoff_id,
+            &fence,
+            evidence.clone(),
+        )
         .expect("an identical retry returns the original completion");
-    assert_eq!(retried.version, completed.version, "an identical retry changes nothing");
-    assert_eq!(retried.history, completed.history, "an identical retry adds no history");
+    assert_eq!(
+        retried.version, completed.version,
+        "an identical retry changes nothing"
+    );
+    assert_eq!(
+        retried.history, completed.history,
+        "an identical retry adds no history"
+    );
     assert!(
         fixture
             .state
-            .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, json!({ "other": true }))
+            .complete_handoff(
+                &fixture.primary,
+                &handoff.handoff_id,
+                &fence,
+                json!({ "other": true })
+            )
             .is_err(),
         "a conflicting completion is refused"
     );
     let before = fixture.record(&handoff.handoff_id);
     assert_eq!(before.state, HandoffState::Completed);
-    assert_eq!(before.version, completed.version, "the refused completion changed nothing");
+    assert_eq!(
+        before.version, completed.version,
+        "the refused completion changed nothing"
+    );
 
     let paths = fixture.paths.clone();
     fixture.state.shutdown_persist_blocking();
@@ -406,27 +507,51 @@ fn a_completed_handoff_keeps_its_evidence_and_history_across_a_restart() {
         .expect("the completed handoff survives the restart")
         .record;
     assert_eq!(after.state, HandoffState::Completed, "still completed");
-    assert_eq!(after.completion.as_ref(), Some(&evidence), "the completion evidence is kept");
-    assert_eq!(after.accepted_by, before.accepted_by, "the accepted owner is kept");
+    assert_eq!(
+        after.completion.as_ref(),
+        Some(&evidence),
+        "the completion evidence is kept"
+    );
+    assert_eq!(
+        after.accepted_by, before.accepted_by,
+        "the accepted owner is kept"
+    );
     assert_eq!(after.version, before.version, "the version is kept");
     assert_eq!(after.history, before.history, "the full history is kept");
     assert!(
-        after.history.iter().any(|entry| entry.event.starts_with("completed by")),
+        after
+            .history
+            .iter()
+            .any(|entry| entry.event.starts_with("completed by")),
         "the history records the completion"
     );
 
     let again = restarted
-        .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, evidence.clone())
+        .complete_handoff(
+            &fixture.primary,
+            &handoff.handoff_id,
+            &fence,
+            evidence.clone(),
+        )
         .expect("an identical retry after the restart returns the original completion");
     assert_eq!(again.version, before.version, "and changes nothing");
     assert!(
         restarted
-            .complete_handoff(&fixture.primary, &handoff.handoff_id, &fence, json!({ "late": true }))
+            .complete_handoff(
+                &fixture.primary,
+                &handoff.handoff_id,
+                &fence,
+                json!({ "late": true })
+            )
             .is_err(),
         "a conflicting completion after the restart is refused"
     );
-    let report = restarted.handoff_watchdog_tick_with(at(900), &|_| HandoffPrerequisiteOutcome::Met);
-    assert!(report.offered.is_empty(), "a completed handoff is never offered again");
+    let report =
+        restarted.handoff_watchdog_tick_with(at(900), &|_| HandoffPrerequisiteOutcome::Met);
+    assert!(
+        report.offered.is_empty(),
+        "a completed handoff is never offered again"
+    );
     restarted.shutdown_persist_blocking();
 }
 
@@ -451,7 +576,10 @@ fn a_stale_ledger_write_is_refused_by_the_version_compare_and_swap() {
         .expect("the compare-and-swap runs");
     assert!(!written, "a write from a stale version is refused");
     let after = fixture.record(&handoff.handoff_id);
-    assert_eq!(after, current, "the refused write left the row exactly as it was");
+    assert_eq!(
+        after, current,
+        "the refused write left the row exactly as it was"
+    );
 
     let fresh = current.next(at(2), "a write built from the current version");
     let written = with_handoff_writer(&path, |connection| cas_handoff_on(connection, &fresh))
@@ -470,20 +598,43 @@ fn an_offer_queued_behind_a_busy_owner_waits_instead_of_escalating() {
     let handoff = fixture.register("busy");
     fixture.set_status(&fixture.primary, SessionStatus::Active);
     let report = fixture.tick(at(0), HandoffPrerequisiteOutcome::Met);
-    assert_eq!(report.offered.len(), 1, "the offer is queued to the busy owner");
+    assert_eq!(
+        report.offered.len(),
+        1,
+        "the offer is queued to the busy owner"
+    );
     for seconds in [31, 61, 300] {
         let report = fixture.tick(at(seconds), HandoffPrerequisiteOutcome::Met);
-        assert!(report.offered.is_empty(), "no escalation at {seconds}s while it is queued");
+        assert!(
+            report.offered.is_empty(),
+            "no escalation at {seconds}s while it is queued"
+        );
         let view = fixture.view(&handoff.handoff_id, at(seconds));
-        assert!(!view.overdue, "a queued offer is waiting, not overdue, at {seconds}s");
-        assert!(view.record.waiting.is_some(), "the wait shows its reason at {seconds}s");
-        assert!(view.record.delivered_at.is_none(), "not delivered while queued");
+        assert!(
+            !view.overdue,
+            "a queued offer is waiting, not overdue, at {seconds}s"
+        );
+        assert!(
+            view.record.waiting.is_some(),
+            "the wait shows its reason at {seconds}s"
+        );
+        assert!(
+            view.record.delivered_at.is_none(),
+            "not delivered while queued"
+        );
     }
-    assert_eq!(prompts_waiting(&fixture.recovery_prompts), 0, "the recovery owner is never woken");
+    assert_eq!(
+        prompts_waiting(&fixture.recovery_prompts),
+        0,
+        "the recovery owner is never woken"
+    );
 
     fixture.set_status(&fixture.primary, SessionStatus::Idle);
     fixture.drain(&fixture.primary);
-    received_prompt(&fixture.primary_prompts, "the queued offer reaches the owner when its turn ends");
+    received_prompt(
+        &fixture.primary_prompts,
+        "the queued offer reaches the owner when its turn ends",
+    );
     fixture.tick(at(301), HandoffPrerequisiteOutcome::Met);
     let delivered = fixture.record(&handoff.handoff_id);
     assert!(delivered.delivered_at.is_some(), "the delivery is recorded");
@@ -491,8 +642,15 @@ fn an_offer_queued_behind_a_busy_owner_waits_instead_of_escalating() {
         .state
         .accept_handoff(&fixture.primary, &handoff.handoff_id, 1)
         .expect("the primary accepts the offer it was finally given");
-    assert_eq!(accepted.accepted_by.as_deref(), Some(fixture.primary.as_str()));
-    assert_eq!(prompts_waiting(&fixture.recovery_prompts), 0, "one executor");
+    assert_eq!(
+        accepted.accepted_by.as_deref(),
+        Some(fixture.primary.as_str())
+    );
+    assert_eq!(
+        prompts_waiting(&fixture.recovery_prompts),
+        0,
+        "one executor"
+    );
     fixture.state.shutdown_persist_blocking();
 }
 
@@ -501,7 +659,8 @@ fn an_offer_queued_behind_a_busy_owner_waits_instead_of_escalating() {
 /// five minutes after delivery it is superseded by an offer to the recovery
 /// owner, and the superseded offer can no longer be accepted.
 #[test]
-fn a_delivered_unaccepted_offer_is_overdue_at_30_seconds_and_handed_to_recovery_after_five_minutes() {
+fn a_delivered_unaccepted_offer_is_overdue_at_30_seconds_and_handed_to_recovery_after_five_minutes()
+{
     let fixture = Fixture::new("recovery");
     let handoff = fixture.register("recovery");
     fixture.tick(at(0), HandoffPrerequisiteOutcome::Met);
@@ -514,14 +673,27 @@ fn a_delivered_unaccepted_offer_is_overdue_at_30_seconds_and_handed_to_recovery_
 
     let report = fixture.tick(at(32), HandoffPrerequisiteOutcome::Met);
     assert!(report.offered.is_empty(), "overdue is not yet handed over");
-    assert!(fixture.view(&handoff.handoff_id, at(32)).overdue, "30 seconds after delivery it is overdue");
+    assert!(
+        fixture.view(&handoff.handoff_id, at(32)).overdue,
+        "30 seconds after delivery it is overdue"
+    );
 
     for seconds in [62, 180, 300] {
         let report = fixture.tick(at(seconds), HandoffPrerequisiteOutcome::Met);
-        assert!(report.offered.is_empty(), "the owner keeps a delivered offer at {seconds}s");
-        assert!(fixture.view(&handoff.handoff_id, at(seconds)).overdue, "still overdue at {seconds}s");
+        assert!(
+            report.offered.is_empty(),
+            "the owner keeps a delivered offer at {seconds}s"
+        );
+        assert!(
+            fixture.view(&handoff.handoff_id, at(seconds)).overdue,
+            "still overdue at {seconds}s"
+        );
     }
-    assert_eq!(prompts_waiting(&fixture.recovery_prompts), 0, "no recovery wake yet");
+    assert_eq!(
+        prompts_waiting(&fixture.recovery_prompts),
+        0,
+        "no recovery wake yet"
+    );
 
     let report = fixture.tick(at(302), HandoffPrerequisiteOutcome::Met);
     assert_eq!(
@@ -532,14 +704,20 @@ fn a_delivered_unaccepted_offer_is_overdue_at_30_seconds_and_handed_to_recovery_
     let text = received_prompt(&fixture.recovery_prompts, "the recovery offer");
     assert!(text.contains(&handoff.handoff_id));
     assert!(
-        fixture.state.accept_handoff(&fixture.primary, &handoff.handoff_id, 1).is_err(),
+        fixture
+            .state
+            .accept_handoff(&fixture.primary, &handoff.handoff_id, 1)
+            .is_err(),
         "the superseded primary offer can no longer be accepted"
     );
     let accepted = fixture
         .state
         .accept_handoff(&fixture.recovery, &handoff.handoff_id, 2)
         .expect("the recovery owner accepts the current offer");
-    assert_eq!(accepted.accepted_by.as_deref(), Some(fixture.recovery.as_str()));
+    assert_eq!(
+        accepted.accepted_by.as_deref(),
+        Some(fixture.recovery.as_str())
+    );
     fixture.state.shutdown_persist_blocking();
 }
 
@@ -556,16 +734,29 @@ fn an_accepted_handoff_is_never_offered_to_a_second_executor() {
         .expect("the primary accepts");
     for seconds in [31, 61, 600, 3600] {
         let report = fixture.tick(at(seconds), HandoffPrerequisiteOutcome::Met);
-        assert!(report.offered.is_empty(), "no offer at {seconds}s after acceptance");
+        assert!(
+            report.offered.is_empty(),
+            "no offer at {seconds}s after acceptance"
+        );
     }
-    assert_eq!(prompts_waiting(&fixture.recovery_prompts), 0, "the recovery owner never executes it");
+    assert_eq!(
+        prompts_waiting(&fixture.recovery_prompts),
+        0,
+        "the recovery owner never executes it"
+    );
     assert!(
-        fixture.state.accept_handoff(&fixture.recovery, &handoff.handoff_id, 1).is_err(),
+        fixture
+            .state
+            .accept_handoff(&fixture.recovery, &handoff.handoff_id, 1)
+            .is_err(),
         "nobody else can accept an accepted handoff"
     );
     let record = fixture.record(&handoff.handoff_id);
     assert_eq!(record.state, HandoffState::Accepted);
-    assert_eq!(record.accepted_by.as_deref(), Some(fixture.primary.as_str()));
+    assert_eq!(
+        record.accepted_by.as_deref(),
+        Some(fixture.primary.as_str())
+    );
     fixture.state.shutdown_persist_blocking();
 }
 
@@ -579,12 +770,23 @@ fn a_pass_without_credit_never_readies_a_credited_step_and_a_changed_claim_route
         .state
         .register_handoff(
             &fixture.primary,
-            fixture.spec("credit", HandoffPrerequisite::Credited { run_id: LIVE_RUN.to_owned() }),
+            fixture.spec(
+                "credit",
+                HandoffPrerequisite::Credited {
+                    run_id: LIVE_RUN.to_owned(),
+                },
+            ),
         )
         .expect("the handoff registers");
     let report = fixture.tick(at(0), HandoffPrerequisiteOutcome::Pending);
-    assert!(report.offered.is_empty(), "a PASS whose credit is owed readies nothing");
-    assert_eq!(fixture.record(&handoff.handoff_id).state, HandoffState::WaitingPrerequisite);
+    assert!(
+        report.offered.is_empty(),
+        "a PASS whose credit is owed readies nothing"
+    );
+    assert_eq!(
+        fixture.record(&handoff.handoff_id).state,
+        HandoffState::WaitingPrerequisite
+    );
 
     // A restart between the PASS and the closing checkpoint.
     let primary = fixture.primary.clone();
@@ -611,11 +813,21 @@ fn a_pass_without_credit_never_readies_a_credited_step_and_a_changed_claim_route
         .find(|view| view.record.handoff_id == handoff.handoff_id)
         .unwrap()
         .record;
-    assert_eq!(record.state, HandoffState::Offered, "the diagnostic route is offered");
+    assert_eq!(
+        record.state,
+        HandoffState::Offered,
+        "the diagnostic route is offered"
+    );
     assert_eq!(record.diagnostic.as_deref(), Some(reason));
     let text = received_prompt(&prompts, "the diagnostic offer");
-    assert!(text.contains(reason), "the offer names the diagnosis: {text}");
-    assert!(text.contains("do not treat the step as succeeded"), "the offer forbids the success path: {text}");
+    assert!(
+        text.contains(reason),
+        "the offer names the diagnosis: {text}"
+    );
+    assert!(
+        text.contains("do not treat the step as succeeded"),
+        "the offer forbids the success path: {text}"
+    );
     restarted.shutdown_persist_blocking();
 }
 
@@ -631,18 +843,36 @@ fn a_changed_claim_or_fence_on_the_same_work_is_recognized() {
         claim_id: "claim-1".to_owned(),
         claim_fence: 1,
     };
-    assert_eq!(handoff_credit_claim_changed(&run, Some(&run)), None, "the same claim settles");
+    assert_eq!(
+        handoff_credit_claim_changed(&run, Some(&run)),
+        None,
+        "the same claim settles"
+    );
     let mut refenced = run.clone();
     refenced.claim_fence = 2;
-    assert!(handoff_credit_claim_changed(&run, Some(&refenced)).is_some(), "a re-fenced claim");
+    assert!(
+        handoff_credit_claim_changed(&run, Some(&refenced)).is_some(),
+        "a re-fenced claim"
+    );
     let mut reclaimed = run.clone();
     reclaimed.claim_id = "claim-2".to_owned();
-    assert!(handoff_credit_claim_changed(&run, Some(&reclaimed)).is_some(), "another claim");
+    assert!(
+        handoff_credit_claim_changed(&run, Some(&reclaimed)).is_some(),
+        "another claim"
+    );
     let mut other_work = run.clone();
     other_work.work_id = "work-b".to_owned();
     other_work.claim_id = "claim-9".to_owned();
-    assert_eq!(handoff_credit_claim_changed(&run, Some(&other_work)), None, "another work shows nothing");
-    assert_eq!(handoff_credit_claim_changed(&run, None), None, "no binding shows nothing");
+    assert_eq!(
+        handoff_credit_claim_changed(&run, Some(&other_work)),
+        None,
+        "another work shows nothing"
+    );
+    assert_eq!(
+        handoff_credit_claim_changed(&run, None),
+        None,
+        "no binding shows nothing"
+    );
 }
 
 /// A primary owner whose queue is paused is never bypassed: the handoff shows
@@ -661,7 +891,10 @@ fn a_paused_primary_is_shown_blocked_and_never_bypassed() {
     let report = fixture.tick(at(0), HandoffPrerequisiteOutcome::Met);
     assert!(report.offered.is_empty(), "a paused queue is not bypassed");
     assert_eq!(report.blocked.len(), 1, "the block is reported");
-    assert!(fixture.record(&handoff.handoff_id).blocked.is_some(), "the block is visible");
+    assert!(
+        fixture.record(&handoff.handoff_id).blocked.is_some(),
+        "the block is visible"
+    );
     assert_eq!(prompts_waiting(&fixture.primary_prompts), 0);
 
     let report = fixture.tick(at(61), HandoffPrerequisiteOutcome::Met);
@@ -683,17 +916,30 @@ fn a_stop_that_cleared_the_offer_is_seen_and_handed_to_recovery() {
     let handoff = fixture.register("stopped");
     fixture.set_status(&fixture.primary, SessionStatus::Active);
     fixture.tick(at(0), HandoffPrerequisiteOutcome::Met);
-    assert_eq!(fixture.queued_texts(&fixture.primary).len(), 1, "the offer is queued");
+    assert_eq!(
+        fixture.queued_texts(&fixture.primary).len(),
+        1,
+        "the offer is queued"
+    );
     fixture.stop(&fixture.primary);
-    assert!(fixture.queued_texts(&fixture.primary).is_empty(), "Stop cleared it");
+    assert!(
+        fixture.queued_texts(&fixture.primary).is_empty(),
+        "Stop cleared it"
+    );
 
     let report = fixture.tick(at(2), HandoffPrerequisiteOutcome::Met);
-    assert!(report.offered.is_empty(), "the stopped owner is not re-woken");
+    assert!(
+        report.offered.is_empty(),
+        "the stopped owner is not re-woken"
+    );
     assert!(
         fixture.record(&handoff.handoff_id).blocked.is_some(),
         "the cleared offer shows its owner as blocked"
     );
-    assert!(fixture.queued_texts(&fixture.primary).is_empty(), "nothing is re-queued past the Stop");
+    assert!(
+        fixture.queued_texts(&fixture.primary).is_empty(),
+        "nothing is re-queued past the Stop"
+    );
 
     let report = fixture.tick(at(61), HandoffPrerequisiteOutcome::Met);
     assert_eq!(
@@ -733,13 +979,24 @@ fn an_offer_removed_twice_is_blocked_instead_of_requeued_again() {
     cancel();
     let report = fixture.tick(at(2), HandoffPrerequisiteOutcome::Met);
     assert!(report.offered.is_empty(), "a re-queue is not a new offer");
-    assert_eq!(fixture.queued_texts(&fixture.primary).len(), 1, "queued again once");
-    assert_eq!(fixture.record(&handoff.handoff_id).offer_generation, 1, "same generation");
+    assert_eq!(
+        fixture.queued_texts(&fixture.primary).len(),
+        1,
+        "queued again once"
+    );
+    assert_eq!(
+        fixture.record(&handoff.handoff_id).offer_generation,
+        1,
+        "same generation"
+    );
 
     cancel();
     fixture.tick(at(4), HandoffPrerequisiteOutcome::Met);
     fixture.tick(at(6), HandoffPrerequisiteOutcome::Met);
-    assert!(fixture.queued_texts(&fixture.primary).is_empty(), "never queued a third time");
+    assert!(
+        fixture.queued_texts(&fixture.primary).is_empty(),
+        "never queued a third time"
+    );
     assert!(
         fixture.record(&handoff.handoff_id).blocked.is_some(),
         "the twice-removed offer shows as blocked"
@@ -765,7 +1022,10 @@ fn an_offer_promoted_but_held_before_the_runtime_is_waiting_not_delivered() {
     let handoff = fixture.register("retained");
     fixture.set_status(&fixture.primary, SessionStatus::Active);
     fixture.tick(at(0), HandoffPrerequisiteOutcome::Met);
-    let prompt_id = fixture.record(&handoff.handoff_id).offered_prompt_id.unwrap();
+    let prompt_id = fixture
+        .record(&handoff.handoff_id)
+        .offered_prompt_id
+        .unwrap();
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.primary).unwrap();
@@ -792,9 +1052,15 @@ fn an_offer_promoted_but_held_before_the_runtime_is_waiting_not_delivered() {
     for seconds in [2, 40, 400] {
         fixture.tick(at(seconds), HandoffPrerequisiteOutcome::Met);
         let view = fixture.view(&handoff.handoff_id, at(seconds));
-        assert!(view.record.delivered_at.is_none(), "not delivered at {seconds}s");
         assert!(
-            view.record.waiting.as_deref().is_some_and(|reason| reason.contains("held before")),
+            view.record.delivered_at.is_none(),
+            "not delivered at {seconds}s"
+        );
+        assert!(
+            view.record
+                .waiting
+                .as_deref()
+                .is_some_and(|reason| reason.contains("held before")),
             "the wait names the hold at {seconds}s: {:?}",
             view.record.waiting
         );
@@ -812,7 +1078,10 @@ fn an_offer_promoted_but_held_before_the_runtime_is_waiting_not_delivered() {
         sync_pending_prompts(record);
     }
     fixture.tick(at(401), HandoffPrerequisiteOutcome::Met);
-    assert!(fixture.record(&handoff.handoff_id).delivered_at.is_some(), "delivered once released");
+    assert!(
+        fixture.record(&handoff.handoff_id).delivered_at.is_some(),
+        "delivered once released"
+    );
     fixture.state.shutdown_persist_blocking();
 }
 
@@ -828,19 +1097,23 @@ fn many_pending_handoffs_never_starve_a_later_ready_one() {
                 &fixture.primary,
                 fixture.spec(
                     &format!("pending-{index}"),
-                    HandoffPrerequisite::Terminal { run_id: format!("run-pending-{index}") },
+                    HandoffPrerequisite::Terminal {
+                        run_id: format!("run-pending-{index}"),
+                    },
                 ),
             )
             .expect("a pending handoff registers");
     }
     let ready = fixture.register("ready-last");
-    let report = fixture.state.handoff_watchdog_tick_with(at(0), &|prerequisite| {
-        if prerequisite.run_id() == LIVE_RUN {
-            HandoffPrerequisiteOutcome::Met
-        } else {
-            HandoffPrerequisiteOutcome::Pending
-        }
-    });
+    let report = fixture
+        .state
+        .handoff_watchdog_tick_with(at(0), &|prerequisite| {
+            if prerequisite.run_id() == LIVE_RUN {
+                HandoffPrerequisiteOutcome::Met
+            } else {
+                HandoffPrerequisiteOutcome::Pending
+            }
+        });
     assert_eq!(
         report.offered,
         vec![(ready.handoff_id.clone(), fixture.primary.clone(), 1)],
@@ -860,7 +1133,12 @@ fn the_settlement_wake_waits_for_a_paused_owner_and_is_queued_once_more_at_most(
         .state
         .register_handoff(
             &fixture.primary,
-            fixture.spec("settle", HandoffPrerequisite::Credited { run_id: LIVE_RUN.to_owned() }),
+            fixture.spec(
+                "settle",
+                HandoffPrerequisite::Credited {
+                    run_id: LIVE_RUN.to_owned(),
+                },
+            ),
         )
         .unwrap();
     let owner = fixture.recovery.clone();
@@ -868,10 +1146,15 @@ fn the_settlement_wake_waits_for_a_paused_owner_and_is_queued_once_more_at_most(
     let pause = |paused: bool| {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&owner).unwrap();
-        inner.session_mut_by_index(index).unwrap().orchestrator_auto_dispatch_blocked = paused;
+        inner
+            .session_mut_by_index(index)
+            .unwrap()
+            .orchestrator_auto_dispatch_blocked = paused;
         fixture.state.commit_locked(&mut inner).unwrap();
     };
-    let settle = HandoffPrerequisiteOutcome::AwaitingSettlement { owner: owner.clone() };
+    let settle = HandoffPrerequisiteOutcome::AwaitingSettlement {
+        owner: owner.clone(),
+    };
     let settle_wakes = || {
         fixture
             .queued_texts(&owner)
@@ -884,26 +1167,42 @@ fn the_settlement_wake_waits_for_a_paused_owner_and_is_queued_once_more_at_most(
     fixture.tick(at(0), settle.clone());
     fixture.tick(at(2), settle.clone());
     let record = fixture.record(&handoff.handoff_id);
-    assert!(record.settle_prompt_id.is_some(), "the wake's id is recorded first");
+    assert!(
+        record.settle_prompt_id.is_some(),
+        "the wake's id is recorded first"
+    );
     assert_eq!(settle_wakes(), 0, "a paused owner is never bypassed");
 
     pause(false);
     fixture.tick(at(4), settle.clone());
-    assert_eq!(settle_wakes(), 1, "the wake is queued once the owner can take it");
+    assert_eq!(
+        settle_wakes(),
+        1,
+        "the wake is queued once the owner can take it"
+    );
     fixture.tick(at(6), settle.clone());
     assert_eq!(settle_wakes(), 1, "and never twice");
 
-    let prompt_id = fixture.record(&handoff.handoff_id).settle_prompt_id.unwrap();
+    let prompt_id = fixture
+        .record(&handoff.handoff_id)
+        .settle_prompt_id
+        .unwrap();
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&owner).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.queued_prompts.retain(|queued| queued.pending_prompt.id != prompt_id);
+        record
+            .queued_prompts
+            .retain(|queued| queued.pending_prompt.id != prompt_id);
         sync_pending_prompts(record);
     }
     fixture.tick(at(8), settle.clone());
     fixture.tick(at(10), settle);
-    assert_eq!(settle_wakes(), 0, "a wake lost after its one more queueing is not queued again");
+    assert_eq!(
+        settle_wakes(),
+        0,
+        "a wake lost after its one more queueing is not queued again"
+    );
     assert_eq!(
         fixture.record(&handoff.handoff_id).state,
         HandoffState::WaitingPrerequisite,
@@ -932,15 +1231,27 @@ fn two_blocked_owners_leave_the_row_stable() {
         assert!(report.offered.is_empty());
     }
     let after = fixture.record(&handoff.handoff_id);
-    assert_eq!(after.version, settled.version, "no write while nothing changes");
-    assert_eq!(after.history.len(), settled.history.len(), "no history growth");
+    assert_eq!(
+        after.version, settled.version,
+        "no write while nothing changes"
+    );
+    assert_eq!(
+        after.history.len(),
+        settled.history.len(),
+        "no history growth"
+    );
     fixture.state.shutdown_persist_blocking();
 }
 
 const RUN_OWNER: &str = "session-run-owner";
 
 /// A run's indexed summary as the test-run index holds it.
-fn run_summary(run_id: &str, state: &str, unknown_reason: Option<&str>, ended_at: &str) -> TestRunSummary {
+fn run_summary(
+    run_id: &str,
+    state: &str,
+    unknown_reason: Option<&str>,
+    ended_at: &str,
+) -> TestRunSummary {
     serde_json::from_value(json!({
         "runId": run_id,
         "projectId": null,
@@ -1049,15 +1360,25 @@ fn decide(
     owner_binding: Option<EngramControlWorkBinding>,
 ) -> HandoffPrerequisiteOutcome {
     let rows = observations.iter().collect::<Vec<_>>();
-    handoff_prerequisite_outcome(&prerequisite, summary.as_ref(), &rows, owner_binding.as_ref(), at(60))
+    handoff_prerequisite_outcome(
+        &prerequisite,
+        summary.as_ref(),
+        &rows,
+        owner_binding.as_ref(),
+        at(60),
+    )
 }
 
 fn terminal() -> HandoffPrerequisite {
-    HandoffPrerequisite::Terminal { run_id: LIVE_RUN.to_owned() }
+    HandoffPrerequisite::Terminal {
+        run_id: LIVE_RUN.to_owned(),
+    }
 }
 
 fn credited() -> HandoffPrerequisite {
-    HandoffPrerequisite::Credited { run_id: LIVE_RUN.to_owned() }
+    HandoffPrerequisite::Credited {
+        run_id: LIVE_RUN.to_owned(),
+    }
 }
 
 /// The production reader for a terminal prerequisite: a passed or failed run
@@ -1068,25 +1389,48 @@ fn the_production_reader_meets_a_terminal_prerequisite_only_on_a_result() {
     let ended = "2026-10-17T16:00:30Z";
     for state in ["passed", "failed"] {
         assert_eq!(
-            decide(terminal(), Some(run_summary(LIVE_RUN, state, None, ended)), &[], None),
+            decide(
+                terminal(),
+                Some(run_summary(LIVE_RUN, state, None, ended)),
+                &[],
+                None
+            ),
             HandoffPrerequisiteOutcome::Met,
             "a {state} run"
         );
     }
     assert!(matches!(
-        decide(terminal(), Some(run_summary(LIVE_RUN, "unknown", Some("processGone"), ended)), &[], None),
+        decide(
+            terminal(),
+            Some(run_summary(LIVE_RUN, "unknown", Some("processGone"), ended)),
+            &[],
+            None
+        ),
         HandoffPrerequisiteOutcome::Diagnostic(_)
     ));
     for (state, reason) in [("running", None), ("unknown", Some("heartbeatStale"))] {
         assert_eq!(
-            decide(terminal(), Some(run_summary(LIVE_RUN, state, reason, ended)), &[], None),
+            decide(
+                terminal(),
+                Some(run_summary(LIVE_RUN, state, reason, ended)),
+                &[],
+                None
+            ),
             HandoffPrerequisiteOutcome::Pending,
             "a {state} run waits"
         );
     }
-    assert_eq!(decide(terminal(), None, &[], None), HandoffPrerequisiteOutcome::Pending);
     assert_eq!(
-        decide(terminal(), Some(run_summary("another-run", "passed", None, ended)), &[], None),
+        decide(terminal(), None, &[], None),
+        HandoffPrerequisiteOutcome::Pending
+    );
+    assert_eq!(
+        decide(
+            terminal(),
+            Some(run_summary("another-run", "passed", None, ended)),
+            &[],
+            None
+        ),
         HandoffPrerequisiteOutcome::Pending,
         "another run's result is not this one's"
     );
@@ -1103,7 +1447,10 @@ fn a_launcher_run_finds_its_credit_through_the_exact_artifact_association() {
     let record = Some("record");
     let ok = EngramExecutionOutcome::Succeeded;
     let mine = observation(LIVE_RUN, Some(claim(1)), record, ok);
-    assert_ne!(mine.summary.run_id, LIVE_RUN, "the row carries its own observed id");
+    assert_ne!(
+        mine.summary.run_id, LIVE_RUN,
+        "the row carries its own observed id"
+    );
     let other_run = observation("test-another-run", Some(claim(1)), record, ok);
     let mut other_owner = observation(LIVE_RUN, Some(claim(1)), record, ok);
     other_owner.summary.owner_session_id = Some("session-someone-else".to_owned());
@@ -1112,11 +1459,16 @@ fn a_launcher_run_finds_its_credit_through_the_exact_artifact_association() {
 
     let mut inner = StateInner::new();
     for row in [&mine, &other_run, &other_owner, &other_digest] {
-        inner.test_run_observations.insert(row.execution_id.clone(), row.clone());
+        inner
+            .test_run_observations
+            .insert(row.execution_id.clone(), row.clone());
     }
     let found = handoff_run_observations(&inner, &run, None);
     assert_eq!(
-        found.iter().map(|row| row.execution_id.as_str()).collect::<Vec<_>>(),
+        found
+            .iter()
+            .map(|row| row.execution_id.as_str())
+            .collect::<Vec<_>>(),
         vec![mine.execution_id.as_str()],
         "only the exactly associated observation is the run's"
     );
@@ -1128,13 +1480,20 @@ fn a_launcher_run_finds_its_credit_through_the_exact_artifact_association() {
 
     let mut uncredited = StateInner::new();
     for row in [&other_run, &other_owner, &other_digest] {
-        uncredited.test_run_observations.insert(row.execution_id.clone(), row.clone());
+        uncredited
+            .test_run_observations
+            .insert(row.execution_id.clone(), row.clone());
     }
     let found = handoff_run_observations(&uncredited, &run, None);
-    assert!(found.is_empty(), "no other run's, owner's or digest's credit is the run's");
+    assert!(
+        found.is_empty(),
+        "no other run's, owner's or digest's credit is the run's"
+    );
     assert_eq!(
         handoff_prerequisite_outcome(&credited(), Some(&run), &found, Some(&claim(1)), at(60)),
-        HandoffPrerequisiteOutcome::AwaitingSettlement { owner: RUN_OWNER.to_owned() },
+        HandoffPrerequisiteOutcome::AwaitingSettlement {
+            owner: RUN_OWNER.to_owned()
+        },
     );
 }
 
@@ -1168,7 +1527,12 @@ fn the_locked_reader_resolves_compacted_and_host_observed_runs() {
     );
     inner.test_run_compacted.insert(
         LIVE_RUN.to_owned(),
-        compacted(vec![observation(LIVE_RUN, Some(claim(1)), Some("record"), ok)]),
+        compacted(vec![observation(
+            LIVE_RUN,
+            Some(claim(1)),
+            Some("record"),
+            ok,
+        )]),
     );
     assert_eq!(
         handoff_prerequisite_outcome_locked(&inner, &credited(), at(60)),
@@ -1185,7 +1549,9 @@ fn the_locked_reader_resolves_compacted_and_host_observed_runs() {
         .insert(LIVE_RUN.to_owned(), compacted(Vec::new()));
     assert_eq!(
         handoff_prerequisite_outcome_locked(&inner, &credited(), at(60)),
-        HandoffPrerequisiteOutcome::AwaitingSettlement { owner: RUN_OWNER.to_owned() },
+        HandoffPrerequisiteOutcome::AwaitingSettlement {
+            owner: RUN_OWNER.to_owned()
+        },
         "a compacted PASS without credit still never meets it"
     );
 
@@ -1193,11 +1559,15 @@ fn the_locked_reader_resolves_compacted_and_host_observed_runs() {
     let observed_run = observed.execution_id.clone();
     let mut inner = StateInner::new();
     inner.test_runs.scanned_once = true;
-    inner.test_run_observations.insert(observed_run.clone(), observed);
+    inner
+        .test_run_observations
+        .insert(observed_run.clone(), observed);
     assert_eq!(
         handoff_prerequisite_outcome_locked(
             &inner,
-            &HandoffPrerequisite::Credited { run_id: observed_run },
+            &HandoffPrerequisite::Credited {
+                run_id: observed_run
+            },
             at(60)
         ),
         HandoffPrerequisiteOutcome::Met,
@@ -1214,16 +1584,32 @@ fn the_locked_reader_resolves_compacted_and_host_observed_runs() {
 /// binding) is not diagnosed before the grace.
 #[test]
 fn the_production_reader_never_meets_a_credited_prerequisite_on_a_pass_alone() {
-    let fresh = Some(run_summary(LIVE_RUN, "passed", None, "2026-10-17T16:00:30Z"));
-    let settle = HandoffPrerequisiteOutcome::AwaitingSettlement { owner: RUN_OWNER.to_owned() };
+    let fresh = Some(run_summary(
+        LIVE_RUN,
+        "passed",
+        None,
+        "2026-10-17T16:00:30Z",
+    ));
+    let settle = HandoffPrerequisiteOutcome::AwaitingSettlement {
+        owner: RUN_OWNER.to_owned(),
+    };
     let run_claim = Some(claim(1));
 
-    assert_eq!(decide(credited(), fresh.clone(), &[], run_claim.clone()), settle, "a PASS alone");
+    assert_eq!(
+        decide(credited(), fresh.clone(), &[], run_claim.clone()),
+        settle,
+        "a PASS alone"
+    );
     assert_eq!(
         decide(
             credited(),
             fresh.clone(),
-            &[observation(LIVE_RUN, run_claim.clone(), None, EngramExecutionOutcome::Succeeded)],
+            &[observation(
+                LIVE_RUN,
+                run_claim.clone(),
+                None,
+                EngramExecutionOutcome::Succeeded
+            )],
             run_claim.clone()
         ),
         settle,
@@ -1233,7 +1619,12 @@ fn the_production_reader_never_meets_a_credited_prerequisite_on_a_pass_alone() {
         decide(
             credited(),
             fresh.clone(),
-            &[observation(LIVE_RUN, run_claim.clone(), Some("record"), EngramExecutionOutcome::Failed)],
+            &[observation(
+                LIVE_RUN,
+                run_claim.clone(),
+                Some("record"),
+                EngramExecutionOutcome::Failed
+            )],
             run_claim.clone()
         ),
         settle,
@@ -1243,7 +1634,12 @@ fn the_production_reader_never_meets_a_credited_prerequisite_on_a_pass_alone() {
         decide(
             credited(),
             fresh.clone(),
-            &[observation(LIVE_RUN, run_claim.clone(), Some("record"), EngramExecutionOutcome::Succeeded)],
+            &[observation(
+                LIVE_RUN,
+                run_claim.clone(),
+                Some("record"),
+                EngramExecutionOutcome::Succeeded
+            )],
             run_claim.clone()
         ),
         HandoffPrerequisiteOutcome::Met,
@@ -1253,7 +1649,12 @@ fn the_production_reader_never_meets_a_credited_prerequisite_on_a_pass_alone() {
     let changed = decide(
         credited(),
         fresh.clone(),
-        &[observation(LIVE_RUN, run_claim.clone(), None, EngramExecutionOutcome::Succeeded)],
+        &[observation(
+            LIVE_RUN,
+            run_claim.clone(),
+            None,
+            EngramExecutionOutcome::Succeeded,
+        )],
         Some(claim(2)),
     );
     assert!(
@@ -1264,7 +1665,12 @@ fn the_production_reader_never_meets_a_credited_prerequisite_on_a_pass_alone() {
         decide(
             credited(),
             fresh.clone(),
-            &[observation(LIVE_RUN, run_claim.clone(), None, EngramExecutionOutcome::Succeeded)],
+            &[observation(
+                LIVE_RUN,
+                run_claim.clone(),
+                None,
+                EngramExecutionOutcome::Succeeded
+            )],
             None
         ),
         settle,
@@ -1272,12 +1678,27 @@ fn the_production_reader_never_meets_a_credited_prerequisite_on_a_pass_alone() {
     );
 
     assert!(matches!(
-        decide(credited(), Some(run_summary(LIVE_RUN, "failed", None, "2026-10-17T16:00:30Z")), &[], None),
+        decide(
+            credited(),
+            Some(run_summary(
+                LIVE_RUN,
+                "failed",
+                None,
+                "2026-10-17T16:00:30Z"
+            )),
+            &[],
+            None
+        ),
         HandoffPrerequisiteOutcome::Diagnostic(_)
     ));
     let late = decide(
         credited(),
-        Some(run_summary(LIVE_RUN, "passed", None, "2026-10-17T15:49:00Z")),
+        Some(run_summary(
+            LIVE_RUN,
+            "passed",
+            None,
+            "2026-10-17T15:49:00Z",
+        )),
         &[],
         run_claim,
     );
@@ -1291,11 +1712,31 @@ fn the_production_reader_never_meets_a_credited_prerequisite_on_a_pass_alone() {
 #[test]
 fn registration_refuses_unknown_or_identical_owners() {
     let fixture = Fixture::new("owners");
-    let mut unknown = fixture.spec("unknown", HandoffPrerequisite::Terminal { run_id: LIVE_RUN.to_owned() });
+    let mut unknown = fixture.spec(
+        "unknown",
+        HandoffPrerequisite::Terminal {
+            run_id: LIVE_RUN.to_owned(),
+        },
+    );
     unknown.recovery_owner = "session-that-does-not-exist".to_owned();
-    assert!(fixture.state.register_handoff(&fixture.primary, unknown).is_err());
-    let mut same = fixture.spec("same", HandoffPrerequisite::Terminal { run_id: LIVE_RUN.to_owned() });
+    assert!(
+        fixture
+            .state
+            .register_handoff(&fixture.primary, unknown)
+            .is_err()
+    );
+    let mut same = fixture.spec(
+        "same",
+        HandoffPrerequisite::Terminal {
+            run_id: LIVE_RUN.to_owned(),
+        },
+    );
     same.recovery_owner = same.primary_owner.clone();
-    assert!(fixture.state.register_handoff(&fixture.primary, same).is_err());
+    assert!(
+        fixture
+            .state
+            .register_handoff(&fixture.primary, same)
+            .is_err()
+    );
     fixture.state.shutdown_persist_blocking();
 }

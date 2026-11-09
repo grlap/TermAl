@@ -64,8 +64,18 @@ pub(super) async fn attest_after_satellite_delay(
     let (central_read, central_write) = tokio::io::split(central_far);
     let (satellite_read, satellite_write) = tokio::io::split(satellite_far);
     let preface = FEDERATION_CONTROL_PREFACE.len();
-    let forward_down = tokio::spawn(fixture_forward(central_read, satellite_write, preface, delay));
-    let forward_up = tokio::spawn(fixture_forward(satellite_read, central_write, usize::MAX, Duration::ZERO));
+    let forward_down = tokio::spawn(fixture_forward(
+        central_read,
+        satellite_write,
+        preface,
+        delay,
+    ));
+    let forward_up = tokio::spawn(fixture_forward(
+        satellite_read,
+        central_write,
+        usize::MAX,
+        Duration::ZERO,
+    ));
     let mut central_io: FederationControlIo = Box::new(central_io);
     let mut satellite_io: FederationControlIo = Box::new(satellite_io);
     let attested = attest_over(central, satellite, &mut central_io, &mut satellite_io).await;
@@ -117,7 +127,10 @@ async fn attest_over(
     central_io: &mut FederationControlIo,
     satellite_io: &mut FederationControlIo,
 ) -> Attested {
-    let (central, satellite) = (fixture_attest_channel(central), fixture_attest_channel(satellite));
+    let (central, satellite) = (
+        fixture_attest_channel(central),
+        fixture_attest_channel(satellite),
+    );
     let (central, satellite) = (&central, &satellite);
     let satellite_proof = async {
         let mut preface = vec![0; FEDERATION_CONTROL_PREFACE.len()];
@@ -139,24 +152,31 @@ async fn attest_over(
     let (satellite_context, satellite_guard) = s.unwrap();
     // This fixture used to stop at mutual proof. Satellite RPC now needs the
     // existing first heartbeat too: run the real receiver, never set its flag.
-    let receive = federation_control_satellite_established(
-        satellite, satellite_io, &satellite_context,
-    );
+    let receive =
+        federation_control_satellite_established(satellite, satellite_io, &satellite_context);
     tokio::pin!(receive);
     tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
         tokio::select! {
             _ = &mut receive => panic!("satellite control ended before readiness"),
             _ = heartbeat_round_trip(central_io, &central_context, 1) => {},
         }
-    }).await.expect("first authenticated heartbeat");
-    Attested { _central: central_guard, _satellite: satellite_guard }
+    })
+    .await
+    .expect("first authenticated heartbeat");
+    Attested {
+        _central: central_guard,
+        _satellite: satellite_guard,
+    }
 }
 
 pub(super) fn heartbeat_request(context: &FederationSecurityContext, sequence: u64) -> Vec<u8> {
     let sequence = sequence.to_be_bytes();
     let challenge = [7; 16];
-    let tag = federation_mac(&context.keys[4],
-        &[b"hb-req", &context.transcript, &sequence, &challenge]).unwrap();
+    let tag = federation_mac(
+        &context.keys[4],
+        &[b"hb-req", &context.transcript, &sequence, &challenge],
+    )
+    .unwrap();
     federation_encode(b"termal-hb-req-v1", &[&sequence, &challenge, &tag])
 }
 
@@ -165,12 +185,18 @@ pub(super) async fn heartbeat_round_trip(
     context: &FederationSecurityContext,
     sequence: u64,
 ) {
-    federation_write_frame(io, &heartbeat_request(context, sequence)).await.unwrap();
+    federation_write_frame(io, &heartbeat_request(context, sequence))
+        .await
+        .unwrap();
     let response = federation_read_frame(io).await.unwrap();
     let fields = federation_decode(&response, b"termal-hb-resp-v1", 2).unwrap();
     assert_eq!(fields[0], sequence.to_be_bytes());
-    federation_verify_mac(&context.keys[5],
-        &[b"hb-resp", &context.transcript, fields[0], &[7; 16]], fields[1]).unwrap();
+    federation_verify_mac(
+        &context.keys[5],
+        &[b"hb-resp", &context.transcript, fields[0], &[7; 16]],
+        fields[1],
+    )
+    .unwrap();
 }
 
 pub(super) fn signed(

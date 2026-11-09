@@ -711,23 +711,21 @@ fn acceptance_evaluator_brief_numbers_criteria_lists_locators_and_names_the_tool
         "submit exactly the same verdicts\n  again, at most 3 more times; if it is still refused, \
          finish and report\n  that last refusal verbatim."
     ));
-    assert!(TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION.contains(
-        "If a refusal begins \"authority transition in flight\", nothing was recorded and the \
+    assert!(
+        TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION.contains(
+            "If a refusal begins \"authority transition in flight\", nothing was recorded and the \
          attempt is still open: wait the seconds it names and submit exactly the same verdicts \
          again, at most three more times; if it is still refused, finish and report that last \
          refusal verbatim. No other refusal is retried this way."
-    ));
+        )
+    );
     // A Claude evaluator's brief states the command form TermAl's read-only
     // Claude gate allows, so an evaluator checking a freeze fingerprint does
     // not reach for a refused shape first.
-    let claude = build_acceptance_evaluator_brief_for_agent(
-        &task,
-        "/work/repo",
-        Agent::Claude,
-        64 * 1024,
-    )
-    .unwrap()
-    .prompt;
+    let claude =
+        build_acceptance_evaluator_brief_for_agent(&task, "/work/repo", Agent::Claude, 64 * 1024)
+            .unwrap()
+            .prompt;
     for form in [
         "TermAl's read-only gate",
         "Run each command in the\nworkspace as it is",
@@ -747,8 +745,12 @@ fn acceptance_evaluator_brief_numbers_criteria_lists_locators_and_names_the_tool
         assert!(claude.contains(form), "{form}: {claude}");
     }
     // The paragraph sits with the workspace rule, before the Rules list.
-    let workspace = claude.find("is read-only. Inspect").expect("workspace rule");
-    let gate = claude.find("TermAl's read-only gate").expect("command form");
+    let workspace = claude
+        .find("is read-only. Inspect")
+        .expect("workspace rule");
+    let gate = claude
+        .find("TermAl's read-only gate")
+        .expect("command form");
     let rules = claude.find("\nRules:\n").expect("rules");
     assert!(workspace < gate && gate < rules, "{claude}");
     // A Codex evaluator runs in its own sandbox, through PowerShell on
@@ -1369,7 +1371,7 @@ fn acceptance_same_session_brief_carries_the_bases_and_every_criterion() {
 fn acceptance_submit_refuses_callers_without_authority_before_running() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (delegation, child) = 
+    let (delegation, child) =
         install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     let refused = |caller: &str, expected: &str| {
         let error = state
@@ -1454,7 +1456,7 @@ fn acceptance_submit_refuses_callers_without_authority_before_running() {
 fn acceptance_submit_refuses_each_malformed_submission_before_running() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (delegation, child) = 
+    let (delegation, child) =
         install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     let pass = |criterion| verdict(criterion, "pass", "Checked it.", &["aaaaaaaa1111"]);
     let with = |change: &dyn Fn(&mut SubmitAcceptanceEvaluationVerdict)| {
@@ -1785,7 +1787,11 @@ fn acceptance_submit_relays_a_refusal_and_records_nothing_on_failure() {
         .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.contains(refusal), "{}", error.message);
-    assert!(error.message.contains("Finish and report"), "{}", error.message);
+    assert!(
+        error.message.contains("Finish and report"),
+        "{}",
+        error.message
+    );
     assert!(!error.message.contains("reminders"), "{}", error.message);
     assert!(outcome_of(&state, &delegation).is_none());
 
@@ -1919,7 +1925,7 @@ fn acceptance_submit_capability_is_classified_for_claude_and_codex() {
 
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Codex);
-    let (delegation, child) = 
+    let (delegation, child) =
         install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 1);
     let request = json!({"id":"acceptance-approval","params":{
         "threadId":"thread-evaluator","turnId":"turn-evaluator","serverName":TERMAL_DELEGATION_MCP_SERVER_NAME,
@@ -1986,7 +1992,7 @@ fn acceptance_submit_capability_is_classified_for_claude_and_codex() {
 fn acceptance_and_review_capabilities_are_never_shared() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (_, evaluator) = 
+    let (_, evaluator) =
         install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 1);
     let (_, reviewer) =
         super::delegation_support::install_required_review_delegation(&state, &parent);
@@ -2083,7 +2089,7 @@ fn acceptance_and_review_capabilities_are_never_shared() {
 fn acceptance_target_persists_with_the_record_and_is_absent_elsewhere() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (evaluation, _) = 
+    let (evaluation, _) =
         install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     let (review, _) =
         super::delegation_support::install_required_review_delegation(&state, &parent);
@@ -2269,13 +2275,27 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
     assert_eq!(record.cwd, root.to_string_lossy());
     assert_eq!(record.title, "Acceptance evaluation: w-task");
     assert_eq!(record.review_result_submission_attempt, 0);
-    let history = record.acceptance_evaluation.as_ref().unwrap().attempt_history.as_ref().unwrap();
-    assert!(!history.requester_text_tainted, "the first host-authored brief is not requester follow-up");
+    let history = record
+        .acceptance_evaluation
+        .as_ref()
+        .unwrap()
+        .attempt_history
+        .as_ref()
+        .unwrap();
+    assert!(
+        !history.requester_text_tainted,
+        "the first host-authored brief is not requester follow-up"
+    );
     assert_eq!(history.ordinal, 1);
     assert_eq!(history.parent_session_id, parent);
     assert_eq!(history.child_session_id, record.child_session_id);
     assert_eq!(history.cwd, record.cwd);
-    assert_eq!(history.identity, acceptance_core_identity(&evidence_selection::canonical_core_receipt()).unwrap().unwrap());
+    assert_eq!(
+        history.identity,
+        acceptance_core_identity(&evidence_selection::canonical_core_receipt())
+            .unwrap()
+            .unwrap()
+    );
     // The first whole judgment has its own ordinal-bearing key. The target
     // names the store the brief was read from.
     let store = established_store(&state, &project).expect("the fixture store");
@@ -2479,7 +2499,7 @@ fn acceptance_project_defaults_are_used_only_when_admitted_and_never_override_ta
 fn acceptance_parent_card_uses_receipt_not_agent_prose_and_waits_for_acknowledgement() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (id, child) = 
+    let (id, child) =
         install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     {
         let mut inner = state.inner.lock().unwrap();
@@ -2653,7 +2673,8 @@ fn acceptance_request_applies_request_defaults_and_real_provider_precedence() {
             .unwrap();
         let AcceptanceEvaluationRequestResponse::Spawned {
             delegation, mode, ..
-        } = response else {
+        } = response
+        else {
             panic!("must spawn")
         };
         assert_eq!(mode, AcceptanceEvaluationMode::SubAgent);
@@ -4186,7 +4207,10 @@ fn acceptance_submit_releases_its_in_flight_marker_on_every_way_out() {
         writer.receive_fence();
         writer.fail_write();
         writer.receive_fence();
-        assert!(!submit.is_finished(), "withdrawal still awaits its durable acknowledgement");
+        assert!(
+            !submit.is_finished(),
+            "withdrawal still awaits its durable acknowledgement"
+        );
         assert_eq!(submissions_in_flight(&state), 1);
         writer.write();
         let error = submit.join().unwrap().unwrap_err();
@@ -4560,10 +4584,17 @@ fn acceptance_run_is_refused_only_by_the_expected_exit_code_with_the_known_shape
     // The two shapes the real CLI produces when nothing was recorded.
     assert_eq!(
         classify(EngramCliExit::Code(1), "", &envelope),
-        AcceptanceEvaluationRunOutcome::Refused { code: Some("work_revision_conflict".to_owned()), message: REVISION_CONFLICT.to_owned(), alternatives: Vec::new() }
+        AcceptanceEvaluationRunOutcome::Refused {
+            code: Some("work_revision_conflict".to_owned()),
+            message: REVISION_CONFLICT.to_owned(),
+            alternatives: Vec::new()
+        }
     );
-    let AcceptanceEvaluationRunOutcome::Refused { message: words, code: None, .. } =
-        classify(EngramCliExit::Code(2), "", CLAP_USAGE_ERROR)
+    let AcceptanceEvaluationRunOutcome::Refused {
+        message: words,
+        code: None,
+        ..
+    } = classify(EngramCliExit::Code(2), "", CLAP_USAGE_ERROR)
     else {
         panic!("a usage error is raised before any store is opened");
     };
@@ -5379,9 +5410,8 @@ fn endless_evidence_reader(
             page["notes"] = json!([{"locator": format!("{call:08x}cafe"), "kind": "generic",
                 "family": "notes"}]);
             page["notes_omitted"] = json!(99 - newer);
-            page["notes_window"] = canonical_notes_window(
-                100, newer, 1, 42, Some(&format!("token-{call}")),
-            );
+            page["notes_window"] =
+                canonical_notes_window(100, newer, 1, 42, Some(&format!("token-{call}")));
             Ok(page)
         }
     }
@@ -5407,9 +5437,11 @@ fn acceptance_request_budget_covers_every_read_with_its_retry() {
     // Ordinary replay and confirmed refresh are different sequential chains.
     assert_eq!(
         acceptance_evaluation_submit_budget(),
-        (call * 2 + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2 + REVIEW_FREEZE_TIMEOUT)
-            .max(call + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 5
-                + REVIEW_FREEZE_TIMEOUT + acceptance_evaluation_request_tracker_budget())
+        (call * 2 + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2 + REVIEW_FREEZE_TIMEOUT).max(
+            call + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 5
+                + REVIEW_FREEZE_TIMEOUT
+                + acceptance_evaluation_request_tracker_budget()
+        )
     );
 
     // The arithmetic names exactly the reads a maximal request performs.

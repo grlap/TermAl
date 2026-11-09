@@ -112,7 +112,10 @@ fn bash_that_writes_or_escapes_the_checker_is_rejected() {
         "cat $(echo x)",
         "sed -i 's/a/b/' src/main.rs",
     ] {
-        assert!(is_reject(&bash_decision(json!({ "command": command }))), "{command}");
+        assert!(
+            is_reject(&bash_decision(json!({ "command": command }))),
+            "{command}"
+        );
     }
 }
 
@@ -160,13 +163,20 @@ fn repeated_argument_keys_are_rejected_never_resolved() {
         r#"{"command":"git status","description":"a","description":"b"}"#,
         r#"{"command":"git status","extra":{"x":1,"x":2}}"#,
     ] {
-        assert!(is_reject(&decide(&params, Some(&observed("Bash", text)))), "{text}");
+        assert!(
+            is_reject(&decide(&params, Some(&observed("Bash", text)))),
+            "{text}"
+        );
     }
     assert_eq!(
         kimi_parse_arguments(r#"{"a":{"b":[1,{"c":true}]}}"#),
         Some(json!({ "a": { "b": [1, { "c": true }] } }))
     );
-    assert_eq!(kimi_parse_arguments("[1,2]"), None, "only an object is arguments");
+    assert_eq!(
+        kimi_parse_arguments("[1,2]"),
+        None,
+        "only an object is arguments"
+    );
 }
 
 #[test]
@@ -179,12 +189,20 @@ fn the_after_the_fact_check_compares_values_not_text() {
     observations.record_approval("c1", approved);
     // Kimi's re-serialization: compact, another key order.
     assert_eq!(
-        observations.observe(&raw_input("c1", json!({ "timeout": 30, "command": "git status" }))),
+        observations.observe(&raw_input(
+            "c1",
+            json!({ "timeout": 30, "command": "git status" })
+        )),
         None
     );
-    assert!(observations
-        .observe(&raw_input("c1", json!({ "timeout": 30, "command": "git stash" })))
-        .is_some());
+    assert!(
+        observations
+            .observe(&raw_input(
+                "c1",
+                json!({ "timeout": 30, "command": "git stash" })
+            ))
+            .is_some()
+    );
 }
 
 #[test]
@@ -194,9 +212,15 @@ fn cwd_is_compared_as_a_path_key() {
     } else {
         "/work/repo/"
     };
-    assert!(!is_reject(&bash_decision(json!({ "command": "git status", "cwd": same }))));
-    assert!(is_reject(&bash_decision(json!({ "command": "git status", "cwd": "/work/repo/sub" }))));
-    assert!(is_reject(&bash_decision(json!({ "command": "git status", "cwd": 7 }))));
+    assert!(!is_reject(&bash_decision(
+        json!({ "command": "git status", "cwd": same })
+    )));
+    assert!(is_reject(&bash_decision(
+        json!({ "command": "git status", "cwd": "/work/repo/sub" })
+    )));
+    assert!(is_reject(&bash_decision(
+        json!({ "command": "git status", "cwd": 7 })
+    )));
 }
 
 #[test]
@@ -212,8 +236,10 @@ fn only_the_streamed_text_shape_counts_and_oversized_streams_are_rejected() {
         ]),
     ];
     for content in odd_shapes {
-        observations.observe(&json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1",
-            "status": "in_progress", "content": content }));
+        observations.observe(
+            &json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1",
+            "status": "in_progress", "content": content }),
+        );
     }
     assert_eq!(observations.get("c1").unwrap().streamed_args, None);
 
@@ -242,7 +268,10 @@ fn a_summary_that_does_not_show_the_command_is_rejected() {
         "git status",
     ] {
         assert!(
-            is_reject(&decide(&request_params("b", "Bash", summary), Some(&observation))),
+            is_reject(&decide(
+                &request_params("b", "Bash", summary),
+                Some(&observation)
+            )),
             "{summary}"
         );
     }
@@ -269,13 +298,20 @@ fn submit_args() -> Value {
 }
 
 fn mcp_params(title: &str) -> Value {
-    request_params("m", title, &format!("Requesting approval to Approve {title}"))
+    request_params(
+        "m",
+        title,
+        &format!("Requesting approval to Approve {title}"),
+    )
 }
 
 #[test]
 fn only_the_exact_termal_result_tool_with_a_valid_request_is_allowed() {
     let args = submit_args();
-    let observation = observed(TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME, &args.to_string());
+    let observation = observed(
+        TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME,
+        &args.to_string(),
+    );
     assert_eq!(
         decide(
             &mcp_params(TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME),
@@ -296,7 +332,10 @@ fn only_the_exact_termal_result_tool_with_a_valid_request_is_allowed() {
     wrong["schemaVersion"] = json!(99);
     assert!(is_reject(&decide(
         &mcp_params(TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME),
-        Some(&observed(TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME, &wrong.to_string()))
+        Some(&observed(
+            TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME,
+            &wrong.to_string()
+        ))
     )));
     // Foreign aliases, the bare name and the evaluator tool are refused.
     for title in [
@@ -306,7 +345,10 @@ fn only_the_exact_termal_result_tool_with_a_valid_request_is_allowed() {
         TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME,
     ] {
         assert!(
-            is_reject(&decide(&mcp_params(title), Some(&observed(title, &args.to_string())))),
+            is_reject(&decide(
+                &mcp_params(title),
+                Some(&observed(title, &args.to_string()))
+            )),
             "{title}"
         );
     }
@@ -328,7 +370,10 @@ fn exit_plan_mode_rejects_the_plan_and_leaves_plan_mode() {
         Some("plan_reject_and_exit")
     );
     // Without that option the plan is refused, and plan mode stays.
-    assert!(is_reject(&decide(&request_params("p", "ExitPlanMode", "x"), None)));
+    assert!(is_reject(&decide(
+        &request_params("p", "ExitPlanMode", "x"),
+        None
+    )));
 }
 
 #[test]
@@ -339,7 +384,10 @@ fn an_approval_selects_allow_once_and_never_allow_always() {
         Some("approve_once")
     );
     let only_always = json!([{ "optionId": "always", "kind": "allow_always" }]);
-    assert_eq!(kimi_read_only_option_id(only_always.as_array().unwrap(), &decision), None);
+    assert_eq!(
+        kimi_read_only_option_id(only_always.as_array().unwrap(), &decision),
+        None
+    );
 }
 
 #[test]
@@ -363,12 +411,21 @@ fn observations_follow_kimis_real_ordering_and_catch_a_changed_raw_input() {
         "the reported input is the approved one"
     );
     assert_eq!(
-        observations.observe(&raw_input("c1", json!({ "command": "git status; rm -rf ." }))),
-        Some(KimiApprovedInputMismatch { title: "Bash".to_owned() })
+        observations.observe(&raw_input(
+            "c1",
+            json!({ "command": "git status; rm -rf ." })
+        )),
+        Some(KimiApprovedInputMismatch {
+            title: "Bash".to_owned()
+        })
     );
-    let done = json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed" });
+    let done =
+        json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed" });
     observations.observe(&done);
-    assert!(observations.get("c1").is_none(), "a finished call is forgotten");
+    assert!(
+        observations.get("c1").is_none(),
+        "a finished call is forgotten"
+    );
 }
 
 #[test]
@@ -546,9 +603,11 @@ fn kimi_read_only_child(
         Some("delegation-kimi-read-only".to_owned());
     inner.sessions[child_index].session.status = SessionStatus::Active;
     inner.sessions[child_index].runtime = SessionRuntime::Acp(runtime.clone());
-    inner
-        .delegations
-        .push(kimi_reviewer_record(parent_session_id, child_session_id.clone(), Agent::Kimi));
+    inner.delegations.push(kimi_reviewer_record(
+        parent_session_id,
+        child_session_id.clone(),
+        Agent::Kimi,
+    ));
     let delegation_index = inner.delegations.len() - 1;
     inner.mark_delegation_mutated(delegation_index);
     inner.sync_running_read_only_delegation_index(delegation_index);
@@ -568,8 +627,13 @@ fn permission_message(params: Value) -> Value {
 
 fn next_permission_outcome(rx: &mpsc::Receiver<AcpRuntimeCommand>) -> Value {
     loop {
-        match rx.try_recv().expect("a permission answer should have been sent") {
-            AcpRuntimeCommand::JsonRpcMessage(message) => return message["result"]["outcome"].clone(),
+        match rx
+            .try_recv()
+            .expect("a permission answer should have been sent")
+        {
+            AcpRuntimeCommand::JsonRpcMessage(message) => {
+                return message["result"]["outcome"].clone();
+            }
             _ => continue,
         }
     }
@@ -580,19 +644,30 @@ fn a_read_only_kimi_child_is_answered_by_the_host_in_the_real_message_order() {
     let mut kimi = KimiHarness::read_only_child();
 
     // Read-only bash: streamed, requested, approved once.
-    kimi.request("c1", "Bash", "{\"command\": \"git status\"}",
-        "Requesting approval to Running: git status");
+    kimi.request(
+        "c1",
+        "Bash",
+        "{\"command\": \"git status\"}",
+        "Requesting approval to Running: git status",
+    );
     assert_eq!(
         next_permission_outcome(&kimi.rx),
         json!({ "outcome": "selected", "optionId": "approve_once" })
     );
     // Kimi's report after the answer matches what was approved.
     kimi.send(update(raw_input("c1", json!({ "command": "git status" }))));
-    assert!(kimi.rx.try_recv().is_err(), "a matching report changes nothing");
+    assert!(
+        kimi.rx.try_recv().is_err(),
+        "a matching report changes nothing"
+    );
 
     // A write: rejected once, never shown as a manual card.
-    kimi.request("c2", "Write", "{\"path\": \"x.txt\", \"content\": \"x\"}",
-        "Requesting approval to Writing x.txt");
+    kimi.request(
+        "c2",
+        "Write",
+        "{\"path\": \"x.txt\", \"content\": \"x\"}",
+        "Requesting approval to Writing x.txt",
+    );
     assert_eq!(
         next_permission_outcome(&kimi.rx),
         json!({ "outcome": "selected", "optionId": "reject" })
@@ -630,19 +705,33 @@ fn a_stale_or_stopping_runtime_is_answered_cancelled() {
         let index = inner.find_session_index(&kimi.id).unwrap();
         inner.sessions[index].runtime_stop_in_progress = true;
     }
-    kimi.request("c1", "Bash", "{\"command\": \"git status\"}",
-        "Requesting approval to Running: git status");
-    assert_eq!(next_permission_outcome(&kimi.rx), json!({ "outcome": "cancelled" }));
+    kimi.request(
+        "c1",
+        "Bash",
+        "{\"command\": \"git status\"}",
+        "Requesting approval to Running: git status",
+    );
+    assert_eq!(
+        next_permission_outcome(&kimi.rx),
+        json!({ "outcome": "cancelled" })
+    );
 }
 
 #[test]
 fn a_changed_raw_input_after_an_approval_stops_the_turn() {
     let mut kimi = KimiHarness::read_only_child();
-    kimi.request("c1", "Bash", "{\"command\": \"git status\"}",
-        "Requesting approval to Running: git status");
+    kimi.request(
+        "c1",
+        "Bash",
+        "{\"command\": \"git status\"}",
+        "Requesting approval to Running: git status",
+    );
     let _ = next_permission_outcome(&kimi.rx);
 
-    kimi.send(update(raw_input("c1", json!({ "command": "git status; touch x" }))));
+    kimi.send(update(raw_input(
+        "c1",
+        json!({ "command": "git status; touch x" }),
+    )));
 
     assert!(kimi.cancelled(), "the prompt is cancelled");
     assert_eq!(kimi.status(), SessionStatus::Error);
@@ -654,15 +743,21 @@ fn a_mode_that_stops_asking_stops_a_read_only_turn_only_inside_the_prompt() {
 
     // During session setup, before TermAl's own Default-mode ACK, a mode Kimi
     // kept from an earlier session is about to be replaced: no violation.
-    kimi.send(update(json!({ "sessionUpdate": "current_mode_update", "currentModeId": "yolo" })));
+    kimi.send(update(
+        json!({ "sessionUpdate": "current_mode_update", "currentModeId": "yolo" }),
+    ));
     assert!(!kimi.cancelled(), "setup is not a violation");
     assert_eq!(kimi.status(), SessionStatus::Active);
 
     // After the ACK, for the rest of the prompt, the gate is armed.
     set_kimi_mode_gate_armed(&kimi.runtime_state, true);
-    kimi.send(update(json!({ "sessionUpdate": "current_mode_update", "currentModeId": "plan" })));
+    kimi.send(update(
+        json!({ "sessionUpdate": "current_mode_update", "currentModeId": "plan" }),
+    ));
     assert!(!kimi.cancelled(), "plan mode keeps the gate");
-    kimi.send(update(json!({ "sessionUpdate": "current_mode_update", "currentModeId": "yolo" })));
+    kimi.send(update(
+        json!({ "sessionUpdate": "current_mode_update", "currentModeId": "yolo" }),
+    ));
     assert!(kimi.cancelled());
     assert_eq!(kimi.status(), SessionStatus::Error);
 }
@@ -692,7 +787,10 @@ fn a_mode_violation_is_cancelled_even_when_persisting_the_display_fails() {
         AcpAgent::Kimi,
     );
 
-    assert!(kimi.cancelled(), "the prompt is cancelled whatever persistence does");
+    assert!(
+        kimi.cancelled(),
+        "the prompt is cancelled whatever persistence does"
+    );
 }
 
 #[test]
@@ -707,12 +805,20 @@ fn a_kimi_session_that_is_not_read_only_keeps_manual_approvals() {
         inner.sessions[index].session.status = SessionStatus::Active;
     }
     let mut kimi = KimiHarness::new(state, id, runtime, rx);
-    kimi.request("c1", "Bash", "{\"command\": \"git status\"}",
-        "Requesting approval to Running: git status");
+    kimi.request(
+        "c1",
+        "Bash",
+        "{\"command\": \"git status\"}",
+        "Requesting approval to Running: git status",
+    );
     assert!(kimi.rx.try_recv().is_err(), "the host answers nothing");
     let inner = kimi.state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&kimi.id).unwrap()];
-    assert_eq!(record.pending_acp_approvals.len(), 1, "a manual card is queued");
+    assert_eq!(
+        record.pending_acp_approvals.len(),
+        1,
+        "a manual card is queued"
+    );
 }
 
 #[test]
@@ -728,7 +834,9 @@ fn the_freeze_tool_is_allowed_with_a_valid_request_and_a_mismatched_summary_is_n
     let other_summary = request_params(
         "m",
         title,
-        &format!("Requesting approval to Approve {TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME}"),
+        &format!(
+            "Requesting approval to Approve {TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME}"
+        ),
     );
     assert!(is_reject(&decide(&other_summary, Some(&observation))));
     let bad = json!({ "manifestPath": "", "expectedFingerprint": "x" });
@@ -758,15 +866,20 @@ fn eviction_spares_an_approved_call_whose_report_is_pending() {
         observations.observe(&tool_call(&format!("read{index}"), "Read"));
     }
     assert!(observations.get("approved").is_some());
-    assert!(observations
-        .observe(&raw_input("approved", json!({ "command": "rm -rf ." })))
-        .is_some());
+    assert!(
+        observations
+            .observe(&raw_input("approved", json!({ "command": "rm -rf ." })))
+            .is_some()
+    );
 }
 
 #[test]
 fn only_windows_folds_separators_and_case_in_the_cwd_key() {
     if cfg!(windows) {
-        assert_eq!(kimi_path_key(r"C:\Work\Repo\"), kimi_path_key("c:/work/repo"));
+        assert_eq!(
+            kimi_path_key(r"C:\Work\Repo\"),
+            kimi_path_key("c:/work/repo")
+        );
     } else {
         assert_ne!(kimi_path_key(r"/work\repo"), kimi_path_key("/work/repo"));
         assert_ne!(kimi_path_key("/Work/Repo"), kimi_path_key("/work/repo"));
@@ -796,7 +909,10 @@ fn the_creation_path_admits_a_kimi_reviewer_and_a_read_only_explorer() {
             )
             .unwrap_or_else(|err| panic!("{mode:?} should be admitted: {}", err.message));
         assert_eq!(response.delegation.agent, Agent::Kimi);
-        assert_eq!(response.delegation.write_policy, DelegationWritePolicy::ReadOnly);
+        assert_eq!(
+            response.delegation.write_policy,
+            DelegationWritePolicy::ReadOnly
+        );
         let inner = state.inner.lock().unwrap();
         let child = inner
             .sessions

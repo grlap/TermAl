@@ -10,12 +10,19 @@ const MEMBER_GENERATION: u64 = 5;
 // not a second naming RPC, receipt, verification record or bind obligation.
 fn name_member(turn: &EOCheckedTurn) -> EngramWorkSourceRoot {
     let mut inner = turn.state.inner.lock().unwrap();
-    let launch = inner.engram_work_source_roots.iter()
-        .find(|entry| entry.named_by_session == turn.session_id).cloned().unwrap();
+    let launch = inner
+        .engram_work_source_roots
+        .iter()
+        .find(|entry| entry.named_by_session == turn.session_id)
+        .cloned()
+        .unwrap();
     let member = EngramWorkSourceRoot {
-        work_id: "work-member".to_owned(), short_ref: "w-member".to_owned(),
-        claim_id: "claim-member".to_owned(), claim_fence: 1,
-        generation: MEMBER_GENERATION, ..launch
+        work_id: "work-member".to_owned(),
+        short_ref: "w-member".to_owned(),
+        claim_id: "claim-member".to_owned(),
+        claim_fence: 1,
+        generation: MEMBER_GENERATION,
+        ..launch
     };
     inner.engram_work_source_roots.push(member.clone());
     member
@@ -23,27 +30,37 @@ fn name_member(turn: &EOCheckedTurn) -> EngramWorkSourceRoot {
 
 fn member_binding(fence: i64) -> EngramControlWorkBinding {
     EngramControlWorkBinding {
-        root_execution_id: "root-member".to_owned(), work_id: "work-member".to_owned(),
-        run_id: "run-member".to_owned(), work_revision: 1,
-        claim_id: "claim-member".to_owned(), claim_fence: fence,
+        root_execution_id: "root-member".to_owned(),
+        work_id: "work-member".to_owned(),
+        run_id: "run-member".to_owned(),
+        work_revision: 1,
+        claim_id: "claim-member".to_owned(),
+        claim_fence: fence,
     }
 }
 
 fn script_members(turn: &EOCheckedTurn, member_fence: Option<i64>, omitted: u64) {
     let launch = turn.record(|record| record.engram.work_binding.clone().unwrap());
     let mut items = vec![EngramHeldClaim {
-        work_id: launch.work_id.clone(), short_ref: launch.work_id.clone(),
-        claim_id: launch.claim_id.clone(), claim_fence: launch.claim_fence,
-        focused: true, control_binding: Some(launch),
+        work_id: launch.work_id.clone(),
+        short_ref: launch.work_id.clone(),
+        claim_id: launch.claim_id.clone(),
+        claim_fence: launch.claim_fence,
+        focused: true,
+        control_binding: Some(launch),
     }];
     if let Some(fence) = member_fence {
         items.push(EngramHeldClaim {
-            work_id: "work-member".to_owned(), short_ref: "w-member".to_owned(),
-            claim_id: "claim-member".to_owned(), claim_fence: fence,
-            focused: false, control_binding: Some(member_binding(fence)),
+            work_id: "work-member".to_owned(),
+            short_ref: "w-member".to_owned(),
+            claim_id: "claim-member".to_owned(),
+            claim_fence: fence,
+            focused: false,
+            control_binding: Some(member_binding(fence)),
         });
     }
-    turn.transport.replace_held_claims([Ok(EngramHeldClaims { items, omitted })]);
+    turn.transport
+        .replace_held_claims([Ok(EngramHeldClaims { items, omitted })]);
 }
 
 #[test]
@@ -53,11 +70,16 @@ fn an_ordinary_launch_preserves_the_members_original_fence_without_binding_its_a
     script_members(&turn, Some(2), 0);
     ordinary_launch_gate(&turn, &worktree, false);
     let original = turn.record(|record| record.engram.carried_checks[0].bind_targets.clone());
-    assert_eq!(original, vec![EngramBindTarget {
-        work_id: "work-member".to_owned(), short_ref: "w-member".to_owned(),
-        claim_id: "claim-member".to_owned(), claim_fence: 2,
-        root_generation: MEMBER_GENERATION,
-    }]);
+    assert_eq!(
+        original,
+        vec![EngramBindTarget {
+            work_id: "work-member".to_owned(),
+            short_ref: "w-member".to_owned(),
+            claim_id: "claim-member".to_owned(),
+            claim_fence: 2,
+            root_generation: MEMBER_GENERATION,
+        }]
+    );
     script_members(&turn, Some(3), 0);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     assert_carried_artifact_custody(&turn, &run, true);
@@ -73,12 +95,18 @@ fn an_ordinary_launch_preserves_the_members_original_fence_without_binding_its_a
 fn an_unread_member_claim_creates_no_captured_target_or_native_binding() {
     let (turn, worktree) = ordinary_carried_turn("ordinary-member-unread");
     name_member(&turn);
-    turn.transport.replace_held_claims([Err(EngramTransportError::transport("held read unavailable"))]);
+    turn.transport
+        .replace_held_claims([Err(EngramTransportError::transport(
+            "held read unavailable",
+        ))]);
     ordinary_launch_gate(&turn, &worktree, false);
     turn.record(|record| {
         assert!(record.engram.carried_checks[0].bind_targets.is_empty());
         let line = record.engram.pending_source_root_line.as_deref().unwrap();
-        assert!(line.contains("w-member") && line.contains("could not be read"), "{line}");
+        assert!(
+            line.contains("w-member") && line.contains("could not be read"),
+            "{line}"
+        );
     });
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
@@ -92,7 +120,10 @@ fn a_member_missing_from_a_cut_short_held_list_stays_unknown_without_a_binding()
     turn.record(|record| {
         assert!(record.engram.carried_checks[0].bind_targets.is_empty());
         let line = record.engram.pending_source_root_line.as_deref().unwrap();
-        assert!(line.contains("w-member") && line.contains("was cut short"), "{line}");
+        assert!(
+            line.contains("w-member") && line.contains("was cut short"),
+            "{line}"
+        );
     });
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
@@ -123,10 +154,15 @@ fn historical_batch_data() -> Value {
 fn assert_batch_history(record: &SessionRecord, history: &Value) {
     let wire = serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap();
     for key in ["engramOwedBinds", "engramPendingBatches"] {
-        assert_eq!(&wire[key], &history[key], "{key} is passive, complete original data");
+        assert_eq!(
+            &wire[key], &history[key],
+            "{key} is passive, complete original data"
+        );
     }
-    assert!(record.engram.pending_source_root_line.is_none(),
-        "raw history cannot invent a collision, retry or expiry notice");
+    assert!(
+        record.engram.pending_source_root_line.is_none(),
+        "raw history cannot invent a collision, retry or expiry notice"
+    );
 }
 
 #[test]
@@ -135,22 +171,30 @@ fn historical_owed_and_pending_batches_survive_sqlite_and_an_ordinary_turn_witho
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     let guard = phase_sync::PollGuard::new();
     loop {
-        if turn.record(|record| record.engram.unadmitted_active_turn.is_none()
-            && !record.engram.unadmitted_worker_running) { break; }
+        if turn.record(|record| {
+            record.engram.unadmitted_active_turn.is_none()
+                && !record.engram.unadmitted_worker_running
+        }) {
+            break;
+        }
         guard.wait("the initial ordinary observation completes before loading history");
     }
     let history = historical_batch_data();
     let runtime = turn.record(|record| record.runtime.clone());
     // Read the fixture's association before the stored record replaces the
     // live one: the persisted form carries no work binding.
-    let binding = turn.record(|record| record.engram.work_binding.clone())
+    let binding = turn
+        .record(|record| record.engram.work_binding.clone())
         .expect("the fixture associated its claim");
     let stored = turn.record(|record| {
         let mut wire = serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap();
         for key in ["engramOwedBinds", "engramPendingBatches"] {
             wire[key] = history[key].clone();
         }
-        serde_json::from_value::<PersistedSessionRecord>(wire).unwrap().into_record().unwrap()
+        serde_json::from_value::<PersistedSessionRecord>(wire)
+            .unwrap()
+            .into_record()
+            .unwrap()
     });
     assert_batch_history(&stored, &history);
     turn.state.shutdown_persist_blocking();
@@ -161,8 +205,13 @@ fn historical_owed_and_pending_batches_survive_sqlite_and_an_ordinary_turn_witho
         inner.session_mut_by_index(index).unwrap();
         turn.state.persist_synchronous_locked(&inner).unwrap();
     }
-    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
-    assert_batch_history(&loaded.sessions[loaded.find_session_index(&turn.session_id).unwrap()], &history);
+    let loaded = load_state(turn.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_batch_history(
+        &loaded.sessions[loaded.find_session_index(&turn.session_id).unwrap()],
+        &history,
+    );
     // Boot restores no current-claim mirror and no in-memory fixture hooks.
     // Reattach exactly what the fixture installed: its clock, transport,
     // source capture and explicit work association (as the fixture does
@@ -170,11 +219,17 @@ fn historical_owed_and_pending_batches_survive_sqlite_and_an_ordinary_turn_witho
     let clock = turn.state.engram_budget_clock();
     *turn.state.inner.lock().unwrap() = loaded;
     turn.state.select_test_engram_budget_clock(clock);
-    turn.state.install_control_test_transport(turn.transport.clone());
+    turn.state
+        .install_control_test_transport(turn.transport.clone());
     turn.state.inner.lock().unwrap().test_engram_source_capture =
-        Some(Arc::new(|place, _budget| engram_place_source_capture(place)));
+        Some(Arc::new(|place, _budget| {
+            engram_place_source_capture(place)
+        }));
     turn.record_mut(|record| {
-        assert!(record.engram.work_binding.is_none(), "the reload restores no claim association");
+        assert!(
+            record.engram.work_binding.is_none(),
+            "the reload restores no claim association"
+        );
         record.runtime = runtime;
         record.engram.context_nudge_pending = false;
         record.engram.work_binding = Some(binding);
@@ -186,14 +241,26 @@ fn historical_owed_and_pending_batches_survive_sqlite_and_an_ordinary_turn_witho
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     turn.record(|record| assert_batch_history(record, &history));
     let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
-    turn.state.update_project_engram_settings(&project_id,
-        EngramProjectSettings { enabled: false, ..EngramProjectSettings::default() }).unwrap();
+    turn.state
+        .update_project_engram_settings(
+            &project_id,
+            EngramProjectSettings {
+                enabled: false,
+                ..EngramProjectSettings::default()
+            },
+        )
+        .unwrap();
     turn.record(|record| assert_batch_history(record, &history));
     {
         let inner = turn.state.inner.lock().unwrap();
         turn.state.persist_synchronous_locked(&inner).unwrap();
     }
-    let again = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
-    assert_batch_history(&again.sessions[again.find_session_index(&turn.session_id).unwrap()], &history);
+    let again = load_state(turn.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_batch_history(
+        &again.sessions[again.find_session_index(&turn.session_id).unwrap()],
+        &history,
+    );
     assert_ordinary_turn_has_no_native_requests(&turn);
 }

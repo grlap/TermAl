@@ -53,7 +53,10 @@ fn engram_node_force_exit_preserves_supported_options_and_literal_operands() {
         assert_eq!(check.normalized, command);
         let words = engram_shell_words(&check.normalized).unwrap();
         let expected = engram_shell_words(&format!("node {arguments}")).unwrap();
-        assert_eq!(engram_focused_node_words(&check.program, &words[1..]), Some(expected));
+        assert_eq!(
+            engram_focused_node_words(&check.program, &words[1..]),
+            Some(expected)
+        );
     }
 }
 
@@ -150,23 +153,44 @@ fn engram_node_force_exit_keeps_source_and_runtime_owner_fences() {
         if changed == "source" {
             fixture.turn.change_readme("changed while Node tests ran\n");
         } else {
-            fixture.provenance = fixture.turn.record(|record| EngramObservationProvenance::Runtime {
-                token: record.runtime.runtime_token().unwrap(),
-                turn_generation: record.active_turn_generation.saturating_add(1),
-            });
+            fixture.provenance =
+                fixture
+                    .turn
+                    .record(|record| EngramObservationProvenance::Runtime {
+                        token: record.runtime.runtime_token().unwrap(),
+                        turn_generation: record.active_turn_generation.saturating_add(1),
+                    });
         }
         let observation = fixture.finish(EngramCommandExit::Code(0));
         assert!(observation.get("verification_evidence").is_none());
         if changed == "owner" {
             one_node_test(&observation, "indeterminate");
-            assert!(observation["occurrence"]["observed_checks"][0].get("finished_at").is_none());
+            assert!(
+                observation["occurrence"]["observed_checks"][0]
+                    .get("finished_at")
+                    .is_none()
+            );
         } else {
             let check = node_diagnostic(&fixture.turn);
-            let start = check.start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
-            let end = check.end.as_ref().unwrap().end_basis
-                .wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+            let start = check
+                .start_basis
+                .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+                .unwrap()
+                .unwrap();
+            let end = check
+                .end
+                .as_ref()
+                .unwrap()
+                .end_basis
+                .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+                .unwrap()
+                .unwrap();
             assert_ne!(start.source_revision, end.source_revision);
-            assert!(observation["occurrence"]["observed_checks"][0].get("source_basis").is_none());
+            assert!(
+                observation["occurrence"]["observed_checks"][0]
+                    .get("source_basis")
+                    .is_none()
+            );
         }
     }
 }

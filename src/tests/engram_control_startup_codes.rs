@@ -77,20 +77,35 @@ fn control_startup_codes_are_terminal_remote_errors_classified_by_code() {
 #[test]
 fn startup_errors_do_not_refuse_an_ordinary_observation_report() {
     let message = "Engram control startup could not acquire the store.";
-    for code in STARTUP_CODES.into_iter().chain(["storage_error", "control_projection_invalid"]) {
+    for code in STARTUP_CODES
+        .into_iter()
+        .chain(["storage_error", "control_projection_invalid"])
+    {
         let delivery = engram_runtime_observation_failure_delivery(
-            remote_error(code, message), "ordinary-observation-key");
-        assert_eq!(delivery, EngramRuntimeObservationDelivery::Pending {
-            last_error: Some(message.to_owned()),
-        }, "{code}: no definitive ordinary report refusal or write certificate");
+            remote_error(code, message),
+            "ordinary-observation-key",
+        );
+        assert_eq!(
+            delivery,
+            EngramRuntimeObservationDelivery::Pending {
+                last_error: Some(message.to_owned()),
+            },
+            "{code}: no definitive ordinary report refusal or write certificate"
+        );
     }
     let code = "execution_observation_invalid";
     let message = "ordinary report payload refused";
-    assert_eq!(engram_runtime_observation_failure_delivery(
-        remote_error(code, message), "ordinary-observation-key"),
+    assert_eq!(
+        engram_runtime_observation_failure_delivery(
+            remote_error(code, message),
+            "ordinary-observation-key"
+        ),
         EngramRuntimeObservationDelivery::Refused {
-            code: code.to_owned(), message: message.to_owned(),
-        }, "the remaining protocol's documented no-write refusal stays final");
+            code: code.to_owned(),
+            message: message.to_owned(),
+        },
+        "the remaining protocol's documented no-write refusal stays final"
+    );
 }
 
 /// Every other request-level error keeps today's meaning: a live
@@ -107,13 +122,21 @@ fn ordinary_remote_errors_keep_their_worker_as_before() {
         "control_startup_busy_v2",
     ] {
         let error = remote_error(code, "Engram control startup could not acquire the store.");
-        assert!(error.keeps_control_process_alive(), "{code}: the worker is kept");
+        assert!(
+            error.keeps_control_process_alive(),
+            "{code}: the worker is kept"
+        );
         assert!(!error.disables_session(), "{code}: not fatal");
         let expected = if matches!(code, "control_request_expired" | "control_store_busy") {
             EngramInvocationApplication::CertifiedNotApplied
-        } else { EngramInvocationApplication::Unknown };
-        assert_eq!(error.invocation_application(), expected,
-            "{code}: only the typed remote certificate proves non-application");
+        } else {
+            EngramInvocationApplication::Unknown
+        };
+        assert_eq!(
+            error.invocation_application(),
+            expected,
+            "{code}: only the typed remote certificate proves non-application"
+        );
     }
 }
 
@@ -135,7 +158,11 @@ fn real_process_startup_code_evicts_and_reaps_the_worker() {
 
         fs::write(&project_file, format!("{mode}\n")).unwrap();
         let error = transport
-            .request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
+            .request(
+                &connection,
+                &EngramControlRequest::WorkSessionRead {},
+                DEADLOCK_GUARD,
+            )
             .expect_err("the startup code is an error");
         assert_eq!(error.kind, EngramTransportErrorKind::Remote, "{code}");
         assert_eq!(error.code.as_deref(), Some(code));
@@ -147,7 +174,10 @@ fn real_process_startup_code_evicts_and_reaps_the_worker() {
             .and_then(Option::as_ref)
             .cloned()
             .expect("the retiring worker keeps registry custody until cleanup");
-        assert!(Arc::ptr_eq(&retained, &worker), "{code}: exact cleanup owner");
+        assert!(
+            Arc::ptr_eq(&retained, &worker),
+            "{code}: exact cleanup owner"
+        );
         assert!(
             worker.retiring.load(std::sync::atomic::Ordering::Acquire),
             "{code}: the worker {pid} is retired from request service"
@@ -159,11 +189,23 @@ fn real_process_startup_code_evicts_and_reaps_the_worker() {
 
         fs::write(&project_file, "fixture-ok\n").unwrap();
         let next = transport
-            .request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
+            .request(
+                &connection,
+                &EngramControlRequest::WorkSessionRead {},
+                DEADLOCK_GUARD,
+            )
             .expect("a later call starts a new worker");
-        assert_eq!(next, json!({"binding":null}), "framing-only ordinary read, no identity or capability proof");
-        assert!(worker.cleanup_finished.load(std::sync::atomic::Ordering::Acquire),
-            "{code}: successor service waits for the old cleanup owner");
+        assert_eq!(
+            next,
+            json!({"binding":null}),
+            "framing-only ordinary read, no identity or capability proof"
+        );
+        assert!(
+            worker
+                .cleanup_finished
+                .load(std::sync::atomic::Ordering::Acquire),
+            "{code}: successor service waits for the old cleanup owner"
+        );
         assert_ne!(
             transport.process_for(&connection).unwrap().process.id(),
             pid,
@@ -189,7 +231,11 @@ fn real_process_ordinary_remote_error_keeps_the_worker() {
 
         fs::write(&project_file, format!("{mode}\n")).unwrap();
         let error = transport
-            .request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
+            .request(
+                &connection,
+                &EngramControlRequest::WorkSessionRead {},
+                DEADLOCK_GUARD,
+            )
             .expect_err("the request-level error is reported");
         assert_eq!(error.code.as_deref(), Some(code));
         assert!(
@@ -199,7 +245,11 @@ fn real_process_ordinary_remote_error_keeps_the_worker() {
 
         fs::write(&project_file, "fixture-ok\n").unwrap();
         transport
-            .request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
+            .request(
+                &connection,
+                &EngramControlRequest::WorkSessionRead {},
+                DEADLOCK_GUARD,
+            )
             .expect("the same worker answers the next call");
         assert!(
             Arc::ptr_eq(&worker, &transport.process_for(&connection).unwrap()),

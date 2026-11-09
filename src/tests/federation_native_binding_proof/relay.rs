@@ -86,7 +86,9 @@ async fn mailbox_relay_rpc_describes_unbound_native_without_changing_its_runtime
             }
         )
         .await
-        .err().expect("missing remote root must refuse").status,
+        .err()
+        .expect("missing remote root must refuse")
+        .status,
         StatusCode::NOT_FOUND,
         "a typed application NotFound is not a missing relay capability"
     );
@@ -484,7 +486,10 @@ async fn mailbox_relay_public_remote_proxy_send_reply_read_ack_keeps_local_histo
             false
         )
     );
-    assert!(!note.contains(&format!("messageId: \"{home_local}\"")), "{note}");
+    assert!(
+        !note.contains(&format!("messageId: \"{home_local}\"")),
+        "{note}"
+    );
     // The sender's exact read of it through the relay reports the home's
     // current state as of the read.
     let response = fixture
@@ -691,10 +696,22 @@ async fn mailbox_relay_public_remote_proxy_send_reply_read_ack_keeps_local_histo
     let reply: MailboxAppendReceipt = response.json().await.unwrap();
     assert_eq!(reply.mailbox_id, sent.mailbox_id);
     assert_eq!(reply.sequence, sent.sequence + 1);
-    let reply_locator = MailboxRelayLocator::decode(&reply.message_id, true).unwrap().unwrap();
-    let owner = fixture.central.native_mailbox_relay_descriptor(&caller).unwrap();
-    let replied_message = fixture.central.mailbox_store.read_message(&owner.principal.participant_key(), &reply_locator.id).unwrap();
-    assert_eq!(replied_message.target_name, owner.name, "replying through a qualified principal retains the freshly proved display name");
+    let reply_locator = MailboxRelayLocator::decode(&reply.message_id, true)
+        .unwrap()
+        .unwrap();
+    let owner = fixture
+        .central
+        .native_mailbox_relay_descriptor(&caller)
+        .unwrap();
+    let replied_message = fixture
+        .central
+        .mailbox_store
+        .read_message(&owner.principal.participant_key(), &reply_locator.id)
+        .unwrap();
+    assert_eq!(
+        replied_message.target_name, owner.name,
+        "replying through a qualified principal retains the freshly proved display name"
+    );
     assert_eq!(
         fixture
             .central
@@ -926,7 +943,10 @@ async fn mailbox_relay_public_remote_proxy_send_reply_read_ack_keeps_local_histo
     let error = unavailable["error"].as_str().expect("an error message");
     assert!(error.starts_with("current status unavailable:"), "{error}");
     assert!(error.contains("says nothing about delivery"), "{error}");
-    assert!(!error.contains("reconcile the original operation"), "{error}");
+    assert!(
+        !error.contains("reconcile the original operation"),
+        "{error}"
+    );
     assert!(unavailable.get("currentStatus").is_none());
     satellite_api.finish().await;
     central_api.finish().await;

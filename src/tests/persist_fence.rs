@@ -49,15 +49,23 @@ impl FenceFixture {
         let root = TestTempRoot::create("persist-fence");
         let path = root.path().join("termal.sqlite");
         let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
-        connection.pragma_update(None, "encoding", encoding).unwrap();
+        connection
+            .pragma_update(None, "encoding", encoding)
+            .unwrap();
         // Keep the chosen connection through schema creation: an encoding
         // selected on a still-empty database does not survive its last close.
         ensure_sqlite_state_schema_for_load_path(&connection, &path).unwrap();
-        let actual: String = connection.pragma_query_value(None, "encoding", |row| row.get(0)).unwrap();
+        let actual: String = connection
+            .pragma_query_value(None, "encoding", |row| row.get(0))
+            .unwrap();
         assert_eq!(actual, encoding);
         let inner = StateInner::new();
-        inner.metadata_predecessor.store(metadata_unit_generation(&connection).unwrap(), std::sync::atomic::Ordering::Release);
-        let cache = SqlitePersistConnectionCache::from_validated_connection(Some((path, connection)));
+        inner.metadata_predecessor.store(
+            metadata_unit_generation(&connection).unwrap(),
+            std::sync::atomic::Ordering::Release,
+        );
+        let cache =
+            SqlitePersistConnectionCache::from_validated_connection(Some((path, connection)));
         Self {
             cache,
             root,
@@ -279,16 +287,40 @@ fn own_row_fence_requires_every_ordinary_component_on_the_same_writer_connection
     // Every ordinary component of the row image must match; a historical
     // control key is raw data and cannot hold or grant the acknowledgement.
     for (pointer, value, ordinary) in [
-        ("/queuedPrompts/0/pending_prompt/text", json!("different queued intent"), true),
-        ("/humanQueueChoices", json!({"head": {"different": true}}), true),
+        (
+            "/queuedPrompts/0/pending_prompt/text",
+            json!("different queued intent"),
+            true,
+        ),
+        (
+            "/humanQueueChoices",
+            json!({"head": {"different": true}}),
+            true,
+        ),
         ("/engramBeginRecovery", json!({"different": true}), false),
-        ("/engramBeginRecoveryAudit", json!({"different": true}), false),
-        ("/engramDispatchGeneration", json!({"different": true}), false),
+        (
+            "/engramBeginRecoveryAudit",
+            json!({"different": true}),
+            false,
+        ),
+        (
+            "/engramDispatchGeneration",
+            json!({"different": true}),
+            false,
+        ),
         ("/engramUncertainGrantId", json!({"different": true}), false),
         ("/engramBeginCancelAudit", json!({"different": true}), false),
-        ("/engramBeginRecoveryFormat", json!({"different": true}), false),
+        (
+            "/engramBeginRecoveryFormat",
+            json!({"different": true}),
+            false,
+        ),
         ("/engramBeginOperationId", json!({"different": true}), false),
-        ("/engramBeginCancelCapture", json!({"different": true}), false),
+        (
+            "/engramBeginCancelCapture",
+            json!({"different": true}),
+            false,
+        ),
     ] {
         let waiter = fixture.enqueue(PersistFenceTarget::OrdinarySessionRow {
             session_id: id.clone(),
@@ -300,7 +332,10 @@ fn own_row_fence_requires_every_ordinary_component_on_the_same_writer_connection
             Some(slot) => *slot = value,
             None => {
                 let key = pointer.trim_start_matches('/');
-                changed.as_object_mut().unwrap().insert(key.to_owned(), value);
+                changed
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(key.to_owned(), value);
             }
         }
         fixture
@@ -526,9 +561,9 @@ fn source_observation_fence_requires_the_exact_history_and_observation_after_res
     let history = fixture.enqueue(PersistFenceTarget::EngramSourceSightingHistory(Box::new(
         owner.clone(),
     )));
-    let wrong_history = fixture.enqueue(PersistFenceTarget::EngramSourceSightingHistory(
-        Box::new(later_owner),
-    ));
+    let wrong_history = fixture.enqueue(PersistFenceTarget::EngramSourceSightingHistory(Box::new(
+        later_owner,
+    )));
     fixture.receive(false);
     assert!(!fixture.batch.drain(&fixture.rx, false));
     assert_eq!(
@@ -766,12 +801,19 @@ fn predecessor_change_keeps_the_same_fences_pending_until_retry_commits() {
     });
     let result = fixture.write(&delta);
     assert!(
-        result.as_ref().is_err_and(|error| format!("{error:#}")
-            .contains("transcript predecessor changed")),
+        result
+            .as_ref()
+            .is_err_and(|error| format!("{error:#}").contains("transcript predecessor changed")),
         "the safety refusal must still reject the stale sparse write"
     );
     assert!(fixture.cache.connection.is_none());
-    assert!(fixture.cache.transcripts.values().all(|row| !row.transcript_valid && row.identities.is_empty()));
+    assert!(
+        fixture
+            .cache
+            .transcripts
+            .values()
+            .all(|row| !row.transcript_valid && row.identities.is_empty())
+    );
     let stored = rusqlite::Connection::open(&path).unwrap();
     for target in &targets {
         assert!(!target.is_already_durable(&stored).unwrap());
@@ -823,9 +865,11 @@ fn predecessor_change_keeps_the_same_fences_pending_until_retry_commits() {
         assert_eq!(poll(waiter), Some(Ok(())));
     }
     for target in &targets {
-        assert!(target
-            .is_already_durable(fixture.cache.connection.as_ref().unwrap())
-            .unwrap());
+        assert!(
+            target
+                .is_already_durable(fixture.cache.connection.as_ref().unwrap())
+                .unwrap()
+        );
     }
     assert_eq!(body(&stored), "original body");
 }
@@ -1376,9 +1420,20 @@ fn a_late_wait_registration_is_proven_by_metadata_without_a_new_mutation() {
             .unwrap_or_default()
             .is_empty()
     );
-    assert!(next.metadata.metadata_collection_is_omitted("delegationWaits"));
-    assert!(read_metadata_for_fence(fixture.cache.connection.as_ref().unwrap(), &["delegationWaits"])
-        .unwrap().unwrap().delegation_waits.contains(&expected));
+    assert!(
+        next.metadata
+            .metadata_collection_is_omitted("delegationWaits")
+    );
+    assert!(
+        read_metadata_for_fence(
+            fixture.cache.connection.as_ref().unwrap(),
+            &["delegationWaits"]
+        )
+        .unwrap()
+        .unwrap()
+        .delegation_waits
+        .contains(&expected)
+    );
     fixture.write(&next).unwrap();
     let after = {
         let state = fixture.inner.lock().unwrap();

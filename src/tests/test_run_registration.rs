@@ -4,71 +4,135 @@
 // verification credit from an execution result.
 use super::*;
 
- // Shared real native registration/provider fixture for authenticated
- // completion-consumer tests. Telemetry is synthetic; it grants no credit.
- pub(in crate::tests) fn native_completion_producer_fixture(
-     state: AppState, label: &str, scope: &str,
- ) -> (String, String, PathBuf) {
-     let root = state.test_temp_root.as_ref().unwrap().path().join(label);
-     fs::create_dir_all(&root).unwrap();
-     run_git_test_command(&root, &["init", "--quiet"]);
-     let project_id = create_test_project(&state, &root, label);
-     let fixture = RunFixture { state, root, project_id };
-     let session = running_owner(&fixture, "native-wire-runtime");
-     {
-         let mut inner = fixture.state.inner.lock().unwrap();
-         let project = inner.projects.iter_mut().find(|project| project.id == fixture.project_id).unwrap();
-         project.engram = Some(EngramProjectSettings {
-             authority_store_key: Some(EngramAuthorityStoreKey {
-                 database_path: fixture.root.join("private-disposable-store.db"),
-                 project_id: scope.to_owned(),
-             }), ..EngramProjectSettings::default()
-         });
-     }
-     observed_terminal::start(&fixture, &session, "native-wire-tool", observed_terminal::LAUNCH);
-     let (id, directory) = observed_terminal::launcher(&fixture, &session);
-     fixture.state.note_engram_command_finished_with_capture(
-         &session, &EngramObservationProvenance::Ambient, "native-wire-tool", observed_terminal::LAUNCH,
-         &format!("RUN {}", test_run_display_path(&directory)), Some(EngramCommandExit::NotFinished), false,
-     );
-     (session, id, directory)
- }
+// Shared real native registration/provider fixture for authenticated
+// completion-consumer tests. Telemetry is synthetic; it grants no credit.
+pub(in crate::tests) fn native_completion_producer_fixture(
+    state: AppState,
+    label: &str,
+    scope: &str,
+) -> (String, String, PathBuf) {
+    let root = state.test_temp_root.as_ref().unwrap().path().join(label);
+    fs::create_dir_all(&root).unwrap();
+    run_git_test_command(&root, &["init", "--quiet"]);
+    let project_id = create_test_project(&state, &root, label);
+    let fixture = RunFixture {
+        state,
+        root,
+        project_id,
+    };
+    let session = running_owner(&fixture, "native-wire-runtime");
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let project = inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == fixture.project_id)
+            .unwrap();
+        project.engram = Some(EngramProjectSettings {
+            authority_store_key: Some(EngramAuthorityStoreKey {
+                database_path: fixture.root.join("private-disposable-store.db"),
+                project_id: scope.to_owned(),
+            }),
+            ..EngramProjectSettings::default()
+        });
+    }
+    observed_terminal::start(
+        &fixture,
+        &session,
+        "native-wire-tool",
+        observed_terminal::LAUNCH,
+    );
+    let (id, directory) = observed_terminal::launcher(&fixture, &session);
+    fixture.state.note_engram_command_finished_with_capture(
+        &session,
+        &EngramObservationProvenance::Ambient,
+        "native-wire-tool",
+        observed_terminal::LAUNCH,
+        &format!("RUN {}", test_run_display_path(&directory)),
+        Some(EngramCommandExit::NotFinished),
+        false,
+    );
+    (session, id, directory)
+}
 
- pub(in crate::tests) fn finish_native_completion_producer(
-     state: &AppState, id: &str, directory: &FsPath, success: bool,
- ) {
-     observed_terminal::finish_artifact(directory, id, success);
-     state.refresh_test_runs_with(&|_, _| false, &|_, _| {});
- }
+pub(in crate::tests) fn finish_native_completion_producer(
+    state: &AppState,
+    id: &str,
+    directory: &FsPath,
+    success: bool,
+) {
+    observed_terminal::finish_artifact(directory, id, success);
+    state.refresh_test_runs_with(&|_, _| false, &|_, _| {});
+}
 
 // Use the existing receipt/lifecycle fixtures to make history eligible for
 // real compaction. Their telemetry and producer replies are fixture inputs;
 // this helper neither executes a consumer test nor proves native credit.
 pub(in crate::tests) fn compacted_native_completion_producer_fixture(
-    state: AppState, label: &str, scope: &str, success: bool,
+    state: AppState,
+    label: &str,
+    scope: &str,
+    success: bool,
 ) -> (String, TestRunNativeCompletion) {
     let root = state.test_temp_root.as_ref().unwrap().path().join(label);
     fs::create_dir_all(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
     let project_id = create_test_project(&state, &root, label);
     let (fixture, id, store, binding, native) = native_evidence_fixture_from(
-        RunFixture { state, root, project_id }, false, success, scope);
+        RunFixture {
+            state,
+            root,
+            project_id,
+        },
+        false,
+        success,
+        scope,
+    );
     fixture.refresh(&[]);
     let retained = fixture.state.inner.lock().unwrap().test_run_registrations[&id]
-        .native_completion.clone().expect("original native settlement retained");
+        .native_completion
+        .clone()
+        .expect("original native settlement retained");
     record_native_evidence(&fixture, &native);
     let read = serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
-    fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(false));
+    fixture
+        .state
+        .revalidate_test_run_lifecycle(&store, &binding, &read);
+    assert_eq!(
+        fixture
+            .summary(&id)
+            .registration
+            .restart_would_void_evidence,
+        Some(false)
+    );
     compaction::fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
     fixture.refresh(&[]);
-    let loaded = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
+    let loaded = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
     assert!(!loaded.test_run_registrations.contains_key(&id));
-    assert!(!loaded.test_run_observations.contains_key(&retained.execution_id));
+    assert!(
+        !loaded
+            .test_run_observations
+            .contains_key(&retained.execution_id)
+    );
     let survivor = &loaded.test_run_compacted[&id];
     assert!(survivor.compacted);
-    assert_eq!(survivor.registration.as_ref().unwrap().native_completion.as_ref(), Some(&retained));
-    assert!(survivor.observations.iter().any(|row| row.execution_id == retained.execution_id));
+    assert_eq!(
+        survivor
+            .registration
+            .as_ref()
+            .unwrap()
+            .native_completion
+            .as_ref(),
+        Some(&retained)
+    );
+    assert!(
+        survivor
+            .observations
+            .iter()
+            .any(|row| row.execution_id == retained.execution_id)
+    );
     // Reinstall exactly the canonical loader's history collections while the
     // fixture's authenticated transport stays live; no cached index remains.
     let mut inner = fixture.state.inner.lock().unwrap();
@@ -78,7 +142,6 @@ pub(in crate::tests) fn compacted_native_completion_producer_fixture(
     inner.test_runs = TestRunIndex::default();
     (id, retained)
 }
-
 
 #[path = "test_run_registration_identity.rs"]
 mod identity;
@@ -97,7 +160,6 @@ mod observation_review;
 
 #[path = "test_run_final_unbound.rs"]
 mod final_unbound;
-
 
 #[path = "test_run_compaction.rs"]
 mod compaction;
@@ -369,15 +431,29 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
     let key = "focused-commit-tool";
     let root = fs::canonicalize(&fixture.root).unwrap();
     fixture.state.note_engram_command_started(
-        &session, &EngramObservationProvenance::Ambient, key,
-        Some(command), Some(&root.to_string_lossy()),
+        &session,
+        &EngramObservationProvenance::Ambient,
+        key,
+        Some(command),
+        Some(&root.to_string_lossy()),
     );
     let check = engram_check_command(command).expect("the actual committed launcher is recognized");
     assert_eq!(check.normalized, command);
     assert_eq!(check.argv, engram_shell_words(command).unwrap());
-    let observed = fixture.state.inner.lock().unwrap().test_run_observations
-        .values().next().expect("the real command start creates an observation").clone();
-    assert_eq!(observed.command_fingerprint, EngramHost::check_fingerprint(&check));
+    let observed = fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_observations
+        .values()
+        .next()
+        .expect("the real command start creates an observation")
+        .clone();
+    assert_eq!(
+        observed.command_fingerprint,
+        EngramHost::check_fingerprint(&check)
+    );
     let run_id = format!("test-{}", Uuid::new_v4());
     let request = json!({
         "root": root, "owner": session, "input": "commit", "full": false, "detached": false,
@@ -385,7 +461,10 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
         "stages": [{"name": "focused", "command": "cargo", "args": ["test"]}],
     });
     let directory = write_run(&fixture.runs_dir(), &run_id, request.clone(), None);
-    fixture.state.register_test_run(&session, registration_request(&run_id, &directory)).unwrap();
+    fixture
+        .state
+        .register_test_run(&session, registration_request(&run_id, &directory))
+        .unwrap();
     let registration = fixture.state.inner.lock().unwrap().test_run_registrations[&run_id].clone();
     let request_path = directory.join("request.json");
     let original_request = fs::read(&request_path).unwrap();
@@ -403,12 +482,16 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
             let (successor, _commands) = test_codex_runtime_handle("registry-focused-successor");
             let mut inner = fixture.state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
-            Some(std::mem::replace(&mut inner.sessions[index].runtime, SessionRuntime::Codex(successor)))
+            Some(std::mem::replace(
+                &mut inner.sessions[index].runtime,
+                SessionRuntime::Codex(successor),
+            ))
         } else {
             None
         };
         fixture.state.observe_test_command_artifact(
-            &session, &EngramObservationProvenance::Ambient,
+            &session,
+            &EngramObservationProvenance::Ambient,
             if case == "tool" { "another-tool" } else { key },
             if case == "command" {
                 "node scripts/test-launcher.mjs focused --input commit -- cargo test --lib"
@@ -422,8 +505,17 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
             },
             false,
         );
-        assert_eq!(fixture.state.inner.lock().unwrap().test_run_observations
-            .get(&observed.execution_id), Some(&observed), "{case}: no mismatched attachment");
+        assert_eq!(
+            fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_observations
+                .get(&observed.execution_id),
+            Some(&observed),
+            "{case}: no mismatched attachment"
+        );
         if let Some(runtime) = previous_runtime {
             let mut inner = fixture.state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -432,23 +524,51 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
         fs::write(&request_path, &original_request).unwrap();
     }
     fixture.state.observe_test_command_artifact(
-        &session, &EngramObservationProvenance::Ambient, key, command, &locator, false,
+        &session,
+        &EngramObservationProvenance::Ambient,
+        key,
+        command,
+        &locator,
+        false,
     );
-    let attached = fixture.state.inner.lock().unwrap().test_run_observations[&observed.execution_id].clone();
-    let artifact = attached.artifact.as_ref().expect("the exact registered locator attaches");
+    let attached =
+        fixture.state.inner.lock().unwrap().test_run_observations[&observed.execution_id].clone();
+    let artifact = attached
+        .artifact
+        .as_ref()
+        .expect("the exact registered locator attaches");
     assert_eq!(artifact.run_id, run_id);
-    assert_eq!(artifact.request_identity.as_ref(), Some(&registration.request_identity));
+    assert_eq!(
+        artifact.request_identity.as_ref(),
+        Some(&registration.request_identity)
+    );
     assert_eq!(attached.command_fingerprint, observed.command_fingerprint);
-    assert!(attached.evidence.is_empty(), "attachment does not fabricate verification");
+    assert!(
+        attached.evidence.is_empty(),
+        "attachment does not fabricate verification"
+    );
     // Once attached, a different request identity cannot replace the original one.
     let mut changed: Value = serde_json::from_slice(&original_request).unwrap();
     changed["stages"][0]["args"] = json!(["test", "--lib"]);
     fs::write(&request_path, changed.to_string()).unwrap();
     fixture.state.observe_test_command_artifact(
-        &session, &EngramObservationProvenance::Ambient, key, command, &locator, false,
+        &session,
+        &EngramObservationProvenance::Ambient,
+        key,
+        command,
+        &locator,
+        false,
     );
-    assert_eq!(fixture.state.inner.lock().unwrap().test_run_observations
-        .get(&observed.execution_id), Some(&attached));
+    assert_eq!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_observations
+            .get(&observed.execution_id),
+        Some(&attached)
+    );
     fs::write(&request_path, &original_request).unwrap();
     assert_eq!(fs::read(&request_path).unwrap(), original_request);
 }
@@ -839,20 +959,47 @@ struct NativeEvidenceRun {
     receipt: EngramVerificationRecordReceipt,
 }
 
-fn native_evidence_fixture(label: &str) -> (
-    RunFixture, String, EngramAuthorityStoreKey, EngramControlWorkBinding, NativeEvidenceRun,
+fn native_evidence_fixture(
+    label: &str,
+) -> (
+    RunFixture,
+    String,
+    EngramAuthorityStoreKey,
+    EngramControlWorkBinding,
+    NativeEvidenceRun,
 ) {
     native_evidence_fixture_with_build(label, false)
 }
 
-fn native_evidence_fixture_with_build(label: &str, with_build: bool) -> (
-    RunFixture, String, EngramAuthorityStoreKey, EngramControlWorkBinding, NativeEvidenceRun,
+fn native_evidence_fixture_with_build(
+    label: &str,
+    with_build: bool,
+) -> (
+    RunFixture,
+    String,
+    EngramAuthorityStoreKey,
+    EngramControlWorkBinding,
+    NativeEvidenceRun,
 ) {
-    native_evidence_fixture_from(RunFixture::new(label), with_build, true, "canonical-project")
+    native_evidence_fixture_from(
+        RunFixture::new(label),
+        with_build,
+        true,
+        "canonical-project",
+    )
 }
 
-fn native_evidence_fixture_from(fixture: RunFixture, with_build: bool, success: bool, scope: &str) -> (
-    RunFixture, String, EngramAuthorityStoreKey, EngramControlWorkBinding, NativeEvidenceRun,
+fn native_evidence_fixture_from(
+    fixture: RunFixture,
+    with_build: bool,
+    success: bool,
+    scope: &str,
+) -> (
+    RunFixture,
+    String,
+    EngramAuthorityStoreKey,
+    EngramControlWorkBinding,
+    NativeEvidenceRun,
 ) {
     let session = running_owner(&fixture, "registry-native-evidence-runtime");
     let store = EngramAuthorityStoreKey {
@@ -861,23 +1008,36 @@ fn native_evidence_fixture_from(fixture: RunFixture, with_build: bool, success: 
     };
     let binding = EngramControlWorkBinding {
         root_execution_id: "root-execution-one".to_owned(),
-        work_id: "work-one".to_owned(), run_id: "run-one".to_owned(),
-        work_revision: 1, claim_id: "claim-one".to_owned(), claim_fence: 1,
+        work_id: "work-one".to_owned(),
+        run_id: "run-one".to_owned(),
+        work_revision: 1,
+        claim_id: "claim-one".to_owned(),
+        claim_fence: 1,
     };
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        inner.projects.iter_mut().find(|project| project.id == fixture.project_id).unwrap()
+        inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == fixture.project_id)
+            .unwrap()
             .engram = Some(EngramProjectSettings {
-                enabled: true, authority_store_key: Some(store.clone()),
-                ..EngramProjectSettings::default()
-            });
+            enabled: true,
+            authority_store_key: Some(store.clone()),
+            ..EngramProjectSettings::default()
+        });
     }
     let root = fs::canonicalize(&fixture.root).unwrap();
     named_root::name_root(&fixture, &store, &binding, &session, &root, 1);
     let command = "node scripts/test-launcher.mjs focused --input commit -- cargo test";
     let key = "native-evidence-launch";
-    fixture.state.note_engram_command_started(&session, &EngramObservationProvenance::Ambient,
-        key, Some(command), Some(&root.to_string_lossy()));
+    fixture.state.note_engram_command_started(
+        &session,
+        &EngramObservationProvenance::Ambient,
+        key,
+        Some(command),
+        Some(&root.to_string_lossy()),
+    );
     let run_id = format!("test-{}", Uuid::new_v4());
     let mut request = json!({
         "root": root.to_string_lossy(), "input": "commit", "full": false,
@@ -886,18 +1046,23 @@ fn native_evidence_fixture_from(fixture: RunFixture, with_build: bool, success: 
         "stages": [{"name": "focused", "command": "cargo", "args": ["test"]}],
     });
     if with_build {
-        request["stages"].as_array_mut().unwrap().insert(0,
-            json!({"name": "cargo-check", "command": "cargo", "args": ["check"]}));
+        request["stages"].as_array_mut().unwrap().insert(
+            0,
+            json!({"name": "cargo-check", "command": "cargo", "args": ["check"]}),
+        );
     }
     let directory = write_run(&fixture.runs_dir(), &run_id, request, None);
-    fixture.state.register_test_run(&session, registration_request(&run_id, &directory)).unwrap();
+    fixture
+        .state
+        .register_test_run(&session, registration_request(&run_id, &directory))
+        .unwrap();
     let registration = fixture.state.inner.lock().unwrap().test_run_registrations[&run_id].clone();
     assert_eq!(registration.work_binding.as_ref(), Some(&binding));
     assert_eq!(registration.authority_store.as_ref(), Some(&store));
     // Construct valid fixture stage times after the captured registration;
     // no wait, timeout enlargement or claimed runtime measurement is involved.
-    let started = engram_parse_time(&registration.registered_at).unwrap()
-        + chrono::Duration::milliseconds(1);
+    let started =
+        engram_parse_time(&registration.registered_at).unwrap() + chrono::Duration::milliseconds(1);
     let ended = started + chrono::Duration::milliseconds(1);
     let mut results = json!({
         "runId": run_id, "state": "passed", "exitCode": 0,
@@ -919,21 +1084,42 @@ fn native_evidence_fixture_from(fixture: RunFixture, with_build: bool, success: 
     if !success {
         results["state"] = json!("failed");
         results["exitCode"] = json!(101);
-        let focused = results["stages"].as_array_mut().unwrap().iter_mut()
-            .find(|stage| stage["name"] == "focused").unwrap();
+        let focused = results["stages"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|stage| stage["name"] == "focused")
+            .unwrap();
         focused["state"] = json!("failed");
         focused["code"] = json!(101);
         focused["tests"]["passed"] = json!(0);
         focused["tests"]["failed"] = json!(1);
     }
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
-    fixture.state.note_engram_command_finished_with_capture(&session,
-        &EngramObservationProvenance::Ambient, key, command,
+    fixture.state.note_engram_command_finished_with_capture(
+        &session,
+        &EngramObservationProvenance::Ambient,
+        key,
+        command,
         &format!("RUN {}", test_run_display_path(&directory)),
-        Some(EngramCommandExit::Code(if success { 0 } else { 101 })), false);
-    let id = fixture.state.inner.lock().unwrap().test_run_observations.values()
-        .find(|row| row.artifact.as_ref().is_some_and(|artifact| artifact.run_id == run_id))
-        .expect("the real locator attaches to its own observed command").execution_id.clone();
+        Some(EngramCommandExit::Code(if success { 0 } else { 101 })),
+        false,
+    );
+    let id = fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_observations
+        .values()
+        .find(|row| {
+            row.artifact
+                .as_ref()
+                .is_some_and(|artifact| artifact.run_id == run_id)
+        })
+        .expect("the real locator attaches to its own observed command")
+        .execution_id
+        .clone();
     let frozen = match engram_verification_record_prepare(&registration) {
         EngramVerificationRecordPrepared::Ready(frozen) => frozen,
         other => panic!("the real registered artifact prepares: {other:?}"),
@@ -944,28 +1130,68 @@ fn native_evidence_fixture_from(fixture: RunFixture, with_build: bool, success: 
         "verifications": [{"stage": "focused", "record_id": "e".repeat(64)}],
     });
     if with_build {
-        receipt_wire["verifications"].as_array_mut().unwrap().insert(0,
-            json!({"stage": "cargo-check", "record_id": "1".repeat(32)}));
+        receipt_wire["verifications"]
+            .as_array_mut()
+            .unwrap()
+            .insert(
+                0,
+                json!({"stage": "cargo-check", "record_id": "1".repeat(32)}),
+            );
     }
     let receipt: EngramVerificationRecordReceipt = serde_json::from_value(receipt_wire).unwrap();
     engram_verification_record_receipt_check(&frozen.body, &receipt).unwrap();
-    assert!(fixture.summary(&run_id).registration.verification_record_ids.is_empty(),
-        "artifact PASS and durable registration alone create no native record");
-    (fixture, run_id, store, binding, NativeEvidenceRun {
-        execution_id: id, registration, body: frozen.body, receipt,
-    })
+    assert!(
+        fixture
+            .summary(&run_id)
+            .registration
+            .verification_record_ids
+            .is_empty(),
+        "artifact PASS and durable registration alone create no native record"
+    );
+    (
+        fixture,
+        run_id,
+        store,
+        binding,
+        NativeEvidenceRun {
+            execution_id: id,
+            registration,
+            body: frozen.body,
+            receipt,
+        },
+    )
 }
 
 fn record_native_evidence(fixture: &RunFixture, run: &NativeEvidenceRun) {
-    assert!(matches!(fixture.state.complete_engram_verification_record(
-        &run.registration, &run.body, &run.receipt), EngramVerificationRecordSettlement::Settled));
-    let stored = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
-    let row = stored.test_run_observations.values().find(|row| row.artifact.as_ref()
-        .is_some_and(|artifact| artifact.run_id == run.registration.run_id)).unwrap();
+    assert!(matches!(
+        fixture.state.complete_engram_verification_record(
+            &run.registration,
+            &run.body,
+            &run.receipt
+        ),
+        EngramVerificationRecordSettlement::Settled
+    ));
+    let stored = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let row = stored
+        .test_run_observations
+        .values()
+        .find(|row| {
+            row.artifact
+                .as_ref()
+                .is_some_and(|artifact| artifact.run_id == run.registration.run_id)
+        })
+        .unwrap();
     assert_eq!(row.evidence.len(), 1);
-    assert_eq!(row.evidence[0].verification_record_id.as_deref(), Some("e".repeat(64).as_str()));
-    assert!(row.evidence[0].checkpoint_id.is_none() && row.evidence[0].confirmed_cursor.is_none(),
-        "native registration does not manufacture historical checkpoint provenance");
+    assert_eq!(
+        row.evidence[0].verification_record_id.as_deref(),
+        Some("e".repeat(64).as_str())
+    );
+    assert!(
+        row.evidence[0].checkpoint_id.is_none() && row.evidence[0].confirmed_cursor.is_none(),
+        "native registration does not manufacture historical checkpoint provenance"
+    );
 }
 
 fn completed_lifecycle(
@@ -985,7 +1211,8 @@ fn completed_lifecycle(
 
 #[test]
 fn exact_verification_receipt_and_completed_lifecycle_clear_only_their_association() {
-    let (fixture, id, store, binding, native) = native_evidence_fixture("registration-exact-evidence");
+    let (fixture, id, store, binding, native) =
+        native_evidence_fixture("registration-exact-evidence");
     assert_eq!(
         fixture
             .summary(&id)
@@ -1038,7 +1265,8 @@ fn exact_verification_receipt_and_completed_lifecycle_clear_only_their_associati
         let row = &inner.test_run_observations[&native.execution_id];
         assert_eq!(row.evidence[0].lifecycle_read.as_deref(), Some(&read));
         assert!(inner.test_runs.lifecycle_revalidated.contains(&(
-            row.execution_id.clone(), row.evidence[0].producer_observation_id.clone(),
+            row.execution_id.clone(),
+            row.evidence[0].producer_observation_id.clone(),
         )));
         assert_eq!(test_run_evidence_impact(&*inner, row), Some(false));
     }
@@ -1114,20 +1342,41 @@ fn partial_or_malformed_native_receipts_do_not_create_any_evidence() {
         let (fixture, id, _, _, native) = native_evidence_fixture("registration-partial-receipt");
         let mut receipt = native.receipt.clone();
         let mut wire = serde_json::to_value(&receipt).unwrap();
-        wire["verifications"] = json!(records.iter().map(|id|
-            json!({"stage": "focused", "record_id": id})).collect::<Vec<_>>());
+        wire["verifications"] = json!(
+            records
+                .iter()
+                .map(|id| json!({"stage": "focused", "record_id": id}))
+                .collect::<Vec<_>>()
+        );
         receipt = serde_json::from_value(wire).unwrap();
-        assert!(matches!(fixture.state.complete_engram_verification_record(
-            &native.registration, &native.body, &receipt),
-            EngramVerificationRecordSettlement::ReceiptMismatch { .. }));
+        assert!(matches!(
+            fixture.state.complete_engram_verification_record(
+                &native.registration,
+                &native.body,
+                &receipt
+            ),
+            EngramVerificationRecordSettlement::ReceiptMismatch { .. }
+        ));
         let summary = fixture.summary(&id);
         assert!(summary.registration.verification_record_ids.is_empty());
-        assert_eq!(summary.registration.restart_would_void_evidence, None,
-            "a malformed receipt supplies no native evidence, not a safe result");
-        assert!(fixture.state.inner.lock().unwrap().test_run_observations[&native.execution_id].evidence.is_empty());
+        assert_eq!(
+            summary.registration.restart_would_void_evidence, None,
+            "a malformed receipt supplies no native evidence, not a safe result"
+        );
+        assert!(
+            fixture.state.inner.lock().unwrap().test_run_observations[&native.execution_id]
+                .evidence
+                .is_empty()
+        );
         record_native_evidence(&fixture, &native);
-        assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(true),
-            "the exact receipt is a positive control and still needs canonical completion");
+        assert_eq!(
+            fixture
+                .summary(&id)
+                .registration
+                .restart_would_void_evidence,
+            Some(true),
+            "the exact receipt is a positive control and still needs canonical completion"
+        );
     }
 }
 
@@ -1137,8 +1386,12 @@ fn receipt_from_another_store_binding_source_or_action_never_settles_the_origina
         let (fixture, id, store, binding, native) =
             native_evidence_fixture(&format!("registration-receipt-scope-{case}"));
         record_native_evidence(&fixture, &native);
-        let mut producer = engram_verification_record_producers(&native.registration.run_id, &native.body)
-            .into_iter().next().unwrap().1;
+        let mut producer =
+            engram_verification_record_producers(&native.registration.run_id, &native.body)
+                .into_iter()
+                .next()
+                .unwrap()
+                .1;
         let mut receipt_store = store.clone();
         let mut receipt_binding = binding.clone();
         match case {
@@ -1148,13 +1401,7 @@ fn receipt_from_another_store_binding_source_or_action_never_settles_the_origina
             "root" => receipt_binding.root_execution_id = "other-root".to_owned(),
             "run" => receipt_binding.run_id = "other-run".to_owned(),
             "action" => producer.action_fingerprint = "a".repeat(64),
-            "source" => {
-                producer
-                    .source_basis
-                    .as_mut()
-                    .unwrap()
-                    .source_revision = "f".repeat(64)
-            }
+            "source" => producer.source_basis.as_mut().unwrap().source_revision = "f".repeat(64),
             _ => unreachable!(),
         }
         // A selector-only negative: start with a real durable native
@@ -1164,12 +1411,25 @@ fn receipt_from_another_store_binding_source_or_action_never_settles_the_origina
         let record_id = "e".repeat(64);
         {
             let mut inner = fixture.state.inner.lock().unwrap();
-            inner.test_run_observations.get_mut(&native.execution_id).unwrap()
-                .evidence[0].verification_record_id = None;
-            let changed = AppState::settle_test_run_producer_records_locked(&mut inner,
-                HashMap::from([(producer.observation_id.as_str(), vec![(&producer, &record_id)])]),
-                &receipt_store, &receipt_binding);
-            assert!(changed.is_empty(), "{case}: a mismatched producer cannot fill the pending association");
+            inner
+                .test_run_observations
+                .get_mut(&native.execution_id)
+                .unwrap()
+                .evidence[0]
+                .verification_record_id = None;
+            let changed = AppState::settle_test_run_producer_records_locked(
+                &mut inner,
+                HashMap::from([(
+                    producer.observation_id.as_str(),
+                    vec![(&producer, &record_id)],
+                )]),
+                &receipt_store,
+                &receipt_binding,
+            );
+            assert!(
+                changed.is_empty(),
+                "{case}: a mismatched producer cannot fill the pending association"
+            );
         }
         assert!(
             fixture
@@ -1180,8 +1440,11 @@ fn receipt_from_another_store_binding_source_or_action_never_settles_the_origina
             "{case}"
         );
         record_native_evidence(&fixture, &native);
-        assert_eq!(fixture.summary(&id).registration.verification_record_ids, [record_id],
-            "{case}: the exact native registration/receipt still settles through the real owner");
+        assert_eq!(
+            fixture.summary(&id).registration.verification_record_ids,
+            [record_id],
+            "{case}: the exact native registration/receipt still settles through the real owner"
+        );
         assert_eq!(
             fixture
                 .summary(&id)
@@ -1195,7 +1458,8 @@ fn receipt_from_another_store_binding_source_or_action_never_settles_the_origina
 
 #[test]
 fn every_associated_work_must_settle_and_true_dominates_unknown() {
-    let (fixture, id, store, binding, native) = native_evidence_fixture("registration-all-associations");
+    let (fixture, id, store, binding, native) =
+        native_evidence_fixture("registration-all-associations");
     record_native_evidence(&fixture, &native);
     let read = serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
     fixture
@@ -1209,7 +1473,10 @@ fn every_associated_work_must_settle_and_true_dominates_unknown() {
         Some(false)
     );
     let mut inner = fixture.state.inner.lock().unwrap();
-    let mut row = inner.test_run_observations.get_mut(&native.execution_id).unwrap();
+    let mut row = inner
+        .test_run_observations
+        .get_mut(&native.execution_id)
+        .unwrap();
     let mut second = row.evidence[0].clone();
     second.producer_observation_id = "2".repeat(64);
     second.binding.work_id = "second-work".to_owned();
@@ -1231,7 +1498,10 @@ fn every_associated_work_must_settle_and_true_dominates_unknown() {
         "first lifecycle completion cannot discharge another check"
     );
     let mut inner = fixture.state.inner.lock().unwrap();
-    let mut row = inner.test_run_observations.get_mut(&native.execution_id).unwrap();
+    let mut row = inner
+        .test_run_observations
+        .get_mut(&native.execution_id)
+        .unwrap();
     row.evidence[1].verification_record_id = Some("3".repeat(64));
     assert!(row.evidence[1].checkpoint_id.is_none());
     row.evidence[1].reported_outcome = EngramExecutionOutcome::Failed;
@@ -1299,8 +1569,15 @@ fn positively_unbound_terminal_executions_still_obey_the_ordinary_retention_cap(
     );
     let inner = fixture.state.inner.lock().unwrap();
     assert_eq!(inner.test_run_compacted.len(), 2);
-    assert_eq!(inner.test_run_compacted.values().map(|row| row.observations.len()).sum::<usize>(), 2,
-        "every omitted execution retains exact durable identity and proof");
+    assert_eq!(
+        inner
+            .test_run_compacted
+            .values()
+            .map(|row| row.observations.len())
+            .sum::<usize>(),
+        2,
+        "every omitted execution retains exact durable identity and proof"
+    );
 }
 
 #[test]
@@ -1418,13 +1695,17 @@ fn live_durability_invalidation_has_a_revision_after_the_preceding_persistence_s
     let id = fixture.summaries()[0].run_id.clone();
     let mut diagnostics = TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
     let Json(detail) = get_test_run_observed(fixture.state.clone(), &id, &mut diagnostics).unwrap();
-    assert_eq!(detail.run.registration.tracking_durability.as_deref(), Some("durable"));
+    assert_eq!(
+        detail.run.registration.tracking_durability.as_deref(),
+        Some("durable")
+    );
     assert!(detail.run.registration.verification_record_ids.is_empty());
 }
 
 #[test]
 fn mixed_native_receipt_keeps_only_the_test_stage_object_id() {
-    let (fixture, id, _, _, native) = native_evidence_fixture_with_build("registration-mixed-receipt", true);
+    let (fixture, id, _, _, native) =
+        native_evidence_fixture_with_build("registration-mixed-receipt", true);
     assert_eq!(native.receipt.verifications[0].record_id, "1".repeat(32));
     assert_eq!(native.receipt.verifications[1].record_id, "e".repeat(64));
     record_native_evidence(&fixture, &native);

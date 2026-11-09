@@ -20,34 +20,61 @@ fn assert_stopped_orchestrator_boot_delta(has_orchestrator_prompt: bool) {
     let cwd = normalize_local_user_facing_path(root.path().to_string_lossy().as_ref());
     let mut original = StateInner::new();
     let project = original.create_project(None, cwd.clone(), LOCAL_REMOTE_ID.to_owned());
-    let child = original.create_session(Agent::Claude, None, cwd, Some(project.id.clone()), None).session.id;
+    let child = original
+        .create_session(Agent::Claude, None, cwd, Some(project.id.clone()), None)
+        .session
+        .id;
     let record = original.session_mut(&child).unwrap();
-    push_message_on_record(record, Message::Text {
-        id: "durable-child-output".into(), timestamp: stamp_now(), author: Author::Assistant,
-        text: "Already durable stopped child output".into(), expanded_text: None,
-        source: None, attachments: vec![],
-    });
+    push_message_on_record(
+        record,
+        Message::Text {
+            id: "durable-child-output".into(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "Already durable stopped child output".into(),
+            expanded_text: None,
+            source: None,
+            attachments: vec![],
+        },
+    );
     let prompt = |id: &str| PendingPrompt {
-        id: id.into(), timestamp: stamp_now(), text: id.into(), expanded_text: None,
-        source: None, attachments: vec![], engram_interrupted: false, is_engram_retained: false,
+        id: id.into(),
+        timestamp: stamp_now(),
+        text: id.into(),
+        expanded_text: None,
+        source: None,
+        attachments: vec![],
+        engram_interrupted: false,
+        is_engram_retained: false,
     };
     queue_prompt_on_record(record, prompt("keep-user-prompt"), vec![]);
     if has_orchestrator_prompt {
         queue_orchestrator_prompt_on_record(record, prompt("remove-orchestrator-prompt"), vec![]);
     }
     record.session.status = SessionStatus::Idle;
-    let template = orchestrator_template_from_draft("stopped-template", sample_orchestrator_template_draft()).unwrap();
+    let template =
+        orchestrator_template_from_draft("stopped-template", sample_orchestrator_template_draft())
+            .unwrap();
     original.orchestrator_instances.push(OrchestratorInstance {
-        id: "stopped-instance".into(), remote_id: None, remote_orchestrator_id: None,
-        template_id: template.id.clone(), project_id: project.id, template_snapshot: template,
+        id: "stopped-instance".into(),
+        remote_id: None,
+        remote_orchestrator_id: None,
+        template_id: template.id.clone(),
+        project_id: project.id,
+        template_snapshot: template,
         status: OrchestratorInstanceStatus::Stopped,
         session_instances: vec![OrchestratorSessionInstance {
-            template_session_id: "planner".into(), session_id: child.clone(),
-            last_completion_revision: None, last_delivered_completion_revision: None,
+            template_session_id: "planner".into(),
+            session_id: child.clone(),
+            last_completion_revision: None,
+            last_delivered_completion_revision: None,
         }],
-        pending_transitions: vec![], created_at: stamp_orchestrator_template_now(),
-        error_message: None, completed_at: Some(stamp_orchestrator_template_now()),
-        stop_in_progress: false, active_session_ids_during_stop: None,
+        pending_transitions: vec![],
+        created_at: stamp_orchestrator_template_now(),
+        error_message: None,
+        completed_at: Some(stamp_orchestrator_template_now()),
+        stop_in_progress: false,
+        active_session_ids_during_stop: None,
         stopped_session_ids_during_stop: vec![],
     });
     persist_state(&path, &original).unwrap();
@@ -58,12 +85,25 @@ fn assert_stopped_orchestrator_boot_delta(has_orchestrator_prompt: bool) {
     assert_eq!(record.session.status, SessionStatus::Idle);
     assert_eq!(record.session.messages.len(), 1);
     assert_eq!(record.queued_prompts.len(), 1);
-    assert_eq!(record.queued_prompts[0].pending_prompt.id, "keep-user-prompt");
+    assert_eq!(
+        record.queued_prompts[0].pending_prompt.id,
+        "keep-user-prompt"
+    );
     let delta = collect_persist_delta_from_shared_state(&StateMutex::new(restored), 0);
-    let expected = if has_orchestrator_prompt { vec![child.clone()] } else { vec![] };
-    let selected = delta.changed_sessions.iter().map(|row| row.session.id.clone()).collect::<Vec<_>>();
-    assert_eq!(selected, expected,
-        "a stopped child is selected only when boot actually removes an orchestrator prompt");
+    let expected = if has_orchestrator_prompt {
+        vec![child.clone()]
+    } else {
+        vec![]
+    };
+    let selected = delta
+        .changed_sessions
+        .iter()
+        .map(|row| row.session.id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected, expected,
+        "a stopped child is selected only when boot actually removes an orchestrator prompt"
+    );
     drop(connection);
     let observer = Arc::new(PersistObserver::default());
     let scope = observer.begin_at(std::time::Instant::now());
@@ -75,29 +115,53 @@ fn assert_stopped_orchestrator_boot_delta(has_orchestrator_prompt: bool) {
     let snapshot = observer.snapshot_at(std::time::Instant::now());
     let counts = &snapshot.recent[0].counts;
     assert!(counts.payload_measured);
-    assert_eq!(counts.changed_sessions, usize::from(has_orchestrator_prompt));
+    assert_eq!(
+        counts.changed_sessions,
+        usize::from(has_orchestrator_prompt)
+    );
     if !has_orchestrator_prompt {
         assert_eq!(counts.retained_messages, 0);
         assert_eq!(counts.message_bytes, 0);
     }
-    eprintln!("stopped-orchestrator first tick: cleanup={} changed_sessions={} retained_messages={} message_bytes={}",
-        has_orchestrator_prompt, counts.changed_sessions, counts.retained_messages, counts.message_bytes);
+    eprintln!(
+        "stopped-orchestrator first tick: cleanup={} changed_sessions={} retained_messages={} message_bytes={}",
+        has_orchestrator_prompt,
+        counts.changed_sessions,
+        counts.retained_messages,
+        counts.message_bytes
+    );
     drop(cache);
     let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
     let (rows, _, _) = load_session_records_from_sqlite_with_skipped(&connection, &path).unwrap();
     let durable = rows.iter().find(|row| row.session.id == child).unwrap();
-    assert_eq!(durable.queued_prompts.len(), 1, "the actual delta must persist the queue cleanup");
-    assert_eq!(durable.queued_prompts[0].pending_prompt.id, "keep-user-prompt");
+    assert_eq!(
+        durable.queued_prompts.len(),
+        1,
+        "the actual delta must persist the queue cleanup"
+    );
+    assert_eq!(
+        durable.queued_prompts[0].pending_prompt.id,
+        "keep-user-prompt"
+    );
     drop(connection);
     let (reopened, _) = load_state_for_boot(&path).unwrap();
     let reopened = reopened.unwrap();
     let record = &reopened.sessions[reopened.find_session_index(&child).unwrap()];
     assert_eq!(record.queued_prompts.len(), 1);
-    assert_eq!(record.queued_prompts[0].pending_prompt.id, "keep-user-prompt");
+    assert_eq!(
+        record.queued_prompts[0].pending_prompt.id,
+        "keep-user-prompt"
+    );
     assert_eq!(record.session.messages.len(), 1);
-    assert_eq!(record.mutation_stamp, 0, "the durable cleanup must not be stamped again");
+    assert_eq!(
+        record.mutation_stamp, 0,
+        "the durable cleanup must not be stamped again"
+    );
     let next_delta = collect_persist_delta_from_shared_state(&StateMutex::new(reopened), 0);
-    assert!(next_delta.changed_sessions.is_empty(), "the next clean boot must select no child");
+    assert!(
+        next_delta.changed_sessions.is_empty(),
+        "the next clean boot must select no child"
+    );
 }
 
 #[test]
@@ -118,19 +182,42 @@ fn boot_recovery_keeps_unchanged_sessions_out_of_the_first_persist_delta() {
     let mut original = StateInner::new();
     let mut unchanged = Vec::new();
     for agent in [Agent::Claude, Agent::Codex] {
-        let id = original.create_session(agent, None,
-            root.path().to_string_lossy().into_owned(), None, None).session.id;
+        let id = original
+            .create_session(
+                agent,
+                None,
+                root.path().to_string_lossy().into_owned(),
+                None,
+                None,
+            )
+            .session
+            .id;
         let record = original.session_mut(&id).unwrap();
-        push_message_on_record(record, Message::Text {
-            id: format!("stored-{id}"), timestamp: stamp_now(), author: Author::Assistant,
-            text: "Already durable completed output".into(), expanded_text: None,
-            source: None, attachments: Vec::new(),
-        });
+        push_message_on_record(
+            record,
+            Message::Text {
+                id: format!("stored-{id}"),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Already durable completed output".into(),
+                expanded_text: None,
+                source: None,
+                attachments: Vec::new(),
+            },
+        );
         record.session.status = SessionStatus::Idle;
         unchanged.push(id);
     }
-    let interrupted = original.create_session(Agent::Claude, None,
-        root.path().to_string_lossy().into_owned(), None, None).session.id;
+    let interrupted = original
+        .create_session(
+            Agent::Claude,
+            None,
+            root.path().to_string_lossy().into_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
     original.session_mut(&interrupted).unwrap().session.status = SessionStatus::Active;
     persist_state(&path, &original).unwrap();
 
@@ -143,11 +230,21 @@ fn boot_recovery_keeps_unchanged_sessions_out_of_the_first_persist_delta() {
     }
     let recovered = &restored.sessions[restored.find_session_index(&interrupted).unwrap()];
     assert_eq!(recovered.session.status, SessionStatus::Error);
-    assert!(!recovered.session.messages.is_empty(), "real interruption recovery still persists its notice");
+    assert!(
+        !recovered.session.messages.is_empty(),
+        "real interruption recovery still persists its notice"
+    );
     let delta = collect_persist_delta_from_shared_state(&StateMutex::new(restored), 0);
-    let selected = delta.changed_sessions.iter().map(|row| row.session.id.clone()).collect::<Vec<_>>();
-    assert_eq!(selected, vec![interrupted],
-        "boot recovery must not dirty already durable, unchanged local sessions");
+    let selected = delta
+        .changed_sessions
+        .iter()
+        .map(|row| row.session.id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected,
+        vec![interrupted],
+        "boot recovery must not dirty already durable, unchanged local sessions"
+    );
     // The production writer starts with an empty body cache. Selection must
     // avoid replay even without a baseline learned by a previous tick.
     drop(connection);
@@ -161,10 +258,15 @@ fn boot_recovery_keeps_unchanged_sessions_out_of_the_first_persist_delta() {
     let snapshot = observer.snapshot_at(std::time::Instant::now());
     let counts = &snapshot.recent[0].counts;
     assert_eq!(counts.changed_sessions, 1);
-    assert_eq!(counts.retained_messages, 1, "the selected recovered row contains one notice");
+    assert_eq!(
+        counts.retained_messages, 1,
+        "the selected recovered row contains one notice"
+    );
     assert!(counts.message_bytes > 0);
-    eprintln!("boot-recovery first tick: changed_sessions={} retained_messages={} message_bytes={}",
-        counts.changed_sessions, counts.retained_messages, counts.message_bytes);
+    eprintln!(
+        "boot-recovery first tick: changed_sessions={} retained_messages={} message_bytes={}",
+        counts.changed_sessions, counts.retained_messages, counts.message_bytes
+    );
 }
 
 #[test]
@@ -174,24 +276,39 @@ fn clean_boot_with_unchanged_codex_discovery_serializes_no_durable_transcript() 
     let path = root.path().join("termal.sqlite");
     let cwd = normalize_local_user_facing_path(root.path().to_string_lossy().as_ref());
     let thread = DiscoveredCodexThread {
-        id: "already-imported".into(), cwd: cwd.clone(), archived: false,
-        title: "Imported thread".into(), model: None, reasoning_effort: None,
-        sandbox_mode: None, approval_policy: None,
+        id: "already-imported".into(),
+        cwd: cwd.clone(),
+        archived: false,
+        title: "Imported thread".into(),
+        model: None,
+        reasoning_effort: None,
+        sandbox_mode: None,
+        approval_policy: None,
     };
     let mut original = StateInner::new();
     original.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
     let id = original.sessions[0].session.id.clone();
-    push_message_on_record(original.session_mut(&id).unwrap(), Message::Text {
-        id: "durable-body".into(), timestamp: stamp_now(), author: Author::Assistant,
-        text: "Already durable output".into(), expanded_text: None,
-        source: None, attachments: vec![],
-    });
+    push_message_on_record(
+        original.session_mut(&id).unwrap(),
+        Message::Text {
+            id: "durable-body".into(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "Already durable output".into(),
+            expanded_text: None,
+            source: None,
+            attachments: vec![],
+        },
+    );
     persist_state(&path, &original).unwrap();
     let (restored, connection) = load_state_for_boot(&path).unwrap();
     let mut restored = restored.unwrap();
     restored.import_discovered_codex_threads(&cwd, vec![thread]);
     let delta = collect_persist_delta_from_shared_state(&StateMutex::new(restored), 0);
-    assert!(delta.changed_sessions.is_empty(), "unchanged discovery must not dirty its session");
+    assert!(
+        delta.changed_sessions.is_empty(),
+        "unchanged discovery must not dirty its session"
+    );
     drop(connection);
     let observer = Arc::new(PersistObserver::default());
     let scope = observer.begin_at(std::time::Instant::now());
@@ -251,16 +368,23 @@ fn plain_unpaused_resume_is_idempotent_but_a_paused_human_head_keeps_its_stop_ow
             QueuedPromptSource::Human,
         );
     }
-    let (_, stop) = state.begin_requested_stop_session(&session, &StopSessionOptions::default()).unwrap();
+    let (_, stop) = state
+        .begin_requested_stop_session(&session, &StopSessionOptions::default())
+        .unwrap();
     assert!(stop.is_some(), "the production Stop owner must be claimed");
     let (queue, stop_generation) = {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
         assert!(record.orchestrator_auto_dispatch_blocked && record.runtime_stop_in_progress);
-        (serde_json::to_value(&record.queued_prompts).unwrap(), record.runtime_stop_generation)
+        (
+            serde_json::to_value(&record.queued_prompts).unwrap(),
+            record.runtime_stop_generation,
+        )
     };
-    let error = state.resume_session_queue(&session)
-        .err().expect("the paused Human head must preserve its Stop owner");
+    let error = state
+        .resume_session_queue(&session)
+        .err()
+        .expect("the paused Human head must preserve its Stop owner");
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(receiver.try_recv().is_err());
     let inner = state.inner.lock().unwrap();
@@ -627,7 +751,7 @@ fn claude_control_failure_terminates_the_child_and_preserves_the_waiter_reason()
         &error_override,
         detail,
     )
-        .expect("the reader failure should terminate the Claude child");
+    .expect("the reader failure should terminate the Claude child");
     process
         .wait()
         .expect("the terminated Claude child should be reapable");

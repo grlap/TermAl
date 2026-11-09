@@ -41,14 +41,7 @@ async fn prompt_handler_deadline(route: &'static str) {
         "content-type",
         axum::http::HeaderValue::from_static("application/json"),
     );
-    let request = federation_control_fixture::signed(
-        &sender,
-        1,
-        "POST",
-        route,
-        headers,
-        b"{}",
-    );
+    let request = federation_control_fixture::signed(&sender, 1, "POST", route, headers, b"{}");
     let running = tokio::spawn(router.clone().oneshot(request));
     tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered.notified())
         .await

@@ -90,7 +90,10 @@ fn each_committed_input_outcome_reads_as_recorded() {
     )
     .committed_input
     .expect("a debris record reads");
-    assert_eq!(debris.outcome, Some(TestRunCommittedInputOutcome::DebrisPendingDisposition));
+    assert_eq!(
+        debris.outcome,
+        Some(TestRunCommittedInputOutcome::DebrisPendingDisposition)
+    );
     assert_eq!(debris.eligible, Some(false));
     let after = debris.after.expect("the after state is kept");
     assert!(!after.clean);
@@ -109,7 +112,10 @@ fn each_committed_input_outcome_reads_as_recorded() {
     )
     .committed_input
     .expect("an input-changed record reads");
-    assert_eq!(changed.outcome, Some(TestRunCommittedInputOutcome::InputChanged));
+    assert_eq!(
+        changed.outcome,
+        Some(TestRunCommittedInputOutcome::InputChanged)
+    );
     let after = changed.after.expect("the after state is kept");
     assert_eq!(after.commit, MOVED);
     assert_eq!(after.paths[0].origin.as_deref(), Some("a.rs"));
@@ -143,7 +149,10 @@ fn each_committed_input_outcome_reads_as_recorded() {
     .committed_input
     .expect("a record refused for a configured filter reads");
     assert!(!filtered_before.clean_before);
-    assert_eq!(filtered_before.filters, vec!["filter.fixture.clean".to_owned()]);
+    assert_eq!(
+        filtered_before.filters,
+        vec!["filter.fixture.clean".to_owned()]
+    );
     assert_eq!(
         serde_json::to_value(&filtered_before).unwrap()["filters"],
         json!(["filter.fixture.clean"]),
@@ -182,7 +191,10 @@ fn each_committed_input_outcome_reads_as_recorded() {
     .committed_input
     .expect("an input-changed record for a gitlink reads");
     assert_eq!(
-        gitlinked_after.after.expect("the after state is kept").gitlinks,
+        gitlinked_after
+            .after
+            .expect("the after state is kept")
+            .gitlinks,
         vec!["sub".to_owned()]
     );
 
@@ -218,8 +230,18 @@ fn each_committed_input_outcome_reads_as_recorded() {
     )
     .committed_input
     .expect("an input-changed record for a skipped path reads");
-    assert_eq!(skipped_after.outcome, Some(TestRunCommittedInputOutcome::InputChanged));
-    assert_eq!(skipped_after.after.expect("the after state is kept").skipped_paths.len(), 1);
+    assert_eq!(
+        skipped_after.outcome,
+        Some(TestRunCommittedInputOutcome::InputChanged)
+    );
+    assert_eq!(
+        skipped_after
+            .after
+            .expect("the after state is kept")
+            .skipped_paths
+            .len(),
+        1
+    );
 
     // A Git filter configured during the run stops the status being read:
     // the launcher records it after the run, as an input change.
@@ -235,9 +257,15 @@ fn each_committed_input_outcome_reads_as_recorded() {
     )
     .committed_input
     .expect("an input-changed record for a filter reads");
-    assert_eq!(filtered_after.outcome, Some(TestRunCommittedInputOutcome::InputChanged));
     assert_eq!(
-        filtered_after.after.expect("the after state is kept").filters,
+        filtered_after.outcome,
+        Some(TestRunCommittedInputOutcome::InputChanged)
+    );
+    assert_eq!(
+        filtered_after
+            .after
+            .expect("the after state is kept")
+            .filters,
         vec!["filter.fixture.clean".to_owned()]
     );
 
@@ -248,7 +276,10 @@ fn each_committed_input_outcome_reads_as_recorded() {
     )
     .committed_input
     .expect("a record written before the run reads");
-    assert_eq!((pending.after, pending.outcome, pending.eligible), (None, None, None));
+    assert_eq!(
+        (pending.after, pending.outcome, pending.eligible),
+        (None, None, None)
+    );
 
     // The wire form names it beside its siblings, in camelCase.
     let wire = serde_json::to_value(&clean).unwrap();
@@ -336,6 +367,10 @@ fn a_malformed_committed_input_reads_as_none() {
             with_input(input.clone()),
         );
         assert_eq!(detail.committed_input, None, "{input}");
-        assert_eq!(detail.stages.len(), 2, "the rest of the detail still reads: {input}");
+        assert_eq!(
+            detail.stages.len(),
+            2,
+            "the rest of the detail still reads: {input}"
+        );
     }
 }

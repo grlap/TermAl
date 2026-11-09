@@ -2762,8 +2762,11 @@ async fn telegram_test_route_rate_limit_includes_retry_after_header() {
     // This test is about the route's answer. The tests above own the cooldown,
     // and a real one could run out before a slow test gets to its request, so
     // this attempt is dated an hour ahead.
-    check_telegram_test_rate_limit_at(&token, std::time::Instant::now() + Duration::from_secs(3600))
-        .expect("first attempt should prime rate limit");
+    check_telegram_test_rate_limit_at(
+        &token,
+        std::time::Instant::now() + Duration::from_secs(3600),
+    )
+    .expect("first attempt should prime rate limit");
 
     let response = request_response(
         &app,

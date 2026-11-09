@@ -34,7 +34,11 @@ pub(super) async fn operator_view(state: &AppState) -> Value {
     operator_request(state, "GET", "/api/federation", None, StatusCode::OK).await
 }
 
-pub(super) async fn operator_configure(state: &AppState, body: Value, expected: StatusCode) -> Value {
+pub(super) async fn operator_configure(
+    state: &AppState,
+    body: Value,
+    expected: StatusCode,
+) -> Value {
     operator_request(
         state,
         "POST",

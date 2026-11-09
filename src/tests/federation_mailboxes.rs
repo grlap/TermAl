@@ -98,9 +98,11 @@ async fn explicit_empty_mailbox_creation_is_idempotent_and_visible_before_first_
         0
     );
     // Standalone callers retain the existing populated-mailbox-only view.
-    assert!(mailbox_summaries_for_session(&connection, &pa.session_id)
-        .unwrap()
-        .is_empty());
+    assert!(
+        mailbox_summaries_for_session(&connection, &pa.session_id)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -193,7 +195,8 @@ async fn domain_read_issues_receipts_and_exact_retry_keeps_the_canonical_append(
     let mailbox = first["mailboxId"].as_str().unwrap().to_owned();
     let notifications = state.clone();
     tokio::task::spawn_blocking(move || notifications.run_native_mailbox_wake_batch(0))
-        .await.unwrap();
+        .await
+        .unwrap();
     let page: MailboxReadResponse = state
         .federation_mailbox_operation(
             &b,
@@ -288,16 +291,39 @@ async fn numeric_ack_is_rejected_for_domain_members_but_standalone_behavior_rema
             inner.session_mut_by_index(index).unwrap().session.status = SessionStatus::Active;
         }
     }
-    let sent = state.append_mailbox_message_and_notify(&sender, SendMailboxMessageRequest {
-        target_session_id: target.clone(), message: "standalone numeric ACK".to_owned(),
-        idempotency_key: "numeric".to_owned(), topic: None, state_stamp: None, class: None,
-    }).unwrap();
-    state.mailbox_store.read_range_with_issuance(&target, &sent.mailbox_id, None, 50, true).unwrap();
-    let response = app_router(state).oneshot(Request::builder().method("POST")
-        .uri(format!("/api/sessions/{target}/mailboxes/{}/acknowledge", sent.mailbox_id))
-        .header("content-type", "application/json")
-        .body(Body::from(r#"{"expectedProcessedThrough":0,"processedThrough":1}"#)).unwrap())
-        .await.unwrap();
+    let sent = state
+        .append_mailbox_message_and_notify(
+            &sender,
+            SendMailboxMessageRequest {
+                target_session_id: target.clone(),
+                message: "standalone numeric ACK".to_owned(),
+                idempotency_key: "numeric".to_owned(),
+                topic: None,
+                state_stamp: None,
+                class: None,
+            },
+        )
+        .unwrap();
+    state
+        .mailbox_store
+        .read_range_with_issuance(&target, &sent.mailbox_id, None, 50, true)
+        .unwrap();
+    let response = app_router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/sessions/{target}/mailboxes/{}/acknowledge",
+                    sent.mailbox_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"expectedProcessedThrough":0,"processedThrough":1}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }
 
@@ -307,39 +333,80 @@ async fn central_domain_receipt_cannot_silently_accept_a_local_coverage_declarat
     let state = central_store();
     let (sender, _) = local_participant(&state, "Sender");
     let (target, participant) = local_participant(&state, "Target");
-    let sent: MailboxAppendReceipt = state.federation_mailbox_operation(
-        &sender, send(&participant.session_id, "coverage-declaration"),
-    ).await.unwrap();
-    let page: MailboxReadResponse = state.federation_mailbox_operation(
-        &target, FederationMailboxOperation::Read {
-            mailbox_id: sent.mailbox_id.clone(), after_sequence: None,
-            limit: 10, issue_receipt: true,
-        },
-    ).await.unwrap();
+    let sent: MailboxAppendReceipt = state
+        .federation_mailbox_operation(
+            &sender,
+            send(&participant.session_id, "coverage-declaration"),
+        )
+        .await
+        .unwrap();
+    let page: MailboxReadResponse = state
+        .federation_mailbox_operation(
+            &target,
+            FederationMailboxOperation::Read {
+                mailbox_id: sent.mailbox_id.clone(),
+                after_sequence: None,
+                limit: 10,
+                issue_receipt: true,
+            },
+        )
+        .await
+        .unwrap();
     let receipt = page.receipt.unwrap();
     let error = acknowledge_mailbox(
-        AxumPath((target.clone(), sent.mailbox_id.clone())), State(state.clone()),
+        AxumPath((target.clone(), sent.mailbox_id.clone())),
+        State(state.clone()),
         Json(AcknowledgeMailboxRequest {
-            receipt: Some(receipt.clone()), expected_processed_through: None,
-            processed_through: None, no_continuation: true,
+            receipt: Some(receipt.clone()),
+            expected_processed_through: None,
+            processed_through: None,
+            no_continuation: true,
         }),
-    ).await.unwrap_err();
+    )
+    .await
+    .unwrap_err();
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(error.message.contains("noContinuation is unavailable for central-domain"));
-    assert_eq!(mailbox_processed_through(
-        &state.mailbox_store.connection().unwrap(), &sent.mailbox_id, &participant.session_id,
-    ).unwrap(), 0);
+    assert!(
+        error
+            .message
+            .contains("noContinuation is unavailable for central-domain")
+    );
+    assert_eq!(
+        mailbox_processed_through(
+            &state.mailbox_store.connection().unwrap(),
+            &sent.mailbox_id,
+            &participant.session_id,
+        )
+        .unwrap(),
+        0
+    );
     let summary = acknowledge_mailbox(
-        AxumPath((target, sent.mailbox_id)), State(state.clone()),
+        AxumPath((target, sent.mailbox_id)),
+        State(state.clone()),
         Json(AcknowledgeMailboxRequest {
-            receipt: Some(receipt), expected_processed_through: None,
-            processed_through: None, no_continuation: false,
+            receipt: Some(receipt),
+            expected_processed_through: None,
+            processed_through: None,
+            no_continuation: false,
         }),
-    ).await.unwrap().0;
+    )
+    .await
+    .unwrap()
+    .0;
     assert_eq!(summary.unread_count, 0);
-    assert_eq!(state.mailbox_store.connection().unwrap().query_row(
-        "SELECT count(*) FROM mailbox_continuation_declarations", [], |r| r.get::<_, u64>(0),
-    ).unwrap(), 0);
+    assert_eq!(
+        state
+            .mailbox_store
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM mailbox_continuation_declarations",
+                [],
+                |r| r.get::<_, u64>(0),
+            )
+            .unwrap(),
+        0
+    );
 }
 
 #[test]

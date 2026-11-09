@@ -104,13 +104,25 @@ fn a_wrapped_focused_run_without_its_stage_line_keeps_the_missing_line_diagnosti
     let turn = EOCheckedTurn::start("focused-stage-line-missing", true);
     let directory = records(&runs_dir(&turn, "other"), 36);
     let output = other_launcher_summary(&directory);
-    assert_eq!(engram_launcher_output_test_stages(&output), ["focused"],
-        "the run's actual artifact backs its pass");
+    assert_eq!(
+        engram_launcher_output_test_stages(&output),
+        ["focused"],
+        "the run's actual artifact backs its pass"
+    );
     let (request, check) = run_and_finish(&turn, WRAPPED, &output);
     let end = check.end.as_ref().unwrap();
-    assert!(end.focused_stage_line_missing, "missing stage line is distinct from zero tests");
+    assert!(
+        end.focused_stage_line_missing,
+        "missing stage line is distinct from zero tests"
+    );
     assert!(!end.showed_passing_tests);
-    assert_eq!(request["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        request["occurrence"]["observed_checks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -155,5 +167,9 @@ fn only_a_record_backed_pass_without_its_stage_line_gets_the_new_reason() {
 
     // A full gate's command never reads as a focused run's.
     let full = engram_check_command("node scripts/test-launcher.mjs full").expect("a full gate");
-    assert!(!engram_focused_stage_line_missing(&full, &[], &["focused".to_owned()]));
+    assert!(!engram_focused_stage_line_missing(
+        &full,
+        &[],
+        &["focused".to_owned()]
+    ));
 }

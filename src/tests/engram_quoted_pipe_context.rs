@@ -6,57 +6,84 @@ use super::*;
 fn wrapper_must_stay_unknown(label: &str, command: &str) {
     for native in [0, 1] {
         let fixture = FocusedNodeFixture::with_bash_test(
-            &format!("wrapper-{label}-{native}"), native, false, command, &ARGS,
+            &format!("wrapper-{label}-{native}"),
+            native,
+            false,
+            command,
+            &ARGS,
         );
         fixture.assert_started();
         let observation = fixture.finish(EngramCommandExit::Code(native));
         assert_truthful_refusal(&fixture.turn, &observation, native, "pipe containment");
-        assert!(!node_refs(&fixture.turn).contains(&format!("exit:{native}")), "{observation:#}");
+        assert!(
+            !node_refs(&fixture.turn).contains(&format!("exit:{native}")),
+            "{observation:#}"
+        );
         eprintln!("wrapper containment refused: {label}, native={native}");
     }
 }
 
 #[test]
 fn bash_wrapper_has_no_literal_pipe_exemption() {
-    wrapper_must_stay_unknown("bash", &format!(
-        "bash -lc '{PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs'"));
+    wrapper_must_stay_unknown(
+        "bash",
+        &format!("bash -lc '{PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs'"),
+    );
 }
 
 #[test]
 fn powershell_wrapper_has_no_literal_pipe_exemption() {
-    wrapper_must_stay_unknown("powershell", &format!(
-        "pwsh -Command {PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs"));
+    wrapper_must_stay_unknown(
+        "powershell",
+        &format!("pwsh -Command {PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs"),
+    );
 }
 
 #[test]
 fn cmd_wrapper_has_no_literal_pipe_exemption() {
-    wrapper_must_stay_unknown("cmd", &format!(
-        "cmd /c {PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs"));
+    wrapper_must_stay_unknown(
+        "cmd",
+        &format!("cmd /c {PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs"),
+    );
 }
 
 #[test]
 fn cmd_leading_quote_cannot_supply_cargo_test_credit() {
     let command = r#"cmd /c "cargo" test -- "x|echo test result: ok. 1 passed""#;
-    let (turn, observation) = review_record_native_exit("cmd-leading-quote", command,
-        "test result: ok. 1 passed; 0 failed");
+    let (turn, observation) = review_record_native_exit(
+        "cmd-leading-quote",
+        command,
+        "test result: ok. 1 passed; 0 failed",
+    );
     assert_truthful_refusal(&turn, &observation, 0, "pipe containment");
 }
 
 #[test]
 fn powershell_interposition_cannot_supply_cargo_test_credit() {
     let command = r#"pwsh -Command cargo test -- "x|echo test result: ok. 1 passed""#;
-    let (turn, observation) = review_record_native_exit("powershell-interposition", command,
-        "test result: ok. 1 passed; 0 failed");
+    let (turn, observation) = review_record_native_exit(
+        "powershell-interposition",
+        command,
+        "test result: ok. 1 passed; 0 failed",
+    );
     assert_truthful_refusal(&turn, &observation, 0, "pipe containment");
 }
 
 #[test]
 fn wrappers_cannot_supply_cargo_build_exit_credit() {
-    for wrapper in ["bash -lc 'cargo build -- \"x|y\"'",
-        "pwsh -Command cargo build -- \"x|y\"", "cmd /c cargo build -- \"x|y\""] {
+    for wrapper in [
+        "bash -lc 'cargo build -- \"x|y\"'",
+        "pwsh -Command cargo build -- \"x|y\"",
+        "cmd /c cargo build -- \"x|y\"",
+    ] {
         let (_turn, observation) = review_record_native_exit("wrapper-cargo-build", wrapper, "");
-        assert!(observation["occurrence"]["observed_checks"].as_array().unwrap().is_empty(),
-            "a wrapped Build has no recognized check fact: {observation:#}");
+        assert!(
+            observation["occurrence"]["observed_checks"]
+                .as_array()
+                .unwrap()
+                .is_empty(),
+            "a wrapped Build has no recognized check fact: {observation:#}"
+        );
     }
 }
 
@@ -64,43 +91,65 @@ fn wrappers_cannot_supply_cargo_build_exit_credit() {
 fn unknown_runtime_double_quotes_are_not_an_exemption() {
     let command = format!("{PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs");
     let check = engram_check_command(&command).expect("the Test remains observable");
-    assert!(!check.simple, "an unwrapped line alone does not identify its shell");
+    assert!(
+        !check.simple,
+        "an unwrapped line alone does not identify its shell"
+    );
     let fixture = FocusedNodeFixture::with_test("unknown-double-quote", 0, false, &command, &ARGS);
     one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "indeterminate");
 }
 
 #[test]
 fn known_bash_unwrapped_quotes_keep_native_results() {
-    for (label, pattern) in [("single", "'a|b'"), ("double", "\"a|b\""),
-        ("mixed", "a'|'\"b\"")] {
+    for (label, pattern) in [
+        ("single", "'a|b'"),
+        ("double", "\"a|b\""),
+        ("mixed", "a'|'\"b\""),
+    ] {
         let command = format!("{PREFIX} --test-name-pattern={pattern} fixture.test.mjs");
         for native in [0, 1] {
             let fixture = FocusedNodeFixture::with_bash_test(
-                &format!("direct-bash-{label}-{native}"), native, false, &command, &ARGS);
+                &format!("direct-bash-{label}-{native}"),
+                native,
+                false,
+                &command,
+                &ARGS,
+            );
             fixture.assert_started();
-            one_node_test(&fixture.finish(EngramCommandExit::Code(native)),
-                if native == 0 { "passed" } else { "failed" });
+            one_node_test(
+                &fixture.finish(EngramCommandExit::Code(native)),
+                if native == 0 { "passed" } else { "failed" },
+            );
             eprintln!("known Bash literal pipe validated: {label}, native={native}");
         }
     }
 }
 
-const ESCAPED_TEST: &str =
-    r#"node scripts/test-launcher.mjs focused -- node --te\st --test-name-pattern="a|b" fixture.test.mjs"#;
+const ESCAPED_TEST: &str = r#"node scripts/test-launcher.mjs focused -- node --te\st --test-name-pattern="a|b" fixture.test.mjs"#;
 
 #[test]
 fn known_bash_escaped_token_uses_focused_validation() {
     for native in [0, 1] {
         let fixture = FocusedNodeFixture::with_bash_test(
-            &format!("direct-bash-token-{native}"), native, false, ESCAPED_TEST, &ARGS);
+            &format!("direct-bash-token-{native}"),
+            native,
+            false,
+            ESCAPED_TEST,
+            &ARGS,
+        );
         // This is the liveness witness: a known Bash token must be decoded
         // before recognition, rather than rejected by the unknown-shell view.
         fixture.assert_started();
-        assert!(fixture.turn.record(|record|
-            engram_is_focused_node_check(&record.engram.active_turn_checks[0].command)),
-            "classification must use the same argv that recognized the Test");
-        one_node_test(&fixture.finish(EngramCommandExit::Code(native)),
-            if native == 0 { "passed" } else { "failed" });
+        assert!(
+            fixture.turn.record(|record| engram_is_focused_node_check(
+                &record.engram.active_turn_checks[0].command
+            )),
+            "classification must use the same argv that recognized the Test"
+        );
+        one_node_test(
+            &fixture.finish(EngramCommandExit::Code(native)),
+            if native == 0 { "passed" } else { "failed" },
+        );
         eprintln!("known Bash escaped token validated: native={native}");
     }
 }
@@ -110,11 +159,17 @@ fn known_bash_escaped_quote_keeps_the_complete_argument() {
     let command = format!(r#"{PREFIX} --test-name-pattern="a\"|b" fixture.test.mjs"#);
     for native in [0, 1] {
         let fixture = FocusedNodeFixture::with_bash_test(
-            &format!("direct-bash-quote-{native}"), native, false, &command,
-            &["--test", "--test-name-pattern=a\"|b", "fixture.test.mjs"]);
+            &format!("direct-bash-quote-{native}"),
+            native,
+            false,
+            &command,
+            &["--test", "--test-name-pattern=a\"|b", "fixture.test.mjs"],
+        );
         fixture.assert_started();
-        one_node_test(&fixture.finish(EngramCommandExit::Code(native)),
-            if native == 0 { "passed" } else { "failed" });
+        one_node_test(
+            &fixture.finish(EngramCommandExit::Code(native)),
+            if native == 0 { "passed" } else { "failed" },
+        );
         eprintln!("known Bash escaped quote validated: native={native}");
     }
 }
@@ -126,7 +181,12 @@ fn escaped_token_never_falls_back_to_generic_artifact_credit() {
         // completion path that borrows generic stage counts.
         let command = format!("bash -lc '{ESCAPED_TEST}'");
         let mut fixture = FocusedNodeFixture::with_test(
-            &format!("wrapped-token-{defect}"), 0, false, &command, &ARGS);
+            &format!("wrapped-token-{defect}"),
+            0,
+            false,
+            &command,
+            &ARGS,
+        );
         corrupt_artifact(&mut fixture, defect);
         let checkpoint = fixture.finish(EngramCommandExit::Code(0));
         one_node_test(&checkpoint, "indeterminate");
@@ -157,12 +217,20 @@ fn known_bash_literal_pipe_refuses_each_invalid_artifact() {
     let command = format!("{PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs");
     for defect in ["owner", "interval", "argv", "input"] {
         let mut fixture = FocusedNodeFixture::with_bash_test(
-            &format!("direct-literal-{defect}"), 0, false, &command, &ARGS);
+            &format!("direct-literal-{defect}"),
+            0,
+            false,
+            &command,
+            &ARGS,
+        );
         fixture.assert_started();
         corrupt_artifact(&mut fixture, defect);
         let checkpoint = fixture.finish(EngramCommandExit::Code(0));
         one_node_test(&checkpoint, "indeterminate");
-        assert!(!node_refs(&fixture.turn).contains(&"exit:0".to_owned()), "{checkpoint:#}");
+        assert!(
+            !node_refs(&fixture.turn).contains(&"exit:0".to_owned()),
+            "{checkpoint:#}"
+        );
         eprintln!("known Bash literal pipe artifact refused: {defect}");
     }
 }
@@ -171,14 +239,23 @@ fn known_bash_literal_pipe_refuses_each_invalid_artifact() {
 fn known_bash_one_call_has_a_positive_twin_in_the_same_directory() {
     for native in [0, 1] {
         let fixture = FocusedNodeFixture::with_bash_test(
-            &format!("direct-bash-one-call-{native}"), native, true,
-            &format!("{PREFIX} --test-name-pattern='a|b' fixture.test.mjs"), &ARGS);
+            &format!("direct-bash-one-call-{native}"),
+            native,
+            true,
+            &format!("{PREFIX} --test-name-pattern='a|b' fixture.test.mjs"),
+            &ARGS,
+        );
         // Prove this exact fixture directory is readable by the one-call parser.
         let positive = format!("pushd \"{}\" && {NODE_TEST}", fixture.turn.root.display());
-        assert!(engram_check_command(&positive).is_some(), "plain one-call control must resolve");
+        assert!(
+            engram_check_command(&positive).is_some(),
+            "plain one-call control must resolve"
+        );
         fixture.assert_started();
-        one_node_test(&fixture.finish(EngramCommandExit::Code(native)),
-            if native == 0 { "passed" } else { "failed" });
+        one_node_test(
+            &fixture.finish(EngramCommandExit::Code(native)),
+            if native == 0 { "passed" } else { "failed" },
+        );
         eprintln!("known Bash one-call validated: native={native}");
     }
 }
@@ -186,30 +263,46 @@ fn known_bash_one_call_has_a_positive_twin_in_the_same_directory() {
 #[test]
 fn ordinary_pipe_free_focused_artifacts_still_validate() {
     for native in [0, 1] {
-        one_node_test(&FocusedNodeFixture::new(&format!("pipe-free-context-{native}"), native)
-            .finish(EngramCommandExit::Code(native)),
-            if native == 0 { "passed" } else { "failed" });
+        one_node_test(
+            &FocusedNodeFixture::new(&format!("pipe-free-context-{native}"), native)
+                .finish(EngramCommandExit::Code(native)),
+            if native == 0 { "passed" } else { "failed" },
+        );
     }
 }
 
 #[test]
 fn known_bash_pipeline_cannot_borrow_a_focused_native_exit() {
     let command = format!("{PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs | cat");
-    let fixture = FocusedNodeFixture::with_bash_test(
-        "known-bash-pipeline", 0, false, &command, &ARGS);
+    let fixture =
+        FocusedNodeFixture::with_bash_test("known-bash-pipeline", 0, false, &command, &ARGS);
     fixture.assert_started();
-    assert_truthful_refusal(&fixture.turn, &fixture.finish(EngramCommandExit::Code(0)),
-        0, "compound command");
+    assert_truthful_refusal(
+        &fixture.turn,
+        &fixture.finish(EngramCommandExit::Code(0)),
+        0,
+        "compound command",
+    );
 }
 
 #[test]
 fn qualified_escaped_token_keeps_every_artifact_guard() {
     for defect in ["owner", "interval", "argv", "input"] {
         let mut fixture = FocusedNodeFixture::with_bash_test(
-            &format!("qualified-token-{defect}"), 0, false, ESCAPED_TEST, &ARGS);
+            &format!("qualified-token-{defect}"),
+            0,
+            false,
+            ESCAPED_TEST,
+            &ARGS,
+        );
         fixture.assert_started();
         corrupt_artifact(&mut fixture, defect);
-        assert_truthful_refusal(&fixture.turn, &fixture.finish(EngramCommandExit::Code(0)), 0, defect);
+        assert_truthful_refusal(
+            &fixture.turn,
+            &fixture.finish(EngramCommandExit::Code(0)),
+            0,
+            defect,
+        );
         eprintln!("qualified escaped token artifact guard reached: {defect}");
     }
 }
@@ -217,8 +310,8 @@ fn qualified_escaped_token_keeps_every_artifact_guard() {
 #[test]
 fn qualified_launcher_cannot_borrow_generic_stage_counts() {
     let command = "node scripts/test-launcher.mjs focused -- cargo test --filter=\"a|b\"";
-    let fixture = FocusedNodeFixture::with_bash_test(
-        "qualified-generic-counts", 0, false, command, &ARGS);
+    let fixture =
+        FocusedNodeFixture::with_bash_test("qualified-generic-counts", 0, false, command, &ARGS);
     fixture.assert_started();
     let checkpoint = fixture.finish(EngramCommandExit::Code(0));
     assert_truthful_refusal(&fixture.turn, &checkpoint, 0, "argv");
@@ -228,18 +321,34 @@ fn qualified_launcher_cannot_borrow_generic_stage_counts() {
 fn qualified_description_preserves_argv_and_refuses_substitution() {
     for changed in [false, true] {
         let fixture = FocusedNodeFixture::with_bash_test(
-            &format!("qualified-description-{changed}"), 0, false, ESCAPED_TEST, &ARGS);
+            &format!("qualified-description-{changed}"),
+            0,
+            false,
+            ESCAPED_TEST,
+            &ARGS,
+        );
         fixture.assert_started();
         let described = if changed {
             ESCAPED_TEST.replace("fixture.test.mjs", "other.test.mjs")
-        } else { ESCAPED_TEST.to_owned() };
+        } else {
+            ESCAPED_TEST.to_owned()
+        };
         let mut recorder = fixture.turn.recorder();
         recorder.set_observation_provenance(fixture.provenance.clone());
-        recorder.command_described("node", Some(&described),
-            Some(&fixture.turn.root.to_string_lossy())).unwrap();
+        recorder
+            .command_described(
+                "node",
+                Some(&described),
+                Some(&fixture.turn.root.to_string_lossy()),
+            )
+            .unwrap();
         if changed {
-            assert!(fixture.turn.record(|record| record.engram.active_turn_checks.is_empty()),
-                "a described argv substitution must drop its original check");
+            assert!(
+                fixture
+                    .turn
+                    .record(|record| record.engram.active_turn_checks.is_empty()),
+                "a described argv substitution must drop its original check"
+            );
             one_node_test(&fixture.finish(EngramCommandExit::Code(0)), "indeterminate");
         } else {
             fixture.assert_started();
@@ -253,11 +362,18 @@ fn qualified_description_preserves_argv_and_refuses_substitution() {
 fn qualified_pipe_does_not_prove_expanded_or_unsupported_argv() {
     for suffix in ["{a,b}", "*.mjs", "$'a\\\'|b'", "$\"a|b\"", "x^\"|y\"", "a$"] {
         let command = format!(r#"{PREFIX} --test-name-pattern="a\"|b" {suffix}"#);
-        assert!(engram_check_command_in(&command, EngramShellDialect::Bash)
-            .is_none_or(|check| !check.simple), "unsupported argv must not qualify: {command}");
+        assert!(
+            engram_check_command_in(&command, EngramShellDialect::Bash)
+                .is_none_or(|check| !check.simple),
+            "unsupported argv must not qualify: {command}"
+        );
     }
     let plain = format!("{PREFIX} --test-name-pattern=\"a|b\" fixture.test.mjs");
-    assert!(engram_check_command_in(&plain, EngramShellDialect::Bash).unwrap().simple);
+    assert!(
+        engram_check_command_in(&plain, EngramShellDialect::Bash)
+            .unwrap()
+            .simple
+    );
 }
 
 #[test]
@@ -270,20 +386,38 @@ fn qualified_plain_runner_end_must_match_its_started_argv() {
         ("unrecognized", "echo finished", true),
     ] {
         let turn = EOCheckedTurn::start(&format!("qualified-cargo-end-{label}"), true);
-        let provenance = turn.record(|record|
+        let provenance = turn.record(|record| {
             EngramObservationProvenance::Claude(ClaudeObservationProvenance {
                 token: record.runtime.runtime_token().unwrap(),
-                origin: ClaudeWorkOrigin::Attempt { turn_generation: record.active_turn_generation },
-            }));
+                origin: ClaudeWorkOrigin::Attempt {
+                    turn_generation: record.active_turn_generation,
+                },
+            })
+        });
         let mut recorder = turn.recorder();
         recorder.set_observation_provenance(provenance);
-        recorder.command_started_in("cargo", started, Some(started),
-            Some(&turn.root.to_string_lossy())).unwrap();
+        recorder
+            .command_started_in(
+                "cargo",
+                started,
+                Some(started),
+                Some(&turn.root.to_string_lossy()),
+            )
+            .unwrap();
         turn.wait_for_snapshots();
-        assert_eq!(turn.record(|record| record.engram.active_turn_checks.len()), 1);
-        recorder.command_completed_with_exit("cargo", finished,
-            "test result: ok. 1 passed; 0 failed", CommandStatus::Success,
-            EngramCommandExit::Code(0)).unwrap();
+        assert_eq!(
+            turn.record(|record| record.engram.active_turn_checks.len()),
+            1
+        );
+        recorder
+            .command_completed_with_exit(
+                "cargo",
+                finished,
+                "test result: ok. 1 passed; 0 failed",
+                CommandStatus::Success,
+                EngramCommandExit::Code(0),
+            )
+            .unwrap();
         turn.wait_for_snapshots();
         let checkpoint = turn.finish();
         assert_ordinary_observation_has_no_native_credit(&turn, &checkpoint);

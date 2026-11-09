@@ -64,9 +64,9 @@ use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use base64::Engine as _;
 use chrono::Local;
-use notify::{Event as NotifyEvent, EventKind as NotifyEventKind};
 #[cfg(not(test))]
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Event as NotifyEvent, EventKind as NotifyEventKind};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -188,7 +188,10 @@ async fn run_server() -> Result<()> {
         .local_addr()
         .context("failed to read local backend address")?;
     state.set_local_http_base_url(format!("http://{bound}"));
-    eprintln!("startup> listener bound elapsed_ms={}", boot_started.elapsed().as_millis());
+    eprintln!(
+        "startup> listener bound elapsed_ms={}",
+        boot_started.elapsed().as_millis()
+    );
 
     // Restore the full inventory on the owned boot worker. Its publication
     // prepares per-session readiness before dependent requests can observe it.
@@ -265,12 +268,18 @@ async fn run_server() -> Result<()> {
     let capture_result = if shutdown_state.capture_lifetime.stop_and_join() {
         Ok(())
     } else {
-        Err(anyhow!("capture_cleanup_pending: host capture cleanup has not completed"))
+        Err(anyhow!(
+            "capture_cleanup_pending: host capture cleanup has not completed"
+        ))
     };
     let result = result.and(persist_result).and(capture_result);
     shutdown_state.shutdown_state_broadcast_blocking();
     if let Some(lifecycle) = host_lifecycle {
-        let outcome = if result.is_ok() { HostShutdownOutcome::Graceful } else { HostShutdownOutcome::Fatal };
+        let outcome = if result.is_ok() {
+            HostShutdownOutcome::Graceful
+        } else {
+            HostShutdownOutcome::Fatal
+        };
         lifecycle.finish(outcome);
     }
 
@@ -344,10 +353,22 @@ fn app_router_with_acceptance_policy_limiter(
 
     Router::new()
         .route("/api/health", get(health))
-        .route("/api/diagnostics/persistence", get(get_persistence_diagnostics))
-        .route("/api/diagnostics/host-lifecycle", get(get_host_lifecycle_diagnostics))
-        .route("/api/diagnostics/runtime-observations", get(get_runtime_observation_counts))
-        .route("/api/diagnostics/mailbox-relay-wakes", get(get_mailbox_relay_wake_diagnostics))
+        .route(
+            "/api/diagnostics/persistence",
+            get(get_persistence_diagnostics),
+        )
+        .route(
+            "/api/diagnostics/host-lifecycle",
+            get(get_host_lifecycle_diagnostics),
+        )
+        .route(
+            "/api/diagnostics/runtime-observations",
+            get(get_runtime_observation_counts),
+        )
+        .route(
+            "/api/diagnostics/mailbox-relay-wakes",
+            get(get_mailbox_relay_wake_diagnostics),
+        )
         .route(
             "/api/federation/peers/{id}/enroll",
             post(enroll_federation_satellite),
@@ -449,7 +470,10 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .route("/api/projects", post(create_project))
         .route("/api/projects/{id}", delete(delete_project))
-        .route("/api/projects/{id}/environment", patch(update_project_environment))
+        .route(
+            "/api/projects/{id}/environment",
+            patch(update_project_environment),
+        )
         .route(
             "/api/projects/{id}/engram",
             patch(update_project_engram_settings),
@@ -490,7 +514,10 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/sessions/{id}/test-runs",
             post(register_session_test_run),
         )
-        .route("/api/sessions/{id}/source-owner", get(get_session_source_owner))
+        .route(
+            "/api/sessions/{id}/source-owner",
+            get(get_session_source_owner),
+        )
         .route("/api/test-runs/{run_id}", get(get_test_run))
         .route(
             "/api/test-runs/{run_id}/interrupt-monitoring",
@@ -623,18 +650,54 @@ fn app_router_with_acceptance_policy_limiter(
             post(send_session_telegram_document),
         )
         .route("/api/sessions/{id}/mailboxes", get(list_mailboxes_api))
-        .route("/api/sessions/{id}/mailbox-references", get(list_federation_mailbox_references).post(provision_federation_mailbox_reference))
-        .route("/api/sessions/{id}/mailbox-references/{reference}/resolve", get(resolve_federation_mailbox_reference))
-        .route("/api/sessions/{id}/mailboxes/protocol", get(negotiate_federation_mailboxes))
-        .route("/api/sessions/{id}/mailboxes/domain", post(join_federation_mailboxes))
-        .route("/api/sessions/{id}/mailboxes/participants", get(list_federation_mailbox_participants_with_basis))
-        .route("/api/sessions/{id}/mailboxes/directory", get(list_federation_mailbox_directory))
-        .route("/api/sessions/{id}/mailbox-intents", post(prepare_federation_intent_route))
-        .route("/api/sessions/{id}/mailbox-intents/{key}", get(get_federation_intent_route))
-        .route("/api/sessions/{id}/mailbox-intents/{key}/retry", post(retry_federation_intent_route))
-        .route("/api/sessions/{id}/mailbox-intents/{key}/cancel", post(cancel_federation_intent_route))
-        .route("/api/sessions/{id}/mailbox-intents/{key}/gc", post(gc_federation_intent_route))
-        .route("/api/sessions/{id}/mailboxes/create", post(get_or_create_federation_mailbox))
+        .route(
+            "/api/sessions/{id}/mailbox-references",
+            get(list_federation_mailbox_references).post(provision_federation_mailbox_reference),
+        )
+        .route(
+            "/api/sessions/{id}/mailbox-references/{reference}/resolve",
+            get(resolve_federation_mailbox_reference),
+        )
+        .route(
+            "/api/sessions/{id}/mailboxes/protocol",
+            get(negotiate_federation_mailboxes),
+        )
+        .route(
+            "/api/sessions/{id}/mailboxes/domain",
+            post(join_federation_mailboxes),
+        )
+        .route(
+            "/api/sessions/{id}/mailboxes/participants",
+            get(list_federation_mailbox_participants_with_basis),
+        )
+        .route(
+            "/api/sessions/{id}/mailboxes/directory",
+            get(list_federation_mailbox_directory),
+        )
+        .route(
+            "/api/sessions/{id}/mailbox-intents",
+            post(prepare_federation_intent_route),
+        )
+        .route(
+            "/api/sessions/{id}/mailbox-intents/{key}",
+            get(get_federation_intent_route),
+        )
+        .route(
+            "/api/sessions/{id}/mailbox-intents/{key}/retry",
+            post(retry_federation_intent_route),
+        )
+        .route(
+            "/api/sessions/{id}/mailbox-intents/{key}/cancel",
+            post(cancel_federation_intent_route),
+        )
+        .route(
+            "/api/sessions/{id}/mailbox-intents/{key}/gc",
+            post(gc_federation_intent_route),
+        )
+        .route(
+            "/api/sessions/{id}/mailboxes/create",
+            post(get_or_create_federation_mailbox),
+        )
         .route(
             "/api/sessions/{id}/mailboxes/send",
             post(send_mailbox_message),
@@ -728,7 +791,10 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/sessions/{id}/codex/requests/{message_id}",
             post(submit_codex_app_request),
         )
-        .layer(axum::middleware::from_fn_with_state(state.clone(), delegation_inventory_http_guard))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            delegation_inventory_http_guard,
+        ))
         .with_state(state)
         .layer(axum::Extension(policy_limiter))
         .layer(axum::Extension(EngramAuditLimiter(Arc::new(

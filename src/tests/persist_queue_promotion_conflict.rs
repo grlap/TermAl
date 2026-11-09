@@ -21,8 +21,14 @@ fn queue_fixture(source: Option<QueuedPromptSource>) -> QueueFixture {
     let (bad, good, bad_prompt, bad_input, good_input) = {
         let mut inner = store.inner.lock().unwrap();
         let cwd = store.root.path().to_string_lossy().into_owned();
-        let bad = inner.create_session(Agent::Claude, None, cwd.clone(), None, None).session.id;
-        let good = inner.create_session(Agent::Claude, None, cwd, None, None).session.id;
+        let bad = inner
+            .create_session(Agent::Claude, None, cwd.clone(), None, None)
+            .session
+            .id;
+        let good = inner
+            .create_session(Agent::Claude, None, cwd, None, None)
+            .session
+            .id;
         let (bad_runtime, bad_input) = test_claude_runtime_handle("rejected-promotion");
         let (good_runtime, good_input) = test_claude_runtime_handle("saved-promotion");
         let record = inner.session_mut(&bad).unwrap();
@@ -70,22 +76,42 @@ fn queue_fixture(source: Option<QueuedPromptSource>) -> QueueFixture {
         let inner = state.inner.lock().unwrap();
         inner.sessions[inner.find_session_index(&bad).unwrap()].active_turn_generation
     };
-    QueueFixture { _store: store, state, bad, good, bad_prompt, bad_generation, bad_input, good_input }
+    QueueFixture {
+        _store: store,
+        state,
+        bad,
+        good,
+        bad_prompt,
+        bad_generation,
+        bad_input,
+        good_input,
+    }
 }
 
 fn stored_ids(fixture: &QueueFixture, session: &str) -> Vec<String> {
     let connection = fixture._store.cache.connection.as_ref().unwrap();
-    let mut statement = connection.prepare(
-        "SELECT message_id FROM messages WHERE session_id=?1 ORDER BY position",
-    ).unwrap();
-    let rows = statement.query_map([session], |row| row.get::<_, String>(0)).unwrap();
+    let mut statement = connection
+        .prepare("SELECT message_id FROM messages WHERE session_id=?1 ORDER BY position")
+        .unwrap();
+    let rows = statement
+        .query_map([session], |row| row.get::<_, String>(0))
+        .unwrap();
     rows.collect::<rusqlite::Result<Vec<_>>>().unwrap()
 }
 
 fn stored_session(fixture: &QueueFixture, session: &str) -> String {
-    fixture._store.cache.connection.as_ref().unwrap().query_row(
-        "SELECT value_json FROM sessions WHERE id=?1", [session], |row| row.get(0),
-    ).unwrap()
+    fixture
+        ._store
+        .cache
+        .connection
+        .as_ref()
+        .unwrap()
+        .query_row(
+            "SELECT value_json FROM sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap()
 }
 
 fn assert_original_head_retained(fixture: &QueueFixture) {
@@ -95,14 +121,29 @@ fn assert_original_head_retained(fixture: &QueueFixture) {
     assert!(record.session.queue_paused);
     assert_eq!(record.session.status, SessionStatus::Idle);
     assert_eq!(record.active_turn_generation, fixture.bad_generation);
-    assert_eq!(record.session.messages.len(), 1, "no promoted prompt can survive rollback");
+    assert_eq!(
+        record.session.messages.len(),
+        1,
+        "no promoted prompt can survive rollback"
+    );
     assert_eq!(record.session.prompt_history, ["earlier prompt"]);
     assert_eq!(record.queued_prompts.len(), 1);
-    assert_eq!(record.queued_prompts[0].pending_prompt.id, fixture.bad_prompt);
-    assert_eq!(record.queued_prompts[0].pending_prompt.text, "keep the original queued intent");
-    assert!(record.prompt_deliveries.is_empty(), "ordinary prompts need no forged receipt");
-    assert!(matches!(fixture.bad_input.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "a rejected promotion must not reach or tear down the provider channel");
+    assert_eq!(
+        record.queued_prompts[0].pending_prompt.id,
+        fixture.bad_prompt
+    );
+    assert_eq!(
+        record.queued_prompts[0].pending_prompt.text,
+        "keep the original queued intent"
+    );
+    assert!(
+        record.prompt_deliveries.is_empty(),
+        "ordinary prompts need no forged receipt"
+    );
+    assert!(
+        matches!(fixture.bad_input.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "a rejected promotion must not reach or tear down the provider channel"
+    );
 }
 
 #[test]
@@ -113,13 +154,19 @@ fn ordinary_resume_sql_conflict_rolls_back_and_same_head_dispatches_once_after_c
         Err(error) => error,
         Ok(_) => panic!("a rejected promotion must fail before provider dispatch"),
     };
-    assert!(error.message.contains("UNIQUE constraint failed: messages.session_id, messages.message_id"));
+    assert!(
+        error
+            .message
+            .contains("UNIQUE constraint failed: messages.session_id, messages.message_id")
+    );
     assert!(error.message.contains(&fixture.bad));
     assert_original_head_retained(&fixture);
     // A different session can promote and really enqueue while the bad row remains rejected.
     fixture.state.resume_session_queue(&fixture.good).unwrap();
-    assert!(matches!(recv_within_guard(&fixture.good_input, "healthy sibling promotion"),
-        Ok(ClaudeRuntimeCommand::Prompt(_))));
+    assert!(matches!(
+        recv_within_guard(&fixture.good_input, "healthy sibling promotion"),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
     assert!(fixture.good_input.try_recv().is_err());
     assert_original_head_retained(&fixture);
     {
@@ -129,23 +176,53 @@ fn ordinary_resume_sql_conflict_rolls_back_and_same_head_dispatches_once_after_c
         record.message_positions = build_message_positions(&record.session.messages);
     }
     fixture.state.resume_session_queue(&fixture.bad).unwrap();
-    assert!(matches!(recv_within_guard(&fixture.bad_input, "corrected original promotion"),
-        Ok(ClaudeRuntimeCommand::Prompt(_))));
-    assert!(fixture.bad_input.try_recv().is_err(), "no duplicate provider command");
+    assert!(matches!(
+        recv_within_guard(&fixture.bad_input, "corrected original promotion"),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
+    assert!(
+        fixture.bad_input.try_recv().is_err(),
+        "no duplicate provider command"
+    );
     // Inspect the durable rows separately from boot's recovery projection.
-    assert_eq!(stored_ids(&fixture, &fixture.bad),
-        ["body-0", "body-1", "body-2", fixture.bad_prompt.as_str()]);
-    let loaded = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
+    assert_eq!(
+        stored_ids(&fixture, &fixture.bad),
+        ["body-0", "body-1", "body-2", fixture.bad_prompt.as_str()]
+    );
+    let loaded = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
     let record = &loaded.sessions[loaded.find_session_index(&fixture.bad).unwrap()];
     assert!(record.queued_prompts.is_empty());
-    assert_eq!(record.session.prompt_history, ["earlier prompt", "keep the original queued intent"]);
-    assert_eq!(record.session.messages.iter().map(Message::id).collect::<Vec<_>>(),
-        ["body-0", "body-1", "body-2", fixture.bad_prompt.as_str(), "message-1"]);
-    assert!(matches!(record.session.messages.last(), Some(Message::Text {
+    assert_eq!(
+        record.session.prompt_history,
+        ["earlier prompt", "keep the original queued intent"]
+    );
+    assert_eq!(
+        record
+            .session
+            .messages
+            .iter()
+            .map(Message::id)
+            .collect::<Vec<_>>(),
+        [
+            "body-0",
+            "body-1",
+            "body-2",
+            fixture.bad_prompt.as_str(),
+            "message-1"
+        ]
+    );
+    assert!(
+        matches!(record.session.messages.last(), Some(Message::Text {
         author: Author::Assistant, text, source: None, ..
-    }) if text == "TermAl restarted before this turn finished. The last response may be incomplete. Send another prompt to continue."));
+    }) if text == "TermAl restarted before this turn finished. The last response may be incomplete. Send another prompt to continue.")
+    );
     assert_eq!(record.session.status, SessionStatus::Error);
-    assert_eq!(loaded.preferences.default_codex_model, "saved-sibling-preference");
+    assert_eq!(
+        loaded.preferences.default_codex_model,
+        "saved-sibling-preference"
+    );
 }
 
 #[test]
@@ -156,7 +233,10 @@ fn direct_queued_promotion_sql_conflict_uses_the_existing_rollback_owner() {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.bad).unwrap();
         match fixture.state.start_and_commit_queued_dispatch_locked(
-            &mut inner, index, None, &fixture.bad_prompt,
+            &mut inner,
+            index,
+            None,
+            &fixture.bad_prompt,
         ) {
             Err(error) => error,
             Ok(_) => panic!("a direct promotion cannot succeed after its session was rejected"),
@@ -175,10 +255,18 @@ fn refused_ordinary_promotion_does_not_lend_its_trace_to_a_different_prompt() {
     crate::tests::engram_host_adapter::enable_test_project_engram(&fixture.state, &project, root);
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        inner.projects.iter_mut().find(|row| row.id == project).unwrap()
-            .engram.as_mut().unwrap().authority_store_key = Some(EngramAuthorityStoreKey {
-                database_path: root.join("observation-fixture.db"), project_id: project.clone(),
-            });
+        inner
+            .projects
+            .iter_mut()
+            .find(|row| row.id == project)
+            .unwrap()
+            .engram
+            .as_mut()
+            .unwrap()
+            .authority_store_key = Some(EngramAuthorityStoreKey {
+            database_path: root.join("observation-fixture.db"),
+            project_id: project.clone(),
+        });
         let record = inner.session_mut(&fixture.bad).unwrap();
         record.session.project_id = Some(project);
         assert!(record.engram.unadmitted_active_turn.is_none());
@@ -186,9 +274,11 @@ fn refused_ordinary_promotion_does_not_lend_its_trace_to_a_different_prompt() {
     let error = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.bad).unwrap();
-        fixture.state.start_and_commit_queued_dispatch_locked(
-            &mut inner, index, None, &fixture.bad_prompt,
-        ).err().expect("the real SQL conflict must refuse promotion")
+        fixture
+            .state
+            .start_and_commit_queued_dispatch_locked(&mut inner, index, None, &fixture.bad_prompt)
+            .err()
+            .expect("the real SQL conflict must refuse promotion")
     };
     assert!(format!("{error:#}").contains("UNIQUE constraint failed"));
     assert_original_head_retained(&fixture);
@@ -196,7 +286,10 @@ fn refused_ordinary_promotion_does_not_lend_its_trace_to_a_different_prompt() {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.bad).unwrap();
         let record = &mut inner.sessions[index];
-        assert!(record.engram.unadmitted_active_turn.is_none(), "unsent trace rolled back");
+        assert!(
+            record.engram.unadmitted_active_turn.is_none(),
+            "unsent trace rolled back"
+        );
         // Preserve the old intent separately, then select a genuinely different
         // prompt at the same restored generation after correcting the row.
         let mut replacement = record.queued_prompts.front().unwrap().clone();
@@ -205,9 +298,15 @@ fn refused_ordinary_promotion_does_not_lend_its_trace_to_a_different_prompt() {
         record.queued_prompts[0] = replacement;
         record.session.messages[0] = message("body-2");
         record.message_positions = build_message_positions(&record.session.messages);
-        let started = fixture.state.start_and_commit_queued_dispatch_locked(
-            &mut inner, index, None, "different-observed-prompt",
-        ).unwrap();
+        let started = fixture
+            .state
+            .start_and_commit_queued_dispatch_locked(
+                &mut inner,
+                index,
+                None,
+                "different-observed-prompt",
+            )
+            .unwrap();
         assert!(started.is_some());
         let record = &inner.sessions[index];
         let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
@@ -220,7 +319,8 @@ fn refused_ordinary_promotion_does_not_lend_its_trace_to_a_different_prompt() {
 fn historical_causal_card() -> EngramControlCard {
     let mut cause = EngramCausalFailure::local(
         &EngramTransportError::transport("retained concrete control failure"),
-        "turn_evaluate", "synchronous card write",
+        "turn_evaluate",
+        "synchronous card write",
     );
     cause.publication_pending = true;
     EngramControlCard {
@@ -236,8 +336,12 @@ fn historical_causal_card() -> EngramControlCard {
         directives: Vec::new(),
         delivered_range: None,
         latency_ms: EngramControlLatencyCard {
-            admission_fence: None, preparation_fence: None,
-            evaluate: None, begin: None, checkpoint: None, total: 0,
+            admission_fence: None,
+            preparation_fence: None,
+            evaluate: None,
+            begin: None,
+            checkpoint: None,
+            total: 0,
         },
         fail_mode: EngramControlFailMode::Enforced,
         repair_armed: false,
@@ -261,45 +365,83 @@ fn historical_cause_reaches_only_its_own_committed_row_after_partial_synchronous
         let mut indexes = Vec::new();
         for id in [&bad, &good] {
             let record = inner.session_mut(id).unwrap();
-            indexes.push(push_message_on_record(record, Message::EngramControl {
-                id: format!("causal-{id}"), timestamp: stamp_now(), author: Author::Assistant,
-                card: historical_causal_card(),
-            }));
+            indexes.push(push_message_on_record(
+                record,
+                Message::EngramControl {
+                    id: format!("causal-{id}"),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    card: historical_causal_card(),
+                },
+            ));
         }
-        state.commit_locked_with_persist_outcome(&mut inner).unwrap();
+        state
+            .commit_locked_with_persist_outcome(&mut inner)
+            .unwrap();
         (indexes[0], indexes[1])
     };
     // In memory the cause stays hidden: no publication callback runs.
     let visible = |id: &str, index| {
         let inner = state.inner.lock().unwrap();
-        serde_json::to_value(&inner.sessions[inner.find_session_index(id).unwrap()].session.messages[index])
-            .unwrap().get("causalFailure").is_some()
+        serde_json::to_value(
+            &inner.sessions[inner.find_session_index(id).unwrap()]
+                .session
+                .messages[index],
+        )
+        .unwrap()
+        .get("causalFailure")
+        .is_some()
     };
     // The committed row alone carries the cause, and only for its own session.
     let stored_causes = |id: &str| -> Vec<bool> {
         let connection = store.cache.connection.as_ref().unwrap();
-        let mut statement = connection.prepare(
-            "SELECT value_json FROM messages WHERE session_id=?1 AND message_id=?2",
-        ).unwrap();
-        statement.query_map(rusqlite::params![id, format!("causal-{id}")], |row| row.get::<_, String>(0))
+        let mut statement = connection
+            .prepare("SELECT value_json FROM messages WHERE session_id=?1 AND message_id=?2")
+            .unwrap();
+        statement
+            .query_map(rusqlite::params![id, format!("causal-{id}")], |row| {
+                row.get::<_, String>(0)
+            })
             .unwrap()
-            .map(|json| serde_json::from_str::<Value>(&json.unwrap()).unwrap().get("causalFailure").is_some())
+            .map(|json| {
+                serde_json::from_str::<Value>(&json.unwrap())
+                    .unwrap()
+                    .get("causalFailure")
+                    .is_some()
+            })
             .collect()
     };
     assert!(!visible(&bad, bad_index));
     assert!(!visible(&good, good_index));
-    assert_eq!(stored_causes(&bad), Vec::<bool>::new(), "the rejected own row stores no card");
-    assert_eq!(stored_causes(&good), [true], "the saved sibling's committed row carries its cause");
+    assert_eq!(
+        stored_causes(&bad),
+        Vec::<bool>::new(),
+        "the rejected own row stores no card"
+    );
+    assert_eq!(
+        stored_causes(&good),
+        [true],
+        "the saved sibling's committed row carries its cause"
+    );
     {
         let mut inner = state.inner.lock().unwrap();
         let record = inner.session_mut(&bad).unwrap();
         record.session.messages[0] = message("body-2");
         record.message_positions = build_message_positions(&record.session.messages);
-        state.commit_locked_with_persist_outcome(&mut inner).unwrap();
+        state
+            .commit_locked_with_persist_outcome(&mut inner)
+            .unwrap();
     }
-    assert_eq!(stored_causes(&bad), [true], "the corrected own row now commits its cause");
+    assert_eq!(
+        stored_causes(&bad),
+        [true],
+        "the corrected own row now commits its cause"
+    );
     assert_eq!(stored_causes(&good), [true]);
-    assert!(!visible(&bad, bad_index), "a commit does not recreate a publication callback");
+    assert!(
+        !visible(&bad, bad_index),
+        "a commit does not recreate a publication callback"
+    );
 }
 
 #[test]
@@ -307,7 +449,9 @@ fn narrow_row_commit_keeps_existing_housekeeping_semantics() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let (_store, state, _, good) = partial_synchronous_fixture(false);
     let mut inner = state.inner.lock().unwrap();
-    state.commit_persisted_session_delta_locked(&mut inner, &good).unwrap();
+    state
+        .commit_persisted_session_delta_locked(&mut inner, &good)
+        .unwrap();
     assert!(inner.settings_persist_dirty);
     assert!(inner.remote_settings_persist_dirty);
     assert!(inner.remote_delta_persist_dirty);
@@ -318,14 +462,25 @@ fn narrow_row_commit_keeps_existing_housekeeping_semantics() {
 }
 
 fn send_human(
-    state: &AppState, session: &str, text: &str, accepted: &mut Option<String>,
+    state: &AppState,
+    session: &str,
+    text: &str,
+    accepted: &mut Option<String>,
 ) -> Result<(), ApiError> {
-    let result = state.dispatch_human_turn_with_acceptance(session, SendMessageRequest {
-        text: text.into(), expanded_text: None, attachments: Vec::new(),
-        source_session_id: None, source_mailbox: None,
-    }, accepted)?;
+    let result = state.dispatch_human_turn_with_acceptance(
+        session,
+        SendMessageRequest {
+            text: text.into(),
+            expanded_text: None,
+            attachments: Vec::new(),
+            source_session_id: None,
+            source_mailbox: None,
+        },
+        accepted,
+    )?;
     match result {
-        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
             deliver_turn_dispatch(state, dispatch).into_public_result()
         }
         DispatchTurnResult::Queued => Ok(()),
@@ -339,17 +494,22 @@ fn own_row_image_is_durable(state: &AppState, inner: &StateInner, session: &str)
     let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
     PersistFenceTarget::OrdinarySessionRow {
         session_id: session.to_owned(),
-        content: ordinary_session_row_persisted_content(&PersistedSessionRecord::from_record(record)),
+        content: ordinary_session_row_persisted_content(&PersistedSessionRecord::from_record(
+            record,
+        )),
     }
-        .is_already_durable(&connection)
-        .unwrap()
+    .is_already_durable(&connection)
+    .unwrap()
 }
 
 fn human_selection(state: &AppState, session: &str) -> HumanPromptSelection {
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(session).unwrap()];
     assert!(own_row_image_is_durable(state, &inner, session));
-    assert!(record.prompt_deliveries.is_empty(), "exercise an unreceipted Human head");
+    assert!(
+        record.prompt_deliveries.is_empty(),
+        "exercise an unreceipted Human head"
+    );
     HumanPromptSelection {
         prompt: projected_pending_prompts(record)[0].clone(),
         session_mutation_stamp: record.mutation_stamp,
@@ -364,17 +524,29 @@ fn human_intake_sql_conflict_leaves_the_draft_unaccepted_and_sibling_delivers() 
     let text = "preserve the unaccepted Human draft";
     let mut accepted = None;
     let error = send_human(&fixture.state, &fixture.bad, text, &mut accepted)
-        .err().expect("an own-row rejection must refuse Human intake");
+        .err()
+        .expect("an own-row rejection must refuse Human intake");
     assert!(error.message.contains("UNIQUE constraint failed"));
     assert!(error.message.contains(&fixture.bad));
-    assert!(accepted.is_none(), "no executable copy of a rejected draft may be accepted");
-    assert!(matches!(fixture.bad_input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(
+        accepted.is_none(),
+        "no executable copy of a rejected draft may be accepted"
+    );
+    assert!(matches!(
+        fixture.bad_input.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     assert_eq!(stored_session(&fixture, &fixture.bad), before);
-    assert_eq!(stored_ids(&fixture, &fixture.bad), ["body-0", "body-1", "body-2"]);
+    assert_eq!(
+        stored_ids(&fixture, &fixture.bad),
+        ["body-0", "body-1", "body-2"]
+    );
     {
         let inner = fixture.state.inner.lock().unwrap();
-        assert!(own_row_image_is_durable(&fixture.state, &inner, &fixture.bad),
-            "a rejected draft leaves no unsaved own-row image");
+        assert!(
+            own_row_image_is_durable(&fixture.state, &inner, &fixture.bad),
+            "a rejected draft leaves no unsaved own-row image"
+        );
         let record = &inner.sessions[inner.find_session_index(&fixture.bad).unwrap()];
         assert!(record.queued_prompts.is_empty());
         assert!(record.human_prompt_turn.is_none());
@@ -384,11 +556,22 @@ fn human_intake_sql_conflict_leaves_the_draft_unaccepted_and_sibling_delivers() 
         assert!(record.orchestrator_auto_dispatch_blocked);
     }
     let mut good_accepted = None;
-    send_human(&fixture.state, &fixture.good, "healthy Human sibling", &mut good_accepted).unwrap();
+    send_human(
+        &fixture.state,
+        &fixture.good,
+        "healthy Human sibling",
+        &mut good_accepted,
+    )
+    .unwrap();
     assert!(good_accepted.is_some());
-    assert!(matches!(recv_within_guard(&fixture.good_input, "healthy Human intake"),
-        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains("healthy Human sibling")));
-    assert!(matches!(fixture.good_input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(
+        matches!(recv_within_guard(&fixture.good_input, "healthy Human intake"),
+        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains("healthy Human sibling"))
+    );
+    assert!(matches!(
+        fixture.good_input.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     assert_eq!(stored_session(&fixture, &fixture.bad), before);
     {
         let mut inner = fixture.state.inner.lock().unwrap();
@@ -398,10 +581,18 @@ fn human_intake_sql_conflict_leaves_the_draft_unaccepted_and_sibling_delivers() 
     }
     send_human(&fixture.state, &fixture.bad, text, &mut accepted).unwrap();
     let accepted = accepted.expect("the corrected draft is now accepted");
-    assert!(matches!(recv_within_guard(&fixture.bad_input, "corrected Human intake"),
-        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(text)));
-    assert!(matches!(fixture.bad_input.try_recv(), Err(mpsc::TryRecvError::Empty)));
-    assert_eq!(stored_ids(&fixture, &fixture.bad), ["body-0", "body-1", "body-2", accepted.as_str()]);
+    assert!(
+        matches!(recv_within_guard(&fixture.bad_input, "corrected Human intake"),
+        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(text))
+    );
+    assert!(matches!(
+        fixture.bad_input.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    assert_eq!(
+        stored_ids(&fixture, &fixture.bad),
+        ["body-0", "body-1", "body-2", accepted.as_str()]
+    );
     let inner = fixture.state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&fixture.bad).unwrap()];
     assert_eq!(record.session.prompt_history, ["earlier prompt", text]);
@@ -414,28 +605,48 @@ fn human_promotion_sql_conflict_keeps_the_exact_head_until_correction() {
     let before = stored_session(&fixture, &fixture.bad);
     let queued_before = {
         let inner = fixture.state.inner.lock().unwrap();
-        serde_json::to_value(&inner.sessions[inner.find_session_index(&fixture.bad).unwrap()].queued_prompts).unwrap()
+        serde_json::to_value(
+            &inner.sessions[inner.find_session_index(&fixture.bad).unwrap()].queued_prompts,
+        )
+        .unwrap()
     };
-    let error = fixture.state.resume_selected_human_prompt(
-        &fixture.bad, human_selection(&fixture.state, &fixture.bad),
-    ).err().expect("an own-row rejection must refuse Human promotion");
+    let error = fixture
+        .state
+        .resume_selected_human_prompt(&fixture.bad, human_selection(&fixture.state, &fixture.bad))
+        .err()
+        .expect("an own-row rejection must refuse Human promotion");
     assert!(error.message.contains("UNIQUE constraint failed"));
     assert!(error.message.contains(&fixture.bad));
     assert_original_head_retained(&fixture);
     assert_eq!(stored_session(&fixture, &fixture.bad), before);
-    assert_eq!(stored_ids(&fixture, &fixture.bad), ["body-0", "body-1", "body-2"]);
+    assert_eq!(
+        stored_ids(&fixture, &fixture.bad),
+        ["body-0", "body-1", "body-2"]
+    );
     {
         let inner = fixture.state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&fixture.bad).unwrap()];
-        assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), queued_before);
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts).unwrap(),
+            queued_before
+        );
         assert!(record.human_prompt_turn.is_none());
     }
-    fixture.state.resume_selected_human_prompt(
-        &fixture.good, human_selection(&fixture.state, &fixture.good),
-    ).unwrap();
-    assert!(matches!(recv_within_guard(&fixture.good_input, "healthy Human promotion"),
-        Ok(ClaudeRuntimeCommand::Prompt(_))));
-    assert!(matches!(fixture.good_input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    fixture
+        .state
+        .resume_selected_human_prompt(
+            &fixture.good,
+            human_selection(&fixture.state, &fixture.good),
+        )
+        .unwrap();
+    assert!(matches!(
+        recv_within_guard(&fixture.good_input, "healthy Human promotion"),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
+    assert!(matches!(
+        fixture.good_input.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     assert_original_head_retained(&fixture);
     {
         let mut inner = fixture.state.inner.lock().unwrap();
@@ -443,15 +654,30 @@ fn human_promotion_sql_conflict_keeps_the_exact_head_until_correction() {
         record.session.messages[0] = message("body-2");
         record.message_positions = build_message_positions(&record.session.messages);
     }
-    fixture.state.resume_selected_human_prompt(
-        &fixture.bad, human_selection(&fixture.state, &fixture.bad),
-    ).unwrap();
-    assert!(matches!(recv_within_guard(&fixture.bad_input, "corrected Human promotion"),
-        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains("keep the original queued intent")));
-    assert!(matches!(fixture.bad_input.try_recv(), Err(mpsc::TryRecvError::Empty)));
-    assert_eq!(stored_ids(&fixture, &fixture.bad), ["body-0", "body-1", "body-2", fixture.bad_prompt.as_str()]);
+    fixture
+        .state
+        .resume_selected_human_prompt(&fixture.bad, human_selection(&fixture.state, &fixture.bad))
+        .unwrap();
+    assert!(
+        matches!(recv_within_guard(&fixture.bad_input, "corrected Human promotion"),
+        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains("keep the original queued intent"))
+    );
+    assert!(matches!(
+        fixture.bad_input.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    assert_eq!(
+        stored_ids(&fixture, &fixture.bad),
+        ["body-0", "body-1", "body-2", fixture.bad_prompt.as_str()]
+    );
     let inner = fixture.state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&fixture.bad).unwrap()];
-    assert_eq!(record.session.prompt_history, ["earlier prompt", "keep the original queued intent"]);
-    assert_eq!(record.human_prompt_turn.as_ref().unwrap().prompt_id, fixture.bad_prompt);
+    assert_eq!(
+        record.session.prompt_history,
+        ["earlier prompt", "keep the original queued intent"]
+    );
+    assert_eq!(
+        record.human_prompt_turn.as_ref().unwrap().prompt_id,
+        fixture.bad_prompt
+    );
 }

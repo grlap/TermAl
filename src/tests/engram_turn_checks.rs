@@ -447,7 +447,6 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         ["rust-tests: passed"],
         "a stage line is cut before its log path"
     );
-
 }
 
 #[test]
@@ -455,14 +454,26 @@ fn ordinary_trace_keeps_failed_and_indeterminate_facts_without_native_credit() {
     let turn = EOCheckedTurn::start("ordinary-negative-check-facts", true);
     turn.run("failed", SIZE_TEST, EngramCommandExit::Code(101), || {});
     turn.run("unknown", SIZE_TEST, EngramCommandExit::Unknown, || {});
-    turn.run("masked", &format!("{SIZE_TEST} || true"), EngramCommandExit::Code(0), || {});
+    turn.run(
+        "masked",
+        &format!("{SIZE_TEST} || true"),
+        EngramCommandExit::Code(0),
+        || {},
+    );
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 3);
     let turn_ref = request["occurrence"]["host_turn_ref"].as_str().unwrap();
-    for (key, expected) in [("failed", "failed"), ("unknown", "indeterminate"), ("masked", "indeterminate")] {
+    for (key, expected) in [
+        ("failed", "failed"),
+        ("unknown", "indeterminate"),
+        ("masked", "indeterminate"),
+    ] {
         let id = unadmitted_host_check_id(turn_ref, key);
-        let check = checks.iter().find(|check| check["host_check_id"] == id).unwrap();
+        let check = checks
+            .iter()
+            .find(|check| check["host_check_id"] == id)
+            .unwrap();
         assert_eq!(check["observed_result"], expected, "{key}: {check:#}");
     }
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
@@ -473,24 +484,42 @@ fn ordinary_trace_fanout_keeps_every_check_past_the_inline_limit() {
     let turn = EOCheckedTurn::start("ordinary-inline-check-fanout", true);
     let count = ENGRAM_OBSERVATION_MAX_CHECKS + 2;
     for sequence in 0..count {
-        turn.run(&format!("check-{sequence}"), SIZE_TEST, EngramCommandExit::Code(0), || {});
+        turn.run(
+            &format!("check-{sequence}"),
+            SIZE_TEST,
+            EngramCommandExit::Code(0),
+            || {},
+        );
     }
     let request = turn.finish();
     let inline = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(inline.len(), ENGRAM_OBSERVATION_MAX_CHECKS);
-    let mut ids = inline.iter().map(|check| check["host_check_id"].as_str().unwrap().to_owned())
+    let mut ids = inline
+        .iter()
+        .map(|check| check["host_check_id"].as_str().unwrap().to_owned())
         .collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), inline.len());
     let turn_ref = request["occurrence"]["host_turn_ref"].as_str().unwrap();
     while ids.len() < count {
-        let standalone = receive(&turn.observations.lock().unwrap(), "standalone ordinary check");
+        let standalone = receive(
+            &turn.observations.lock().unwrap(),
+            "standalone ordinary check",
+        );
         assert_eq!(standalone["occurrence"]["kind"], "observed_check");
         assert_eq!(standalone["occurrence"]["host_turn_ref"], turn_ref);
-        assert!(ids.insert(standalone["occurrence"]["check"]["host_check_id"].as_str().unwrap().to_owned()),
-            "fanout emits each observed check once");
+        assert!(
+            ids.insert(
+                standalone["occurrence"]["check"]["host_check_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            ),
+            "fanout emits each observed check once"
+        );
     }
-    let expected = (0..count).map(|sequence|
-        unadmitted_host_check_id(turn_ref, &format!("check-{sequence}"))).collect::<BTreeSet<_>>();
+    let expected = (0..count)
+        .map(|sequence| unadmitted_host_check_id(turn_ref, &format!("check-{sequence}")))
+        .collect::<BTreeSet<_>>();
     assert_eq!(ids, expected);
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
@@ -499,9 +528,12 @@ fn ordinary_trace_fanout_keeps_every_check_past_the_inline_limit() {
 fn a_check_keeps_the_toolchain_capture_taken_at_its_start() {
     let mut check = finished_check(0, engram_ready_basis_capture());
     check.toolchain = EngramToolchainCapture::settled(Some("rustc 1.80.0".to_owned()));
-    let previous = TEST_ENGRAM_TOOLCHAIN_LABEL.with(|slot|
-        slot.replace(Some(Some("a later toolchain".to_owned()))));
-    let captured = check.toolchain.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).flatten();
+    let previous = TEST_ENGRAM_TOOLCHAIN_LABEL
+        .with(|slot| slot.replace(Some(Some("a later toolchain".to_owned()))));
+    let captured = check
+        .toolchain
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .flatten();
     TEST_ENGRAM_TOOLCHAIN_LABEL.with(|slot| *slot.borrow_mut() = previous);
     assert_eq!(captured.as_deref(), Some("rustc 1.80.0"));
 }
@@ -712,7 +744,9 @@ impl EOCaptureWorkerGate {
 
     pub(super) fn open(&self) {
         let (open, opened) = &*self.0;
-        *open.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        *open
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
         opened.notify_all();
     }
 }
@@ -770,7 +804,10 @@ impl Drop for EOFixtureHost {
     /// order (sse_broadcast.rs).
     fn drop(&mut self) {
         retire_capture_observation_workers(
-            &self.captures, &self.observation, &self.federation, &self.shutdown,
+            &self.captures,
+            &self.observation,
+            &self.federation,
+            &self.shutdown,
         );
     }
 }
@@ -794,14 +831,11 @@ impl EOCheckedTurn {
         Self::start_in(label, true, None, true)
     }
 
-    fn start_in(
-        label: &str,
-        claimed: bool,
-        subdirectory: Option<&str>,
-        named: bool,
-    ) -> Self {
+    fn start_in(label: &str, claimed: bool, subdirectory: Option<&str>, named: bool) -> Self {
         let turn = Self::prepare_in(label, claimed, subdirectory, named);
-        if claimed && !named { turn.acknowledge_unnamed_root(); }
+        if claimed && !named {
+            turn.acknowledge_unnamed_root();
+        }
         turn.begin("Run the checks.");
         turn
     }
@@ -816,12 +850,7 @@ impl EOCheckedTurn {
         Self::prepare_with_clock(label, claimed, None, false, true)
     }
 
-    fn prepare_in(
-        label: &str,
-        claimed: bool,
-        subdirectory: Option<&str>,
-        named: bool,
-    ) -> Self {
+    fn prepare_in(label: &str, claimed: bool, subdirectory: Option<&str>, named: bool) -> Self {
         Self::prepare_with_clock(label, claimed, subdirectory, named, false)
     }
 
@@ -836,15 +865,31 @@ impl EOCheckedTurn {
         use_toolchain_label(Some(FIXTURE_TOOLCHAIN));
         let (state, runtime_rx) =
             test_app_state_with_delegation_codex_runtime(&format!("eo-check-{label}"));
-        assert_eq!(state.inner.lock().unwrap().engram_budget_clock_snapshots
-            .load(std::sync::atomic::Ordering::SeqCst), 0,
-            "the fixture chooses its clock before a target can capture it");
-        if real_clock { state.declare_test_real_engram_budget_clock(); }
-        else { state.select_test_scripted_engram_budget_clock(); }
+        assert_eq!(
+            state
+                .inner
+                .lock()
+                .unwrap()
+                .engram_budget_clock_snapshots
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the fixture chooses its clock before a target can capture it"
+        );
+        if real_clock {
+            state.declare_test_real_engram_budget_clock();
+        } else {
+            state.select_test_scripted_engram_budget_clock();
+        }
         // Capture real contents independently of the scripted RPC budget.
         state.inner.lock().unwrap().test_engram_source_capture =
-            Some(Arc::new(|place, _budget| engram_place_source_capture(place)));
-        let root = state.test_temp_root.as_ref().unwrap().path()
+            Some(Arc::new(|place, _budget| {
+                engram_place_source_capture(place)
+            }));
+        let root = state
+            .test_temp_root
+            .as_ref()
+            .unwrap()
+            .path()
             .join(format!("eo-check-{label}-project"));
         fs::create_dir_all(&root).unwrap();
         let git_timing = fixture_phase("git_fixture");
@@ -859,26 +904,49 @@ impl EOCheckedTurn {
         // Naming exercises the full owner protocol independently of these
         // older ordinary-observation fixtures' historical content seam.
         let owner_binary = super::engram_source_owner::source_owner_fixture_binary(
-            state.test_temp_root.as_ref().unwrap().path());
+            state.test_temp_root.as_ref().unwrap().path(),
+        );
         {
             let mut inner = state.inner.lock().unwrap();
-            inner.projects.iter_mut().find(|p| p.id == project).unwrap()
-                .engram.as_mut().unwrap().binary_path = Some(owner_binary.to_string_lossy().into_owned());
+            inner
+                .projects
+                .iter_mut()
+                .find(|p| p.id == project)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap()
+                .binary_path = Some(owner_binary.to_string_lossy().into_owned());
             inner.test_observation_source_owner = Some(Arc::new(|_, _, args, _, _| {
                 if args[0] == "--version" {
                     return Ok(super::engram_source_owner::source_owner_reply(args));
                 }
-                Ok(super::engram_source_owner::source_owner_output(0, serde_json::to_vec(
-                    &super::engram_source_command::source_envelope(FsPath::new(&args[2]), "clean")
-                ).unwrap()))
+                Ok(super::engram_source_owner::source_owner_output(
+                    0,
+                    serde_json::to_vec(&super::engram_source_command::source_envelope(
+                        FsPath::new(&args[2]),
+                        "clean",
+                    ))
+                    .unwrap(),
+                ))
             }));
         }
-        fs::write(root.join(".engram-project"), "github.com/example/source-root\n").unwrap();
+        fs::write(
+            root.join(".engram-project"),
+            "github.com/example/source-root\n",
+        )
+        .unwrap();
         let binding = test_control_work_binding(&format!("eo-check-{label}"), 1);
         {
             let mut inner = state.inner.lock().unwrap();
-            let settings = inner.projects.iter_mut().find(|p| p.id == project).unwrap()
-                .engram.as_mut().unwrap();
+            let settings = inner
+                .projects
+                .iter_mut()
+                .find(|p| p.id == project)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap();
             settings.execution_observability = true;
             settings.authority_store_key = Some(EngramAuthorityStoreKey {
                 database_path: root.join("engram.db"),
@@ -896,34 +964,62 @@ impl EOCheckedTurn {
         transport.enable_named_roots(&session, &binding);
         // Explicit positive ordinary service fixture. The transport's absent,
         // invalid and exhausted replies remain real negative cases elsewhere.
-        transport.named_roots.lock().unwrap().as_mut().unwrap().work_session_read_reply = Some(Ok(json!({
+        transport
+            .named_roots
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .work_session_read_reply = Some(Ok(json!({
             "project_id": "github.com/example/source-root", "session_id": session,
             "work_session": true, "capabilities": ["host_work_v1"],
         })));
         transport.replace_held_claims([Ok(EngramHeldClaims {
-            items: if claimed { vec![EngramHeldClaim {
-                work_id: binding.work_id.clone(),
-                short_ref: binding.work_id.clone(),
-                claim_id: binding.claim_id.clone(),
-                claim_fence: binding.claim_fence,
-                focused: true,
-                control_binding: Some(binding.clone()),
-            }] } else { Vec::new() },
+            items: if claimed {
+                vec![EngramHeldClaim {
+                    work_id: binding.work_id.clone(),
+                    short_ref: binding.work_id.clone(),
+                    claim_id: binding.claim_id.clone(),
+                    claim_fence: binding.claim_fence,
+                    focused: true,
+                    control_binding: Some(binding.clone()),
+                }]
+            } else {
+                Vec::new()
+            },
             omitted: 0,
         })]);
         state.install_control_test_transport(transport.clone());
-        let mut turn = Self::from_session(state, session, root, transport,
-            Arc::new(Mutex::new(runtime_rx)));
+        let mut turn = Self::from_session(
+            state,
+            session,
+            root,
+            transport,
+            Arc::new(Mutex::new(runtime_rx)),
+        );
         turn.host = Some(Arc::new(EOFixtureHost::of(&turn.state)));
         if named {
             let worktree = turn.root.join(".worktrees").join("wt");
-            run_git_test_command(&turn.root, &[
-                "worktree", "add", "--quiet", "-b", "wt", worktree.to_str().unwrap(),
-            ]);
-            turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
-                work: binding.work_id,
-                path: Some(Some(worktree.to_string_lossy().into_owned())),
-            }).expect("ordinary work services name the root without admitting a turn");
+            run_git_test_command(
+                &turn.root,
+                &[
+                    "worktree",
+                    "add",
+                    "--quiet",
+                    "-b",
+                    "wt",
+                    worktree.to_str().unwrap(),
+                ],
+            );
+            turn.state
+                .name_engram_source_root(
+                    &turn.session_id,
+                    EngramSourceRootRequest {
+                        work: binding.work_id,
+                        path: Some(Some(worktree.to_string_lossy().into_owned())),
+                    },
+                )
+                .expect("ordinary work services name the root without admitting a turn");
         }
         turn
     }
@@ -936,20 +1032,39 @@ impl EOCheckedTurn {
         runtime_rx: Arc<Mutex<mpsc::Receiver<CodexRuntimeCommand>>>,
     ) -> Self {
         let (sent, received) = mpsc::channel();
-        transport.named_roots.lock().unwrap().as_mut().unwrap()
+        transport
+            .named_roots
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
             .observation_notices = Some(sent);
-        Self { state, session_id, root, transport,
-            observations: Mutex::new(received), _runtime_rx: runtime_rx, host: None }
+        Self {
+            state,
+            session_id,
+            root,
+            transport,
+            observations: Mutex::new(received),
+            _runtime_rx: runtime_rx,
+            host: None,
+        }
     }
 
     // Positive check fixtures explicitly establish their opening before
     // dispatch. An idle fixture deliberately starts with unknown authority.
     pub(super) fn acknowledge_unnamed_root(&self) {
-        let work = self.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
-        self.state.name_engram_source_root(&self.session_id, EngramSourceRootRequest {
-            work, path: None,
-        }).expect("explicit ordinary clear acknowledges that no root is named");
-        assert_eq!(self.state.engram_root_capture(&self.session_id), EngramRootCapture::Unnamed);
+        let work =
+            self.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
+        self.state
+            .name_engram_source_root(
+                &self.session_id,
+                EngramSourceRootRequest { work, path: None },
+            )
+            .expect("explicit ordinary clear acknowledges that no root is named");
+        assert_eq!(
+            self.state.engram_root_capture(&self.session_id),
+            EngramRootCapture::Unnamed
+        );
     }
 
     pub(super) fn begin(&self, text: &str) {
@@ -957,18 +1072,37 @@ impl EOCheckedTurn {
     }
 
     pub(super) fn begin_prompt(&self, text: &str) -> CodexPromptCommand {
-        let dispatch = match self.state.dispatch_turn(&self.session_id, SendMessageRequest {
-            text: text.to_owned(), expanded_text: None, attachments: Vec::new(),
-            source_session_id: None, source_mailbox: None,
-        }).expect("ordinary input should dispatch") {
+        let dispatch = match self
+            .state
+            .dispatch_turn(
+                &self.session_id,
+                SendMessageRequest {
+                    text: text.to_owned(),
+                    expanded_text: None,
+                    attachments: Vec::new(),
+                    source_session_id: None,
+                    source_mailbox: None,
+                },
+            )
+            .expect("ordinary input should dispatch")
+        {
             DispatchTurnResult::Dispatched(dispatch)
             | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
             DispatchTurnResult::Queued => panic!("the idle ordinary root must dispatch"),
         };
         deliver_turn_dispatch(&self.state, dispatch).expect("ordinary provider handoff");
-        match receive(&self._runtime_rx.lock().unwrap(), "ordinary provider prompt") {
-            CodexRuntimeCommand::Prompt { session_id, command } => {
-                assert_eq!(session_id, self.session_id, "handoff belongs to this session");
+        match receive(
+            &self._runtime_rx.lock().unwrap(),
+            "ordinary provider prompt",
+        ) {
+            CodexRuntimeCommand::Prompt {
+                session_id,
+                command,
+            } => {
+                assert_eq!(
+                    session_id, self.session_id,
+                    "handoff belongs to this session"
+                );
                 command
             }
             _ => panic!("ordinary dispatch must deliver a provider prompt"),
@@ -982,33 +1116,69 @@ impl EOCheckedTurn {
     pub(super) fn set_observability(&self, enabled: bool) {
         let mut inner = self.state.inner.lock().unwrap();
         let project = inner.sessions[inner.find_session_index(&self.session_id).unwrap()]
-            .session.project_id.clone().unwrap();
-        inner.projects.iter_mut().find(|item| item.id == project).unwrap()
-            .engram.as_mut().unwrap().execution_observability = enabled;
+            .session
+            .project_id
+            .clone()
+            .unwrap();
+        inner
+            .projects
+            .iter_mut()
+            .find(|item| item.id == project)
+            .unwrap()
+            .engram
+            .as_mut()
+            .unwrap()
+            .execution_observability = enabled;
         self.state.commit_locked(&mut inner).unwrap();
     }
 
-    pub(super) fn run(&self, key: &str, command: &str, exit: EngramCommandExit, before_end: impl FnOnce()) {
+    pub(super) fn run(
+        &self,
+        key: &str,
+        command: &str,
+        exit: EngramCommandExit,
+        before_end: impl FnOnce(),
+    ) {
         let mut recorder = self.recorder();
         recorder.command_started(key, command).unwrap();
         self.wait_for_snapshots();
         before_end();
-        recorder.command_completed_with_exit(key, command,
-            "running 3 tests\ntest result: ok. 3 passed", CommandStatus::Success, exit).unwrap();
+        recorder
+            .command_completed_with_exit(
+                key,
+                command,
+                "running 3 tests\ntest result: ok. 3 passed",
+                CommandStatus::Success,
+                exit,
+            )
+            .unwrap();
         self.wait_for_snapshots();
     }
 
     pub(super) fn wait_for_snapshots(&self) {
         let _timing = fixture_phase("snapshot_wait");
-        let captures = self.record(|record| record.engram.active_turn_checks.iter()
-            .flat_map(|check| std::iter::once(check.start_basis.clone())
-                .chain(check.end.as_ref().map(|end| end.end_basis.clone())))
-            .collect::<Vec<_>>());
+        let captures = self.record(|record| {
+            record
+                .engram
+                .active_turn_checks
+                .iter()
+                .flat_map(|check| {
+                    std::iter::once(check.start_basis.clone())
+                        .chain(check.end.as_ref().map(|end| end.end_basis.clone()))
+                })
+                .collect::<Vec<_>>()
+        });
         for capture in captures {
             capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
         }
-        let readings = self.record(|record| record.engram.active_turn_checks.iter()
-            .filter_map(|check| check.end.as_ref()?.declared.clone()).collect::<Vec<_>>());
+        let readings = self.record(|record| {
+            record
+                .engram
+                .active_turn_checks
+                .iter()
+                .filter_map(|check| check.end.as_ref()?.declared.clone())
+                .collect::<Vec<_>>()
+        });
         for reading in readings {
             reading.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
         }
@@ -1040,15 +1210,24 @@ impl EOCheckedTurn {
     }
 
     pub(super) fn finish(&self) -> Value {
-        let turn_ref = self.record(|record| record.engram.unadmitted_active_turn.as_ref()
-            .expect("EO captured an ordinary trace").host_turn_ref.clone());
+        let turn_ref = self.record(|record| {
+            record
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
+                .expect("EO captured an ordinary trace")
+                .host_turn_ref
+                .clone()
+        });
         self.end();
         self.observation_for(&turn_ref)
     }
 
     pub(super) fn end(&self) {
         let token = self.record(|record| record.runtime.runtime_token().unwrap());
-        self.state.finish_turn_ok_if_runtime_matches(&self.session_id, &token).unwrap();
+        self.state
+            .finish_turn_ok_if_runtime_matches(&self.session_id, &token)
+            .unwrap();
     }
 
     pub(super) fn observation_for(&self, turn_ref: &str) -> Value {
@@ -1056,7 +1235,8 @@ impl EOCheckedTurn {
         loop {
             let request = receive(&notices, "ordinary execution observation");
             if request["occurrence"]["kind"] == "unadmitted_turn"
-                && request["occurrence"]["host_turn_ref"] == turn_ref {
+                && request["occurrence"]["host_turn_ref"] == turn_ref
+            {
                 assert_eq!(request["operation"], "execution_observe");
                 assert!(request.get("verification_evidence").is_none());
                 return request;
@@ -1068,18 +1248,36 @@ impl EOCheckedTurn {
         content_revision(&self.root).unwrap().1
     }
 
-    fn finished_check(&self, sequence: usize, end_basis: Arc<EngramBasisCapture>) -> EngramTurnCheck {
+    fn finished_check(
+        &self,
+        sequence: usize,
+        end_basis: Arc<EngramBasisCapture>,
+    ) -> EngramTurnCheck {
         let root = engram_worktree_root_path(&self.root);
         EngramTurnCheck {
-            host_turn_ref: self.record(|record| record.engram.unadmitted_active_turn.as_ref()
-                .expect("the ordinary trace owns the check").host_turn_ref.clone()),
-            target: EngramCheckTarget { root: root.clone(), directory: root, common_dir_key: None },
+            host_turn_ref: self.record(|record| {
+                record
+                    .engram
+                    .unadmitted_active_turn
+                    .as_ref()
+                    .expect("the ordinary trace owns the check")
+                    .host_turn_ref
+                    .clone()
+            }),
+            target: EngramCheckTarget {
+                root: root.clone(),
+                directory: root,
+                common_dir_key: None,
+            },
             ..finished_check(sequence, end_basis)
         }
     }
 }
 
-pub(super) fn assert_ordinary_observation_has_no_native_credit(turn: &EOCheckedTurn, request: &Value) {
+pub(super) fn assert_ordinary_observation_has_no_native_credit(
+    turn: &EOCheckedTurn,
+    request: &Value,
+) {
     assert_eq!(request["operation"], "execution_observe");
     assert_eq!(request["occurrence"]["kind"], "unadmitted_turn");
     assert!(request.get("verification_evidence").is_none());
@@ -1088,11 +1286,23 @@ pub(super) fn assert_ordinary_observation_has_no_native_credit(turn: &EOCheckedT
 
 pub(super) fn assert_ordinary_turn_has_no_native_requests(turn: &EOCheckedTurn) {
     for recorded in turn.transport.requests() {
-        assert!(!matches!(recorded.request["operation"].as_str(),
-            Some("session_bind" | "session_status" | "turn_grant_read"
-                | "turn_evaluate" | "turn_begin" | "turn_checkpoint"
-                | "verification_record" | "verification_bind")),
-            "automatic observation cannot register verification: {}", recorded.request);
+        assert!(
+            !matches!(
+                recorded.request["operation"].as_str(),
+                Some(
+                    "session_bind"
+                        | "session_status"
+                        | "turn_grant_read"
+                        | "turn_evaluate"
+                        | "turn_begin"
+                        | "turn_checkpoint"
+                        | "verification_record"
+                        | "verification_bind"
+                )
+            ),
+            "automatic observation cannot register verification: {}",
+            recorded.request
+        );
     }
 }
 
@@ -1104,26 +1314,44 @@ fn opening_root_preparation_sends_nothing_and_preserves_uncertainty() {
         calls: Mutex<usize>,
     }
     impl EngramControlTransport for UnavailableRoot {
-        fn read_observation_policy(&self, _: &EngramConnectionConfig, _: &EngramAuthorityStoreKey,
-            timeout: Duration, _: &FsPath) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        fn read_observation_policy(
+            &self,
+            _: &EngramConnectionConfig,
+            _: &EngramAuthorityStoreKey,
+            timeout: Duration,
+            _: &FsPath,
+        ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
             *self.calls.lock().unwrap() += 1;
             self.clock.advance(timeout);
-            Err(EngramTransportError::deadline("observation policy is unavailable"))
+            Err(EngramTransportError::deadline(
+                "observation policy is unavailable",
+            ))
         }
-        fn request(&self, connection: &EngramConnectionConfig, request: &EngramControlRequest,
-            timeout: Duration) -> Result<Value, EngramTransportError> {
+        fn request(
+            &self,
+            connection: &EngramConnectionConfig,
+            request: &EngramControlRequest,
+            timeout: Duration,
+        ) -> Result<Value, EngramTransportError> {
             let _ = (connection, request);
             *self.calls.lock().unwrap() += 1;
             self.clock.advance(timeout);
-            Err(EngramTransportError::deadline("source authority is unavailable"))
+            Err(EngramTransportError::deadline(
+                "source authority is unavailable",
+            ))
         }
-        fn read_work_binding(&self, connection: &EngramConnectionConfig,
-            preference: EngramBindingPreference<'_>, timeout: Duration)
-            -> Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        fn read_work_binding(
+            &self,
+            connection: &EngramConnectionConfig,
+            preference: EngramBindingPreference<'_>,
+            timeout: Duration,
+        ) -> Result<Option<EngramControlWorkBinding>, EngramTransportError> {
             let _ = (connection, preference);
             *self.calls.lock().unwrap() += 1;
             self.clock.advance(timeout);
-            Err(EngramTransportError::deadline("work authority is unavailable"))
+            Err(EngramTransportError::deadline(
+                "work authority is unavailable",
+            ))
         }
         fn shutdown_session(&self, session_id: &str) {
             self.control.shutdown_session(session_id);
@@ -1131,32 +1359,63 @@ fn opening_root_preparation_sends_nothing_and_preserves_uncertainty() {
     }
     let turn = EOCheckedTurn::idle("opening-root-local", true);
     let clock = turn.state.engram_budget_clock();
-    assert_eq!(turn.state.engram_root_capture(&turn.session_id), EngramRootCapture::Unconfirmed);
+    assert_eq!(
+        turn.state.engram_root_capture(&turn.session_id),
+        EngramRootCapture::Unconfirmed
+    );
     let transport = Arc::new(UnavailableRoot {
-        control: turn.transport.clone(), clock: clock.clone(), calls: Mutex::new(0),
+        control: turn.transport.clone(),
+        clock: clock.clone(),
+        calls: Mutex::new(0),
     });
     turn.state.install_test_engram_transport(transport.clone());
     let started = clock.now();
     let prompt = turn.begin_prompt("Continue even when source authority is unavailable.");
-    assert!(prompt.prompt.contains("Continue even when source authority is unavailable."));
-    assert_eq!(*transport.calls.lock().unwrap(), 0, "handoff performs no authority RPC");
-    assert_eq!(clock.elapsed_since(started), Duration::ZERO, "handoff spends no remote budget");
+    assert!(
+        prompt
+            .prompt
+            .contains("Continue even when source authority is unavailable.")
+    );
+    assert_eq!(
+        *transport.calls.lock().unwrap(),
+        0,
+        "handoff performs no authority RPC"
+    );
+    assert_eq!(
+        clock.elapsed_since(started),
+        Duration::ZERO,
+        "handoff spends no remote budget"
+    );
     assert!(prompt.prompt.contains("source root is unconfirmed"));
     assert!(prompt.prompt.contains("evidence is withheld"));
-    assert!(!prompt.prompt.contains("no worktree named"), "unknown is not acknowledged absence");
+    assert!(
+        !prompt.prompt.contains("no worktree named"),
+        "unknown is not acknowledged absence"
+    );
     turn.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Active);
         let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
         assert!(trace.opening_prepared);
-        assert_eq!(trace.opening_root.as_ref().unwrap().provenance, EngramRootCapture::Unconfirmed);
+        assert_eq!(
+            trace.opening_root.as_ref().unwrap().provenance,
+            EngramRootCapture::Unconfirmed
+        );
     });
     let token = turn.record(|record| record.runtime.runtime_token().unwrap());
     let generation = turn.record(|record| record.active_turn_generation);
     let opening = turn.record(|record| record.engram.observed_opening().cloned());
-    turn.state.prepare_ordinary_opening_root_before_handoff(&turn.session_id, &token, generation);
-    assert_eq!(*transport.calls.lock().unwrap(), 0, "repreparation sends nothing");
-    assert_eq!(turn.record(|record| record.engram.observed_opening().cloned()), opening,
-        "the same turn cannot upgrade its withheld opening");
+    turn.state
+        .prepare_ordinary_opening_root_before_handoff(&turn.session_id, &token, generation);
+    assert_eq!(
+        *transport.calls.lock().unwrap(),
+        0,
+        "repreparation sends nothing"
+    );
+    assert_eq!(
+        turn.record(|record| record.engram.observed_opening().cloned()),
+        opening,
+        "the same turn cannot upgrade its withheld opening"
+    );
     turn.state.trigger_shutdown_signal();
     turn.state.shutdown_persist_blocking();
 }
@@ -1164,9 +1423,21 @@ fn opening_root_preparation_sends_nothing_and_preserves_uncertainty() {
 #[test]
 fn ordinary_check_facts_do_not_register_native_verification() {
     let turn = EOCheckedTurn::start("ordinary-uncredited-check", true);
-    let turn_ref = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().host_turn_ref.clone());
-    turn.run("ordinary-check", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    let turn_ref = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .host_turn_ref
+            .clone()
+    });
+    turn.run(
+        "ordinary-check",
+        SIZE_TEST,
+        EngramCommandExit::Code(0),
+        || {},
+    );
     let request = turn.finish();
     assert_eq!(request["occurrence"]["host_turn_ref"], turn_ref);
     assert_eq!(request["occurrence"]["outcome"], "succeeded");
@@ -1181,11 +1452,25 @@ fn ordinary_check_facts_do_not_register_native_verification() {
 #[test]
 fn disabling_observability_keeps_the_current_turn_and_its_captured_facts() {
     let turn = EOCheckedTurn::start("ordinary-observability-toggle", true);
-    let (runtime, generation, turn_ref) = turn.record(|record| (
-        record.runtime.runtime_token().unwrap(), record.active_turn_generation,
-        record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref.clone(),
-    ));
-    turn.run("captured-before-toggle", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    let (runtime, generation, turn_ref) = turn.record(|record| {
+        (
+            record.runtime.runtime_token().unwrap(),
+            record.active_turn_generation,
+            record
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
+                .unwrap()
+                .host_turn_ref
+                .clone(),
+        )
+    });
+    turn.run(
+        "captured-before-toggle",
+        SIZE_TEST,
+        EngramCommandExit::Code(0),
+        || {},
+    );
     turn.set_observability(false);
     turn.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Active);
@@ -1193,11 +1478,21 @@ fn disabling_observability_keeps_the_current_turn_and_its_captured_facts() {
         assert_eq!(record.active_turn_generation, generation);
         let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
         assert_eq!(trace.host_turn_ref, turn_ref);
-        assert_eq!(trace.commands.len(), 1, "the toggle cannot erase captured facts");
+        assert_eq!(
+            trace.commands.len(),
+            1,
+            "the toggle cannot erase captured facts"
+        );
     });
     let request = turn.finish();
     assert_eq!(request["occurrence"]["host_turn_ref"], turn_ref);
-    assert_eq!(request["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        request["occurrence"]["observed_checks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
@@ -1205,7 +1500,10 @@ fn disabling_observability_keeps_the_current_turn_and_its_captured_facts() {
 fn observability_off_does_not_hold_ordinary_work_and_on_starts_a_fresh_trace() {
     let turn = EOCheckedTurn::start("ordinary-observability-new-turn", true);
     let first = turn.finish();
-    let first_ref = first["occurrence"]["host_turn_ref"].as_str().unwrap().to_owned();
+    let first_ref = first["occurrence"]["host_turn_ref"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     turn.set_observability(false);
     turn.begin("Ordinary input with automatic observation disabled.");
     turn.record(|record| {
@@ -1217,9 +1515,19 @@ fn observability_off_does_not_hold_ordinary_work_and_on_starts_a_fresh_trace() {
     turn.end();
     turn.set_observability(true);
     turn.begin("Ordinary input with automatic observation enabled again.");
-    let fresh_ref = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .expect("a new ordinary turn samples the enabled setting").host_turn_ref.clone());
-    assert_ne!(fresh_ref, first_ref, "a setting change cannot revive an old trace");
+    let fresh_ref = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .expect("a new ordinary turn samples the enabled setting")
+            .host_turn_ref
+            .clone()
+    });
+    assert_ne!(
+        fresh_ref, first_ref,
+        "a setting change cannot revive an old trace"
+    );
     let fresh = turn.finish();
     assert_eq!(fresh["occurrence"]["host_turn_ref"], fresh_ref);
     assert_ordinary_observation_has_no_native_credit(&turn, &fresh);
@@ -1279,20 +1587,33 @@ fn silent_check_outcome_background_launch_ack_is_not_a_late_completion() {
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["observed_result"], "indeterminate");
-    assert!(checks[0].get("finished_at").is_none(), "a launch is no process completion");
-    assert_eq!(turn.record(|record| record.engram.pending_source_root_line.clone()), before_close,
-        "a launch acknowledgment cannot produce a late-completion notice");
+    assert!(
+        checks[0].get("finished_at").is_none(),
+        "a launch is no process completion"
+    );
+    assert_eq!(
+        turn.record(|record| record.engram.pending_source_root_line.clone()),
+        before_close,
+        "a launch acknowledgment cannot produce a late-completion notice"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
 #[test]
 fn ordinary_check_facts_survive_missing_or_changed_diagnostic_snapshots() {
-    for shape in ["missing-start", "missing-finish", "different", "pending-finish"] {
+    for shape in [
+        "missing-start",
+        "missing-finish",
+        "different",
+        "pending-finish",
+    ] {
         let turn = EOCheckedTurn::start(&format!("ordinary-check-capture-{shape}"), true);
         turn.run("check", SIZE_TEST, EngramCommandExit::Code(0), || {});
-        let original = turn.record(|record| record.engram.active_turn_checks[0].start_basis.clone())
+        let original = turn
+            .record(|record| record.engram.active_turn_checks[0].start_basis.clone())
             .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
-            .expect("the actual start capture settled").expect("the capture has a basis");
+            .expect("the actual start capture settled")
+            .expect("the capture has a basis");
         let capture = Arc::new(EngramBasisCapture::default());
         if shape == "different" {
             let mut changed = original.clone();
@@ -1303,17 +1624,29 @@ fn ordinary_check_facts_survive_missing_or_changed_diagnostic_snapshots() {
         }
         turn.record_mut(|record| {
             let check = &mut record.engram.active_turn_checks[0];
-            if shape == "missing-start" { check.start_basis = capture.clone(); }
-            else { check.end.as_mut().unwrap().end_basis = capture.clone(); }
+            if shape == "missing-start" {
+                check.start_basis = capture.clone();
+            } else {
+                check.end.as_mut().unwrap().end_basis = capture.clone();
+            }
         });
         let request = turn.finish();
-        if shape == "pending-finish" { capture.finish(Some(original)); }
+        if shape == "pending-finish" {
+            capture.finish(Some(original));
+        }
         let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
-        assert_eq!(checks.len(), 1, "{shape}: a diagnostic snapshot cannot erase an observed command");
+        assert_eq!(
+            checks.len(),
+            1,
+            "{shape}: a diagnostic snapshot cannot erase an observed command"
+        );
         assert_eq!(checks[0]["observed_result"], "passed");
         assert!(checks[0]["started_at"].is_string());
         assert!(checks[0]["finished_at"].is_string());
-        assert!(checks[0].get("source_basis").is_none(), "no unproved source credit: {shape}");
+        assert!(
+            checks[0].get("source_basis").is_none(),
+            "no unproved source credit: {shape}"
+        );
         assert_ordinary_observation_has_no_native_credit(&turn, &request);
     }
 }
@@ -1327,49 +1660,99 @@ fn capture_capacity_refusals_are_explained_without_losing_ordinary_facts() {
         let pending = if capacity == "workers" {
             gate.hold_every_worker(&workers)
         } else {
-            let checks = (0..ENGRAM_TURN_CHECK_LIMIT).map(|sequence| {
-                let mut check = turn.finished_check(sequence, engram_ready_basis_capture());
-                check.end = None;
-                check
-            }).collect();
+            let checks = (0..ENGRAM_TURN_CHECK_LIMIT)
+                .map(|sequence| {
+                    let mut check = turn.finished_check(sequence, engram_ready_basis_capture());
+                    check.end = None;
+                    check
+                })
+                .collect();
             turn.record_mut(|record| {
                 record.engram.active_turn_checks = checks;
                 record.engram.next_turn_check_sequence = ENGRAM_TURN_CHECK_LIMIT;
             });
             Vec::new()
         };
-        turn.run("capacity-refused", SIZE_TEST, EngramCommandExit::Code(0), || {});
-        let (refused, notice, trace) = turn.record(|record| (
-            record.engram.active_turn_checks.iter().all(|check| check.key != "capacity-refused"),
-            record.engram.pending_source_root_line.clone(),
-            record.engram.unadmitted_active_turn.clone().unwrap(),
-        ));
+        turn.run(
+            "capacity-refused",
+            SIZE_TEST,
+            EngramCommandExit::Code(0),
+            || {},
+        );
+        let (refused, notice, trace) = turn.record(|record| {
+            (
+                record
+                    .engram
+                    .active_turn_checks
+                    .iter()
+                    .all(|check| check.key != "capacity-refused"),
+                record.engram.pending_source_root_line.clone(),
+                record.engram.unadmitted_active_turn.clone().unwrap(),
+            )
+        });
         // Release every fixture worker before asserting, including on a failing input.
         gate.open();
         for capture in pending {
-            capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+            capture
+                .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
                 .expect("the released capture finishes");
         }
-        assert!(refused, "the diagnostic capture limit still applies: {capacity}");
+        assert!(
+            refused,
+            "the diagnostic capture limit still applies: {capacity}"
+        );
         let notice = notice.expect("capture refusal is visible to the holder");
         assert!(notice.contains("capacity"), "{capacity}: {notice}");
         assert!(!notice.contains("--nocapture") && !notice.contains("source_file_size"));
-        assert_eq!(trace.commands.len(), 1, "ordinary facts are independent of diagnostic capacity");
-        assert_eq!(trace.commands[0].check.observed_result, EngramObservedCheckResult::Passed);
+        assert_eq!(
+            trace.commands.len(),
+            1,
+            "ordinary facts are independent of diagnostic capacity"
+        );
+        assert_eq!(
+            trace.commands[0].check.observed_result,
+            EngramObservedCheckResult::Passed
+        );
         if capacity == "retained" {
             turn.record_mut(|record| record.engram.active_turn_checks.clear());
         }
         assert_eq!(workers.load(std::sync::atomic::Ordering::SeqCst), 0);
         let first = turn.finish();
-        assert_eq!(first["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            first["occurrence"]["observed_checks"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert_ordinary_observation_has_no_native_credit(&turn, &first);
         turn.begin("Run a check after the diagnostic backlog drains.");
-        turn.run("after-capacity", SIZE_TEST, EngramCommandExit::Code(0), || {});
-        assert!(turn.record(|record| record.engram.active_turn_checks.iter()
-            .any(|check| check.key == "after-capacity")), "capture recovers: {capacity}");
+        turn.run(
+            "after-capacity",
+            SIZE_TEST,
+            EngramCommandExit::Code(0),
+            || {},
+        );
+        assert!(
+            turn.record(|record| record
+                .engram
+                .active_turn_checks
+                .iter()
+                .any(|check| check.key == "after-capacity")),
+            "capture recovers: {capacity}"
+        );
         let recovered = turn.finish();
-        assert_eq!(recovered["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
-        assert_ne!(recovered["occurrence"]["host_turn_ref"], first["occurrence"]["host_turn_ref"]);
+        assert_eq!(
+            recovered["occurrence"]["observed_checks"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_ne!(
+            recovered["occurrence"]["host_turn_ref"],
+            first["occurrence"]["host_turn_ref"]
+        );
         assert_ordinary_observation_has_no_native_credit(&turn, &recovered);
     }
 }
@@ -1386,53 +1769,111 @@ fn a_missing_end_is_frozen_indeterminate_and_a_late_end_cannot_enter_the_success
     let turn_ref = first["occurrence"]["host_turn_ref"].as_str().unwrap();
     let checks = first["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
-    assert_eq!(checks[0]["host_check_id"], unadmitted_host_check_id(turn_ref, "lost-end"));
+    assert_eq!(
+        checks[0]["host_check_id"],
+        unadmitted_host_check_id(turn_ref, "lost-end")
+    );
     assert_eq!(checks[0]["observed_result"], "indeterminate");
     assert!(checks[0].get("finished_at").is_none());
-    let closing = turn.record(|record| record.engram.pending_source_root_line.clone()).unwrap();
-    assert_eq!(closing.matches("no end was reported").count(), 1, "{closing}");
+    let closing = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .unwrap();
+    assert_eq!(
+        closing.matches("no end was reported").count(),
+        1,
+        "{closing}"
+    );
     assert!(closing.contains("outcome Unknown") && closing.contains(&fingerprint));
     turn.record_mut(|record| record.engram.pending_source_root_line = None);
-    recorder.command_completed_with_exit("lost-end", SIZE_TEST,
-        "running 3 tests\ntest result: ok. 3 passed", CommandStatus::Success,
-        EngramCommandExit::Code(0)).unwrap();
-    let late = turn.record(|record| record.engram.pending_source_root_line.clone()).unwrap();
-    assert!(late.contains("an end (exit code 0)") && late.contains(&fingerprint), "{late}");
+    recorder
+        .command_completed_with_exit(
+            "lost-end",
+            SIZE_TEST,
+            "running 3 tests\ntest result: ok. 3 passed",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
+    let late = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .unwrap();
+    assert!(
+        late.contains("an end (exit code 0)") && late.contains(&fingerprint),
+        "{late}"
+    );
     assert!(!late.contains("--nocapture") && !late.contains("source_file_size"));
     turn.record_mut(|record| record.engram.pending_source_root_line = None);
-    recorder.command_completed_with_exit("lost-end", SIZE_TEST,
-        "running 3 tests\ntest result: ok. 3 passed", CommandStatus::Success,
-        EngramCommandExit::Code(0)).unwrap();
-    assert!(turn.record(|record| record.engram.pending_source_root_line.is_none()),
-        "a repeated late end is not announced twice");
+    recorder
+        .command_completed_with_exit(
+            "lost-end",
+            SIZE_TEST,
+            "running 3 tests\ntest result: ok. 3 passed",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
+    assert!(
+        turn.record(|record| record.engram.pending_source_root_line.is_none()),
+        "a repeated late end is not announced twice"
+    );
     turn.begin("The successor is ordinary work, not another outcome for the lost check.");
     let second = turn.finish();
-    assert_ne!(second["occurrence"]["host_turn_ref"], first["occurrence"]["host_turn_ref"]);
-    assert!(second["occurrence"]["observed_checks"].as_array().unwrap().is_empty());
-    let first_sends = turn.transport.requests().into_iter().filter(|sent|
-        sent.request["operation"] == "execution_observe"
-            && sent.request["occurrence"]["kind"] == "unadmitted_turn"
-            && sent.request["occurrence"]["host_turn_ref"] == turn_ref)
-        .map(|sent| sent.request).collect::<Vec<_>>();
+    assert_ne!(
+        second["occurrence"]["host_turn_ref"],
+        first["occurrence"]["host_turn_ref"]
+    );
+    assert!(
+        second["occurrence"]["observed_checks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let first_sends = turn
+        .transport
+        .requests()
+        .into_iter()
+        .filter(|sent| {
+            sent.request["operation"] == "execution_observe"
+                && sent.request["occurrence"]["kind"] == "unadmitted_turn"
+                && sent.request["occurrence"]["host_turn_ref"] == turn_ref
+        })
+        .map(|sent| sent.request)
+        .collect::<Vec<_>>();
     assert!(!first_sends.is_empty());
-    assert!(first_sends.iter().all(|request| request == &first),
-        "a late end cannot rewrite or add a completed outcome to the frozen first trace");
+    assert!(
+        first_sends.iter().all(|request| request == &first),
+        "a late end cannot rewrite or add a completed outcome to the frozen first trace"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &first);
     assert_ordinary_observation_has_no_native_credit(&turn, &second);
 }
 #[test]
 fn a_passing_ordinary_check_keeps_its_capture_but_emits_no_environment_or_verification_credit() {
     let turn = EOCheckedTurn::start("ordinary-passing-check-capture", true);
-    turn.record_mut(|record| record.active_codex_sandbox_mode = Some(CodexSandboxMode::WorkspaceWrite));
+    turn.record_mut(|record| {
+        record.active_codex_sandbox_mode = Some(CodexSandboxMode::WorkspaceWrite)
+    });
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
     let (fingerprint, sandbox, toolchain) = turn.record(|record| {
         let check = &record.engram.active_turn_checks[0];
-        (engram_check_fingerprint(&check.command), check.sandbox.clone(), check.toolchain.clone())
+        (
+            engram_check_fingerprint(&check.command),
+            check.sandbox.clone(),
+            check.toolchain.clone(),
+        )
     });
-    assert_eq!(fingerprint, "2d7cc0ce52623c3bde2cd355ea5a9f35001e657b72bf75d3fbca2a15d321b48c");
+    assert_eq!(
+        fingerprint,
+        "2d7cc0ce52623c3bde2cd355ea5a9f35001e657b72bf75d3fbca2a15d321b48c"
+    );
     assert_eq!(sandbox.as_deref(), Some("workspace-write"));
-    assert_eq!(toolchain.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).flatten().as_deref(),
-        Some(FIXTURE_TOOLCHAIN));
+    assert_eq!(
+        toolchain
+            .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+            .flatten()
+            .as_deref(),
+        Some(FIXTURE_TOOLCHAIN)
+    );
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
@@ -1441,9 +1882,14 @@ fn a_passing_ordinary_check_keeps_its_capture_but_emits_no_environment_or_verifi
     assert!(checks[0]["started_at"].is_string() && checks[0]["finished_at"].is_string());
     assert!(checks[0].get("source_basis").is_none());
     assert!(request.get("environment_evidence").is_none());
-    assert!(request.get("observations").is_none(), "no retired producer/checkpoint envelope");
-    assert!(!serde_json::to_string(&request).unwrap().contains(SIZE_TEST),
-        "ordinary observations do not disclose the command text");
+    assert!(
+        request.get("observations").is_none(),
+        "no retired producer/checkpoint envelope"
+    );
+    assert!(
+        !serde_json::to_string(&request).unwrap().contains(SIZE_TEST),
+        "ordinary observations do not disclose the command text"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 #[test]
@@ -1453,14 +1899,23 @@ fn a_change_before_a_check_is_measured_without_claiming_verification() {
     let revision = turn.revision();
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
     let capture = turn.record(|record| record.engram.active_turn_checks[0].start_basis.clone());
-    let start = capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+    let start = capture
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .unwrap()
+        .unwrap();
     assert_eq!(start.source_revision, revision);
     let request = turn.finish();
-    assert_eq!(request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], revision);
+    assert_eq!(
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        revision
+    );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["observed_result"], "passed");
-    assert!(checks[0].get("source_basis").is_none(), "coincidence is not source verification");
+    assert!(
+        checks[0].get("source_basis").is_none(),
+        "coincidence is not source verification"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
@@ -1469,18 +1924,34 @@ fn a_later_source_change_is_not_attributed_to_the_earlier_check() {
     let turn = EOCheckedTurn::start("ordinary-change-after", true);
     let tested = turn.revision();
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
-    let capture = turn.record(|record| record.engram.active_turn_checks[0].end.as_ref().unwrap().end_basis.clone());
-    let end = capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+    let capture = turn.record(|record| {
+        record.engram.active_turn_checks[0]
+            .end
+            .as_ref()
+            .unwrap()
+            .end_basis
+            .clone()
+    });
+    let end = capture
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .unwrap()
+        .unwrap();
     assert_eq!(end.source_revision, tested);
     turn.change_readme("changed after the test\n");
     let changed = turn.revision();
     assert_ne!(changed, tested);
     let request = turn.finish();
-    assert_eq!(request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], changed);
+    assert_eq!(
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        changed
+    );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["observed_result"], "passed");
-    assert!(checks[0].get("source_basis").is_none(), "a later revision did not run this check");
+    assert!(
+        checks[0].get("source_basis").is_none(),
+        "a later revision did not run this check"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
@@ -1493,14 +1964,26 @@ fn source_changes_during_a_check_keep_its_result_without_verification_credit() {
     });
     let (start, end) = turn.record(|record| {
         let check = &record.engram.active_turn_checks[0];
-        (check.start_basis.clone(), check.end.as_ref().unwrap().end_basis.clone())
+        (
+            check.start_basis.clone(),
+            check.end.as_ref().unwrap().end_basis.clone(),
+        )
     });
-    let start = start.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
-    let end = end.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+    let start = start
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .unwrap()
+        .unwrap();
+    let end = end
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .unwrap()
+        .unwrap();
     assert_eq!(start.source_revision, before);
     assert_ne!(start.source_revision, end.source_revision);
     let request = turn.finish();
-    assert_eq!(request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], end.source_revision);
+    assert_eq!(
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        end.source_revision
+    );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["observed_result"], "passed");
@@ -1573,12 +2056,21 @@ fn a_zero_test_exit_is_only_an_ordinary_fact_without_native_credit() {
         )
         .expect("the end should record");
     turn.wait_for_snapshots();
-    assert!(!turn.record(|record| record.engram.active_turn_checks[0]
-        .end.as_ref().unwrap().showed_passing_tests), "zero tests is not a verified test run");
+    assert!(
+        !turn.record(|record| record.engram.active_turn_checks[0]
+            .end
+            .as_ref()
+            .unwrap()
+            .showed_passing_tests),
+        "zero tests is not a verified test run"
+    );
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
-    assert_eq!(checks[0]["observed_result"], "passed", "only the observed exit status");
+    assert_eq!(
+        checks[0]["observed_result"], "passed",
+        "only the observed exit status"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
@@ -1627,8 +2119,15 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
     // A test can finish before its snapshots are taken; an edit in between
     // would be read by both snapshots and certified as tested.
     let turn = EOCheckedTurn::start("open-to-writes", true);
-    let owner = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().host_turn_ref.clone());
+    let owner = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .host_turn_ref
+            .clone()
+    });
     let pending = Arc::new(EngramBasisCapture::default());
     let settled = || {
         let capture = Arc::new(EngramBasisCapture::default());
@@ -2177,8 +2676,10 @@ fn an_acp_tool_call_ends_its_check_with_the_exit_code_it_reported() {
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     let turn_ref = request["occurrence"]["host_turn_ref"].as_str().unwrap();
-    let completed = checks.iter().find(|check| check["host_check_id"] ==
-        unadmitted_host_check_id(turn_ref, "acp-check")).unwrap();
+    let completed = checks
+        .iter()
+        .find(|check| check["host_check_id"] == unadmitted_host_check_id(turn_ref, "acp-check"))
+        .unwrap();
     assert_eq!(completed["observed_result"], "passed");
     assert!(completed["finished_at"].is_string());
     assert!(completed.get("source_basis").is_none());
@@ -2190,15 +2691,28 @@ fn a_background_command_counts_as_running_for_the_rest_of_the_turn() {
     let turn = EOCheckedTurn::start("background-writer", true);
     let mut recorder = turn.recorder();
     recorder.command_started("watch", "npm run watch").unwrap();
-    recorder.command_completed_with_exit("watch", "npm run watch", "",
-        CommandStatus::Success, EngramCommandExit::NotFinished).unwrap();
+    recorder
+        .command_completed_with_exit(
+            "watch",
+            "npm run watch",
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::NotFinished,
+        )
+        .unwrap();
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
-    assert!(turn.record(|record| record.engram.active_turn_checks[0].overlapped),
-        "a launch result cannot prove the writer stopped");
+    assert!(
+        turn.record(|record| record.engram.active_turn_checks[0].overlapped),
+        "a launch result cannot prove the writer stopped"
+    );
     let request = turn.finish();
     let turn_ref = request["occurrence"]["host_turn_ref"].as_str().unwrap();
-    let check = request["occurrence"]["observed_checks"].as_array().unwrap().iter()
-        .find(|check| check["host_check_id"] == unadmitted_host_check_id(turn_ref, "check-1")).unwrap();
+    let check = request["occurrence"]["observed_checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["host_check_id"] == unadmitted_host_check_id(turn_ref, "check-1"))
+        .unwrap();
     assert_eq!(check["observed_result"], "passed");
     assert!(check.get("source_basis").is_none());
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
@@ -2220,8 +2734,13 @@ fn a_denied_command_stops_counting_as_running() {
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1, "neither denied command actually ran");
-    assert_eq!(checks[0]["host_check_id"], unadmitted_host_check_id(
-        request["occurrence"]["host_turn_ref"].as_str().unwrap(), "check-1"));
+    assert_eq!(
+        checks[0]["host_check_id"],
+        unadmitted_host_check_id(
+            request["occurrence"]["host_turn_ref"].as_str().unwrap(),
+            "check-1"
+        )
+    );
     assert_eq!(checks[0]["observed_result"], "passed");
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
@@ -2233,13 +2752,26 @@ fn checks_that_share_a_runtime_key_keep_distinct_observation_ids() {
     let turn = EOCheckedTurn::start("same-key", true);
     turn.run(SIZE_TEST, SIZE_TEST, EngramCommandExit::Code(0), || {});
     turn.run(SIZE_TEST, SIZE_TEST, EngramCommandExit::Code(0), || {});
-    assert_eq!(turn.record(|record| record.engram.active_turn_checks.len()), 2);
+    assert_eq!(
+        turn.record(|record| record.engram.active_turn_checks.len()),
+        2
+    );
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
-    assert_eq!(checks.len(), 2, "a reused fallback key cannot erase an actual invocation");
-    let ids = checks.iter().map(|check| check["host_check_id"].as_str().unwrap())
+    assert_eq!(
+        checks.len(),
+        2,
+        "a reused fallback key cannot erase an actual invocation"
+    );
+    let ids = checks
+        .iter()
+        .map(|check| check["host_check_id"].as_str().unwrap())
         .collect::<BTreeSet<_>>();
-    assert_eq!(ids.len(), 2, "each invocation has its own immutable identity");
+    assert_eq!(
+        ids.len(),
+        2,
+        "each invocation has its own immutable identity"
+    );
     for check in checks {
         assert_eq!(check["observed_result"], "passed");
         assert!(check["started_at"].is_string() && check["finished_at"].is_string());
@@ -2252,25 +2784,67 @@ fn duplicate_start_description_and_end_do_not_duplicate_an_ordinary_check() {
     let mut recorder = turn.recorder();
     recorder.command_started("check", SIZE_TEST).unwrap();
     recorder.command_started("check", SIZE_TEST).unwrap();
-    recorder.command_described("check", Some(SIZE_TEST), None).unwrap();
+    recorder
+        .command_described("check", Some(SIZE_TEST), None)
+        .unwrap();
     turn.wait_for_snapshots();
-    let initial = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone());
+    let initial = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()
+    });
     assert_eq!(initial.len(), 1);
-    recorder.command_completed_with_exit("check", SIZE_TEST,
-        "running 3 tests\ntest result: ok. 3 passed", CommandStatus::Success,
-        EngramCommandExit::Code(0)).unwrap();
+    recorder
+        .command_completed_with_exit(
+            "check",
+            SIZE_TEST,
+            "running 3 tests\ntest result: ok. 3 passed",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
     turn.wait_for_snapshots();
-    let completed = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone());
+    let completed = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()
+    });
     assert_eq!(completed.len(), 1);
-    assert_eq!(completed[0].check.host_check_id, initial[0].check.host_check_id);
-    recorder.command_described("check", Some(SIZE_TEST), None).unwrap();
-    recorder.command_completed_with_exit("check", SIZE_TEST,
-        "test result: FAILED. 0 passed; 1 failed", CommandStatus::Error,
-        EngramCommandExit::Code(1)).unwrap();
-    assert_eq!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone()), completed, "duplicate terminal events cannot revise the first result");
+    assert_eq!(
+        completed[0].check.host_check_id,
+        initial[0].check.host_check_id
+    );
+    recorder
+        .command_described("check", Some(SIZE_TEST), None)
+        .unwrap();
+    recorder
+        .command_completed_with_exit(
+            "check",
+            SIZE_TEST,
+            "test result: FAILED. 0 passed; 1 failed",
+            CommandStatus::Error,
+            EngramCommandExit::Code(1),
+        )
+        .unwrap();
+    assert_eq!(
+        turn.record(|record| record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()),
+        completed,
+        "duplicate terminal events cannot revise the first result"
+    );
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
@@ -2282,20 +2856,49 @@ fn duplicate_start_description_and_end_do_not_duplicate_an_ordinary_check() {
 fn abandoning_a_second_same_key_invocation_keeps_the_completed_first_fact() {
     let turn = EOCheckedTurn::start("ordinary-abandoned-second-check", true);
     turn.run(SIZE_TEST, SIZE_TEST, EngramCommandExit::Code(0), || {});
-    let first = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone());
+    let first = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()
+    });
     assert_eq!(first.len(), 1);
     let mut recorder = turn.recorder();
     recorder.command_started(SIZE_TEST, SIZE_TEST).unwrap();
-    let second = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone());
+    let second = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()
+    });
     assert_eq!(second.len(), 2);
     assert_ne!(second[0].check.host_check_id, second[1].check.host_check_id);
     recorder.command_abandoned(SIZE_TEST).unwrap();
-    assert_eq!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone()), first, "denying a successor cannot erase a completed invocation");
+    assert_eq!(
+        turn.record(|record| record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()),
+        first,
+        "denying a successor cannot erase a completed invocation"
+    );
     let request = turn.finish();
-    assert_eq!(request["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        request["occurrence"]["observed_checks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
@@ -2307,27 +2910,53 @@ fn repeated_detached_launcher_invocations_have_distinct_unfinished_check_facts()
     for _ in 0..2 {
         recorder.command_started("launch", command).unwrap();
         turn.wait_for_snapshots();
-        recorder.command_completed_with_exit("launch", command,
-            "STARTED (launcher acknowledgment only)", CommandStatus::Success,
-            EngramCommandExit::Code(0)).unwrap();
+        recorder
+            .command_completed_with_exit(
+                "launch",
+                command,
+                "STARTED (launcher acknowledgment only)",
+                CommandStatus::Success,
+                EngramCommandExit::Code(0),
+            )
+            .unwrap();
         turn.wait_for_snapshots();
     }
     let trace = turn.record(|record| record.engram.unadmitted_active_turn.clone().unwrap());
-    assert_eq!(trace.commands.len(), 2, "two shell invocations are distinct from two completed gates");
-    assert_ne!(trace.commands[0].check.host_check_id, trace.commands[1].check.host_check_id);
+    assert_eq!(
+        trace.commands.len(),
+        2,
+        "two shell invocations are distinct from two completed gates"
+    );
+    assert_ne!(
+        trace.commands[0].check.host_check_id,
+        trace.commands[1].check.host_check_id
+    );
     for entry in &trace.commands {
-        assert_eq!(entry.check.observed_result, EngramObservedCheckResult::Indeterminate);
-        assert!(entry.check.finished_at.is_none(), "a launcher exit is not a test-process end");
+        assert_eq!(
+            entry.check.observed_result,
+            EngramObservedCheckResult::Indeterminate
+        );
+        assert!(
+            entry.check.finished_at.is_none(),
+            "a launcher exit is not a test-process end"
+        );
     }
     let saved = serde_json::to_value(&trace).unwrap();
     let restored: EngramRuntimeObservedTurn = serde_json::from_value(saved.clone()).unwrap();
-    assert_eq!(serde_json::to_value(restored).unwrap(), saved,
-        "serializing the retained trace preserves occurrence identity and unfinished facts");
+    assert_eq!(
+        serde_json::to_value(restored).unwrap(),
+        saved,
+        "serializing the retained trace preserves occurrence identity and unfinished facts"
+    );
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 2);
-    assert!(checks.iter().all(|check| check["observed_result"] == "indeterminate"
-        && check.get("finished_at").is_none()));
+    assert!(
+        checks
+            .iter()
+            .all(|check| check["observed_result"] == "indeterminate"
+                && check.get("finished_at").is_none())
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
@@ -2336,23 +2965,43 @@ fn late_recognition_of_a_running_command_does_not_invent_its_start_time() {
     for reveal in ["start", "description"] {
         let turn = EOCheckedTurn::start(&format!("ordinary-late-recognition-{reveal}"), true);
         let mut recorder = turn.recorder();
-        recorder.command_started_in("late-check", "Run tests", None, None).unwrap();
-        assert!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-            .unwrap().commands.is_empty()));
+        recorder
+            .command_started_in("late-check", "Run tests", None, None)
+            .unwrap();
+        assert!(turn.record(|record| {
+            record
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
+                .unwrap()
+                .commands
+                .is_empty()
+        }));
         if reveal == "start" {
             recorder.command_started("late-check", SIZE_TEST).unwrap();
         } else {
-            recorder.command_described("late-check", Some(SIZE_TEST), None).unwrap();
+            recorder
+                .command_described("late-check", Some(SIZE_TEST), None)
+                .unwrap();
         }
         turn.wait_for_snapshots();
-        recorder.command_completed_with_exit("late-check", SIZE_TEST,
-            "running 3 tests\ntest result: ok. 3 passed", CommandStatus::Success,
-            EngramCommandExit::Code(0)).unwrap();
+        recorder
+            .command_completed_with_exit(
+                "late-check",
+                SIZE_TEST,
+                "running 3 tests\ntest result: ok. 3 passed",
+                CommandStatus::Success,
+                EngramCommandExit::Code(0),
+            )
+            .unwrap();
         turn.wait_for_snapshots();
         let request = turn.finish();
         let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
         assert_eq!(checks.len(), 1);
-        assert!(checks[0].get("started_at").is_none(), "recognition is not a newly observed start: {reveal}");
+        assert!(
+            checks[0].get("started_at").is_none(),
+            "recognition is not a newly observed start: {reveal}"
+        );
         assert!(checks[0]["finished_at"].is_string());
         assert_eq!(checks[0]["observed_result"], "passed");
         assert_ordinary_observation_has_no_native_credit(&turn, &request);
@@ -2365,17 +3014,27 @@ fn ordinary_claim_association_cannot_relabel_or_replay_a_historical_checkpoint()
     let current = turn.record(|record| record.engram.work_binding.clone().unwrap());
     let historical = test_control_work_binding("historical-other-claim", 7);
     assert_ne!(historical, current);
-    let mut operation = checkpoint_result_recovery::passive_checkpoint(&turn.root, &turn.session_id);
+    let mut operation =
+        checkpoint_result_recovery::passive_checkpoint(&turn.root, &turn.session_id);
     operation.original.work_binding = Some(json!(historical));
     operation.protection.frozen_request = serde_json::to_value(&operation.original).unwrap();
     operation.validate().unwrap();
     let frozen = serde_json::to_value(&operation).unwrap();
     {
         let mut inner = turn.state.inner.lock().unwrap();
-        checkpoint_result_recovery::install_historical_checkpoint(&mut inner, &turn.session_id, &operation);
+        checkpoint_result_recovery::install_historical_checkpoint(
+            &mut inner,
+            &turn.session_id,
+            &operation,
+        );
         turn.state.commit_locked(&mut inner).unwrap();
     }
-    turn.run("current-claim-check", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    turn.run(
+        "current-claim-check",
+        SIZE_TEST,
+        EngramCommandExit::Code(0),
+        || {},
+    );
     let report = turn.finish();
     assert_eq!(report["binding"], json!(current));
     assert_ne!(report["binding"], json!(historical));
@@ -2383,28 +3042,48 @@ fn ordinary_claim_association_cannot_relabel_or_replay_a_historical_checkpoint()
     assert_ordinary_observation_has_no_native_credit(&turn, &report);
     turn.record(|record| {
         assert_eq!(record.engram.work_binding.as_ref(), Some(&current));
-        assert_eq!(record.engram.historical_control["engramCheckpointOperation"], frozen);
+        assert_eq!(
+            record.engram.historical_control["engramCheckpointOperation"],
+            frozen
+        );
     });
     let inner = turn.state.inner.lock().unwrap();
-    assert_eq!(serde_json::to_value(&inner.engram_session_obligations.checkpoint_operations[0]).unwrap(), frozen);
-    assert_eq!(inner.engram_session_obligations.checkpoint_operations[0].original.work_binding,
-        Some(json!(historical)), "a current claim cannot rewrite old checkpoint custody");
+    assert_eq!(
+        serde_json::to_value(&inner.engram_session_obligations.checkpoint_operations[0]).unwrap(),
+        frozen
+    );
+    assert_eq!(
+        inner.engram_session_obligations.checkpoint_operations[0]
+            .original
+            .work_binding,
+        Some(json!(historical)),
+        "a current claim cannot rewrite old checkpoint custody"
+    );
 }
 
 #[test]
 fn a_failing_test_and_a_masked_exit_are_reported_honestly() {
     let turn = EOCheckedTurn::start("honest", true);
     turn.run("check-1", "cargo test", EngramCommandExit::Code(101), || {});
-    turn.run("check-2", "cargo test 2>&1 | tail -5", EngramCommandExit::Code(0), || {});
+    turn.run(
+        "check-2",
+        "cargo test 2>&1 | tail -5",
+        EngramCommandExit::Code(0),
+        || {},
+    );
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 2);
     let turn_ref = request["occurrence"]["host_turn_ref"].as_str().unwrap();
     for (key, outcome) in [("check-1", "failed"), ("check-2", "indeterminate")] {
-        let check = checks.iter().find(|check| check["host_check_id"] ==
-            unadmitted_host_check_id(turn_ref, key)).unwrap();
-        assert_eq!(check["observed_result"], outcome,
-            "a pipe's status cannot prove the underlying test succeeded");
+        let check = checks
+            .iter()
+            .find(|check| check["host_check_id"] == unadmitted_host_check_id(turn_ref, key))
+            .unwrap();
+        assert_eq!(
+            check["observed_result"], outcome,
+            "a pipe's status cannot prove the underlying test succeeded"
+        );
     }
     assert!(request.get("environment_evidence").is_none());
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
@@ -2443,15 +3122,33 @@ fn an_unclaimed_turn_keeps_no_claim_diagnostics_and_sends_no_unattributed_report
         .command_started("check-1", SIZE_TEST)
         .expect("the start should record");
     assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
-    assert_eq!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.len()), 1, "ordinary process facts do not require admission");
+    assert_eq!(
+        turn.record(|record| record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .len()),
+        1,
+        "ordinary process facts do not require admission"
+    );
     let (idle, idle_rx) = mpsc::channel();
-    *turn.state.runtime_observation_lifetime.install_hook.lock().unwrap() =
-        Some(Arc::new(move |phase| {
-            if phase == "idle" { let _ = idle.send(()); }
-        }));
+    *turn
+        .state
+        .runtime_observation_lifetime
+        .install_hook
+        .lock()
+        .unwrap() = Some(Arc::new(move |phase| {
+        if phase == "idle" {
+            let _ = idle.send(());
+        }
+    }));
     turn.end();
-    receive(&idle_rx, "unclaimed observation worker settles without a report");
+    receive(
+        &idle_rx,
+        "unclaimed observation worker settles without a report",
+    );
     turn.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Idle);
         assert!(!record.session.queue_paused && !record.orchestrator_auto_dispatch_blocked);
@@ -2459,11 +3156,23 @@ fn an_unclaimed_turn_keeps_no_claim_diagnostics_and_sends_no_unattributed_report
         assert!(record.engram.unadmitted_closing_jobs.is_empty());
         assert!(record.engram.unadmitted_reports.is_empty());
     });
-    assert!(turn.transport.requests().iter().all(|sent|
-        !matches!(sent.request["operation"].as_str(), Some("execution_observe"
-            | "verification_record" | "verification_bind" | "session_bind" | "session_status"
-            | "turn_grant_read" | "turn_evaluate" | "turn_begin" | "turn_checkpoint"))),
-        "no claimed authority is invented for an ordinary unclaimed turn");
+    assert!(
+        turn.transport.requests().iter().all(|sent| !matches!(
+            sent.request["operation"].as_str(),
+            Some(
+                "execution_observe"
+                    | "verification_record"
+                    | "verification_bind"
+                    | "session_bind"
+                    | "session_status"
+                    | "turn_grant_read"
+                    | "turn_evaluate"
+                    | "turn_begin"
+                    | "turn_checkpoint"
+            )
+        )),
+        "no claimed authority is invented for an ordinary unclaimed turn"
+    );
 }
 
 /// A second Git repository beside `turn`'s, with a manifest a command can
@@ -2910,33 +3619,58 @@ fn a_check_runs_where_the_commands_before_it_left_a_shell_that_reports_no_direct
 fn late_file_tracking_does_not_invent_a_source_change_after_an_unchanged_check() {
     let turn = EOCheckedTurn::start("tracking-after-check", true);
     let (idle, idle_rx) = mpsc::channel();
-    *turn.state.runtime_observation_lifetime.install_hook.lock().unwrap() =
-        Some(Arc::new(move |phase| {
-            if phase == "idle" { let _ = idle.send(()); }
-        }));
+    *turn
+        .state
+        .runtime_observation_lifetime
+        .install_hook
+        .lock()
+        .unwrap() = Some(Arc::new(move |phase| {
+        if phase == "idle" {
+            let _ = idle.send(());
+        }
+    }));
     let first = turn.finish();
-    receive(&idle_rx, "initial ordinary observation and measured sighting settle");
+    receive(
+        &idle_rx,
+        "initial ordinary observation and measured sighting settle",
+    );
     // Ordinary observation writes no baseline of its own. Install a measured
     // passive baseline of the actual content, as
     // `install_passive_measured_baseline` (engram_turn_observations.rs) does.
-    let measured = engram_place_source_basis(
-        &EngramBasisPlace::Workdir(turn.root.to_string_lossy().into_owned())).unwrap();
+    let measured = engram_place_source_basis(&EngramBasisPlace::Workdir(
+        turn.root.to_string_lossy().into_owned(),
+    ))
+    .unwrap();
     let baseline = EngramRuntimeCheckpointBasis {
         binding: turn.record(|record| record.engram.work_binding.clone().unwrap()),
         endpoint: EngramMeasuredBaseline {
-            source_id: None, workspace_id: measured.workspace_id,
-            source_revision: measured.source_revision, observed_at: unadmitted_observation_timestamp() },
+            source_id: None,
+            workspace_id: measured.workspace_id,
+            source_revision: measured.source_revision,
+            observed_at: unadmitted_observation_timestamp(),
+        },
         source_root_generation: measured.source_root_generation,
         source_root_state: measured.source_root_state,
     };
     {
         let mut inner = turn.state.inner.lock().unwrap();
-        inner.session_mut(&turn.session_id).unwrap().engram.runtime_checkpoint = Some(baseline.clone());
+        inner
+            .session_mut(&turn.session_id)
+            .unwrap()
+            .engram
+            .runtime_checkpoint = Some(baseline.clone());
         turn.state.commit_locked(&mut inner).unwrap();
     }
-    let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
-    assert_eq!(loaded.sessions[loaded.find_session_index(&turn.session_id).unwrap()]
-        .engram.runtime_checkpoint.as_ref(), Some(&baseline));
+    let loaded = load_state(turn.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.sessions[loaded.find_session_index(&turn.session_id).unwrap()]
+            .engram
+            .runtime_checkpoint
+            .as_ref(),
+        Some(&baseline)
+    );
     turn.record(|record| assert_eq!(record.engram.runtime_checkpoint.as_ref(), Some(&baseline)));
     turn.begin("Check the same source after the first measured checkpoint.");
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
@@ -2947,9 +3681,14 @@ fn late_file_tracking_does_not_invent_a_source_change_after_an_unchanged_check()
         );
     });
     let request = turn.finish();
-    assert_ne!(request["occurrence"]["host_turn_ref"], first["occurrence"]["host_turn_ref"]);
-    assert!(request["occurrence"]["source_change"].is_null(),
-        "a late tracker entry cannot turn unchanged measured content into a mutation");
+    assert_ne!(
+        request["occurrence"]["host_turn_ref"],
+        first["occurrence"]["host_turn_ref"]
+    );
+    assert!(
+        request["occurrence"]["source_change"].is_null(),
+        "a late tracker entry cannot turn unchanged measured content into a mutation"
+    );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["observed_result"], "passed");
@@ -3380,7 +4119,10 @@ fn a_missing_toolchain_label_cannot_be_invented_for_an_ordinary_check() {
     use_toolchain_label(None);
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
     let capture = turn.record(|record| record.engram.active_turn_checks[0].toolchain.clone());
-    assert_eq!(capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD), Some(None));
+    assert_eq!(
+        capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD),
+        Some(None)
+    );
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
@@ -3743,9 +4485,17 @@ fn a_turn_bounds_diagnostic_captures_without_bounding_ordinary_facts() {
         Some(format!("running-{}", ENGRAM_TURN_CHECK_LIMIT - 2).as_str()),
         "the starts past the limit keep none"
     );
-    assert_eq!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.len()), ENGRAM_TURN_CHECK_LIMIT + 5,
-        "all real starts remain ordinary facts even after diagnostic capture is full");
+    assert_eq!(
+        turn.record(|record| record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .len()),
+        ENGRAM_TURN_CHECK_LIMIT + 5,
+        "all real starts remain ordinary facts even after diagnostic capture is full"
+    );
 }
 
 #[test]
@@ -3754,10 +4504,19 @@ fn a_session_in_a_subdirectory_captures_its_worktree_without_verification_credit
     let revision = turn.revision();
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
     let start = turn.record(|record| record.engram.active_turn_checks[0].start_basis.clone());
-    assert_eq!(start.wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
-        .unwrap().unwrap().source_revision, revision);
+    assert_eq!(
+        start
+            .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+            .unwrap()
+            .unwrap()
+            .source_revision,
+        revision
+    );
     let request = turn.finish();
-    assert_eq!(request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], revision);
+    assert_eq!(
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        revision
+    );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["observed_result"], "passed");
@@ -3981,22 +4740,43 @@ fn git_terminal_and_review_writes_through_termal_overlap_an_open_check() {
 // provider dispatch happened; public naming is exercised by the helper below.
 fn name_other_session_source_root(turn: &EOCheckedTurn, session: &str, root: &FsPath) {
     let (root, common_dir_key) = validate_engram_source_root(
-        &root.to_string_lossy(), &turn.root.to_string_lossy(), &turn.root.to_string_lossy(),
-    ).expect("the worktree can be captured");
-    let opening = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().opening_root.clone().unwrap());
+        &root.to_string_lossy(),
+        &turn.root.to_string_lossy(),
+        &turn.root.to_string_lossy(),
+    )
+    .expect("the worktree can be captured");
+    let opening = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .opening_root
+            .clone()
+            .unwrap()
+    });
     let mut inner = turn.state.inner.lock().unwrap();
     let provenance = engram_root_capture_locked(&inner, session);
     let record = inner.session_mut(session).unwrap();
     let mut trace = EngramRuntimeObservedTurn::started(
-        "other-session-root-capture-fixture".to_owned(), record.active_turn_generation);
+        "other-session-root-capture-fixture".to_owned(),
+        record.active_turn_generation,
+    );
     let binding = opening.binding;
     let source_root = EngramTurnSourceRoot {
-        root, common_dir_key, short_ref: binding.work_id.clone(), claim_id: binding.claim_id.clone(),
-        generation: 0, sealed_revision: None, sealed_source_id: None,
+        root,
+        common_dir_key,
+        short_ref: binding.work_id.clone(),
+        claim_id: binding.claim_id.clone(),
+        generation: 0,
+        sealed_revision: None,
+        sealed_source_id: None,
     };
     trace.opening_root = Some(EngramRuntimeOpeningRoot {
-        store: opening.store, binding: binding.clone(), provenance, source_root: Some(source_root),
+        store: opening.store,
+        binding: binding.clone(),
+        provenance,
+        source_root: Some(source_root),
     });
     record.engram.work_binding = Some(binding);
     record.engram.unadmitted_active_turn = Some(trace);
@@ -4007,24 +4787,52 @@ fn name_other_session_source_root(turn: &EOCheckedTurn, session: &str, root: &Fs
 fn name_turn_source_root(turn: &EOCheckedTurn) -> PathBuf {
     turn.record(|record| {
         assert!(record.engram.active_turn_checks.is_empty());
-        assert!(record.engram.unadmitted_active_turn.as_ref().unwrap().commands.is_empty(),
-            "the fixture names a root before checks, never rewrites a running check's owner");
+        assert!(
+            record
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
+                .unwrap()
+                .commands
+                .is_empty(),
+            "the fixture names a root before checks, never rewrites a running check's owner"
+        );
     });
     turn.finish();
     let guard = phase_sync::PollGuard::new();
     loop {
-        if turn.record(|record| !record.engram.unadmitted_worker_running
-            && !runtime_observation_has_removal_duty(record)) { break; }
-        guard.wait(format_args!("the initial ordinary observation settles before naming a new root"));
+        if turn.record(|record| {
+            !record.engram.unadmitted_worker_running
+                && !runtime_observation_has_removal_duty(record)
+        }) {
+            break;
+        }
+        guard.wait(format_args!(
+            "the initial ordinary observation settles before naming a new root"
+        ));
     }
     let worktree = turn.root.join(".worktrees").join("wt");
-    run_git_test_command(&turn.root, &[
-        "worktree", "add", "--quiet", "-b", "wt", worktree.to_str().unwrap(),
-    ]);
+    run_git_test_command(
+        &turn.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "wt",
+            worktree.to_str().unwrap(),
+        ],
+    );
     let binding = turn.record(|record| record.engram.work_binding.clone().unwrap());
-    turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
-        work: binding.work_id, path: Some(Some(worktree.to_string_lossy().into_owned())),
-    }).expect("ordinary work services name the root");
+    turn.state
+        .name_engram_source_root(
+            &turn.session_id,
+            EngramSourceRootRequest {
+                work: binding.work_id,
+                path: Some(Some(worktree.to_string_lossy().into_owned())),
+            },
+        )
+        .expect("ordinary work services name the root");
     turn.begin("Run the checks in the named source root.");
     turn.record_mut(|record| record.engram.pending_source_root_line = None);
     worktree
@@ -4132,13 +4940,21 @@ fn historical_closing_scope_fields_roundtrip_without_becoming_current_credential
     };
     let fresh = serde_json::to_value(&current).unwrap();
     assert!(fresh.get("routing_token").is_none());
-    for token in [json!("opaque-original-history"), Value::Null, json!({"oldShape":[null,"żółw 🐢"]})] {
+    for token in [
+        json!("opaque-original-history"),
+        Value::Null,
+        json!({"oldShape":[null,"żółw 🐢"]}),
+    ] {
         let mut historical = fresh.clone();
         historical["routing_token"] = token;
         historical["future_old_scope"] = json!({"nullable":null,"exact":[false,17,"🐢"]});
-        let restored: EngramRuntimeClosingScope = serde_json::from_value(historical.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&restored).unwrap(), historical,
-            "unrecognized historical scope fields are data, including explicit null");
+        let restored: EngramRuntimeClosingScope =
+            serde_json::from_value(historical.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&restored).unwrap(),
+            historical,
+            "unrecognized historical scope fields are data, including explicit null"
+        );
         let inner = turn.state.inner.lock().unwrap();
         restored.require_current(&inner, &turn.session_id).unwrap();
         drop(inner);
@@ -4146,16 +4962,21 @@ fn historical_closing_scope_fields_roundtrip_without_becoming_current_credential
         turn.record_mut(|record| record.engram.work_binding.as_mut().unwrap().claim_fence += 1);
         {
             let inner = turn.state.inner.lock().unwrap();
-            assert!(restored.require_current(&inner, &turn.session_id).is_err(),
-                "historical token/unknown fields cannot authorize a different current claim");
+            assert!(
+                restored.require_current(&inner, &turn.session_id).is_err(),
+                "historical token/unknown fields cannot authorize a different current claim"
+            );
         }
         turn.record_mut(|record| record.engram.work_binding = Some(original));
         let captured = {
             let inner = turn.state.inner.lock().unwrap();
             EngramRuntimeClosingScope::capture(&inner, &turn.session_id).unwrap()
         };
-        assert_eq!(serde_json::to_value(captured).unwrap(), fresh,
-            "a fresh capture does not inherit credentials or extra fields from old scope data");
+        assert_eq!(
+            serde_json::to_value(captured).unwrap(),
+            fresh,
+            "a fresh capture does not inherit credentials or extra fields from old scope data"
+        );
     }
     let report = turn.finish();
     assert!(report.get("routing_token").is_none());
@@ -4175,51 +4996,77 @@ fn retained_claude_work_without_a_new_frame_withholds_only_ordinary_source_attri
         let project = turn.record(|record| record.session.project_id.clone().unwrap());
         let other = create_test_project_session(&turn.state, Agent::Claude, &project, &hazard_root);
         let since = EngramHost::interference_tick();
-        let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
+        let cwd = fs::canonicalize(&worktree)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         let mut recorder = turn.recorder();
-        recorder.command_started_in("finished-check", SIZE_TEST, Some(SIZE_TEST), Some(&cwd)).unwrap();
+        recorder
+            .command_started_in("finished-check", SIZE_TEST, Some(SIZE_TEST), Some(&cwd))
+            .unwrap();
         turn.wait_for_snapshots();
-        recorder.command_completed_with_exit("finished-check", SIZE_TEST,
-            "running 3 tests\ntest result: ok. 3 passed", CommandStatus::Success,
-            EngramCommandExit::Code(0)).unwrap();
+        recorder
+            .command_completed_with_exit(
+                "finished-check",
+                SIZE_TEST,
+                "running 3 tests\ntest result: ok. 3 passed",
+                CommandStatus::Success,
+                EngramCommandExit::Code(0),
+            )
+            .unwrap();
         turn.wait_for_snapshots();
         if case != "none" {
             // Retained work can become visible without another command frame
             // on this consumer. Closing must still reconcile its source claim.
             let mut inner = turn.state.inner.lock().unwrap();
             let index = inner.find_session_index(&other).unwrap();
-            inner.sessions[index].claude_outstanding.register(ClaudeOutstandingEntry {
-                token: RuntimeToken::Claude("retained-close-cut-gone".to_owned()),
-                key: "orphaned".to_owned(),
-                origin: ClaudeWorkOrigin::Unattributed,
-                background: false,
-                nested: false,
-                self_gate: false,
-                locations: vec![Some(engram_worktree_root(&hazard_root))],
-                registered_at: since,
-            });
+            inner.sessions[index]
+                .claude_outstanding
+                .register(ClaudeOutstandingEntry {
+                    token: RuntimeToken::Claude("retained-close-cut-gone".to_owned()),
+                    key: "orphaned".to_owned(),
+                    origin: ClaudeWorkOrigin::Unattributed,
+                    background: false,
+                    nested: false,
+                    self_gate: false,
+                    locations: vec![Some(engram_worktree_root(&hazard_root))],
+                    registered_at: since,
+                });
         }
         turn.record(|record| {
-            assert_eq!(record.engram.active_turn_checks[0].fenced_by_outstanding, None,
-                "no later frame has reconciled this finished diagnostic");
+            assert_eq!(
+                record.engram.active_turn_checks[0].fenced_by_outstanding, None,
+                "no later frame has reconciled this finished diagnostic"
+            );
         });
         let request = turn.finish();
         let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
         assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0]["observed_result"], "passed",
-            "uncertain source ownership does not erase the observed process result");
+        assert_eq!(
+            checks[0]["observed_result"], "passed",
+            "uncertain source ownership does not erase the observed process result"
+        );
         assert!(checks[0]["finished_at"].is_string());
         // `source_change` is always present: withholding is an explicit null.
         // No baseline was installed, so an attributed change is reported as
         // measured without one.
         let source_change = &request["occurrence"]["source_change"];
-        assert!(request["occurrence"].as_object().unwrap().contains_key("source_change"));
+        assert!(
+            request["occurrence"]
+                .as_object()
+                .unwrap()
+                .contains_key("source_change")
+        );
         if case == "same-root" {
-            assert!(source_change.is_null(),
-                "retained work at the closing cut restricts only source attribution: {request:#}");
+            assert!(
+                source_change.is_null(),
+                "retained work at the closing cut restricts only source attribution: {request:#}"
+            );
         } else {
-            assert_eq!(source_change["detection"], "assumed_missing_baseline",
-                "unrelated or absent retained work leaves source attribution: {request:#}");
+            assert_eq!(
+                source_change["detection"], "assumed_missing_baseline",
+                "unrelated or absent retained work leaves source attribution: {request:#}"
+            );
         }
         assert_ordinary_observation_has_no_native_credit(&turn, &request);
     }

@@ -12,13 +12,25 @@
 use super::*;
 
 fn source_uncertain(record: &SessionRecord) -> bool {
-    let trace = record.engram.unadmitted_active_turn.as_ref().expect("ordinary trace");
+    let trace = record
+        .engram
+        .unadmitted_active_turn
+        .as_ref()
+        .expect("ordinary trace");
     assert_eq!(trace.generation, record.active_turn_generation);
     trace.source_attribution_uncertain
 }
 
 fn current_trace(turn: &EOCheckedTurn) -> String {
-    turn.record(|record| record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref.clone())
+    turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .host_turn_ref
+            .clone()
+    })
 }
 
 /// A top-level Bash tool call.
@@ -111,7 +123,15 @@ fn a_subagent_command_running_across_the_prompt_boundary_marks_the_next_trace_un
     // No frame of A's subagent has arrived since B began: B is excluded from
     // the command still running all the same.
     turn.record(|record| {
-        assert_eq!(record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref, turn_ref);
+        assert_eq!(
+            record
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
+                .unwrap()
+                .host_turn_ref,
+            turn_ref
+        );
         assert!(source_uncertain(record));
         assert!(record.claude_outstanding.holds("long-under-a"));
     });
@@ -156,7 +176,10 @@ fn a_subagent_command_running_across_the_prompt_boundary_marks_the_next_trace_un
         1,
         "B's fenced test remains an uncredited observed fact: {report:#}"
     );
-    assert!(report["occurrence"]["source_change"].is_null(), "{report:#}");
+    assert!(
+        report["occurrence"]["source_change"].is_null(),
+        "{report:#}"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &report);
 }
 
@@ -221,7 +244,8 @@ fn terminal_report_after_foreign_stage(label: &str, stage: ForeignStage) -> Valu
 }
 
 #[test]
-fn a_foreign_frame_admitted_before_terminal_close_withholds_sources_without_waiting_for_its_handler() {
+fn a_foreign_frame_admitted_before_terminal_close_withholds_sources_without_waiting_for_its_handler()
+ {
     // The contrast: with no foreign frame, the turn reports its own change.
     let clean = terminal_report_after_foreign_stage("race-contrast", ForeignStage::None);
     assert!(!clean["occurrence"]["source_change"].is_null(), "{clean:#}");
@@ -231,7 +255,10 @@ fn a_foreign_frame_admitted_before_terminal_close_withholds_sources_without_wait
         ("race-settled", ForeignStage::Settled),
     ] {
         let report = terminal_report_after_foreign_stage(label, stage);
-        assert!(report["occurrence"]["source_change"].is_null(), "{stage:?}: {report:#}");
+        assert!(
+            report["occurrence"]["source_change"].is_null(),
+            "{stage:?}: {report:#}"
+        );
     }
 }
 
@@ -261,11 +288,7 @@ fn the_sink_alone_marks_the_current_trace_uncertain_from_another_turns_observati
             EngramRecorderObservation::WorkspaceEdit { target: None },
         );
         turn.record(|record| {
-            assert_eq!(
-                source_uncertain(record),
-                foreign,
-                "{label}"
-            );
+            assert_eq!(source_uncertain(record), foreign, "{label}");
         });
     }
 }
@@ -366,7 +389,14 @@ fn an_ordinary_turnover_after_routing_leaves_old_work_foreign_on_the_same_runtim
     // A ends and B begins on the same runtime before the frame's effects.
     reader.feed(named_result(&first));
     begin_next_turn(&turn);
-    turn.record_mut(|record| record.engram.unadmitted_active_turn.as_mut().unwrap().source_attribution_uncertain = false);
+    turn.record_mut(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_mut()
+            .unwrap()
+            .source_attribution_uncertain = false
+    });
     apply_claude_frame_plan(
         &reader.context,
         &mut reader.frames,
@@ -445,8 +475,14 @@ fn a_background_launch_acknowledgement_retires_nothing_and_its_terminal_notice_d
             .iter()
             .find(|check| check.key == "clean-test")
             .expect("the later test starts a check");
-        assert_eq!(clean.fenced_by_outstanding, None, "no outstanding Claude work fences it");
-        assert!(!clean.overlapped, "an earlier turn's command does not overlap this turn");
+        assert_eq!(
+            clean.fenced_by_outstanding, None,
+            "no outstanding Claude work fences it"
+        );
+        assert!(
+            !clean.overlapped,
+            "an earlier turn's command does not overlap this turn"
+        );
         assert_eq!(clean.overlap_cause, None);
         assert!(!record.engram.running_command_keys.contains_key("toolu-bg"));
         assert!(source_uncertain(record));
@@ -461,16 +497,33 @@ fn a_background_launch_acknowledgement_retires_nothing_and_its_terminal_notice_d
         Some(2),
         "both executed checks remain ordinary facts, including the fenced one: {observed:#}"
     );
-    let checks = observed["occurrence"]["observed_checks"].as_array().unwrap();
-    assert!(checks.iter().any(|check| check["host_check_id"] == unadmitted_host_check_id(&second_ref, "fenced-test")));
-    assert!(checks.iter().any(|check| check["host_check_id"] == unadmitted_host_check_id(&second_ref, "clean-test")));
+    let checks = observed["occurrence"]["observed_checks"]
+        .as_array()
+        .unwrap();
+    assert!(checks.iter().any(
+        |check| check["host_check_id"] == unadmitted_host_check_id(&second_ref, "fenced-test")
+    ));
+    assert!(
+        checks
+            .iter()
+            .any(|check| check["host_check_id"]
+                == unadmitted_host_check_id(&second_ref, "clean-test"))
+    );
     assert!(observed["occurrence"]["source_change"].is_null());
     assert_ordinary_observation_has_no_native_credit(&turn, &observed);
 
     // A later ordinary trace begins clean once nothing is outstanding.
     begin_next_turn(&turn);
     turn.record(|record| {
-        assert_ne!(record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref, second_ref);
+        assert_ne!(
+            record
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
+                .unwrap()
+                .host_turn_ref,
+            second_ref
+        );
         assert!(!source_uncertain(record));
     });
 }
@@ -498,18 +551,29 @@ fn a_background_command_still_running_in_its_own_turn_overlaps_that_turns_later_
     reader.feed(root_bash("same-turn-test", SIZE_TEST, false));
     turn.wait_for_snapshots();
     turn.record(|record| {
-        assert!(record.engram.running_command_keys.contains_key("toolu-bg-same"),
-            "the current turn's launch is still running");
+        assert!(
+            record
+                .engram
+                .running_command_keys
+                .contains_key("toolu-bg-same"),
+            "the current turn's launch is still running"
+        );
         let check = record
             .engram
             .active_turn_checks
             .iter()
             .find(|check| check.key == "same-turn-test")
             .expect("the later test starts a check");
-        assert!(check.overlapped, "its own turn's background command still overlaps it");
+        assert!(
+            check.overlapped,
+            "its own turn's background command still overlaps it"
+        );
         assert_eq!(
             check.overlap_cause,
-            Some(format!("{} was still running", engram_session_command_label("toolu-bg-same")))
+            Some(format!(
+                "{} was still running",
+                engram_session_command_label("toolu-bg-same")
+            ))
         );
     });
     reader.feed(root_bash_result("same-turn-test", PASSING));
@@ -530,14 +594,20 @@ fn a_background_test_terminal_notice_settles_only_its_observed_execution() {
     reader.feed(lifecycle(&prompt, "started"));
     for key in ["toolu-ended-test", "toolu-live-test"] {
         reader.feed(root_bash(key, SIZE_TEST, true));
-        reader.feed(root_bash_result(key, "Command running in background with ID: b1."));
+        reader.feed(root_bash_result(
+            key,
+            "Command running in background with ID: b1.",
+        ));
     }
     let observed = |key: &str| {
         let inner = turn.state.inner.lock().unwrap();
-        inner.test_run_observations.values()
+        inner
+            .test_run_observations
+            .values()
             .find(|row| row.tool_identity == sha256_hex(key.as_bytes()))
             .expect("the background test has an observed execution")
-            .summary.clone()
+            .summary
+            .clone()
     };
     assert_eq!(observed("toolu-ended-test").state, TestRunState::Running);
     assert_eq!(observed("toolu-live-test").state, TestRunState::Running);
@@ -552,25 +622,50 @@ fn a_background_test_terminal_notice_settles_only_its_observed_execution() {
     assert_eq!(observed("toolu-ended-test").state, TestRunState::Running);
     reader.feed(task_ended("toolu-ended-test"));
     let ended = observed("toolu-ended-test");
-    assert_eq!(ended.state, TestRunState::Unknown,
-        "the task ended, but its notification supplies no test verdict");
+    assert_eq!(
+        ended.state,
+        TestRunState::Unknown,
+        "the task ended, but its notification supplies no test verdict"
+    );
     assert!(ended.ended_at.is_some());
     assert!(ended.exit_code.is_none());
-    assert!(!ended.interrupted, "this is a reported end, not lost monitoring");
-    assert_eq!(ended.error.as_deref(),
-        Some("Claude reported this task ended without a test verdict or exit code."));
+    assert!(
+        !ended.interrupted,
+        "this is a reported end, not lost monitoring"
+    );
+    assert_eq!(
+        ended.error.as_deref(),
+        Some("Claude reported this task ended without a test verdict or exit code.")
+    );
     assert_eq!(observed("toolu-live-test").state, TestRunState::Running);
     reader.feed(task_ended("toolu-ended-test"));
-    assert_eq!(observed("toolu-ended-test"), ended, "a duplicate end is inert");
+    assert_eq!(
+        observed("toolu-ended-test"),
+        ended,
+        "a duplicate end is inert"
+    );
     {
         let inner = turn.state.inner.lock().unwrap();
-        assert!(inner.test_run_observations.values().all(|row| row.evidence.is_empty()));
+        assert!(
+            inner
+                .test_run_observations
+                .values()
+                .all(|row| row.evidence.is_empty())
+        );
     }
     turn.state.shutdown_persist_blocking();
-    let restored = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
-    assert_eq!(restored.test_run_observations.values()
-        .find(|row| row.tool_identity == sha256_hex(b"toolu-ended-test"))
-        .expect("terminal observation survives reload").summary, ended);
+    let restored = load_state(turn.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        restored
+            .test_run_observations
+            .values()
+            .find(|row| row.tool_identity == sha256_hex(b"toolu-ended-test"))
+            .expect("terminal observation survives reload")
+            .summary,
+        ended
+    );
 }
 
 #[test]
@@ -582,32 +677,73 @@ fn a_background_test_terminal_notice_does_not_settle_a_replacement_runtime() {
     turn.record_mut(|record| record.runtime = SessionRuntime::Claude(successor));
     let mut reader = ClaudeReaderOn::new(&turn, new_claude_turn_ownership());
     reader.feed(root_bash("reused-tool", SIZE_TEST, true));
-    let snapshot = || turn.state.inner.lock().unwrap().test_run_observations
-        .values().cloned().collect::<Vec<_>>();
+    let snapshot = || {
+        turn.state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_observations
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     let before = snapshot();
     assert_eq!(before.len(), 2, "same tool key, different runtime owners");
     old_reader.feed(task_ended("reused-tool"));
-    assert_eq!(snapshot(), before, "the old reader cannot settle either row");
+    assert_eq!(
+        snapshot(),
+        before,
+        "the old reader cannot settle either row"
+    );
     reader.feed(task_ended("reused-tool"));
     let after = snapshot();
-    assert_eq!(after.iter().filter(|row| row.summary.ended_at.is_some()).count(), 1);
-    assert_eq!(after.iter().filter(|row| row.summary.state == TestRunState::Running).count(), 1);
-    assert!(after.iter().all(|row| row.summary.exit_code.is_none() && row.evidence.is_empty()));
+    assert_eq!(
+        after
+            .iter()
+            .filter(|row| row.summary.ended_at.is_some())
+            .count(),
+        1
+    );
+    assert_eq!(
+        after
+            .iter()
+            .filter(|row| row.summary.state == TestRunState::Running)
+            .count(),
+        1
+    );
+    assert!(
+        after
+            .iter()
+            .all(|row| row.summary.exit_code.is_none() && row.evidence.is_empty())
+    );
 }
 
 #[test]
 fn a_background_launcher_terminal_notice_does_not_invent_the_workloads_end() {
     let turn = EOCheckedTurn::start("background-observed-launch-only", true);
     let mut reader = ClaudeReaderOn::new(&turn, new_claude_turn_ownership());
-    reader.feed(root_bash("full-launch", "node scripts/test-launcher.mjs full", true));
-    reader.feed(root_bash_result("full-launch", "Command running in background with ID: full."));
+    reader.feed(root_bash(
+        "full-launch",
+        "node scripts/test-launcher.mjs full",
+        true,
+    ));
+    reader.feed(root_bash_result(
+        "full-launch",
+        "Command running in background with ID: full.",
+    ));
     reader.feed(task_ended("full-launch"));
     let inner = turn.state.inner.lock().unwrap();
-    let row = inner.test_run_observations.values()
-        .find(|row| row.tool_identity == sha256_hex(b"full-launch")).unwrap();
+    let row = inner
+        .test_run_observations
+        .values()
+        .find(|row| row.tool_identity == sha256_hex(b"full-launch"))
+        .unwrap();
     assert!(row.launch_only);
     assert_eq!(row.summary.state, TestRunState::Unknown);
-    assert!(row.summary.ended_at.is_none(), "launcher completion is not workload completion");
+    assert!(
+        row.summary.ended_at.is_none(),
+        "launcher completion is not workload completion"
+    );
     assert!(row.summary.exit_code.is_none());
     assert!(row.evidence.is_empty());
 }
@@ -715,7 +851,7 @@ fn an_abandoned_call_and_a_parents_end_without_proof_for_its_subagent_keep_work_
 
 #[test]
 fn a_replaced_runtimes_buffered_result_is_not_successor_work_but_its_new_command_fences_the_trace()
- {
+{
     let turn = EOCheckedTurn::start("stale-history", true);
     let generation = turn.record(|record| record.active_turn_generation);
     let ownership = new_claude_turn_ownership();
@@ -842,7 +978,13 @@ fn an_excluded_session_says_why_once_and_says_so_again_when_the_work_ends() {
     // automatic checkpoint-to-verification conversion follows its close.
     reader.feed(named_result(&second));
     let observed = turn.observation_for(&turn_ref);
-    assert_eq!(observed["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        observed["occurrence"]["observed_checks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(observed["occurrence"]["source_change"].is_null());
     assert_ordinary_observation_has_no_native_credit(&turn, &observed);
     turn.record(|record| {
@@ -999,8 +1141,14 @@ fn the_trace_that_launches_background_work_is_uncertain_even_if_work_ends_before
     reader.feed(task_ended("toolu-bg"));
     turn.record(|record| {
         assert!(!record.claude_outstanding.any());
-        assert!(record.engram.active_turn_checks.is_empty(), "non-test work starts no check");
-        assert!(source_uncertain(record), "the interval stays uncertain after its hazard ends");
+        assert!(
+            record.engram.active_turn_checks.is_empty(),
+            "non-test work starts no check"
+        );
+        assert!(
+            source_uncertain(record),
+            "the interval stays uncertain after its hazard ends"
+        );
     });
     reader.feed(named_result(&prompt));
     let observed = turn.observation_for(&turn_ref);
@@ -1224,7 +1372,10 @@ fn a_command_moved_to_the_background_fences_its_trace_before_partial_output_can_
         1,
         "the unfinished command remains an honest observed fact: {observed:#}"
     );
-    assert_eq!(observed["occurrence"]["observed_checks"][0]["observed_result"], "indeterminate");
+    assert_eq!(
+        observed["occurrence"]["observed_checks"][0]["observed_result"],
+        "indeterminate"
+    );
     assert!(observed["occurrence"]["source_change"].is_null());
     assert_ordinary_observation_has_no_native_credit(&turn, &observed);
 }
@@ -1305,20 +1456,51 @@ fn an_adopted_turns_own_foreground_command_is_its_own_and_nothing_else_is() {
         registered_at: EngramHost::interference_tick(),
     };
     let own = ClaudeWorkOrigin::Adopted { turn_generation: 4 };
-    assert!(!entry(own.clone(), false, false).is_hazard(Some(&token), 4, Some(4)),
-        "the adopted turn's own foreground command");
-    assert!(!entry(ClaudeWorkOrigin::Attempt { turn_generation: 4 }, false, false)
-        .is_hazard(Some(&token), 4, None), "a prompt attempt's own command is unchanged");
-    assert!(entry(own.clone(), true, false).is_hazard(Some(&token), 4, Some(4)), "background");
-    assert!(entry(own.clone(), false, true).is_hazard(Some(&token), 4, Some(4)), "nested");
-    assert!(entry(ClaudeWorkOrigin::Adopted { turn_generation: 3 }, false, false)
-        .is_hazard(Some(&token), 4, Some(4)), "an earlier generation");
-    assert!(entry(own.clone(), false, false).is_hazard(Some(&token), 4, None),
-        "no adopted turn any more");
-    assert!(entry(own.clone(), false, false).is_hazard(Some(&token), 4, Some(3)),
-        "adopted at another generation");
+    assert!(
+        !entry(own.clone(), false, false).is_hazard(Some(&token), 4, Some(4)),
+        "the adopted turn's own foreground command"
+    );
+    assert!(
+        !entry(
+            ClaudeWorkOrigin::Attempt { turn_generation: 4 },
+            false,
+            false
+        )
+        .is_hazard(Some(&token), 4, None),
+        "a prompt attempt's own command is unchanged"
+    );
+    assert!(
+        entry(own.clone(), true, false).is_hazard(Some(&token), 4, Some(4)),
+        "background"
+    );
+    assert!(
+        entry(own.clone(), false, true).is_hazard(Some(&token), 4, Some(4)),
+        "nested"
+    );
+    assert!(
+        entry(
+            ClaudeWorkOrigin::Adopted { turn_generation: 3 },
+            false,
+            false
+        )
+        .is_hazard(Some(&token), 4, Some(4)),
+        "an earlier generation"
+    );
+    assert!(
+        entry(own.clone(), false, false).is_hazard(Some(&token), 4, None),
+        "no adopted turn any more"
+    );
+    assert!(
+        entry(own.clone(), false, false).is_hazard(Some(&token), 4, Some(3)),
+        "adopted at another generation"
+    );
     let replaced = RuntimeToken::Claude("replaced".to_owned());
-    assert!(entry(own, false, false).is_hazard(Some(&replaced), 4, Some(4)), "another runtime");
-    assert!(entry(ClaudeWorkOrigin::Unattributed, false, false).is_hazard(Some(&token), 4, Some(4)),
-        "unattributed work");
+    assert!(
+        entry(own, false, false).is_hazard(Some(&replaced), 4, Some(4)),
+        "another runtime"
+    );
+    assert!(
+        entry(ClaudeWorkOrigin::Unattributed, false, false).is_hazard(Some(&token), 4, Some(4)),
+        "unattributed work"
+    );
 }

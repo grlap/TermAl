@@ -187,10 +187,12 @@ fn fresh_source_admits_the_windows_consumer_but_denies_writing_and_deletion() {
         read_as_source_consumer(guard.path()),
         acceptance_source_bytes(&identity()).unwrap()
     );
-    assert!(fs::OpenOptions::new()
-        .write(true)
-        .open(guard.path())
-        .is_err());
+    assert!(
+        fs::OpenOptions::new()
+            .write(true)
+            .open(guard.path())
+            .is_err()
+    );
     assert!(fs::remove_file(guard.path()).is_err());
     guard
         .verify(&acceptance_source_bytes(&identity()).unwrap())
@@ -718,7 +720,10 @@ fn uncertain_file_is_retained_and_changed_bytes_are_refused_before_submission() 
     // Recovery uses the saved object and locator after the old process has
     // released its read-only custody; it must not accept replaced bytes.
     fs::write(&path, b"!").unwrap();
-    let error = payload.reopen(&root).err().expect("corrupted replay is refused");
+    let error = payload
+        .reopen(&root)
+        .err()
+        .expect("corrupted replay is refused");
     assert!(error.message.contains("changed before submission"));
     assert!(
         path.exists(),

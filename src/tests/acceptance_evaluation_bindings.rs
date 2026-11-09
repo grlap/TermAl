@@ -282,7 +282,10 @@ fn a_verification_from_another_revision_is_context_only_and_the_binding_names_th
             );
         }
         let lines = records(current);
-        assert!(!lines.is_empty(), "{name}: the current record is listed: {prompt}");
+        assert!(
+            !lines.is_empty(),
+            "{name}: the current record is listed: {prompt}"
+        );
         assert!(
             lines.iter().all(|line| !line.contains("context only")),
             "{name}: the current record stays citable: {lines:?}"
@@ -417,7 +420,7 @@ fn the_request_path_briefs_and_persists_the_bindings() {
 fn the_submission_refuses_a_bound_judgment_pass_before_the_tracker_runs() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
-    let (delegation, child) = 
+    let (delegation, child) =
         install_evaluator_delegation(&state, &parent, None, &state.default_workdir, 2);
     update_evaluation_target(&state, &delegation, |target| {
         target.bindings = vec![AcceptanceCriterionBinding {

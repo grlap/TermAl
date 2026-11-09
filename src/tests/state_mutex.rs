@@ -65,9 +65,9 @@ fn state_mutex_wait_diagnostic_is_reported_before_the_waiting_guard_drops() {
             let remaining = diagnostic_deadline
                 .checked_duration_since(Instant::now())
                 .expect("waiting state-lock diagnostic exceeded the fixture deadlock guard");
-            let diagnostic = diagnostic_receiver
-                .recv_timeout(remaining)
-                .expect("waiting state-lock diagnostic did not arrive before the fixture deadlock guard");
+            let diagnostic = diagnostic_receiver.recv_timeout(remaining).expect(
+                "waiting state-lock diagnostic did not arrive before the fixture deadlock guard",
+            );
             if matches!(diagnostic, StateMutexDiagnostic::Waited { .. }) {
                 break diagnostic;
             }

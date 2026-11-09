@@ -60,10 +60,13 @@ fn published_registration_ack_does_not_reacquire_state_behind_an_unrelated_holde
                     });
                 }));
             });
-            let result = state.register_test_run(&session, RegisterTestRunRequest {
-                run_id: run_id.to_owned(),
-                run_directory: test_run_display_path(&directory),
-            });
+            let result = state.register_test_run(
+                &session,
+                RegisterTestRunRequest {
+                    run_id: run_id.to_owned(),
+                    run_directory: test_run_display_path(&directory),
+                },
+            );
             // Clear an unused hook on the fixed path, before thread teardown.
             let _ = TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|slot| slot.borrow_mut().take());
             let _ = event_tx.send("response returned");
@@ -79,17 +82,23 @@ fn published_registration_ack_does_not_reacquire_state_behind_an_unrelated_holde
     let original_registration = state.inner.lock().unwrap().test_run_registrations[run_id].clone();
     // Exercise replay and refusal against the same production writer, without
     // replacing the recorded operation or manufacturing a new identity.
-    let replay = state.register_test_run(&session, RegisterTestRunRequest {
-        run_id: run_id.to_owned(),
-        run_directory: test_run_display_path(&directory),
-    });
+    let replay = state.register_test_run(
+        &session,
+        RegisterTestRunRequest {
+            run_id: run_id.to_owned(),
+            run_directory: test_run_display_path(&directory),
+        },
+    );
     let mut changed = request.clone();
     changed["stages"] = json!([{"name": "different-stage"}]);
     fs::write(directory.join("request.json"), changed.to_string()).unwrap();
-    let changed_request = state.register_test_run(&session, RegisterTestRunRequest {
-        run_id: run_id.to_owned(),
-        run_directory: test_run_display_path(&directory),
-    });
+    let changed_request = state.register_test_run(
+        &session,
+        RegisterTestRunRequest {
+            run_id: run_id.to_owned(),
+            run_directory: test_run_display_path(&directory),
+        },
+    );
     fs::write(directory.join("request.json"), request.to_string()).unwrap();
     state.shutdown_persist_blocking();
     holder_result.unwrap();
@@ -99,18 +108,36 @@ fn published_registration_ack_does_not_reacquire_state_behind_an_unrelated_holde
     let replay = replay.unwrap();
     assert!(replay.registered);
     assert_eq!(replay.run_id, run_id);
-    assert_eq!(changed_request.err().expect("changed identity must refuse").status, StatusCode::CONFLICT);
+    assert_eq!(
+        changed_request
+            .err()
+            .expect("changed identity must refuse")
+            .status,
+        StatusCode::CONFLICT
+    );
     {
         let inner = state.inner.lock().unwrap();
         assert_eq!(inner.test_run_registrations.len(), 1);
         assert_eq!(inner.test_run_registrations[run_id], original_registration);
     }
-    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
-    assert!(loaded.test_run_registrations.contains_key(run_id), "real SQLite ACK survives reload");
-    assert!(!directory.join("results.json").exists(), "registration does not start a stage");
-    assert!(loaded.test_run_observations.is_empty(), "registration supplies no execution evidence");
+    let loaded = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert!(
+        loaded.test_run_registrations.contains_key(run_id),
+        "real SQLite ACK survives reload"
+    );
+    assert!(
+        !directory.join("results.json").exists(),
+        "registration does not start a stage"
+    );
+    assert!(
+        loaded.test_run_observations.is_empty(),
+        "registration supplies no execution evidence"
+    );
     assert_eq!(
-        first_event.unwrap(), "response returned",
+        first_event.unwrap(),
+        "response returned",
         "an acknowledged, published registration must return before an unrelated StateInner holder releases"
     );
 }

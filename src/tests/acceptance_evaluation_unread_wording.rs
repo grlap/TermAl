@@ -47,8 +47,14 @@ fn both_briefs_name_unread_evidence_by_its_read_cut_not_its_continuation() {
         None,
         AcceptanceOmissionDetail::Full,
     ));
-    for (brief, text) in [("independent", &independent), ("same-session", &same_session)] {
-        assert!(text.contains("paging stopped: entry_limit"), "{brief}: {text}");
+    for (brief, text) in [
+        ("independent", &independent),
+        ("same-session", &same_session),
+    ] {
+        assert!(
+            text.contains("paging stopped: entry_limit"),
+            "{brief}: {text}"
+        );
         assert!(text.contains(UNREAD_RULE), "{brief} brief rule: {text}");
         assert!(
             !text.contains("locator or captured continuation")
@@ -66,7 +72,10 @@ fn a_same_session_notice_with_only_unread_records_reports_just_the_boundary() {
         paging: task.evidence_paging.clone(),
         ..AcceptanceBriefCuts::default()
     };
-    for detail in [AcceptanceOmissionDetail::Full, AcceptanceOmissionDetail::Compact] {
+    for detail in [
+        AcceptanceOmissionDetail::Full,
+        AcceptanceOmissionDetail::Compact,
+    ] {
         let notice = acceptance_same_session_cut_notice_with_detail("w-task", &cuts, detail)
             .expect("unread records are an omission");
         assert!(
@@ -132,7 +141,11 @@ fn the_independent_brief_crosses_the_compact_floor_into_minimal_and_refuses_belo
     for max_bytes in [compact - 1, minimal] {
         let brief = build_acceptance_evaluator_brief(&task, ".", max_bytes)
             .unwrap_or_else(|error| panic!("{max_bytes} bytes fit Minimal: {}", error.message));
-        assert_eq!(brief.plan.detail, AcceptanceOmissionDetail::Minimal, "{max_bytes}");
+        assert_eq!(
+            brief.plan.detail,
+            AcceptanceOmissionDetail::Minimal,
+            "{max_bytes}"
+        );
         assert!(brief.prompt.len() <= max_bytes);
         assert!(
             task.criteria

@@ -17,12 +17,28 @@ fn ordinary_carried_turn(label: &str) -> (EOCheckedTurn, PathBuf) {
 
 fn ordinary_launch_gate(turn: &EOCheckedTurn, worktree: &FsPath, detached: bool) {
     let command = if detached { DETACHED_GATE } else { GATE };
-    let cwd = fs::canonicalize(worktree).unwrap().to_string_lossy().into_owned();
+    let cwd = fs::canonicalize(worktree)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let mut recorder = turn.recorder();
-    recorder.command_started_in("gate", command, Some(command), Some(&cwd)).unwrap();
+    recorder
+        .command_started_in("gate", command, Some(command), Some(&cwd))
+        .unwrap();
     turn.wait_for_snapshots();
-    recorder.command_completed_with_exit("gate", command, "STARTED", CommandStatus::Success,
-        if detached { EngramCommandExit::Code(0) } else { EngramCommandExit::NotFinished }).unwrap();
+    recorder
+        .command_completed_with_exit(
+            "gate",
+            command,
+            "STARTED",
+            CommandStatus::Success,
+            if detached {
+                EngramCommandExit::Code(0)
+            } else {
+                EngramCommandExit::NotFinished
+            },
+        )
+        .unwrap();
     turn.wait_for_snapshots();
     turn.record(|record| assert_eq!(record.engram.carried_checks.len(), 1));
 }
@@ -34,9 +50,10 @@ struct LaunchCustodyClock(Option<(String, Option<String>)>);
 
 impl LaunchCustodyClock {
     fn at(started_at: &str) -> Self {
-        Self(TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {
-            slot.replace(Some((started_at.to_owned(), None)))
-        }))
+        Self(
+            TEST_ENGRAM_COMMAND_START_TIMING
+                .with(|slot| slot.replace(Some((started_at.to_owned(), None)))),
+        )
     }
 
     fn advance_to(&self, started_at: &str) {
@@ -54,18 +71,25 @@ impl Drop for LaunchCustodyClock {
 
 fn linked_unbound_launch_cannot_lend_its_run(description_only: bool) {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let label = if description_only { "linked-custody-description" } else { "linked-custody-start" };
+    let label = if description_only {
+        "linked-custody-description"
+    } else {
+        "linked-custody-start"
+    };
     let turn = EOCheckedTurn::start(label, false);
     let b = turn.root.join(".worktrees").join("b");
-    run_git_test_command(&turn.root, &[
-        "worktree", "add", "--quiet", "-b", "b", b.to_str().unwrap(),
-    ]);
+    run_git_test_command(
+        &turn.root,
+        &["worktree", "add", "--quiet", "-b", "b", b.to_str().unwrap()],
+    );
     let b = fs::canonicalize(b).unwrap();
     let cwd = b.to_string_lossy().into_owned();
     assert_ne!(engram_exact_path_key(&turn.root), engram_exact_path_key(&b));
     let first_time = chrono::Utc::now() - chrono::Duration::seconds(4);
-    let at = |offset| (first_time + chrono::Duration::seconds(offset))
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let at = |offset| {
+        (first_time + chrono::Duration::seconds(offset))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    };
     let clock = LaunchCustodyClock::at(&at(0));
     let provenance = turn.record(|record| EngramObservationProvenance::Runtime {
         token: record.runtime.runtime_token().unwrap(),
@@ -74,34 +98,61 @@ fn linked_unbound_launch_cannot_lend_its_run(description_only: bool) {
     let mut recorder = turn.recorder();
     recorder.set_observation_provenance(provenance.clone());
     if description_only {
-        recorder.command_started_in("old", "pending command", None, Some(&cwd)).unwrap();
-        recorder.command_described("old", Some(DETACHED_GATE), Some(&cwd)).unwrap();
+        recorder
+            .command_started_in("old", "pending command", None, Some(&cwd))
+            .unwrap();
+        recorder
+            .command_described("old", Some(DETACHED_GATE), Some(&cwd))
+            .unwrap();
     } else {
-        recorder.command_started_in("old", DETACHED_GATE, Some(DETACHED_GATE), Some(&cwd)).unwrap();
+        recorder
+            .command_started_in("old", DETACHED_GATE, Some(DETACHED_GATE), Some(&cwd))
+            .unwrap();
     }
     clock.advance_to(&at(1));
-    recorder.command_started_in("old", DETACHED_GATE, Some(DETACHED_GATE), Some(&cwd)).unwrap();
+    recorder
+        .command_started_in("old", DETACHED_GATE, Some(DETACHED_GATE), Some(&cwd))
+        .unwrap();
     turn.record(|record| {
-        assert_eq!(record.engram.carried_unmatched_launches,
+        assert_eq!(
+            record.engram.carried_unmatched_launches,
             vec![(engram_path_key(&b), at(0))],
-            "a repeated provider frame keeps one original B/start exclusion");
+            "a repeated provider frame keeps one original B/start exclusion"
+        );
     });
-    recorder.command_completed_with_exit("old", DETACHED_GATE, "STARTED",
-        CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    recorder
+        .command_completed_with_exit(
+            "old",
+            DETACHED_GATE,
+            "STARTED",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
     let old = {
         let inner = turn.state.inner.lock().unwrap();
-        inner.test_run_observations.values().find(|row| {
-            row.summary.owner_session_id.as_deref() == Some(turn.session_id.as_str())
-                && row.tool_identity == sha256_hex(b"old")
-        }).expect("the original provider execution is recorded").clone()
+        inner
+            .test_run_observations
+            .values()
+            .find(|row| {
+                row.summary.owner_session_id.as_deref() == Some(turn.session_id.as_str())
+                    && row.tool_identity == sha256_hex(b"old")
+            })
+            .expect("the original provider execution is recorded")
+            .clone()
     };
     assert_eq!(old.summary.started_at.as_deref(), Some(at(0).as_str()));
-    assert!(old.summary.worktree.is_empty(), "location observation cannot widen credit eligibility");
+    assert!(
+        old.summary.worktree.is_empty(),
+        "location observation cannot widen credit eligibility"
+    );
     assert!(old.work_binding.is_none() && old.source_root.is_none());
     assert!(old.artifact.is_none() && old.evidence.is_empty() && old.final_unbound_proof.is_none());
     turn.record(|record| {
         assert!(record.engram.work_binding.is_none());
-        assert!(record.engram.active_turn_checks.is_empty() && record.engram.carried_checks.is_empty());
+        assert!(
+            record.engram.active_turn_checks.is_empty() && record.engram.carried_checks.is_empty()
+        );
     });
 
     let run_id = "test-original-linked-launch";
@@ -112,20 +163,28 @@ fn linked_unbound_launch_cannot_lend_its_run(description_only: bool) {
         "full": true, "detached": true, "started": at(1),
         "sourceId": launcher_source_id_fixture(),
         "stages": [{ "name": "rust-tests", "kind": "test" }],
-    })).unwrap();
+    }))
+    .unwrap();
     fs::write(run.join("request.json"), &request).unwrap();
-    fs::write(run.join("results.json"), serde_json::to_vec(&json!({
-        "runId": run_id, "state": "running", "started": at(1),
-        "stages": [{ "name": "rust-tests", "state": "unrun" }],
-    })).unwrap()).unwrap();
+    fs::write(
+        run.join("results.json"),
+        serde_json::to_vec(&json!({
+            "runId": run_id, "state": "running", "started": at(1),
+            "stages": [{ "name": "rust-tests", "state": "unrun" }],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     assert!(engram_terminal_record_digest(&run).is_none());
     // An unclaimed turn closes quietly; there is no attributed report to await.
     turn.end();
     let guard = phase_sync::PollGuard::new();
-    while turn.record(|record| record.engram.unadmitted_worker_running
-        || runtime_observation_has_removal_duty(record))
-    {
-        guard.wait(format_args!("the original ordinary observation settles before naming B"));
+    while turn.record(|record| {
+        record.engram.unadmitted_worker_running || runtime_observation_has_removal_duty(record)
+    }) {
+        guard.wait(format_args!(
+            "the original ordinary observation settles before naming B"
+        ));
     }
     turn.record(|record| {
         assert!(record.engram.unadmitted_active_turn.is_none());
@@ -137,56 +196,103 @@ fn linked_unbound_launch_cannot_lend_its_run(description_only: bool) {
     // Claim association and root naming go through the actual ordinary work
     // service. No active trace, binding or check owner is rewritten by hand.
     let binding = test_control_work_binding(&format!("eo-check-{label}"), 1);
-    turn.transport.set_current_work_binding(Some(binding.clone()));
+    turn.transport
+        .set_current_work_binding(Some(binding.clone()));
     turn.transport.replace_held_claims([Ok(EngramHeldClaims {
         items: vec![EngramHeldClaim {
-            work_id: binding.work_id.clone(), short_ref: binding.work_id.clone(),
-            claim_id: binding.claim_id.clone(), claim_fence: binding.claim_fence,
-            focused: true, control_binding: Some(binding.clone()),
-        }], omitted: 0,
+            work_id: binding.work_id.clone(),
+            short_ref: binding.work_id.clone(),
+            claim_id: binding.claim_id.clone(),
+            claim_fence: binding.claim_fence,
+            focused: true,
+            control_binding: Some(binding.clone()),
+        }],
+        omitted: 0,
     })]);
-    turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
-        work: binding.work_id.clone(), path: Some(Some(cwd.clone())),
-    }).expect("the newly held claim names the real linked worktree B");
+    turn.state
+        .name_engram_source_root(
+            &turn.session_id,
+            EngramSourceRootRequest {
+                work: binding.work_id.clone(),
+                path: Some(Some(cwd.clone())),
+            },
+        )
+        .expect("the newly held claim names the real linked worktree B");
     turn.record(|record| assert_eq!(record.engram.work_binding.as_ref(), Some(&binding)));
     turn.begin("Launch a distinct invocation in the now named source B.");
     clock.advance_to(&at(2));
     let mut later = turn.recorder();
     later.set_observation_provenance(turn.record(|record| EngramObservationProvenance::Runtime {
-        token: record.runtime.runtime_token().unwrap(), turn_generation: record.active_turn_generation,
+        token: record.runtime.runtime_token().unwrap(),
+        turn_generation: record.active_turn_generation,
     }));
-    later.command_started_in("new", DETACHED_GATE, Some(DETACHED_GATE), Some(&cwd)).unwrap();
+    later
+        .command_started_in("new", DETACHED_GATE, Some(DETACHED_GATE), Some(&cwd))
+        .unwrap();
     turn.wait_for_snapshots();
-    later.command_completed_with_exit("new", DETACHED_GATE, "STARTED",
-        CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    later
+        .command_completed_with_exit(
+            "new",
+            DETACHED_GATE,
+            "STARTED",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
     // The old Running artifact is a real match for the unchanged root/owner/
     // ten-second reader. Only invocation ambiguity may stop the new carry.
-    assert_eq!(engram_find_carried_run(&turn.session_id, &b, &at(2), &[],
-        &std::collections::BTreeSet::new()).0, Some(run.clone()));
+    assert_eq!(
+        engram_find_carried_run(
+            &turn.session_id,
+            &b,
+            &at(2),
+            &[],
+            &std::collections::BTreeSet::new()
+        )
+        .0,
+        Some(run.clone())
+    );
     turn.state.poll_engram_carried_runs();
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
         let carried = &record.engram.carried_checks[0];
         assert_eq!(carried.check.key, "new");
-        assert!(carried.fence.is_none(), "an unrelated writer fence must not mask borrowing");
-        assert!(carried.ambiguous, "the original B invocation excludes ambiguous correlation");
+        assert!(
+            carried.fence.is_none(),
+            "an unrelated writer fence must not mask borrowing"
+        );
+        assert!(
+            carried.ambiguous,
+            "the original B invocation excludes ambiguous correlation"
+        );
         assert!(carried.run_directory.is_none() && carried.terminal_digest.is_none());
     });
-    fs::write(run.join("results.json"), serde_json::to_vec(&json!({
-        "runId": run_id, "state": "passed", "started": at(1),
-        "ended": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        "sourceIdBefore": launcher_source_id_fixture(),
-        "sourceIdAfter": launcher_source_id_fixture(), "exitCode": 0,
-        "stages": [{ "name": "rust-tests", "state": "passed", "code": 0 }],
-    })).unwrap()).unwrap();
+    fs::write(
+        run.join("results.json"),
+        serde_json::to_vec(&json!({
+            "runId": run_id, "state": "passed", "started": at(1),
+            "ended": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "sourceIdBefore": launcher_source_id_fixture(),
+            "sourceIdAfter": launcher_source_id_fixture(), "exitCode": 0,
+            "stages": [{ "name": "rust-tests", "state": "passed", "code": 0 }],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let digest = engram_terminal_record_digest(&run).unwrap();
-    assert!(engram_read_carried_run(&run, &digest).is_ok(), "the older artifact validates on its own");
+    assert!(
+        engram_read_carried_run(&run, &digest).is_ok(),
+        "the older artifact validates on its own"
+    );
     assert_eq!(fs::read(run.join("request.json")).unwrap(), request);
     assert_carried_ambiguity(&turn);
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     let inner = turn.state.inner.lock().unwrap();
-    assert_eq!(inner.test_run_observations.get(&old.execution_id), Some(&old),
-        "later binding/naming/carry must not lend the old execution any authority or artifact");
+    assert_eq!(
+        inner.test_run_observations.get(&old.execution_id),
+        Some(&old),
+        "later binding/naming/carry must not lend the old execution any authority or artifact"
+    );
 }
 
 #[test]
@@ -203,25 +309,45 @@ fn assert_carried_ambiguity(turn: &EOCheckedTurn) {
     let identity = turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
         let carried = &record.engram.carried_checks[0];
-        assert!(carried.ambiguous, "another possibly launched run must prevent correlation");
-        (carried.run_directory.clone(), carried.terminal_digest.clone())
+        assert!(
+            carried.ambiguous,
+            "another possibly launched run must prevent correlation"
+        );
+        (
+            carried.run_directory.clone(),
+            carried.terminal_digest.clone(),
+        )
     });
     turn.state.poll_engram_carried_runs();
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
         let carried = &record.engram.carried_checks[0];
-        assert!(carried.ambiguous, "another possibly launched run must prevent correlation");
-        assert_eq!((carried.run_directory.clone(), carried.terminal_digest.clone()), identity,
-            "an ambiguous launch cannot acquire another run or a new terminal record");
+        assert!(
+            carried.ambiguous,
+            "another possibly launched run must prevent correlation"
+        );
+        assert_eq!(
+            (
+                carried.run_directory.clone(),
+                carried.terminal_digest.clone()
+            ),
+            identity,
+            "an ambiguous launch cannot acquire another run or a new terminal record"
+        );
     });
 }
 
 fn assert_carried_artifact_custody(turn: &EOCheckedTurn, run: &FsPath, passed: bool) -> Value {
-    let digest = engram_terminal_record_digest(run).expect("the exact fixture artifact is terminal");
-    let verdict = engram_read_carried_run(run, &digest).expect("the artifact validates independently");
+    let digest =
+        engram_terminal_record_digest(run).expect("the exact fixture artifact is terminal");
+    let verdict =
+        engram_read_carried_run(run, &digest).expect("the artifact validates independently");
     assert_eq!(verdict.passed, passed);
     assert_eq!(verdict.exit_code, if passed { 0 } else { 101 });
-    assert_eq!(serde_json::to_value(verdict.source_id).unwrap(), launcher_source_id_fixture());
+    assert_eq!(
+        serde_json::to_value(verdict.source_id).unwrap(),
+        launcher_source_id_fixture()
+    );
     turn.state.poll_engram_carried_runs();
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
@@ -231,19 +357,34 @@ fn assert_carried_artifact_custody(turn: &EOCheckedTurn, run: &FsPath, passed: b
         assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
     });
     let observation = turn.finish();
-    let facts = observation["occurrence"]["observed_checks"].as_array().unwrap();
+    let facts = observation["occurrence"]["observed_checks"]
+        .as_array()
+        .unwrap();
     assert_eq!(facts.len(), 1, "{observation:#}");
     assert_eq!(facts[0]["check_kind"], "test");
-    assert_eq!(facts[0]["host_check_id"], unadmitted_host_check_id(
-        observation["occurrence"]["host_turn_ref"].as_str().unwrap(), "gate"));
-    assert_eq!(facts[0]["observed_result"], "indeterminate",
-        "a launch acknowledgement is not a test result");
+    assert_eq!(
+        facts[0]["host_check_id"],
+        unadmitted_host_check_id(
+            observation["occurrence"]["host_turn_ref"].as_str().unwrap(),
+            "gate"
+        )
+    );
+    assert_eq!(
+        facts[0]["observed_result"], "indeterminate",
+        "a launch acknowledgement is not a test result"
+    );
     assert!(facts[0].get("finished_at").is_none());
     assert_ordinary_observation_has_no_native_credit(turn, &observation);
     turn.record(|record| {
-        assert_eq!(record.engram.carried_checks.len(), 1,
-            "ordinary closing never consumes an artifact into verification");
-        assert_eq!(record.engram.carried_checks[0].terminal_digest.as_deref(), Some(digest.as_str()));
+        assert_eq!(
+            record.engram.carried_checks.len(),
+            1,
+            "ordinary closing never consumes an artifact into verification"
+        );
+        assert_eq!(
+            record.engram.carried_checks[0].terminal_digest.as_deref(),
+            Some(digest.as_str())
+        );
     });
     observation
 }
@@ -251,14 +392,20 @@ fn assert_carried_artifact_custody(turn: &EOCheckedTurn, run: &FsPath, passed: b
 fn assert_carried_fence_custody(turn: &EOCheckedTurn, why: &str) -> String {
     let cause = turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
-        record.engram.carried_checks[0].fence.clone().expect("the actual recorder fenced this launch")
+        record.engram.carried_checks[0]
+            .fence
+            .clone()
+            .expect("the actual recorder fenced this launch")
     });
     assert!(cause.contains(why), "{cause}");
     assert_ordinary_observation_has_no_native_credit(turn, &turn.finish());
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
-        assert_eq!(record.engram.carried_checks[0].fence.as_deref(), Some(cause.as_str()),
-            "ordinary closing preserves the original cause without consuming verification");
+        assert_eq!(
+            record.engram.carried_checks[0].fence.as_deref(),
+            Some(cause.as_str()),
+            "ordinary closing preserves the original cause without consuming verification"
+        );
     });
     cause
 }
@@ -269,14 +416,21 @@ fn assert_carried_artifact_rejected(turn: &EOCheckedTurn, run: &FsPath, why: &st
         assert_eq!(record.engram.carried_checks.len(), 1);
         let carried = &record.engram.carried_checks[0];
         assert_eq!(carried.run_directory.as_deref(), Some(run));
-        carried.terminal_digest.clone().expect("the real poll pins a terminal identity")
+        carried
+            .terminal_digest
+            .clone()
+            .expect("the real poll pins a terminal identity")
     });
-    let error = engram_read_carried_run(run, &digest).expect_err("the real artifact reader rejects it");
+    let error =
+        engram_read_carried_run(run, &digest).expect_err("the real artifact reader rejects it");
     assert!(error.contains(why), "{error}");
     assert_ordinary_observation_has_no_native_credit(turn, &turn.finish());
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
-        assert_eq!(record.engram.carried_checks[0].terminal_digest.as_deref(), Some(digest.as_str()));
+        assert_eq!(
+            record.engram.carried_checks[0].terminal_digest.as_deref(),
+            Some(digest.as_str())
+        );
         assert!(record.engram.carried_consumed_runs.is_empty());
     });
 }
@@ -286,7 +440,8 @@ fn late_launch_basis_completion_does_not_turn_artifact_custody_into_verification
     let (turn, worktree) = ordinary_carried_turn("ordinary-late-launch-basis");
     ordinary_launch_gate(&turn, &worktree, false);
     let original = turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
-    let basis = original.wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+    let basis = original
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
         .expect("the actual original launch capture finished");
     let pending = Arc::new(EngramBasisCapture::default());
     turn.record_mut(|record| record.engram.carried_checks[0].check.start_basis = pending.clone());
@@ -296,7 +451,9 @@ fn late_launch_basis_completion_does_not_turn_artifact_custody_into_verification
     assert_eq!(pending.wait_until(std::time::Instant::now()), None);
     let observation = turn.finish();
     assert_ordinary_observation_has_no_native_credit(&turn, &observation);
-    let facts = observation["occurrence"]["observed_checks"].as_array().unwrap();
+    let facts = observation["occurrence"]["observed_checks"]
+        .as_array()
+        .unwrap();
     assert_eq!(facts.len(), 1);
     assert_eq!(facts[0]["observed_result"], "indeterminate");
     assert!(facts[0].get("finished_at").is_none());
@@ -484,7 +641,8 @@ fn a_fence_names_the_holders_command_without_its_line() {
     assert!(!cause.contains("sk-secret-123"), "{cause}");
     assert!(!cause.contains("Authorization"), "{cause}");
     let directory = if cfg!(windows) { "C:/repo" } else { "/repo" };
-    let one_call = engram_own_command_cause(&format!("pushd \"{directory}\" && cargo build --token=abc"));
+    let one_call =
+        engram_own_command_cause(&format!("pushd \"{directory}\" && cargo build --token=abc"));
     assert!(one_call.contains("`cargo` command"), "{one_call}");
     assert!(!one_call.contains("abc"), "{one_call}");
     // A leading assignment is skipped, whatever its value.
@@ -554,7 +712,9 @@ fn write_run(
     let mut source_after = source_id.clone();
     // Existing callers use this fixture token to request changed input. It
     // is never written as an input fingerprint; records carry full objects.
-    if after != "f".repeat(64) { source_after["tree"] = json!("e".repeat(40)); }
+    if after != "f".repeat(64) {
+        source_after["tree"] = json!("e".repeat(40));
+    }
     fs::write(
         directory.join("request.json"),
         serde_json::to_vec(&json!({
@@ -618,7 +778,10 @@ fn a_run_record_is_credited_only_as_it_was_first_read_and_consistent() {
     assert!(verdict.passed);
     assert_eq!(verdict.exit_code, 0);
     assert_eq!(verdict.stages.len(), 5);
-    assert_eq!(serde_json::to_value(verdict.source_id).unwrap(), launcher_source_id_fixture());
+    assert_eq!(
+        serde_json::to_value(verdict.source_id).unwrap(),
+        launcher_source_id_fixture()
+    );
     assert_eq!(
         engram_read_carried_run(&passed, &"0".repeat(64)),
         Err("its terminal record changed after the host first read it as terminal")
@@ -1044,10 +1207,7 @@ fn a_command_of_a_turn_no_prompt_owns_still_fences_the_carried_gate() {
         .finish_claude_result(&turn.session_id, &token, owner, None)
         .expect("the unowned turn's result is routed");
     finish_run(&worktree, "passed", &"f".repeat(64));
-    assert_carried_fence_custody(
-        &turn,
-        "this session ran a `cargo` command there",
-    );
+    assert_carried_fence_custody(&turn, "this session ran a `cargo` command there");
 }
 
 #[test]
@@ -1296,8 +1456,11 @@ fn a_write_after_the_terminal_read_does_not_rewrite_the_carried_artifact() {
     let digest = engram_terminal_record_digest(&run).unwrap();
     let observation = turn.finish();
     assert_ordinary_observation_has_no_native_credit(&turn, &observation);
-    assert_eq!(observation["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], revision,
-        "the real source write belongs to the ordinary turn: {observation:#}");
+    assert_eq!(
+        observation["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        revision,
+        "the real source write belongs to the ordinary turn: {observation:#}"
+    );
     assert!(engram_read_carried_run(&run, &digest).unwrap().passed);
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
@@ -1338,7 +1501,10 @@ fn another_session_running_a_command_in_the_worktree_refuses_the_gate() {
             &sha256_hex(ran.as_bytes())[..12]
         )
     );
-    assert!(!cause.contains("was in a turn") && !cause.contains(ran), "{cause}");
+    assert!(
+        !cause.contains("was in a turn") && !cause.contains(ran),
+        "{cause}"
+    );
 }
 
 /// The fence of the turn's one carried gate.
@@ -1373,7 +1539,11 @@ fn another_claude_sessions_read_only_command_preserves_the_carried_artifact() {
                 EngramCommandExit::ReportedSuccess,
             )
             .expect("the reader's command should end");
-        assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None, "{line}");
+        assert_eq!(
+            turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+            None,
+            "{line}"
+        );
     }
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     assert_carried_artifact_custody(&turn, &run, true);
@@ -1412,14 +1582,20 @@ fn another_sessions_command_fences_only_where_it_may_write() {
             EngramCommandExit::ReportedSuccess,
         )
         .expect("the writer's command should end");
-    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None);
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+        None
+    );
 
     // One TermAl cannot place counts where its session works, which is not
     // here: it cannot fence this launch's artifact custody.
     recorder
         .command_started("lost", UNPLACED_WRITE)
         .expect("the writer's command should record");
-    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None);
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+        None
+    );
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     assert_carried_artifact_custody(&turn, &run, true);
 }
@@ -1453,8 +1629,11 @@ fn an_unplaced_command_refuses_a_carried_gate_where_its_session_works() {
     recorder
         .command_started("lost", UNPLACED_WRITE)
         .expect("the writer's command should record");
-    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None,
-        "it works elsewhere so far");
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+        None,
+        "it works elsewhere so far"
+    );
     // This helper selects the other session's current named-root provenance;
     // it is a unit fixture, not a second provider dispatch or naming ACK.
     name_other_session_source_root(&turn, &writer, &worktree);
@@ -1486,10 +1665,7 @@ fn a_command_whose_start_was_never_reported_fences_where_its_session_writes() {
         )
         .expect("the end should record");
     finish_run(&worktree, "passed", &"f".repeat(64));
-    assert_carried_fence_custody(
-        &turn,
-        "ran a command there whose start TermAl was not told",
-    );
+    assert_carried_fence_custody(&turn, "ran a command there whose start TermAl was not told");
 }
 
 #[test]
@@ -1506,7 +1682,9 @@ fn a_terminal_record_changed_after_the_first_terminal_read_refuses_the_gate() {
         serde_json::to_vec(&record).unwrap(),
     )
     .unwrap();
-    assert_carried_artifact_rejected(&turn, &run,
+    assert_carried_artifact_rejected(
+        &turn,
+        &run,
         "its terminal record changed after the host first read it as terminal",
     );
 }
@@ -1522,18 +1700,28 @@ fn an_unreported_source_change_is_measured_separately_from_a_carried_artifact() 
     assert_ne!(before, after);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     let digest = engram_terminal_record_digest(&run).unwrap();
-    assert!(engram_read_carried_run(&run, &digest).unwrap().passed,
-        "an independently valid artifact does not prove the current source association");
+    assert!(
+        engram_read_carried_run(&run, &digest).unwrap().passed,
+        "an independently valid artifact does not prove the current source association"
+    );
     turn.state.poll_engram_carried_runs();
     let observation = turn.finish();
-    assert_eq!(observation["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], after);
-    let checks = observation["occurrence"]["observed_checks"].as_array().unwrap();
+    assert_eq!(
+        observation["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        after
+    );
+    let checks = observation["occurrence"]["observed_checks"]
+        .as_array()
+        .unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["observed_result"], "indeterminate");
     assert!(checks[0].get("source_basis").is_none());
     assert_ordinary_observation_has_no_native_credit(&turn, &observation);
     turn.record(|record| {
-        assert_eq!(record.engram.carried_checks[0].terminal_digest.as_deref(), Some(digest.as_str()));
+        assert_eq!(
+            record.engram.carried_checks[0].terminal_digest.as_deref(),
+            Some(digest.as_str())
+        );
         assert!(record.engram.carried_consumed_runs.is_empty());
     });
 }
@@ -1543,7 +1731,9 @@ fn a_complete_source_id_changed_during_the_run_refuses_the_gate() {
     let (turn, worktree) = ordinary_carried_turn("carried-drifted");
     ordinary_launch_gate(&turn, &worktree, false);
     let run = finish_run(&worktree, "passed", &"e".repeat(64));
-    assert_carried_artifact_rejected(&turn, &run,
+    assert_carried_artifact_rejected(
+        &turn,
+        &run,
         "its complete source_id input is unavailable, malformed or changed",
     );
 }
@@ -1599,23 +1789,48 @@ fn renaming_the_current_root_does_not_relabel_a_prior_carried_launch() {
     let (turn, worktree) = ordinary_carried_turn("carried-renamed");
     // A successor root must lie inside the project, as the named one does.
     let next = turn.root.join(".worktrees").join("renamed-current");
-    run_git_test_command(&turn.root, &[
-        "worktree", "add", "--quiet", "-b", "renamed-current", next.to_str().unwrap(),
-    ]);
+    run_git_test_command(
+        &turn.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "renamed-current",
+            next.to_str().unwrap(),
+        ],
+    );
     ordinary_launch_gate(&turn, &worktree, false);
     let original = turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
-        (carried.check.host_turn_ref.clone(), carried.root_generation, carried.check.target.root.clone())
+        (
+            carried.check.host_turn_ref.clone(),
+            carried.root_generation,
+            carried.check.target.root.clone(),
+        )
     });
     let work = turn.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
-    let named = turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
-        work, path: Some(Some(next.to_string_lossy().into_owned())),
-    }).expect("the actual work service may name a successor root");
+    let named = turn
+        .state
+        .name_engram_source_root(
+            &turn.session_id,
+            EngramSourceRootRequest {
+                work,
+                path: Some(Some(next.to_string_lossy().into_owned())),
+            },
+        )
+        .expect("the actual work service may name a successor root");
     assert!(named.generation > original.1);
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
-        assert_eq!((&carried.check.host_turn_ref, carried.root_generation, &carried.check.target.root),
-            (&original.0, original.1, &original.2));
+        assert_eq!(
+            (
+                &carried.check.host_turn_ref,
+                carried.root_generation,
+                &carried.check.target.root
+            ),
+            (&original.0, original.1, &original.2)
+        );
         assert!(record.engram.carried_consumed_runs.is_empty());
     });
     assert_ordinary_turn_has_no_native_requests(&turn);
@@ -1729,9 +1944,18 @@ fn a_launch_outside_a_named_root_or_beside_another_command_is_not_carried() {
 
     // Another command running in its worktree as it launched.
     let (turn, worktree) = ordinary_carried_turn("carried-beside");
-    let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
-    turn.recorder().command_started_in("other-writing-command", "touch notes.txt",
-        Some("touch notes.txt"), Some(&cwd)).unwrap();
+    let cwd = fs::canonicalize(&worktree)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    turn.recorder()
+        .command_started_in(
+            "other-writing-command",
+            "touch notes.txt",
+            Some("touch notes.txt"),
+            Some(&cwd),
+        )
+        .unwrap();
     launch_command(&turn, &worktree, GATE, EngramCommandExit::NotFinished);
     assert_dropped_at_launch(&turn, "another command or another writable session");
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
@@ -1986,10 +2210,7 @@ fn a_background_launch_leaves_a_claude_sessions_shell_where_it_was() {
         .command_started("write-there", &into_the_gate)
         .expect("the command should record");
     finish_run(&worktree, "passed", &"f".repeat(64));
-    assert_carried_fence_custody(
-        &turn,
-        "this session ran a `touch` command there",
-    );
+    assert_carried_fence_custody(&turn, "this session ran a `touch` command there");
 }
 
 #[test]
@@ -2145,23 +2366,46 @@ fn an_ordinary_successor_turn_does_not_take_a_predecessors_carried_artifact() {
     ordinary_launch_gate(&turn, &worktree, false);
     let first = turn.finish();
     assert_ordinary_observation_has_no_native_credit(&turn, &first);
-    let original = first["occurrence"]["host_turn_ref"].as_str().unwrap().to_owned();
+    let original = first["occurrence"]["host_turn_ref"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let guard = phase_sync::PollGuard::new();
     loop {
-        if turn.record(|record| record.engram.unadmitted_active_turn.is_none()
-            && !record.engram.unadmitted_worker_running) { break; }
+        if turn.record(|record| {
+            record.engram.unadmitted_active_turn.is_none()
+                && !record.engram.unadmitted_worker_running
+        }) {
+            break;
+        }
         guard.wait("the actual predecessor observation completes before another ordinary turn");
     }
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     let digest = engram_terminal_record_digest(&run).unwrap();
     turn.state.poll_engram_carried_runs();
     turn.begin("Read the gate's ordinary summary.");
-    let next = turn.record(|record| record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref.clone());
-    assert_ne!(next, original, "the actual provider dispatch captures a fresh trace owner");
+    let next = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .host_turn_ref
+            .clone()
+    });
+    assert_ne!(
+        next, original,
+        "the actual provider dispatch captures a fresh trace owner"
+    );
     let second = turn.finish();
     assert_eq!(second["occurrence"]["host_turn_ref"], next);
-    assert!(second["occurrence"]["observed_checks"].as_array().unwrap().is_empty(),
-        "a successor cannot claim the predecessor's launch or artifact as its own check");
+    assert!(
+        second["occurrence"]["observed_checks"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a successor cannot claim the predecessor's launch or artifact as its own check"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &second);
     turn.record(|record| {
         assert_eq!(record.engram.carried_checks.len(), 1);
@@ -2320,13 +2564,19 @@ fn two_terminal_reads_that_disagree_keep_the_first_digest_and_mark_the_conflict(
             Vec::new(),
         );
         assert!(carried.terminal_conflict);
-        assert_eq!(carried.terminal_digest.as_deref(), Some("0".repeat(64).as_str()));
+        assert_eq!(
+            carried.terminal_digest.as_deref(),
+            Some("0".repeat(64).as_str())
+        );
     });
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
         assert!(carried.terminal_conflict);
-        assert_eq!(carried.terminal_digest.as_deref(), Some("0".repeat(64).as_str()));
+        assert_eq!(
+            carried.terminal_digest.as_deref(),
+            Some("0".repeat(64).as_str())
+        );
         assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
         assert!(record.engram.carried_consumed_runs.is_empty());
     });
@@ -2428,10 +2678,19 @@ fn a_conflict_recorded_after_a_carried_copy_preserves_the_original_terminal_cust
     let copy = turn.record(|record| record.engram.carried_checks[0].clone());
     let digest = copy.terminal_digest.clone().unwrap();
     turn.record_mut(|record| {
-        engram_note_carried_run_read(&mut record.engram.carried_checks[0], Some(run.clone()),
-            Some("0".repeat(64)), false, false, Vec::new());
+        engram_note_carried_run_read(
+            &mut record.engram.carried_checks[0],
+            Some(run.clone()),
+            Some("0".repeat(64)),
+            false,
+            false,
+            Vec::new(),
+        );
     });
-    assert!(!copy.terminal_conflict, "a captured value does not share later mutation");
+    assert!(
+        !copy.terminal_conflict,
+        "a captured value does not share later mutation"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     turn.record(|record| {
         let live = &record.engram.carried_checks[0];
@@ -2588,24 +2847,47 @@ fn concurrent_artifact_polls_keep_the_first_terminal_digest_before_a_later_read(
     let first = std::thread::spawn(move || state.poll_engram_carried_runs());
     let mut second = None;
     let inspected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        receive(&paused, "the actual first terminal read pauses before install");
-        let mut record: Value = serde_json::from_slice(&fs::read(run.join("results.json")).unwrap()).unwrap();
+        receive(
+            &paused,
+            "the actual first terminal read pauses before install",
+        );
+        let mut record: Value =
+            serde_json::from_slice(&fs::read(run.join("results.json")).unwrap()).unwrap();
         record["note"] = json!("rewritten after the first terminal read");
-        fs::write(run.join("results.json"), serde_json::to_vec(&record).unwrap()).unwrap();
+        fs::write(
+            run.join("results.json"),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
         let waiting = install_test_engram_carried_poll_waiting(&turn.state);
         let state = turn.state.clone();
         second = Some(std::thread::spawn(move || state.poll_engram_carried_runs()));
-        receive(&waiting, "the real second poll waits for the first poll owner");
+        receive(
+            &waiting,
+            "the real second poll waits for the first poll owner",
+        );
     }));
     let _ = release.send(());
-    first.join().expect("the first poll is always released and joined");
-    if let Some(second) = second { second.join().expect("the serialized poll joins"); }
-    if let Err(panic) = inspected { std::panic::resume_unwind(panic); }
+    first
+        .join()
+        .expect("the first poll is always released and joined");
+    if let Some(second) = second {
+        second.join().expect("the serialized poll joins");
+    }
+    if let Err(panic) = inspected {
+        std::panic::resume_unwind(panic);
+    }
     turn.record(|record| {
-        assert_eq!(record.engram.carried_checks[0].terminal_digest.as_deref(), Some(first_digest.as_str()));
+        assert_eq!(
+            record.engram.carried_checks[0].terminal_digest.as_deref(),
+            Some(first_digest.as_str())
+        );
     });
-    assert_carried_artifact_rejected(&turn, &run,
-        "its terminal record changed after the host first read it as terminal");
+    assert_carried_artifact_rejected(
+        &turn,
+        &run,
+        "its terminal record changed after the host first read it as terminal",
+    );
 }
 
 #[test]
@@ -2667,15 +2949,34 @@ fn a_run_a_dropped_gate_used_is_never_taken_by_a_later_launch() {
     }
     turn.state.poll_engram_carried_runs();
     let used = turn.record(|record| {
-        assert!(record.engram.carried_checks.iter().all(|carried| carried.check.key != "gate"));
-        assert!(record.engram.carried_checks.iter().all(|carried| carried.run_directory.as_ref() != Some(&run)));
+        assert!(
+            record
+                .engram
+                .carried_checks
+                .iter()
+                .all(|carried| carried.check.key != "gate")
+        );
+        assert!(
+            record
+                .engram
+                .carried_checks
+                .iter()
+                .all(|carried| carried.run_directory.as_ref() != Some(&run))
+        );
         assert!(record.engram.carried_consumed_runs.contains(&run));
         record.engram.carried_consumed_runs.clone()
     });
-    let (found, _, _) = engram_find_carried_run(&turn.session_id, &worktree,
+    let (found, _, _) = engram_find_carried_run(
+        &turn.session_id,
+        &worktree,
         &(chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339(),
-        &used, &std::collections::BTreeSet::new());
-    assert_eq!(found, None, "a retired locator cannot become a later launch's run");
+        &used,
+        &std::collections::BTreeSet::new(),
+    );
+    assert_eq!(
+        found, None,
+        "a retired locator cannot become a later launch's run"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
 }
 
@@ -2691,8 +2992,12 @@ fn a_restart_notice_is_told_once_through_the_store() {
     // persist of the loaded state below.
     let guard = phase_sync::PollGuard::new();
     loop {
-        if turn.record(|record| record.engram.unadmitted_active_turn.is_none()
-            && !record.engram.unadmitted_worker_running) { break; }
+        if turn.record(|record| {
+            record.engram.unadmitted_active_turn.is_none()
+                && !record.engram.unadmitted_worker_running
+        }) {
+            break;
+        }
         guard.wait("the ordinary observation completes before the restart is simulated");
     }
     assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
@@ -2723,8 +3028,13 @@ fn a_restart_notice_is_told_once_through_the_store() {
     // persist delta even though its runtime was Idle at shutdown.
     assert_ne!(record.mutation_stamp, 0);
     let delta = collect_persist_delta_from_shared_state(&StateMutex::new(loaded), 0);
-    assert!(delta.changed_sessions.iter().any(|record|
-        record.session.id == turn.session_id), "the marker removal reaches the first delta");
+    assert!(
+        delta
+            .changed_sessions
+            .iter()
+            .any(|record| record.session.id == turn.session_id),
+        "the marker removal reaches the first delta"
+    );
     let mut cache = SqlitePersistConnectionCache::new();
     persist_delta_via_cache_timed(&mut cache, path, &delta, &mut PersistTickTimings::default())
         .expect("the first delta persists the marker removal");
@@ -2735,8 +3045,10 @@ fn a_restart_notice_is_told_once_through_the_store() {
         .find_session_index(&turn.session_id)
         .expect("the session loads");
     assert_eq!(again.sessions[index].engram.pending_source_root_line, None);
-    assert_eq!(again.sessions[index].mutation_stamp, 0,
-        "a later clean restart has no marker removal to persist");
+    assert_eq!(
+        again.sessions[index].mutation_stamp, 0,
+        "a later clean restart has no marker removal to persist"
+    );
 }
 
 #[test]
@@ -2856,8 +3168,10 @@ fn a_launch_after_one_matched_to_its_run_takes_its_own() {
     turn.state.poll_engram_carried_runs();
     turn.record(|record| {
         let carried = &record.engram.carried_checks[1];
-        assert!(!carried.ambiguous && carried.fence.is_none(),
-            "the clean distinct-run control remains available without an unrelated fence");
+        assert!(
+            !carried.ambiguous && carried.fence.is_none(),
+            "the clean distinct-run control remains available without an unrelated fence"
+        );
         assert_ne!(carried.run_directory.as_ref(), Some(&first));
     });
     assert_eq!(
@@ -2929,8 +3243,13 @@ fn a_missing_launch_basis_never_turns_a_valid_carried_artifact_into_native_verif
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     assert_carried_artifact_custody(&turn, &run, true);
     turn.record(|record| {
-        assert!(matches!(record.engram.carried_checks[0].check.start_basis
-            .wait_until(std::time::Instant::now()), Some(None)));
+        assert!(matches!(
+            record.engram.carried_checks[0]
+                .check
+                .start_basis
+                .wait_until(std::time::Instant::now()),
+            Some(None)
+        ));
         assert!(record.engram.carried_consumed_runs.is_empty());
     });
 }
@@ -2941,8 +3260,13 @@ fn a_launch_after_one_refused_for_an_overlap_is_refused_as_ambiguous() {
     // which the next launch in the worktree must not take.
     let (turn, worktree) = ordinary_carried_turn("carried-after-refused");
     let mut recorder = turn.recorder();
-    let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
-    recorder.command_started_in("other", "git status", Some("git status"), Some(&cwd)).unwrap();
+    let cwd = fs::canonicalize(&worktree)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    recorder
+        .command_started_in("other", "git status", Some("git status"), Some(&cwd))
+        .unwrap();
     launch_detached(&turn, &worktree, "first");
     assert!(turn.record(|record| record.engram.carried_checks.is_empty()));
     recorder
@@ -2966,7 +3290,12 @@ fn expiry_never_converts_an_already_terminal_artifact_into_native_verification()
     ordinary_launch_gate(&turn, &worktree, false);
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     turn.state.poll_engram_carried_runs();
-    let digest = turn.record(|record| record.engram.carried_checks[0].terminal_digest.clone().unwrap());
+    let digest = turn.record(|record| {
+        record.engram.carried_checks[0]
+            .terminal_digest
+            .clone()
+            .unwrap()
+    });
     turn.record_mut(|record| {
         record.engram.carried_checks[0].check.started_at =
             (chrono::Utc::now() - chrono::Duration::hours(7)).to_rfc3339();
@@ -3035,8 +3364,13 @@ fn a_relaunch_after_the_stated_wait_is_carried_unambiguously() {
     // for, two minutes on, is carried as the holder's own.
     let (turn, worktree) = ordinary_carried_turn("carried-remedy");
     let mut recorder = turn.recorder();
-    let cwd = fs::canonicalize(&worktree).unwrap().to_string_lossy().into_owned();
-    recorder.command_started_in("other", "git status", Some("git status"), Some(&cwd)).unwrap();
+    let cwd = fs::canonicalize(&worktree)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    recorder
+        .command_started_in("other", "git status", Some("git status"), Some(&cwd))
+        .unwrap();
     launch_detached(&turn, &worktree, "first");
     recorder
         .command_completed_with_exit(
@@ -3232,7 +3566,10 @@ fn a_fixture_store_under_a_removed_scratch_directory_leaves_a_carried_gate_alone
             fence(),
             None,
             "after the fixture store is gone: {:?}",
-            batch.iter().map(|change| change.path.clone()).collect::<Vec<_>>()
+            batch
+                .iter()
+                .map(|change| change.path.clone())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -3270,10 +3607,12 @@ fn a_fixture_store_under_a_scratch_directory_that_becomes_a_repository_leaves_a_
     };
     let fence = || turn.record(|record| record.engram.carried_checks[0].fence.clone());
 
-    turn.state.note_engram_workspace_file_changes(&[change(&journal)]);
+    turn.state
+        .note_engram_workspace_file_changes(&[change(&journal)]);
     assert_eq!(fence(), None, "before the fixture's git init");
     fs::create_dir_all(repository.join(".git")).expect("the fixture's .git should be created");
-    turn.state.note_engram_workspace_file_changes(&[change(&journal)]);
+    turn.state
+        .note_engram_workspace_file_changes(&[change(&journal)]);
     assert_eq!(
         fence(),
         None,
@@ -3313,7 +3652,8 @@ fn a_tmp_naming_path_that_fences_states_the_scratch_tests_inputs_in_the_cause() 
             fs::write(directory.join("x.log"), "x\n").unwrap();
         }
         let path = directory.join("x.log");
-        turn.state.note_engram_workspace_file_changes(&[change(&path)]);
+        turn.state
+            .note_engram_workspace_file_changes(&[change(&path)]);
         let fence = turn
             .record(|record| record.engram.carried_checks[0].fence.clone())
             .expect("a change under a nested .tmp fences the gate");
@@ -3412,10 +3752,7 @@ fn another_sessions_command_later_described_in_the_worktree_refuses_the_gate() {
         .command_described("late", None, Some(&cwd))
         .expect("the description should record");
     finish_run(&worktree, "passed", &"f".repeat(64));
-    assert_carried_fence_custody(
-        &turn,
-        "ran a command there (its line TermAl was not told)",
-    );
+    assert_carried_fence_custody(&turn, "ran a command there (its line TermAl was not told)");
 }
 
 /// The provenance a Claude reader gives the frames of the turn running on
@@ -3507,8 +3844,15 @@ fn a_claude_background_launch_keeps_its_artifact_but_withholds_ordinary_source_a
         let carried = &record.engram.carried_checks[0];
         assert_eq!(carried.fence, None);
         assert_eq!(carried.check.fenced_by_outstanding, None);
-        assert!(record.engram.unadmitted_active_turn.as_ref().unwrap().source_attribution_uncertain,
-            "ordinary source attribution has no self-launch exception");
+        assert!(
+            record
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
+                .unwrap()
+                .source_attribution_uncertain,
+            "ordinary source attribution has no self-launch exception"
+        );
     });
     let start_basis =
         turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
@@ -3531,9 +3875,16 @@ fn a_claude_background_launch_keeps_its_artifact_but_withholds_ordinary_source_a
     // The occurrence always carries `source_change`; withholding is an
     // explicit null. No baseline was installed, so an attributed change
     // would be an `assumed_missing_baseline` object, not null.
-    assert!(observation["occurrence"].as_object().unwrap().contains_key("source_change"));
-    assert!(observation["occurrence"]["source_change"].is_null(),
-        "outstanding own work cannot receive ordinary source attribution: {observation:#}");
+    assert!(
+        observation["occurrence"]
+            .as_object()
+            .unwrap()
+            .contains_key("source_change")
+    );
+    assert!(
+        observation["occurrence"]["source_change"].is_null(),
+        "outstanding own work cannot receive ordinary source attribution: {observation:#}"
+    );
 }
 
 #[test]
@@ -3819,8 +4170,10 @@ fn a_newly_found_place_of_outstanding_work_reaches_a_finished_check_only_from_it
         });
         let observation = turn.finish();
         assert_ordinary_observation_has_no_native_credit(&turn, &observation);
-        assert_eq!(observation["occurrence"]["observed_checks"][0]["observed_result"], "passed",
-            "interference withholds source attribution, not a reported process exit");
+        assert_eq!(
+            observation["occurrence"]["observed_checks"][0]["observed_result"], "passed",
+            "interference withholds source attribution, not a reported process exit"
+        );
     }
 }
 
@@ -3879,9 +4232,16 @@ fn a_newly_found_place_keeps_the_carried_artifact_and_its_original_interference_
         assert_ordinary_observation_has_no_native_credit(&turn, &observation);
         // Withholding is an explicit null `source_change`; with no baseline
         // installed an attributed change would be an object.
-        assert!(observation["occurrence"].as_object().unwrap().contains_key("source_change"));
-        assert!(observation["occurrence"]["source_change"].is_null(),
-            "retained work at closing withholds ordinary source attribution: {observation:#}");
+        assert!(
+            observation["occurrence"]
+                .as_object()
+                .unwrap()
+                .contains_key("source_change")
+        );
+        assert!(
+            observation["occurrence"]["source_change"].is_null(),
+            "retained work at closing withholds ordinary source attribution: {observation:#}"
+        );
         turn.record(|record| {
             let carried = &record.engram.carried_checks[0];
             assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));

@@ -25,8 +25,10 @@ fn durable_registration_and_query_do_not_wait_for_an_unrelated_rescan() {
             "runId": run_id, "root": test_run_display_path(&root), "owner": session,
             "full": true, "stages": [{"name":"rust-tests"}],
             "started": engram_command_started_at(), "creatorPid": std::process::id()
-        }).to_string(),
-    ).unwrap();
+        })
+        .to_string(),
+    )
+    .unwrap();
     state.persist_tx = fixture.tx.clone();
     fixture.inner = state.inner.clone();
     let rescan = state.inner.lock().unwrap().test_runs.rescan.clone();
@@ -41,10 +43,15 @@ fn durable_registration_and_query_do_not_wait_for_an_unrelated_rescan() {
             TEST_TEST_RUN_REGISTRATION_FENCE_SENT.with(|slot| {
                 *slot.borrow_mut() = Some(Box::new(move || queued_tx.send(()).unwrap()));
             });
-            reply_tx.send(state.register_test_run(&session, RegisterTestRunRequest {
-                run_id: run_id.to_owned(),
-                run_directory: test_run_display_path(&directory),
-            })).unwrap();
+            reply_tx
+                .send(state.register_test_run(
+                    &session,
+                    RegisterTestRunRequest {
+                        run_id: run_id.to_owned(),
+                        run_directory: test_run_display_path(&directory),
+                    },
+                ))
+                .unwrap();
         })
     };
     // Release the held scan and join even if a precondition or the ACK wait
@@ -56,20 +63,32 @@ fn durable_registration_and_query_do_not_wait_for_an_unrelated_rescan() {
         assert_eq!(fixture.batch.pending.len(), 1);
         let delta = fixture.collect();
         assert!(fixture.batch.pending[0].target.is_in_delta(&delta));
-        assert!(matches!(reply_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
-            "registration cannot ACK before the real durable write");
+        assert!(
+            matches!(reply_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "registration cannot ACK before the real durable write"
+        );
         fixture.write(&delta).unwrap();
         let started = std::time::Instant::now();
         let response = reply_rx.recv_timeout(phase_sync::DEADLOCK_GUARD);
-        eprintln!("registration after durable commit with 128 unrelated directories and held scan: {:?}", started.elapsed());
-        let ack = response.expect("durable registration ACK must not wait for an unrelated global rescan").unwrap();
+        eprintln!(
+            "registration after durable commit with 128 unrelated directories and held scan: {:?}",
+            started.elapsed()
+        );
+        let ack = response
+            .expect("durable registration ACK must not wait for an unrelated global rescan")
+            .unwrap();
         assert!(ack.registered);
         let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2).enable_all().build().unwrap();
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
         let (status, detail): (StatusCode, Value) = runtime.block_on(request_json(
             &app_router(state.clone()),
-            Request::builder().uri(format!("/api/test-runs/{run_id}"))
-                .body(Body::empty()).unwrap(),
+            Request::builder()
+                .uri(format!("/api/test-runs/{run_id}"))
+                .body(Body::empty())
+                .unwrap(),
         ));
         assert_eq!(status, StatusCode::OK, "{detail}");
         assert_eq!(detail["run"]["runId"], run_id);
@@ -78,15 +97,21 @@ fn durable_registration_and_query_do_not_wait_for_an_unrelated_rescan() {
         assert_eq!(detail["run"]["ownerSessionId"], session);
         assert_eq!(detail["run"]["runDir"], test_run_display_path(&directory));
         assert_eq!(detail["source"], "registration");
-        let restored = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+        let restored = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
         assert!(restored.test_run_registrations.contains_key(run_id));
     }));
     drop(scan_guard);
-    worker.join().expect("registration worker should finish after scan release");
+    worker
+        .join()
+        .expect("registration worker should finish after scan release");
     if let Err(panic) = outcome {
         std::panic::resume_unwind(panic);
     }
     state.refresh_test_runs();
-    assert!(state.inner.lock().unwrap().test_runs.find(run_id).is_some(),
-        "the ordinary scanner must catch up after its mutex is released");
+    assert!(
+        state.inner.lock().unwrap().test_runs.find(run_id).is_some(),
+        "the ordinary scanner must catch up after its mutex is released"
+    );
 }

@@ -19,7 +19,15 @@ fn sibling_row(row: &TestRunCommandObservation, suffix: &str) -> TestRunCommandO
 
 /// Two changed rows, a stopped persistence worker, a disconnected sender and a
 /// state path that cannot be written: every synchronous save attempt fails.
-fn failing_stopped_worker_batch(label: &str) -> (RunFixture, [String; 2], EngramNamedRootReadResponse, EngramAuthorityStoreKey, EngramControlWorkBinding) {
+fn failing_stopped_worker_batch(
+    label: &str,
+) -> (
+    RunFixture,
+    [String; 2],
+    EngramNamedRootReadResponse,
+    EngramAuthorityStoreKey,
+    EngramControlWorkBinding,
+) {
     let (mut fixture, _, store, binding, native) = native_evidence_fixture(label);
     record_native_evidence(&fixture, &native);
     let id = native.execution_id;
@@ -37,7 +45,10 @@ fn failing_stopped_worker_batch(label: &str) -> (RunFixture, [String; 2], Engram
     let (sender, receiver) = mpsc::channel();
     drop(receiver);
     fixture.state.persist_tx = sender;
-    fixture.state.persist_worker_alive.store(false, Ordering::Release);
+    fixture
+        .state
+        .persist_worker_alive
+        .store(false, Ordering::Release);
     let invalid = fixture.root.join("state-is-a-directory");
     fs::create_dir(&invalid).unwrap();
     fixture.state.persistence_path = Arc::new(invalid);
@@ -51,7 +62,10 @@ fn changed_runs(deltas: &mut broadcast::Receiver<String>) -> Vec<(u64, TestRunSu
         let event: Value = serde_json::from_str(&text).unwrap();
         if event["type"] == "testRunChanged" {
             let revision = event["revision"].as_u64().unwrap();
-            runs.push((revision, serde_json::from_value(event["run"].clone()).unwrap()));
+            runs.push((
+                revision,
+                serde_json::from_value(event["run"].clone()).unwrap(),
+            ));
         }
     }
     runs
@@ -59,55 +73,87 @@ fn changed_runs(deltas: &mut broadcast::Receiver<String>) -> Vec<(u64, TestRunSu
 
 #[test]
 fn every_row_of_a_failed_stopped_worker_batch_publishes_its_failure_at_its_own_revision() {
-    let (fixture, ids, read, store, binding) = failing_stopped_worker_batch("batch-failure-every-row");
+    let (fixture, ids, read, store, binding) =
+        failing_stopped_worker_batch("batch-failure-every-row");
     let mut deltas = fixture.state.subscribe_delta_events();
     let before = fixture.state.inner.lock().unwrap().revision;
-    fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
+    fixture
+        .state
+        .revalidate_test_run_lifecycle(&store, &binding, &read);
     let published = changed_runs(&mut deltas);
     let inner = fixture.state.inner.lock().unwrap();
     for id in &ids {
         assert!(inner.test_runs.observations_failed.contains(id));
         assert!(!inner.test_runs.observations_durable.contains(id));
-        assert_eq!(test_run_observation_summary(&*inner, &inner.test_run_observations[id])
-            .registration.tracking_durability.as_deref(), Some("failed"));
+        assert_eq!(
+            test_run_observation_summary(&*inner, &inner.test_run_observations[id])
+                .registration
+                .tracking_durability
+                .as_deref(),
+            Some("failed")
+        );
     }
     assert_eq!(
-        published.iter().map(|(revision, _)| *revision).collect::<Vec<_>>(),
+        published
+            .iter()
+            .map(|(revision, _)| *revision)
+            .collect::<Vec<_>>(),
         [before + 1, before + 2],
         "each changed row publishes at the distinct revision its failed save allocated"
     );
-    let mut published_ids: Vec<_> = published.iter().map(|(_, run)| run.run_id.clone()).collect();
+    let mut published_ids: Vec<_> = published
+        .iter()
+        .map(|(_, run)| run.run_id.clone())
+        .collect();
     published_ids.sort();
-    let public_id = &inner.test_run_observations[&ids[0]].artifact.as_ref().unwrap().run_id;
+    let public_id = &inner.test_run_observations[&ids[0]]
+        .artifact
+        .as_ref()
+        .unwrap()
+        .run_id;
     assert_eq!(published_ids, [public_id.clone(), public_id.clone()]);
     let mut expected_observations = ids.to_vec();
     expected_observations.sort();
     for (_, run) in &published {
         assert_eq!(run.registration.superseded_run_ids, expected_observations);
-        assert_eq!(run.registration.tracking_durability.as_deref(), Some("durable"),
-            "the registration was durable before observation persistence failed");
-        assert_eq!(run.registration.restart_would_void_evidence, None,
-            "a durable registration cannot make the failed observation save safe");
+        assert_eq!(
+            run.registration.tracking_durability.as_deref(),
+            Some("durable"),
+            "the registration was durable before observation persistence failed"
+        );
+        assert_eq!(
+            run.registration.restart_would_void_evidence, None,
+            "a durable registration cannot make the failed observation save safe"
+        );
     }
     assert_eq!(inner.revision, before + 2);
 }
 
 #[test]
 fn a_batch_whose_revision_cannot_advance_publishes_no_reused_revision() {
-    let (fixture, ids, read, store, binding) = failing_stopped_worker_batch("batch-failure-exhausted");
+    let (fixture, ids, read, store, binding) =
+        failing_stopped_worker_batch("batch-failure-exhausted");
     fixture.state.inner.lock().unwrap().revision = u64::MAX;
     let mut deltas = fixture.state.subscribe_delta_events();
-    fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read);
+    fixture
+        .state
+        .revalidate_test_run_lifecycle(&store, &binding, &read);
     let published = changed_runs(&mut deltas);
     assert!(
         published.is_empty(),
         "no row may publish at a revision that was not allocated for it: {:?}",
-        published.iter().map(|(revision, run)| (*revision, run.run_id.clone())).collect::<Vec<_>>()
+        published
+            .iter()
+            .map(|(revision, run)| (*revision, run.run_id.clone()))
+            .collect::<Vec<_>>()
     );
     let inner = fixture.state.inner.lock().unwrap();
     assert_eq!(inner.revision, u64::MAX);
     for id in &ids {
-        assert!(inner.test_runs.observations_failed.contains(id), "the failed save is still tracked");
+        assert!(
+            inner.test_runs.observations_failed.contains(id),
+            "the failed save is still tracked"
+        );
     }
 }
 
@@ -117,7 +163,9 @@ fn persist_single_row(fixture: &RunFixture, id: &str) -> Vec<(u64, TestRunSummar
     let mut deltas = fixture.state.subscribe_delta_events();
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        fixture.state.persist_test_command_observation_locked(&mut inner, row);
+        fixture
+            .state
+            .persist_test_command_observation_locked(&mut inner, row);
     }
     changed_runs(&mut deltas)
 }
@@ -130,11 +178,17 @@ fn the_single_row_writer_with_an_exhausted_revision_publishes_no_reused_revision
     assert!(
         published.is_empty(),
         "the single-row writer may not publish at a revision it did not allocate: {:?}",
-        published.iter().map(|(revision, run)| (*revision, run.run_id.clone())).collect::<Vec<_>>()
+        published
+            .iter()
+            .map(|(revision, run)| (*revision, run.run_id.clone()))
+            .collect::<Vec<_>>()
     );
     let inner = fixture.state.inner.lock().unwrap();
     assert_eq!(inner.revision, u64::MAX);
-    assert!(inner.test_runs.observations_failed.contains(&id), "the failed save is still tracked");
+    assert!(
+        inner.test_runs.observations_failed.contains(&id),
+        "the failed save is still tracked"
+    );
     assert!(!inner.test_runs.observations_durable.contains(&id));
 }
 
@@ -147,17 +201,31 @@ fn the_single_row_writer_still_publishes_a_failed_save_at_its_allocated_revision
     let row = &inner.test_run_observations[&id];
     let public_id = row.artifact.as_ref().unwrap().run_id.clone();
     assert_eq!(
-        published.iter().map(|(revision, run)| (*revision, run.run_id.clone())).collect::<Vec<_>>(),
+        published
+            .iter()
+            .map(|(revision, run)| (*revision, run.run_id.clone()))
+            .collect::<Vec<_>>(),
         [(before + 1, public_id)],
         "a save that fails after allocation still publishes its failure at that revision"
     );
-    assert_eq!(test_run_observation_summary(&*inner, row)
-        .registration.tracking_durability.as_deref(), Some("failed"));
+    assert_eq!(
+        test_run_observation_summary(&*inner, row)
+            .registration
+            .tracking_durability
+            .as_deref(),
+        Some("failed")
+    );
     assert!(published[0].1.registration.superseded_run_ids.contains(&id));
-    assert_eq!(published[0].1.registration.tracking_durability.as_deref(), Some("durable"),
-        "the registration was durable before observation persistence failed");
-    assert_eq!(published[0].1.registration.restart_would_void_evidence, Some(true),
-        "this single-row save does not complete the associated work lifecycle");
+    assert_eq!(
+        published[0].1.registration.tracking_durability.as_deref(),
+        Some("durable"),
+        "the registration was durable before observation persistence failed"
+    );
+    assert_eq!(
+        published[0].1.registration.restart_would_void_evidence,
+        Some(true),
+        "this single-row save does not complete the associated work lifecycle"
+    );
     assert_eq!(inner.revision, before + 1);
     assert!(inner.test_runs.observations_failed.contains(&id));
     assert!(!inner.test_runs.observations_durable.contains(&id));

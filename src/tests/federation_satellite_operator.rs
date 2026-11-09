@@ -6,7 +6,7 @@
 // checklist itself. New coverage mounted below federation_registry.rs, beside
 // federation_operator.rs, whose HTTP helpers it shares.
 use super::operator::{
-    current_image, operator_configure, operator_request, operator_view, OperatorPersistShutdown,
+    OperatorPersistShutdown, current_image, operator_configure, operator_request, operator_view,
 };
 use super::*;
 
@@ -47,7 +47,10 @@ fn satellite_host() -> (AppState, String, String) {
 
 async fn version_of(state: &AppState) -> Value {
     let version = operator_view(state).await["version"].clone();
-    assert!(version.is_u64(), "the read view names the domain version: {version}");
+    assert!(
+        version.is_u64(),
+        "the read view names the domain version: {version}"
+    );
     version
 }
 
@@ -55,16 +58,18 @@ fn bind_session_to(state: &AppState, session: &str, central: &FederationHostIden
     let mut inner = state.inner.lock().unwrap();
     let local = inner.federation.local.clone().unwrap();
     let index = inner.find_session_index(session).unwrap();
-    inner.session_mut_by_index(index).unwrap().federation_mailbox_binding =
-        Some(FederationMailboxBinding {
-            central: central.clone(),
-            identity: FederationSessionIdentity {
-                host_id: local.host_id,
-                session_id: session.to_owned(),
-                creation_id: Uuid::new_v4().to_string(),
-            },
-            placement_generation: 1,
-        });
+    inner
+        .session_mut_by_index(index)
+        .unwrap()
+        .federation_mailbox_binding = Some(FederationMailboxBinding {
+        central: central.clone(),
+        identity: FederationSessionIdentity {
+            host_id: local.host_id,
+            session_id: session.to_owned(),
+            creation_id: Uuid::new_v4().to_string(),
+        },
+        placement_generation: 1,
+    });
 }
 
 async fn send_local(state: &AppState, sender: &str, target: &str, key: &str) -> Value {
@@ -93,14 +98,24 @@ async fn federation_satellite_settings_bind_a_named_central_and_survive_a_host_r
     let local = before["local"].clone();
     let version = version_of(&state).await;
     let (_, central) = central_identity();
-    let enabled =
-        operator_configure(&state, satellite_settings(&central, true, &version), StatusCode::OK).await;
+    let enabled = operator_configure(
+        &state,
+        satellite_settings(&central, true, &version),
+        StatusCode::OK,
+    )
+    .await;
     assert_eq!(enabled["enabled"], true);
     assert_eq!(enabled["role"], "satellite");
     assert_eq!(enabled["central"], central);
-    assert_eq!(enabled["local"], local, "binding a central never mints a new local identity");
+    assert_eq!(
+        enabled["local"], local,
+        "binding a central never mints a new local identity"
+    );
     assert_eq!(enabled["trackingDurability"], "durable");
-    assert_eq!(enabled["version"].as_u64().unwrap(), version.as_u64().unwrap() + 1);
+    assert_eq!(
+        enabled["version"].as_u64().unwrap(),
+        version.as_u64().unwrap() + 1
+    );
     let image = current_image(&state);
     assert_eq!(image["settings"]["role"], "satellite");
     assert_eq!(image["settings"]["central"], central);
@@ -145,13 +160,25 @@ async fn federation_satellite_settings_require_the_version_the_operator_read() {
     .await;
     assert_eq!(missing["code"], "federation_expected_version_required");
     let stale = json!(version.as_u64().unwrap() + 1);
-    let conflict =
-        operator_configure(&state, satellite_settings(&central, true, &stale), StatusCode::CONFLICT).await;
+    let conflict = operator_configure(
+        &state,
+        satellite_settings(&central, true, &stale),
+        StatusCode::CONFLICT,
+    )
+    .await;
     assert_eq!(conflict["code"], "federation_version_conflict");
     assert_eq!(current_image(&state), before);
-    assert_eq!(read_federation_persist_image(&connection).unwrap(), stored_before);
+    assert_eq!(
+        read_federation_persist_image(&connection).unwrap(),
+        stored_before
+    );
     assert!(state.inner.lock().unwrap().federation_durable);
-    operator_configure(&state, satellite_settings(&central, true, &version), StatusCode::OK).await;
+    operator_configure(
+        &state,
+        satellite_settings(&central, true, &version),
+        StatusCode::OK,
+    )
+    .await;
     // Leaving the satellite role is fenced the same way.
     let again = version_of(&state).await;
     let wrong = standalone_settings(&json!(again.as_u64().unwrap() + 7));
@@ -185,8 +212,12 @@ async fn federation_central_settings_stay_compatible_and_honour_an_expected_vers
         operator_configure(&state, stale, StatusCode::CONFLICT).await["code"],
         "federation_version_conflict"
     );
-    let fenced = json!({"enabled": false, "role": "central", "central": local, "expectedVersion": version});
-    assert_eq!(operator_configure(&state, fenced, StatusCode::OK).await["enabled"], false);
+    let fenced =
+        json!({"enabled": false, "role": "central", "central": local, "expectedVersion": version});
+    assert_eq!(
+        operator_configure(&state, fenced, StatusCode::OK).await["enabled"],
+        false
+    );
 }
 
 /// A central identity that is stale (an older generation of the bound
@@ -201,7 +232,12 @@ async fn federation_satellite_stale_or_mismatched_central_identity_is_refused_ty
     bound.host_generation = 2;
     let bound_json = serde_json::to_value(&bound).unwrap();
     let version = version_of(&state).await;
-    operator_configure(&state, satellite_settings(&bound_json, true, &version), StatusCode::OK).await;
+    operator_configure(
+        &state,
+        satellite_settings(&bound_json, true, &version),
+        StatusCode::OK,
+    )
+    .await;
 
     let assert_unchanged = |before: &Value, state: &AppState| {
         assert_eq!(&current_image(state), before);
@@ -226,8 +262,12 @@ async fn federation_satellite_stale_or_mismatched_central_identity_is_refused_ty
     let version = version_of(&state).await;
     let before = current_image(&state);
     let other = serde_json::to_value(&peer(48002).identity).unwrap();
-    let mismatched =
-        operator_configure(&state, satellite_settings(&other, true, &version), StatusCode::CONFLICT).await;
+    let mismatched = operator_configure(
+        &state,
+        satellite_settings(&other, true, &version),
+        StatusCode::CONFLICT,
+    )
+    .await;
     assert_eq!(mismatched["code"], "federation_central_mismatch");
     assert_unchanged(&before, &state);
     let mut newer = bound.clone();
@@ -238,12 +278,19 @@ async fn federation_satellite_stale_or_mismatched_central_identity_is_refused_ty
         StatusCode::CONFLICT,
     )
     .await;
-    assert_eq!(rebound["code"], "federation_central_mismatch", "a new epoch needs the old peer revoked");
+    assert_eq!(
+        rebound["code"], "federation_central_mismatch",
+        "a new epoch needs the old peer revoked"
+    );
     assert_unchanged(&before, &state);
 
     let local = operator_view(&state).await["local"].clone();
-    let itself =
-        operator_configure(&state, satellite_settings(&local, true, &version), StatusCode::BAD_REQUEST).await;
+    let itself = operator_configure(
+        &state,
+        satellite_settings(&local, true, &version),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
     assert_eq!(itself["code"], "federation_invalid_binding");
     assert_unchanged(&before, &state);
 }
@@ -259,7 +306,12 @@ async fn federation_satellite_central_older_than_a_retained_peer_record_is_stale
     bound.host_generation = 2;
     let bound_json = serde_json::to_value(&bound).unwrap();
     let version = version_of(&state).await;
-    operator_configure(&state, satellite_settings(&bound_json, true, &version), StatusCode::OK).await;
+    operator_configure(
+        &state,
+        satellite_settings(&bound_json, true, &version),
+        StatusCode::OK,
+    )
+    .await;
     let mut enrolled = record.clone();
     enrolled.identity = bound.clone();
     state.enroll_federation_peer(enrolled).unwrap();
@@ -292,24 +344,38 @@ async fn federation_satellite_role_or_central_change_is_refused_while_sessions_a
     let (state, _sender, target) = satellite_host();
     let (record, central) = central_identity();
     let version = version_of(&state).await;
-    operator_configure(&state, satellite_settings(&central, true, &version), StatusCode::OK).await;
+    operator_configure(
+        &state,
+        satellite_settings(&central, true, &version),
+        StatusCode::OK,
+    )
+    .await;
     bind_session_to(&state, &target, &record.identity);
     let bound = operator_view(&state).await;
     assert_eq!(bound["satellite"]["boundSessions"], 1);
 
     let version = version_of(&state).await;
     let before = current_image(&state);
-    let standalone = operator_configure(&state, standalone_settings(&version), StatusCode::CONFLICT).await;
+    let standalone =
+        operator_configure(&state, standalone_settings(&version), StatusCode::CONFLICT).await;
     assert_eq!(standalone["code"], "federation_bound_sessions");
     assert_eq!(current_image(&state), before);
     let other = serde_json::to_value(&peer(48002).identity).unwrap();
-    let elsewhere =
-        operator_configure(&state, satellite_settings(&other, true, &version), StatusCode::CONFLICT).await;
+    let elsewhere = operator_configure(
+        &state,
+        satellite_settings(&other, true, &version),
+        StatusCode::CONFLICT,
+    )
+    .await;
     assert_eq!(elsewhere["code"], "federation_bound_sessions");
     assert_eq!(current_image(&state), before);
 
-    let disabled =
-        operator_configure(&state, satellite_settings(&central, false, &version), StatusCode::OK).await;
+    let disabled = operator_configure(
+        &state,
+        satellite_settings(&central, false, &version),
+        StatusCode::OK,
+    )
+    .await;
     assert_eq!(disabled["enabled"], false);
     assert_eq!(disabled["role"], "satellite");
     let inner = state.inner.lock().unwrap();
@@ -333,41 +399,73 @@ async fn federation_satellite_disable_holds_and_a_separate_request_returns_to_st
     );
     let read_body = json!({"afterSequence": 0, "limit": 50});
     let (_, central) = central_identity();
-    let sessions = |state: &AppState| serde_json::to_value(state.snapshot()).unwrap()["sessions"].clone();
+    let sessions =
+        |state: &AppState| serde_json::to_value(state.snapshot()).unwrap()["sessions"].clone();
     let mailbox = |state: &AppState| {
         let state = state.clone();
         let (path, body) = (read_path.clone(), read_body.clone());
-        async move { operator_request(&state, "POST", &path, Some(body), StatusCode::OK).await["messages"].clone() }
+        async move {
+            operator_request(&state, "POST", &path, Some(body), StatusCode::OK).await["messages"]
+                .clone()
+        }
     };
 
     // Each configuration change leaves every local session and the local
     // mailbox exactly as they were; local sends keep working in each state.
     let (sessions_before, mailbox_before) = (sessions(&state), mailbox(&state).await);
     let version = version_of(&state).await;
-    operator_configure(&state, satellite_settings(&central, true, &version), StatusCode::OK).await;
-    assert_eq!(sessions(&state), sessions_before, "enabling satellite changes no local session");
+    operator_configure(
+        &state,
+        satellite_settings(&central, true, &version),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(
+        sessions(&state),
+        sessions_before,
+        "enabling satellite changes no local session"
+    );
     assert_eq!(mailbox(&state).await, mailbox_before);
     send_local(&state, &sender, &target, "while-satellite").await;
 
     let (sessions_before, mailbox_before) = (sessions(&state), mailbox(&state).await);
     let version = version_of(&state).await;
-    let disabled =
-        operator_configure(&state, satellite_settings(&central, false, &version), StatusCode::OK).await;
+    let disabled = operator_configure(
+        &state,
+        satellite_settings(&central, false, &version),
+        StatusCode::OK,
+    )
+    .await;
     assert_eq!(disabled["enabled"], false);
     assert_eq!(disabled["role"], "satellite");
-    assert_eq!(disabled["central"], central, "disable retains the central binding");
-    assert!(state.ensure_federation_admission_allowed().is_err(), "disable holds admission");
-    assert_eq!(sessions(&state), sessions_before, "disabling changes no local session");
+    assert_eq!(
+        disabled["central"], central,
+        "disable retains the central binding"
+    );
+    assert!(
+        state.ensure_federation_admission_allowed().is_err(),
+        "disable holds admission"
+    );
+    assert_eq!(
+        sessions(&state),
+        sessions_before,
+        "disabling changes no local session"
+    );
     assert_eq!(mailbox(&state).await, mailbox_before);
     send_local(&state, &sender, &target, "while-disabled").await;
 
     let (sessions_before, mailbox_before) = (sessions(&state), mailbox(&state).await);
     let version = version_of(&state).await;
-    let standalone = operator_configure(&state, standalone_settings(&version), StatusCode::OK).await;
+    let standalone =
+        operator_configure(&state, standalone_settings(&version), StatusCode::OK).await;
     assert_eq!(standalone["role"], "standalone");
     assert!(standalone["central"].is_null());
     assert!(standalone.get("satellite").is_none_or(Value::is_null));
-    assert_eq!(sessions(&state), sessions_before, "returning to standalone changes no local session");
+    assert_eq!(
+        sessions(&state),
+        sessions_before,
+        "returning to standalone changes no local session"
+    );
     assert_eq!(mailbox(&state).await, mailbox_before);
     send_local(&state, &sender, &target, "after-standalone").await;
 
@@ -376,8 +474,13 @@ async fn federation_satellite_disable_holds_and_a_separate_request_returns_to_st
         4,
         "every local send in every state was accepted and kept"
     );
-    let stored = load_state(state.persistence_path.as_path()).unwrap().unwrap();
-    assert_eq!(stored.preferences.federation.role, FederationRole::Standalone);
+    let stored = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored.preferences.federation.role,
+        FederationRole::Standalone
+    );
 }
 
 /// The read view shows the satellite's bound central, the central's peer
@@ -388,18 +491,31 @@ async fn federation_satellite_read_view_shows_central_peer_generations_and_curre
     let state = domain_state();
     let (record, central) = central_identity();
     let version = version_of(&state).await;
-    let view = operator_configure(&state, satellite_settings(&central, true, &version), StatusCode::OK).await;
+    let view = operator_configure(
+        &state,
+        satellite_settings(&central, true, &version),
+        StatusCode::OK,
+    )
+    .await;
     assert_eq!(view["satellite"]["central"], central);
     assert_eq!(view["satellite"]["centralPeer"]["enrolled"], false);
     assert_eq!(view["satellite"]["centralPeer"]["linkConnected"], false);
     assert_eq!(view["satellite"]["boundSessions"], 0);
 
     state.enroll_federation_peer(record.clone()).unwrap();
-    let snapshot = state.federation_peer_snapshot(&record.identity.host_id).unwrap();
+    let snapshot = state
+        .federation_peer_snapshot(&record.identity.host_id)
+        .unwrap();
     let enrolled = operator_view(&state).await;
     assert_eq!(enrolled["satellite"]["centralPeer"]["enrolled"], true);
-    assert_eq!(enrolled["satellite"]["centralPeer"]["membership"], "enrolled");
-    assert_eq!(enrolled["satellite"]["centralPeer"]["linkConnected"], false, "enrollment is not a link");
+    assert_eq!(
+        enrolled["satellite"]["centralPeer"]["membership"],
+        "enrolled"
+    );
+    assert_eq!(
+        enrolled["satellite"]["centralPeer"]["linkConnected"], false,
+        "enrollment is not a link"
+    );
 
     let connected = state
         .federation_peer_connected(&snapshot, Uuid::new_v4().to_string())
@@ -408,7 +524,10 @@ async fn federation_satellite_read_view_shows_central_peer_generations_and_curre
     let peer_view = &linked["satellite"]["centralPeer"];
     assert_eq!(peer_view["linkConnected"], true);
     assert_eq!(peer_view["recordGeneration"], connected.record_generation);
-    assert_eq!(peer_view["transportGeneration"], connected.transport_generation);
+    assert_eq!(
+        peer_view["transportGeneration"],
+        connected.transport_generation
+    );
     assert_eq!(peer_view["verificationCurrent"], false);
     // The block carries exactly these facts: no endpoint, credential
     // reference or key material.
@@ -432,13 +551,21 @@ async fn federation_satellite_read_view_shows_central_peer_generations_and_curre
         ]
     );
     for secret in ["pair-capability", "pinned-host", "known-hosts"] {
-        assert!(!linked["satellite"].to_string().contains(secret), "no credential reference: {secret}");
+        assert!(
+            !linked["satellite"].to_string().contains(secret),
+            "no credential reference: {secret}"
+        );
     }
 
     // Disabling invalidates the link: the view says so, even though the
     // last observation is kept.
     let version = version_of(&state).await;
-    let held = operator_configure(&state, satellite_settings(&central, false, &version), StatusCode::OK).await;
+    let held = operator_configure(
+        &state,
+        satellite_settings(&central, false, &version),
+        StatusCode::OK,
+    )
+    .await;
     assert_eq!(held["satellite"]["centralPeer"]["linkConnected"], false);
 }
 
@@ -451,9 +578,16 @@ async fn federation_satellite_configured_through_the_route_meets_the_o1_probe_pr
     let state = domain_state();
     let (record, central) = central_identity();
     let version = version_of(&state).await;
-    operator_configure(&state, satellite_settings(&central, true, &version), StatusCode::OK).await;
+    operator_configure(
+        &state,
+        satellite_settings(&central, true, &version),
+        StatusCode::OK,
+    )
+    .await;
     state.enroll_federation_peer(record.clone()).unwrap();
-    let snapshot = state.federation_peer_snapshot(&record.identity.host_id).unwrap();
+    let snapshot = state
+        .federation_peer_snapshot(&record.identity.host_id)
+        .unwrap();
     let incarnation = Uuid::new_v4().to_string();
     assert!(
         state
@@ -461,10 +595,16 @@ async fn federation_satellite_configured_through_the_route_meets_the_o1_probe_pr
             .is_err(),
         "no link yet: no probe"
     );
-    let connected = state.federation_peer_connected(&snapshot, incarnation.clone()).unwrap();
+    let connected = state
+        .federation_peer_connected(&snapshot, incarnation.clone())
+        .unwrap();
     assert!(
         state
-            .prepare_federation_probe(&connected, &Uuid::new_v4().to_string(), &Uuid::new_v4().to_string())
+            .prepare_federation_probe(
+                &connected,
+                &Uuid::new_v4().to_string(),
+                &Uuid::new_v4().to_string()
+            )
             .is_err(),
         "a stale link incarnation: no probe"
     );
@@ -490,7 +630,10 @@ async fn federation_satellite_failed_persistence_reports_an_unresolved_hold() {
         StatusCode::INTERNAL_SERVER_ERROR,
     )
     .await;
-    assert_eq!(read_federation_persist_image(&connection).unwrap(), stored_before);
+    assert_eq!(
+        read_federation_persist_image(&connection).unwrap(),
+        stored_before
+    );
     let view = operator_view(&state).await;
     assert_eq!(view["trackingDurability"], "unresolved");
     assert!(state.ensure_federation_admission_allowed().is_err());

@@ -86,7 +86,7 @@ fn choosing_a_clock_after_a_snapshot_fails_at_once() {
 fn a_test_boot_chooses_its_clock_before_its_own_recovery() {
     let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
-    let booted = super::delegation_support::boot_on_delegation_root(&temp_root, ||
+    let booted = super::delegation_support::boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths_engram_transport_and_clock_for_test(
             project_root.to_string_lossy().into_owned(),
             persistence_path,
@@ -95,7 +95,7 @@ fn a_test_boot_chooses_its_clock_before_its_own_recovery() {
             EngramBudgetClock::scripted(),
         )
         .expect("state should boot")
-    );
+    });
     let inner = booted.inner.lock().expect("state mutex poisoned");
     assert!(inner.engram_budget_clock_selected);
     assert!(is_scripted(&inner.engram_budget_clock_snapshot()));

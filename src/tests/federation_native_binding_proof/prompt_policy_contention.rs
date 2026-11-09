@@ -260,41 +260,75 @@ async fn federation_prompt_policy_client_preflight_uses_the_rpc_deadline_and_ret
     let entered = Arc::new(tokio::sync::Notify::new());
     let signal = entered.clone();
     let checked = channel.clone();
-    let rpc = FederationRpcClient::new(fixture.server.port, channel.clone(), Arc::new(move || {
-        signal.notify_one();
-        checked.current_authority().map(|_| ())
-    })).unwrap();
+    let rpc = FederationRpcClient::new(
+        fixture.server.port,
+        channel.clone(),
+        Arc::new(move || {
+            signal.notify_one();
+            checked.current_authority().map(|_| ())
+        }),
+    )
+    .unwrap();
     let lease = channel.current_lease().unwrap();
     let security = channel.security_context().unwrap();
     let counter = security.sender.lock().unwrap().next;
-    let request = FederationPromptPolicyRequest { protocol_version: 1,
+    let request = FederationPromptPolicyRequest {
+        protocol_version: 1,
         request_id: Uuid::new_v4().to_string(),
-        operation: FederationPromptPolicyOperation::DestinationProof { scope, consent: consent.identity } };
+        operation: FederationPromptPolicyOperation::DestinationProof {
+            scope,
+            consent: consent.identity,
+        },
+    };
     let held = fixture.central.inner.lock().unwrap();
     let requested_lease = lease.clone();
     let running = tokio::spawn(async move {
-        rpc.request::<FederationPromptPolicyReply>(FederationRpcRoute::PromptPolicy(requested_lease, request)).await
+        rpc.request::<FederationPromptPolicyReply>(FederationRpcRoute::PromptPolicy(
+            requested_lease,
+            request,
+        ))
+        .await
     });
-    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered.notified()).await.unwrap();
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered.notified())
+        .await
+        .unwrap();
     channel.control.clock.advance(Duration::from_secs(10));
-    let result = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running).await.unwrap().unwrap();
+    let result = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
+        .await
+        .unwrap()
+        .unwrap();
     let capacity = channel.bound.permits.available_permits();
     drop(held);
-    let drained = tokio::time::timeout(phase_sync::DEADLOCK_GUARD,
-        channel.bound.permits.clone().acquire_many_owned(4)).await.unwrap().unwrap();
+    let drained = tokio::time::timeout(
+        phase_sync::DEADLOCK_GUARD,
+        channel.bound.permits.clone().acquire_many_owned(4),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     drop(drained);
-    let error = result.err().expect("preflight must expire while the owner is held");
+    let error = result
+        .err()
+        .expect("preflight must expire while the owner is held");
     assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(error.message.contains("outcome is unknown"));
-    assert_eq!(capacity, 3, "expired caller cannot release the still-running authority job");
-    assert_eq!(security.sender.lock().unwrap().next, counter, "no request counter was allocated");
+    assert_eq!(
+        capacity, 3,
+        "expired caller cannot release the still-running authority job"
+    );
+    assert_eq!(
+        security.sender.lock().unwrap().next,
+        counter,
+        "no request counter was allocated"
+    );
     assert!(Arc::ptr_eq(&security, &channel.security_context().unwrap()));
     lease.with_current(&fixture.central, |_, _| Ok(())).unwrap();
     fixture.server.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn federation_prompt_policy_verified_reply_local_authority_deadline_does_not_fence_the_pair() {
+async fn federation_prompt_policy_verified_reply_local_authority_deadline_does_not_fence_the_pair()
+{
     let mut fixture = policy_fixture(false).await;
     let scope = scope(&fixture, false);
     let consent = consent(&fixture, &scope);
@@ -306,42 +340,86 @@ async fn federation_prompt_policy_verified_reply_local_authority_deadline_does_n
     let entered = Mutex::new(Some(entered));
     let checks = std::sync::atomic::AtomicUsize::new(0);
     let checked = channel.clone();
-    let rpc = FederationRpcClient::new(fixture.server.port, channel.clone(), Arc::new(move || {
-        if checks.fetch_add(1, Ordering::SeqCst) == 1 {
-            entered.lock().unwrap().take().unwrap().send(()).unwrap();
-            let (done, _) = phase.1.wait_timeout_while(phase.0.lock().unwrap(),
-                phase_sync::DEADLOCK_GUARD, |done| !*done).unwrap();
-            assert!(*done, "verified-response owner check was not released");
-        }
-        checked.current_authority().map(|_| ())
-    })).unwrap();
+    let rpc = FederationRpcClient::new(
+        fixture.server.port,
+        channel.clone(),
+        Arc::new(move || {
+            if checks.fetch_add(1, Ordering::SeqCst) == 1 {
+                entered.lock().unwrap().take().unwrap().send(()).unwrap();
+                let (done, _) = phase
+                    .1
+                    .wait_timeout_while(
+                        phase.0.lock().unwrap(),
+                        phase_sync::DEADLOCK_GUARD,
+                        |done| !*done,
+                    )
+                    .unwrap();
+                assert!(*done, "verified-response owner check was not released");
+            }
+            checked.current_authority().map(|_| ())
+        }),
+    )
+    .unwrap();
     let lease = channel.current_lease().unwrap();
     let security = channel.security_context().unwrap();
     let counter = security.sender.lock().unwrap().next;
-    let request = FederationPromptPolicyRequest { protocol_version: 1,
+    let request = FederationPromptPolicyRequest {
+        protocol_version: 1,
         request_id: Uuid::new_v4().to_string(),
-        operation: FederationPromptPolicyOperation::DestinationProof { scope, consent: consent.identity } };
+        operation: FederationPromptPolicyOperation::DestinationProof {
+            scope,
+            consent: consent.identity,
+        },
+    };
     let requested_lease = lease.clone();
     let running = tokio::spawn(async move {
-        rpc.request::<FederationPromptPolicyReply>(FederationRpcRoute::PromptPolicy(requested_lease, request)).await
+        rpc.request::<FederationPromptPolicyReply>(FederationRpcRoute::PromptPolicy(
+            requested_lease,
+            request,
+        ))
+        .await
     });
-    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered_rx).await.unwrap().unwrap();
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered_rx)
+        .await
+        .unwrap()
+        .unwrap();
     let held = fixture.central.inner.lock().unwrap();
     drop(release);
     channel.control.clock.advance(Duration::from_secs(10));
-    let result = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running).await.unwrap().unwrap();
+    let result = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
+        .await
+        .unwrap()
+        .unwrap();
     let capacity = channel.bound.permits.available_permits();
     drop(held);
-    let drained = tokio::time::timeout(phase_sync::DEADLOCK_GUARD,
-        channel.bound.permits.clone().acquire_many_owned(4)).await.unwrap().unwrap();
+    let drained = tokio::time::timeout(
+        phase_sync::DEADLOCK_GUARD,
+        channel.bound.permits.clone().acquire_many_owned(4),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     drop(drained);
-    let error = result.err().expect("expired local recheck cannot return a usable proof");
+    let error = result
+        .err()
+        .expect("expired local recheck cannot return a usable proof");
     assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(error.message.contains("outcome is unknown"));
     assert_eq!(capacity, 3);
-    assert_eq!(security.sender.lock().unwrap().next, counter + 1, "real RPC allocated exactly one counter");
-    assert!(!security.sender.lock().unwrap().outstanding.contains_key(&counter),
-        "authenticated receipt settles its transport watchdog before a local owner wait");
+    assert_eq!(
+        security.sender.lock().unwrap().next,
+        counter + 1,
+        "real RPC allocated exactly one counter"
+    );
+    assert!(
+        !security
+            .sender
+            .lock()
+            .unwrap()
+            .outstanding
+            .contains_key(&counter),
+        "authenticated receipt settles its transport watchdog before a local owner wait"
+    );
     assert!(Arc::ptr_eq(&security, &channel.security_context().unwrap()));
     lease.with_current(&fixture.central, |_, _| Ok(())).unwrap();
     fixture.server.finish().await;

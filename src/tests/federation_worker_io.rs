@@ -6,8 +6,8 @@ use super::*;
 struct ReleaseRead(Arc<(Mutex<bool>, std::sync::Condvar)>);
 impl Drop for ReleaseRead {
     fn drop(&mut self) {
-        *self.0 .0.lock().unwrap() = true;
-        self.0 .1.notify_all();
+        *self.0.0.lock().unwrap() = true;
+        self.0.1.notify_all();
     }
 }
 
@@ -118,9 +118,11 @@ async fn federation_worker_reports_retry_with_current_attempt_and_basis() {
         worker["transportGeneration"],
         observed["transportGeneration"]
     );
-    assert!(worker["retryAfterMs"]
-        .as_u64()
-        .is_some_and(|delay| (1000..=2000).contains(&delay)));
+    assert!(
+        worker["retryAfterMs"]
+            .as_u64()
+            .is_some_and(|delay| (1000..=2000).contains(&delay))
+    );
 }
 
 #[test]

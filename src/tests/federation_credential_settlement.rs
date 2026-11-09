@@ -519,27 +519,53 @@ async fn pending_credential_read_converges_after_hostname_update_and_build_obser
     fixture.io.credentials = Arc::new(move |snapshot| {
         let index = reads.fetch_add(1, Ordering::SeqCst);
         let _ = entered.send(snapshot.clone());
-        if index == 0 { wait_at(&held); }
+        if index == 0 {
+            wait_at(&held);
+        }
         original(snapshot)
     });
     let mut pending = pending_events(&mut fixture.io);
     let runtime = start_federation_runtime_with_io(fixture.app.clone(), fixture.io.clone());
     let old = next(&mut entries).await;
     next(&mut pending).await;
-    fixture.app.mutate_federation(|domain, _| {
-        domain.peers.get_mut(&old.peer.host_id).unwrap().profile.binary_sha256 = "c".repeat(64);
-        Ok(())
-    }).unwrap();
+    fixture
+        .app
+        .mutate_federation(|domain, _| {
+            domain
+                .peers
+                .get_mut(&old.peer.host_id)
+                .unwrap()
+                .profile
+                .binary_sha256 = "c".repeat(64);
+            Ok(())
+        })
+        .unwrap();
     let version = fixture.app.inner.lock().unwrap().federation.version;
-    fixture.app.update_federation_ssh_host(&old.peer.host_id, version, "moved.local".into()).unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "the old read retains its settlement owner");
+    fixture
+        .app
+        .update_federation_ssh_host(&old.peer.host_id, version, "moved.local".into())
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the old read retains its settlement owner"
+    );
     assert!(runtime.peer(&fixture.id).is_none());
     gate.release();
     let successor = next(&mut entries).await;
-    let healthy = fixture.event(|event| matches!(event, Event::Response(path, status)
-        if path.ends_with("health") && status.is_success())).await;
+    let healthy = fixture
+        .event(|event| {
+            matches!(event, Event::Response(path, status)
+        if path.ends_with("health") && status.is_success())
+        })
+        .await;
     let quarantined = !runtime.quarantined.lock().unwrap().is_empty();
-    let current = runtime.peer(&fixture.id).unwrap().channel.current_authority().unwrap();
+    let current = runtime
+        .peer(&fixture.id)
+        .unwrap()
+        .channel
+        .current_authority()
+        .unwrap();
     fixture.finish(runtime).await;
     assert!(healthy && !quarantined);
     assert_eq!(successor.endpoint.ssh_host, "moved.local");
@@ -547,7 +573,10 @@ async fn pending_credential_read_converges_after_hostname_update_and_build_obser
     assert_eq!(current.peer, old.peer);
     assert_eq!(current.enrollment_generation, old.enrollment_generation);
     assert_eq!(current.pair_capability_ref, old.pair_capability_ref);
-    assert!(!successor.same_transport_as(&old), "the late old read cannot supply the successor basis");
+    assert!(
+        !successor.same_transport_as(&old),
+        "the late old read cannot supply the successor basis"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

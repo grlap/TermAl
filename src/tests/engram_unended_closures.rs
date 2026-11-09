@@ -23,7 +23,11 @@ const TOLD: &str = "was closed with outcome Unknown; it is not recorded";
 /// Starts a recognised check under `key` whose end is never reported, and
 /// closes the turn, which closes it with outcome Unknown. Clears the holder
 /// line afterwards so what follows reads alone.
-fn close_a_check_with_no_end(turn: &EOCheckedTurn, recorder: &mut SessionRecorder, key: &str) -> Value {
+fn close_a_check_with_no_end(
+    turn: &EOCheckedTurn,
+    recorder: &mut SessionRecorder,
+    key: &str,
+) -> Value {
     close_a_command_with_no_end(turn, recorder, key, SIZE_TEST)
 }
 
@@ -186,7 +190,11 @@ fn a_rerun_that_capacity_refuses_is_told_once() {
     assert_eq!(line.matches(TOLD).count(), 1, "{line}");
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
-    assert_eq!(checks.len(), 1, "diagnostic capacity cannot lose ordinary facts: {request:#}");
+    assert_eq!(
+        checks.len(),
+        1,
+        "diagnostic capacity cannot lose ordinary facts: {request:#}"
+    );
     assert_eq!(checks[0]["observed_result"], "passed");
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
@@ -278,11 +286,21 @@ fn a_rerun_that_starts_a_check_retires_the_closure() {
         "nor is its end reported again"
     );
     let request = turn.finish();
-    assert_ne!(request["occurrence"]["host_turn_ref"], first["occurrence"]["host_turn_ref"]);
+    assert_ne!(
+        request["occurrence"]["host_turn_ref"],
+        first["occurrence"]["host_turn_ref"]
+    );
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
-    assert_eq!(checks.len(), 1, "only the successor's own check: {request:#}");
+    assert_eq!(
+        checks.len(),
+        1,
+        "only the successor's own check: {request:#}"
+    );
     assert_eq!(checks[0]["observed_result"], "passed");
-    assert_ne!(checks[0]["host_check_id"], first["occurrence"]["observed_checks"][0]["host_check_id"]);
+    assert_ne!(
+        checks[0]["host_check_id"],
+        first["occurrence"]["observed_checks"][0]["host_check_id"]
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }
 
@@ -306,13 +324,25 @@ fn session_test_runs(turn: &EOCheckedTurn) -> Vec<(String, bool)> {
 fn a_start_repeated_in_its_own_turn_matches_its_original_row() {
     let turn = EOCheckedTurn::start("repeated-start-same-turn", true);
     let mut recorder = turn.recorder();
-    recorder.command_started("repeated", SIZE_TEST).expect("the start records");
+    recorder
+        .command_started("repeated", SIZE_TEST)
+        .expect("the start records");
     let original = session_test_runs(&turn);
-    assert_eq!(original.len(), 1, "the start is one execution: {original:?}");
+    assert_eq!(
+        original.len(),
+        1,
+        "the start is one execution: {original:?}"
+    );
     assert!(!original[0].1, "the original start has not ended");
     for _ in 0..2 {
-        recorder.command_started("repeated", SIZE_TEST).expect("the repeated start records");
-        assert_eq!(session_test_runs(&turn), original, "a repeated start adds no row");
+        recorder
+            .command_started("repeated", SIZE_TEST)
+            .expect("the repeated start records");
+        assert_eq!(
+            session_test_runs(&turn),
+            original,
+            "a repeated start adds no row"
+        );
     }
     turn.wait_for_snapshots();
     end(&mut recorder, "repeated", SIZE_TEST, 0);

@@ -26,11 +26,20 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
     fixture.work(session, &["claim", work, "--json"]);
     let binding = fixture.claim_binding(session);
     let association = EngramRootIntentAssociation::validate(
-        &fixture.store(), &binding.work_id, &binding.claim_id, Some(binding.claim_fence), Some(&binding),
-    ).unwrap();
+        &fixture.store(),
+        &binding.work_id,
+        &binding.claim_id,
+        Some(binding.claim_fence),
+        Some(&binding),
+    )
+    .unwrap();
     let target = fixture.target(session);
     let deadline = fixture.live.state.engram_budget_clock().now() + target.settings.call_timeout();
-    fixture.live.state.bind_fresh_engram_source_root_until(target, &association, deadline).unwrap();
+    fixture
+        .live
+        .state
+        .bind_fresh_engram_source_root_until(target, &association, deadline)
+        .unwrap();
     let before = fixture.canonical_read(session, &binding);
     assert_eq!(before.named_root, EngramNamedRootState::None);
     assert!(
@@ -97,7 +106,10 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         let index = inner.find_session_index(session).unwrap();
         inner.sessions[index].runtime = runtime;
     }
-    assert_eq!(fixture.live.state.engram_turn_root_capture(session), EngramRootCapture::Unconfirmed);
+    assert_eq!(
+        fixture.live.state.engram_turn_root_capture(session),
+        EngramRootCapture::Unconfirmed
+    );
     let named = fixture
         .live
         .state
@@ -111,37 +123,93 @@ fn legacy_local_only_root_recovers_through_normal_forward_naming() {
         .expect("ordinary forward naming recovers without historical repair");
     assert!(named.generation > 7);
     let bound = fixture.canonical_read(session, &binding);
-    assert!(matches!(bound.named_root, EngramNamedRootState::Bound { generation, .. }
-        if generation == named.generation as i64));
+    assert!(
+        matches!(bound.named_root, EngramNamedRootState::Bound { generation, .. }
+        if generation == named.generation as i64)
+    );
     assert_eq!(bound.latest_event.unwrap().kind, EngramNamedRootKind::Bound);
-    fixture.begin(session, "Check the prospectively named generation without an edit.");
+    fixture.begin(
+        session,
+        "Check the prospectively named generation without an edit.",
+    );
     fixture.record(session, |record| {
-        let opening = record.engram.unadmitted_active_turn.as_ref().unwrap().opening_root.as_ref().unwrap();
+        let opening = record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .opening_root
+            .as_ref()
+            .unwrap();
         assert_eq!(opening.binding, binding);
-        assert!(matches!(opening.provenance, EngramRootCapture::Recorded { generation, .. }
-            if generation == named.generation as i64));
+        assert!(
+            matches!(opening.provenance, EngramRootCapture::Recorded { generation, .. }
+            if generation == named.generation as i64)
+        );
     });
     let before = content_revision(&fixture.root).unwrap().1;
-    let (body, receipt) = fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
+    let (body, receipt) =
+        fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
     assert_eq!(body.registration.binding, binding);
     assert_eq!(body.registration.root.generation, named.generation as i64);
     let stored = fixture.object(&receipt.verifications[0].record_id);
-    assert_eq!(stored["source_basis"], serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap());
+    assert_eq!(
+        stored["source_basis"],
+        serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap()
+    );
     assert_eq!(stored["check_kind"], "test");
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
-    assert_eq!(content_revision(&fixture.root).unwrap().1, before, "no invented source edit");
+    assert_eq!(
+        content_revision(&fixture.root).unwrap().1,
+        before,
+        "no invented source edit"
+    );
     let shown = fixture.work(session, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
-    let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("historical evaluation witness requires its retained Commit record"); };
-    fixture.work(session, &["evaluate", work, "--mode", "same-session", "--acceptance-basis",
-        &acceptance, "--evidence-basis", &evidence, "--verdict", "1=pass:observed", "--rationale",
-        "1=Real registered check in a prospectively confirmed legacy root passed", "--evidence",
-        &format!("1={}", receipt.verifications[0].record_id), "--source-fingerprint", commit,
-        "--attempt", "legacy-forward-completion", "--json"]);
-    fixture.work(session, &["done", work, "Prospective root check passed", "--source-fingerprint", commit, "--json"]);
+    let EngramVerificationRecordInput::Commit { commit } = &body.input else {
+        panic!("historical evaluation witness requires its retained Commit record");
+    };
+    fixture.work(
+        session,
+        &[
+            "evaluate",
+            work,
+            "--mode",
+            "same-session",
+            "--acceptance-basis",
+            &acceptance,
+            "--evidence-basis",
+            &evidence,
+            "--verdict",
+            "1=pass:observed",
+            "--rationale",
+            "1=Real registered check in a prospectively confirmed legacy root passed",
+            "--evidence",
+            &format!("1={}", receipt.verifications[0].record_id),
+            "--source-fingerprint",
+            commit,
+            "--attempt",
+            "legacy-forward-completion",
+            "--json",
+        ],
+    );
+    fixture.work(
+        session,
+        &[
+            "done",
+            work,
+            "Prospective root check passed",
+            "--source-fingerprint",
+            commit,
+            "--json",
+        ],
+    );
     let completed = fixture.work(session, &["show", work, "--json"]);
-    assert_eq!(completed["status"]["work"]["lifecycle"], "completed", "<completed withheld>");
+    assert_eq!(
+        completed["status"]["work"]["lifecycle"], "completed",
+        "<completed withheld>"
+    );
     assert_no_live_turn_gate(&fixture.live.transport);
 }

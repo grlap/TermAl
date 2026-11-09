@@ -71,8 +71,8 @@ async fn federation_startup_can_reach_first_frame_after_five_seconds_before_atte
                 start(&snapshot, port, &pin, &mut owned)?;
                 owned.ok_or_else(federation_transport_unavailable)
             })
-                .await
-                .unwrap();
+            .await
+            .unwrap();
             let mut child = match started {
                 Ok(child) => child,
                 Err(error) => {

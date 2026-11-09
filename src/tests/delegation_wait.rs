@@ -91,11 +91,13 @@ fn delegation_wait_fan_in_reports_unfinished_and_unknown_command_statuses() {
                 {"command": "unfinished command", "status": "running"},
                 {"command": "unclassified command", "status": "unknown"}
             ]}
-    })).unwrap();
+    }))
+    .unwrap();
     let prompt = delegation_wait_result_section(&record);
-    assert!(prompt.contains(
-        "recorded commands: 4; errors: 1; unfinished/unknown: 2; inspected files: 0"
-    ));
+    assert!(
+        prompt
+            .contains("recorded commands: 4; errors: 1; unfinished/unknown: 2; inspected files: 0")
+    );
     assert!(prompt.contains("termal_get_session_result"));
     assert!(!prompt.contains("successful command"));
     assert!(!prompt.contains("failed command"));
@@ -510,7 +512,11 @@ fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason()
         let event: DeltaEvent =
             serde_json::from_str(&payload).expect("delta event should deserialize");
         match event {
-            DeltaEvent::DelegationWaitCreated { server_instance_id, wait, .. } => {
+            DeltaEvent::DelegationWaitCreated {
+                server_instance_id,
+                wait,
+                ..
+            } => {
                 assert_eq!(server_instance_id, state.server_instance_id);
                 created_wait_ids.insert(wait.id);
             }
@@ -649,14 +655,14 @@ fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_ta
     let wait_id = "delegation-wait-removed-parent-unsatisfied".to_owned();
     let delegation_id;
     {
-        let state = boot_on_delegation_root(&temp_root, ||
+        let state = boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        );
+        });
         install_delegation_codex_runtime(&state, "delegation-wait-missing-parent-target");
         let other_parent_session_id = test_session_id(&state, Agent::Codex);
         let other_delegation = state
@@ -704,14 +710,14 @@ fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_ta
         state.shutdown_persist_blocking();
     }
 
-    let restarted = boot_on_delegation_root(&temp_root, ||
+    let restarted = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path.clone(),
             templates_path.clone(),
         )
         .expect("state should reload")
-    );
+    });
 
     let inner = restarted.inner.lock().expect("state mutex poisoned");
     assert!(
@@ -816,10 +822,16 @@ fn delegation_wait_deltas_keep_server_identity_and_decode_legacy_payloads() {
         }),
     ] {
         let event: DeltaEvent = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(serde_json::to_value(event).unwrap()["serverInstanceId"], "instance-1");
+        assert_eq!(
+            serde_json::to_value(event).unwrap()["serverInstanceId"],
+            "instance-1"
+        );
         value.as_object_mut().unwrap().remove("serverInstanceId");
         let untagged: DeltaEvent = serde_json::from_value(value).unwrap();
-        assert_eq!(serde_json::to_value(untagged).unwrap()["serverInstanceId"], "");
+        assert_eq!(
+            serde_json::to_value(untagged).unwrap()["serverInstanceId"],
+            ""
+        );
     }
 }
 
@@ -1401,14 +1413,14 @@ fn delegation_wait_reconciles_after_restart_recovery() {
     let delegation_id;
     let mailbox_id;
     {
-        let state = boot_on_delegation_root(&temp_root, ||
+        let state = boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        );
+        });
         install_delegation_codex_runtime(&state, "delegation-wait-restart-runtime");
         parent_session_id = test_session_id(&state, Agent::Codex);
         let created = state
@@ -1465,14 +1477,14 @@ fn delegation_wait_reconciles_after_restart_recovery() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = boot_on_delegation_root(&temp_root, ||
+    let restarted = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path.clone(),
             templates_path.clone(),
         )
         .expect("state should reload")
-    );
+    });
     {
         let inner = restarted.inner.lock().expect("state mutex poisoned");
         assert!(inner.delegation_waits.is_empty());
@@ -1548,14 +1560,14 @@ fn delegation_wait_reconciles_missing_parent_after_restart() {
     let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let wait_id = "delegation-wait-restart-missing-parent".to_owned();
     {
-        let state = boot_on_delegation_root(&temp_root, ||
+        let state = boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        );
+        });
         {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
             inner.delegation_waits.push(DelegationWaitRecord {
@@ -1571,14 +1583,14 @@ fn delegation_wait_reconciles_missing_parent_after_restart() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = boot_on_delegation_root(&temp_root, ||
+    let restarted = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path.clone(),
             templates_path.clone(),
         )
         .expect("state should reload")
-    );
+    });
     let inner = restarted.inner.lock().expect("state mutex poisoned");
     assert!(
         inner

@@ -46,17 +46,21 @@ fn independent_clone_registration_requires_its_native_clone_project_binding() {
         error.message.split(';').next(),
         Some("test run directory is outside this project's run directories")
     );
-    assert!(error
-        .message
-        .split("; ")
-        .any(|field| field == "phase=validate_target_directory"));
-    assert!(!fixture
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .test_run_registrations
-        .contains_key(run_id));
+    assert!(
+        error
+            .message
+            .split("; ")
+            .any(|field| field == "phase=validate_target_directory")
+    );
+    assert!(
+        !fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .contains_key(run_id)
+    );
 
     let ack = fixture
         .state
@@ -96,17 +100,21 @@ fn correct_clone_binding_cannot_substitute_for_immutable_request_ownership() {
         error.message.split(';').next(),
         Some("test run identity or initiating session does not match")
     );
-    assert!(error
-        .message
-        .split("; ")
-        .any(|field| field == "phase=parse_request"));
-    assert!(!fixture
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .test_run_registrations
-        .contains_key(run_id));
+    assert!(
+        error
+            .message
+            .split("; ")
+            .any(|field| field == "phase=parse_request")
+    );
+    assert!(
+        !fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .contains_key(run_id)
+    );
 }
 
 #[test]
@@ -134,17 +142,21 @@ fn correct_clone_binding_refuses_a_request_root_in_another_repository() {
         error.message.split(';').next(),
         Some("test run worktree is outside the configured project")
     );
-    assert!(error
-        .message
-        .split("; ")
-        .any(|field| field == "phase=index_request"));
-    assert!(fixture
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .test_run_registrations
-        .is_empty());
+    assert!(
+        error
+            .message
+            .split("; ")
+            .any(|field| field == "phase=index_request")
+    );
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .is_empty()
+    );
 }
 
 #[test]
@@ -174,15 +186,19 @@ fn correct_clone_binding_refuses_a_directory_named_for_another_run() {
         error.message.split(';').next(),
         Some("test run directory is outside this project's run directories")
     );
-    assert!(error
-        .message
-        .split("; ")
-        .any(|field| field == "phase=validate_target_directory"));
-    assert!(fixture
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .test_run_registrations
-        .is_empty());
+    assert!(
+        error
+            .message
+            .split("; ")
+            .any(|field| field == "phase=validate_target_directory")
+    );
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .is_empty()
+    );
 }

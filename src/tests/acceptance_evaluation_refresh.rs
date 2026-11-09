@@ -26,13 +26,16 @@ fn selected_refresh_reader(
         show["acceptance_basis"] = json!(8);
         full["work"]["revision"] = json!(8);
         core["status"]["work"]["revision"] = json!(8);
-        full["work"]["acceptance_bindings"] = json!([{"criterion":1,"requirement":{"check_kind":"test"}}]);
+        full["work"]["acceptance_bindings"] =
+            json!([{"criterion":1,"requirement":{"check_kind":"test"}}]);
     }
     move |_, args, _| {
         if args.iter().any(|arg| arg == "--note") {
             reads.fetch_add(1, Ordering::SeqCst);
             if failure == Some("timeout") {
-                return Err(EngramTransportError::deadline("selected proof read timed out"));
+                return Err(EngramTransportError::deadline(
+                    "selected proof read timed out",
+                ));
             }
             if failure == Some("malformed") {
                 return Ok(json!({"work_ref":"w-task", "note":null}));
@@ -42,16 +45,29 @@ fn selected_refresh_reader(
                 "summary":format!("Older selected proof read anew at cut {cut}."),
                 "non_holder":matches!(failure, Some("non-holder" | "non-holder-missing" | "non-holder-null" | "non-holder-oversize"))
             }});
-            if failure == Some("non-holder-missing") { receipt["note"].as_object_mut().unwrap().remove("summary"); }
-            if failure == Some("non-holder-null") { receipt["note"]["summary"] = Value::Null; }
-            if failure == Some("non-holder-oversize") { receipt["note"]["summary"] = json!("x".repeat(16 * 1024 + 1)); }
-            if failure == Some("wrong-locator") { receipt["note"]["locator"] = json!("dddddddddddddddddddddddddddddddd"); }
-            if failure == Some("partial") { receipt["note"]["body_omitted"] = json!(true); }
+            if failure == Some("non-holder-missing") {
+                receipt["note"].as_object_mut().unwrap().remove("summary");
+            }
+            if failure == Some("non-holder-null") {
+                receipt["note"]["summary"] = Value::Null;
+            }
+            if failure == Some("non-holder-oversize") {
+                receipt["note"]["summary"] = json!("x".repeat(16 * 1024 + 1));
+            }
+            if failure == Some("wrong-locator") {
+                receipt["note"]["locator"] = json!("dddddddddddddddddddddddddddddddd");
+            }
+            if failure == Some("partial") {
+                receipt["note"]["body_omitted"] = json!(true);
+            }
             Ok(receipt)
-        } else if args.iter().any(|arg| arg == "inspect") { Ok(core.clone()) }
-        else if args.iter().any(|arg| arg == "--full") { Ok(full.clone()) }
-        else if args.iter().any(|arg| arg == "held") { Ok(json!({"items":[],"omitted":0})) }
-        else if args.first().map(String::as_str) == Some("control-policy") {
+        } else if args.iter().any(|arg| arg == "inspect") {
+            Ok(core.clone())
+        } else if args.iter().any(|arg| arg == "--full") {
+            Ok(full.clone())
+        } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items":[],"omitted":0}))
+        } else if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["independent_session"])))
         } else {
             let mut receipt = show.clone();
@@ -70,36 +86,72 @@ fn selected_refresh_fixture() -> (AppState, String, String, String) {
 fn selected_refresh_fixture_for(criteria: &[usize]) -> (AppState, String, String, String) {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
-    super::super::delegation_support::install_delegation_codex_runtime(&state, "acceptance-selected-refresh-runtime");
+    super::super::delegation_support::install_delegation_codex_runtime(
+        &state,
+        "acceptance-selected-refresh-runtime",
+    );
     let mut request = evaluation_request(Some(Agent::Codex));
-    request.criterion_evidence = criteria.iter().map(|criterion| AcceptanceCriterionEvidenceRequest {
-        criterion:*criterion, locators:vec![REFRESH_SELECTED_PROOF.to_owned()]
-    }).collect();
+    request.criterion_evidence = criteria
+        .iter()
+        .map(|criterion| AcceptanceCriterionEvidenceRequest {
+            criterion: *criterion,
+            locators: vec![REFRESH_SELECTED_PROOF.to_owned()],
+        })
+        .collect();
     let reads = Arc::new(AtomicUsize::new(0));
-    let response = state.request_acceptance_evaluation_with_runner(
-        &parent, request, selected_refresh_reader(reads.clone(),42,false,None)
-    ).unwrap();
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            request,
+            selected_refresh_reader(reads.clone(), 42, false, None),
+        )
+        .unwrap();
     let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
         panic!("expected independent evaluator");
     };
-    assert_eq!(reads.load(Ordering::SeqCst),1);
-    assert!(delegation.delegation.prompt.contains("Older selected proof read anew at cut 42."));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    assert!(
+        delegation
+            .delegation
+            .prompt
+            .contains("Older selected proof read anew at cut 42.")
+    );
     // The evaluator is already active. Ordinary observation schedules no
     // bind/abort retry, so acceptance refresh needs no dispatch-reset flag.
-    (state,parent,delegation.delegation.id,delegation.delegation.child_session_id)
+    (
+        state,
+        parent,
+        delegation.delegation.id,
+        delegation.delegation.child_session_id,
+    )
 }
 
 #[test]
 fn acceptance_refresh_selected_older_proof_is_reread_after_typed_refusal() {
-    let (state,_,id,child) = selected_refresh_fixture();
-    let (writes,run) = scripted_runner(vec![Ok(resubmit_refusal())]);
+    let (state, _, id, child) = selected_refresh_fixture();
+    let (writes, run) = scripted_runner(vec![Ok(resubmit_refusal())]);
     let reads = Arc::new(AtomicUsize::new(0));
-    state.submit_acceptance_evaluation_with_io(&child,keyed_submission(&id,1),run,
-        selected_refresh_reader(reads.clone(),43,false,None)).unwrap_err();
-    assert_eq!(writes.lock().unwrap().len(),1);
-    assert_eq!(reads.load(Ordering::SeqCst),1,"the older selected proof must be read again");
-    let target = current_target(&state,&id);
-    let brief = target.attempt_history.unwrap().prepared_brief.unwrap().prompt;
+    state
+        .submit_acceptance_evaluation_with_io(
+            &child,
+            keyed_submission(&id, 1),
+            run,
+            selected_refresh_reader(reads.clone(), 43, false, None),
+        )
+        .unwrap_err();
+    assert_eq!(writes.lock().unwrap().len(), 1);
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "the older selected proof must be read again"
+    );
+    let target = current_target(&state, &id);
+    let brief = target
+        .attempt_history
+        .unwrap()
+        .prepared_brief
+        .unwrap()
+        .prompt;
     assert!(brief.contains("Older selected proof read anew at cut 43."));
     assert!(!brief.contains("Older selected proof read anew at cut 42."));
     assert!(brief.contains(&format!("Criterion 1: {REFRESH_SELECTED_PROOF}")));
@@ -107,36 +159,80 @@ fn acceptance_refresh_selected_older_proof_is_reread_after_typed_refusal() {
 
 #[test]
 fn acceptance_refresh_selected_read_uncertainty_keeps_the_settled_prior_attempt() {
-    for failure in ["timeout","malformed","wrong-locator","partial","basis-move"] {
-        let (state,_,id,child) = selected_refresh_fixture();
-        let (_,run) = scripted_runner(vec![Ok(resubmit_refusal())]);
+    for failure in [
+        "timeout",
+        "malformed",
+        "wrong-locator",
+        "partial",
+        "basis-move",
+    ] {
+        let (state, _, id, child) = selected_refresh_fixture();
+        let (_, run) = scripted_runner(vec![Ok(resubmit_refusal())]);
         let reads = Arc::new(AtomicUsize::new(0));
-        state.submit_acceptance_evaluation_with_io(&child,keyed_submission(&id,1),run,
-            selected_refresh_reader(reads.clone(),43,false,Some(failure))).unwrap_err();
-        assert_eq!(reads.load(Ordering::SeqCst),1,"the carried read was attempted");
-        let target = current_target(&state,&id);
-        assert_eq!(target.attempt_key,acceptance_evaluation_ordinal_key(&id,1));
-        assert_eq!(target.selected_evidence.len(),1,"uncertainty preserves the original association");
+        state
+            .submit_acceptance_evaluation_with_io(
+                &child,
+                keyed_submission(&id, 1),
+                run,
+                selected_refresh_reader(reads.clone(), 43, false, Some(failure)),
+            )
+            .unwrap_err();
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            1,
+            "the carried read was attempted"
+        );
+        let target = current_target(&state, &id);
+        assert_eq!(
+            target.attempt_key,
+            acceptance_evaluation_ordinal_key(&id, 1)
+        );
+        assert_eq!(
+            target.selected_evidence.len(),
+            1,
+            "uncertainty preserves the original association"
+        );
         let history = target.attempt_history.unwrap();
         assert!(history.refusal.is_some());
-        assert!(history.prepared_brief.is_none(),"unknown proof cannot produce a reduced brief");
+        assert!(
+            history.prepared_brief.is_none(),
+            "unknown proof cannot produce a reduced brief"
+        );
     }
 }
 
 #[test]
 fn acceptance_refresh_changed_criterion_drops_and_discloses_the_selection() {
-    let (state,_,id,child) = selected_refresh_fixture();
-    let (_,run) = scripted_runner(vec![Ok(resubmit_refusal())]);
+    let (state, _, id, child) = selected_refresh_fixture();
+    let (_, run) = scripted_runner(vec![Ok(resubmit_refusal())]);
     let reads = Arc::new(AtomicUsize::new(0));
-    state.submit_acceptance_evaluation_with_io(&child,keyed_submission(&id,1),run,
-        selected_refresh_reader(reads.clone(),43,true,None)).unwrap_err();
-    assert_eq!(reads.load(Ordering::SeqCst),0,"changed text does not retarget old hints");
-    let target = current_target(&state,&id);
-    assert_eq!(target.acceptance_basis,8);
+    state
+        .submit_acceptance_evaluation_with_io(
+            &child,
+            keyed_submission(&id, 1),
+            run,
+            selected_refresh_reader(reads.clone(), 43, true, None),
+        )
+        .unwrap_err();
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        0,
+        "changed text does not retarget old hints"
+    );
+    let target = current_target(&state, &id);
+    assert_eq!(target.acceptance_basis, 8);
     assert!(target.selected_evidence.is_empty());
-    let brief = target.attempt_history.unwrap().prepared_brief.unwrap().prompt;
+    let brief = target
+        .attempt_history
+        .unwrap()
+        .prepared_brief
+        .unwrap()
+        .prompt;
     assert!(brief.contains("1. The new route exists"));
-    assert!(brief.contains("evidence selection for criterion 1 was not carried: its text changed"),"{brief}");
+    assert!(
+        brief.contains("evidence selection for criterion 1 was not carried: its text changed"),
+        "{brief}"
+    );
     assert!(!brief.contains("Older selected proof"));
 }
 
@@ -145,17 +241,33 @@ fn assert_incomplete_non_holder_keeps_selection(failure: &'static str) {
     let before = current_target(&state, &id);
     let (_, run) = scripted_runner(vec![Ok(resubmit_refusal())]);
     let reads = Arc::new(AtomicUsize::new(0));
-    state.submit_acceptance_evaluation_with_io(
-        &child, keyed_submission(&id, 1), run,
-        selected_refresh_reader(reads.clone(), 43, false, Some(failure)),
-    ).unwrap_err();
+    state
+        .submit_acceptance_evaluation_with_io(
+            &child,
+            keyed_submission(&id, 1),
+            run,
+            selected_refresh_reader(reads.clone(), 43, false, Some(failure)),
+        )
+        .unwrap_err();
     assert_eq!(reads.load(Ordering::SeqCst), 1);
     let target = current_target(&state, &id);
-    assert_eq!(target.attempt_key, before.attempt_key, "an incomplete receipt cannot authorize a new attempt");
-    assert_eq!(target.selected_evidence, before.selected_evidence, "an incomplete receipt cannot permanently drop a selection");
+    assert_eq!(
+        target.attempt_key, before.attempt_key,
+        "an incomplete receipt cannot authorize a new attempt"
+    );
+    assert_eq!(
+        target.selected_evidence, before.selected_evidence,
+        "an incomplete receipt cannot permanently drop a selection"
+    );
     let history = target.attempt_history.unwrap();
-    assert!(history.refusal.is_some(), "the producer refusal remains settled");
-    assert!(history.prepared_brief.is_none(), "no reduced host brief is installed");
+    assert!(
+        history.refusal.is_some(),
+        "the producer refusal remains settled"
+    );
+    assert!(
+        history.prepared_brief.is_none(),
+        "no reduced host brief is installed"
+    );
 }
 
 #[test]
@@ -175,44 +287,76 @@ fn acceptance_refresh_incomplete_non_holder_oversized_body_keeps_selection() {
 
 #[test]
 fn acceptance_refresh_shared_selection_keeps_the_unchanged_criterion_only() {
-    let (state,_,id,child) = selected_refresh_fixture_for(&[1,2]);
-    let (_,run) = scripted_runner(vec![Ok(resubmit_refusal())]);
+    let (state, _, id, child) = selected_refresh_fixture_for(&[1, 2]);
+    let (_, run) = scripted_runner(vec![Ok(resubmit_refusal())]);
     let reads = Arc::new(AtomicUsize::new(0));
-    state.submit_acceptance_evaluation_with_io(&child,keyed_submission(&id,1),run,
-        selected_refresh_reader(reads.clone(),43,true,None)).unwrap_err();
-    assert_eq!(reads.load(Ordering::SeqCst),1);
-    let target = current_target(&state,&id);
-    assert_eq!(target.selected_evidence.len(),1);
-    assert_eq!(target.selected_evidence[0].criterion,2);
-    let restored: DelegationAcceptanceEvaluation = serde_json::from_value(serde_json::to_value(&target).unwrap()).unwrap();
-    assert_eq!(restored,target,"the carried set survives restoration");
-    let brief = target.attempt_history.unwrap().prepared_brief.unwrap().prompt;
+    state
+        .submit_acceptance_evaluation_with_io(
+            &child,
+            keyed_submission(&id, 1),
+            run,
+            selected_refresh_reader(reads.clone(), 43, true, None),
+        )
+        .unwrap_err();
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    let target = current_target(&state, &id);
+    assert_eq!(target.selected_evidence.len(), 1);
+    assert_eq!(target.selected_evidence[0].criterion, 2);
+    let restored: DelegationAcceptanceEvaluation =
+        serde_json::from_value(serde_json::to_value(&target).unwrap()).unwrap();
+    assert_eq!(restored, target, "the carried set survives restoration");
+    let brief = target
+        .attempt_history
+        .unwrap()
+        .prepared_brief
+        .unwrap()
+        .prompt;
     assert!(brief.contains(&format!("Criterion 2: {REFRESH_SELECTED_PROOF}")));
     assert!(brief.contains("selection for criterion 1 was not carried"));
 }
 
 #[test]
 fn acceptance_refresh_definitive_non_holder_drop_does_not_resurrect_next_attempt() {
-    let (state,_,id,child) = selected_refresh_fixture();
-    let (_,run) = scripted_runner(vec![Ok(resubmit_refusal()),Ok(resubmit_refusal())]);
+    let (state, _, id, child) = selected_refresh_fixture();
+    let (_, run) = scripted_runner(vec![Ok(resubmit_refusal()), Ok(resubmit_refusal())]);
     let reads = Arc::new(AtomicUsize::new(0));
-    state.submit_acceptance_evaluation_with_io(&child,keyed_submission(&id,1),&run,
-        selected_refresh_reader(reads.clone(),43,false,Some("non-holder"))).unwrap_err();
-    assert_eq!(reads.load(Ordering::SeqCst),1);
-    let target = current_target(&state,&id);
+    state
+        .submit_acceptance_evaluation_with_io(
+            &child,
+            keyed_submission(&id, 1),
+            &run,
+            selected_refresh_reader(reads.clone(), 43, false, Some("non-holder")),
+        )
+        .unwrap_err();
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    let target = current_target(&state, &id);
     assert!(target.selected_evidence.is_empty());
-    let brief = target.attempt_history.unwrap().prepared_brief.unwrap().prompt;
+    let brief = target
+        .attempt_history
+        .unwrap()
+        .prepared_brief
+        .unwrap()
+        .prompt;
     assert!(brief.contains("the exact record is non-holder and cannot be cited"));
     let next_reads = Arc::new(AtomicUsize::new(0));
-    state.submit_acceptance_evaluation_with_io(&child,keyed_submission(&id,2),&run,
-        selected_refresh_reader(next_reads.clone(),44,false,None)).unwrap_err();
-    assert_eq!(current_target(&state,&id).attempt_history.unwrap().ordinal,3);
-    assert_eq!(next_reads.load(Ordering::SeqCst),0);
+    state
+        .submit_acceptance_evaluation_with_io(
+            &child,
+            keyed_submission(&id, 2),
+            &run,
+            selected_refresh_reader(next_reads.clone(), 44, false, None),
+        )
+        .unwrap_err();
+    assert_eq!(
+        current_target(&state, &id).attempt_history.unwrap().ordinal,
+        3
+    );
+    assert_eq!(next_reads.load(Ordering::SeqCst), 0);
 }
 
 #[test]
 fn acceptance_refresh_binding_change_preserves_the_discovery_hint() {
-    let (state,_,id,child) = selected_refresh_fixture();
+    let (state, _, id, child) = selected_refresh_fixture();
     let (_, _, mut binding_page) = evidence_selection::canonical_binding_receipts();
     binding_page["basis"]["work_revision"] = json!(8);
     binding_page["basis"]["run_cut"] = json!(43);
@@ -223,47 +367,89 @@ fn acceptance_refresh_binding_change_preserves_the_discovery_hint() {
     // The new criterion binding has no recorded closure. Discovery must
     // preserve the requester's hint without manufacturing verification proof.
     evidence_selection::install_binding_evidence_transport(&state, &child, vec![binding_page]);
-    let (_,run) = scripted_runner(vec![Ok(resubmit_refusal())]);
+    let (_, run) = scripted_runner(vec![Ok(resubmit_refusal())]);
     let reads = Arc::new(AtomicUsize::new(0));
-    state.submit_acceptance_evaluation_with_io(&child,keyed_submission(&id,1),run,
-        selected_refresh_reader(reads.clone(),43,false,Some("binding"))).unwrap_err();
-    let target = current_target(&state,&id);
-    assert_eq!(target.acceptance_basis,8);
-    assert_eq!(target.bindings[0].criterion,1);
-    assert_eq!(target.selected_evidence.len(),1);
-    assert_eq!(reads.load(Ordering::SeqCst),1);
+    state
+        .submit_acceptance_evaluation_with_io(
+            &child,
+            keyed_submission(&id, 1),
+            run,
+            selected_refresh_reader(reads.clone(), 43, false, Some("binding")),
+        )
+        .unwrap_err();
+    let target = current_target(&state, &id);
+    assert_eq!(target.acceptance_basis, 8);
+    assert_eq!(target.bindings[0].criterion, 1);
+    assert_eq!(target.selected_evidence.len(), 1);
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
 }
 
 #[test]
 fn acceptance_refresh_explicit_request_owns_its_selection() {
-    let (state,parent,id,_) = selected_refresh_fixture();
-    set_delegation_status(&state,&id,DelegationStatus::Completed);
+    let (state, parent, id, _) = selected_refresh_fixture();
+    set_delegation_status(&state, &id, DelegationStatus::Completed);
     let reads = Arc::new(AtomicUsize::new(0));
     let mut request = evaluation_request(None);
     request.reuse_delegation_id = Some(id.clone());
-    let response = state.request_acceptance_evaluation_with_runner(&parent,request,
-        selected_refresh_reader(reads.clone(),43,false,None)).unwrap();
-    let AcceptanceEvaluationRequestResponse::Spawned { reused,.. } = response else { panic!("independent evaluation"); };
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            request,
+            selected_refresh_reader(reads.clone(), 43, false, None),
+        )
+        .unwrap();
+    let AcceptanceEvaluationRequestResponse::Spawned { reused, .. } = response else {
+        panic!("independent evaluation");
+    };
     assert!(reused);
-    assert_eq!(reads.load(Ordering::SeqCst),0,"explicit empty selection does not inherit hints");
-    let target = current_target(&state,&id);
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        0,
+        "explicit empty selection does not inherit hints"
+    );
+    let target = current_target(&state, &id);
     assert!(target.selected_evidence.is_empty());
-    assert!(!target.attempt_history.unwrap().prepared_brief.unwrap().prompt.contains("Older selected proof"));
+    assert!(
+        !target
+            .attempt_history
+            .unwrap()
+            .prepared_brief
+            .unwrap()
+            .prompt
+            .contains("Older selected proof")
+    );
 }
 
 #[test]
 fn acceptance_refresh_selection_never_moves_by_matching_text_and_keeps_bounds() {
-    let mut task = parse_acceptance_evaluation_task(show_receipt(None),full_receipt()).unwrap();
-    let original = AcceptanceSelectedEvidence { criterion:1,criterion_text:task.criteria[0].clone(),locators:vec![REFRESH_SELECTED_PROOF.to_owned()] };
-    task.criteria.swap(0,1);
+    let mut task = parse_acceptance_evaluation_task(show_receipt(None), full_receipt()).unwrap();
+    let original = AcceptanceSelectedEvidence {
+        criterion: 1,
+        criterion_text: task.criteria[0].clone(),
+        locators: vec![REFRESH_SELECTED_PROOF.to_owned()],
+    };
+    task.criteria.swap(0, 1);
     let mut disclosures = Vec::new();
-    assert!(carry_acceptance_evidence_selection(&[original.clone()],&task,&mut disclosures).unwrap().is_empty());
-    assert_eq!(disclosures.len(),1,"a renumbered hint cannot move with matching text");
-    let rows = (1..=17).map(|criterion| AcceptanceSelectedEvidence { criterion,..original.clone() }).collect::<Vec<_>>();
-    assert!(carry_acceptance_evidence_selection(&rows,&task,&mut Vec::new()).is_err());
+    assert!(
+        carry_acceptance_evidence_selection(&[original.clone()], &task, &mut disclosures)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        disclosures.len(),
+        1,
+        "a renumbered hint cannot move with matching text"
+    );
+    let rows = (1..=17)
+        .map(|criterion| AcceptanceSelectedEvidence {
+            criterion,
+            ..original.clone()
+        })
+        .collect::<Vec<_>>();
+    assert!(carry_acceptance_evidence_selection(&rows, &task, &mut Vec::new()).is_err());
     let mut row = original;
     row.locators = (0..17).map(|n| format!("{n:032x}")).collect();
-    assert!(carry_acceptance_evidence_selection(&[row],&task,&mut Vec::new()).is_err());
+    assert!(carry_acceptance_evidence_selection(&[row], &task, &mut Vec::new()).is_err());
 }
 
 #[test]
@@ -274,16 +460,30 @@ fn acceptance_refresh_regression_api_hides_history_arguments() {
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_delegation_index(&id).unwrap();
-            let target = inner.delegations[index].acceptance_evaluation.as_mut().unwrap();
+            let target = inner.delegations[index]
+                .acceptance_evaluation
+                .as_mut()
+                .unwrap();
             target.selected_evidence = vec![AcceptanceSelectedEvidence {
-                criterion:1,criterion_text:"private selection context".to_owned(),locators:vec![REFRESH_SELECTED_PROOF.to_owned()]
+                criterion: 1,
+                criterion_text: "private selection context".to_owned(),
+                locators: vec![REFRESH_SELECTED_PROOF.to_owned()],
             }];
             let original = AcceptanceEvaluationOpenWrite {
                 source_payload: Some(AcceptanceSourcePayload {
                     source_id: shared_source::identity(),
-                    source_file: Some(state.persistence_path.parent().unwrap().join("private-history-source.json")),
+                    source_file: Some(
+                        state
+                            .persistence_path
+                            .parent()
+                            .unwrap()
+                            .join("private-history-source.json"),
+                    ),
                 }),
-                args: vec!["--actor-context".to_owned(), "private-test-context".to_owned()],
+                args: vec![
+                    "--actor-context".to_owned(),
+                    "private-test-context".to_owned(),
+                ],
                 ..AcceptanceEvaluationOpenWrite::default()
             };
             let refusal = AcceptanceEvaluationDefinitiveRefusal {
@@ -296,41 +496,78 @@ fn acceptance_refresh_regression_api_hides_history_arguments() {
                     receipt: AcceptanceEvaluationReceiptExtract::default(),
                     recorded_at: stamp_now(),
                 }
-            } else { AcceptanceEvaluationSubmission::None };
+            } else {
+                AcceptanceEvaluationSubmission::None
+            };
             let history = target.attempt_history.as_mut().unwrap();
             history.refusal = Some(refusal.clone());
             history.previous = vec![AcceptanceEvaluationPreviousAttempt {
                 source_id: Some(shared_source::identity()),
-                ordinal: 1, key: "old-key".to_owned(), acceptance_basis: 7,
-                evidence_basis: 42, source_fingerprint: None,
-                submission: pending_with("old-digest", original), refusal: Some(refusal),
+                ordinal: 1,
+                key: "old-key".to_owned(),
+                acceptance_basis: 7,
+                evidence_basis: 42,
+                source_fingerprint: None,
+                submission: pending_with("old-digest", original),
+                refusal: Some(refusal),
             }];
-            assert!(serde_json::to_value(&inner.delegations[index]).unwrap().to_string().contains("\"args\""));
-            assert!(serde_json::to_value(&inner.delegations[index]).unwrap().to_string().contains("private-history-source.json"),
-                "all history positions must carry the private payload before projection");
+            assert!(
+                serde_json::to_value(&inner.delegations[index])
+                    .unwrap()
+                    .to_string()
+                    .contains("\"args\"")
+            );
+            assert!(
+                serde_json::to_value(&inner.delegations[index])
+                    .unwrap()
+                    .to_string()
+                    .contains("private-history-source.json"),
+                "all history positions must carry the private payload before projection"
+            );
         }
         let value = serde_json::to_value(state.get_delegation(&parent, &id).unwrap()).unwrap();
-        assert!(!value.to_string().contains("\"args\""), "API must strip history args with recorded={recorded}");
+        assert!(
+            !value.to_string().contains("\"args\""),
+            "API must strip history args with recorded={recorded}"
+        );
         assert!(!value.to_string().contains("private-test-context"));
         assert!(!value.to_string().contains("sourcePayload"));
         assert!(!value.to_string().contains("private-history-source.json"));
         assert!(!value.to_string().contains("private-path.txt"));
-        assert!(value["delegation"]["acceptanceEvaluation"].get("selectedEvidence").is_none());
+        assert!(
+            value["delegation"]["acceptanceEvaluation"]
+                .get("selectedEvidence")
+                .is_none()
+        );
         let inner = state.inner.lock().unwrap();
-        let summary = serde_json::to_value(delegation_summary_from_record(&inner.delegations[inner.find_delegation_index(&id).unwrap()])).unwrap();
+        let summary = serde_json::to_value(delegation_summary_from_record(
+            &inner.delegations[inner.find_delegation_index(&id).unwrap()],
+        ))
+        .unwrap();
         assert!(!summary.to_string().contains("\"args\""));
         assert!(!summary.to_string().contains("sourcePayload"));
         assert!(!summary.to_string().contains("private-history-source.json"));
         assert!(!summary.to_string().contains("private-path.txt"));
-        assert!(summary["acceptanceEvaluation"].get("selectedEvidence").is_none());
-        assert_eq!(value["delegation"]["acceptanceEvaluation"]["attemptHistory"]["previous"][0]["key"], "old-key");
+        assert!(
+            summary["acceptanceEvaluation"]
+                .get("selectedEvidence")
+                .is_none()
+        );
+        assert_eq!(
+            value["delegation"]["acceptanceEvaluation"]["attemptHistory"]["previous"][0]["key"],
+            "old-key"
+        );
     }
 }
 
 #[test]
 fn acceptance_refresh_regression_terminal_child_model_drift_selects_fresh() {
     let (state, _, parent, _, id) = finished_evaluator_fixture("acceptance-model-drift-runtime");
-    let child = state.get_delegation(&parent, &id).unwrap().delegation.child_session_id;
+    let child = state
+        .get_delegation(&parent, &id)
+        .unwrap()
+        .delegation
+        .child_session_id;
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_delegation_index(&id).unwrap();
@@ -345,46 +582,91 @@ fn acceptance_refresh_regression_terminal_child_model_drift_selects_fresh() {
     let mut request = evaluation_request(Some(Agent::Claude));
     request.model = Some("default".to_owned());
     request.reuse_delegation_id = Some(id.clone());
-    let response = state.request_acceptance_evaluation_with_runner(
-        &parent, request, fresh_reader(Arc::default(), 43)
-    ).unwrap();
-    let AcceptanceEvaluationRequestResponse::Spawned { delegation, reused, notice, .. } = response else {
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            request,
+            fresh_reader(Arc::default(), 43),
+        )
+        .unwrap();
+    let AcceptanceEvaluationRequestResponse::Spawned {
+        delegation,
+        reused,
+        notice,
+        ..
+    } = response
+    else {
         panic!("independent evaluator required");
     };
-    assert!(!reused, "live model drift must not reuse the old evaluator: {notice:?}");
+    assert!(
+        !reused,
+        "live model drift must not reuse the old evaluator: {notice:?}"
+    );
     assert_ne!(delegation.delegation.id, id);
     assert_eq!(delegation.delegation.model.as_deref(), Some("default"));
-    assert_eq!(current_target(&state, &id).attempt_history.unwrap().ordinal, 1);
+    assert_eq!(
+        current_target(&state, &id).attempt_history.unwrap().ordinal,
+        1
+    );
 }
 
 #[test]
 fn acceptance_refresh_model_change_cannot_cross_attempt_reservation() {
-    let (state, _, parent, _, id) = finished_evaluator_fixture("acceptance-model-reservation-runtime");
-    let child = state.get_delegation(&parent, &id).unwrap().delegation.child_session_id;
+    let (state, _, parent, _, id) =
+        finished_evaluator_fixture("acceptance-model-reservation-runtime");
+    let child = state
+        .get_delegation(&parent, &id)
+        .unwrap()
+        .delegation
+        .child_session_id;
     enable_attempt_history(&state, &id, &parent, &child);
     let mut request = evaluation_request(Some(Agent::Claude));
     request.reuse_delegation_id = Some(id.clone());
-    let reservation = state.reserve_acceptance_evaluation_reuse(&parent, &request, false).unwrap().unwrap();
+    let reservation = state
+        .reserve_acceptance_evaluation_reuse(&parent, &request, false)
+        .unwrap()
+        .unwrap();
     let settings = serde_json::from_value(json!({"model":"sonnet"})).unwrap();
     let result = state.update_session_settings(&child, settings);
-    assert!(result.is_err(), "settings must not change the evaluator inside attempt preparation");
+    assert!(
+        result.is_err(),
+        "settings must not change the evaluator inside attempt preparation"
+    );
     drop(reservation);
-    state.update_session_settings(&child, serde_json::from_value(json!({"model":"sonnet"})).unwrap()).unwrap();
+    state
+        .update_session_settings(
+            &child,
+            serde_json::from_value(json!({"model":"sonnet"})).unwrap(),
+        )
+        .unwrap();
 }
 
 #[test]
 fn acceptance_refresh_model_change_cannot_alter_a_retained_host_brief() {
-    let (state,_,parent,_,id) = finished_evaluator_fixture("acceptance-retained-model-runtime");
-    let child = state.get_delegation(&parent,&id).unwrap().delegation.child_session_id;
-    enable_attempt_history(&state,&id,&parent,&child);
-    update_evaluation_target(&state,&id,|target| {
-        target.attempt_history.as_mut().unwrap().prepared_brief = Some(AcceptanceEvaluationPreparedBrief {
-            attempt_key:target.attempt_key.clone(),prompt:"Exact reserved brief".to_owned(),
-            digest:acceptance_evaluation_payload_digest(&["Exact reserved brief".to_owned()]),offered:false,
-        });
+    let (state, _, parent, _, id) = finished_evaluator_fixture("acceptance-retained-model-runtime");
+    let child = state
+        .get_delegation(&parent, &id)
+        .unwrap()
+        .delegation
+        .child_session_id;
+    enable_attempt_history(&state, &id, &parent, &child);
+    update_evaluation_target(&state, &id, |target| {
+        target.attempt_history.as_mut().unwrap().prepared_brief =
+            Some(AcceptanceEvaluationPreparedBrief {
+                attempt_key: target.attempt_key.clone(),
+                prompt: "Exact reserved brief".to_owned(),
+                digest: acceptance_evaluation_payload_digest(&["Exact reserved brief".to_owned()]),
+                offered: false,
+            });
     });
-    let result = state.update_session_settings(&child,serde_json::from_value(json!({"model":"sonnet"})).unwrap());
-    assert!(result.is_err(),"a retained brief preserves the model of its original attempt");
+    let result = state.update_session_settings(
+        &child,
+        serde_json::from_value(json!({"model":"sonnet"})).unwrap(),
+    );
+    assert!(
+        result.is_err(),
+        "a retained brief preserves the model of its original attempt"
+    );
 }
 
 #[test]
@@ -450,7 +732,10 @@ fn enable_attempt_history(state: &AppState, id: &str, parent: &str, child: &str)
     let mut inner = state.inner.lock().unwrap();
     let index = inner.find_delegation_index(id).unwrap();
     let cwd = inner.delegations[index].cwd.clone();
-    let child_model = inner.sessions[inner.find_session_index(child).unwrap()].session.model.clone();
+    let child_model = inner.sessions[inner.find_session_index(child).unwrap()]
+        .session
+        .model
+        .clone();
     // Real evaluator creation persists its resolved model with the delegation.
     inner.delegations[index].model.get_or_insert(child_model);
     let target = inner.delegations[index]
@@ -762,10 +1047,13 @@ fn acceptance_refresh_three_keys_then_explicit_request_spawns_a_fresh_evaluator(
 
 #[test]
 fn acceptance_refresh_explicit_reuse_rearms_only_the_host_brief() {
-    let (state, project, parent, root, id) = finished_evaluator_fixture("acceptance-host-brief-runtime");
+    let (state, project, parent, root, id) =
+        finished_evaluator_fixture("acceptance-host-brief-runtime");
     source::make_workdir_a_worktree(&root);
     let original = shared_source::identity();
-    update_evaluation_target(&state, &id, |target| target.source_id = Some(original.clone()));
+    update_evaluation_target(&state, &id, |target| {
+        target.source_id = Some(original.clone())
+    });
     let mut fresh = original.clone();
     fresh.changes[0].blob = Some("e".repeat(40));
     let captured = fresh.clone();
@@ -869,23 +1157,35 @@ fn acceptance_refresh_changed_agent_selects_a_fresh_evaluator() {
 fn acceptance_refresh_sub_agent_pin_selects_fresh_attested_child() {
     let (state, _, parent, _, old_id) =
         finished_evaluator_fixture("acceptance-sub-agent-refresh-runtime");
-    let old_child = state.get_delegation(&parent, &old_id).unwrap()
-        .delegation.child_session_id;
+    let old_child = state
+        .get_delegation(&parent, &old_id)
+        .unwrap()
+        .delegation
+        .child_session_id;
     enable_attempt_history(&state, &old_id, &parent, &old_child);
     let mut request = evaluation_request(Some(Agent::Codex));
     request.reuse_delegation_id = Some(old_id.clone());
-    let response = state.request_acceptance_evaluation_with_runner(
-        &parent,
-        request,
-        fixture_reader(
-            Arc::default(),
-            show_receipt(Some("sub_agent")),
-            Ok(policy_receipt(Some(&["independent_session", "sub_agent"]))),
-        ),
-    ).unwrap();
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            request,
+            fixture_reader(
+                Arc::default(),
+                show_receipt(Some("sub_agent")),
+                Ok(policy_receipt(Some(&["independent_session", "sub_agent"]))),
+            ),
+        )
+        .unwrap();
     let AcceptanceEvaluationRequestResponse::Spawned {
-        delegation, reused, notice, mode, ..
-    } = response else { panic!("sub_agent must create an evaluator"); };
+        delegation,
+        reused,
+        notice,
+        mode,
+        ..
+    } = response
+    else {
+        panic!("sub_agent must create an evaluator");
+    };
     assert_eq!(mode, AcceptanceEvaluationMode::SubAgent);
     assert!(!reused);
     let record = delegation.delegation;
@@ -894,26 +1194,39 @@ fn acceptance_refresh_sub_agent_pin_selects_fresh_attested_child() {
     assert!(notice.unwrap().contains("independent_session admission"));
     let target = current_target(&state, &record.id);
     assert_eq!(target.parent_session.as_deref(), Some(parent.as_str()));
-    assert_eq!(target.execution_identity.as_deref(), Some(record.id.as_str()));
+    assert_eq!(
+        target.execution_identity.as_deref(),
+        Some(record.id.as_str())
+    );
     assert_eq!(target.attempt_key, record.id);
     assert!(target.attempt_history.is_none());
     assert!(!record.prompt.contains("Host-authored acceptance attempt"));
-    assert_eq!(current_target(&state, &old_id).attempt_history.unwrap().ordinal, 1);
+    assert_eq!(
+        current_target(&state, &old_id)
+            .attempt_history
+            .unwrap()
+            .ordinal,
+        1
+    );
     // Submission uses the retained evaluator identity; ordinary observation
     // has no bind retry to park before this injected write.
     let mut receipt: Value = serde_json::from_str(&evaluate_receipt(false)).unwrap();
     receipt["evaluation"]["mode"] = json!("sub_agent");
-    state.submit_acceptance_evaluation_with_runner(
-        &record.child_session_id, two_verdicts(), |connection, args, _| {
-            let flag = |name| args.windows(2).find(|pair| pair[0] == name).unwrap()[1].clone();
-            assert_eq!(connection.session_id, record.child_session_id);
-            assert_eq!(flag("--mode"), "sub_agent");
-            assert_eq!(flag("--parent-session"), parent);
-            assert_eq!(flag("--execution-identity"), record.id);
-            assert_eq!(flag("--attempt"), record.id);
-            Ok(cli_output(true, &receipt.to_string(), ""))
-        },
-    ).unwrap();
+    state
+        .submit_acceptance_evaluation_with_runner(
+            &record.child_session_id,
+            two_verdicts(),
+            |connection, args, _| {
+                let flag = |name| args.windows(2).find(|pair| pair[0] == name).unwrap()[1].clone();
+                assert_eq!(connection.session_id, record.child_session_id);
+                assert_eq!(flag("--mode"), "sub_agent");
+                assert_eq!(flag("--parent-session"), parent);
+                assert_eq!(flag("--execution-identity"), record.id);
+                assert_eq!(flag("--attempt"), record.id);
+                Ok(cli_output(true, &receipt.to_string(), ""))
+            },
+        )
+        .unwrap();
 }
 
 #[test]

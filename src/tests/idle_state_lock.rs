@@ -300,13 +300,15 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
             }
         }
         assert!(!inner.test_runs.observations_durable.contains(id));
-        assert!(inner
-            .test_runs
-            .observation_persistence
-            .0
-            .lock()
-            .unwrap()
-            .contains_key(id));
+        assert!(
+            inner
+                .test_runs
+                .observation_persistence
+                .0
+                .lock()
+                .unwrap()
+                .contains_key(id)
+        );
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
         fixture
             .state
@@ -446,7 +448,13 @@ fn idle_history_compaction_tick_does_not_reproject_unchanged_history() {
         "an unrelated revision must not reconstruct every historical summary"
     );
     // A writer that changed selection inputs asks for a fresh selection.
-    fixture.state.inner.lock().unwrap().test_runs.compaction_examined_revision = None;
+    fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_runs
+        .compaction_examined_revision = None;
     let (_, visits) = measure("requested_compaction_tick", || {
         fixture.state.step_test_run_compaction()
     });
@@ -524,7 +532,13 @@ fn history_pass_work(action: impl FnOnce()) -> HistoryPassWork {
 /// read do at one history size.
 fn compacted_history_work(count: usize) -> [HistoryPassWork; 3] {
     let fixture = compacted_history(count);
-    fixture.state.inner.lock().unwrap().test_runs.compaction_examined_revision = None;
+    fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_runs
+        .compaction_examined_revision = None;
     let selection = history_pass_work(|| fixture.state.step_test_run_compaction());
     fixture.state.inner.lock().unwrap().revision += 1;
     let unrelated = history_pass_work(|| fixture.state.step_test_run_compaction());
@@ -532,7 +546,11 @@ fn compacted_history_work(count: usize) -> [HistoryPassWork; 3] {
         let inner = fixture.state.inner.lock().unwrap();
         let runs = test_run_summaries_locked(&inner);
         let history = test_run_history_locked(&inner, None);
-        assert_eq!(runs.len(), count, "installed compacted rows are safe and omitted");
+        assert_eq!(
+            runs.len(),
+            count,
+            "installed compacted rows are safe and omitted"
+        );
         assert_eq!(history.compacted_count, count * 3);
     });
     eprintln!(
@@ -545,18 +563,28 @@ fn compacted_history_work(count: usize) -> [HistoryPassWork; 3] {
 fn compaction_selection_and_list_work_is_linear_in_compacted_history() {
     let [selection, unrelated, list] = compacted_history_work(64);
     let [selection_4x, unrelated_4x, list_4x] = compacted_history_work(256);
-    assert_eq!(selection.projections, 1, "a requested pass projects history once");
+    assert_eq!(
+        selection.projections, 1,
+        "a requested pass projects history once"
+    );
     assert_eq!(
         selection.wait_visits, 8,
         "each wait record is read once per pass, not once per candidate run"
     );
     assert_eq!(
         unrelated,
-        HistoryPassWork { projections: 0, finds: 0, wait_visits: 0 },
+        HistoryPassWork {
+            projections: 0,
+            finds: 0,
+            wait_visits: 0
+        },
         "an unrelated revision neither projects nor rereads history"
     );
     // Linear entry lookups made per compacted row would grow with history.
-    assert_eq!(selection_4x, selection, "selection lookups do not grow with history");
+    assert_eq!(
+        selection_4x, selection,
+        "selection lookups do not grow with history"
+    );
     assert_eq!(unrelated_4x, unrelated);
     assert_eq!(list_4x, list, "list lookups do not grow with history");
 }

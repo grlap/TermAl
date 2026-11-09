@@ -2,7 +2,12 @@
 //! Removed control Bind retry/circuit-breaker timing has no executor to test.
 use super::*;
 
-fn capacity_ack_fixture() -> (AppState, String, EngramBudgetClock, mpsc::Receiver<PersistRequest>) {
+fn capacity_ack_fixture() -> (
+    AppState,
+    String,
+    EngramBudgetClock,
+    mpsc::Receiver<PersistRequest>,
+) {
     let (mut state, _, session, _) = super::super::work_visualizer::fixture();
     let clock = state.select_test_scripted_engram_budget_clock();
     state.shutdown_persist_blocking();
@@ -21,31 +26,46 @@ fn capacity_ack_fixture() -> (AppState, String, EngramBudgetClock, mpsc::Receive
             stop_generation: record.runtime_stop_generation,
             pause_epoch: record.auto_dispatch_pause_epoch,
             settings: provider_capacity_settings(record),
-            attempts: 0, due_at: Some("2026-11-02T12:00:00Z".into()),
-            recovering: false, dispatched: false,
+            attempts: 0,
+            due_at: Some("2026-11-02T12:00:00Z".into()),
+            recovering: false,
+            dispatched: false,
             original_preview: "native provider capacity failure".into(),
-            saved: false, fence: None,
+            saved: false,
+            fence: None,
         });
     }
     (state, session, clock, receiver)
 }
 
-fn request_capacity_image(state: &AppState, session: &str, receiver: &mpsc::Receiver<PersistRequest>)
-    -> (Box<PersistFence>, Value)
-{
+fn request_capacity_image(
+    state: &AppState,
+    session: &str,
+    receiver: &mpsc::Receiver<PersistRequest>,
+) -> (Box<PersistFence>, Value) {
     let expected = {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(session).unwrap();
-        let expected = serde_json::to_value(&inner.sessions[index].provider_capacity_retry).unwrap();
+        let expected =
+            serde_json::to_value(&inner.sessions[index].provider_capacity_retry).unwrap();
         state.request_provider_capacity_ack_locked(&mut inner, index);
         expected
     };
     let PersistRequest::Fence(fence) = crate::tests::phase_sync::receive(
-        receiver, "the actual provider-capacity image acknowledgement",
-    ) else { panic!("the capacity owner must request a fence") };
-    assert!(fence.retry_acknowledgement, "this fence belongs to the actual retry ACK owner");
+        receiver,
+        "the actual provider-capacity image acknowledgement",
+    ) else {
+        panic!("the capacity owner must request a fence")
+    };
+    assert!(
+        fence.retry_acknowledgement,
+        "this fence belongs to the actual retry ACK owner"
+    );
     match &fence.target {
-        PersistFenceTarget::ProviderCapacityRecovery { session_id, content } => {
+        PersistFenceTarget::ProviderCapacityRecovery {
+            session_id,
+            content,
+        } => {
             assert_eq!(session_id, session);
             assert_eq!(content, &expected);
         }
@@ -67,8 +87,14 @@ fn capacity_acknowledgement_uses_the_chosen_clock_once_for_its_exact_image() {
         assert_eq!(expected["nonce"], "first-capacity-image");
         assert!(fence.completion.poll_at(clock.now()).is_none());
         clock.advance(Duration::from_secs(20));
-        assert!(matches!(fence.completion.poll_at(clock.now()), Some(Err(PersistFenceError::Deadline))));
-        assert!(matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty)), "one ACK request, no automatic retry");
+        assert!(matches!(
+            fence.completion.poll_at(clock.now()),
+            Some(Err(PersistFenceError::Deadline))
+        ));
+        assert!(
+            matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "one ACK request, no automatic retry"
+        );
     }
 }
 
@@ -90,9 +116,24 @@ fn a_later_capacity_image_keeps_its_own_content_and_original_clock_cut() {
     assert_eq!(first_content["nonce"], "first-capacity-image");
     assert_eq!(second_content["nonce"], "successor-capacity-image");
     assert_eq!(second_content["attempts"], 1);
-    assert_eq!(second.completion.deadline.duration_since(first.completion.deadline), Duration::from_secs(1));
+    assert_eq!(
+        second
+            .completion
+            .deadline
+            .duration_since(first.completion.deadline),
+        Duration::from_secs(1)
+    );
     clock.advance(Duration::from_secs(19));
-    assert!(matches!(first.completion.poll_at(clock.now()), Some(Err(PersistFenceError::Deadline))));
-    assert!(second.completion.poll_at(clock.now()).is_none(), "an older image's deadline cannot expire its successor");
-    assert!(matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        first.completion.poll_at(clock.now()),
+        Some(Err(PersistFenceError::Deadline))
+    ));
+    assert!(
+        second.completion.poll_at(clock.now()).is_none(),
+        "an older image's deadline cannot expire its successor"
+    );
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 }

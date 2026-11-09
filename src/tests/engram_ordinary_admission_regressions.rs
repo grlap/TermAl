@@ -8,12 +8,23 @@ fn ordinary_user_and_mailbox_delivery_never_consults_retired_healing_responses()
     for code in ["stale_fence", "control_assurance_insufficient"] {
         for source in [QueuedPromptSource::User, QueuedPromptSource::Mailbox] {
             let turn = OrdinaryRoot::new("ordinary-unused-healing");
-            turn.transport.responses.lock().unwrap().push_back(ScriptedEngramControlResponse::Reply(
-                Ok(json!({"decision":"refuse","code":code}))));
+            turn.transport.responses.lock().unwrap().push_back(
+                ScriptedEngramControlResponse::Reply(Ok(json!({"decision":"refuse","code":code}))),
+            );
             turn.enqueue("ordinary payload with original source", source);
-            let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap();
-            deliver_turn_dispatch(&turn.state, started.dispatch).into_public_result().unwrap();
-            assert!(turn.prompt().prompt.contains("ordinary payload with original source"));
+            let started = turn
+                .state
+                .start_next_queued_turn_off_lock(&turn.session, false, false)
+                .unwrap()
+                .unwrap();
+            deliver_turn_dispatch(&turn.state, started.dispatch)
+                .into_public_result()
+                .unwrap();
+            assert!(
+                turn.prompt()
+                    .prompt
+                    .contains("ordinary payload with original source")
+            );
             turn.record(|record| {
                 assert!(record.queued_prompts.is_empty());
                 assert!(record.prompt_deliveries.is_empty());
@@ -39,7 +50,10 @@ async fn ordinary_stop_receipt_case(
     let writer = DeliveryWriter::attach(&mut turn.state);
     let (prepared, receipt_id, _write_ahead_fence) = if receipted {
         let id = turn.enqueue_durable("exact ordinary prompt", true);
-        assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+        assert!(
+            turn.state
+                .request_queued_prompt_durability(&turn.session, &id)
+        );
         writer.take(HeldFence::Durability).finish(Ok(()));
         let fence = writer.take(HeldFence::WriteAhead);
         turn.record(|record| {
@@ -53,15 +67,28 @@ async fn ordinary_stop_receipt_case(
         // dispatch before settlement's automatic provider enqueue. Promotion,
         // receipt identity and removal of the queue row remain production code.
         turn.edit(|record| {
-            record.prompt_deliveries.get_mut(&id).unwrap().write_ahead_acknowledged = true;
+            record
+                .prompt_deliveries
+                .get_mut(&id)
+                .unwrap()
+                .write_ahead_acknowledged = true;
         });
-        let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false)
-            .unwrap().expect("acknowledged ordinary receipt promotes");
+        let started = turn
+            .state
+            .start_next_queued_turn_off_lock(&turn.session, false, false)
+            .unwrap()
+            .expect("acknowledged ordinary receipt promotes");
         turn.record(|record| {
-            assert!(record.queued_prompts.is_empty(), "ordinary promotion removes its queue row");
+            assert!(
+                record.queued_prompts.is_empty(),
+                "ordinary promotion removes its queue row"
+            );
             let receipt = &record.prompt_deliveries[&id];
             assert_eq!(receipt.disposition, PromptDeliveryDisposition::HandingOff);
-            assert_eq!(receipt.turn_generation, Some(started.dispatch.active_turn_generation()));
+            assert_eq!(
+                receipt.turn_generation,
+                Some(started.dispatch.active_turn_generation())
+            );
             assert_eq!(receipt.entry.as_ref().unwrap().pending_prompt.id, id);
             assert!(receipt.message_id.is_some() && receipt.attempt_key.is_some());
         });
@@ -70,9 +97,9 @@ async fn ordinary_stop_receipt_case(
         (turn.prepare("exact ordinary prompt"), None, None)
     };
     turn.assert_no_prompt();
-    let promoted_receipt = receipt_id.as_ref().map(|id| turn.record(|record| {
-        serde_json::to_value(&record.prompt_deliveries[id]).unwrap()
-    }));
+    let promoted_receipt = receipt_id.as_ref().map(|id| {
+        turn.record(|record| serde_json::to_value(&record.prompt_deliveries[id]).unwrap())
+    });
     let state = &turn.state;
     let session = &turn.session;
     let root_rx = &turn.receiver;
@@ -99,7 +126,10 @@ async fn ordinary_stop_receipt_case(
     gate.wait_until_claimed();
     if let Some(change) = changed_receipt {
         turn.edit(|record| {
-            let receipt = record.prompt_deliveries.get_mut(receipt_id.as_ref().unwrap()).unwrap();
+            let receipt = record
+                .prompt_deliveries
+                .get_mut(receipt_id.as_ref().unwrap())
+                .unwrap();
             match change {
                 "nonce" => receipt.write_ahead = Uuid::new_v4().to_string(),
                 "attempt" => receipt.attempt += 1,
@@ -131,9 +161,7 @@ async fn ordinary_stop_receipt_case(
     });
     let early =
         callback_first.then(|| handoff_prepared_turn_dispatch(&state, dispatch.take().unwrap()));
-    let callbacks = turn.record(|record| {
-        record.deferred_stop_callbacks.clone()
-    });
+    let callbacks = turn.record(|record| record.deferred_stop_callbacks.clone());
     let delivered_during_stop = receiver
         .try_iter()
         .any(|command| matches!(command, AcpRuntimeCommand::Prompt(_)));
@@ -165,16 +193,31 @@ async fn ordinary_stop_receipt_case(
     .expect("real Stop must settle its runtime fence");
     if failed_stop {
         turn.record(|record| {
-            assert_eq!(record.session.status,
-                if restores_handoff { SessionStatus::Active } else { SessionStatus::Error });
-            assert!(record.queued_prompts.is_empty(), "Stop cannot recreate a queue owner");
+            assert_eq!(
+                record.session.status,
+                if restores_handoff {
+                    SessionStatus::Active
+                } else {
+                    SessionStatus::Error
+                }
+            );
+            assert!(
+                record.queued_prompts.is_empty(),
+                "Stop cannot recreate a queue owner"
+            );
             if restores_handoff {
                 let receipt = &record.prompt_deliveries[receipt_id.as_ref().unwrap()];
                 assert!(receipt.write_ahead_acknowledged);
-                assert_eq!(Some(serde_json::to_value(receipt).unwrap()), promoted_receipt,
-                    "failed Stop restores the same receipt without replacing it");
+                assert_eq!(
+                    Some(serde_json::to_value(receipt).unwrap()),
+                    promoted_receipt,
+                    "failed Stop restores the same receipt without replacing it"
+                );
             } else if !receipted {
-                assert!(record.prompt_deliveries.is_empty(), "direct dispatch has no receipt owner");
+                assert!(
+                    record.prompt_deliveries.is_empty(),
+                    "direct dispatch has no receipt owner"
+                );
             }
         });
     }

@@ -63,7 +63,11 @@ fn has_exit_like_key(value: &Value) -> bool {
 
 #[test]
 fn kimi_acp_fixtures_carry_output_as_a_bare_string_and_no_exit_code() {
-    for fixture in [KIMI_ACP_BASH_PASS, KIMI_ACP_BASH_FAIL, KIMI_ACP_BASH_TEST_PASS] {
+    for fixture in [
+        KIMI_ACP_BASH_PASS,
+        KIMI_ACP_BASH_FAIL,
+        KIMI_ACP_BASH_TEST_PASS,
+    ] {
         let frames = kimi_acp_frames(fixture);
         let terminal = kimi_acp_terminal(&frames);
         assert_eq!(terminal["sessionUpdate"], "tool_call_update");
@@ -78,7 +82,9 @@ fn kimi_acp_fixtures_carry_output_as_a_bare_string_and_no_exit_code() {
         );
         assert!(terminal.pointer("/rawOutput/stdout").is_none());
         assert_eq!(
-            terminal.pointer("/content/0/content/text").and_then(Value::as_str),
+            terminal
+                .pointer("/content/0/content/text")
+                .and_then(Value::as_str),
             raw_output.as_str(),
             "the same text is the first content block"
         );
@@ -129,7 +135,11 @@ fn a_kimi_shell_failure_reads_as_its_suffix_exit_code_with_its_output_text() {
 #[test]
 fn the_kimi_exit_and_output_reading_leaves_other_acp_agents_alone() {
     for agent in [AcpAgent::OpenCode, AcpAgent::Cursor] {
-        for fixture in [KIMI_ACP_BASH_PASS, KIMI_ACP_BASH_FAIL, KIMI_ACP_BASH_TEST_PASS] {
+        for fixture in [
+            KIMI_ACP_BASH_PASS,
+            KIMI_ACP_BASH_FAIL,
+            KIMI_ACP_BASH_TEST_PASS,
+        ] {
             let frames = kimi_acp_frames(fixture);
             let terminal = kimi_acp_terminal(&frames);
             assert_eq!(
@@ -227,8 +237,7 @@ fn kimi_truncated(head: &str, tail: &str, suffix: &str) -> String {
 
 /// The spill reference Kimi's shell tool appends to a foreground result over
 /// 50,000 characters (`addForegroundOutputReference`).
-const KIMI_SPILL_REFERENCE: &str =
-    "task_id: bash-7\noutput_size_bytes: 81234\nnext_step: Use TaskOutput(task_id=\"bash-7\") to query the task output.";
+const KIMI_SPILL_REFERENCE: &str = "task_id: bash-7\noutput_size_bytes: 81234\nnext_step: Use TaskOutput(task_id=\"bash-7\") to query the task output.";
 
 #[test]
 fn a_kimi_background_block_inside_the_truncation_wrapper_is_still_a_launch() {
@@ -238,13 +247,19 @@ fn a_kimi_background_block_inside_the_truncation_wrapper_is_still_a_launch() {
     let block = "task_id: bash-3\npid: 4321\ndescription: verbose suite\nstatus: running\nautomatic_notification: true\nnext_step: The task now runs in the background. You will be automatically notified when it completes.\nhuman_shell_hint: The task is visible in the background-task panel.\n\nforeground_output:\nrunning 4000 tests";
     let output = kimi_truncated(block, "test big::case_3999 ... ok", "");
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "completed", "rawOutput": output})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "completed", "rawOutput": output})
+        ),
         EngramCommandExit::NotFinished
     );
     // The same block unwrapped, detached by the user, with foreground output.
     let detached = "task_id: bash-4\npid: 99\ndescription: suite\nstatus: running\ndetached_by_user: true\nautomatic_notification: true\nnext_step: The user moved this task to the background.\nhuman_shell_hint: The task is visible in the background-task panel.\n\nforeground_output:\nrunning 12 tests";
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "completed", "rawOutput": detached})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "completed", "rawOutput": detached})
+        ),
         EngramCommandExit::NotFinished
     );
 }
@@ -253,21 +268,39 @@ fn a_kimi_background_block_inside_the_truncation_wrapper_is_still_a_launch() {
 fn a_verbose_kimi_foreground_result_keeps_its_exit_behind_the_spill_reference() {
     // A noisy failure: the exit sentence closes the command's text and the
     // spill reference follows it, unwrapped and inside the wrapper.
-    let unwrapped = format!("test a ... FAILED\nCommand failed with exit code: 101.\n\n{KIMI_SPILL_REFERENCE}");
+    let unwrapped =
+        format!("test a ... FAILED\nCommand failed with exit code: 101.\n\n{KIMI_SPILL_REFERENCE}");
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "failed", "rawOutput": unwrapped})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "failed", "rawOutput": unwrapped})
+        ),
         EngramCommandExit::Code(101)
     );
-    let wrapped = kimi_truncated("running 4000 tests", "test result: FAILED. 3999 passed; 1 failed\nCommand failed with exit code: 101.", KIMI_SPILL_REFERENCE);
+    let wrapped = kimi_truncated(
+        "running 4000 tests",
+        "test result: FAILED. 3999 passed; 1 failed\nCommand failed with exit code: 101.",
+        KIMI_SPILL_REFERENCE,
+    );
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "failed", "rawOutput": wrapped})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "failed", "rawOutput": wrapped})
+        ),
         EngramCommandExit::Code(101)
     );
     // A noisy success carries the same spill reference, which is no
     // background block: `completed` is still its exit-0 report.
-    let passed = kimi_truncated("running 4000 tests", "test result: ok. 4000 passed; 0 failed", KIMI_SPILL_REFERENCE);
+    let passed = kimi_truncated(
+        "running 4000 tests",
+        "test result: ok. 4000 passed; 0 failed",
+        KIMI_SPILL_REFERENCE,
+    );
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "completed", "rawOutput": passed})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "completed", "rawOutput": passed})
+        ),
         EngramCommandExit::Code(0)
     );
 }
@@ -278,10 +311,16 @@ fn a_wrapped_kimi_background_block_is_a_launch_even_when_its_marker_was_elided()
     // `automatic_notification` into the elided middle; the block still opens
     // the original text, right after the head preview's marker.
     let long_description = "d".repeat(5000);
-    let head = format!("task_id: bash-5\npid: 77\ndescription: {}", &long_description[..4000]);
+    let head = format!(
+        "task_id: bash-5\npid: 77\ndescription: {}",
+        &long_description[..4000]
+    );
     let output = kimi_truncated(&head, "test case_12000 ... ok", "");
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "completed", "rawOutput": output})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "completed", "rawOutput": output})
+        ),
         EngramCommandExit::NotFinished
     );
 }
@@ -291,11 +330,16 @@ fn a_kimi_failure_keeps_its_exit_behind_the_per_line_truncation_pointer() {
     // Shortening long lines brought the text under the limit: the pointer is
     // appended right after the exit sentence, the spill reference after it.
     let pointer = "[Per-line truncation occurred; only the first 60000 characters (of 61000) were saved to a file.\noutput_path: C:/kimi/tool-results/Bash-tool-2.txt\nnext_step: Use Read with output_path to page through the saved output, or Grep to search it.]";
-    let with_spill = format!("very long line …\nCommand failed with exit code: 101.\n{pointer}\n\n{KIMI_SPILL_REFERENCE}");
+    let with_spill = format!(
+        "very long line …\nCommand failed with exit code: 101.\n{pointer}\n\n{KIMI_SPILL_REFERENCE}"
+    );
     let without_spill = format!("very long line …\nCommand failed with exit code: 2.\n{pointer}");
     for (output, code) in [(with_spill, 101), (without_spill, 2)] {
         assert_eq!(
-            engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "failed", "rawOutput": output})),
+            engram_acp_command_exit(
+                AcpAgent::Kimi,
+                &json!({"status": "failed", "rawOutput": output})
+            ),
             EngramCommandExit::Code(code)
         );
     }
@@ -304,12 +348,18 @@ fn a_kimi_failure_keeps_its_exit_behind_the_per_line_truncation_pointer() {
     // report.
     let extra = format!("Command failed with exit code: 2.\noutput_path: C:/x\n{pointer}");
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "failed", "rawOutput": extra})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "failed", "rawOutput": extra})
+        ),
         EngramCommandExit::Unknown
     );
     let stray_path = "Command failed with exit code: 2.\noutput_path: C:/x";
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "failed", "rawOutput": stray_path})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "failed", "rawOutput": stray_path})
+        ),
         EngramCommandExit::Unknown
     );
 }
@@ -320,7 +370,10 @@ fn a_failed_kimi_call_printing_a_background_block_still_reads_its_exit() {
     // prints such a block is still that test's failure.
     let output = "task_id: bash-1\npid: 1234\nautomatic_notification: true\nassertion failed\nCommand failed with exit code: 1.";
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "failed", "rawOutput": output})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "failed", "rawOutput": output})
+        ),
         EngramCommandExit::Code(1)
     );
 }
@@ -331,13 +384,19 @@ fn only_the_closing_kimi_exit_sentence_counts_and_failed_never_reads_as_zero() {
     // other than the producer's spill lines, is not the tool's exit report.
     let embedded = "Command failed with exit code: 3.\nCommand killed by timeout (60s)";
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "failed", "rawOutput": embedded})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "failed", "rawOutput": embedded})
+        ),
         EngramCommandExit::Unknown
     );
     // A `failed` call is never a success, whatever code its text names.
     let zero = "Command failed with exit code: 0.";
     assert_eq!(
-        engram_acp_command_exit(AcpAgent::Kimi, &json!({"status": "failed", "rawOutput": zero})),
+        engram_acp_command_exit(
+            AcpAgent::Kimi,
+            &json!({"status": "failed", "rawOutput": zero})
+        ),
         EngramCommandExit::Unknown
     );
 }
@@ -468,7 +527,10 @@ fn a_captured_kimi_test_run_is_recorded_as_passed_with_its_result_line() {
     );
     turn.wait_for_snapshots();
     let check = turn.record(|record| record.engram.active_turn_checks[0].clone());
-    let end = check.end.as_ref().expect("Kimi's terminal update ended the diagnostic");
+    let end = check
+        .end
+        .as_ref()
+        .expect("Kimi's terminal update ended the diagnostic");
     let summary = engram_check_summary(&check.command, end.exit, &end.result_lines);
     assert!(
         summary.starts_with("`cargo test --bin termal live_proof` exited 0\n"),
@@ -590,5 +652,9 @@ fn a_check_named_late_stays_overlapped_for_other_acp_agents() {
     // though diagnostic overlap prevents any verification claim. The late
     // description must not fabricate an observed start time.
     let request = finish_observed(&turn, "passed");
-    assert!(request["occurrence"]["observed_checks"][0].get("started_at").is_none());
+    assert!(
+        request["occurrence"]["observed_checks"][0]
+            .get("started_at")
+            .is_none()
+    );
 }

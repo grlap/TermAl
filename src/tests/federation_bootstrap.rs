@@ -60,14 +60,30 @@ fn federation_legacy_schema_upgrade_preserves_local_metadata() {
     let mut metadata =
         serde_json::to_value(PersistedState::metadata_from_inner(&StateInner::new())).unwrap();
     assert_eq!(
-        metadata.as_object_mut().unwrap().remove("engramSessionObligations"),
+        metadata
+            .as_object_mut()
+            .unwrap()
+            .remove("engramSessionObligations"),
         Some(json!(EngramSessionObligationLedger::empty())),
         "a primary-2 specimen cannot contain modern obligation custody"
     );
-    assert_eq!(metadata.as_object_mut().unwrap().remove("remoteTestRunFacts"), Some(json!({})),
-        "a primary-2 specimen cannot discard native completion custody");
-    connection.execute("INSERT INTO app_state(key,value_json) VALUES(?1,?2)",
-        rusqlite::params![SQLITE_METADATA_KEY, serde_json::to_string(&metadata).unwrap()]).unwrap();
+    assert_eq!(
+        metadata
+            .as_object_mut()
+            .unwrap()
+            .remove("remoteTestRunFacts"),
+        Some(json!({})),
+        "a primary-2 specimen cannot discard native completion custody"
+    );
+    connection
+        .execute(
+            "INSERT INTO app_state(key,value_json) VALUES(?1,?2)",
+            rusqlite::params![
+                SQLITE_METADATA_KEY,
+                serde_json::to_string(&metadata).unwrap()
+            ],
+        )
+        .unwrap();
     let before: String = connection
         .query_row(
             "SELECT value_json FROM app_state WHERE key = ?1",
@@ -88,7 +104,16 @@ fn federation_legacy_schema_upgrade_preserves_local_metadata() {
     let current = read_persisted_metadata_json(&connection).unwrap().unwrap();
     let restored: PersistedState = serde_json::from_str(&current).unwrap();
     let original: Value = serde_json::from_str(&before).unwrap();
-    assert_eq!(json!(restored.next_session_number), original["nextSessionNumber"]);
-    assert_eq!(json!(restored.next_message_number), original["nextMessageNumber"]);
-    assert_eq!(serde_json::to_value(restored.projects).unwrap(), original["projects"]);
+    assert_eq!(
+        json!(restored.next_session_number),
+        original["nextSessionNumber"]
+    );
+    assert_eq!(
+        json!(restored.next_message_number),
+        original["nextMessageNumber"]
+    );
+    assert_eq!(
+        serde_json::to_value(restored.projects).unwrap(),
+        original["projects"]
+    );
 }

@@ -5,10 +5,18 @@ use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 fn wire(state: &AppState, session: &str) -> Value {
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(session).unwrap()];
-    serde_json::to_value(AppState::wire_session_from_record(&state.server_instance_id, record)).unwrap()
+    serde_json::to_value(AppState::wire_session_from_record(
+        &state.server_instance_id,
+        record,
+    ))
+    .unwrap()
 }
 
-fn change_record<T>(state: &AppState, session: &str, change: impl FnOnce(&mut SessionRecord) -> T) -> T {
+fn change_record<T>(
+    state: &AppState,
+    session: &str,
+    change: impl FnOnce(&mut SessionRecord) -> T,
+) -> T {
     let mut inner = state.inner.lock().unwrap();
     change(inner.session_mut(session).unwrap())
 }
@@ -20,13 +28,26 @@ fn removed_admission_budget_wire_fields_are_not_restored_as_permission_or_displa
     let original = json!({"admittedAt":"2026-10-20T10:00:00Z","deadline":"2026-10-20T10:04:00Z",
         "attempts":3,"renewedAt":"2026-10-20T10:05:00Z","unknown":[null,"unchanged"]});
     turn.edit(|record| {
-        record.engram.historical_control.insert("engramBeginPreparationLineage".into(), original.clone());
+        record
+            .engram
+            .historical_control
+            .insert("engramBeginPreparationLineage".into(), original.clone());
     });
     let mut encoded = turn.saved();
     encoded["session"]["promptAdmissionBudgets"] = json!({"old-head":original});
-    let loaded = serde_json::from_value::<PersistedSessionRecord>(encoded).unwrap().into_record().unwrap();
-    assert_eq!(loaded.engram.historical_control["engramBeginPreparationLineage"], original);
-    let view = serde_json::to_value(AppState::wire_session_from_record(&turn.state.server_instance_id, &loaded)).unwrap();
+    let loaded = serde_json::from_value::<PersistedSessionRecord>(encoded)
+        .unwrap()
+        .into_record()
+        .unwrap();
+    assert_eq!(
+        loaded.engram.historical_control["engramBeginPreparationLineage"],
+        original
+    );
+    let view = serde_json::to_value(AppState::wire_session_from_record(
+        &turn.state.server_instance_id,
+        &loaded,
+    ))
+    .unwrap();
     assert!(view["promptAdmissionBudgets"].is_null());
     assert!(loaded.prompt_deliveries.is_empty());
     turn.assert_no_prompt();
@@ -36,19 +57,35 @@ fn removed_admission_budget_wire_fields_are_not_restored_as_permission_or_displa
 fn actual_enqueue(source: QueuedPromptSource, receiver_closed: bool) {
     let mut turn = OrdinaryRoot::new("actual-handoff-observation");
     let id = turn.enqueue("ordinary observed prompt", source);
-    let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap();
-    assert!(wire(&turn.state, &turn.session)["providerHandoffs"].as_array().is_none_or(Vec::is_empty),
-        "preparation is not an enqueue");
+    let started = turn
+        .state
+        .start_next_queued_turn_off_lock(&turn.session, false, false)
+        .unwrap()
+        .unwrap();
+    assert!(
+        wire(&turn.state, &turn.session)["providerHandoffs"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "preparation is not an enqueue"
+    );
     let (_, empty) = mpsc::channel();
     let receiver = std::mem::replace(&mut turn.receiver, empty);
     let mut receiver = Some(receiver);
-    if receiver_closed { drop(receiver.take()); }
+    if receiver_closed {
+        drop(receiver.take());
+    }
     let outcome = handoff_prepared_turn_dispatch(&turn.state, started.dispatch);
     if receiver_closed {
         assert!(outcome.is_err(), "the actual receiver was closed");
     } else {
-        assert!(matches!(outcome.unwrap(), HandoffPreparedTurnDispatchOutcome::Delivered));
-        assert!(matches!(receiver.as_ref().unwrap().try_recv().unwrap(), CodexRuntimeCommand::Prompt { .. }));
+        assert!(matches!(
+            outcome.unwrap(),
+            HandoffPreparedTurnDispatchOutcome::Delivered
+        ));
+        assert!(matches!(
+            receiver.as_ref().unwrap().try_recv().unwrap(),
+            CodexRuntimeCommand::Prompt { .. }
+        ));
         assert!(receiver.as_ref().unwrap().try_recv().is_err());
     }
     let view = wire(&turn.state, &turn.session);
@@ -58,14 +95,30 @@ fn actual_enqueue(source: QueuedPromptSource, receiver_closed: bool) {
     assert_eq!(row["sessionId"], turn.session);
     assert_eq!(row["projectId"], turn.project);
     assert_eq!(row["promptId"], id);
-    assert_eq!(row["source"], match source {
-        QueuedPromptSource::User => "user", QueuedPromptSource::Human => "human",
-        QueuedPromptSource::Mailbox => "mailbox", QueuedPromptSource::Orchestrator => "orchestrator",
-    });
-    assert_eq!(row["outcome"], if receiver_closed { "enqueueFailed" } else { "enqueued" });
+    assert_eq!(
+        row["source"],
+        match source {
+            QueuedPromptSource::User => "user",
+            QueuedPromptSource::Human => "human",
+            QueuedPromptSource::Mailbox => "mailbox",
+            QueuedPromptSource::Orchestrator => "orchestrator",
+        }
+    );
+    assert_eq!(
+        row["outcome"],
+        if receiver_closed {
+            "enqueueFailed"
+        } else {
+            "enqueued"
+        }
+    );
     chrono::DateTime::parse_from_rfc3339(row["at"].as_str().unwrap()).unwrap();
     turn.record(|record| assert!(record.prompt_deliveries.is_empty()));
-    assert!(view["promptDeliveries"].as_array().is_none_or(Vec::is_empty));
+    assert!(
+        view["promptDeliveries"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
     turn.assert_no_control();
 }
 
@@ -94,8 +147,10 @@ fn prompt_observation_orchestrator_enqueues_keep_the_queued_source() {
 fn prompt_observation_direct_idle_dispatch_uses_the_user_source() {
     let turn = OrdinaryRoot::new("direct-user-handoff-observation");
     let dispatch = turn.prepare("Direct ordinary prompt.");
-    assert!(matches!(handoff_prepared_turn_dispatch(&turn.state, dispatch).unwrap(),
-        HandoffPreparedTurnDispatchOutcome::Delivered));
+    assert!(matches!(
+        handoff_prepared_turn_dispatch(&turn.state, dispatch).unwrap(),
+        HandoffPreparedTurnDispatchOutcome::Delivered
+    ));
     turn.prompt();
     turn.assert_no_prompt();
     let view = wire(&turn.state, &turn.session);
@@ -165,9 +220,8 @@ fn observed_session_fixture() -> (OrdinaryRoot, Session) {
     let session = &turn.session;
     turn.enqueue("retained observed prompt", QueuedPromptSource::User);
     seed_observation(&state, &session, 1, "2026-10-20T10:00:00Z");
-    let projected = turn.record(|record| {
-        AppState::wire_session_from_record(&state.server_instance_id, record)
-    });
+    let projected =
+        turn.record(|record| AppState::wire_session_from_record(&state.server_instance_id, record));
     assert!(!projected.provider_handoffs.is_empty());
     assert!(projected.provider_handoff_history.is_some());
     (turn, projected)
@@ -201,7 +255,8 @@ fn prompt_observation_serialization_and_restore_drop_seeded_wire_fields() {
     ] {
         encoded["session"][field] = wire_fields[field].clone();
     }
-    encoded["session"]["promptAdmissionBudgets"] = json!({"old-head":{"originalDeadline":"historical-only"}});
+    encoded["session"]["promptAdmissionBudgets"] =
+        json!({"old-head":{"originalDeadline":"historical-only"}});
     let loaded = serde_json::from_value::<PersistedSessionRecord>(encoded)
         .unwrap()
         .into_record()

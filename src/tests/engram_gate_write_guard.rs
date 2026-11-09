@@ -100,8 +100,9 @@ fn assert_allowed(decision: &ClaudePermissionDecision, why: &str) {
 fn assert_allowed_request(decision: &ClaudePermissionDecision, expected_id: &str) {
     match decision {
         ClaudePermissionDecision::Allow { request_id, .. } => assert_eq!(request_id, expected_id),
-        ClaudePermissionDecision::Deny { message, .. } =>
-            panic!("{expected_id}: ordinary policy unexpectedly denied: {message}"),
+        ClaudePermissionDecision::Deny { message, .. } => {
+            panic!("{expected_id}: ordinary policy unexpectedly denied: {message}")
+        }
     }
 }
 
@@ -279,7 +280,10 @@ fn ask_acceptance_and_rejection_are_not_overridden_by_a_carried_artifact() {
         None,
     );
     let (answers, modes) = requester.received();
-    assert!(answers.is_empty() && modes.is_empty(), "Ask has not authorized anything");
+    assert!(
+        answers.is_empty() && modes.is_empty(),
+        "Ask has not authorized anything"
+    );
     let message_id = {
         let inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&writer).unwrap();
@@ -296,24 +300,42 @@ fn ask_acceptance_and_rejection_are_not_overridden_by_a_carried_artifact() {
         .expect("the approval is delivered");
     let (answers, modes) = requester.received();
     assert_eq!(answers.len(), 1);
-    assert!(modes.is_empty(), "one acceptance does not change the session mode");
+    assert!(
+        modes.is_empty(),
+        "one acceptance does not change the session mode"
+    );
     assert_allowed_request(&answers[0], "delayed-edit");
     assert_eq!(
         turn.record(|record| record.engram.carried_checks[0].fence.clone()),
         None,
         "a permission response is not a tool write"
     );
-    requester.request("rejected-edit", "Edit", file_writes(&target)[1].2.clone(), None);
+    requester.request(
+        "rejected-edit",
+        "Edit",
+        file_writes(&target)[1].2.clone(),
+        None,
+    );
     let (answers, modes) = requester.received();
     assert!(answers.is_empty() && modes.is_empty());
     let rejected_id = {
         let inner = turn.state.inner.lock().unwrap();
         let index = inner.find_session_index(&writer).unwrap();
-        inner.sessions[index].pending_claude_approvals.keys().next().unwrap().clone()
+        inner.sessions[index]
+            .pending_claude_approvals
+            .keys()
+            .next()
+            .unwrap()
+            .clone()
     };
-    turn.state.update_approval(&writer, &rejected_id, ApprovalDecision::Rejected).unwrap();
+    turn.state
+        .update_approval(&writer, &rejected_id, ApprovalDecision::Rejected)
+        .unwrap();
     match requester.answer() {
-        ClaudePermissionDecision::Deny { request_id, message } => {
+        ClaudePermissionDecision::Deny {
+            request_id,
+            message,
+        } => {
             assert_eq!(request_id, "rejected-edit");
             assert_eq!(message, "User rejected this action in TermAl.");
         }
@@ -337,7 +359,10 @@ fn accepted_for_session_delivers_its_offered_mode_despite_a_carried_artifact() {
         "request": request}),
     );
     let (answers, modes) = requester.received();
-    assert!(answers.is_empty() && modes.is_empty(), "Ask waits for the session decision");
+    assert!(
+        answers.is_empty() && modes.is_empty(),
+        "Ask waits for the session decision"
+    );
     let message_id = {
         let inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&writer).unwrap();
@@ -360,8 +385,11 @@ fn accepted_for_session_delivers_its_offered_mode_despite_a_carried_artifact() {
     let (answers, modes) = requester.received();
     assert_eq!(answers.len(), 1, "one answer");
     assert_allowed_request(&answers[0], "session-edit");
-    assert_eq!(modes, vec!["acceptEdits".to_owned()],
-        "AcceptedForSession delivers the offered ordinary session mode");
+    assert_eq!(
+        modes,
+        vec!["acceptEdits".to_owned()],
+        "AcceptedForSession delivers the offered ordinary session mode"
+    );
     assert_ordinary_turn_has_no_native_requests(&turn);
 }
 
@@ -397,10 +425,16 @@ fn a_delayed_approval_preserves_relative_input_after_the_session_moves() {
         .update_approval(&writer, &message_id, ApprovalDecision::Accepted)
         .expect("the approval is delivered");
     match requester.answer() {
-        ClaudePermissionDecision::Allow { request_id, updated_input } => {
+        ClaudePermissionDecision::Allow {
+            request_id,
+            updated_input,
+        } => {
             assert_eq!(request_id, "delayed-relative");
-            assert_eq!(updated_input, json!({
-                "file_path": "README.md", "old_string": "checked", "new_string": "changed"}));
+            assert_eq!(
+                updated_input,
+                json!({
+                "file_path": "README.md", "old_string": "checked", "new_string": "changed"})
+            );
         }
         ClaudePermissionDecision::Deny { message, .. } => panic!("{message}"),
     }
@@ -467,31 +501,58 @@ fn ordinary_permissions_cover_nested_beside_scratch_ignored_and_tracked_targets(
 fn carried_artifact_states_do_not_override_ordinary_permission_policy() {
     let expired = (chrono::Utc::now()
         - chrono::Duration::seconds(ENGRAM_CARRIED_CHECK_TTL_SECONDS + 60))
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let cases: Vec<(&str, Box<dyn Fn(&mut EngramCarriedCheck)>)> = vec![
-        ("fenced", Box::new(|carried| carried.fence = Some("an earlier write".to_owned()))),
-        ("by-report", Box::new(|carried| carried.ends_by_report = true)),
-        ("expired", Box::new(move |carried| carried.check.started_at = expired.clone())),
-        ("launcher-gone", Box::new(|carried| carried.launcher_gone = true)),
+        (
+            "fenced",
+            Box::new(|carried| carried.fence = Some("an earlier write".to_owned())),
+        ),
+        (
+            "by-report",
+            Box::new(|carried| carried.ends_by_report = true),
+        ),
+        (
+            "expired",
+            Box::new(move |carried| carried.check.started_at = expired.clone()),
+        ),
+        (
+            "launcher-gone",
+            Box::new(|carried| carried.launcher_gone = true),
+        ),
         ("ambiguous", Box::new(|carried| carried.ambiguous = true)),
-        ("conflict", Box::new(|carried| {
-            carried.terminal_digest = Some("a".repeat(64));
-            carried.terminal_conflict = true;
-        })),
-        ("ended", Box::new(|carried| carried.terminal_digest = Some("a".repeat(64)))),
+        (
+            "conflict",
+            Box::new(|carried| {
+                carried.terminal_digest = Some("a".repeat(64));
+                carried.terminal_conflict = true;
+            }),
+        ),
+        (
+            "ended",
+            Box::new(|carried| carried.terminal_digest = Some("a".repeat(64))),
+        ),
     ];
     for (label, change) in cases {
         let (turn, worktree) = ordinary_carried_turn(&format!("ordinary-policy-state-{label}"));
-        let elsewhere = sibling_worktree(&turn, &format!("ordinary-policy-state-{label}-elsewhere"));
+        let elsewhere =
+            sibling_worktree(&turn, &format!("ordinary-policy-state-{label}-elsewhere"));
         let writer = claude_session_in(&turn, &elsewhere);
         ordinary_launch_gate(&turn, &worktree, false);
         turn.record_mut(|record| change(&mut record.engram.carried_checks[0]));
         let before = fs::read(worktree.join("README.md")).unwrap();
         let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::AutoApprove);
-        requester.request(label, "Edit", file_writes(&worktree.join("README.md"))[1].2.clone(), None);
+        requester.request(
+            label,
+            "Edit",
+            file_writes(&worktree.join("README.md"))[1].2.clone(),
+            None,
+        );
         assert_allowed_request(&requester.answer(), label);
-        assert_eq!(fs::read(worktree.join("README.md")).unwrap(), before,
-            "permission delivery does not execute the tool");
+        assert_eq!(
+            fs::read(worktree.join("README.md")).unwrap(),
+            before,
+            "permission delivery does not execute the tool"
+        );
         assert_ordinary_turn_has_no_native_requests(&turn);
     }
 }
@@ -503,14 +564,20 @@ fn an_ended_artifact_and_a_changed_focus_do_not_create_a_permission_release_gate
     let writer = claude_session_in(&turn, &elsewhere);
     ordinary_launch_gate(&turn, &worktree, false);
     let digest = "a".repeat(64);
-    turn.record_mut(|record| record.engram.carried_checks[0].terminal_digest = Some(digest.clone()));
+    turn.record_mut(|record| {
+        record.engram.carried_checks[0].terminal_digest = Some(digest.clone())
+    });
     let before = fs::read(worktree.join("README.md")).unwrap();
     let mut requester = Requester::on(&turn.state, &writer, ClaudeApprovalMode::AutoApprove);
     let edit = file_writes(&worktree.join("README.md"))[1].2.clone();
     requester.request("still-focused", "Edit", edit.clone(), None);
     assert_allowed_request(&requester.answer(), "still-focused");
     turn.record_mut(|record| {
-        record.engram.work_binding.as_mut().expect("the ordinary holder has a claim")
+        record
+            .engram
+            .work_binding
+            .as_mut()
+            .expect("the ordinary holder has a claim")
             .claim_id = "another-claim".to_owned();
     });
     requester.request("moved-focus", "Edit", edit, None);

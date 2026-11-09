@@ -143,9 +143,7 @@ impl EngramHost<'_> {
     /// Called under the state lock, by the dispatch that holds it, before the
     /// prompt's host line is composed.
     pub(crate) fn turn_prompt_composing(record: &mut SessionRecord) {
-        for line in
-            engram_close_unended_checks(&mut record.engram, None, "the next turn's start")
-        {
+        for line in engram_close_unended_checks(&mut record.engram, None, "the next turn's start") {
             engram_publish_check_notice(
                 &record.session.id,
                 &mut record.engram,
@@ -192,7 +190,8 @@ impl EngramHost<'_> {
         self.state.note_engram_session_worktree_off_lock(session_id);
         // Retained runs of the opened work are read back in the background,
         // never on this caller's thread.
-        self.state.schedule_engram_retained_run_reads(Some(session_id));
+        self.state
+            .schedule_engram_retained_run_reads(Some(session_id));
     }
 
     /// The turn of the session at `index` started. Called under the state
@@ -283,11 +282,17 @@ impl EngramHost<'_> {
     /// process is still running. Forward only this nonterminal reply to the
     /// existing observation owner; ordinary Running transcript updates stay
     /// presentation-only, as do full launchers. No terminal proof is supplied here.
-    pub(crate) fn is_nonterminal_launcher_reply(command: &str, exit: Option<EngramCommandExit>) -> bool {
+    pub(crate) fn is_nonterminal_launcher_reply(
+        command: &str,
+        exit: Option<EngramCommandExit>,
+    ) -> bool {
         exit == Some(EngramCommandExit::NotFinished)
-            && engram_check_command(command).is_some_and(|check|
-                check.simple && !check.literal_pipe && !engram_check_is_launcher_full(&check)
-                    && engram_launcher_words(&check).is_some())
+            && engram_check_command(command).is_some_and(|check| {
+                check.simple
+                    && !check.literal_pipe
+                    && !engram_check_is_launcher_full(&check)
+                    && engram_launcher_words(&check).is_some()
+            })
     }
 
     /// Whether a recognized command is a full launcher run.
@@ -297,7 +302,10 @@ impl EngramHost<'_> {
 
     /// Whether this result describes a launch rather than the test run's end.
     pub(crate) fn is_launch_only(command: &EngramCheckCommand, exit: EngramCommandExit) -> bool {
-        !matches!(engram_launch_disposition(command, exit), EngramLaunchDisposition::Ordinary)
+        !matches!(
+            engram_launch_disposition(command, exit),
+            EngramLaunchDisposition::Ordinary
+        )
     }
 
     /// Resolves the check component's artifact directory; call outside StateInner.
@@ -407,7 +415,10 @@ impl EngramHost<'_> {
 
     /// The lines the holders of a session's carried checks get when a
     /// project settings change ends its claim association.
-    pub(crate) fn carried_checks_association_reset_lines(record: &SessionRecord, why: &str) -> Vec<String> {
+    pub(crate) fn carried_checks_association_reset_lines(
+        record: &SessionRecord,
+        why: &str,
+    ) -> Vec<String> {
         engram_carried_checks_association_reset_lines(record, why)
     }
 }

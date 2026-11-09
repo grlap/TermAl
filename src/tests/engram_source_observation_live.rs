@@ -8,38 +8,98 @@ fn source_observation_live_gitlink_reports_outcome_and_declared_check_only() {
     // telemetry and its failing TRX are fixtures, not a native test-credit run.
     let fixture = completion_fixture();
     let session = &fixture.live.session_id;
-    let added = fixture.work(session, &["add", "Observe checks without submodule source attribution", "--json"]);
-    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    let added = fixture.work(
+        session,
+        &[
+            "add",
+            "Observe checks without submodule source attribution",
+            "--json",
+        ],
+    );
+    let work = added["work"]["short_ref"]
+        .as_str()
+        .or_else(|| added["short_ref"].as_str())
+        .unwrap();
     fixture.work(session, &["claim", work, "--json"]);
-    fixture.live.state.name_engram_source_root(session, EngramSourceRootRequest {
-        work: work.to_owned(), path: Some(Some(fixture.root.to_string_lossy().into_owned())),
-    }).unwrap();
+    fixture
+        .live
+        .state
+        .name_engram_source_root(
+            session,
+            EngramSourceRootRequest {
+                work: work.to_owned(),
+                path: Some(Some(fixture.root.to_string_lossy().into_owned())),
+            },
+        )
+        .unwrap();
     fs::write(fixture.root.join("termal-tests.toml"),
         "[[test]]\ncommand = \"dotnet test\"\ncwd = \".\"\nartifact = \".termal-results/check.trx\"\n").unwrap();
     let ignored = fs::read_to_string(fixture.root.join(".gitignore")).unwrap_or_default();
-    fs::write(fixture.root.join(".gitignore"), format!("{ignored}\n.termal-results/\n")).unwrap();
+    fs::write(
+        fixture.root.join(".gitignore"),
+        format!("{ignored}\n.termal-results/\n"),
+    )
+    .unwrap();
     let head = run_git_test_command_output(&fixture.root, &["rev-parse", "HEAD"]);
-    run_git_test_command(&fixture.root, &["update-index", "--add", "--cacheinfo", "160000", head.trim(), "child"]);
-    assert!(matches!(engram_execution_source_capture_with(&fixture.root, false),
-        Err(SourceBasisRefusal::UnsupportedGitlinks)));
-    fixture.begin(session, "Observe the declared result while submodule measurement is unavailable.");
+    run_git_test_command(
+        &fixture.root,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000",
+            head.trim(),
+            "child",
+        ],
+    );
+    assert!(matches!(
+        engram_execution_source_capture_with(&fixture.root, false),
+        Err(SourceBasisRefusal::UnsupportedGitlinks)
+    ));
+    fixture.begin(
+        session,
+        "Observe the declared result while submodule measurement is unavailable.",
+    );
     let mut recorder = SessionRecorder::new(fixture.live.state.clone(), session.to_owned());
-    recorder.command_started_in("gitlink-declared-check", "dotnet test", Some("dotnet test"),
-        Some(&fixture.root.to_string_lossy())).unwrap();
+    recorder
+        .command_started_in(
+            "gitlink-declared-check",
+            "dotnet test",
+            Some("dotnet test"),
+            Some(&fixture.root.to_string_lossy()),
+        )
+        .unwrap();
     fs::create_dir_all(fixture.root.join(".termal-results")).unwrap();
-    fs::write(fixture.root.join(".termal-results/check.trx"), include_bytes!(
-        "fixtures/declared-trx/fail.trx")).unwrap();
-    recorder.command_completed_with_exit("gitlink-declared-check", "dotnet test", "process exited zero",
-        CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    fs::write(
+        fixture.root.join(".termal-results/check.trx"),
+        include_bytes!("fixtures/declared-trx/fail.trx"),
+    )
+    .unwrap();
+    recorder
+        .command_completed_with_exit(
+            "gitlink-declared-check",
+            "dotnet test",
+            "process exited zero",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
     let requests = fixture.live.transport.requests_for("execution_observe");
-    assert_eq!(requests.len(), 1, "the unmeasured close emits no source sighting");
+    assert_eq!(
+        requests.len(),
+        1,
+        "the unmeasured close emits no source sighting"
+    );
     let occurrence = &requests[0]["occurrence"];
     assert_eq!(occurrence["kind"], "unadmitted_turn");
     assert!(occurrence["source_change"].is_null());
     assert_eq!(occurrence["observed_checks"].as_array().unwrap().len(), 1);
-    assert_eq!(occurrence["observed_checks"][0]["observed_result"], "failed");
+    assert_eq!(
+        occurrence["observed_checks"][0]["observed_result"],
+        "failed"
+    );
     assert!(occurrence["observed_checks"][0]["source_basis"].is_null());
     let receipt = fixture.record(session, |record| {
         assert!(record.engram.runtime_checkpoint.is_none());
@@ -55,9 +115,18 @@ fn source_observation_live_gitlink_reports_outcome_and_declared_check_only() {
     recorded_occurrence["observed_checks"] = json!([{
         "check": occurrence["observed_checks"][0], "credit": "uncredited",
     }]);
-    assert!(fixture.object(receipt["observation"].as_str().unwrap())["occurrence"] == recorded_occurrence,
-        "the exact occurrence remains stored");
-    assert!(fixture.live.transport.requests_for("verification_record").is_empty());
+    assert!(
+        fixture.object(receipt["observation"].as_str().unwrap())["occurrence"]
+            == recorded_occurrence,
+        "the exact occurrence remains stored"
+    );
+    assert!(
+        fixture
+            .live
+            .transport
+            .requests_for("verification_record")
+            .is_empty()
+    );
     assert_no_live_turn_gate(&fixture.live.transport);
 }
 
@@ -66,30 +135,71 @@ fn source_observation_live_gitlink_reports_outcome_and_declared_check_only() {
 fn source_observation_live_delete_recovers_original_committed_reply() {
     let fixture = completion_fixture();
     let session = &fixture.live.session_id;
-    let added = fixture.work(session, &["add", "Recover tracking before deletion", "--json"]);
-    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    let added = fixture.work(
+        session,
+        &["add", "Recover tracking before deletion", "--json"],
+    );
+    let work = added["work"]["short_ref"]
+        .as_str()
+        .or_else(|| added["short_ref"].as_str())
+        .unwrap();
     fixture.work(session, &["claim", work, "--json"]);
-    fixture.live.state.name_engram_source_root(session, EngramSourceRootRequest {
-        work: work.to_owned(), path: Some(Some(fixture.root.to_string_lossy().into_owned())),
-    }).unwrap();
+    fixture
+        .live
+        .state
+        .name_engram_source_root(
+            session,
+            EngramSourceRootRequest {
+                work: work.to_owned(),
+                path: Some(Some(fixture.root.to_string_lossy().into_owned())),
+            },
+        )
+        .unwrap();
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
-    *fixture.live.transport.reply_pause.lock().unwrap() = Some(("execution_observe".to_owned(), entered_tx, release_rx));
-    fixture.live.transport.faults.lock().unwrap().push_back(BoundaryFault::DropAfterReply { operation: "execution_observe" });
-    fixture.begin(session, "Keep the original delivered prompt and its observation.");
+    *fixture.live.transport.reply_pause.lock().unwrap() =
+        Some(("execution_observe".to_owned(), entered_tx, release_rx));
+    fixture
+        .live
+        .transport
+        .faults
+        .lock()
+        .unwrap()
+        .push_back(BoundaryFault::DropAfterReply {
+            operation: "execution_observe",
+        });
+    fixture.begin(
+        session,
+        "Keep the original delivered prompt and its observation.",
+    );
     finish_live_root(&fixture.live.state, session);
-    entered_rx.recv_timeout(DEADLOCK_GUARD).expect("the real producer committed before the boundary pause");
+    entered_rx
+        .recv_timeout(DEADLOCK_GUARD)
+        .expect("the real producer committed before the boundary pause");
     let retained = fixture.record(session, |record| {
         assert_eq!(record.engram.unadmitted_reports.len(), 1);
         serde_json::to_value(&record.engram.unadmitted_reports[0]).unwrap()
     });
-    let saved: Value = serde_json::from_str(&persisted_session_json(&fixture.live.state, session)).unwrap();
-    assert!(saved["engramUnadmittedReports"][0] == retained, "real committed session row owns the original report");
-    let loaded = load_state(fixture.live.state.persistence_path.as_path()).unwrap().unwrap();
+    let saved: Value =
+        serde_json::from_str(&persisted_session_json(&fixture.live.state, session)).unwrap();
+    assert!(
+        saved["engramUnadmittedReports"][0] == retained,
+        "real committed session row owns the original report"
+    );
+    let loaded = load_state(fixture.live.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
     let loaded_record = &loaded.sessions[loaded.find_session_index(session).unwrap()];
-    assert!(serde_json::to_value(&loaded_record.engram.unadmitted_reports[0]).unwrap() == retained,
-        "the exact report survives reload");
-    let error = fixture.live.state.kill_session(session).err().expect("Delete keeps the unresolved original report");
+    assert!(
+        serde_json::to_value(&loaded_record.engram.unadmitted_reports[0]).unwrap() == retained,
+        "the exact report survives reload"
+    );
+    let error = fixture
+        .live
+        .state
+        .kill_session(session)
+        .err()
+        .expect("Delete keeps the unresolved original report");
     assert!(error.message.contains("Session kept"), "<details withheld>");
     fixture.record(session, |record| {
         assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
@@ -100,13 +210,35 @@ fn source_observation_live_delete_recovers_original_committed_reply() {
     fixture.wait_for_reports(session);
     let observations = fixture.live.transport.requests_for("execution_observe");
     let original = observations.first().unwrap();
-    let replay = observations.iter().filter(|request| request["idempotency_key"] == original["idempotency_key"]).collect::<Vec<_>>();
-    assert_eq!(replay.len(), 2, "one discarded committed reply and one exact recovery");
-    assert!(replay[0] == replay[1], "source timestamps, claim, policy, interval and key replay byte-for-byte");
-    assert!(fixture.live.receiver.try_recv().is_err(), "report retry cannot redeliver the provider prompt");
+    let replay = observations
+        .iter()
+        .filter(|request| request["idempotency_key"] == original["idempotency_key"])
+        .collect::<Vec<_>>();
+    assert_eq!(
+        replay.len(),
+        2,
+        "one discarded committed reply and one exact recovery"
+    );
+    assert!(
+        replay[0] == replay[1],
+        "source timestamps, claim, policy, interval and key replay byte-for-byte"
+    );
+    assert!(
+        fixture.live.receiver.try_recv().is_err(),
+        "report retry cannot redeliver the provider prompt"
+    );
     assert_no_live_turn_gate(&fixture.live.transport);
     fixture.live.state.kill_session(session).unwrap();
-    assert!(fixture.live.state.inner.lock().unwrap().find_session_index(session).is_none());
+    assert!(
+        fixture
+            .live
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .find_session_index(session)
+            .is_none()
+    );
 }
 
 #[test]
@@ -115,70 +247,146 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
     for named in [true, false] {
         let fixture = completion_fixture();
         let session = &fixture.live.session_id;
-        let added = fixture.work(session, &["add", "Check source observation freshness", "--accept",
-            "A test passes at the current source", "--bind", "1=test", "--json"]);
-        let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+        let added = fixture.work(
+            session,
+            &[
+                "add",
+                "Check source observation freshness",
+                "--accept",
+                "A test passes at the current source",
+                "--bind",
+                "1=test",
+                "--json",
+            ],
+        );
+        let work = added["work"]["short_ref"]
+            .as_str()
+            .or_else(|| added["short_ref"].as_str())
+            .unwrap();
         fixture.work(session, &["claim", work, "--json"]);
         if !named {
             unnamed_source_interval(&fixture, session, work);
             continue;
         }
-        fixture.live.state.name_engram_source_root(session, EngramSourceRootRequest {
-            work: work.to_owned(), path: Some(Some(fixture.root.to_string_lossy().into_owned())),
-        }).unwrap();
+        fixture
+            .live
+            .state
+            .name_engram_source_root(
+                session,
+                EngramSourceRootRequest {
+                    work: work.to_owned(),
+                    path: Some(Some(fixture.root.to_string_lossy().into_owned())),
+                },
+            )
+            .unwrap();
         fixture.begin(session, "Check the first revision.");
         let source_now = || {
             let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
-            let owner = fixture.live.state.source_owner_metadata_until(session, deadline).unwrap();
+            let owner = fixture
+                .live
+                .state
+                .source_owner_metadata_until(session, deadline)
+                .unwrap();
             engram_source_id_until(&owner, &fixture.root, deadline).unwrap()
         };
         let before = source_now();
-        let (body, receipt) = fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
+        let (body, receipt) =
+            fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
         let verification = &receipt.verifications[0].record_id;
         let original_check = fixture.object(verification);
-        assert!(original_check["source_basis"] == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap(),
-            "the original check retains its complete prepared basis");
+        assert!(
+            original_check["source_basis"]
+                == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap(),
+            "the original check retains its complete prepared basis"
+        );
         finish_live_root(&fixture.live.state, session);
         fixture.wait_for_reports(session);
-        let prior_requests = fixture.live.transport.requests_for("execution_observe").len();
-        fs::write(fixture.root.join("README.md"), "changed between ordinary turns\n").unwrap();
+        let prior_requests = fixture
+            .live
+            .transport
+            .requests_for("execution_observe")
+            .len();
+        fs::write(
+            fixture.root.join("README.md"),
+            "changed between ordinary turns\n",
+        )
+        .unwrap();
         let changed = source_now();
         assert!(changed != before, "the full identity records the real edit");
-        fixture.begin(session, "Inspect quietly without running a check or writing source.");
+        fixture.begin(
+            session,
+            "Inspect quietly without running a check or writing source.",
+        );
         finish_live_root(&fixture.live.state, session);
         fixture.wait_for_reports(session);
         let requests = fixture.live.transport.requests_for("execution_observe");
         let current = &requests[prior_requests..];
-        let change = current.iter().find_map(|request| request["occurrence"].get("source_change")
-            .filter(|change| change["detection"] == "content_comparison")).expect("the real closing capture accounts for the interval");
-        assert!(change["baseline"]["source_id"] == serde_json::to_value(&before).unwrap(),
-            "the baseline retains the complete original identity");
-        assert!(change["sighting"]["source_basis"]["source_id"] == serde_json::to_value(&changed).unwrap(),
-            "the sighting retains the complete changed identity");
+        let change = current
+            .iter()
+            .find_map(|request| {
+                request["occurrence"]
+                    .get("source_change")
+                    .filter(|change| change["detection"] == "content_comparison")
+            })
+            .expect("the real closing capture accounts for the interval");
+        assert!(
+            change["baseline"]["source_id"] == serde_json::to_value(&before).unwrap(),
+            "the baseline retains the complete original identity"
+        );
+        assert!(
+            change["sighting"]["source_basis"]["source_id"]
+                == serde_json::to_value(&changed).unwrap(),
+            "the sighting retains the complete changed identity"
+        );
         assert!(change["baseline"].get("source_revision").is_none());
-        assert!(change["sighting"]["source_basis"].get("source_revision").is_none());
+        assert!(
+            change["sighting"]["source_basis"]
+                .get("source_revision")
+                .is_none()
+        );
         let actual_receipt = fixture.record(session, |record| {
-            record.engram.unadmitted_reports.iter().flat_map(|report| &report.envelopes)
+            record
+                .engram
+                .unadmitted_reports
+                .iter()
+                .flat_map(|report| &report.envelopes)
                 .find_map(|envelope| {
-                    if envelope.request["occurrence"]["source_change"] != *change { return None; }
+                    if envelope.request["occurrence"]["source_change"] != *change {
+                        return None;
+                    }
                     match &envelope.delivery {
-                        EngramRuntimeObservationDelivery::Recorded { receipt } => Some(receipt.clone()),
+                        EngramRuntimeObservationDelivery::Recorded { receipt } => {
+                            Some(receipt.clone())
+                        }
                         _ => None,
                     }
-                }).expect("the actual producer acknowledged this exact source change")
+                })
+                .expect("the actual producer acknowledged this exact source change")
         });
         let stored_observation = fixture.object(actual_receipt["observation"].as_str().unwrap());
-        assert!(stored_observation["occurrence"]["source_change"] == *change,
-            "the exact source change was durably retained");
+        assert!(
+            stored_observation["occurrence"]["source_change"] == *change,
+            "the exact source change was durably retained"
+        );
         assert_eq!(stored_observation["causality"]["kind"], "unknown");
         for request in current {
             assert_eq!(request["causality"]["kind"], "unknown");
             assert_eq!(request["policy_basis"]["mode"], "account_if_eligible");
             assert!(request.get("routing_token").is_none());
-            assert!(request["occurrence"]["observed_checks"].as_array().is_none_or(Vec::is_empty));
+            assert!(
+                request["occurrence"]["observed_checks"]
+                    .as_array()
+                    .is_none_or(Vec::is_empty)
+            );
         }
-        assert!(fixture.object(verification) == original_check, "new source never rewrites old producer evidence");
-        assert!(source_now() == changed, "later reads never change the recorded source");
+        assert!(
+            fixture.object(verification) == original_check,
+            "new source never rewrites old producer evidence"
+        );
+        assert!(
+            source_now() == changed,
+            "later reads never change the recorded source"
+        );
         let shown = fixture.work(session, &["show", work, "--json"]);
         let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
         let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
@@ -186,18 +394,42 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
         // This deliberately retained historical record is compared through
         // the legacy CLI alternative, independently of the new source facts.
         let legacy_changed = content_revision(&fixture.root).unwrap().1;
-        let refused = refused_evaluation(&fixture, session, &[
-            "evaluate", work, "--mode", "same-session", "--acceptance-basis", &acceptance,
-            "--evidence-basis", &evidence, "--verdict", "1=pass:observed", "--rationale",
-            "1=Try the earlier native check at changed source", "--evidence", &citation,
-            "--source-fingerprint", &legacy_changed, "--attempt", "old-check", "--json",
-        ]);
-        assert_eq!(refused["error"]["code"], "acceptance_evaluation_refused", "<refused withheld>");
+        let refused = refused_evaluation(
+            &fixture,
+            session,
+            &[
+                "evaluate",
+                work,
+                "--mode",
+                "same-session",
+                "--acceptance-basis",
+                &acceptance,
+                "--evidence-basis",
+                &evidence,
+                "--verdict",
+                "1=pass:observed",
+                "--rationale",
+                "1=Try the earlier native check at changed source",
+                "--evidence",
+                &citation,
+                "--source-fingerprint",
+                &legacy_changed,
+                "--attempt",
+                "old-check",
+                "--json",
+            ],
+        );
+        assert_eq!(
+            refused["error"]["code"], "acceptance_evaluation_refused",
+            "<refused withheld>"
+        );
         let cause = &refused["error"]["details"]["cause"];
         assert_eq!(cause["kind"], "citation", "<refused withheld>");
         assert_eq!(cause["mismatch"], "wrong_source", "<refused withheld>");
         assert_eq!(cause["citation"], *verification);
-        let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("historical evaluation witness requires its retained Commit record"); };
+        let EngramVerificationRecordInput::Commit { commit } = &body.input else {
+            panic!("historical evaluation witness requires its retained Commit record");
+        };
         assert_eq!(cause["checked_revision"], *commit);
         assert_eq!(cause["judged_revision"], legacy_changed);
         assert_eq!(cause["remedy"], "run_current_check_and_evaluate");
@@ -207,60 +439,123 @@ fn between_turn_observation_makes_the_earlier_check_stale() {
 
 fn unnamed_source_interval(fixture: &CompletionFixture, session: &str, work: &str) {
     let binding = fixture.claim_binding(session);
-    assert_eq!(fixture.canonical_read(session, &binding).named_root, EngramNamedRootState::None);
-    fixture.begin(session, "Observe a genuine unnamed check without native registration credit.");
+    assert_eq!(
+        fixture.canonical_read(session, &binding).named_root,
+        EngramNamedRootState::None
+    );
+    fixture.begin(
+        session,
+        "Observe a genuine unnamed check without native registration credit.",
+    );
     let source_now = || {
         let deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
-        let owner = fixture.live.state.source_owner_metadata_until(session, deadline).unwrap();
+        let owner = fixture
+            .live
+            .state
+            .source_owner_metadata_until(session, deadline)
+            .unwrap();
         engram_source_id_until(&owner, &fixture.root, deadline).unwrap()
     };
     let before = source_now();
     let mut recorder = SessionRecorder::new(fixture.live.state.clone(), session.to_owned());
-    recorder.command_started_in("unnamed-check", "cargo test --offline", Some("cargo test --offline"),
-        Some(&fixture.root.to_string_lossy())).unwrap();
-    let output = Command::new("cargo").args(["test", "--offline"]).current_dir(&fixture.root)
-        .env("CARGO_TARGET_DIR", fixture.root.join("target")).output().unwrap();
-    let text = format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-    assert!(output.status.success() && text.contains("1 passed"), "{text}");
-    recorder.command_completed_with_exit("unnamed-check", "cargo test --offline", &text,
-        CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    recorder
+        .command_started_in(
+            "unnamed-check",
+            "cargo test --offline",
+            Some("cargo test --offline"),
+            Some(&fixture.root.to_string_lossy()),
+        )
+        .unwrap();
+    let output = Command::new("cargo")
+        .args(["test", "--offline"])
+        .current_dir(&fixture.root)
+        .env("CARGO_TARGET_DIR", fixture.root.join("target"))
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.status.success() && text.contains("1 passed"),
+        "{text}"
+    );
+    recorder
+        .command_completed_with_exit(
+            "unnamed-check",
+            "cargo test --offline",
+            &text,
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
-    fs::write(fixture.root.join("README.md"), "new unnamed source between turns\n").unwrap();
+    fs::write(
+        fixture.root.join("README.md"),
+        "new unnamed source between turns\n",
+    )
+    .unwrap();
     let changed = source_now();
-    assert!(changed != before, "the full unnamed identity records the real edit");
+    assert!(
+        changed != before,
+        "the full unnamed identity records the real edit"
+    );
     fixture.begin(session, "Read the changed unnamed source quietly.");
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
     let requests = fixture.live.transport.requests_for("execution_observe");
-    assert!(requests.iter().any(|request| {
-        let change = &request["occurrence"]["source_change"];
-        change["detection"] == "content_comparison"
-            && change["baseline"]["source_id"] == serde_json::to_value(&before).unwrap()
-            && change["sighting"]["source_basis"]["source_id"] == serde_json::to_value(&changed).unwrap()
-    }), "the real producer receives the distinct unnamed source interval");
+    assert!(
+        requests.iter().any(|request| {
+            let change = &request["occurrence"]["source_change"];
+            change["detection"] == "content_comparison"
+                && change["baseline"]["source_id"] == serde_json::to_value(&before).unwrap()
+                && change["sighting"]["source_basis"]["source_id"]
+                    == serde_json::to_value(&changed).unwrap()
+        }),
+        "the real producer receives the distinct unnamed source interval"
+    );
     let shown = fixture.work(session, &["show", work, "--notes", "--json"]);
     let mut checks = Vec::new();
     objects_with_key(&shown, "verification", &mut checks);
-    assert!(checks.is_empty(), "ordinary unnamed facts cannot invent a native verification");
+    assert!(
+        checks.is_empty(),
+        "ordinary unnamed facts cannot invent a native verification"
+    );
     assert_no_live_turn_gate(&fixture.live.transport);
 }
-
 
 fn refused_evaluation(fixture: &CompletionFixture, session: &str, args: &[&str]) -> Value {
     let (actor, context) = {
         let inner = fixture.live.state.inner.lock().unwrap();
-        engram_runtime_actor_identity(&inner.preferences.engram.developer_name,
-            &inner.sessions[inner.find_session_index(session).unwrap()])
+        engram_runtime_actor_identity(
+            &inner.preferences.engram.developer_name,
+            &inner.sessions[inner.find_session_index(session).unwrap()],
+        )
     };
     let mut command = Command::new(live_engram_binary());
-    command.arg("--project-file").arg(fixture.root.join(".engram-project"))
-        .arg("--home").arg(&fixture.home)
+    command
+        .arg("--project-file")
+        .arg(fixture.root.join(".engram-project"))
+        .arg("--home")
+        .arg(&fixture.home)
         .args(["work", "--actor-id", &actor, "--session-id", session]);
-    if let Some(context) = context.as_deref() { command.args(["--actor-context", context]); }
+    if let Some(context) = context.as_deref() {
+        command.args(["--actor-context", context]);
+    }
     let output = command.args(args).output().unwrap();
-    assert_eq!(output.status.code(), Some(1), "a stale citation must be refused: stdout_bytes={} stderr_bytes={}",
-        output.stdout.len(), output.stderr.len());
-    serde_json::from_slice(&output.stderr).unwrap_or_else(|_|
-        panic!("typed evaluation refusal: <details withheld>: {}", output.stderr.len()))
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a stale citation must be refused: stdout_bytes={} stderr_bytes={}",
+        output.stdout.len(),
+        output.stderr.len()
+    );
+    serde_json::from_slice(&output.stderr).unwrap_or_else(|_| {
+        panic!(
+            "typed evaluation refusal: <details withheld>: {}",
+            output.stderr.len()
+        )
+    })
 }

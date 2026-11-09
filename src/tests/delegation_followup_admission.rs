@@ -24,12 +24,18 @@ fn set_followup_project_reset_locked(
         Some(project) => project,
         None if active => {
             let root = state.test_temp_root.as_ref().unwrap().path();
-            let project = inner.create_project(
-                Some("Follow-up resource reset".to_owned()),
-                root.to_string_lossy().into_owned(),
-                default_local_remote_id(),
-            ).id;
-            inner.session_mut_by_index(child).unwrap().session.project_id = Some(project.clone());
+            let project = inner
+                .create_project(
+                    Some("Follow-up resource reset".to_owned()),
+                    root.to_string_lossy().into_owned(),
+                    default_local_remote_id(),
+                )
+                .id;
+            inner
+                .session_mut_by_index(child)
+                .unwrap()
+                .session
+                .project_id = Some(project.clone());
             project
         }
         None => return,
@@ -39,7 +45,10 @@ fn set_followup_project_reset_locked(
     } else if let Some(generation) = inner.engram_project_resets.owners.get(&project).copied() {
         assert!(inner.engram_project_resets.release(&project, generation));
     }
-    assert_eq!(session_resource_reset_in_progress(inner, &inner.sessions[child]), active);
+    assert_eq!(
+        session_resource_reset_in_progress(inner, &inner.sessions[child]),
+        active
+    );
 }
 
 #[test]
@@ -572,7 +581,10 @@ fn canceled_queued_followup_never_reuses_old_result_or_discards_successor() {
             Some(QueuedPromptSource::Mailbox),
             Some(QueuedPromptSource::Orchestrator),
         ] {
-            let successor = matches!(successor_source, Some(QueuedPromptSource::User | QueuedPromptSource::Human));
+            let successor = matches!(
+                successor_source,
+                Some(QueuedPromptSource::User | QueuedPromptSource::Human)
+            );
             let (state, _, parent) = mailbox_test_state();
             let (delegation, child) = install_required_review_delegation(&state, &parent);
             if reviewer {
@@ -596,13 +608,21 @@ fn canceled_queued_followup_never_reuses_old_result_or_discards_successor() {
                 set_followup_project_reset_locked(&state, &mut inner, index, true);
             }
             let admitted = if successor_source == Some(QueuedPromptSource::Human) {
-                state.followup_human_delegation_request(&parent, &delegation, SendMessageRequest {
-                    text: "Cancel me".to_owned(), expanded_text: None, attachments: vec![],
-                    source_session_id: None, source_mailbox: None,
-                })
+                state.followup_human_delegation_request(
+                    &parent,
+                    &delegation,
+                    SendMessageRequest {
+                        text: "Cancel me".to_owned(),
+                        expanded_text: None,
+                        attachments: vec![],
+                        source_session_id: None,
+                        source_mailbox: None,
+                    },
+                )
             } else {
                 state.followup_delegation(&parent, &delegation, "Cancel me".to_owned())
-            }.unwrap();
+            }
+            .unwrap();
             let prompt = admitted.delegation.queued_followup_prompt_id.unwrap();
             let next = if let Some(successor_source) = successor_source {
                 let mut inner = state.inner.lock().unwrap();
@@ -695,7 +715,10 @@ fn canceled_queued_followup_never_reuses_old_result_or_discards_successor() {
                     let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
                     assert_eq!(record.queued_prompts.len(), 1);
                     assert_eq!(record.queued_prompts[0].source, successor_source.unwrap());
-                    assert!(!delegated_child_dispatch_is_blocked_locked(&inner, inner.find_session_index(&child).unwrap()));
+                    assert!(!delegated_child_dispatch_is_blocked_locked(
+                        &inner,
+                        inner.find_session_index(&child).unwrap()
+                    ));
                     assert_eq!(
                         record.queued_prompts[0].pending_prompt.id,
                         next.as_ref().unwrap().as_str()
@@ -1410,7 +1433,10 @@ fn rejected_followup_preserves_completed_structured_review() {
         assert!(result.is_err(), "fixture must reject {rejection}");
         if rejection == "deletion" {
             assert_eq!(result.as_ref().err().unwrap().status, StatusCode::CONFLICT);
-            assert_eq!(result.as_ref().err().unwrap().message, SOURCE_OBSERVATION_DELETE_RETAINED);
+            assert_eq!(
+                result.as_ref().err().unwrap().message,
+                SOURCE_OBSERVATION_DELETE_RETAINED
+            );
         }
         if rejection == "reserved" {
             let error = result.err().expect("reserved follow-up must be rejected");
@@ -1737,23 +1763,38 @@ fn failed_followup_restore_preserves_structured_review_and_polling_cannot_finish
 fn followup_resource_reset_queue_start_failure_settles_instead_of_stranding_running() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("followup-ordinary-start-failure");
-    let root = state.test_temp_root.as_ref().unwrap().path().join("followup-start-failure");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("followup-start-failure");
     fs::create_dir_all(&root).unwrap();
     let project = create_test_project(&state, &root, "Follow-up start failure");
     let parent = create_test_project_session(&state, Agent::Codex, &project, &root);
-    let created = state.create_read_only_delegation(
-        &parent,
-        CreateDelegationRequest {
-            prompt: "Initial attempt".to_owned(), title: None, cwd: None,
-            agent: Some(Agent::Codex), model: None,
-            mode: Some(DelegationMode::Explorer),
-            write_policy: Some(DelegationWritePolicy::ReadOnly),
-        },
-    ).unwrap();
-    assert!(matches!(runtime_rx.try_recv().unwrap(), CodexRuntimeCommand::Prompt { .. }));
+    let created = state
+        .create_read_only_delegation(
+            &parent,
+            CreateDelegationRequest {
+                prompt: "Initial attempt".to_owned(),
+                title: None,
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Explorer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        runtime_rx.try_recv().unwrap(),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
     let child = created.delegation.child_session_id;
     finish_delegation_child_with_assistant_text(
-        &state, &child, "## Result\nStatus: completed\n\nSummary:\nOld result.",
+        &state,
+        &child,
+        "## Result\nStatus: completed\n\nSummary:\nOld result.",
     );
     state.refresh_delegation_for_child_session(&child).unwrap();
     {
@@ -1761,9 +1802,9 @@ fn followup_resource_reset_queue_start_failure_settles_instead_of_stranding_runn
         let index = inner.find_session_index(&child).unwrap();
         set_followup_project_reset_locked(&state, &mut inner, index, true);
     }
-    let admitted = state.followup_delegation(
-        &parent, &created.delegation.id, "Cannot start".to_owned(),
-    ).unwrap();
+    let admitted = state
+        .followup_delegation(&parent, &created.delegation.id, "Cannot start".to_owned())
+        .unwrap();
     assert_eq!(admitted.delegation.status, DelegationStatus::Running);
     let prompt_id = admitted.delegation.queued_followup_prompt_id.unwrap();
     assert!(runtime_rx.try_recv().is_err());
@@ -1774,20 +1815,38 @@ fn followup_resource_reset_queue_start_failure_settles_instead_of_stranding_runn
         let index = inner.find_session_index(&child).unwrap();
         set_followup_project_reset_locked(&state, &mut inner, index, false);
     }
-    let error = state.start_next_queued_turn_off_lock(&child, true, false)
-        .err().expect("runtime spawn must fail after durable queue admission");
-    assert!(format!("{error:#}").contains("agent runtime spawning is disabled"), "{error:#}");
+    let error = state
+        .start_next_queued_turn_off_lock(&child, true, false)
+        .err()
+        .expect("runtime spawn must fail after durable queue admission");
+    assert!(
+        format!("{error:#}").contains("agent runtime spawning is disabled"),
+        "{error:#}"
+    );
     let failure = error.downcast_ref::<QueuedFollowupStartFailure>().unwrap();
     assert_eq!(failure.delegation_id, created.delegation.id);
     assert_eq!(failure.prompt_id, prompt_id);
-    let failed = state.get_delegation(&parent, &created.delegation.id).unwrap().delegation;
+    let failed = state
+        .get_delegation(&parent, &created.delegation.id)
+        .unwrap()
+        .delegation;
     assert_eq!(failed.status, DelegationStatus::Failed);
-    assert!(failed.result.unwrap().summary.contains("agent runtime spawning is disabled"));
+    assert!(
+        failed
+            .result
+            .unwrap()
+            .summary
+            .contains("agent runtime spawning is disabled")
+    );
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
     assert!(record.queued_prompts.is_empty());
     assert!(matches!(record.runtime, SessionRuntime::None));
-    assert!(!inner.delegation_followup_admissions.contains_key(&created.delegation.id));
+    assert!(
+        !inner
+            .delegation_followup_admissions
+            .contains_key(&created.delegation.id)
+    );
     assert!(runtime_rx.try_recv().is_err());
 }
 
@@ -1799,28 +1858,44 @@ fn queued_followup_promotion_rejection_settles_only_the_exact_ordinary_owner() {
                 let (state, _, parent) = mailbox_test_state();
                 let (delegation, child) = install_required_review_delegation(&state, &parent);
                 if reviewer {
-                    state.submit_delegation_review_result(&child, structured_review_request()).unwrap();
+                    state
+                        .submit_delegation_review_result(&child, structured_review_request())
+                        .unwrap();
                 } else {
                     let mut inner = state.inner.lock().unwrap();
                     let index = inner.find_delegation_index(&delegation).unwrap();
                     inner.delegations[index].mode = DelegationMode::Explorer;
                 }
                 finish_delegation_child_with_assistant_text(
-                    &state, &child, "## Result\nStatus: completed\n\nSummary:\nOld result.",
+                    &state,
+                    &child,
+                    "## Result\nStatus: completed\n\nSummary:\nOld result.",
                 );
                 state.refresh_delegation_for_child_session(&child).unwrap();
-                let previous = state.get_delegation(&parent, &delegation).unwrap().delegation;
-                let (runtime, runtime_rx, _) = test_shared_codex_runtime("ordinary-followup-row-rejection");
+                let previous = state
+                    .get_delegation(&parent, &delegation)
+                    .unwrap()
+                    .delegation;
+                let (runtime, runtime_rx, _) =
+                    test_shared_codex_runtime("ordinary-followup-row-rejection");
                 install_single_wire_codex_fixture(&state, Some(runtime));
                 {
                     let mut inner = state.inner.lock().unwrap();
                     let index = inner.find_session_index(&child).unwrap();
                     set_followup_project_reset_locked(&state, &mut inner, index, true);
                 }
-                let admitted = state.followup_delegation(
-                    &parent, &delegation, "Exact ordinary follow-up".to_owned(),
-                ).unwrap();
-                let prompt_id = admitted.delegation.queued_followup_prompt_id.clone().unwrap();
+                let admitted = state
+                    .followup_delegation(
+                        &parent,
+                        &delegation,
+                        "Exact ordinary follow-up".to_owned(),
+                    )
+                    .unwrap();
+                let prompt_id = admitted
+                    .delegation
+                    .queued_followup_prompt_id
+                    .clone()
+                    .unwrap();
                 let (successor_id, queue_before, mut admission) = {
                     let mut inner = state.inner.lock().unwrap();
                     let successor_id = inner.next_message_id();
@@ -1828,14 +1903,21 @@ fn queued_followup_promotion_rejection_settles_only_the_exact_ordinary_owner() {
                     queue_prompt_on_record_with_source(
                         inner.session_mut_by_index(index).unwrap(),
                         PendingPrompt {
-                            engram_interrupted: false, is_engram_retained: false,
-                            id: successor_id.clone(), timestamp: stamp_now(),
-                            text: "FIFO successor".to_owned(), expanded_text: None,
-                            attachments: Vec::new(), source: None,
-                        }, Vec::new(), QueuedPromptSource::User,
+                            engram_interrupted: false,
+                            is_engram_retained: false,
+                            id: successor_id.clone(),
+                            timestamp: stamp_now(),
+                            text: "FIFO successor".to_owned(),
+                            expanded_text: None,
+                            attachments: Vec::new(),
+                            source: None,
+                        },
+                        Vec::new(),
+                        QueuedPromptSource::User,
                     );
                     state.commit_locked(&mut inner).unwrap();
-                    let queue = serde_json::to_value(&inner.sessions[index].queued_prompts).unwrap();
+                    let queue =
+                        serde_json::to_value(&inner.sessions[index].queued_prompts).unwrap();
                     let admission = if live_reservation {
                         // Re-create the caller's exact post-commit/pre-release
                         // reservation cut without a removed Engram wire barrier.
@@ -1843,30 +1925,42 @@ fn queued_followup_promotion_rejection_settles_only_the_exact_ordinary_owner() {
                         let mut reservation = FollowupAdmissionReservation::new(watermark);
                         reservation.admitted = Some((inner.revision, admitted.delegation.clone()));
                         let reservation_id = reservation.reservation_id;
-                        inner.delegation_followup_admissions.insert(delegation.clone(), reservation);
+                        inner
+                            .delegation_followup_admissions
+                            .insert(delegation.clone(), reservation);
                         Some(DelegationFollowupAdmission {
-                            state: state.clone(), reservation_id, previous: previous.clone(),
-                            restore_candidate: false, released: false,
+                            state: state.clone(),
+                            reservation_id,
+                            previous: previous.clone(),
+                            restore_candidate: false,
+                            released: false,
                         })
-                    } else { None };
+                    } else {
+                        None
+                    };
                     (successor_id, queue, admission)
                 };
-                let wait = state.create_delegation_wait(
-                    &parent,
-                    CreateDelegationWaitRequest {
-                        delegation_ids: vec![delegation.clone()],
-                        mode: DelegationWaitMode::All, title: None,
-                    },
-                ).unwrap();
+                let wait = state
+                    .create_delegation_wait(
+                        &parent,
+                        CreateDelegationWaitRequest {
+                            delegation_ids: vec![delegation.clone()],
+                            mode: DelegationWaitMode::All,
+                            title: None,
+                        },
+                    )
+                    .unwrap();
 
                 // A delayed error for the successor or another delegation
                 // cannot settle this head, consume the wait, or reorder FIFO.
                 for stale in [
                     QueuedFollowupStartFailure {
-                        delegation_id: delegation.clone(), prompt_id: successor_id.clone(),
+                        delegation_id: delegation.clone(),
+                        prompt_id: successor_id.clone(),
                     },
                     QueuedFollowupStartFailure {
-                        delegation_id: "not-this-delegation".to_owned(), prompt_id: prompt_id.clone(),
+                        delegation_id: "not-this-delegation".to_owned(),
+                        prompt_id: prompt_id.clone(),
                     },
                 ] {
                     let error = state.finish_queued_followup_start_error(anyhow::Error::new(stale));
@@ -1874,92 +1968,188 @@ fn queued_followup_promotion_rejection_settles_only_the_exact_ordinary_owner() {
                     let inner = state.inner.lock().unwrap();
                     let row = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
                     assert_eq!(row.status, DelegationStatus::Running);
-                    assert_eq!(row.queued_followup_prompt_id.as_deref(), Some(prompt_id.as_str()));
+                    assert_eq!(
+                        row.queued_followup_prompt_id.as_deref(),
+                        Some(prompt_id.as_str())
+                    );
                     let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
-                    assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), queue_before);
+                    assert_eq!(
+                        serde_json::to_value(&record.queued_prompts).unwrap(),
+                        queue_before
+                    );
                     assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
                     assert_eq!(record.queued_prompts[1].pending_prompt.id, successor_id);
-                    assert!(inner.delegation_waits.iter().any(|item| item.id == wait.wait.id));
-                    assert!(inner.sessions[inner.find_session_index(&parent).unwrap()].queued_prompts.is_empty());
+                    assert!(
+                        inner
+                            .delegation_waits
+                            .iter()
+                            .any(|item| item.id == wait.wait.id)
+                    );
+                    assert!(
+                        inner.sessions[inner.find_session_index(&parent).unwrap()]
+                            .queued_prompts
+                            .is_empty()
+                    );
                 }
                 let disk = load_state(&state.persistence_path).unwrap().unwrap();
                 let disk_child = &disk.sessions[disk.find_session_index(&child).unwrap()];
-                assert_eq!(serde_json::to_value(&disk_child.queued_prompts).unwrap(), queue_before);
+                assert_eq!(
+                    serde_json::to_value(&disk_child.queued_prompts).unwrap(),
+                    queue_before
+                );
                 assert!(runtime_rx.try_recv().is_err());
 
                 let connection = rusqlite::Connection::open(&*state.persistence_path).unwrap();
-                connection.execute_batch(&format!(
-                    "CREATE TRIGGER reject_followup_own_row BEFORE INSERT ON messages
+                connection
+                    .execute_batch(&format!(
+                        "CREATE TRIGGER reject_followup_own_row BEFORE INSERT ON messages
                      WHEN NEW.message_id = '{}'
                      BEGIN SELECT RAISE(ABORT, 'injected-followup-own-row-rejection'); END;",
-                    prompt_id.replace('\'', "''"),
-                )).unwrap();
+                        prompt_id.replace('\'', "''"),
+                    ))
+                    .unwrap();
                 {
                     let mut inner = state.inner.lock().unwrap();
                     let index = inner.find_session_index(&child).unwrap();
                     set_followup_project_reset_locked(&state, &mut inner, index, false);
                 }
                 let detail = if direct {
-                    state.dispatch_turn(&child, SendMessageRequest {
-                        text: "Additional user prompt".to_owned(), expanded_text: None,
-                        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
-                    }).err().expect("own-row promotion must fail").message
+                    state
+                        .dispatch_turn(
+                            &child,
+                            SendMessageRequest {
+                                text: "Additional user prompt".to_owned(),
+                                expanded_text: None,
+                                attachments: Vec::new(),
+                                source_session_id: None,
+                                source_mailbox: None,
+                            },
+                        )
+                        .err()
+                        .expect("own-row promotion must fail")
+                        .message
                 } else {
-                    let error = state.start_next_queued_turn_off_lock(&child, true, false)
-                        .err().expect("own-row promotion must fail");
+                    let error = state
+                        .start_next_queued_turn_off_lock(&child, true, false)
+                        .err()
+                        .expect("own-row promotion must fail");
                     let failure = error.downcast_ref::<QueuedFollowupStartFailure>().unwrap();
                     assert_eq!(failure.delegation_id, delegation);
                     assert_eq!(failure.prompt_id, prompt_id);
                     format!("{error:#}")
                 };
-                assert!(detail.contains("injected-followup-own-row-rejection"), "{detail}");
+                assert!(
+                    detail.contains("injected-followup-own-row-rejection"),
+                    "{detail}"
+                );
                 let owner = QueuedFollowupStartFailure {
-                    delegation_id: delegation.clone(), prompt_id: prompt_id.clone(),
+                    delegation_id: delegation.clone(),
+                    prompt_id: prompt_id.clone(),
                 };
                 assert!(detail.contains(&owner.to_string()), "{detail}");
-                assert!(detail.contains("failed to persist the promoted queue head"), "{detail}");
+                assert!(
+                    detail.contains("failed to persist the promoted queue head"),
+                    "{detail}"
+                );
                 if let Some(admission) = admission.as_mut() {
                     let inner = state.inner.lock().unwrap();
-                    assert!(inner.delegation_followup_admissions[&delegation].failure.is_some());
+                    assert!(
+                        inner.delegation_followup_admissions[&delegation]
+                            .failure
+                            .is_some()
+                    );
                     drop(inner);
                     admission.release().unwrap();
                 }
-                assert!(runtime_rx.try_recv().is_err(), "no provider handoff, including the successor");
+                assert!(
+                    runtime_rx.try_recv().is_err(),
+                    "no provider handoff, including the successor"
+                );
                 {
                     let inner = state.inner.lock().unwrap();
-                    let failed = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
+                    let failed =
+                        &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
                     assert_eq!(failed.status, DelegationStatus::Failed);
-                    assert!(failed.result.as_ref().unwrap().summary.contains("injected-followup-own-row-rejection"));
+                    assert!(
+                        failed
+                            .result
+                            .as_ref()
+                            .unwrap()
+                            .summary
+                            .contains("injected-followup-own-row-rejection")
+                    );
                     assert!(failed.queued_followup_prompt_id.is_none());
-                    assert!(failed.attempt.hold.is_none(), "no deleted authorization hold is invented");
-                    assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
+                    assert!(
+                        failed.attempt.hold.is_none(),
+                        "no deleted authorization hold is invented"
+                    );
+                    assert!(
+                        !inner
+                            .delegation_followup_admissions
+                            .contains_key(&delegation)
+                    );
                     let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
                     assert_eq!(record.session.status, SessionStatus::Error);
                     assert!(matches!(record.runtime, SessionRuntime::None));
-                    assert!(record.queued_prompts.is_empty(), "terminal cleanup clears the attempt's queue");
-                    assert!(!record.session.messages.iter().any(|message|
-                        message.id() == prompt_id || message.id() == successor_id));
-                    assert!(!inner.delegation_waits.iter().any(|item| item.id == wait.wait.id));
+                    assert!(
+                        record.queued_prompts.is_empty(),
+                        "terminal cleanup clears the attempt's queue"
+                    );
+                    assert!(
+                        !record.session.messages.iter().any(
+                            |message| message.id() == prompt_id || message.id() == successor_id
+                        )
+                    );
+                    assert!(
+                        !inner
+                            .delegation_waits
+                            .iter()
+                            .any(|item| item.id == wait.wait.id)
+                    );
                     let parent_record = &inner.sessions[inner.find_session_index(&parent).unwrap()];
                     assert_eq!(parent_record.queued_prompts.len(), 1);
-                    assert!(parent_record.queued_prompts[0].pending_prompt.text.contains(&wait.wait.id));
+                    assert!(
+                        parent_record.queued_prompts[0]
+                            .pending_prompt
+                            .text
+                            .contains(&wait.wait.id)
+                    );
                 }
                 // Duplicate completion cannot consume another wait or launch
                 // the already-rejected head under a different identity.
-                state.settle_queued_followup_start_failure(
-                    &QueuedFollowupStartFailure {
-                        delegation_id: delegation.clone(), prompt_id: prompt_id.clone(),
-                    }, "duplicate completion",
-                ).unwrap();
+                state
+                    .settle_queued_followup_start_failure(
+                        &QueuedFollowupStartFailure {
+                            delegation_id: delegation.clone(),
+                            prompt_id: prompt_id.clone(),
+                        },
+                        "duplicate completion",
+                    )
+                    .unwrap();
                 state.get_delegation(&parent, &delegation).unwrap();
                 assert!(runtime_rx.try_recv().is_err());
                 let disk = load_state(&state.persistence_path).unwrap().unwrap();
-                let failed = disk.delegations.iter().find(|item| item.id == delegation).unwrap();
+                let failed = disk
+                    .delegations
+                    .iter()
+                    .find(|item| item.id == delegation)
+                    .unwrap();
                 assert_eq!(failed.status, DelegationStatus::Failed);
                 let child_record = &disk.sessions[disk.find_session_index(&child).unwrap()];
                 assert!(child_record.queued_prompts.is_empty());
-                assert!(!child_record.session.messages.iter().any(|message| message.id() == prompt_id));
-                assert_eq!(disk.sessions[disk.find_session_index(&parent).unwrap()].queued_prompts.len(), 1);
+                assert!(
+                    !child_record
+                        .session
+                        .messages
+                        .iter()
+                        .any(|message| message.id() == prompt_id)
+                );
+                assert_eq!(
+                    disk.sessions[disk.find_session_index(&parent).unwrap()]
+                        .queued_prompts
+                        .len(),
+                    1
+                );
             }
         }
     }
@@ -1970,11 +2160,17 @@ fn ordinary_followup_metadata_failure_rolls_back_admission_or_retries_its_wait()
     for live_reservation in [true, false] {
         let (state, _, parent) = mailbox_test_state();
         let (delegation, child) = install_required_review_delegation(&state, &parent);
-        state.submit_delegation_review_result(&child, structured_review_request()).unwrap();
+        state
+            .submit_delegation_review_result(&child, structured_review_request())
+            .unwrap();
         finish_delegation_child_with_assistant_text(&state, &child, "Previous structured review.");
         state.refresh_delegation_for_child_session(&child).unwrap();
-        let previous = state.get_delegation(&parent, &delegation).unwrap().delegation;
-        let (runtime, runtime_rx, _) = test_shared_codex_runtime("ordinary-followup-metadata-failure");
+        let previous = state
+            .get_delegation(&parent, &delegation)
+            .unwrap()
+            .delegation;
+        let (runtime, runtime_rx, _) =
+            test_shared_codex_runtime("ordinary-followup-metadata-failure");
         install_single_wire_codex_fixture(&state, Some(runtime));
         {
             let mut inner = state.inner.lock().unwrap();
@@ -1983,16 +2179,28 @@ fn ordinary_followup_metadata_failure_rolls_back_admission_or_retries_its_wait()
         }
         let mut wait_id = None;
         if !live_reservation {
-            let admitted = state.followup_delegation(
-                &parent, &delegation, "Durable ordinary follow-up".to_owned(),
-            ).unwrap();
+            let admitted = state
+                .followup_delegation(
+                    &parent,
+                    &delegation,
+                    "Durable ordinary follow-up".to_owned(),
+                )
+                .unwrap();
             assert_eq!(admitted.delegation.status, DelegationStatus::Running);
-            wait_id = Some(state.create_delegation_wait(
-                &parent, CreateDelegationWaitRequest {
-                    delegation_ids: vec![delegation.clone()],
-                    mode: DelegationWaitMode::All, title: None,
-                },
-            ).unwrap().wait.id);
+            wait_id = Some(
+                state
+                    .create_delegation_wait(
+                        &parent,
+                        CreateDelegationWaitRequest {
+                            delegation_ids: vec![delegation.clone()],
+                            mode: DelegationWaitMode::All,
+                            title: None,
+                        },
+                    )
+                    .unwrap()
+                    .wait
+                    .id,
+            );
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&child).unwrap();
             set_followup_project_reset_locked(&state, &mut inner, index, false);
@@ -2000,65 +2208,141 @@ fn ordinary_followup_metadata_failure_rolls_back_admission_or_retries_its_wait()
         let connection = rusqlite::Connection::open(&*state.persistence_path).unwrap();
         // Fail global metadata, not an isolated sibling row. This keeps the
         // parent wait retryable even after in-memory terminal settlement.
-        connection.execute_batch(
-            "CREATE TRIGGER reject_followup_metadata BEFORE UPDATE ON state_metadata_units
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_followup_metadata BEFORE UPDATE ON state_metadata_units
              WHEN NEW.field_name = 'revision'
-             BEGIN SELECT RAISE(ABORT, 'injected-ordinary-followup-metadata-failure'); END;"
-        ).unwrap();
+             BEGIN SELECT RAISE(ABORT, 'injected-ordinary-followup-metadata-failure'); END;",
+            )
+            .unwrap();
         let detail = if live_reservation {
-            state.followup_delegation(&parent, &delegation, "Uncommitted follow-up".to_owned())
-                .err().expect("queue admission metadata must fail").message
+            state
+                .followup_delegation(&parent, &delegation, "Uncommitted follow-up".to_owned())
+                .err()
+                .expect("queue admission metadata must fail")
+                .message
         } else {
-            format!("{:#}", state.start_next_queued_turn_off_lock(&child, true, false)
-                .err().expect("durable follow-up promotion metadata must fail"))
+            format!(
+                "{:#}",
+                state
+                    .start_next_queued_turn_off_lock(&child, true, false)
+                    .err()
+                    .expect("durable follow-up promotion metadata must fail")
+            )
         };
-        assert!(detail.contains("injected-ordinary-followup-metadata-failure"), "{detail}");
+        assert!(
+            detail.contains("injected-ordinary-followup-metadata-failure"),
+            "{detail}"
+        );
         if live_reservation {
-            assert!(detail.contains("failed to persist session state"), "the failure must reach queue admission: {detail}");
+            assert!(
+                detail.contains("failed to persist session state"),
+                "the failure must reach queue admission: {detail}"
+            );
         }
         assert!(runtime_rx.try_recv().is_err());
         {
             let inner = state.inner.lock().unwrap();
             let row = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
             if live_reservation {
-                assert_eq!(row, &previous, "uncommitted admission preserves the exact prior review");
+                assert_eq!(
+                    row, &previous,
+                    "uncommitted admission preserves the exact prior review"
+                );
             } else {
                 assert_eq!(row.status, DelegationStatus::Failed);
-                assert!(row.result.as_ref().unwrap().summary.contains("injected-ordinary-followup-metadata-failure"));
+                assert!(
+                    row.result
+                        .as_ref()
+                        .unwrap()
+                        .summary
+                        .contains("injected-ordinary-followup-metadata-failure")
+                );
             }
-            assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
+            assert!(
+                !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation)
+            );
             let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
             assert!(record.queued_prompts.is_empty());
             assert!(matches!(record.runtime, SessionRuntime::None));
-            assert!(inner.sessions[inner.find_session_index(&parent).unwrap()].queued_prompts.is_empty());
+            assert!(
+                inner.sessions[inner.find_session_index(&parent).unwrap()]
+                    .queued_prompts
+                    .is_empty()
+            );
             if let Some(wait_id) = &wait_id {
-                assert!(inner.delegation_waits.iter().any(|wait| &wait.id == wait_id));
+                assert!(
+                    inner
+                        .delegation_waits
+                        .iter()
+                        .any(|wait| &wait.id == wait_id)
+                );
             }
         }
         let disk_before_retry = load_state(&state.persistence_path).unwrap().unwrap();
-        let saved = disk_before_retry.delegations.iter().find(|row| row.id == delegation).unwrap();
-        assert_eq!(saved.status, if live_reservation { DelegationStatus::Completed } else { DelegationStatus::Running });
-        connection.execute_batch("DROP TRIGGER reject_followup_metadata;").unwrap();
-        state.commit_locked(&mut state.inner.lock().unwrap()).unwrap();
+        let saved = disk_before_retry
+            .delegations
+            .iter()
+            .find(|row| row.id == delegation)
+            .unwrap();
+        assert_eq!(
+            saved.status,
+            if live_reservation {
+                DelegationStatus::Completed
+            } else {
+                DelegationStatus::Running
+            }
+        );
+        connection
+            .execute_batch("DROP TRIGGER reject_followup_metadata;")
+            .unwrap();
+        state
+            .commit_locked(&mut state.inner.lock().unwrap())
+            .unwrap();
         for _ in 0..2 {
             state.get_delegation(&parent, &delegation).unwrap();
         }
         assert!(runtime_rx.try_recv().is_err());
         let inner = state.inner.lock().unwrap();
         if let Some(wait_id) = &wait_id {
-            assert!(!inner.delegation_waits.iter().any(|wait| &wait.id == wait_id));
+            assert!(
+                !inner
+                    .delegation_waits
+                    .iter()
+                    .any(|wait| &wait.id == wait_id)
+            );
             let parent = &inner.sessions[inner.find_session_index(&parent).unwrap()];
-            assert_eq!(parent.queued_prompts.len(), 1, "one committed wake after storage recovers");
-            assert!(parent.queued_prompts[0].pending_prompt.text.contains(wait_id));
+            assert_eq!(
+                parent.queued_prompts.len(),
+                1,
+                "one committed wake after storage recovers"
+            );
+            assert!(
+                parent.queued_prompts[0]
+                    .pending_prompt
+                    .text
+                    .contains(wait_id)
+            );
         }
         drop(inner);
         let saved = load_state(&state.persistence_path).unwrap().unwrap();
-        let row = saved.delegations.iter().find(|row| row.id == delegation).unwrap();
+        let row = saved
+            .delegations
+            .iter()
+            .find(|row| row.id == delegation)
+            .unwrap();
         if live_reservation {
             assert_eq!(row, &previous);
         } else {
             assert_eq!(row.status, DelegationStatus::Failed);
-            assert_eq!(saved.sessions[saved.find_session_index(&parent).unwrap()].queued_prompts.len(), 1);
+            assert_eq!(
+                saved.sessions[saved.find_session_index(&parent).unwrap()]
+                    .queued_prompts
+                    .len(),
+                1
+            );
         }
     }
 }

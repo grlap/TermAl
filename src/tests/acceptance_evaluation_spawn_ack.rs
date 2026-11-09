@@ -61,7 +61,12 @@ impl FirstBriefAckWriter {
                 }
             }
         });
-        Self { tx, held, stop, thread: Mutex::new(Some(thread)) }
+        Self {
+            tx,
+            held,
+            stop,
+            thread: Mutex::new(Some(thread)),
+        }
     }
 
     /// Stops the writer and waits until its receiver is gone, so a later
@@ -103,8 +108,7 @@ fn refused_with_first_brief_unacknowledged(
         let (id, fence) = phase_sync::receive(&writer.held, "the evaluator's first-brief fence");
         // The request stays blocked until the fence resolves, so it is failed
         // even when `meanwhile` panics; the panic is raised after the join.
-        let meanwhile =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| meanwhile(&id)));
+        let meanwhile = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| meanwhile(&id)));
         fence.finish(Err(PersistFenceError::Deadline));
         let outcome = request.join().unwrap();
         if let Err(panic) = meanwhile {
@@ -126,8 +130,13 @@ fn acceptance_spawn_unacknowledged_first_brief_retires_the_evaluator_and_refuses
     let refused = refused_with_first_brief_unacknowledged(&state, &parent, &writer, |_| {});
     let (spawned, child) = {
         let inner = state.inner.lock().unwrap();
-        let record = inner.delegations.first().cloned().expect("the evaluator was spawned");
-        let child = inner.sessions[inner.find_session_index(&record.child_session_id).unwrap()].clone();
+        let record = inner
+            .delegations
+            .first()
+            .cloned()
+            .expect("the evaluator was spawned");
+        let child =
+            inner.sessions[inner.find_session_index(&record.child_session_id).unwrap()].clone();
         (record, child)
     };
     // The writer acknowledges from here on.
@@ -144,7 +153,10 @@ fn acceptance_spawn_unacknowledged_first_brief_retires_the_evaluator_and_refuses
         let inner = state.inner.lock().unwrap();
         let index = inner.find_delegation_index(&spawned.id).unwrap();
         let record = &inner.delegations[index];
-        (record.status, record.result.as_ref().map(|result| result.summary.clone()))
+        (
+            record.status,
+            record.result.as_ref().map(|result| result.summary.clone()),
+        )
     };
     let observed = format!(
         "refusal: {} {:?} {:?}; spawned left {:?} with {} child messages; \
@@ -156,16 +168,28 @@ fn acceptance_spawn_unacknowledged_first_brief_retires_the_evaluator_and_refuses
         child.session.messages.len(),
     );
 
-    assert_eq!(refused.status, StatusCode::SERVICE_UNAVAILABLE, "{observed}");
+    assert_eq!(
+        refused.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{observed}"
+    );
     assert_eq!(
         refused.kind,
         Some(ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged),
         "{observed}"
     );
-    assert!(refused.message.contains("first-brief durable acknowledgement"), "{observed}");
+    assert!(
+        refused
+            .message
+            .contains("first-brief durable acknowledgement"),
+        "{observed}"
+    );
     // The persist phase comes from the fence's own progress: this writer took
     // the fence off the channel without a tick, so it never left the queue.
-    assert!(refused.message.contains(PersistFencePhase::Queued.label()), "{observed}");
+    assert!(
+        refused.message.contains(PersistFencePhase::Queued.label()),
+        "{observed}"
+    );
     // Retired, not left Running with no turn; no evaluator turn was started.
     assert_eq!(spawned.status, DelegationStatus::Canceled, "{observed}");
     assert!(
@@ -174,7 +198,10 @@ fn acceptance_spawn_unacknowledged_first_brief_retires_the_evaluator_and_refuses
     );
     // The task is not blocked: once the writer acknowledges, the same request
     // spawns a fresh evaluator.
-    let Ok(AcceptanceEvaluationRequestResponse::Spawned { delegation: second, .. }) = second else {
+    let Ok(AcceptanceEvaluationRequestResponse::Spawned {
+        delegation: second, ..
+    }) = second
+    else {
         panic!("the request succeeds once the first brief is acknowledged: {observed}");
     };
     assert_ne!(second.delegation.id, spawned.id, "{observed}");
@@ -191,8 +218,16 @@ fn acceptance_spawn_unacknowledged_first_brief_spares_an_evaluator_a_requester_t
     // prompt passes the evaluator's admission: it marks the evaluation tainted
     // and holds the single-flight boundary its dispatch then runs under.
     let refused = refused_with_first_brief_unacknowledged(&state, &parent, &writer, |id| {
-        let child = state.inner.lock().unwrap().delegations
-            .iter().find(|record| record.id == id).unwrap().child_session_id.clone();
+        let child = state
+            .inner
+            .lock()
+            .unwrap()
+            .delegations
+            .iter()
+            .find(|record| record.id == id)
+            .unwrap()
+            .child_session_id
+            .clone();
         let request: SendMessageRequest =
             serde_json::from_value(json!({ "text": "A requester's own question." })).unwrap();
         admitted = Some(
@@ -229,12 +264,23 @@ fn acceptance_spawn_unacknowledged_first_brief_settles_a_wait_registered_meanwhi
     let refused = refused_with_first_brief_unacknowledged(&state, &parent, &writer, |id| {
         let request: CreateDelegationWaitRequest =
             serde_json::from_value(json!({ "delegationIds": [id] })).unwrap();
-        state.create_delegation_wait(&parent, request).expect("the parent waits on its evaluator");
+        state
+            .create_delegation_wait(&parent, request)
+            .expect("the parent waits on its evaluator");
         pending_waits = Some(state.inner.lock().unwrap().delegation_waits.len());
     });
 
-    assert_eq!(pending_waits, Some(1), "the wait was pending while the brief was unacknowledged");
-    assert_eq!(refused.status, StatusCode::SERVICE_UNAVAILABLE, "{}", refused.message);
+    assert_eq!(
+        pending_waits,
+        Some(1),
+        "the wait was pending while the brief was unacknowledged"
+    );
+    assert_eq!(
+        refused.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        refused.message
+    );
     let inner = state.inner.lock().unwrap();
     assert_eq!(inner.delegations[0].status, DelegationStatus::Canceled);
     assert!(
@@ -247,7 +293,8 @@ fn acceptance_spawn_unacknowledged_first_brief_settles_a_wait_registered_meanwhi
 
 #[test]
 fn acceptance_spawn_unacknowledged_first_brief_hands_off_a_wait_when_the_retirement_save_fails() {
-    let (mut state, parent, writer) = first_brief_fixture("acceptance-first-brief-save-fail-runtime");
+    let (mut state, parent, writer) =
+        first_brief_fixture("acceptance-first-brief-save-fail-runtime");
     // While the writer runs, a commit only queues its write. Once it is gone a
     // commit saves synchronously, and this store, a directory, refuses that.
     let failing = state
@@ -263,7 +310,9 @@ fn acceptance_spawn_unacknowledged_first_brief_hands_off_a_wait_when_the_retirem
     let refused = refused_with_first_brief_unacknowledged(&state, &parent, &writer, |id| {
         let request: CreateDelegationWaitRequest =
             serde_json::from_value(json!({ "delegationIds": [id] })).unwrap();
-        let wait = state.create_delegation_wait(&parent, request).expect("the parent waits on its evaluator");
+        let wait = state
+            .create_delegation_wait(&parent, request)
+            .expect("the parent waits on its evaluator");
         wait_id = Some(wait.wait.id);
         // The retirement's commit is the first to find the writer gone.
         writer.disconnect();
@@ -281,10 +330,18 @@ fn acceptance_spawn_unacknowledged_first_brief_hands_off_a_wait_when_the_retirem
         .iter()
         .any(|event| event.contains(&wait_id) && event.contains("WaitConsumed"));
 
-    assert_eq!(refused.status, StatusCode::SERVICE_UNAVAILABLE, "{}", refused.message);
+    assert_eq!(
+        refused.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        refused.message
+    );
     let inner = state.inner.lock().unwrap();
     assert_eq!(inner.delegations[0].status, DelegationStatus::Canceled);
-    assert!(inner.delegation_waits.is_empty(), "the wait was consumed by the retirement");
+    assert!(
+        inner.delegation_waits.is_empty(),
+        "the wait was consumed by the retirement"
+    );
     drop(inner);
     assert!(
         handed_off,

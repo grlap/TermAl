@@ -16,8 +16,18 @@ fn historical_causal_records_preserve_unknown_application_without_process_metada
         });
         let restored: EngramCausalFailure = serde_json::from_value(historical.clone()).unwrap();
         let mut encoded = serde_json::to_value(restored).unwrap();
-        let process = encoded.as_object_mut().unwrap().remove("controlProcess").unwrap();
-        assert_eq!(process, json!({"identity": "unavailable", "exitState": "unavailable"}));
-        assert_eq!(encoded, historical, "missing process metadata cannot rewrite history");
+        let process = encoded
+            .as_object_mut()
+            .unwrap()
+            .remove("controlProcess")
+            .unwrap();
+        assert_eq!(
+            process,
+            json!({"identity": "unavailable", "exitState": "unavailable"})
+        );
+        assert_eq!(
+            encoded, historical,
+            "missing process metadata cannot rewrite history"
+        );
     }
 }

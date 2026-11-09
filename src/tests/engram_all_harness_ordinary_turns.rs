@@ -190,9 +190,14 @@ impl EngramControlTransport for HarnessTransport {
         timeout: Duration,
     ) -> Result<Value, EngramTransportError> {
         if matches!(request, EngramControlRequest::WorkSessionRead { .. }) {
-            self.base.requests.lock().unwrap().push(RecordedEngramControlRequest {
-                connection: connection.clone(), request: serde_json::to_value(request).unwrap(),
-            });
+            self.base
+                .requests
+                .lock()
+                .unwrap()
+                .push(RecordedEngramControlRequest {
+                    connection: connection.clone(),
+                    request: serde_json::to_value(request).unwrap(),
+                });
             return Ok(json!({
                 "project_id": fs::read_to_string(&connection.project_file).unwrap().trim(),
                 "session_id": connection.session_id,
@@ -254,9 +259,14 @@ impl HarnessTurn {
         run_git_test_command(&root, &["commit", "--quiet", "-m", "ordinary"]);
         let project_id = create_test_project(&state, &root, "Engram all-harness turns");
         let workdir = normalize_user_facing_path(&root);
-        let session_id = create_test_project_session(&state, harness.agent(), &project_id, &workdir);
+        let session_id =
+            create_test_project_session(&state, harness.agent(), &project_id, &workdir);
         enable_test_project_engram(&state, &project_id, &root);
-        fs::write(root.join(".engram-project"), "github.com/example/source-root\n").unwrap();
+        fs::write(
+            root.join(".engram-project"),
+            "github.com/example/source-root\n",
+        )
+        .unwrap();
         let binding = test_control_work_binding(&name, 1);
         {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -284,11 +294,19 @@ impl HarnessTurn {
         transport.set_current_work_binding(claimed.then(|| binding.clone()));
         transport.enable_named_roots(&session_id, &binding);
         transport.replace_held_claims([Ok(EngramHeldClaims {
-            items: if claimed { vec![EngramHeldClaim {
-                work_id: binding.work_id.clone(), short_ref: binding.work_id.clone(),
-                claim_id: binding.claim_id.clone(), claim_fence: binding.claim_fence,
-                focused: true, control_binding: Some(binding.clone()),
-            }] } else { Vec::new() }, omitted: 0,
+            items: if claimed {
+                vec![EngramHeldClaim {
+                    work_id: binding.work_id.clone(),
+                    short_ref: binding.work_id.clone(),
+                    claim_id: binding.claim_id.clone(),
+                    claim_fence: binding.claim_fence,
+                    focused: true,
+                    control_binding: Some(binding.clone()),
+                }]
+            } else {
+                Vec::new()
+            },
+            omitted: 0,
         })]);
         let (sent, received) = mpsc::channel();
         let producer = Arc::new(ObservationProducer {
@@ -309,10 +327,19 @@ impl HarnessTurn {
         if claimed {
             // Establish positive fixture authority explicitly before sending;
             // provider handoff performs no canonical read on our behalf.
-            state.name_engram_source_root(&session_id, EngramSourceRootRequest {
-                work: binding.work_id, path: None,
-            }).expect("ordinary public clear acknowledges the fixture's unnamed root");
-            assert_eq!(state.engram_root_capture(&session_id), EngramRootCapture::Unnamed);
+            state
+                .name_engram_source_root(
+                    &session_id,
+                    EngramSourceRootRequest {
+                        work: binding.work_id,
+                        path: None,
+                    },
+                )
+                .expect("ordinary public clear acknowledges the fixture's unnamed root");
+            assert_eq!(
+                state.engram_root_capture(&session_id),
+                EngramRootCapture::Unnamed
+            );
         }
         install_reporting_source_capture(&state);
         let prompts = match (harness, harness.acp()) {
@@ -415,7 +442,11 @@ impl HarnessTurn {
                 .expect("the turn should complete"),
             Outcome::Failed => self
                 .state
-                .fail_turn_if_runtime_matches(&self.session_id, &token, "the provider reported a failure")
+                .fail_turn_if_runtime_matches(
+                    &self.session_id,
+                    &token,
+                    "the provider reported a failure",
+                )
                 .expect("the turn should fail"),
             Outcome::Cancelled => {
                 self.state
@@ -424,11 +455,7 @@ impl HarnessTurn {
             }
             Outcome::Unknown => self
                 .state
-                .handle_runtime_exit_if_matches(
-                    &self.session_id,
-                    &token,
-                    None,
-                )
+                .handle_runtime_exit_if_matches(&self.session_id, &token, None)
                 .expect("the runtime exit should be handled"),
         }
     }
@@ -437,11 +464,14 @@ impl HarnessTurn {
     /// shows the whole gap for this harness and outcome.
     fn gaps(&self, outcome: Outcome) -> (Vec<String>, Option<Vec<String>>) {
         let (gaps, occurrence) = self.observe(outcome);
-        let shape = occurrence.as_ref().and_then(Value::as_object).map(|fields| {
-            let mut keys: Vec<String> = fields.keys().cloned().collect();
-            keys.sort();
-            keys
-        });
+        let shape = occurrence
+            .as_ref()
+            .and_then(Value::as_object)
+            .map(|fields| {
+                let mut keys: Vec<String> = fields.keys().cloned().collect();
+                keys.sort();
+                keys
+            });
         (gaps, shape)
     }
 
@@ -461,12 +491,21 @@ impl HarnessTurn {
         }
         let next_turn = loop {
             let next = self.sent.recv_timeout(DEADLOCK_GUARD);
-            let Ok(observed) = &next else { break next; };
+            let Ok(observed) = &next else {
+                break next;
+            };
             if observed.request["occurrence"]["kind"] != "source_sighting" {
                 break next;
             }
-            assert!(observed.durable_before_send, "quiet facts use the same durable outbox");
-            assert!(observed.request["occurrence"].get("host_turn_ref").is_none());
+            assert!(
+                observed.durable_before_send,
+                "quiet facts use the same durable outbox"
+            );
+            assert!(
+                observed.request["occurrence"]
+                    .get("host_turn_ref")
+                    .is_none()
+            );
             assert_eq!(observed.receipt["accounting"], json!({"kind": "sighting"}));
             assert_eq!(observed.receipt["observed_checks"], json!([]));
             assert_eq!(observed.receipt["opened_obligations"], json!([]));
@@ -546,7 +585,10 @@ impl HarnessTurn {
                     .clone()
                     .expect("the Claude runtime received the ordinary prompt");
                 let token = self.record(|record| {
-                    record.runtime.runtime_token().expect("the turn owns its runtime")
+                    record
+                        .runtime
+                        .runtime_token()
+                        .expect("the turn owns its runtime")
                 });
                 let ownership = new_claude_turn_ownership();
                 lock_claude_turn_ownership(&ownership).reserve(claude_host_prompt_owner(&prompt));
@@ -569,19 +611,25 @@ impl HarnessTurn {
                     "type": "tool_use", "id": "harness-check", "name": "Bash",
                     "input": {"command": SIZE_TEST}}]}}));
                 self.wait_for_measurements();
-                feed(json!({"type": "user", "message": {"role": "user", "content": [{
+                feed(
+                    json!({"type": "user", "message": {"role": "user", "content": [{
                     "type": "tool_result", "tool_use_id": "harness-check", "is_error": false,
                     "content": PASSING_OUTPUT}]},
-                    "tool_use_result": {"stdout": PASSING_OUTPUT, "stderr": "", "interrupted": false}}));
+                    "tool_use_result": {"stdout": PASSING_OUTPUT, "stderr": "", "interrupted": false}}),
+                );
             }
             (_, Some(acp)) => {
                 let (input_tx, _input_rx) = mpsc::channel();
                 let mut turn_state = AcpTurnState::default();
-                let (token, generation) = self.record(|record| (
-                    record.runtime.runtime_token().unwrap(), record.active_turn_generation,
-                ));
+                let (token, generation) = self.record(|record| {
+                    (
+                        record.runtime.runtime_token().unwrap(),
+                        record.active_turn_generation,
+                    )
+                });
                 let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-                    observation_turn_generation: Some(generation), ..Default::default()
+                    observation_turn_generation: Some(generation),
+                    ..Default::default()
                 }));
                 let mut apply = |update: Value| {
                     handle_acp_notification(
@@ -668,7 +716,10 @@ fn assert_ordinary_turn_reports_its_execution(harness: Harness) {
     let (mut gaps, occurrence) = turn.observe(Outcome::Succeeded);
     if let Some(occurrence) = occurrence {
         // An observed check carries its kind and result, not the command.
-        let checks = occurrence["observed_checks"].as_array().cloned().unwrap_or_default();
+        let checks = occurrence["observed_checks"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         match checks.as_slice() {
             [check] => {
                 if check["check_kind"] != "test" {
@@ -826,7 +877,9 @@ fn unclaimed_ordinary_chats_settle_without_retry_custody_or_transcript_errors() 
     for harness in Harness::ALL {
         let turn = HarnessTurn::start_with_claim(harness, "unclaimed", false);
         for attempt in 0..3 {
-            if attempt != 0 { turn.send("Another ordinary chat.", true); }
+            if attempt != 0 {
+                turn.send("Another ordinary chat.", true);
+            }
             turn.end(Outcome::Succeeded);
             let guard = phase_sync::PollGuard::new();
             loop {
@@ -835,29 +888,50 @@ fn unclaimed_ordinary_chats_settle_without_retry_custody_or_transcript_errors() 
                         && record.engram.unadmitted_closing_jobs.is_empty()
                         && !record.engram.unadmitted_worker_running
                 });
-                if settled { break; }
-                guard.wait(format_args!("{harness:?} unclaimed chat must settle quietly"));
+                if settled {
+                    break;
+                }
+                guard.wait(format_args!(
+                    "{harness:?} unclaimed chat must settle quietly"
+                ));
             }
             turn.record(|record| {
                 assert!(!runtime_observation_has_removal_duty(record));
                 assert!(record.engram.unadmitted_reports.is_empty());
-                assert!(!record.session.messages.iter().any(|message| matches!(message,
+                assert!(
+                    !record
+                        .session
+                        .messages
+                        .iter()
+                        .any(|message| matches!(message,
                     Message::Text { author: Author::System, text, .. }
-                        if text.contains("not reported to Engram"))));
+                        if text.contains("not reported to Engram")))
+                );
             });
-            assert!(turn.sent.try_recv().is_err(), "unclaimed facts have no work recipient");
+            assert!(
+                turn.sent.try_recv().is_err(),
+                "unclaimed facts have no work recipient"
+            );
         }
     }
 }
 
 #[test]
 fn replaced_acp_readers_and_old_turns_cannot_write_successor_observations() {
-    for harness in [Harness::Cursor, Harness::Gemini, Harness::OpenCode, Harness::Kimi] {
+    for harness in [
+        Harness::Cursor,
+        Harness::Gemini,
+        Harness::OpenCode,
+        Harness::Kimi,
+    ] {
         let turn = HarnessTurn::start(harness, "stale-reader");
         let acp = harness.acp().unwrap();
-        let (old_token, old_generation) = turn.record(|record| (
-            record.runtime.runtime_token().unwrap(), record.active_turn_generation,
-        ));
+        let (old_token, old_generation) = turn.record(|record| {
+            (
+                record.runtime.runtime_token().unwrap(),
+                record.active_turn_generation,
+            )
+        });
         let (runtime, _runtime_input) = test_acp_runtime_handle(acp, "successor-runtime");
         let new_token = {
             let mut inner = turn.state.inner.lock().unwrap();
@@ -866,37 +940,75 @@ fn replaced_acp_readers_and_old_turns_cannot_write_successor_observations() {
             record.runtime = SessionRuntime::Acp(runtime);
             record.active_turn_generation += 1;
             record.engram.unadmitted_active_turn = Some(EngramRuntimeObservedTurn::started(
-                "successor-prompt".into(), record.active_turn_generation,
+                "successor-prompt".into(),
+                record.active_turn_generation,
             ));
             record.runtime.runtime_token().unwrap()
         };
         let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-            observation_turn_generation: Some(old_generation), ..Default::default()
+            observation_turn_generation: Some(old_generation),
+            ..Default::default()
         }));
         let (input_tx, _input_rx) = mpsc::channel();
         let mut recorder = SessionRecorder::new(turn.state.clone(), turn.session_id.clone());
         let mut turn_state = AcpTurnState::default();
         for token in [&old_token, &new_token] {
-            handle_acp_notification("session/update", &json!({"params": {"update": {
-                "sessionUpdate": "tool_call", "toolCallId": "stale-command",
-                "title": format!("Running: {SIZE_TEST}"), "status": "in_progress",
-                "kind": "execute", "rawInput": {"command": SIZE_TEST}
-            }}}), &turn.state, &turn.session_id, token, &runtime_state,
-                &input_tx, &mut turn_state, &mut recorder, acp).unwrap();
-            turn.record(|record| assert!(record.engram.unadmitted_active_turn
-                .as_ref().unwrap().commands.is_empty(), "stale runtime or generation: {harness:?}"));
+            handle_acp_notification(
+                "session/update",
+                &json!({"params": {"update": {
+                    "sessionUpdate": "tool_call", "toolCallId": "stale-command",
+                    "title": format!("Running: {SIZE_TEST}"), "status": "in_progress",
+                    "kind": "execute", "rawInput": {"command": SIZE_TEST}
+                }}}),
+                &turn.state,
+                &turn.session_id,
+                token,
+                &runtime_state,
+                &input_tx,
+                &mut turn_state,
+                &mut recorder,
+                acp,
+            )
+            .unwrap();
+            turn.record(|record| {
+                assert!(
+                    record
+                        .engram
+                        .unadmitted_active_turn
+                        .as_ref()
+                        .unwrap()
+                        .commands
+                        .is_empty(),
+                    "stale runtime or generation: {harness:?}"
+                )
+            });
         }
         runtime_state.lock().unwrap().observation_turn_generation = Some(old_generation + 1);
-        handle_acp_notification("session/update", &json!({"params": {"update": {
-            "sessionUpdate": "tool_call", "toolCallId": "current-command",
-            "title": format!("Running: {SIZE_TEST}"), "status": "in_progress",
-            "kind": "execute", "rawInput": {"command": SIZE_TEST}
-        }}}), &turn.state, &turn.session_id, &new_token, &runtime_state,
-            &input_tx, &mut turn_state, &mut recorder, acp).unwrap();
+        handle_acp_notification(
+            "session/update",
+            &json!({"params": {"update": {
+                "sessionUpdate": "tool_call", "toolCallId": "current-command",
+                "title": format!("Running: {SIZE_TEST}"), "status": "in_progress",
+                "kind": "execute", "rawInput": {"command": SIZE_TEST}
+            }}}),
+            &turn.state,
+            &turn.session_id,
+            &new_token,
+            &runtime_state,
+            &input_tx,
+            &mut turn_state,
+            &mut recorder,
+            acp,
+        )
+        .unwrap();
         turn.record(|record| {
             let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
             assert_eq!(trace.notice_message_id, "successor-prompt");
-            assert_eq!(trace.commands.len(), 1, "{harness:?} current event is still observed");
+            assert_eq!(
+                trace.commands.len(),
+                1,
+                "{harness:?} current event is still observed"
+            );
             assert_eq!(trace.commands[0].tool_key, "current-command");
         });
     }

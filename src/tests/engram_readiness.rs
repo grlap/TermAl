@@ -22,12 +22,8 @@ fn readiness_admission_rejects_unsupported_envelopes_paths_and_identity() {
     let admit = |value: Value| -> Result<EngramAuthorityStoreKey, String> {
         let receipt: EngramReadinessReceipt =
             serde_json::from_value(value).map_err(|e| e.to_string())?;
-        validate_engram_readiness(
-            &receipt,
-            &root.path().join(".engram-project"),
-            root.path(),
-        )
-        .map_err(|e| e.message)
+        validate_engram_readiness(&receipt, &root.path().join(".engram-project"), root.path())
+            .map_err(|e| e.message)
     };
     assert!(admit(valid.clone()).is_ok());
     for (pointer, replacement) in [
@@ -374,7 +370,9 @@ async fn readiness_verify_save_and_explicit_audit_routes_are_separate() {
                     .method(method)
                     .uri(uri)
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"enabled":true,"executionObservability":true}"#))
+                    .body(Body::from(
+                        r#"{"enabled":true,"executionObservability":true}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -642,11 +640,7 @@ fn real_readiness_verify_save_audit_disposable_store() {
         .arg(&marker)
         .arg("--home")
         .arg(&home)
-        .args([
-            "init",
-            "--authorized-by",
-            "termal-test",
-        ])
+        .args(["init", "--authorized-by", "termal-test"])
         .current_dir(&root)
         .output()
         .unwrap();

@@ -40,12 +40,7 @@ fn review_observer_first_eviction_counters_are_inside_snapshot() {
             writer.released(span(257, 1, 60, 60, Some(70)));
         }));
     });
-    let block = StateLockBlock::collect_at(
-        &observer,
-        &waits(span(1000, 1, 20, 40, None)),
-        0,
-        100,
-    );
+    let block = StateLockBlock::collect_at(&observer, &waits(span(1000, 1, 20, 40, None)), 0, 100);
     assert!(block.holders.is_empty(), "fixture evicted its sole overlap");
     assert!(
         block.partial && (block.unavailable || block.eviction_count > 0),

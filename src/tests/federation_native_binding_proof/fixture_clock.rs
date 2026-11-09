@@ -13,13 +13,15 @@ async fn fixture_attestation_does_not_depend_on_elapsed_wall_time() {
     let (mut central, mut satellite) = (fixture.channel.clone(), fixture.satellite_channel.clone());
     central.control.attest_timeout = window;
     satellite.control.attest_timeout = window;
-    let proof = federation_control_fixture::attest_after_satellite_delay(
-        &central, &satellite, window * 5,
-    )
-    .await;
+    let proof =
+        federation_control_fixture::attest_after_satellite_delay(&central, &satellite, window * 5)
+            .await;
     let old = fixture.attested.lock().unwrap().replace(proof);
     drop(old);
-    fixture.rpc.health(&fixture.channel.current_lease().unwrap()).await
+    fixture
+        .rpc
+        .health(&fixture.channel.current_lease().unwrap())
+        .await
         .expect("the re-attested link is current");
     fixture.finish().await;
 }

@@ -17,9 +17,16 @@ fn two_profiles_runtime_exit_ends_only_its_own_sessions_without_control_recovery
     let project = create_test_project(&state, &root, "Two-profile exit");
     {
         let mut inner = state.inner.lock().unwrap();
-        inner.projects.iter_mut().find(|entry| entry.id == project).unwrap().engram =
-            Some(EngramProjectSettings { enabled: true, execution_observability: false,
-                ..EngramProjectSettings::default() });
+        inner
+            .projects
+            .iter_mut()
+            .find(|entry| entry.id == project)
+            .unwrap()
+            .engram = Some(EngramProjectSettings {
+            enabled: true,
+            execution_observability: false,
+            ..EngramProjectSettings::default()
+        });
     }
     let default_owner = phase_sync::ParkedProcess::spawn();
     let read_only_owner = phase_sync::ParkedProcess::spawn();
@@ -50,9 +57,11 @@ fn two_profiles_runtime_exit_ends_only_its_own_sessions_without_control_recovery
                 let record = &mut inner.sessions[index];
                 record.codex_thread_profile = Some(profile);
                 set_record_external_session_id(record, Some(format!("thread-{id}")));
-                record.engram.historical_control.insert("profileExitHistory".into(),
+                record.engram.historical_control.insert(
+                    "profileExitHistory".into(),
                     json!({"routing_token":format!("before-{id}"),
-                        "grant_id":"unsettled-original", "future":{"untouched":true}}));
+                        "grant_id":"unsettled-original", "future":{"untouched":true}}),
+                );
                 if attached {
                     record.session.status = SessionStatus::Active;
                     record.runtime = SessionRuntime::Codex(
@@ -85,7 +94,10 @@ fn two_profiles_runtime_exit_ends_only_its_own_sessions_without_control_recovery
         .handle_shared_codex_runtime_exit("exit-read-only", None)
         .unwrap();
     let calls = transport.requests();
-    assert!(calls.is_empty(), "an ordinary process exit performs no status read or control bind");
+    assert!(
+        calls.is_empty(),
+        "an ordinary process exit performs no status read or control bind"
+    );
     for (id, profile, attached) in &sessions {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(id).unwrap()];
@@ -118,9 +130,11 @@ fn two_profiles_runtime_exit_ends_only_its_own_sessions_without_control_recovery
                 );
             }
         }
-        assert_eq!(record.engram.historical_control.get("profileExitHistory"),
+        assert_eq!(
+            record.engram.historical_control.get("profileExitHistory"),
             Some(&json!({"routing_token":format!("before-{id}"),
-                "grant_id":"unsettled-original", "future":{"untouched":true}})));
+                "grant_id":"unsettled-original", "future":{"untouched":true}}))
+        );
     }
     assert!(
         state

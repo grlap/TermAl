@@ -9,11 +9,7 @@ fn summary(run_dir: &FsPath) -> String {
         .arg(run_dir)
         .output()
         .expect("Node can read the fixture summary");
-    assert!(
-        output.status.success(),
-        "{}",
-        output.stderr.len()
-    );
+    assert!(output.status.success(), "{}", output.stderr.len());
     String::from_utf8(output.stdout).unwrap()
 }
 
@@ -67,7 +63,9 @@ fn typed_producer_refusal_reaches_the_retained_record_and_actual_summary() {
     );
     // A terminal refusal must remain terminal without another producer send.
     register(&fixture, &[&run]);
-    fixture.state.note_engram_verification_record_step(&run.registration, &step);
+    fixture
+        .state
+        .note_engram_verification_record_step(&run.registration, &step);
     let stored = current(&fixture, &run);
     assert!(matches!(
         &stored.verification_record,

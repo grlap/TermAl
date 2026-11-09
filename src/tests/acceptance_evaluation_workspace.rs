@@ -47,8 +47,8 @@ fn window_record(locator: &str, workspace: Option<&str>) -> Value {
 /// the tracker shows it today: without its workspace.
 fn carried_task(closure_in_window: bool) -> AcceptanceEvaluationTask {
     let (mut show, full, mut page) = super::evidence_selection::canonical_binding_receipts();
-    page["rows"][1]["binding"]["obligation"]["resolution"]["satisfaction"]["verification"]
-        ["source_basis"] = json!({"workspace_id": PRODUCER_WORKSPACE, "source_revision": REVISION});
+    page["rows"][1]["binding"]["obligation"]["resolution"]["satisfaction"]["verification"]["source_basis"] =
+        json!({"workspace_id": PRODUCER_WORKSPACE, "source_revision": REVISION});
     let mut notes = vec![
         window_record(CURRENT, Some(JUDGED_WORKSPACE)),
         window_record(PEER, Some(PRODUCER_WORKSPACE)),
@@ -98,7 +98,9 @@ fn a_closure_from_another_workspace_at_the_judged_revision_is_context_only() {
         // The criterion index offers the closure for criterion 2.
         for prompt in [&independent, &same_session] {
             assert!(
-                prompt.contains(&format!("Criterion 2: {CLOSURE} (original obligation closure)")),
+                prompt.contains(&format!(
+                    "Criterion 2: {CLOSURE} (original obligation closure)"
+                )),
                 "{closure_in_window}: the index offers the closure: {prompt}"
             );
         }
@@ -111,7 +113,11 @@ fn a_closure_from_another_workspace_at_the_judged_revision_is_context_only() {
             &independent[index_start..list_start],
             &independent[list_start..],
         );
-        let (listed, unlisted) = if closure_in_window { (list, index) } else { (index, list) };
+        let (listed, unlisted) = if closure_in_window {
+            (list, index)
+        } else {
+            (index, list)
+        };
         assert!(
             !record_lines(listed, CLOSURE).is_empty() && record_lines(unlisted, CLOSURE).is_empty(),
             "{closure_in_window}: the closure is listed once, where expected: {independent}"
@@ -122,7 +128,10 @@ fn a_closure_from_another_workspace_at_the_judged_revision_is_context_only() {
         ] {
             for locator in [CLOSURE, PEER] {
                 let lines = record_lines(prompt, locator);
-                assert!(!lines.is_empty(), "{closure_in_window} {name}: {locator} is listed: {prompt}");
+                assert!(
+                    !lines.is_empty(),
+                    "{closure_in_window} {name}: {locator} is listed: {prompt}"
+                );
                 assert!(
                     lines.iter().all(|line| line.contains(&marker)),
                     "{closure_in_window} {name}: {locator} is context only: {lines:?}"
@@ -130,7 +139,10 @@ fn a_closure_from_another_workspace_at_the_judged_revision_is_context_only() {
             }
             for locator in [CURRENT, UNKNOWN] {
                 let lines = record_lines(prompt, locator);
-                assert!(!lines.is_empty(), "{closure_in_window} {name}: {locator} is listed: {prompt}");
+                assert!(
+                    !lines.is_empty(),
+                    "{closure_in_window} {name}: {locator} is listed: {prompt}"
+                );
                 assert!(
                     lines.iter().all(|line| !line.contains("context only")),
                     "{closure_in_window} {name}: {locator} stays unmarked: {lines:?}"
@@ -149,9 +161,15 @@ fn no_workspace_marker_without_a_judged_workspace() {
     let prompt = build_acceptance_evaluator_brief(&task, "/repo", MAX_ACCEPTANCE_BRIEF_BYTES)
         .unwrap()
         .prompt;
-    assert!(!prompt.contains("context only: it ran in workspace"), "{prompt}");
+    assert!(
+        !prompt.contains("context only: it ran in workspace"),
+        "{prompt}"
+    );
     for locator in [CLOSURE, PEER, CURRENT, UNKNOWN] {
-        assert!(!record_lines(&prompt, locator).is_empty(), "{locator}: {prompt}");
+        assert!(
+            !record_lines(&prompt, locator).is_empty(),
+            "{locator}: {prompt}"
+        );
     }
 }
 
@@ -167,8 +185,8 @@ fn a_record_from_another_revision_keeps_the_revision_marker() {
     assert!(
         !lines.is_empty()
             && lines.iter().all(|line| line.contains(&format!(
-            "[context only: it ran at {REVISION}, not at content-v1:9c723064"
-        )) && !line.contains("ran in workspace")),
+                "[context only: it ran at {REVISION}, not at content-v1:9c723064"
+            )) && !line.contains("ran in workspace")),
         "{lines:?}"
     );
 }

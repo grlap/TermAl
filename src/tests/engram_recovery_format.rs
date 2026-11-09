@@ -19,7 +19,10 @@ fn historical_recovery_metadata_cannot_replace_or_pause_ordinary_queued_content(
     let index = inner.find_session_index(&id).unwrap();
     let record = &mut inner.sessions[index];
     for (id, text) in [
-        ("ordinary-first", "Original first line\nsecond line\nżółw 🐢"),
+        (
+            "ordinary-first",
+            "Original first line\nsecond line\nżółw 🐢",
+        ),
         ("ordinary-next", "A distinct queued successor"),
     ] {
         record.queued_prompts.push_back(
@@ -60,7 +63,10 @@ fn historical_recovery_metadata_cannot_replace_or_pause_ordinary_queued_content(
         "engramBeginCancelCapture",
         "engramBeginCancelAudit",
     ] {
-        assert!(row.get(field).is_none(), "ordinary persistence adds no {field}");
+        assert!(
+            row.get(field).is_none(),
+            "ordinary persistence adds no {field}"
+        );
         let value = json!({
             "unknown": "Historical operation; application remains unknown",
             "promptId": "a-different-historical-prompt",
@@ -70,37 +76,49 @@ fn historical_recovery_metadata_cannot_replace_or_pause_ordinary_queued_content(
         expected_history.insert(field.to_owned(), value);
     }
     for (field, value) in [
-        ("engramRoutingToken", json!("historical-token-not-a-current-route")),
+        (
+            "engramRoutingToken",
+            json!("historical-token-not-a-current-route"),
+        ),
         ("engramOpenGrantId", json!("historical-grant")),
         ("engramUncertainGrantId", json!("historical-grant")),
         ("engramBeginsRecorded", json!(true)),
         ("engramDispatchGeneration", json!(17)),
-        ("engramPendingBatches", json!([
-            {
-                "checkpointId": "original-checkpoint-key",
-                "outcome": "unknown",
-                "futureProducerFields": {
-                    "opaque": [null, false, {"text": "Original late facts\nżółw 🐢"}],
-                    "verificationRecord": "0123456789abcdef0123456789abcdef"
-                }
-            },
-            {"unrecognizedBatchKind": {"attempts": [1, 2], "applied": null}}
-        ])),
-        ("engramCheckpointOperation", json!({
-            "original": {
-                "id": "historical-checkpoint-key",
-                "request": {
-                    "operation": "turn_checkpoint",
-                    "routing_token": "historical-token-not-a-current-route",
-                    "grant_id": "historical-grant",
-                    "idempotency_key": "historical-checkpoint-key",
-                    "opaque": {"text": "Do not reconstruct this request\nżółw 🐢"}
-                }
-            },
-            "attempts": [{"result": {"kind": "unknown", "detail": "reply was lost"}}]
-        })),
+        (
+            "engramPendingBatches",
+            json!([
+                {
+                    "checkpointId": "original-checkpoint-key",
+                    "outcome": "unknown",
+                    "futureProducerFields": {
+                        "opaque": [null, false, {"text": "Original late facts\nżółw 🐢"}],
+                        "verificationRecord": "0123456789abcdef0123456789abcdef"
+                    }
+                },
+                {"unrecognizedBatchKind": {"attempts": [1, 2], "applied": null}}
+            ]),
+        ),
+        (
+            "engramCheckpointOperation",
+            json!({
+                "original": {
+                    "id": "historical-checkpoint-key",
+                    "request": {
+                        "operation": "turn_checkpoint",
+                        "routing_token": "historical-token-not-a-current-route",
+                        "grant_id": "historical-grant",
+                        "idempotency_key": "historical-checkpoint-key",
+                        "opaque": {"text": "Do not reconstruct this request\nżółw 🐢"}
+                    }
+                },
+                "attempts": [{"result": {"kind": "unknown", "detail": "reply was lost"}}]
+            }),
+        ),
     ] {
-        assert!(row.get(field).is_none(), "a new ordinary row adds no {field}");
+        assert!(
+            row.get(field).is_none(),
+            "a new ordinary row adds no {field}"
+        );
         historical[field] = value.clone();
         expected_history.insert(field.to_owned(), value);
     }
@@ -121,14 +139,23 @@ fn historical_recovery_metadata_cannot_replace_or_pause_ordinary_queued_content(
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(actual, expected, "history cannot replace or reorder queued content");
+        assert_eq!(
+            actual, expected,
+            "history cannot replace or reorder queued content"
+        );
         if retained {
-            let roundtrip = serde_json::to_value(PersistedSessionRecord::from_record(&restored))
-                .unwrap();
+            let roundtrip =
+                serde_json::to_value(PersistedSessionRecord::from_record(&restored)).unwrap();
             for (field, original) in &expected_history {
-                assert_eq!(restored.engram.historical_control.get(field), Some(original));
-                assert_eq!(roundtrip.get(field), Some(original),
-                    "original camelCase history survives without becoming runtime authority: {field}");
+                assert_eq!(
+                    restored.engram.historical_control.get(field),
+                    Some(original)
+                );
+                assert_eq!(
+                    roundtrip.get(field),
+                    Some(original),
+                    "original camelCase history survives without becoming runtime authority: {field}"
+                );
             }
         } else {
             assert!(restored.engram.historical_control.is_empty());

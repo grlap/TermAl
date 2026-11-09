@@ -80,13 +80,26 @@ impl Drop for NamingServer {
 fn named_observed_root(label: &str) -> (EOCheckedTurn, PathBuf) {
     let turn = EOCheckedTurn::idle(label, true);
     let worktree = turn.root.join(".worktrees").join("unknown-fields");
-    run_git_test_command(&turn.root, &[
-        "worktree", "add", "--quiet", "-b", "unknown-fields", worktree.to_str().unwrap(),
-    ]);
-    turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
-        work: naming_work(&turn),
-        path: Some(Some(worktree.to_string_lossy().into_owned())),
-    }).unwrap();
+    run_git_test_command(
+        &turn.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "unknown-fields",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    turn.state
+        .name_engram_source_root(
+            &turn.session_id,
+            EngramSourceRootRequest {
+                work: naming_work(&turn),
+                path: Some(Some(worktree.to_string_lossy().into_owned())),
+            },
+        )
+        .unwrap();
     turn.begin("Inspect the named worktree.");
     (turn, worktree)
 }
@@ -199,9 +212,17 @@ fn source_root_unknown_fields_preserve_a_pending_intent_at_both_boundaries() {
     let label = "unknown-field-pending";
     let claimed = EOCheckedTurn::idle(label, true);
     let worktree = claimed.root.join(".worktrees").join("unknown-pending");
-    run_git_test_command(&claimed.root, &[
-        "worktree", "add", "--quiet", "-b", "unknown-pending", worktree.to_str().unwrap(),
-    ]);
+    run_git_test_command(
+        &claimed.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "unknown-pending",
+            worktree.to_str().unwrap(),
+        ],
+    );
     claimed
         .transport
         .named_roots
@@ -210,10 +231,16 @@ fn source_root_unknown_fields_preserve_a_pending_intent_at_both_boundaries() {
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
-        work: naming_work(&claimed),
-        path: Some(Some(worktree.to_string_lossy().into_owned())),
-    }).unwrap_err();
+    claimed
+        .state
+        .name_engram_source_root(
+            &claimed.session_id,
+            EngramSourceRootRequest {
+                work: naming_work(&claimed),
+                path: Some(Some(worktree.to_string_lossy().into_owned())),
+            },
+        )
+        .unwrap_err();
     assert!(
         claimed
             .state
@@ -316,8 +343,15 @@ fn source_root_unknown_fields_valid_mcp_name_and_omission_clear_still_publish() 
     assert!(cleared["sealed"]["root"].is_string());
     assert!(cleared["sealed"].get("sourceRevision").is_none());
     assert!(cleared["sealed"].get("sourceId").is_none());
-    let source_id = claimed.record(|record| record.engram.observed_source_root()
-        .unwrap().sealed_source_id.clone().unwrap());
+    let source_id = claimed.record(|record| {
+        record
+            .engram
+            .observed_source_root()
+            .unwrap()
+            .sealed_source_id
+            .clone()
+            .unwrap()
+    });
     claimed.record(|record| {
         let current = record.engram.observed_source_root().unwrap();
         assert_eq!(current.root, admitted.root);

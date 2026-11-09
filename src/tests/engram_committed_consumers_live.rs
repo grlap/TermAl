@@ -133,18 +133,20 @@ fn consumer_fixture(consumer: &Consumer) -> CompletionFixture {
             run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim(),
             consumer.commit
         );
-        assert!(run_git_test_command_output(
-            root,
-            &[
-                "-c",
-                "status.showUntrackedFiles=all",
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=all",
-                "--ignore-submodules=none"
-            ]
-        )
-        .is_empty());
+        assert!(
+            run_git_test_command_output(
+                root,
+                &[
+                    "-c",
+                    "status.showUntrackedFiles=all",
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                    "--ignore-submodules=none"
+                ]
+            )
+            .is_empty()
+        );
     });
     eprintln!(
         "CONSUMER_FIXTURE {}",
@@ -375,11 +377,51 @@ fn mutate(matrix: &Matrix, consumer: &Consumer, change: Change) {
             run_git_test_command(&donor, &["init", "--quiet", "--template="]);
             fs::write(donor.join("nested.txt"), "nested pinned input\n").unwrap();
             run_git_test_command(&donor, &["add", "--", "nested.txt"]);
-            run_git_test_command(&donor, &["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "nested input"]);
+            run_git_test_command(
+                &donor,
+                &[
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "nested input",
+                ],
+            );
             let donor = identity_git_path(&fs::canonicalize(donor).unwrap()).unwrap();
-            run_git_test_command(&child, &["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", &donor, "nested-fixture"]);
-            run_git_test_command(&child.join("nested-fixture"), &["config", "core.autocrlf", "false"]);
-            run_git_test_command(&child, &["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-am", "pin nested input"]);
+            run_git_test_command(
+                &child,
+                &[
+                    "-c",
+                    "core.autocrlf=false",
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "add",
+                    "--quiet",
+                    &donor,
+                    "nested-fixture",
+                ],
+            );
+            run_git_test_command(
+                &child.join("nested-fixture"),
+                &["config", "core.autocrlf", "false"],
+            );
+            run_git_test_command(
+                &child,
+                &[
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "--quiet",
+                    "-am",
+                    "pin nested input",
+                ],
+            );
             run_git_test_command(root, &["add", "--", path]);
             run_git_test_command(root, &["commit", "--quiet", "-m", "pin nested child"]);
         }
@@ -421,15 +463,32 @@ fn refuse_consumer_done(matrix: &Matrix, check: &ActualCheck, consumer: &Consume
             let output = matrix.done_output(check);
             assert!(!output.status.success());
             let body: Value = serde_json::from_slice(&output.stdout)
-                .or_else(|_| serde_json::from_slice(&output.stderr)).unwrap();
-            assert_eq!(body["error"]["code"], "work_completion_refused", "<body withheld>");
-            assert_eq!(body["error"]["details"]["work_ref"], matrix.work, "<body withheld>");
+                .or_else(|_| serde_json::from_slice(&output.stderr))
+                .unwrap();
+            assert_eq!(
+                body["error"]["code"], "work_completion_refused",
+                "<body withheld>"
+            );
+            assert_eq!(
+                body["error"]["details"]["work_ref"], matrix.work,
+                "<body withheld>"
+            );
             let reason = body["error"]["details"]["reason"].as_str().unwrap();
-            assert!(reason.contains("no submodule mapping found")
-                && reason.contains(consumer.children[0].0), "<body withheld>");
-            let core = matrix.fixture.work(&matrix.holder, &["core", "inspect", &matrix.work, "--json"]);
+            assert!(
+                reason.contains("no submodule mapping found")
+                    && reason.contains(consumer.children[0].0),
+                "<body withheld>"
+            );
+            let core = matrix
+                .fixture
+                .work(&matrix.holder, &["core", "inspect", &matrix.work, "--json"]);
             assert!(core["run"]["completion_seal"].is_null(), "<core withheld>");
-            eprintln!("MATRIX_DONE_REFUSAL exit={:?} stdout_bytes={} stderr_bytes={}", output.status.code(), output.stdout.len(), output.stderr.len());
+            eprintln!(
+                "MATRIX_DONE_REFUSAL exit={:?} stdout_bytes={} stderr_bytes={}",
+                output.status.code(),
+                output.stdout.len(),
+                output.stderr.len()
+            );
             return;
         }
         Change::TrackedChild
@@ -455,7 +514,10 @@ fn refuse_consumer_done(matrix: &Matrix, check: &ActualCheck, consumer: &Consume
     let body: Value = serde_json::from_slice(&output.stdout)
         .or_else(|_| serde_json::from_slice(&output.stderr))
         .expect("ordinary done returns its typed refusal");
-    assert_eq!(body["error"]["code"], "work_completion_refused", "<body withheld>");
+    assert_eq!(
+        body["error"]["code"], "work_completion_refused",
+        "<body withheld>"
+    );
     assert_eq!(
         body["error"]["details"]["work_ref"], matrix.work,
         "<body withheld>"
@@ -470,7 +532,9 @@ fn refuse_consumer_done(matrix: &Matrix, check: &ActualCheck, consumer: &Consume
     let refused_root = reason
         .strip_prefix("registered root ")
         .and_then(|value| value.strip_suffix(&suffix))
-        .unwrap_or_else(|| panic!("expected this row's '{expected}' guard refusal: <body withheld>"));
+        .unwrap_or_else(|| {
+            panic!("expected this row's '{expected}' guard refusal: <body withheld>")
+        });
     assert_eq!(
         fs::canonicalize(refused_root).unwrap(),
         fs::canonicalize(&matrix.fixture.root).unwrap(),
@@ -490,21 +554,39 @@ fn changed_consumer(consumer: &Consumer, change: Change) {
     );
     if matches!(change, Change::Nested) {
         mutate(&matrix, consumer, change);
-        let commit = run_git_test_command_output(&matrix.fixture.root, &["rev-parse", "HEAD"]).trim().to_owned();
-        let pins: Vec<(String, String)> = consumer.children.iter().map(|(path, _)| (
-            (*path).to_owned(), run_git_test_command_output(&matrix.fixture.root.join(path), &["rev-parse", "HEAD"]).trim().to_owned()
-        )).collect();
+        let commit = run_git_test_command_output(&matrix.fixture.root, &["rev-parse", "HEAD"])
+            .trim()
+            .to_owned();
+        let pins: Vec<(String, String)> = consumer
+            .children
+            .iter()
+            .map(|(path, _)| {
+                (
+                    (*path).to_owned(),
+                    run_git_test_command_output(
+                        &matrix.fixture.root.join(path),
+                        &["rev-parse", "HEAD"],
+                    )
+                    .trim()
+                    .to_owned(),
+                )
+            })
+            .collect();
         let pins: Vec<(&str, &str)> = pins.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
         assert!(matches!(source_revision(&matrix.fixture.root, true),
             Ok(SourceRevision::Taken { revision, .. }) if revision == format!("git-commit:{commit}")));
-        matrix.begin("Check clean nested pinned input derived inside the disposable consumer clone.");
+        matrix
+            .begin("Check clean nested pinned input derived inside the disposable consumer clone.");
         let check = launch_consumer(&matrix, &commit, &pins);
         matrix.close();
         matrix.settle();
         let originals = immutable_bytes(&matrix);
         matrix.accept(&check, || {});
         assert_immutable_bytes(&matrix, &originals);
-        eprintln!("CONSUMER_ADMITTED {}", json!({"consumer":consumer.name,"change":format!("{change:?}"),"commit":commit}));
+        eprintln!(
+            "CONSUMER_ADMITTED {}",
+            json!({"consumer":consumer.name,"change":format!("{change:?}"),"commit":commit})
+        );
         return;
     }
     matrix.begin("Check and independently evaluate the real clean consumer input.");

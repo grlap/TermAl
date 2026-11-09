@@ -28,18 +28,36 @@ const PINNED_IDENTITY: &str = "b1b3be35621e7556ced036653b7314d47d953d2a0307c5d8f
 #[test]
 fn a_request_without_input_keeps_its_unchanged_identity() {
     let request = pinned_request();
-    assert_eq!(test_run_registration_identity(&request).unwrap(), PINNED_IDENTITY);
+    assert_eq!(
+        test_run_registration_identity(&request).unwrap(),
+        PINNED_IDENTITY
+    );
     // The unchanged path, recomputed: the fourteen immutable fields, null
     // when absent, in key order.
     let fields = [
-        "runId", "root", "stages", "notifyTo", "full", "scope", "detached", "creatorPid",
-        "owner", "started", "requiredBinaryEnv", "prerequisiteFiles", "needsCargo", "liveEngram",
+        "runId",
+        "root",
+        "stages",
+        "notifyTo",
+        "full",
+        "scope",
+        "detached",
+        "creatorPid",
+        "owner",
+        "started",
+        "requiredBinaryEnv",
+        "prerequisiteFiles",
+        "needsCargo",
+        "liveEngram",
     ];
     let unchanged: BTreeMap<_, _> = fields
         .into_iter()
         .map(|name| (name, request.get(name).cloned().unwrap_or(Value::Null)))
         .collect();
-    assert_eq!(sha256_hex(&serde_json::to_vec(&unchanged).unwrap()), PINNED_IDENTITY);
+    assert_eq!(
+        sha256_hex(&serde_json::to_vec(&unchanged).unwrap()),
+        PINNED_IDENTITY
+    );
 }
 
 #[test]
@@ -51,7 +69,10 @@ fn a_committed_input_request_has_a_different_identity() {
     let mut other = pinned_request();
     other["input"] = json!("tree");
     assert_ne!(test_run_registration_identity(&other).unwrap(), identity);
-    assert_ne!(test_run_registration_identity(&other).unwrap(), PINNED_IDENTITY);
+    assert_ne!(
+        test_run_registration_identity(&other).unwrap(),
+        PINNED_IDENTITY
+    );
 }
 
 fn engram_owner(fixture: &RunFixture) -> (String, EngramAuthorityStoreKey) {
@@ -129,45 +150,64 @@ pub(super) fn name_root(
     .unwrap();
     let mut inner = fixture.state.inner.lock().unwrap();
     inner.engram_work_source_roots.push(entry.clone());
-    inner.engram_work_naming_history.push(EngramWorkNamingHistory {
-        store: store.clone(),
-        work_id: binding.work_id.clone(),
-        revision: 1,
-        known_generation: generation,
-        epoch: 0,
-        frontier: None,
-        owner_version: 0,
-        transition: None,
-        unresolved_runs: Vec::new(),
-        retired_runs: Vec::new(),
-        proofs: vec![EngramAuthorityProof {
-            binding: binding.clone(),
-            read,
-        }],
-        recovery_reason: None,
-        retirements: Vec::new(),
-    });
-    let bindings = inner.engram_work_naming_history.iter()
-        .flat_map(|history| history.proofs.iter().map(|proof| EngramHeldClaim {
-            work_id: proof.binding.work_id.clone(),
-            short_ref: "named-work".to_owned(),
-            claim_id: proof.binding.claim_id.clone(),
-            claim_fence: proof.binding.claim_fence,
-            focused: false,
-            control_binding: Some(proof.binding.clone()),
-        })).collect();
-    let project = inner.projects.iter_mut().find(|project| project.id == fixture.project_id).unwrap();
-    let mut settings = crate::tests::engram_host_adapter::real_fixture_engram_settings(&fixture.root);
+    inner
+        .engram_work_naming_history
+        .push(EngramWorkNamingHistory {
+            store: store.clone(),
+            work_id: binding.work_id.clone(),
+            revision: 1,
+            known_generation: generation,
+            epoch: 0,
+            frontier: None,
+            owner_version: 0,
+            transition: None,
+            unresolved_runs: Vec::new(),
+            retired_runs: Vec::new(),
+            proofs: vec![EngramAuthorityProof {
+                binding: binding.clone(),
+                read,
+            }],
+            recovery_reason: None,
+            retirements: Vec::new(),
+        });
+    let bindings = inner
+        .engram_work_naming_history
+        .iter()
+        .flat_map(|history| {
+            history.proofs.iter().map(|proof| EngramHeldClaim {
+                work_id: proof.binding.work_id.clone(),
+                short_ref: "named-work".to_owned(),
+                claim_id: proof.binding.claim_id.clone(),
+                claim_fence: proof.binding.claim_fence,
+                focused: false,
+                control_binding: Some(proof.binding.clone()),
+            })
+        })
+        .collect();
+    let project = inner
+        .projects
+        .iter_mut()
+        .find(|project| project.id == fixture.project_id)
+        .unwrap();
+    let mut settings =
+        crate::tests::engram_host_adapter::real_fixture_engram_settings(&fixture.root);
     settings.authority_store_key = Some(store.clone());
     project.engram = Some(settings);
     drop(inner);
     let transport = ScriptedEngramControlTransport::new([]);
-    transport.replace_held_claims([Ok(EngramHeldClaims { items: bindings, omitted: 0 })]);
+    transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: bindings,
+        omitted: 0,
+    })]);
     fixture.state.install_test_engram_transport(transport);
     entry
 }
 
-fn set_session_binding(fixture: &RunFixture, session: &str, binding: Option<EngramControlWorkBinding>) {
+fn set_session_binding(
+    fixture: &RunFixture,
+    session: &str,
+    binding: Option<EngramControlWorkBinding>,
+) {
     let mut inner = fixture.state.inner.lock().unwrap();
     let index = inner.find_session_index(session).unwrap();
     inner.sessions[index].engram.work_binding = binding;
@@ -205,7 +245,14 @@ fn a_committed_input_run_in_the_sessions_named_root_binds_its_claim_with_control
     let fixture = RunFixture::new("registration-named-root-binds");
     let (session, store) = engram_owner(&fixture);
     let binding = claim("named");
-    let entry = name_root(&fixture, &store, &binding, &session, &canonical_root(&fixture), 1);
+    let entry = name_root(
+        &fixture,
+        &store,
+        &binding,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
     // Turn-gated control OFF: the session itself holds no binding.
     set_session_binding(&fixture, &session, None);
     let registration = register_run(&fixture, &session, "test-named-root-binds", true);
@@ -243,7 +290,14 @@ fn a_committed_input_run_ignores_a_stale_session_binding_for_another_claim() {
     let stale = claim("stale");
     set_session_binding(&fixture, &session, Some(stale.clone()));
     let named = claim("named");
-    name_root(&fixture, &store, &named, &session, &canonical_root(&fixture), 1);
+    name_root(
+        &fixture,
+        &store,
+        &named,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
     let registration = register_run(&fixture, &session, "test-stale-named", true);
     assert_eq!(registration.work_binding.as_ref(), Some(&named));
     assert_ne!(registration.work_binding.as_ref(), Some(&stale));
@@ -257,7 +311,10 @@ fn a_committed_input_run_without_a_matching_named_root_stays_unbound() {
     // The session's own binding is never the fallback.
     set_session_binding(&fixture, &session, Some(binding.clone()));
     let unnamed = register_run(&fixture, &session, "test-committed-unnamed", true);
-    assert_eq!(unnamed.work_binding, None, "no named root: unbound, not the session's claim");
+    assert_eq!(
+        unnamed.work_binding, None,
+        "no named root: unbound, not the session's claim"
+    );
     assert_eq!(unnamed.named_root, None);
     assert!(!unnamed.validated_unbound);
 
@@ -272,7 +329,14 @@ fn a_committed_input_run_without_a_matching_named_root_stays_unbound() {
         1,
     );
     let other = claim("other-session");
-    name_root(&fixture, &store, &other, "another-session", &canonical_root(&fixture), 2);
+    name_root(
+        &fixture,
+        &store,
+        &other,
+        "another-session",
+        &canonical_root(&fixture),
+        2,
+    );
     let transport = ScriptedEngramControlTransport::new([]);
     transport.replace_held_claims([Ok(current_held_claim(&binding))]);
     fixture.state.install_test_engram_transport(transport);
@@ -282,7 +346,10 @@ fn a_committed_input_run_without_a_matching_named_root_stays_unbound() {
     let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     request["input"] = json!("commit");
     fs::write(path, request.to_string()).unwrap();
-    fixture.state.register_test_run(&session, registration_request(id, &directory)).unwrap();
+    fixture
+        .state
+        .register_test_run(&session, registration_request(id, &directory))
+        .unwrap();
     let inner = fixture.state.inner.lock().unwrap();
     assert!(inner.test_run_registrations[id].work_binding.is_none());
     assert!(!inner.test_run_registrations[id].validated_unbound);
@@ -297,8 +364,22 @@ fn a_committed_input_run_under_two_matching_named_roots_reports_both_names() {
     let (session, store) = engram_owner(&fixture);
     let first = claim("first");
     let second = claim("second");
-    name_root(&fixture, &store, &first, &session, &canonical_root(&fixture), 1);
-    name_root(&fixture, &store, &second, &session, &canonical_root(&fixture), 2);
+    name_root(
+        &fixture,
+        &store,
+        &first,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
+    name_root(
+        &fixture,
+        &store,
+        &second,
+        &session,
+        &canonical_root(&fixture),
+        2,
+    );
     set_session_binding(&fixture, &session, Some(first.clone()));
     let id = "test-named-root-two";
     let directory = registered_run(&fixture, &session, id);
@@ -306,14 +387,33 @@ fn a_committed_input_run_under_two_matching_named_roots_reports_both_names() {
     let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     request["input"] = json!("commit");
     fs::write(path, request.to_string()).unwrap();
-    let error = fixture.state.register_test_run(&session, registration_request(id, &directory))
-        .err().expect("focus cannot resolve two matching names");
+    let error = fixture
+        .state
+        .register_test_run(&session, registration_request(id, &directory))
+        .err()
+        .expect("focus cannot resolve two matching names");
     assert_eq!(error.status, StatusCode::CONFLICT);
-    for reason in ["ambiguous", &first.work_id, &first.claim_id, "generation 1",
-        &second.work_id, &second.claim_id, "generation 2", "Clear the earlier name"] {
+    for reason in [
+        "ambiguous",
+        &first.work_id,
+        &first.claim_id,
+        "generation 1",
+        &second.work_id,
+        &second.claim_id,
+        "generation 2",
+        "Clear the earlier name",
+    ] {
         assert!(error.message.contains(reason), "{}", error.message);
     }
-    assert!(!fixture.state.inner.lock().unwrap().test_run_registrations.contains_key(id));
+    assert!(
+        !fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .contains_key(id)
+    );
 }
 
 #[test]
@@ -321,31 +421,87 @@ fn committed_registration_refuses_ambiguity_added_during_its_held_read() {
     let fixture = RunFixture::new("registration-ambiguity-during-read");
     let (session, store) = engram_owner(&fixture);
     let original = claim("original");
-    name_root(&fixture, &store, &original, &session, &canonical_root(&fixture), 1);
+    name_root(
+        &fixture,
+        &store,
+        &original,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
     let keys = test_run_worktree_keys(&fixture.root).unwrap();
-    let clock = fixture.state.inner.lock().unwrap().engram_budget_clock_snapshot();
+    let clock = fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_budget_clock_snapshot();
     let mut diagnostics = TestRunRegistrationDiagnostics::new("fixture");
-    let prepared = fixture.state.read_test_run_current_launcher_named_binding(
-        &session, "test-ambiguity-race", Some(&keys), &clock,
-        test_run_registration_deadline(&clock, std::time::Instant::now()), &mut diagnostics).unwrap();
+    let prepared = fixture
+        .state
+        .read_test_run_current_launcher_named_binding(
+            &session,
+            "test-ambiguity-race",
+            Some(&keys),
+            &clock,
+            test_run_registration_deadline(&clock, std::time::Instant::now()),
+            &mut diagnostics,
+        )
+        .unwrap();
     let second = claim("second");
-    name_root(&fixture, &store, &second, &session, &canonical_root(&fixture), 2);
+    name_root(
+        &fixture,
+        &store,
+        &second,
+        &session,
+        &canonical_root(&fixture),
+        2,
+    );
     let inner = fixture.state.inner.lock().unwrap();
-    let error = prepared.resolve_locked(&inner, &session, Some(&store), Some(&keys)).unwrap_err();
+    let error = prepared
+        .resolve_locked(&inner, &session, Some(&store), Some(&keys))
+        .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("ambiguous named roots"), "{}", error.message);
-    for identity in [&original.work_id, &original.claim_id, &second.work_id, &second.claim_id] {
+    assert!(
+        error.message.contains("ambiguous named roots"),
+        "{}",
+        error.message
+    );
+    for identity in [
+        &original.work_id,
+        &original.claim_id,
+        &second.work_id,
+        &second.claim_id,
+    ] {
         assert!(error.message.contains(identity), "{}", error.message);
     }
-    assert!(!inner.test_run_registrations.contains_key("test-ambiguity-race"));
+    assert!(
+        !inner
+            .test_run_registrations
+            .contains_key("test-ambiguity-race")
+    );
 }
 
 #[test]
 fn registration_ambiguity_reason_is_bounded_and_keeps_the_remedy() {
     let fixture = RunFixture::new("registration-ambiguity-reason");
     let (session, store) = engram_owner(&fixture);
-    name_root(&fixture, &store, &claim("first"), &session, &canonical_root(&fixture), 1);
-    name_root(&fixture, &store, &claim("second"), &session, &canonical_root(&fixture), 2);
+    name_root(
+        &fixture,
+        &store,
+        &claim("first"),
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
+    name_root(
+        &fixture,
+        &store,
+        &claim("second"),
+        &session,
+        &canonical_root(&fixture),
+        2,
+    );
     let keys = test_run_worktree_keys(&fixture.root).unwrap();
     let mut inner = fixture.state.inner.lock().unwrap();
     for entry in &mut inner.engram_work_source_roots {
@@ -353,13 +509,24 @@ fn registration_ambiguity_reason_is_bounded_and_keeps_the_remedy() {
         entry.claim_id = format!("claim-{}", "y\r\u{1b}雪".repeat(1000));
         entry.generation = u64::MAX;
     }
-    let error = test_run_registration_named_binding(&inner, &session, Some(&store), Some(&keys)).unwrap_err();
+    let error = test_run_registration_named_binding(&inner, &session, Some(&store), Some(&keys))
+        .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.is_ascii());
     assert!(error.message.len() <= 384, "{}", error.message.len());
     assert!(!error.message.chars().any(char::is_control));
-    assert_eq!(error.message.matches("generation 18446744073709551615").count(), 2);
-    assert!(error.message.ends_with("Clear the earlier name or use separate worktrees."));
+    assert_eq!(
+        error
+            .message
+            .matches("generation 18446744073709551615")
+            .count(),
+        2
+    );
+    assert!(
+        error
+            .message
+            .ends_with("Clear the earlier name or use separate worktrees.")
+    );
 }
 
 #[test]
@@ -369,7 +536,14 @@ fn a_staged_lane_run_still_copies_the_session_binding_beside_a_named_root() {
     let session_binding = claim("session");
     let named = claim("named");
     // A different claim's name for this very worktree changes nothing here.
-    name_root(&fixture, &store, &named, &session, &canonical_root(&fixture), 1);
+    name_root(
+        &fixture,
+        &store,
+        &named,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
     set_session_binding(&fixture, &session, Some(session_binding.clone()));
     let registration = register_run(&fixture, &session, "test-staged-copies", false);
     assert_eq!(registration.work_binding.as_ref(), Some(&session_binding));
@@ -377,7 +551,10 @@ fn a_staged_lane_run_still_copies_the_session_binding_beside_a_named_root() {
     assert_eq!(registration.authority_store.as_ref(), Some(&store));
     assert!(!registration.validated_unbound);
     assert!(
-        serde_json::to_value(&registration).unwrap().get("namedRoot").is_none(),
+        serde_json::to_value(&registration)
+            .unwrap()
+            .get("namedRoot")
+            .is_none(),
         "a staged-lane registration persists as before"
     );
 
@@ -407,9 +584,18 @@ fn committed_registration_reads_the_revision_after_the_holder_revises() {
     let fixture = RunFixture::new("registration-current-revision");
     let (session, store) = engram_owner(&fixture);
     let original = claim("revised");
-    name_root(&fixture, &store, &original, &session, &canonical_root(&fixture), 1);
+    name_root(
+        &fixture,
+        &store,
+        &original,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
     let transport = ScriptedEngramControlTransport::new([]);
-    fixture.state.install_test_engram_transport(transport.clone());
+    fixture
+        .state
+        .install_test_engram_transport(transport.clone());
     // The exact held claim has been revised, while its canonical naming
     // proof still carries the revision at which the root was named.
     let mut current = original.clone();
@@ -417,7 +603,12 @@ fn committed_registration_reads_the_revision_after_the_holder_revises() {
     let mut held = current_held_claim(&current);
     held.omitted = 1; // Omitted siblings do not invalidate the exact present row.
     transport.replace_held_claims([Ok(held)]);
-    let registration = register_run(&fixture, &session, "test-revision-before-registration", true);
+    let registration = register_run(
+        &fixture,
+        &session,
+        "test-revision-before-registration",
+        true,
+    );
     assert_eq!(registration.work_binding.as_ref(), Some(&current));
     assert_eq!(transport.held_claim_reads(), 1);
 
@@ -427,13 +618,29 @@ fn committed_registration_reads_the_revision_after_the_holder_revises() {
     let mut after_registration = current.clone();
     after_registration.work_revision += 1;
     transport.replace_held_claims([Ok(current_held_claim(&after_registration))]);
-    let saved = fixture.state.inner.lock().unwrap().test_run_registrations
-        .get("test-revision-before-registration").unwrap().clone();
+    let saved = fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_registrations
+        .get("test-revision-before-registration")
+        .unwrap()
+        .clone();
     assert_eq!(saved.work_binding, registration.work_binding);
     assert_ne!(saved.work_binding.as_ref(), Some(&after_registration));
-    let replay = register_run(&fixture, &session, "test-revision-before-registration", true);
+    let replay = register_run(
+        &fixture,
+        &session,
+        "test-revision-before-registration",
+        true,
+    );
     assert_eq!(replay.work_binding, registration.work_binding);
-    assert_eq!(transport.held_claim_reads(), 1, "active replay never reads the current claim");
+    assert_eq!(
+        transport.held_claim_reads(),
+        1,
+        "active replay never reads the current claim"
+    );
     let next = register_run(&fixture, &session, "test-revision-next-registration", true);
     assert_eq!(next.work_binding.as_ref(), Some(&after_registration));
     assert_eq!(transport.held_claim_reads(), 2);
@@ -445,20 +652,47 @@ fn committed_registration_reads_the_revision_after_the_holder_revises() {
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         inner.test_run_registrations.remove(&id);
-        assert!(!inner.test_runs.entries.iter().any(|row| row.summary.run_id == id),
-            "registration fallback does not populate the scanner's index");
+        assert!(
+            !inner
+                .test_runs
+                .entries
+                .iter()
+                .any(|row| row.summary.run_id == id),
+            "registration fallback does not populate the scanner's index"
+        );
         inner.test_runs.compactions_durable.insert(id.clone());
-        inner.test_run_compacted.insert(id.clone(), TestRunCompacted {
-            compacted: true, request_identity: Some(registration.request_identity.clone()),
-            summary, registration: Some(registration.clone()), observations: Vec::new(),
-            request_stamp: None, results_stamp: None, reason: "fixture retained identity".to_owned(),
-            artifact_conflict: false, artifact_unavailable: false,
-        });
+        inner.test_run_compacted.insert(
+            id.clone(),
+            TestRunCompacted {
+                compacted: true,
+                request_identity: Some(registration.request_identity.clone()),
+                summary,
+                registration: Some(registration.clone()),
+                observations: Vec::new(),
+                request_stamp: None,
+                results_stamp: None,
+                reason: "fixture retained identity".to_owned(),
+                artifact_conflict: false,
+                artifact_unavailable: false,
+            },
+        );
     }
     let directory = fixture.runs_dir().join(&id);
-    fixture.state.register_test_run(&session, registration_request(&id, &directory)).unwrap();
-    assert_eq!(transport.held_claim_reads(), 2, "compacted replay never reads the current claim");
-    assert_eq!(fixture.state.inner.lock().unwrap().test_run_compacted[&id].registration.as_ref(), Some(&registration));
+    fixture
+        .state
+        .register_test_run(&session, registration_request(&id, &directory))
+        .unwrap();
+    assert_eq!(
+        transport.held_claim_reads(),
+        2,
+        "compacted replay never reads the current claim"
+    );
+    assert_eq!(
+        fixture.state.inner.lock().unwrap().test_run_compacted[&id]
+            .registration
+            .as_ref(),
+        Some(&registration)
+    );
 }
 
 #[test]
@@ -466,9 +700,18 @@ fn committed_registration_never_falls_back_to_an_unavailable_or_different_claim(
     let fixture = RunFixture::new("registration-current-claim-refusal");
     let (session, store) = engram_owner(&fixture);
     let original = claim("held");
-    name_root(&fixture, &store, &original, &session, &canonical_root(&fixture), 1);
+    name_root(
+        &fixture,
+        &store,
+        &original,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
     let transport = ScriptedEngramControlTransport::new([]);
-    fixture.state.install_test_engram_transport(transport.clone());
+    fixture
+        .state
+        .install_test_engram_transport(transport.clone());
     let mut unavailable = current_held_claim(&original);
     unavailable.items[0].control_binding = None;
     let mut successor = original.clone();
@@ -485,20 +728,60 @@ fn committed_registration_never_falls_back_to_an_unavailable_or_different_claim(
     recovered.claim_fence += 1;
     let mut duplicate = current_held_claim(&original);
     duplicate.items.push(duplicate.items[0].clone());
-    let omitted = EngramHeldClaims { items: Vec::new(), omitted: 1 };
+    let omitted = EngramHeldClaims {
+        items: Vec::new(),
+        omitted: 1,
+    };
     for (index, (held, status, message)) in [
-        (Ok(unavailable), StatusCode::CONFLICT, "held association changed"),
-        (Ok(current_held_claim(&successor)), StatusCode::CONFLICT, "unavailable or ambiguous"),
-        (Ok(current_held_claim(&other_run)), StatusCode::CONFLICT, "held association changed"),
-        (Ok(disagreement), StatusCode::CONFLICT, "held association changed"),
-        (Ok(current_held_claim(&regressed)), StatusCode::CONFLICT, "held association changed"),
-        (Ok(current_held_claim(&old_fence)), StatusCode::CONFLICT, "held association changed"),
-        (Ok(current_held_claim(&recovered)), StatusCode::CONFLICT, "name the source root again"),
-        (Ok(duplicate), StatusCode::CONFLICT, "unavailable or ambiguous"),
+        (
+            Ok(unavailable),
+            StatusCode::CONFLICT,
+            "held association changed",
+        ),
+        (
+            Ok(current_held_claim(&successor)),
+            StatusCode::CONFLICT,
+            "unavailable or ambiguous",
+        ),
+        (
+            Ok(current_held_claim(&other_run)),
+            StatusCode::CONFLICT,
+            "held association changed",
+        ),
+        (
+            Ok(disagreement),
+            StatusCode::CONFLICT,
+            "held association changed",
+        ),
+        (
+            Ok(current_held_claim(&regressed)),
+            StatusCode::CONFLICT,
+            "held association changed",
+        ),
+        (
+            Ok(current_held_claim(&old_fence)),
+            StatusCode::CONFLICT,
+            "held association changed",
+        ),
+        (
+            Ok(current_held_claim(&recovered)),
+            StatusCode::CONFLICT,
+            "name the source root again",
+        ),
+        (
+            Ok(duplicate),
+            StatusCode::CONFLICT,
+            "unavailable or ambiguous",
+        ),
         (Ok(omitted), StatusCode::CONFLICT, "bounded held list"),
-        (Err(EngramTransportError::protocol("fixture held read failed")), StatusCode::BAD_GATEWAY, "fixture held read failed"),
+        (
+            Err(EngramTransportError::protocol("fixture held read failed")),
+            StatusCode::BAD_GATEWAY,
+            "fixture held read failed",
+        ),
     ]
-        .into_iter().enumerate()
+    .into_iter()
+    .enumerate()
     {
         transport.replace_held_claims([held]);
         let run_id = format!("test-refused-current-claim-{index}");
@@ -507,10 +790,26 @@ fn committed_registration_never_falls_back_to_an_unavailable_or_different_claim(
         let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         request["input"] = json!("commit");
         fs::write(path, request.to_string()).unwrap();
-        let error = fixture.state.register_test_run(&session, registration_request(&run_id, &directory)).err().expect("registration must refuse");
+        let error = fixture
+            .state
+            .register_test_run(&session, registration_request(&run_id, &directory))
+            .err()
+            .expect("registration must refuse");
         assert_eq!(error.status, status, "case {index}: {}", error.message);
-        assert!(error.message.contains(message), "case {index}: {}", error.message);
-        assert!(!fixture.state.inner.lock().unwrap().test_run_registrations.contains_key(&run_id));
+        assert!(
+            error.message.contains(message),
+            "case {index}: {}",
+            error.message
+        );
+        assert!(
+            !fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_registrations
+                .contains_key(&run_id)
+        );
     }
 }
 
@@ -520,19 +819,47 @@ fn committed_registration_rechecks_the_named_root_after_the_held_read() {
         let fixture = RunFixture::new("registration-root-change-during-read");
         let (session, store) = engram_owner(&fixture);
         let original = claim("root-race");
-        name_root(&fixture, &store, &original, &session, &canonical_root(&fixture), 1);
+        name_root(
+            &fixture,
+            &store,
+            &original,
+            &session,
+            &canonical_root(&fixture),
+            1,
+        );
         let keys = test_run_worktree_keys(&fixture.root).unwrap();
-        let clock = fixture.state.inner.lock().unwrap().engram_budget_clock_snapshot();
+        let clock = fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_budget_clock_snapshot();
         let mut diagnostics = TestRunRegistrationDiagnostics::new("fixture");
-        let prepared = fixture.state.read_test_run_current_launcher_named_binding(
-            &session, "test-root-race", Some(&keys), &clock,
-            test_run_registration_deadline(&clock, std::time::Instant::now()), &mut diagnostics).unwrap();
+        let prepared = fixture
+            .state
+            .read_test_run_current_launcher_named_binding(
+                &session,
+                "test-root-race",
+                Some(&keys),
+                &clock,
+                test_run_registration_deadline(&clock, std::time::Instant::now()),
+                &mut diagnostics,
+            )
+            .unwrap();
         let mut inner = fixture.state.inner.lock().unwrap();
-        if fence_only { inner.engram_work_source_roots[0].claim_fence += 1; }
-        else { inner.engram_work_source_roots[0].generation += 1; }
-        let error = prepared.resolve_locked(&inner, &session, Some(&store), Some(&keys)).unwrap_err();
+        if fence_only {
+            inner.engram_work_source_roots[0].claim_fence += 1;
+        } else {
+            inner.engram_work_source_roots[0].generation += 1;
+        }
+        let error = prepared
+            .resolve_locked(&inner, &session, Some(&store), Some(&keys))
+            .unwrap_err();
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert_eq!(error.message, "test run named root changed during its claim read");
+        assert_eq!(
+            error.message,
+            "test run named root changed during its claim read"
+        );
     }
 }
 
@@ -542,40 +869,91 @@ fn an_expired_held_read_cannot_publish_a_late_registration() {
         let fixture = RunFixture::new("registration-held-read-budget");
         let (session, store) = engram_owner(&fixture);
         let binding = claim("budget");
-        name_root(&fixture, &store, &binding, &session, &canonical_root(&fixture), 1);
+        name_root(
+            &fixture,
+            &store,
+            &binding,
+            &session,
+            &canonical_root(&fixture),
+            1,
+        );
         let clock = fixture.state.select_test_scripted_engram_budget_clock();
-        fixture.state.inner.lock().unwrap().projects.iter_mut().find(|project| project.id == fixture.project_id)
-            .unwrap().engram.as_mut().unwrap().deadline_ms = Some(20_000);
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .projects
+            .iter_mut()
+            .find(|project| project.id == fixture.project_id)
+            .unwrap()
+            .engram
+            .as_mut()
+            .unwrap()
+            .deadline_ms = Some(20_000);
         let transport = ScriptedEngramControlTransport::new([]);
-        let held = if expiry == "rpc-error" { Err(EngramTransportError::protocol("expired read error")) }
-            else { Ok(current_held_claim(&binding)) };
+        let held = if expiry == "rpc-error" {
+            Err(EngramTransportError::protocol("expired read error"))
+        } else {
+            Ok(current_held_claim(&binding))
+        };
         transport.replace_held_claims([held]);
         let state = fixture.state.clone();
         transport.on_next_held_claim_read(move |timeout| {
-            assert!(state.inner.try_lock_now().is_some(), "held RPC must run outside StateInner");
-            assert_eq!(timeout, Duration::from_secs(5), "the CLI shares the registration budget");
+            assert!(
+                state.inner.try_lock_now().is_some(),
+                "held RPC must run outside StateInner"
+            );
+            assert_eq!(
+                timeout,
+                Duration::from_secs(5),
+                "the CLI shares the registration budget"
+            );
             if expiry == "capture" {
                 clock.advance(Duration::from_secs(4));
                 TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|slot| {
-                    *slot.borrow_mut() = Some(Box::new(move || clock.advance(Duration::from_secs(1))));
+                    *slot.borrow_mut() =
+                        Some(Box::new(move || clock.advance(Duration::from_secs(1))));
                 });
             } else {
                 clock.advance(Duration::from_secs(5));
             }
         });
-        fixture.state.install_test_engram_transport(transport.clone());
+        fixture
+            .state
+            .install_test_engram_transport(transport.clone());
         let id = "test-held-read-deadline";
         let directory = registered_run(&fixture, &session, id);
         let path = directory.join("request.json");
         let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         request["input"] = json!("commit");
         fs::write(path, request.to_string()).unwrap();
-        let error = fixture.state.register_test_run(&session, registration_request(id, &directory)).err().expect("expired registration must refuse");
+        let error = fixture
+            .state
+            .register_test_run(&session, registration_request(id, &directory))
+            .err()
+            .expect("expired registration must refuse");
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
-        assert!(error.message.contains("budget expired before publication"), "{}", error.message);
-        assert!(error.message.contains("category=deadline"), "{}", error.message);
+        assert!(
+            error.message.contains("budget expired before publication"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("category=deadline"),
+            "{}",
+            error.message
+        );
         assert_eq!(transport.held_claim_reads(), 1);
-        assert!(!fixture.state.inner.lock().unwrap().test_run_registrations.contains_key(id));
+        assert!(
+            !fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_registrations
+                .contains_key(id)
+        );
     }
 }
 
@@ -585,7 +963,14 @@ fn committed_registration_rechecks_service_adapter_and_runtime_after_the_held_re
         let fixture = RunFixture::new(&format!("registration-authority-race-{case}"));
         let (session, store) = engram_owner(&fixture);
         let binding = claim(case);
-        name_root(&fixture, &store, &binding, &session, &canonical_root(&fixture), 1);
+        name_root(
+            &fixture,
+            &store,
+            &binding,
+            &session,
+            &canonical_root(&fixture),
+            1,
+        );
         let transport = ScriptedEngramControlTransport::new([]);
         transport.replace_held_claims([Ok(current_held_claim(&binding))]);
         let state = fixture.state.clone();
@@ -597,11 +982,19 @@ fn committed_registration_rechecks_service_adapter_and_runtime_after_the_held_re
             } else {
                 let mut inner = state.inner.lock().unwrap();
                 if case == "service" {
-                    inner.projects.iter_mut().find(|row| row.id == project).unwrap()
-                        .engram.as_mut().unwrap().deadline_ms = Some(251);
+                    inner
+                        .projects
+                        .iter_mut()
+                        .find(|row| row.id == project)
+                        .unwrap()
+                        .engram
+                        .as_mut()
+                        .unwrap()
+                        .deadline_ms = Some(251);
                 } else {
                     let index = inner.find_session_index(&caller).unwrap();
-                    let (runtime, _commands) = test_codex_runtime_handle("changed-during-held-read");
+                    let (runtime, _commands) =
+                        test_codex_runtime_handle("changed-during-held-read");
                     inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
                 }
             }
@@ -613,11 +1006,31 @@ fn committed_registration_rechecks_service_adapter_and_runtime_after_the_held_re
         let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         request["input"] = json!("commit");
         fs::write(path, request.to_string()).unwrap();
-        let error = fixture.state.register_test_run(&session, registration_request(id, &directory))
-            .err().expect("changed authority must refuse");
-        assert_eq!(error.status, StatusCode::CONFLICT, "{case}: {}", error.message);
-        assert_eq!(error.message.split(';').next(), Some("test run work authority changed during its read"), "{case}");
-        assert!(!fixture.state.inner.lock().unwrap().test_run_registrations.contains_key(id));
+        let error = fixture
+            .state
+            .register_test_run(&session, registration_request(id, &directory))
+            .err()
+            .expect("changed authority must refuse");
+        assert_eq!(
+            error.status,
+            StatusCode::CONFLICT,
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(
+            error.message.split(';').next(),
+            Some("test run work authority changed during its read"),
+            "{case}"
+        );
+        assert!(
+            !fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_registrations
+                .contains_key(id)
+        );
     }
 }
 
@@ -625,7 +1038,8 @@ fn committed_registration_rechecks_service_adapter_and_runtime_after_the_held_re
 fn an_unbound_committed_run_keeps_its_store_with_an_unavailable_inventory() {
     let fixture = RunFixture::new("registration-unbound-inventory");
     let (session, store) = engram_owner(&fixture);
-    fixture.state.inner.lock().unwrap().delegation_inventory = DelegationInventoryState::Failed { reason: "fixture" };
+    fixture.state.inner.lock().unwrap().delegation_inventory =
+        DelegationInventoryState::Failed { reason: "fixture" };
     let registration = register_run(&fixture, &session, "test-unbound-inventory", true);
     assert_eq!(registration.authority_store, Some(store));
     assert_eq!(registration.work_binding, None);
@@ -636,7 +1050,14 @@ fn concurrent_first_registrations_keep_the_first_inserted_association() {
     let fixture = RunFixture::new("registration-concurrent-claim");
     let (session, store) = engram_owner(&fixture);
     let original = claim("concurrent");
-    name_root(&fixture, &store, &original, &session, &canonical_root(&fixture), 1);
+    name_root(
+        &fixture,
+        &store,
+        &original,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
     fixture.state.select_test_scripted_engram_budget_clock();
     let id = "test-concurrent-first-registration";
     let directory = registered_run(&fixture, &session, id);
@@ -651,19 +1072,41 @@ fn concurrent_first_registrations_keep_the_first_inserted_association() {
     second.work_revision += 1;
     // The hook admits the competing POST before the original read returns.
     // Its held read consumes the first answer, then the original gets N+2.
-    transport.replace_held_claims([Ok(current_held_claim(&first)), Ok(current_held_claim(&second))]);
+    transport.replace_held_claims([
+        Ok(current_held_claim(&first)),
+        Ok(current_held_claim(&second)),
+    ]);
     let state = fixture.state.clone();
     let caller = session.clone();
     let competing_directory = directory.clone();
     transport.on_next_held_claim_read(move |_| {
-        state.register_test_run(&caller, registration_request(id, &competing_directory)).unwrap();
+        state
+            .register_test_run(&caller, registration_request(id, &competing_directory))
+            .unwrap();
     });
-    fixture.state.install_test_engram_transport(transport.clone());
-    fixture.state.register_test_run(&session, registration_request(id, &directory)).unwrap();
+    fixture
+        .state
+        .install_test_engram_transport(transport.clone());
+    fixture
+        .state
+        .register_test_run(&session, registration_request(id, &directory))
+        .unwrap();
     assert_eq!(transport.held_claim_reads(), 2);
-    assert_eq!(fixture.state.inner.lock().unwrap().test_run_registrations[id].work_binding.as_ref(), Some(&first));
-    fixture.state.register_test_run(&session, registration_request(id, &directory)).unwrap();
-    assert_eq!(transport.held_claim_reads(), 2, "the subsequent replay reads neither association again");
+    assert_eq!(
+        fixture.state.inner.lock().unwrap().test_run_registrations[id]
+            .work_binding
+            .as_ref(),
+        Some(&first)
+    );
+    fixture
+        .state
+        .register_test_run(&session, registration_request(id, &directory))
+        .unwrap();
+    assert_eq!(
+        transport.held_claim_reads(),
+        2,
+        "the subsequent replay reads neither association again"
+    );
 }
 
 #[test]
@@ -677,7 +1120,8 @@ fn staged_and_unbound_runs_keep_their_existing_capture_deadline_behavior() {
                 // The first diagnostic lock resolves the project. The next
                 // is capture; no new production clock lock intervenes.
                 TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|next| {
-                    *next.borrow_mut() = Some(Box::new(move || clock.advance(Duration::from_secs(5))));
+                    *next.borrow_mut() =
+                        Some(Box::new(move || clock.advance(Duration::from_secs(5))));
                 });
             }));
         });

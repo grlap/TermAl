@@ -37,14 +37,25 @@ fn initialize(root: &FsPath) {
 fn snapshot_files(root: &FsPath, relative: &FsPath, files: &mut Vec<(PathBuf, Vec<u8>)>) {
     let path = root.join(relative);
     let metadata = fs::symlink_metadata(&path).unwrap();
-    assert!(!metadata.file_type().is_symlink(), "seed contains a link: {}", path.display());
+    assert!(
+        !metadata.file_type().is_symlink(),
+        "seed contains a link: {}",
+        path.display()
+    );
     if metadata.is_dir() {
         for entry in fs::read_dir(&path).unwrap() {
             snapshot_files(root, &relative.join(entry.unwrap().file_name()), files);
         }
     } else {
-        assert!(metadata.is_file(), "seed contains a special file: {}", path.display());
-        assert_ne!(path.extension().and_then(|value| value.to_str()), Some("lock"));
+        assert!(
+            metadata.is_file(),
+            "seed contains a special file: {}",
+            path.display()
+        );
+        assert_ne!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("lock")
+        );
         files.push((relative.to_owned(), fs::read(path).unwrap()));
     }
 }
@@ -63,12 +74,31 @@ pub(super) fn prepare_eo_repository(root: &FsPath) {
         // Omit hooks, logs, worktree registrations and all other metadata.
         // The seed's filesystem can disappear once these immutable bytes exist.
         assert!(!seed.join(".git/objects/info/alternates").exists());
-        let config = git_command().arg("-C").arg(seed.path())
-            .args(["config", "--local", "--get-regexp", "core[.]worktree|include"])
-            .output().unwrap();
-        assert_eq!(config.status.code(), Some(1),
-            "seed config must have no worktree override or include: {:?}", config);
-        for relative in ["README.md", ".git/HEAD", ".git/config", ".git/index", ".git/objects", ".git/refs"] {
+        let config = git_command()
+            .arg("-C")
+            .arg(seed.path())
+            .args([
+                "config",
+                "--local",
+                "--get-regexp",
+                "core[.]worktree|include",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(
+            config.status.code(),
+            Some(1),
+            "seed config must have no worktree override or include: {:?}",
+            config
+        );
+        for relative in [
+            "README.md",
+            ".git/HEAD",
+            ".git/config",
+            ".git/index",
+            ".git/objects",
+            ".git/refs",
+        ] {
             snapshot_files(seed.path(), FsPath::new(relative), &mut files);
         }
         files

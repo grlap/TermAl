@@ -119,9 +119,7 @@ fn a_start_snapshot_cannot_finalize_after_binding_or_reporting_changes() {
                 }
                 "observation" => {
                     let generation = record.active_turn_generation;
-                    adopt_runtime_observation(
-                        record, "pending-observation", generation, None,
-                    );
+                    adopt_runtime_observation(record, "pending-observation", generation, None);
                 }
                 "unmatched-launch" => {
                     engram_note_unmatched_launch(record, &fixture.root, &test_run_timestamp());

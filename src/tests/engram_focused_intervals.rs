@@ -50,11 +50,7 @@ fn engram_focused_interval_late_observation_records_passed_build() {
     let mut f = FocusedBuildFixture::new("focused-interval-latency", 0);
     interval_records(&mut f, REQUEST);
     let revision = f.turn.revision();
-    one_build(
-        &f.finish(EngramCommandExit::Code(0)),
-        &revision,
-        "passed",
-    );
+    one_build(&f.finish(EngramCommandExit::Code(0)), &revision, "passed");
 }
 
 #[test]
@@ -65,11 +61,7 @@ fn engram_focused_interval_exact_slack_boundary_records_passed_build() {
     interval_records(&mut f, "2000-01-01T00:00:00.000Z");
     f.results["stages"][0]["started"] = json!("2000-01-01T00:00:00.050Z");
     let revision = f.turn.revision();
-    one_build(
-        &f.finish(EngramCommandExit::Code(0)),
-        &revision,
-        "passed",
-    );
+    one_build(&f.finish(EngramCommandExit::Code(0)), &revision, "passed");
 }
 
 #[test]
@@ -174,8 +166,6 @@ fn engram_focused_interval_negative_controls_name_the_failed_comparison() {
         );
         assert!(!text.contains("PRIVATE_INVALID_TIME"), "{text}");
         assert!(text.len() <= ENGRAM_CHECK_SUMMARY_MAX_BYTES);
-        assert!(
-            !diagnostic_refs(&f.turn).contains(&"exit:0".to_owned())
-        );
+        assert!(!diagnostic_refs(&f.turn).contains(&"exit:0".to_owned()));
     }
 }

@@ -1,7 +1,7 @@
 //! Ordinary delegation delivery, paused/unknown holds and durable wait fan-in.
 //! Uses the existing runtime and wait owners; no control evaluation is emulated.
-use super::*;
 use super::super::uncertain_begin::OrdinaryRoot;
+use super::*;
 use crate::tests::delegation_support::{
     boot_on_delegation_root, finish_delegation_child_with_assistant_text,
     install_delegation_codex_runtime, mark_delegation_as_unstructured_explorer,
@@ -71,18 +71,27 @@ fn delta_events(receiver: &mut broadcast::Receiver<String>) -> Vec<Value> {
     events
 }
 
-
 // Synthetic ordinary paused-child specimens. They model current queue/receipt
 // uncertainty; they do not recreate a retired control admission or producer.
 fn hold_child_without_refresh(state: &AppState, child: &str, unknown: bool) {
     let mut inner = state.inner.lock().unwrap();
     let id = inner.next_message_id();
     let record = inner.session_mut(child).unwrap();
-    queue_prompt_on_record_with_source(record, PendingPrompt {
-        engram_interrupted: false, is_engram_retained: false, attachments: Vec::new(),
-        id, timestamp: stamp_now(), text: "paused ordinary child prompt".into(),
-        expanded_text: None, source: None,
-    }, Vec::new(), QueuedPromptSource::Orchestrator);
+    queue_prompt_on_record_with_source(
+        record,
+        PendingPrompt {
+            engram_interrupted: false,
+            is_engram_retained: false,
+            attachments: Vec::new(),
+            id,
+            timestamp: stamp_now(),
+            text: "paused ordinary child prompt".into(),
+            expanded_text: None,
+            source: None,
+        },
+        Vec::new(),
+        QueuedPromptSource::Orchestrator,
+    );
     if unknown {
         let head = record.queued_prompts.front_mut().unwrap();
         head.engram_ordinary_handoff = true;
@@ -170,26 +179,47 @@ fn wait_for(
         .unwrap()
 }
 
-
 #[test]
 fn ordinary_first_turn_is_durable_and_reports_its_actual_delivery() {
     let turn = OrdinaryRoot::new("ordinary-delegation-first");
-    let created = turn.state.create_read_only_delegation(&turn.session,
-        explorer_request("ordinary child prompt", "Ordinary child")).unwrap();
-    assert_eq!(created.first_turn.as_ref().unwrap().state, DelegationTurnDeliveryState::Delivered);
-    assert_eq!(delegation_turn_response_status(&created), StatusCode::CREATED);
+    let created = turn
+        .state
+        .create_read_only_delegation(
+            &turn.session,
+            explorer_request("ordinary child prompt", "Ordinary child"),
+        )
+        .unwrap();
+    assert_eq!(
+        created.first_turn.as_ref().unwrap().state,
+        DelegationTurnDeliveryState::Delivered
+    );
+    assert_eq!(
+        delegation_turn_response_status(&created),
+        StatusCode::CREATED
+    );
     let child = &created.delegation.child_session_id;
-    assert!(matches!(receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "child prompt").unwrap(),
-        CodexRuntimeCommand::Prompt { session_id, .. } if &session_id == child));
-    assert_eq!(status_json(&turn.state, &turn.session, &created.delegation.id)["status"], "running");
+    assert!(
+        matches!(receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "child prompt").unwrap(),
+        CodexRuntimeCommand::Prompt { session_id, .. } if &session_id == child)
+    );
+    assert_eq!(
+        status_json(&turn.state, &turn.session, &created.delegation.id)["status"],
+        "running"
+    );
     assert!(created.delegation.attempt.hold.is_none());
     let inner = turn.state.inner.lock().unwrap();
     assert_eq!(inner.delegations.len(), 1);
     persist_locked_state_to_sqlite(&turn.state.persistence_path, &inner).unwrap();
     drop(inner);
     let disk = rusqlite::Connection::open(turn.state.persistence_path.as_path()).unwrap();
-    assert!(PersistFenceTarget::Delegation(Box::new(
-        stored_delegation(&turn.state, &created.delegation.id))).is_already_durable(&disk).unwrap());
+    assert!(
+        PersistFenceTarget::Delegation(Box::new(stored_delegation(
+            &turn.state,
+            &created.delegation.id
+        )))
+        .is_already_durable(&disk)
+        .unwrap()
+    );
     turn.assert_no_prompt();
     turn.assert_no_control();
 }
@@ -241,22 +271,48 @@ fn a_creation_that_cannot_be_saved_names_its_delegation_and_starts_no_turn() {
 #[test]
 fn ordinary_follow_up_never_reuses_the_previous_result_and_completes_its_own_wait() {
     let turn = OrdinaryRoot::new("ordinary-delegation-followup");
-    let created = turn.state.create_read_only_delegation(&turn.session, explorer_request("initial", "Follow up")).unwrap();
+    let created = turn
+        .state
+        .create_read_only_delegation(&turn.session, explorer_request("initial", "Follow up"))
+        .unwrap();
     let delegation = created.delegation.id;
     let child = created.delegation.child_session_id;
     mark_delegation_as_unstructured_explorer(&turn.state, &delegation);
     receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "initial child").unwrap();
-    finish_child_turn(&turn.state, &child, "## Result\nStatus: completed\n\nSummary:\ninitial completed");
-    let followed = turn.state.followup_delegation(&turn.session, &delegation, "follow-up prompt".into()).unwrap();
-    assert_eq!(followed.turn.as_ref().unwrap().state, DelegationTurnDeliveryState::Delivered);
+    finish_child_turn(
+        &turn.state,
+        &child,
+        "## Result\nStatus: completed\n\nSummary:\ninitial completed",
+    );
+    let followed = turn
+        .state
+        .followup_delegation(&turn.session, &delegation, "follow-up prompt".into())
+        .unwrap();
+    assert_eq!(
+        followed.turn.as_ref().unwrap().state,
+        DelegationTurnDeliveryState::Delivered
+    );
     receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "followup child").unwrap();
     let current = status_json(&turn.state, &turn.session, &delegation);
     assert_eq!(current["status"], "running");
     assert!(current.get("result").is_none() && current.get("completedAt").is_none());
-    assert!(turn.state.get_delegation_result(&turn.session, &delegation).is_err());
-    let wait = wait_for(&turn.state, &turn.session, &[&delegation], DelegationWaitMode::All);
+    assert!(
+        turn.state
+            .get_delegation_result(&turn.session, &delegation)
+            .is_err()
+    );
+    let wait = wait_for(
+        &turn.state,
+        &turn.session,
+        &[&delegation],
+        DelegationWaitMode::All,
+    );
     assert!(!wait.resume_prompt_queued);
-    finish_child_turn(&turn.state, &child, "## Result\nStatus: completed\n\nSummary:\nfollow-up completed");
+    finish_child_turn(
+        &turn.state,
+        &child,
+        "## Result\nStatus: completed\n\nSummary:\nfollow-up completed",
+    );
     let notifications = wait_notifications(&turn.state, &turn.session, &wait.wait.id);
     assert_eq!(notifications.len(), 1);
     let text = notifications.values().next().unwrap();
@@ -387,14 +443,14 @@ fn a_paused_parent_keeps_the_attention_notification_queued() {
 fn a_hold_and_its_wait_survive_a_restart_and_wake_once() {
     let (temp_root, project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let boot = || {
-        boot_on_delegation_root(&temp_root, ||
+        boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        )
+        })
     };
     let (parent, delegation, wait_id) = {
         let state = boot();
@@ -460,34 +516,77 @@ fn a_hold_and_its_wait_survive_a_restart_and_wake_once() {
 fn ordinary_unknown_hold_is_cancel_only_and_cancellation_clears_its_presentation() {
     let state = test_app_state_with_drained_delegation_codex_runtime("ordinary-unknown-child");
     let (parent, held, child, running, _) = two_explorers(&state);
-    assert_eq!(state.resume_delegation(&parent, &running).err().unwrap().status, StatusCode::CONFLICT);
+    assert_eq!(
+        state
+            .resume_delegation(&parent, &running)
+            .err()
+            .unwrap()
+            .status,
+        StatusCode::CONFLICT
+    );
     hold_child(&state, &child, true);
     let hold = stored_delegation(&state, &held).attempt.hold.unwrap();
     assert_eq!(hold.reason, DelegationHoldReason::DeliveryUnknown);
     assert_eq!(hold.actions, vec![DelegationHoldAction::Cancel]);
     assert!(!hold.retry_eligible);
-    assert_eq!(state.resume_delegation(&parent, &held).err().unwrap().status, StatusCode::CONFLICT);
+    assert_eq!(
+        state
+            .resume_delegation(&parent, &held)
+            .err()
+            .unwrap()
+            .status,
+        StatusCode::CONFLICT
+    );
     let canceled = state.cancel_delegation(&parent, &held).unwrap();
     assert_eq!(canceled.delegation.status, DelegationStatus::Canceled);
     assert!(canceled.delegation.attempt.hold.is_none());
-    assert!(state.list_delegations(&parent).unwrap().delegations.into_iter()
-        .find(|record| record.id == held).unwrap().hold.is_none());
+    assert!(
+        state
+            .list_delegations(&parent)
+            .unwrap()
+            .delegations
+            .into_iter()
+            .find(|record| record.id == held)
+            .unwrap()
+            .hold
+            .is_none()
+    );
 }
 
 #[test]
 fn ordinary_paused_child_resumes_once_and_wait_does_not_wake_while_it_runs() {
     let turn = OrdinaryRoot::new("ordinary-child-resume");
-    let created = turn.state.create_read_only_delegation(&turn.session, explorer_request("initial", "Resume")).unwrap();
+    let created = turn
+        .state
+        .create_read_only_delegation(&turn.session, explorer_request("initial", "Resume"))
+        .unwrap();
     receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "initial child").unwrap();
     let child = created.delegation.child_session_id;
     let delegation = created.delegation.id;
     hold_child(&turn.state, &child, false);
-    assert_eq!(status_json(&turn.state, &turn.session, &delegation)["status"], "held");
-    let resumed = turn.state.resume_delegation(&turn.session, &delegation).unwrap();
-    assert_eq!(resumed.turn.as_ref().unwrap().state, DelegationTurnDeliveryState::Delivered);
+    assert_eq!(
+        status_json(&turn.state, &turn.session, &delegation)["status"],
+        "held"
+    );
+    let resumed = turn
+        .state
+        .resume_delegation(&turn.session, &delegation)
+        .unwrap();
+    assert_eq!(
+        resumed.turn.as_ref().unwrap().state,
+        DelegationTurnDeliveryState::Delivered
+    );
     receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "resumed child").unwrap();
-    assert_eq!(status_json(&turn.state, &turn.session, &delegation)["status"], "running");
-    let wait = wait_for(&turn.state, &turn.session, &[&delegation], DelegationWaitMode::Any);
+    assert_eq!(
+        status_json(&turn.state, &turn.session, &delegation)["status"],
+        "running"
+    );
+    let wait = wait_for(
+        &turn.state,
+        &turn.session,
+        &[&delegation],
+        DelegationWaitMode::Any,
+    );
     assert!(!wait.resume_prompt_queued);
     assert!(wait_notifications(&turn.state, &turn.session, &wait.wait.id).is_empty());
     turn.assert_no_prompt();
@@ -497,7 +596,10 @@ fn ordinary_paused_child_resumes_once_and_wait_does_not_wake_while_it_runs() {
 #[test]
 fn ordinary_fast_discovery_resume_reports_scheduled_before_any_provider_handoff() {
     let turn = OrdinaryRoot::new("ordinary-child-fast");
-    let created = turn.state.create_read_only_delegation(&turn.session, explorer_request("initial", "Fast")).unwrap();
+    let created = turn
+        .state
+        .create_read_only_delegation(&turn.session, explorer_request("initial", "Fast"))
+        .unwrap();
     receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "initial child").unwrap();
     let child = created.delegation.child_session_id;
     let delegation = created.delegation.id;
@@ -509,15 +611,29 @@ fn ordinary_fast_discovery_resume_reports_scheduled_before_any_provider_handoff(
         record.session.codex_fast_mode = true;
         record.session.model_options.clear();
     }
-    let resumed = turn.state.resume_delegation(&turn.session, &delegation).unwrap();
-    assert_eq!(resumed.turn.as_ref().unwrap().state, DelegationTurnDeliveryState::Scheduled);
+    let resumed = turn
+        .state
+        .resume_delegation(&turn.session, &delegation)
+        .unwrap();
+    assert_eq!(
+        resumed.turn.as_ref().unwrap().state,
+        DelegationTurnDeliveryState::Scheduled
+    );
     let CodexRuntimeCommand::RefreshModelList { response_tx } =
-        phase_sync::receive(&turn.receiver, "ordinary Fast discovery") else { panic!("expected discovery"); };
-    response_tx.send(Err("forced catalog failure".into())).unwrap();
+        phase_sync::receive(&turn.receiver, "ordinary Fast discovery")
+    else {
+        panic!("expected discovery");
+    };
+    response_tx
+        .send(Err("forced catalog failure".into()))
+        .unwrap();
     let settled = phase_sync::PollGuard::new();
     while {
         let inner = turn.state.inner.lock().unwrap();
-        inner.sessions[inner.find_session_index(&child).unwrap()].session.status == SessionStatus::Active
+        inner.sessions[inner.find_session_index(&child).unwrap()]
+            .session
+            .status
+            == SessionStatus::Active
     } {
         settled.wait("the failed Fast worker reaches its terminal state");
     }
@@ -584,20 +700,40 @@ fn a_bound_resume_never_admits_a_successor_exposed_after_its_check() {
     assert_eq!(child.queued_prompts[0].pending_prompt.id, successor);
     assert_eq!(child.queued_prompts[0].pending_prompt.text, "successor");
     assert!(child.orchestrator_auto_dispatch_blocked);
-    assert!(!child.session.messages.iter().any(|message| message.id() == successor));
+    assert!(
+        !child
+            .session
+            .messages
+            .iter()
+            .any(|message| message.id() == successor)
+    );
     drop(inner);
     // A new public Resume captures the current hold; it does not reuse the
     // canceled head's owner from the earlier private call.
     let resumed = state.resume_delegation(&parent, &held).unwrap();
-    assert_eq!(resumed.turn.as_ref().unwrap().state, DelegationTurnDeliveryState::Delivered);
+    assert_eq!(
+        resumed.turn.as_ref().unwrap().state,
+        DelegationTurnDeliveryState::Delivered
+    );
     {
         let inner = state.inner.lock().unwrap();
         let child = &inner.sessions[inner.find_session_index(&held_child).unwrap()];
         assert!(child.queued_prompts.is_empty());
         assert_eq!(child.session.status, SessionStatus::Active);
-        assert_eq!(child.session.messages.iter().filter(|message| message.id() == successor).count(), 1);
+        assert_eq!(
+            child
+                .session
+                .messages
+                .iter()
+                .filter(|message| message.id() == successor)
+                .count(),
+            1
+        );
     }
-    assert!(state.resume_delegation(&parent, &held).is_err(), "the active successor cannot be resumed twice");
+    assert!(
+        state.resume_delegation(&parent, &held).is_err(),
+        "the active successor cannot be resumed twice"
+    );
 }
 
 /// Review regression (a wait judged on a stale stored hold): while the
@@ -668,7 +804,10 @@ fn a_failed_hold_refresh_commit_is_retried_and_notifies_once() {
 #[test]
 fn ordinary_public_stop_claim_cannot_be_bypassed_by_child_resume_and_survives_load() {
     let turn = OrdinaryRoot::new("ordinary-child-stop");
-    let created = turn.state.create_read_only_delegation(&turn.session, explorer_request("initial", "Stop")).unwrap();
+    let created = turn
+        .state
+        .create_read_only_delegation(&turn.session, explorer_request("initial", "Stop"))
+        .unwrap();
     receive_synchronous_engram_prompt(&turn.state, &turn.receiver, "initial child").unwrap();
     let child = created.delegation.child_session_id;
     hold_child(&turn.state, &child, false);
@@ -679,7 +818,10 @@ fn ordinary_public_stop_claim_cannot_be_bypassed_by_child_resume_and_survives_lo
         record.session.status = SessionStatus::Active;
         turn.state.commit_locked(&mut inner).unwrap();
     }
-    let (_, claim) = turn.state.begin_requested_stop_session(&child, &StopSessionOptions::default()).unwrap();
+    let (_, claim) = turn
+        .state
+        .begin_requested_stop_session(&child, &StopSessionOptions::default())
+        .unwrap();
     assert!(claim.is_some());
     assert!(turn.state.resume_session_queue(&child).is_err());
     {
@@ -690,7 +832,11 @@ fn ordinary_public_stop_claim_cannot_be_bypassed_by_child_resume_and_survives_lo
         persist_locked_state_to_sqlite(&turn.state.persistence_path, &inner).unwrap();
     }
     let loaded = load_state(&turn.state.persistence_path).unwrap().unwrap();
-    let record = loaded.sessions.iter().find(|record| record.session.id == child).unwrap();
+    let record = loaded
+        .sessions
+        .iter()
+        .find(|record| record.session.id == child)
+        .unwrap();
     assert!(!record.queued_prompts.is_empty());
     assert!(record.orchestrator_auto_dispatch_blocked);
     turn.assert_no_prompt();

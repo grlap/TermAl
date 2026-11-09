@@ -203,7 +203,11 @@ async fn rebuilt_delivery_case(
             original_intent.native_creation_id
         );
         assert_eq!(intent.binding, original_intent.binding);
-        let expected_basis = if legacy { peer.legacy_verification_basis() } else { peer.verification_basis() };
+        let expected_basis = if legacy {
+            peer.legacy_verification_basis()
+        } else {
+            peer.verification_basis()
+        };
         assert_eq!(intent.execution_basis, expected_basis);
         assert_eq!(intent.peer_verification_basis, expected_basis);
         assert_eq!(
@@ -220,7 +224,11 @@ async fn rebuilt_delivery_case(
             let FederationImageObservation::Known(image) = observation else {
                 panic!("reconnected image must remain diagnostic evidence")
             };
-            assert_eq!(image.sha256, "a".repeat(64), "ordinary health does not fabricate a new report");
+            assert_eq!(
+                image.sha256,
+                "a".repeat(64),
+                "ordinary health does not fabricate a new report"
+            );
         }
         drop(inner);
         let recovered = reserve_federation_mailbox_placement_route(
@@ -232,7 +240,10 @@ async fn rebuilt_delivery_case(
             }),
         )
         .await;
-        assert!(recovered.is_err(), "ordinary reconnect cannot refresh explicit execution placement");
+        assert!(
+            recovered.is_err(),
+            "ordinary reconnect cannot refresh explicit execution placement"
+        );
     }
     let channel = pair.satellite_channel.clone();
     let check = channel.clone();
@@ -528,7 +539,9 @@ impl FederationRpcClient {
     }
 }
 
-pub(super) fn federation_requalification_refusal_status(report: &FederationOnboardingReport) -> StatusCode {
+pub(super) fn federation_requalification_refusal_status(
+    report: &FederationOnboardingReport,
+) -> StatusCode {
     if report.outcomes.iter().any(|outcome| {
         !outcome.passed
             && matches!(

@@ -17,7 +17,10 @@ pub(super) fn entry(root: &FsPath) -> EngramSessionObligation {
     EngramSessionObligation {
         id: "obligation-one".to_owned(),
         project_id: "fixture-project".to_owned(),
-        authority: EngramAuthorityStoreKey { database_path: root.join("historical.sqlite"), project_id: "historical-project".into() },
+        authority: EngramAuthorityStoreKey {
+            database_path: root.join("historical.sqlite"),
+            project_id: "historical-project".into(),
+        },
         authority_confirmed: true,
         connection,
         external_ref: "termal:session:old-local-session".to_owned(),
@@ -41,8 +44,11 @@ fn project_containment_ledger_requires_complete_supported_metadata() {
     let ledger = ledger(vec![entry(root.path())]).unwrap();
     let value = serde_json::to_value(&ledger).unwrap();
     let decoded: EngramSessionObligationLedger = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(serde_json::to_value(&decoded).unwrap(), value,
-        "historical identity remains exact without a live excludes API");
+    assert_eq!(
+        serde_json::to_value(&decoded).unwrap(),
+        value,
+        "historical identity remains exact without a live excludes API"
+    );
     assert!(serde_json::from_value::<EngramSessionObligationLedger>(json!({})).is_err());
     assert!(
         serde_json::from_value::<EngramSessionObligationLedger>(json!({"schemaVersion":1}))
@@ -95,7 +101,10 @@ fn project_containment_ledger_rejects_conflicting_identity_and_changed_frozen_re
     let ledger = ledger(vec![first.clone()]).unwrap();
     let mut changed = first.clone();
     changed.frozen_request["idempotency_key"] = json!("replacement-key");
-    assert!(self::ledger(vec![first.clone(), changed]).is_err(), "same original cannot have two frozen requests");
+    assert!(
+        self::ledger(vec![first.clone(), changed]).is_err(),
+        "same original cannot have two frozen requests"
+    );
     let mut conflicting = first.clone();
     conflicting.id = "new-id".into();
     conflicting.local_session_id = "recreated-local-session".into();
@@ -125,18 +134,18 @@ fn project_containment_ledger_keeps_distinct_kinds_and_exact_request_shape() {
     assert_eq!(ledger.entries.len(), 2);
     let mut unsupported = containment.clone();
     unsupported.frozen_request["future_private_field"] = json!(true);
-    assert!(
-        self::ledger(vec![unsupported]).is_err()
-    );
+    assert!(self::ledger(vec![unsupported]).is_err());
     let mut mismatched = containment;
     mismatched.frozen_request["grant_id"] = json!("successor-grant");
-    assert!(
-        self::ledger(vec![mismatched]).is_err()
-    );
+    assert!(self::ledger(vec![mismatched]).is_err());
 }
 
 fn ledger(entries: Vec<EngramSessionObligation>) -> Result<EngramSessionObligationLedger> {
-    let ledger = EngramSessionObligationLedger { schema_version: 1, entries, checkpoint_operations: Vec::new() };
+    let ledger = EngramSessionObligationLedger {
+        schema_version: 1,
+        entries,
+        checkpoint_operations: Vec::new(),
+    };
     ledger.validate()?;
     Ok(ledger)
 }

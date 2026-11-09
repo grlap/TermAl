@@ -1,7 +1,7 @@
 //! HTTP, exact-selection, provider and persistence boundaries for ordinary Human dispatch.
 //! Disposable runtime channels retain passive history; no control executor is installed.
-use super::*;
 use super::super::uncertain_begin::OrdinaryRoot;
+use super::*;
 use crate::tests::delegation_support::install_required_review_delegation;
 
 fn ordinary_selection_fixture() -> OrdinaryRoot {
@@ -71,18 +71,30 @@ fn unknown_queue_history_projects_uncertainty_and_only_resumes_a_known_unsent_su
             turn.edit(|record| {
                 assert!(record.session.messages.is_empty());
                 for index in 0..100 + SQLITE_SESSION_TAIL_MESSAGES {
-                    push_message_on_record(record, Message::Text {
-                        id: format!("human-history-{index}"), timestamp: stamp_now(),
-                        author: Author::Assistant, text: format!("Earlier history {index}"),
-                        expanded_text: None, source: None, attachments: Vec::new(),
-                    });
+                    push_message_on_record(
+                        record,
+                        Message::Text {
+                            id: format!("human-history-{index}"),
+                            timestamp: stamp_now(),
+                            author: Author::Assistant,
+                            text: format!("Earlier history {index}"),
+                            expanded_text: None,
+                            source: None,
+                            attachments: Vec::new(),
+                        },
+                    );
                 }
             });
-            turn.edit(|record| trim_retained_session_messages(record, SQLITE_SESSION_TAIL_MESSAGES));
-            let prefix = load_persisted_message_range(&state.persistence_path, &session, 0, 100).unwrap();
+            turn.edit(|record| {
+                trim_retained_session_messages(record, SQLITE_SESSION_TAIL_MESSAGES)
+            });
+            let prefix =
+                load_persisted_message_range(&state.persistence_path, &session, 0, 100).unwrap();
             assert_eq!(prefix.len(), 100);
             Some(serde_json::to_value(prefix).unwrap())
-        } else { None };
+        } else {
+            None
+        };
         let original = {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -101,8 +113,10 @@ fn unknown_queue_history_projects_uncertainty_and_only_resumes_a_known_unsent_su
                 "promoted" => record.queued_prompts[0].promoted_message_index = Some(0),
                 _ => unreachable!(),
             }
-            record.engram.historical_control.insert("historicalQueueNote".into(),
-                json!({"unknown": {"payload": "Original history\nżółw 🐢"}}));
+            record.engram.historical_control.insert(
+                "historicalQueueNote".into(),
+                json!({"unknown": {"payload": "Original history\nżółw 🐢"}}),
+            );
             record.queued_prompts.push_back(next);
             sync_pending_prompts(record);
             let original = serde_json::to_value(&record.queued_prompts[0]).unwrap();
@@ -120,8 +134,11 @@ fn unknown_queue_history_projects_uncertainty_and_only_resumes_a_known_unsent_su
                 assert!(!loaded.queued_prompts[0].promotion_disposition_known);
                 assert!(loaded.queued_prompts[0].engram_ordinary_handoff);
             }
-            assert_eq!(serde_json::to_value(&loaded.queued_prompts[0].pending_prompt).unwrap(),
-                original["pending_prompt"], "reload preserves A's original content");
+            assert_eq!(
+                serde_json::to_value(&loaded.queued_prompts[0].pending_prompt).unwrap(),
+                original["pending_prompt"],
+                "reload preserves A's original content"
+            );
             assert_eq!(loaded.queued_prompts[0].source, QueuedPromptSource::Human);
             // Missing evicted transcript proof may conservatively mark the
             // old row as an unknown handoff. Keep that loaded history exact
@@ -136,44 +153,96 @@ fn unknown_queue_history_projects_uncertainty_and_only_resumes_a_known_unsent_su
         let assert_negative_view = || {
             let inner = state.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert!(!record.prompt_deliveries.contains_key("original-ordinary-head"));
-            let view = record.session.prompt_deliveries.iter()
-                .find(|view| view.prompt_id == "original-ordinary-head").unwrap();
+            assert!(
+                !record
+                    .prompt_deliveries
+                    .contains_key("original-ordinary-head")
+            );
+            let view = record
+                .session
+                .prompt_deliveries
+                .iter()
+                .find(|view| view.prompt_id == "original-ordinary-head")
+                .unwrap();
             assert_eq!(view.disposition, PromptDeliveryDisposition::Ambiguous);
-            assert_eq!(view.attempt, 0, "display uncertainty fabricates no provider attempt");
+            assert_eq!(
+                view.attempt, 0,
+                "display uncertainty fabricates no provider attempt"
+            );
             assert!(view.message_id.is_none());
-            assert!(view.reason.as_deref().unwrap().contains("will not be replayed"));
-            assert_eq!(serde_json::to_value(record.queued_prompts.iter()
-                .find(|row| row.pending_prompt.id == "original-ordinary-head").unwrap()).unwrap(), original);
-            assert_eq!(record.engram.historical_control.get("historicalQueueNote"),
-                Some(&json!({"unknown": {"payload": "Original history\nżółw 🐢"}})));
+            assert!(
+                view.reason
+                    .as_deref()
+                    .unwrap()
+                    .contains("will not be replayed")
+            );
+            assert_eq!(
+                serde_json::to_value(
+                    record
+                        .queued_prompts
+                        .iter()
+                        .find(|row| row.pending_prompt.id == "original-ordinary-head")
+                        .unwrap()
+                )
+                .unwrap(),
+                original
+            );
+            assert_eq!(
+                record.engram.historical_control.get("historicalQueueNote"),
+                Some(&json!({"unknown": {"payload": "Original history\nżółw 🐢"}}))
+            );
         };
         assert_negative_view();
-        let error = state.resume_selected_human_prompt(&session, selected_head(&state, &session))
-            .err().expect("an exact unknown selection cannot authorize a different row");
+        let error = state
+            .resume_selected_human_prompt(&session, selected_head(&state, &session))
+            .err()
+            .expect("an exact unknown selection cannot authorize a different row");
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert!(receiver.try_recv().is_err(), "selected A cannot substitute B");
+        assert!(
+            receiver.try_recv().is_err(),
+            "selected A cannot substitute B"
+        );
         assert_negative_view();
 
         state.resume_session_queue(&session).unwrap();
-        let CodexRuntimeCommand::Prompt { command, .. } = phase_sync::receive(&receiver, "ordinary successor B") else {
+        let CodexRuntimeCommand::Prompt { command, .. } =
+            phase_sync::receive(&receiver, "ordinary successor B")
+        else {
             panic!("Resume must deliver the known-unsent successor");
         };
-        assert!(command.prompt.contains("Only this distinct successor may be delivered"));
+        assert!(
+            command
+                .prompt
+                .contains("Only this distinct successor may be delivered")
+        );
         assert!(!command.prompt.contains("ordinary original payload"));
         assert!(receiver.try_recv().is_err());
         assert_negative_view();
         let token = {
             let inner = state.inner.lock().unwrap();
-            inner.sessions[inner.find_session_index(&session).unwrap()].runtime.runtime_token().unwrap()
+            inner.sessions[inner.find_session_index(&session).unwrap()]
+                .runtime
+                .runtime_token()
+                .unwrap()
         };
-        state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
+        state
+            .finish_turn_ok_if_runtime_matches(&session, &token)
+            .unwrap();
         state.resume_session_queue(&session).unwrap();
-        assert!(receiver.try_recv().is_err(), "B is delivered once and A remains history");
+        assert!(
+            receiver.try_recv().is_err(),
+            "B is delivered once and A remains history"
+        );
         assert_negative_view();
         if let Some(prefix) = durable_prefix {
-            assert_eq!(serde_json::to_value(load_persisted_message_range(
-                &state.persistence_path, &session, 0, 100).unwrap()).unwrap(), prefix);
+            assert_eq!(
+                serde_json::to_value(
+                    load_persisted_message_range(&state.persistence_path, &session, 0, 100)
+                        .unwrap()
+                )
+                .unwrap(),
+                prefix
+            );
         }
     }
 }
@@ -183,7 +252,8 @@ fn human_prompt_selected_resume_never_starts_a_concurrent_replacement() {
     for phase in ["before_resume", "before_reset", "before_promotion"] {
         for replacement in ["human", "ordinary", "edited", "stop"] {
             let turn = ordinary_selection_fixture();
-            let (state, session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
+            let (state, session, receiver) =
+                (turn.state.clone(), turn.session.clone(), &turn.receiver);
             {
                 let mut inner = state.inner.lock().unwrap();
                 let index = inner.find_session_index(&session).unwrap();
@@ -621,8 +691,13 @@ fn human_prompt_ordinary_fallback_refuses_unknown_disposition_handoff_or_replace
 fn human_prompt_paused_human_head_cannot_be_activated_by_peer_or_default_send() {
     for peer in [false, true] {
         let turn = OrdinaryRoot::new("human-review-boundary");
-        let (state, _project, session, _root, receiver) =
-            (turn.state.clone(), turn.project.clone(), turn.session.clone(), turn.root.clone(), &turn.receiver);
+        let (state, _project, session, _root, receiver) = (
+            turn.state.clone(),
+            turn.project.clone(),
+            turn.session.clone(),
+            turn.root.clone(),
+            &turn.receiver,
+        );
         let transport = ScriptedEngramControlTransport::new([]);
         state.install_control_test_transport(transport.clone());
         enqueue_human_for_resume(&state, &session, false);
@@ -657,8 +732,13 @@ fn human_prompt_paused_head_cannot_be_promoted_by_off_or_unconfigured_ordinary_s
     for configured in [false, true] {
         for peer in [false, true] {
             let turn = OrdinaryRoot::new("human-review-boundary");
-            let (state, project, session, _root, receiver) =
-                (turn.state.clone(), turn.project.clone(), turn.session.clone(), turn.root.clone(), &turn.receiver);
+            let (state, project, session, _root, receiver) = (
+                turn.state.clone(),
+                turn.project.clone(),
+                turn.session.clone(),
+                turn.root.clone(),
+                &turn.receiver,
+            );
             {
                 let mut inner = state.inner.lock().unwrap();
                 let project = inner.projects.iter_mut().find(|p| p.id == project).unwrap();
@@ -878,7 +958,8 @@ fn human_prompt_concurrent_promotion_before_reset_returns_accepted_without_dupli
 fn human_prompt_remote_choice_translates_only_the_exact_cached_projection_version() {
     for remote_changed in [false, true] {
         let turn = ordinary_selection_fixture();
-        let (upstream, upstream_session, receiver) = (turn.state.clone(), turn.session.clone(), &turn.receiver);
+        let (upstream, upstream_session, receiver) =
+            (turn.state.clone(), turn.session.clone(), &turn.receiver);
         let (remote_wire, remote_stamp) = {
             let inner = upstream.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&upstream_session).unwrap()];
@@ -1066,12 +1147,19 @@ fn human_prompt_live_unknown_handoff_never_replays_through_ordinary_entry_points
             let mut inner = state.inner.lock().unwrap();
             inner.claim_engram_project_reset(&turn.project).unwrap()
         };
-        assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Rejected(_)));
+        assert!(matches!(
+            deliver_turn_dispatch(&state, dispatch),
+            TurnDispatchDeliveryOutcome::Rejected(_)
+        ));
         {
             let mut inner = state.inner.lock().unwrap();
-            assert!(inner.engram_project_resets.release(&turn.project, reset_generation));
+            assert!(
+                inner
+                    .engram_project_resets
+                    .release(&turn.project, reset_generation)
+            );
             let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].set_auto_dispatch_blocked(entry=="resume");
+            inner.sessions[index].set_auto_dispatch_blocked(entry == "resume");
         }
         let (generation, intent) = turn.record(|record| {
             let head = record.queued_prompts.front().unwrap();
@@ -1085,11 +1173,26 @@ fn human_prompt_live_unknown_handoff_never_replays_through_ordinary_entry_points
         match entry {
             // Generic Resume with no runnable entry may clear its pause; it
             // cannot turn an unknown old handoff into another provider send.
-            "resume" => { state.resume_session_queue(&session).unwrap(); },
+            "resume" => {
+                state.resume_session_queue(&session).unwrap();
+            }
             "capture" => turn.record(|record| assert!(QueuedTurnOwner::capture(record).is_none())),
-            "drain" => assert!(state.dispatch_next_queued_turn(&session, false).unwrap().is_none()),
-            "human" => assert!(matches!(state.start_human_queued_turn(&session, true).unwrap(), HumanPromptDrain::Absent)),
-            "inner" => assert!(state.start_next_queued_turn_inner_off_lock(&session, false, false, None).unwrap().is_none()),
+            "drain" => assert!(
+                state
+                    .dispatch_next_queued_turn(&session, false)
+                    .unwrap()
+                    .is_none()
+            ),
+            "human" => assert!(matches!(
+                state.start_human_queued_turn(&session, true).unwrap(),
+                HumanPromptDrain::Absent
+            )),
+            "inner" => assert!(
+                state
+                    .start_next_queued_turn_inner_off_lock(&session, false, false, None)
+                    .unwrap()
+                    .is_none()
+            ),
             _ => unreachable!(),
         }
         turn.record(|record| {
@@ -1110,8 +1213,13 @@ fn human_prompt_live_unknown_handoff_never_replays_through_ordinary_entry_points
 #[test]
 fn human_prompt_denied_final_handoff_releases_only_its_unsent_runtime() {
     let turn = queue::retained_queue_fixture();
-    let (state, _project, session, receiver, transport) =
-        (turn.state.clone(), turn.project.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
+    let (state, _project, session, receiver, transport) = (
+        turn.state.clone(),
+        turn.project.clone(),
+        turn.session.clone(),
+        &turn.receiver,
+        turn.transport.clone(),
+    );
     let dispatch = match state.dispatch_human_turn(&session, prompt()).unwrap() {
         DispatchTurnResult::Dispatched(d) | DispatchTurnResult::DispatchedAfterQueue(d) => d,
         _ => panic!("initial human turn must prepare"),
@@ -1148,11 +1256,21 @@ fn human_prompt_denied_final_handoff_releases_only_its_unsent_runtime() {
 fn human_prompt_one_legacy_resume_carries_exact_receipt_across_dedicated_runtime_reset() {
     use crate::tests::delegation_process_cleanup::ProductionWorkerTree;
     let turn = human_choices::receipted_pending_fixture();
-    let (mut state, session, receiver, transport) =
-        (turn.state.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
-    let (original, choices, old_nonce) = turn.record(|record| (
-        record.queued_prompts[0].clone(), record.human_queue_choices.clone(),
-        record.prompt_deliveries["legacy-proven-pending"].write_ahead.clone()));
+    let (mut state, session, receiver, transport) = (
+        turn.state.clone(),
+        turn.session.clone(),
+        &turn.receiver,
+        turn.transport.clone(),
+    );
+    let (original, choices, old_nonce) = turn.record(|record| {
+        (
+            record.queued_prompts[0].clone(),
+            record.human_queue_choices.clone(),
+            record.prompt_deliveries["legacy-proven-pending"]
+                .write_ahead
+                .clone(),
+        )
+    });
     let temp = TestTempRoot::create("legacy-human-dedicated-to-shared-reset");
     // A retained dedicated owner from the previous runtime configuration is
     // retired before the current shared-Codex destination can be promoted.
@@ -1183,13 +1301,18 @@ fn human_prompt_one_legacy_resume_carries_exact_receipt_across_dedicated_runtime
     phase_sync::receive(&claimed_rx, "the selected receipt owns its dedicated reset");
     assert!(state.inner.inner.try_lock().is_ok());
     release_tx.send(()).unwrap();
-    let command = match phase_sync::receive(&receiver,
-        "one Resume delivers after its own successful reset") {
+    let command = match phase_sync::receive(
+        &receiver,
+        "one Resume delivers after its own successful reset",
+    ) {
         CodexRuntimeCommand::Prompt { command, .. } => command,
         _ => panic!("expected the exact resumed prompt"),
     };
     assert!(command.prompt.contains("Exactly this legacy content"));
-    let receipt = command.delivery_receipt.as_ref().expect("original receipt survives reset");
+    let receipt = command
+        .delivery_receipt
+        .as_ref()
+        .expect("original receipt survives reset");
     assert_eq!(receipt.prompt_id, original.pending_prompt.id);
     assert_ne!(receipt.write_ahead, old_nonce);
     old.await_exit();
@@ -1198,38 +1321,92 @@ fn human_prompt_one_legacy_resume_carries_exact_receipt_across_dedicated_runtime
     assert!(receiver.try_recv().is_err());
     let token = turn.record(|record| {
         assert!(record.runtime_stop_generation > prior_stop);
-        assert_eq!(record.human_queue_choices["legacy-proven-pending"]["decisionId"],
-            json!("historical-choice-only"));
+        assert_eq!(
+            record.human_queue_choices["legacy-proven-pending"]["decisionId"],
+            json!("historical-choice-only")
+        );
         assert_eq!(record.human_queue_choices, choices);
         let delivery = &record.prompt_deliveries["legacy-proven-pending"];
-        assert_eq!(delivery.entry.as_ref().unwrap().source, QueuedPromptSource::User);
+        assert_eq!(
+            delivery.entry.as_ref().unwrap().source,
+            QueuedPromptSource::User
+        );
         assert_eq!(delivery.write_ahead, receipt.write_ahead);
-        assert_eq!(delivery.turn_generation, Some(command.active_turn_generation));
-        assert_eq!(delivery.message_id.as_deref(), Some(original.pending_prompt.id.as_str()));
-        let promoted = record.session.messages.iter()
-            .position(|message| message.id() == original.pending_prompt.id).unwrap();
-        assert_eq!(record.session.messages.iter()
-            .filter(|message| message.id() == original.pending_prompt.id).count(), 1);
+        assert_eq!(
+            delivery.turn_generation,
+            Some(command.active_turn_generation)
+        );
+        assert_eq!(
+            delivery.message_id.as_deref(),
+            Some(original.pending_prompt.id.as_str())
+        );
+        let promoted = record
+            .session
+            .messages
+            .iter()
+            .position(|message| message.id() == original.pending_prompt.id)
+            .unwrap();
+        assert_eq!(
+            record
+                .session
+                .messages
+                .iter()
+                .filter(|message| message.id() == original.pending_prompt.id)
+                .count(),
+            1
+        );
         let mut expected = original.clone();
         expected.engram_ordinary_handoff = true;
         expected.promoted_message_index = Some(global_message_index(record, promoted));
-        assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), json!([expected]),
-            "the reset retains exactly the original history plus its promotion identity");
-        assert!(!ordinary_queue_entry_is_runnable(record, &record.queued_prompts[0]));
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts).unwrap(),
+            json!([expected]),
+            "the reset retains exactly the original history plus its promotion identity"
+        );
+        assert!(!ordinary_queue_entry_is_runnable(
+            record,
+            &record.queued_prompts[0]
+        ));
         assert!(ordinary_queue_position(record).is_none());
-        assert!(record.human_prompt_turn.is_none(), "original User provenance survives reset");
+        assert!(
+            record.human_prompt_turn.is_none(),
+            "original User provenance survives reset"
+        );
         record.runtime.runtime_token().unwrap()
     });
-    state.finish_turn_ok_if_runtime_and_generation_match(
-        &session, &token, command.active_turn_generation).unwrap();
+    state
+        .finish_turn_ok_if_runtime_and_generation_match(
+            &session,
+            &token,
+            command.active_turn_generation,
+        )
+        .unwrap();
     turn.record(|record| assert_eq!(record.session.status, SessionStatus::Idle));
     let retained = turn.record(|record| serde_json::to_value(&record.queued_prompts).unwrap());
-    assert!(state.resume_local_session_queue(&session, None).unwrap().is_none());
+    assert!(
+        state
+            .resume_local_session_queue(&session, None)
+            .unwrap()
+            .is_none()
+    );
     turn.record(|record| {
-        assert_eq!(record.active_turn_generation, command.active_turn_generation);
-        assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), retained);
-        assert_eq!(record.session.messages.iter()
-            .filter(|message| message.id() == original.pending_prompt.id).count(), 1);
+        assert_eq!(
+            record.active_turn_generation,
+            command.active_turn_generation
+        );
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts).unwrap(),
+            retained
+        );
+        assert_eq!(
+            record
+                .session
+                .messages
+                .iter()
+                .filter(|message| message.id() == original.pending_prompt.id)
+                .count(),
+            1
+        );
         assert_eq!(record.human_queue_choices, choices);
         assert!(record.human_prompt_turn.is_none());
     });
@@ -1240,8 +1417,12 @@ fn human_prompt_one_legacy_resume_carries_exact_receipt_across_dedicated_runtime
 #[test]
 fn human_prompt_refused_choice_does_not_create_a_new_pause() {
     let turn = human_choices::receipted_pending_fixture();
-    let (state, session, receiver, _transport) =
-        (turn.state.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
+    let (state, session, receiver, _transport) = (
+        turn.state.clone(),
+        turn.session.clone(),
+        &turn.receiver,
+        turn.transport.clone(),
+    );
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -1284,13 +1465,19 @@ fn human_prompt_receipt_ack_failure_returns_exact_user_prompt_to_pending_and_ret
         let session = turn.session.clone();
         let original = turn.record(|record| record.queued_prompts[0].clone());
         let choices = turn.record(|record| record.human_queue_choices.clone());
-        let duties = serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
+        let duties =
+            serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
         let writer = human_choices::ChoiceWriter::attach(&mut state);
-        state.resume_selected_human_prompt(&session, selected_head(&state, &session)).unwrap();
+        state
+            .resume_selected_human_prompt(&session, selected_head(&state, &session))
+            .unwrap();
         let wal = writer.write_ahead();
         let (prompt_id, nonce) = match &wal.target {
-            PersistFenceTarget::PromptDeliveryWriteAhead { prompt_id, write_ahead, .. } =>
-                (prompt_id.clone(), write_ahead.clone()),
+            PersistFenceTarget::PromptDeliveryWriteAhead {
+                prompt_id,
+                write_ahead,
+                ..
+            } => (prompt_id.clone(), write_ahead.clone()),
             _ => panic!("the actual receipt WAL fence is required"),
         };
         let callback_state = state.clone();
@@ -1299,13 +1486,22 @@ fn human_prompt_receipt_ack_failure_returns_exact_user_prompt_to_pending_and_ret
         let callback_nonce = nonce.clone();
         let wal = (*wal).on_resolved(move |result| {
             callback_state.settle_prompt_delivery_write_ahead(
-                &callback_session, &callback_id, &callback_nonce, result);
+                &callback_session,
+                &callback_id,
+                &callback_nonce,
+                result,
+            );
         });
-        let failure = if deadline { PersistFenceError::Deadline }
-            else { PersistFenceError::WriteFailed("rejected receipt acknowledgement".into()) };
+        let failure = if deadline {
+            PersistFenceError::Deadline
+        } else {
+            PersistFenceError::WriteFailed("rejected receipt acknowledgement".into())
+        };
         // Real SQLite content was written. The missing/failed acknowledgement
         // still cannot authorize a provider send or a different prompt.
-        std::thread::spawn(move || wal.finish(Err(failure))).join().unwrap();
+        std::thread::spawn(move || wal.finish(Err(failure)))
+            .join()
+            .unwrap();
         turn.assert_no_prompt();
         turn.record(|record| {
             let receipt = &record.prompt_deliveries[&prompt_id];
@@ -1313,50 +1509,116 @@ fn human_prompt_receipt_ack_failure_returns_exact_user_prompt_to_pending_and_ret
             assert!(receipt.turn_generation.is_none() && receipt.resume.is_none());
             assert_ne!(receipt.write_ahead, nonce);
             assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
-            assert_eq!(record.queued_prompts[0].pending_prompt.text, "Exactly this legacy content");
+            assert_eq!(
+                record.queued_prompts[0].pending_prompt.text,
+                "Exactly this legacy content"
+            );
             assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
             assert_eq!(record.human_queue_choices, choices);
         });
-        state.resume_selected_human_prompt(&session, selected_head(&state, &session)).unwrap();
+        state
+            .resume_selected_human_prompt(&session, selected_head(&state, &session))
+            .unwrap();
         writer.write_ahead().finish(Ok(()));
         let command = turn.prompt();
-        assert_eq!(command.delivery_receipt.as_ref().unwrap().prompt_id, prompt_id);
-        assert_ne!(command.delivery_receipt.as_ref().unwrap().write_ahead, nonce);
+        assert_eq!(
+            command.delivery_receipt.as_ref().unwrap().prompt_id,
+            prompt_id
+        );
+        assert_ne!(
+            command.delivery_receipt.as_ref().unwrap().write_ahead,
+            nonce
+        );
         assert!(command.prompt.contains("Exactly this legacy content"));
         state.settle_prompt_delivery_write_ahead(&session, &prompt_id, &nonce, Ok(()));
         turn.assert_no_prompt();
         let token = turn.record(|record| {
-            assert_eq!(record.active_turn_generation, command.active_turn_generation);
-            let promoted = record.session.messages.iter()
-                .position(|message| message.id() == original.pending_prompt.id).unwrap();
-            assert_eq!(record.session.messages.iter()
-                .filter(|message| message.id() == original.pending_prompt.id).count(), 1);
+            assert_eq!(
+                record.active_turn_generation,
+                command.active_turn_generation
+            );
+            let promoted = record
+                .session
+                .messages
+                .iter()
+                .position(|message| message.id() == original.pending_prompt.id)
+                .unwrap();
+            assert_eq!(
+                record
+                    .session
+                    .messages
+                    .iter()
+                    .filter(|message| message.id() == original.pending_prompt.id)
+                    .count(),
+                1
+            );
             let mut expected = original.clone();
             expected.engram_ordinary_handoff = true;
             expected.promoted_message_index = Some(global_message_index(record, promoted));
-            assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), json!([expected]),
-                "the successful retry retains exactly the original history and promotion identity");
-            assert!(!ordinary_queue_entry_is_runnable(record, &record.queued_prompts[0]));
+            assert_eq!(
+                serde_json::to_value(&record.queued_prompts).unwrap(),
+                json!([expected]),
+                "the successful retry retains exactly the original history and promotion identity"
+            );
+            assert!(!ordinary_queue_entry_is_runnable(
+                record,
+                &record.queued_prompts[0]
+            ));
             assert!(ordinary_queue_position(record).is_none());
             let receipt = &record.prompt_deliveries[&prompt_id];
-            assert_eq!(receipt.message_id.as_deref(), Some(original.pending_prompt.id.as_str()));
-            assert_eq!(receipt.turn_generation, Some(command.active_turn_generation));
-            assert_eq!(receipt.write_ahead, command.delivery_receipt.as_ref().unwrap().write_ahead);
-            assert_eq!(receipt.entry.as_ref().unwrap().source, QueuedPromptSource::User);
+            assert_eq!(
+                receipt.message_id.as_deref(),
+                Some(original.pending_prompt.id.as_str())
+            );
+            assert_eq!(
+                receipt.turn_generation,
+                Some(command.active_turn_generation)
+            );
+            assert_eq!(
+                receipt.write_ahead,
+                command.delivery_receipt.as_ref().unwrap().write_ahead
+            );
+            assert_eq!(
+                receipt.entry.as_ref().unwrap().source,
+                QueuedPromptSource::User
+            );
             assert_eq!(record.human_queue_choices, choices);
             assert!(record.human_prompt_turn.is_none());
             record.runtime.runtime_token().unwrap()
         });
-        state.finish_turn_ok_if_runtime_and_generation_match(
-            &session, &token, command.active_turn_generation).unwrap();
+        state
+            .finish_turn_ok_if_runtime_and_generation_match(
+                &session,
+                &token,
+                command.active_turn_generation,
+            )
+            .unwrap();
         turn.record(|record| assert_eq!(record.session.status, SessionStatus::Idle));
         let retained = turn.record(|record| serde_json::to_value(&record.queued_prompts).unwrap());
-        assert!(state.resume_local_session_queue(&session, None).unwrap().is_none());
+        assert!(
+            state
+                .resume_local_session_queue(&session, None)
+                .unwrap()
+                .is_none()
+        );
         turn.record(|record| {
-            assert_eq!(record.active_turn_generation, command.active_turn_generation);
-            assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), retained);
-            assert_eq!(record.session.messages.iter()
-                .filter(|message| message.id() == original.pending_prompt.id).count(), 1);
+            assert_eq!(
+                record.active_turn_generation,
+                command.active_turn_generation
+            );
+            assert_eq!(
+                serde_json::to_value(&record.queued_prompts).unwrap(),
+                retained
+            );
+            assert_eq!(
+                record
+                    .session
+                    .messages
+                    .iter()
+                    .filter(|message| message.id() == original.pending_prompt.id)
+                    .count(),
+                1
+            );
             assert_eq!(record.human_queue_choices, choices);
             assert!(record.human_prompt_turn.is_none());
         });
@@ -1373,8 +1635,12 @@ fn human_prompt_busy_receipted_choice_reports_conflict_without_a_continuation() 
         SessionStatus::Stopping,
     ] {
         let turn = human_choices::receipted_pending_fixture();
-        let (state, session, receiver, _) =
-            (turn.state.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
+        let (state, session, receiver, _) = (
+            turn.state.clone(),
+            turn.session.clone(),
+            &turn.receiver,
+            turn.transport.clone(),
+        );
         let changed_state = state.clone();
         let changed_session = session.clone();
         TEST_ORDINARY_SELECTED_BEFORE_RESUME.with(|slot| {
@@ -1517,34 +1783,55 @@ async fn human_prompt_ui_unknown_choice_refuses_without_delivering_a_distinct_su
     let turn = queue::retained_queue_fixture();
     enqueue_human_for_resume(&turn.state, &turn.session, false);
     let before = turn.saved();
-    let duties = serde_json::to_value(&turn.state.inner.lock().unwrap().engram_session_obligations).unwrap();
+    let duties =
+        serde_json::to_value(&turn.state.inner.lock().unwrap().engram_session_obligations).unwrap();
     let selection = selected_head(&turn.state, &turn.session);
-    let response = app_router(turn.state.clone()).oneshot(
-        Request::builder().method("POST")
-            .uri(format!("/api/sessions/{}/queue/resume", turn.session))
-            .header("content-type", "application/json")
-            .body(Body::from(json!({"origin":"human", "humanChoice":selection}).to_string())).unwrap()
-    ).await.unwrap();
+    let response = app_router(turn.state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{}/queue/resume", turn.session))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"origin":"human", "humanChoice":selection}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
-    assert_eq!(turn.saved(), before, "selected unknown original cannot authorize the queued successor");
+    assert_eq!(
+        turn.saved(),
+        before,
+        "selected unknown original cannot authorize the queued successor"
+    );
     turn.assert_no_prompt();
     // An attempted selection of the successor still cannot authorize a non-head row.
     let selected = {
         let inner = turn.state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&turn.session).unwrap()];
-        HumanPromptSelection { prompt: projected_pending_prompts(record)[1].clone(),
-            session_mutation_stamp: record.mutation_stamp }
+        HumanPromptSelection {
+            prompt: projected_pending_prompts(record)[1].clone(),
+            session_mutation_stamp: record.mutation_stamp,
+        }
     };
     // The current selection API selects the queue head only, even if a
     // generic Resume may independently find a runnable successor.
-    assert!(turn.state.resume_selected_human_prompt(&turn.session, selected).is_err());
+    assert!(
+        turn.state
+            .resume_selected_human_prompt(&turn.session, selected)
+            .is_err()
+    );
     turn.assert_no_prompt();
     turn.state.resume_session_queue(&turn.session).unwrap();
     assert!(turn.prompt().prompt.contains("Distinct ordinary input."));
     turn.assert_no_prompt();
     turn.record(|record| {
         assert_eq!(record.queued_prompts.len(), 1);
-        assert_eq!(record.queued_prompts[0].pending_prompt.id, "original-held-head");
+        assert_eq!(
+            record.queued_prompts[0].pending_prompt.id,
+            "original-held-head"
+        );
         assert!(record.prompt_deliveries.is_empty());
         assert!(record.human_queue_choices.is_empty());
     });
@@ -1554,8 +1841,13 @@ async fn human_prompt_ui_unknown_choice_refuses_without_delivering_a_distinct_su
 #[test]
 fn human_prompt_failed_promotion_capture_releases_only_unsent_turn_and_retains_debt() {
     let turn = queue::retained_queue_fixture();
-    let (state, _project, session, receiver, transport) =
-        (turn.state.clone(), turn.project.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
+    let (state, _project, session, receiver, transport) = (
+        turn.state.clone(),
+        turn.project.clone(),
+        turn.session.clone(),
+        &turn.receiver,
+        turn.transport.clone(),
+    );
     let duties =
         serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
     TEST_HUMAN_PROMOTION_CAPTURE_FAILURE.with(|flag| flag.set(true));
@@ -1610,8 +1902,13 @@ fn human_prompt_failed_promotion_capture_releases_only_unsent_turn_and_retains_d
 async fn human_prompt_ui_followup_keeps_origin_for_completed_and_failed_children() {
     for status in [DelegationStatus::Completed, DelegationStatus::Failed] {
         let turn = OrdinaryRoot::new("human-review-boundary");
-        let (state, project, parent, root, receiver) =
-            (turn.state.clone(), turn.project.clone(), turn.session.clone(), turn.root.clone(), &turn.receiver);
+        let (state, project, parent, root, receiver) = (
+            turn.state.clone(),
+            turn.project.clone(),
+            turn.session.clone(),
+            turn.root.clone(),
+            &turn.receiver,
+        );
         let (delegation, child) = install_required_review_delegation(&state, &parent);
         {
             let mut inner = state.inner.lock().unwrap();
@@ -1624,8 +1921,10 @@ async fn human_prompt_ui_followup_keeps_origin_for_completed_and_failed_children
             record.session.project_id = Some(project);
             record.session.workdir = root.to_string_lossy().into_owned();
             record.session.status = SessionStatus::Idle;
-            record.engram.historical_control.insert("historicalChildNote".into(),
-                json!({"grant":"old-child-grant","payload":"retained unchanged"}));
+            record.engram.historical_control.insert(
+                "historicalChildNote".into(),
+                json!({"grant":"old-child-grant","payload":"retained unchanged"}),
+            );
             state.commit_locked(&mut inner).unwrap();
         }
         let transport = ScriptedEngramControlTransport::new([]);
@@ -1659,8 +1958,10 @@ async fn human_prompt_ui_followup_keeps_origin_for_completed_and_failed_children
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
         assert!(human_prompt_turn_is_current(record));
-        assert_eq!(record.engram.historical_control["historicalChildNote"],
-            json!({"grant":"old-child-grant","payload":"retained unchanged"}));
+        assert_eq!(
+            record.engram.historical_control["historicalChildNote"],
+            json!({"grant":"old-child-grant","payload":"retained unchanged"})
+        );
         assert_eq!(
             inner.delegations[inner.find_delegation_index(&delegation).unwrap()].status,
             DelegationStatus::Running
@@ -1668,8 +1969,6 @@ async fn human_prompt_ui_followup_keeps_origin_for_completed_and_failed_children
         assert!(transport.requests().is_empty());
     }
 }
-
-
 
 #[cfg(windows)]
 #[test]
@@ -1805,7 +2104,9 @@ fn human_prompt_windows_reset_reaches_the_existing_off_lock_cleanup_owner() {
 #[tokio::test]
 async fn human_prompt_provider_start_failure_is_accepted_and_resume_reuses_one_original_envelope() {
     let (mut state, _old_receiver) =
-        crate::tests::delegation_support::test_app_state_with_delegation_codex_runtime("ordinary-selected-resume");
+        crate::tests::delegation_support::test_app_state_with_delegation_codex_runtime(
+            "ordinary-selected-resume",
+        );
     let session = test_session_id(&state, Agent::Codex);
     state.agent_runtime_spawning_enabled = false;
     install_single_wire_codex_fixture(&state, None);
@@ -1870,8 +2171,13 @@ async fn human_prompt_provider_start_failure_is_accepted_and_resume_reuses_one_o
 fn human_prompt_failed_or_deadline_promotion_ack_cannot_strand_or_replace_a_successor() {
     for expires in [false, true] {
         let turn = queue::retained_queue_fixture();
-        let (mut state, _project, session, receiver, transport) =
-            (turn.state.clone(), turn.project.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
+        let (mut state, _project, session, receiver, transport) = (
+            turn.state.clone(),
+            turn.project.clone(),
+            turn.session.clone(),
+            &turn.receiver,
+            turn.transport.clone(),
+        );
         enqueue_human_for_resume(&state, &session, false);
         let duties =
             serde_json::to_value(&state.inner.lock().unwrap().engram_session_obligations).unwrap();
@@ -1958,8 +2264,13 @@ fn human_prompt_failed_or_deadline_promotion_ack_cannot_strand_or_replace_a_succ
 fn human_prompt_orchestrator_destination_keeps_template_rendering() {
     for expanded in [false, true] {
         let turn = OrdinaryRoot::new("human-review-boundary");
-        let (state, project, session, root, receiver) =
-            (turn.state.clone(), turn.project.clone(), turn.session.clone(), turn.root.clone(), &turn.receiver);
+        let (state, project, session, root, receiver) = (
+            turn.state.clone(),
+            turn.project.clone(),
+            turn.session.clone(),
+            turn.root.clone(),
+            &turn.receiver,
+        );
         let mut instance = sample_remote_orchestrator_state(
             &project,
             &root.to_string_lossy(),
@@ -2069,8 +2380,13 @@ fn human_prompt_unknown_tail_does_not_preempt_an_ordinary_head() {
 #[test]
 fn human_prompt_old_obligation_does_not_allow_skipping_unrelated_user_fifo() {
     let turn = queue::retained_queue_fixture();
-    let (state, _project, session, receiver, _transport) =
-        (turn.state.clone(), turn.project.clone(), turn.session.clone(), &turn.receiver, turn.transport.clone());
+    let (state, _project, session, receiver, _transport) = (
+        turn.state.clone(),
+        turn.project.clone(),
+        turn.session.clone(),
+        &turn.receiver,
+        turn.transport.clone(),
+    );
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -2091,15 +2407,26 @@ fn human_prompt_old_obligation_does_not_allow_skipping_unrelated_user_fifo() {
         state.commit_locked(&mut inner).unwrap();
     }
     let dispatch = match state.dispatch_human_turn(&session, prompt()).unwrap() {
-        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-        DispatchTurnResult::Queued => panic!("OFF must activate the earlier eligible ordinary prompt"),
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => {
+            panic!("OFF must activate the earlier eligible ordinary prompt")
+        }
     };
-    assert!(matches!(deliver_turn_dispatch(&state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
-    assert!(matches!(phase_sync::receive(&receiver, "the earlier ordinary FIFO prompt"),
-        CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains("earlier independent user")));
+    assert!(matches!(
+        deliver_turn_dispatch(&state, dispatch),
+        TurnDispatchDeliveryOutcome::Delivered
+    ));
+    assert!(
+        matches!(phase_sync::receive(&receiver, "the earlier ordinary FIFO prompt"),
+        CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains("earlier independent user"))
+    );
     assert!(receiver.try_recv().is_err());
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-    assert_eq!(record.queued_prompts[0].pending_prompt.id, "original-held-head");
+    assert_eq!(
+        record.queued_prompts[0].pending_prompt.id,
+        "original-held-head"
+    );
     assert_eq!(record.queued_prompts[1].source, QueuedPromptSource::Human);
 }

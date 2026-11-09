@@ -6,46 +6,96 @@ pub(super) fn address(state: &AppState, session: &str) -> String {
     let inner = state.inner.lock().unwrap();
     let host = &inner.federation.local.as_ref().unwrap().host_id;
     let target = format!("host:{host}::{session}");
-    assert!(matches!(FederationMailboxAlias::parse(&target, None).unwrap(),
-        FederationMailboxAlias::HostNative { .. }));
+    assert!(matches!(
+        FederationMailboxAlias::parse(&target, None).unwrap(),
+        FederationMailboxAlias::HostNative { .. }
+    ));
     target
 }
 
-pub(super) async fn ordinary(state: &AppState, sender: &str, target: &str, key: &str)
-    -> Result<MailboxAppendReceipt, ApiError>
-{
-    send_mailbox_message(AxumPath(sender.to_owned()), State(state.clone()),
-        Json(SendMailboxApiRequest { message: SendMailboxMessageRequest {
-            target_session_id: target.to_owned(), message: key.to_owned(),
-            idempotency_key: key.to_owned(), topic: None, state_stamp: None,
-            class: Some("routine".into()),
-        }, _target_binding: () })).await.map(|(_, receipt)| receipt.0)
+pub(super) async fn ordinary(
+    state: &AppState,
+    sender: &str,
+    target: &str,
+    key: &str,
+) -> Result<MailboxAppendReceipt, ApiError> {
+    send_mailbox_message(
+        AxumPath(sender.to_owned()),
+        State(state.clone()),
+        Json(SendMailboxApiRequest {
+            message: SendMailboxMessageRequest {
+                target_session_id: target.to_owned(),
+                message: key.to_owned(),
+                idempotency_key: key.to_owned(),
+                topic: None,
+                state_stamp: None,
+                class: Some("routine".into()),
+            },
+            _target_binding: (),
+        }),
+    )
+    .await
+    .map(|(_, receipt)| receipt.0)
 }
 
-pub(super) async fn receive_and_ack(state: &AppState, recipient: &str, sent: &MailboxAppendReceipt)
-    -> Result<(), ApiError>
-{
-    let page = read_mailbox(AxumPath((recipient.to_owned(), sent.mailbox_id.clone())),
-        State(state.clone()), Json(ReadMailboxRequest {
-            after_sequence: None, limit: 20, issue_receipt: true, read_key: None,
-        })).await?.0;
-    let message = page.messages.iter().find(|message| message.id == sent.message_id)
+pub(super) async fn receive_and_ack(
+    state: &AppState,
+    recipient: &str,
+    sent: &MailboxAppendReceipt,
+) -> Result<(), ApiError> {
+    let page = read_mailbox(
+        AxumPath((recipient.to_owned(), sent.mailbox_id.clone())),
+        State(state.clone()),
+        Json(ReadMailboxRequest {
+            after_sequence: None,
+            limit: 20,
+            issue_receipt: true,
+            read_key: None,
+        }),
+    )
+    .await?
+    .0;
+    let message = page
+        .messages
+        .iter()
+        .find(|message| message.id == sent.message_id)
         .expect("the intended native recipient sees the exact committed message");
     assert_eq!(message.sequence, sent.sequence);
     let target = message.target_session_id.clone();
-    let summary = acknowledge_mailbox(AxumPath((recipient.to_owned(), sent.mailbox_id.clone())),
-        State(state.clone()), Json(AcknowledgeMailboxRequest {
-            receipt: Some(page.receipt.expect("the recipient receives its own ACK receipt")),
-            expected_processed_through: None, processed_through: None, no_continuation: false,
-        })).await?.0;
-    assert!(summary.participants.iter().any(|participant|
-        participant.session_id == target && participant.processed_through >= sent.sequence));
+    let summary = acknowledge_mailbox(
+        AxumPath((recipient.to_owned(), sent.mailbox_id.clone())),
+        State(state.clone()),
+        Json(AcknowledgeMailboxRequest {
+            receipt: Some(
+                page.receipt
+                    .expect("the recipient receives its own ACK receipt"),
+            ),
+            expected_processed_through: None,
+            processed_through: None,
+            no_continuation: false,
+        }),
+    )
+    .await?
+    .0;
+    assert!(
+        summary
+            .participants
+            .iter()
+            .any(|participant| participant.session_id == target
+                && participant.processed_through >= sent.sequence)
+    );
     Ok(())
 }
 
 fn messages(state: &AppState) -> u64 {
-    state.mailbox_store.connection().unwrap().query_row(
-        "SELECT COUNT(*) FROM mailbox_messages", [], |row| row.get(0)).unwrap()
+    state
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM mailbox_messages", [], |row| {
+            row.get(0)
+        })
+        .unwrap()
 }
 
 #[tokio::test]
@@ -64,30 +114,56 @@ async fn routing_only_domain_mail_and_distinct_native_mail_keep_separate_wake_au
         record.orchestrator_auto_dispatch_blocked = true;
     }
     let rows = directory(&pair.central, &sender).await;
-    let domain = rows.iter().find(|row|
-        row.binding.identity.host_id == pair.id && row.binding.identity.session_id == target)
-        .unwrap().binding.participant_key();
-    let routed = ordinary(&pair.central, &sender, &domain, "domain-routing-only").await.unwrap();
-    assert_eq!(routed.notification_cause.as_deref(),
-        Some("delivered to mailbox; automatic participation does not authorize an executor wake"));
+    let domain = rows
+        .iter()
+        .find(|row| {
+            row.binding.identity.host_id == pair.id && row.binding.identity.session_id == target
+        })
+        .unwrap()
+        .binding
+        .participant_key();
+    let routed = ordinary(&pair.central, &sender, &domain, "domain-routing-only")
+        .await
+        .unwrap();
+    assert_eq!(
+        routed.notification_cause.as_deref(),
+        Some("delivered to mailbox; automatic participation does not authorize an executor wake")
+    );
     pair.central.drain_one_federation_executor_wake("").await;
     {
         let connection = pair.central.mailbox_store.connection().unwrap();
-        let state: String = connection.query_row(
-            "SELECT state FROM federation_mailbox_wake_obligations WHERE message_id=?1",
-            [&routed.message_id], |row| row.get(0)).unwrap();
+        let state: String = connection
+            .query_row(
+                "SELECT state FROM federation_mailbox_wake_obligations WHERE message_id=?1",
+                [&routed.message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(state, "settled");
     }
     {
         let inner = pair.satellite.inner.lock().unwrap();
-        assert!(inner.sessions[inner.find_session_index(&target).unwrap()].queued_prompts.is_empty());
+        assert!(
+            inner.sessions[inner.find_session_index(&target).unwrap()]
+                .queued_prompts
+                .is_empty()
+        );
     }
-    assert!(matches!(input.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        input.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
 
     // A separate message explicitly selects the native channel. This is not
     // replay or fallback for the domain message, whose receipt stays owned.
-    let sent = ordinary(&pair.central, &sender, &address(&pair.satellite, &target),
-        "separate-native-message").await.unwrap();
+    let sent = ordinary(
+        &pair.central,
+        &sender,
+        &address(&pair.satellite, &target),
+        "separate-native-message",
+    )
+    .await
+    .unwrap();
     assert_ne!(sent.message_id, routed.message_id);
     pair.central.run_mailbox_relay_wake_batch(0, 0).await;
     {
@@ -97,26 +173,57 @@ async fn routing_only_domain_mail_and_distinct_native_mail_keep_separate_wake_au
         record.session.status = SessionStatus::Idle;
         record.orchestrator_auto_dispatch_blocked = false;
     }
-    let dispatch = pair.satellite.dispatch_next_queued_turn(&target, false).unwrap().unwrap();
+    let dispatch = pair
+        .satellite
+        .dispatch_next_queued_turn(&target, false)
+        .unwrap()
+        .unwrap();
     deliver_turn_dispatch(&pair.satellite, dispatch).unwrap();
-    let ClaudeRuntimeCommand::Prompt(prompt) = recv_within_guard(&input, "explicit native wake").unwrap()
-        else { panic!("native wake must reach the provider"); };
+    let ClaudeRuntimeCommand::Prompt(prompt) =
+        recv_within_guard(&input, "explicit native wake").unwrap()
+    else {
+        panic!("native wake must reach the provider");
+    };
     assert!(prompt.text.contains(&sent.mailbox_id));
     assert!(!prompt.text.contains("separate-native-message"));
     assert!(!prompt.text.contains(&routed.mailbox_id));
-    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
-    let actor = pair.satellite.native_mailbox_relay_descriptor(&target).unwrap().principal;
-    assert!(pair.satellite.mailbox_store.mailbox_relay_notification(&actor, &locator.id, sent.sequence)
-        .unwrap().unwrap().handed_off);
-    let duplicate = ordinary(&pair.central, &sender, &domain, "domain-routing-only").await.unwrap();
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false)
+        .unwrap()
+        .unwrap();
+    let actor = pair
+        .satellite
+        .native_mailbox_relay_descriptor(&target)
+        .unwrap()
+        .principal;
+    assert!(
+        pair.satellite
+            .mailbox_store
+            .mailbox_relay_notification(&actor, &locator.id, sent.sequence)
+            .unwrap()
+            .unwrap()
+            .handed_off
+    );
+    let duplicate = ordinary(&pair.central, &sender, &domain, "domain-routing-only")
+        .await
+        .unwrap();
     assert!(duplicate.duplicate);
-    assert_eq!((&duplicate.mailbox_id, &duplicate.message_id), (&routed.mailbox_id, &routed.message_id));
-    assert_eq!(pair.central.inner.lock().unwrap().federation.peers[&pair.id].membership,
-        FederationMembershipState::Verified);
+    assert_eq!(
+        (&duplicate.mailbox_id, &duplicate.message_id),
+        (&routed.mailbox_id, &routed.message_id)
+    );
+    assert_eq!(
+        pair.central.inner.lock().unwrap().federation.peers[&pair.id].membership,
+        FederationMembershipState::Verified
+    );
     for state in [&pair.central, &pair.satellite] {
         let inner = state.inner.lock().unwrap();
-        assert!(inner.federation.placements.values().all(|placement|
-            !federation_placement_authority(&inner.federation, &inner.preferences.federation, placement)));
+        assert!(inner.federation.placements.values().all(|placement| {
+            !federation_placement_authority(
+                &inner.federation,
+                &inner.preferences.federation,
+                placement,
+            )
+        }));
     }
     pair.finish().await;
 }
@@ -133,37 +240,101 @@ async fn explicit_native_pair_exchanges_mail_without_proxy_or_manual_join() {
     assert_eq!(satellite, central_namesake);
     for state in [&pair.central, &pair.satellite] {
         let inner = state.inner.lock().unwrap();
-        assert!(inner.sessions.iter().all(|record|
-            record.mailbox_binding().is_none() && record.remote_id.is_none()));
+        assert!(
+            inner
+                .sessions
+                .iter()
+                .all(|record| record.mailbox_binding().is_none() && record.remote_id.is_none())
+        );
     }
     let result = async {
-        let sent = ordinary(&pair.central, &central, &address(&pair.satellite, &satellite),
-            "explicit-native-outbound").await?;
-        let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false).unwrap().unwrap();
-        let recipient = pair.satellite.native_mailbox_relay_descriptor(&satellite)?.principal;
-        assert!(pair.satellite.mailbox_store.mailbox_relay_association(&recipient, &locator.id).unwrap().is_none(),
-            "the first recipient has not received a worker wake or learned an association");
+        let sent = ordinary(
+            &pair.central,
+            &central,
+            &address(&pair.satellite, &satellite),
+            "explicit-native-outbound",
+        )
+        .await?;
+        let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false)
+            .unwrap()
+            .unwrap();
+        let recipient = pair
+            .satellite
+            .native_mailbox_relay_descriptor(&satellite)?
+            .principal;
+        assert!(
+            pair.satellite
+                .mailbox_store
+                .mailbox_relay_association(&recipient, &locator.id)
+                .unwrap()
+                .is_none(),
+            "the first recipient has not received a worker wake or learned an association"
+        );
         let stranger = native(&pair.satellite, "Unrelated root");
-        assert!(read_mailbox(AxumPath((stranger.clone(), sent.mailbox_id.clone())),
-            State(pair.satellite.clone()), Json(ReadMailboxRequest {
-                after_sequence: None, limit: 20, issue_receipt: true, read_key: None,
-            })).await.is_err(), "the locator cannot grant another native root membership");
-        let stranger = pair.satellite.native_mailbox_relay_descriptor(&stranger)?.principal;
-        assert!(pair.satellite.mailbox_store.mailbox_relay_association(&stranger, &locator.id).unwrap().is_none());
+        assert!(
+            read_mailbox(
+                AxumPath((stranger.clone(), sent.mailbox_id.clone())),
+                State(pair.satellite.clone()),
+                Json(ReadMailboxRequest {
+                    after_sequence: None,
+                    limit: 20,
+                    issue_receipt: true,
+                    read_key: None,
+                })
+            )
+            .await
+            .is_err(),
+            "the locator cannot grant another native root membership"
+        );
+        let stranger = pair
+            .satellite
+            .native_mailbox_relay_descriptor(&stranger)?
+            .principal;
+        assert!(
+            pair.satellite
+                .mailbox_store
+                .mailbox_relay_association(&stranger, &locator.id)
+                .unwrap()
+                .is_none()
+        );
         receive_and_ack(&pair.satellite, &satellite, &sent).await?;
-        assert!(pair.satellite.mailbox_store.mailbox_relay_association(&recipient, &locator.id).unwrap().is_some());
-        assert!(read_mailbox_message(AxumPath((central_namesake, sent.message_id.clone())),
-            State(pair.central.clone())).await.is_err(), "the same local id is a different recipient");
-        let reply = ordinary(&pair.satellite, &satellite, &address(&pair.central, &central),
-            "explicit-native-return").await?;
+        assert!(
+            pair.satellite
+                .mailbox_store
+                .mailbox_relay_association(&recipient, &locator.id)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            read_mailbox_message(
+                AxumPath((central_namesake, sent.message_id.clone())),
+                State(pair.central.clone())
+            )
+            .await
+            .is_err(),
+            "the same local id is a different recipient"
+        );
+        let reply = ordinary(
+            &pair.satellite,
+            &satellite,
+            &address(&pair.central, &central),
+            "explicit-native-return",
+        )
+        .await?;
         receive_and_ack(&pair.central, &central, &reply).await?;
         assert_eq!(sent.mailbox_id, reply.mailbox_id);
-        let duplicate = ordinary(&pair.central, &central, &address(&pair.satellite, &satellite),
-            "explicit-native-outbound").await?;
+        let duplicate = ordinary(
+            &pair.central,
+            &central,
+            &address(&pair.satellite, &satellite),
+            "explicit-native-outbound",
+        )
+        .await?;
         assert!(duplicate.duplicate);
         assert_eq!(duplicate.message_id, sent.message_id);
         Ok::<_, ApiError>(())
-    }.await;
+    }
+    .await;
     pair.finish().await;
     result.expect("both ordinary qualified sends and their receipt retries must work");
 }
@@ -179,16 +350,34 @@ async fn bare_native_ids_stay_local_when_the_same_ids_exist_on_the_peer() {
     assert_eq!(central_target, satellite_target);
     let result = async {
         for (state, sender, target, other) in [
-            (&pair.central, &central_sender, &central_target, &pair.satellite),
-            (&pair.satellite, &satellite_sender, &satellite_target, &pair.central),
+            (
+                &pair.central,
+                &central_sender,
+                &central_target,
+                &pair.satellite,
+            ),
+            (
+                &pair.satellite,
+                &satellite_sender,
+                &satellite_target,
+                &pair.central,
+            ),
         ] {
             let sent = ordinary(state, sender, target, "bare-stays-local").await?;
             receive_and_ack(state, target, &sent).await?;
-            assert!(read_mailbox_message(AxumPath((target.clone(), sent.message_id)),
-                State(other.clone())).await.is_err(), "a bare id cannot deliver on the other host");
+            assert!(
+                read_mailbox_message(
+                    AxumPath((target.clone(), sent.message_id)),
+                    State(other.clone())
+                )
+                .await
+                .is_err(),
+                "a bare id cannot deliver on the other host"
+            );
         }
         Ok::<_, ApiError>(())
-    }.await;
+    }
+    .await;
     pair.finish().await;
     result.expect("bare native ids retain local-only semantics in each direction");
 }
@@ -205,8 +394,11 @@ async fn absent_bare_native_refuses_with_explicit_remote_address_guidance() {
     pair.finish().await;
     let error = sent.expect_err("a missing bare id never searches other hosts");
     assert_eq!(stored, 0);
-    assert!(error.message.contains("host:") && error.message.to_ascii_lowercase().contains("native"),
-        "the refusal must explain the explicit host/native form: {}", error.message);
+    assert!(
+        error.message.contains("host:") && error.message.to_ascii_lowercase().contains("native"),
+        "the refusal must explain the explicit host/native form: {}",
+        error.message
+    );
 }
 
 #[tokio::test]
@@ -221,9 +413,13 @@ async fn bare_central_proxy_refuses_a_new_remote_send_with_its_native_address() 
     {
         let mut inner = pair.central.inner.lock().unwrap();
         inner.preferences.remotes.push(RemoteConfig {
-            id: "addressing-test-peer".into(), name: "Test peer".into(), enabled: true,
-            transport: RemoteTransport::Ssh, host: Some(peer.endpoint.ssh_host.clone()),
-            port: Some(peer.endpoint.ssh_port), user: Some(peer.endpoint.ssh_user.clone()),
+            id: "addressing-test-peer".into(),
+            name: "Test peer".into(),
+            enabled: true,
+            transport: RemoteTransport::Ssh,
+            host: Some(peer.endpoint.ssh_host.clone()),
+            port: Some(peer.endpoint.ssh_port),
+            user: Some(peer.endpoint.ssh_user.clone()),
         });
         let index = inner.find_session_index(&proxy).unwrap();
         inner.sessions[index].remote_id = Some("addressing-test-peer".into());
@@ -234,7 +430,11 @@ async fn bare_central_proxy_refuses_a_new_remote_send_with_its_native_address() 
     pair.finish().await;
     let error = sent.expect_err("a projection id cannot initiate a new remote send");
     assert_eq!(stored, 0, "a refusal does not append anywhere");
-    assert!(error.message.contains(&expected), "give the explicit native address: {}", error.message);
+    assert!(
+        error.message.contains(&expected),
+        "give the explicit native address: {}",
+        error.message
+    );
 }
 
 #[tokio::test]
@@ -245,10 +445,19 @@ async fn missing_exact_native_pair_never_falls_back_to_a_display_name() {
     let missing = address(&pair.satellite, "session-99999");
     native(&pair.central, &missing);
     native(&pair.satellite, "Recipient decoy");
-    let sent = ordinary(&pair.central, &sender, &missing, "exact-does-not-name-fallback").await;
+    let sent = ordinary(
+        &pair.central,
+        &sender,
+        &missing,
+        "exact-does-not-name-fallback",
+    )
+    .await;
     let stored = messages(&pair.central) + messages(&pair.satellite);
     pair.finish().await;
-    assert!(sent.is_err(), "an absent native id cannot fall back to the local literal namesake");
+    assert!(
+        sent.is_err(),
+        "an absent native id cannot fall back to the local literal namesake"
+    );
     assert_eq!(stored, 0);
 }
 
@@ -269,7 +478,10 @@ async fn local_child_refusal_never_searches_the_peer_for_the_same_bare_id() {
     let sent = ordinary(&pair.central, &sender, &child, "bare-child-no-fallback").await;
     let stored = messages(&pair.central) + messages(&pair.satellite);
     pair.finish().await;
-    assert!(sent.is_err(), "a local child cannot redirect a bare id to the remote root");
+    assert!(
+        sent.is_err(),
+        "a local child cannot redirect a bare id to the remote root"
+    );
     assert_eq!(stored, 0);
 }
 
@@ -283,7 +495,10 @@ async fn unenrolled_host_uuid_never_resolves_to_a_local_literal_namesake() {
     let sent = ordinary(&pair.central, &sender, &target, "unknown-host-no-fallback").await;
     let stored = messages(&pair.central) + messages(&pair.satellite);
     pair.finish().await;
-    assert!(sent.is_err(), "an exact UUID cannot fall back to a display-name match");
+    assert!(
+        sent.is_err(),
+        "an exact UUID cannot fall back to a display-name match"
+    );
     assert_eq!(stored, 0);
 }
 
@@ -331,9 +546,12 @@ async fn satellite_native_sibling_refusal_keeps_local_and_central_authority_dist
 async fn refused_peer_case(condition: &str) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let pair = federation_onboarding_fixture::Pair::with_enrolled_profile(
-        federation_mailboxes::central_store(), federation_onboarding_fixture::io(),
-        federation_onboarding_fixture::io(), federation_onboarding_fixture::profile(),
-    ).await;
+        federation_mailboxes::central_store(),
+        federation_onboarding_fixture::io(),
+        federation_onboarding_fixture::io(),
+        federation_onboarding_fixture::profile(),
+    )
+    .await;
     let sender = native(&pair.central, "Sender");
     let target = native(&pair.satellite, "Remote root");
     if condition != "unverified" {
@@ -341,16 +559,31 @@ async fn refused_peer_case(condition: &str) {
     }
     if condition == "revoked" {
         let peer = pair.central.federation_peer_snapshot(&pair.id).unwrap();
-        pair.central.transition_federation_peer(&peer, FederationMembershipState::Revoked).unwrap();
+        pair.central
+            .transition_federation_peer(&peer, FederationMembershipState::Revoked)
+            .unwrap();
     } else if condition == "stale" {
         pair.lease.channel.invalidate();
     }
-    let sent = ordinary(&pair.central, &sender, &address(&pair.satellite, &target), condition).await;
+    let sent = ordinary(
+        &pair.central,
+        &sender,
+        &address(&pair.satellite, &target),
+        condition,
+    )
+    .await;
     if condition == "unverified" {
         let sent = sent.expect("the enrolled authenticated pair needs no diagnostic verification");
-        receive_and_ack(&pair.satellite, &target, &sent).await.unwrap();
-        assert!(pair.satellite.federation_mailbox_actor(&target).unwrap().is_none(),
-            "native delivery grants no domain or execution binding");
+        receive_and_ack(&pair.satellite, &target, &sent)
+            .await
+            .unwrap();
+        assert!(
+            pair.satellite
+                .federation_mailbox_actor(&target)
+                .unwrap()
+                .is_none(),
+            "native delivery grants no domain or execution binding"
+        );
         assert_eq!(messages(&pair.central) + messages(&pair.satellite), 1);
         pair.finish().await;
         return;
@@ -363,21 +596,31 @@ async fn refused_peer_case(condition: &str) {
 }
 
 #[tokio::test]
-async fn explicit_native_target_accepts_enrolled_unverified_peer() { refused_peer_case("unverified").await; }
+async fn explicit_native_target_accepts_enrolled_unverified_peer() {
+    refused_peer_case("unverified").await;
+}
 
 #[tokio::test]
-async fn explicit_native_target_refuses_revoked_peer() { refused_peer_case("revoked").await; }
+async fn explicit_native_target_refuses_revoked_peer() {
+    refused_peer_case("revoked").await;
+}
 
 #[tokio::test]
-async fn explicit_native_target_refuses_stale_link() { refused_peer_case("stale").await; }
+async fn explicit_native_target_refuses_stale_link() {
+    refused_peer_case("stale").await;
+}
 
 #[tokio::test]
 async fn ordinary_local_to_local_send_keeps_the_existing_public_path() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let (state, sender, target) = mailboxes::mailbox_test_state();
-    let sent = ordinary(&state, &sender, &target, "ordinary-local-control").await.unwrap();
+    let sent = ordinary(&state, &sender, &target, "ordinary-local-control")
+        .await
+        .unwrap();
     receive_and_ack(&state, &target, &sent).await.unwrap();
-    let duplicate = ordinary(&state, &sender, &target, "ordinary-local-control").await.unwrap();
+    let duplicate = ordinary(&state, &sender, &target, "ordinary-local-control")
+        .await
+        .unwrap();
     assert_eq!(duplicate.message_id, sent.message_id);
     assert!(duplicate.duplicate);
 }
@@ -390,81 +633,146 @@ async fn self_host_qualified_sends_keep_the_local_pair_wake_and_retry_owner() {
     let (target, _) = federation_mailboxes::local_participant(&state, "Local target");
     let qualified = address(&state, &target);
 
-    let plain = ordinary(&state, &sender, &target, "local-spelling").await.unwrap();
+    let plain = ordinary(&state, &sender, &target, "local-spelling")
+        .await
+        .unwrap();
     receive_and_ack(&state, &target, &plain).await.unwrap();
-    let sent = ordinary(&state, &sender, &qualified, "qualified-spelling").await.unwrap();
+    let sent = ordinary(&state, &sender, &qualified, "qualified-spelling")
+        .await
+        .unwrap();
     assert_eq!(sent.mailbox_id, plain.mailbox_id);
     assert_eq!(sent.sequence, plain.sequence + 1);
     assert!(!sent.duplicate);
     assert_eq!(sent.notification_disposition, "queuedBehindActiveTurn");
-    let stored = state.mailbox_store.read_message(&target, &sent.message_id).unwrap();
+    let stored = state
+        .mailbox_store
+        .read_message(&target, &sent.message_id)
+        .unwrap();
     assert_eq!(stored.target_session_id, target);
     let queued = {
         let inner = state.inner.lock().unwrap();
         let root = &inner.sessions[inner.find_session_index(&target).unwrap()];
-        assert!(root.queued_prompts.iter().any(|prompt|
+        assert!(root.queued_prompts.iter().any(|prompt| {
             prompt.pending_prompt.text.contains(&sent.mailbox_id)
-                && prompt.pending_prompt.text.contains(&format!("Latest inbound: #{}", sent.sequence))));
-        root.queued_prompts.iter().map(|prompt| prompt.pending_prompt.id.clone()).collect::<Vec<_>>()
+                && prompt
+                    .pending_prompt
+                    .text
+                    .contains(&format!("Latest inbound: #{}", sent.sequence))
+        }));
+        root.queued_prompts
+            .iter()
+            .map(|prompt| prompt.pending_prompt.id.clone())
+            .collect::<Vec<_>>()
     };
     for spelling in [&qualified, &target] {
-        let retry = ordinary(&state, &sender, spelling, "qualified-spelling").await.unwrap();
+        let retry = ordinary(&state, &sender, spelling, "qualified-spelling")
+            .await
+            .unwrap();
         assert!(retry.duplicate);
-        assert_eq!((&retry.mailbox_id, &retry.message_id), (&sent.mailbox_id, &sent.message_id));
+        assert_eq!(
+            (&retry.mailbox_id, &retry.message_id),
+            (&sent.mailbox_id, &sent.message_id)
+        );
         assert_eq!(retry.sequence, sent.sequence);
     }
-    let alias_retry = ordinary(&state, &sender, &qualified, "local-spelling").await.unwrap();
+    let alias_retry = ordinary(&state, &sender, &qualified, "local-spelling")
+        .await
+        .unwrap();
     assert!(alias_retry.duplicate);
     assert_eq!(alias_retry.message_id, plain.message_id);
     let changed = super::regressions::public_send(
-        &state, &sender, &qualified, "qualified-spelling", "changed body",
-    ).await.unwrap_err();
+        &state,
+        &sender,
+        &qualified,
+        "qualified-spelling",
+        "changed body",
+    )
+    .await
+    .unwrap_err();
     assert_eq!(changed.status, StatusCode::CONFLICT);
     {
         let inner = state.inner.lock().unwrap();
         let root = &inner.sessions[inner.find_session_index(&target).unwrap()];
-        assert_eq!(root.queued_prompts.iter().map(|prompt| prompt.pending_prompt.id.clone())
-            .collect::<Vec<_>>(), queued, "duplicate spelling does not enqueue another wake");
+        assert_eq!(
+            root.queued_prompts
+                .iter()
+                .map(|prompt| prompt.pending_prompt.id.clone())
+                .collect::<Vec<_>>(),
+            queued,
+            "duplicate spelling does not enqueue another wake"
+        );
     }
     assert_eq!(messages(&state), 2);
 
     // An already retained domain intent keeps its original pair and key.
-    let delivery = state.prepare_federation_delivery(&sender, FederationMailboxOperation::Send {
-        target: qualified.clone(), message: "retained-self-domain".into(),
-        key: "retained-self-domain".into(), topic: None, state_stamp: None,
-    }).await.unwrap();
-    let domain = state.send_prepared_federation_delivery(&sender, delivery).await.unwrap();
+    let delivery = state
+        .prepare_federation_delivery(
+            &sender,
+            FederationMailboxOperation::Send {
+                target: qualified.clone(),
+                message: "retained-self-domain".into(),
+                key: "retained-self-domain".into(),
+                topic: None,
+                state_stamp: None,
+            },
+        )
+        .await
+        .unwrap();
+    let domain = state
+        .send_prepared_federation_delivery(&sender, delivery)
+        .await
+        .unwrap();
     assert_ne!(domain.mailbox_id, sent.mailbox_id);
-    let retry = ordinary(&state, &sender, &qualified, "retained-self-domain").await.unwrap();
+    let retry = ordinary(&state, &sender, &qualified, "retained-self-domain")
+        .await
+        .unwrap();
     assert!(retry.duplicate);
-    assert_eq!((retry.mailbox_id, retry.message_id), (domain.mailbox_id, domain.message_id));
+    assert_eq!(
+        (retry.mailbox_id, retry.message_id),
+        (domain.mailbox_id, domain.message_id)
+    );
     receive_and_ack(&state, &target, &sent).await.unwrap();
     assert_eq!(messages(&state), 3);
     let connection = state.mailbox_store.connection().unwrap();
-    assert_eq!(connection.query_row("SELECT COUNT(*) FROM mailbox_relay_intents", [],
-        |row| row.get::<_, u64>(0)).unwrap(), 0);
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM mailbox_relay_intents", [], |row| row
+                .get::<_, u64>(
+                0
+            ))
+            .unwrap(),
+        0
+    );
 }
 
 #[test]
 fn mcp_send_preserves_the_explicit_native_locator_without_directory_resolution() {
     let target = format!("host:{}::session-2", Uuid::new_v4());
     let expected = target.clone();
-    let (base_url, requests, server) = crate::delegation_mcp_tests::spawn_test_mcp_http_server(1, move |request| {
-        assert_eq!(request.method, "POST");
-        assert_eq!(request.path, "/api/sessions/session-parent/mailboxes/send");
-        let body: Value = serde_json::from_str(&request.body).unwrap();
-        assert_eq!(body["targetSessionId"], expected);
-        assert_eq!(body["idempotencyKey"], "explicit-mcp-native");
-        (202, json!({"mailboxId":"mailbox-native", "messageId":"mailbox-message-native",
+    let (base_url, requests, server) =
+        crate::delegation_mcp_tests::spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.method, "POST");
+            assert_eq!(request.path, "/api/sessions/session-parent/mailboxes/send");
+            let body: Value = serde_json::from_str(&request.body).unwrap();
+            assert_eq!(body["targetSessionId"], expected);
+            assert_eq!(body["idempotencyKey"], "explicit-mcp-native");
+            (
+                202,
+                json!({"mailboxId":"mailbox-native", "messageId":"mailbox-message-native",
             "sequence":1, "unreadDepth":1, "notificationDisposition":"queuedBehindActiveTurn",
-            "duplicate":false, "senderProcessedThrough":1, "senderCursorAdvanced":true}))
-    });
+            "duplicate":false, "senderProcessedThrough":1, "senderCursorAdvanced":true}),
+            )
+        });
     let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
     let sent = bridge.tool_send_to_session(json!({"sessionId":target,
         "message":"ordinary", "idempotencyKey":"explicit-mcp-native"}));
     server.join().unwrap();
     assert_eq!(sent.unwrap()["sessionId"], target);
-    assert_eq!(requests.lock().unwrap().len(), 1, "the backend owns exact native admission");
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "the backend owns exact native admission"
+    );
 }
 
 #[tokio::test]
@@ -475,17 +783,50 @@ async fn retained_domain_send_keeps_its_receipt_when_the_native_relay_becomes_av
     let target = native(&pair.satellite, "Recipient");
     directory(&pair.central, &sender).await;
     let requested = address(&pair.satellite, &target);
-    let delivery = pair.central.prepare_federation_delivery(&sender, FederationMailboxOperation::Send {
-        target: requested.clone(), message: "retained-domain".into(), key: "retained-domain".into(),
-        topic: None, state_stamp: None,
-    }).await.unwrap();
-    let original = pair.central.send_prepared_federation_delivery(&sender, delivery).await.unwrap();
-    let retry = ordinary(&pair.central, &sender, &requested, "retained-domain").await.unwrap();
+    let delivery = pair
+        .central
+        .prepare_federation_delivery(
+            &sender,
+            FederationMailboxOperation::Send {
+                target: requested.clone(),
+                message: "retained-domain".into(),
+                key: "retained-domain".into(),
+                topic: None,
+                state_stamp: None,
+            },
+        )
+        .await
+        .unwrap();
+    let original = pair
+        .central
+        .send_prepared_federation_delivery(&sender, delivery)
+        .await
+        .unwrap();
+    let retry = ordinary(&pair.central, &sender, &requested, "retained-domain")
+        .await
+        .unwrap();
     assert!(retry.duplicate);
-    assert_eq!((retry.mailbox_id, retry.message_id), (original.mailbox_id, original.message_id));
+    assert_eq!(
+        (retry.mailbox_id, retry.message_id),
+        (original.mailbox_id, original.message_id)
+    );
     let connection = pair.central.mailbox_store.connection().unwrap();
-    assert_eq!(connection.query_row("SELECT COUNT(*) FROM mailbox_messages", [], |row| row.get::<_, u64>(0)).unwrap(), 1);
-    assert_eq!(connection.query_row("SELECT COUNT(*) FROM mailbox_relay_intents", [], |row| row.get::<_, u64>(0)).unwrap(), 0);
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM mailbox_messages", [], |row| row
+                .get::<_, u64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM mailbox_relay_intents", [], |row| row
+                .get::<_, u64>(
+                0
+            ))
+            .unwrap(),
+        0
+    );
     drop(connection);
     pair.finish().await;
 }
@@ -501,11 +842,33 @@ async fn local_domain_and_relay_sends_share_one_native_sender_key() {
     let qualified = address(&pair.satellite, &remote);
     let (local_result, domain_result, relay_result) = tokio::join!(
         super::regressions::public_send(&pair.central, &sender, &local, "one-native-key", "local"),
-        super::regressions::public_send(&pair.central, &sender, "Local recipient", "one-native-key", "domain"),
-        super::regressions::public_send(&pair.central, &sender, &qualified, "one-native-key", "relay"));
-    assert_eq!([local_result.is_ok(), domain_result.is_ok(), relay_result.is_ok()]
-        .into_iter().filter(|success| *success).count(), 1,
-        "local={local_result:?}, domain={domain_result:?}, relay={relay_result:?}");
+        super::regressions::public_send(
+            &pair.central,
+            &sender,
+            "Local recipient",
+            "one-native-key",
+            "domain"
+        ),
+        super::regressions::public_send(
+            &pair.central,
+            &sender,
+            &qualified,
+            "one-native-key",
+            "relay"
+        )
+    );
+    assert_eq!(
+        [
+            local_result.is_ok(),
+            domain_result.is_ok(),
+            relay_result.is_ok()
+        ]
+        .into_iter()
+        .filter(|success| *success)
+        .count(),
+        1,
+        "local={local_result:?}, domain={domain_result:?}, relay={relay_result:?}"
+    );
     assert_eq!(messages(&pair.central) + messages(&pair.satellite), 1);
     let connection = pair.central.mailbox_store.connection().unwrap();
     let intents: u64 = connection.query_row(

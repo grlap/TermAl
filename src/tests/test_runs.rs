@@ -178,16 +178,34 @@ async fn raw_results_route_preserves_bytes_digest_size_and_read_only_state() {
         original.len().to_string()
     );
     assert_eq!(
-        response.headers()["x-termal-results-sha256"].to_str().unwrap(),
+        response.headers()["x-termal-results-sha256"]
+            .to_str()
+            .unwrap(),
         sha256_hex(&original)
     );
-    let body = to_bytes(response.into_body(), 1024 * 1024 + 1).await.unwrap();
-    assert_eq!(body.as_ref(), original.as_slice(), "no JSON reserialization");
+    let body = to_bytes(response.into_body(), 1024 * 1024 + 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        body.as_ref(),
+        original.as_slice(),
+        "no JSON reserialization"
+    );
     assert_eq!(fs::read(run_dir.join("results.json")).unwrap(), original);
-    assert_eq!(fs::read(run_dir.join("request.json")).unwrap(), before_request);
+    assert_eq!(
+        fs::read(run_dir.join("request.json")).unwrap(),
+        before_request
+    );
     assert_eq!(serde_json::to_value(fixture.summaries()).unwrap(), before);
-    assert!(drain_test_run_deltas(&mut deltas).is_empty(), "GET must not publish a mutation");
-    assert_eq!(fs::read_dir(&run_dir).unwrap().count(), 2, "GET creates no artifacts");
+    assert!(
+        drain_test_run_deltas(&mut deltas).is_empty(),
+        "GET must not publish a mutation"
+    );
+    assert_eq!(
+        fs::read_dir(&run_dir).unwrap().count(),
+        2,
+        "GET creates no artifacts"
+    );
 }
 
 #[tokio::test]
@@ -197,7 +215,10 @@ async fn raw_results_route_unknown_run_has_a_named_not_found_error() {
     let (status, body) = raw_results_refusal(&app, "test-no-such-run").await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["code"], "test_run_results_unknown", "{body}");
-    assert!(!fixture.runs_dir().exists(), "unknown lookup must not allocate a run");
+    assert!(
+        !fixture.runs_dir().exists(),
+        "unknown lookup must not allocate a run"
+    );
 }
 
 #[tokio::test]
@@ -225,11 +246,16 @@ async fn raw_results_route_accepts_exactly_one_mib_without_truncating() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-length"], "1048576");
     assert_eq!(
-        response.headers()["x-termal-results-sha256"].to_str().unwrap(),
+        response.headers()["x-termal-results-sha256"]
+            .to_str()
+            .unwrap(),
         sha256_hex(&original)
     );
     assert_eq!(
-        to_bytes(response.into_body(), 1024 * 1024 + 1).await.unwrap().as_ref(),
+        to_bytes(response.into_body(), 1024 * 1024 + 1)
+            .await
+            .unwrap()
+            .as_ref(),
         original.as_slice()
     );
 }
@@ -267,7 +293,10 @@ async fn raw_results_route_does_not_rescan_or_serve_an_unindexed_unregistered_di
     let (status, body) = raw_results_refusal(&app_router(fixture.state.clone()), run_id).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["code"], "test_run_results_unknown", "{body}");
-    assert!(fixture.summaries().is_empty(), "raw lookup must not rescan the index");
+    assert!(
+        fixture.summaries().is_empty(),
+        "raw lookup must not rescan the index"
+    );
     assert_eq!(fs::read(run_dir.join("results.json")).unwrap(), before);
 }
 
@@ -284,7 +313,11 @@ async fn raw_results_route_is_never_compressed_for_a_gzip_client() {
         Some(passed_results()),
     );
     // Large and repetitive enough that the compression predicate would act.
-    let original = format!("{{\"runId\":\"{run_id}\",\"pad\":\"{}\"}}", "x".repeat(64 * 1024)).into_bytes();
+    let original = format!(
+        "{{\"runId\":\"{run_id}\",\"pad\":\"{}\"}}",
+        "x".repeat(64 * 1024)
+    )
+    .into_bytes();
     fs::write(run_dir.join("results.json"), &original).unwrap();
     fixture.refresh(&[]);
     let response = request_response(
@@ -298,12 +331,19 @@ async fn raw_results_route_is_never_compressed_for_a_gzip_client() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-encoding"], "identity");
-    assert_eq!(response.headers()["content-length"], original.len().to_string().as_str());
     assert_eq!(
-        response.headers()["x-termal-results-sha256"].to_str().unwrap(),
+        response.headers()["content-length"],
+        original.len().to_string().as_str()
+    );
+    assert_eq!(
+        response.headers()["x-termal-results-sha256"]
+            .to_str()
+            .unwrap(),
         sha256_hex(&original)
     );
-    let body = to_bytes(response.into_body(), 1024 * 1024 + 1).await.unwrap();
+    let body = to_bytes(response.into_body(), 1024 * 1024 + 1)
+        .await
+        .unwrap();
     assert_eq!(body.as_ref(), original.as_slice());
 }
 
@@ -329,14 +369,22 @@ async fn raw_results_route_refuses_entry(label: &str, replace: impl FnOnce(&FsPa
 
 #[tokio::test]
 async fn raw_results_route_refuses_a_directory_in_place_of_results() {
-    raw_results_route_refuses_entry("raw-results-directory", |path| fs::create_dir(path).unwrap()).await;
+    raw_results_route_refuses_entry("raw-results-directory", |path| {
+        fs::create_dir(path).unwrap()
+    })
+    .await;
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn raw_results_route_refuses_a_link_to_a_file_outside_the_run() {
     raw_results_route_refuses_entry("raw-results-link", |path| {
-        let outside = path.parent().unwrap().parent().unwrap().join("outside-secret.json");
+        let outside = path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("outside-secret.json");
         fs::write(&outside, b"{\"secret\":true}").unwrap();
         std::os::unix::fs::symlink(&outside, path).unwrap();
     })
@@ -394,7 +442,12 @@ async fn raw_results_route_refuses_a_fifo_swapped_in_at_open_without_blocking() 
 #[tokio::test]
 async fn raw_results_route_refuses_a_link_swapped_in_at_open() {
     raw_results_route_refuses_swap_at_open("raw-results-link-race", |path| {
-        let outside = path.parent().unwrap().parent().unwrap().join("outside-race.json");
+        let outside = path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("outside-race.json");
         fs::write(&outside, b"{\"secret\":true}").unwrap();
         std::os::unix::fs::symlink(&outside, path).unwrap();
     })
@@ -893,7 +946,10 @@ fn the_rescan_publishes_only_changes_with_consecutive_revisions() {
     let public_cut: Value = serde_json::from_str(&state_receiver.try_recv().unwrap()).unwrap();
     assert_eq!(public_cut["testRunOverview"]["total"], 2);
     assert!(public_cut.get("testRuns").is_none());
-    assert!(state_receiver.try_recv().is_err(), "one aggregate cut covers the batch");
+    assert!(
+        state_receiver.try_recv().is_err(),
+        "one aggregate cut covers the batch"
+    );
     let stored = load_state(fixture.state.persistence_path.as_path())
         .unwrap()
         .unwrap();
@@ -926,7 +982,13 @@ fn the_rescan_publishes_only_changes_with_consecutive_revisions() {
     );
     assert_eq!(fixture.state.full_snapshot().revision, before + 2);
     assert_eq!(
-        fixture.state.snapshot().test_run_overview.get().counts.total,
+        fixture
+            .state
+            .snapshot()
+            .test_run_overview
+            .get()
+            .counts
+            .total,
         2,
         "the snapshot counts the canonical runs"
     );
@@ -1408,7 +1470,10 @@ fn test_run_membership_preserves_removed_id_semantics() {
         let mut removed = test_run_removed_ids(previous.iter().copied(), current.iter().copied());
         // Ordering belongs to the existing publication caller, not membership.
         removed.sort();
-        let expected = expected.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        let expected = expected
+            .iter()
+            .map(|id| (*id).to_owned())
+            .collect::<Vec<_>>();
         assert_eq!(removed, expected, "{label}");
     }
 }
@@ -2359,7 +2424,10 @@ fn an_unknown_run_says_why_when_that_is_known() {
     for (run_id, reason) in [
         ("test-gone", Some(TestRunUnknownReason::ProcessGone)),
         ("test-no-pid", Some(TestRunUnknownReason::NoPid)),
-        ("test-unreadable", Some(TestRunUnknownReason::ResultsUnreadable)),
+        (
+            "test-unreadable",
+            Some(TestRunUnknownReason::ResultsUnreadable),
+        ),
         ("test-running", None),
         ("test-passed", None),
     ] {
@@ -2521,7 +2589,14 @@ fn a_run_that_cannot_be_indexed_is_not_tracked() {
     fixture.refresh(&[]);
 
     assert!(fixture.summaries().is_empty());
-    let tracked = fixture.state.inner.lock().unwrap().test_runs.tracked_dirs.clone();
+    let tracked = fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_runs
+        .tracked_dirs
+        .clone();
     let tracks = |name: &str| tracked.iter().any(|(dir, _)| dir.ends_with(name));
     assert!(!tracks("test-long-owner"), "{tracked:?}");
     assert!(!tracks("test-oversized-request"), "{tracked:?}");
@@ -2582,7 +2657,14 @@ fn a_rescan_tracks_the_directories_where_a_new_run_appears() {
     let fixture = RunFixture::new("tracked-dirs");
     let runs = fixture.runs_dir();
     let tracked = |fixture: &RunFixture| -> Vec<(PathBuf, Option<std::time::SystemTime>)> {
-        fixture.state.inner.lock().unwrap().test_runs.tracked_dirs.clone()
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_runs
+            .tracked_dirs
+            .clone()
     };
     // The index spells paths as it found them from the project root, so they
     // are matched by their trailing components.
@@ -2607,8 +2689,11 @@ fn a_rescan_tracks_the_directories_where_a_new_run_appears() {
     );
     assert!(
         first.iter().any(|(dir, stamp)| {
-            dir.ends_with(FsPath::new("test-runs-tracked-dirs").join(".git").join("worktrees"))
-                && stamp.is_none()
+            dir.ends_with(
+                FsPath::new("test-runs-tracked-dirs")
+                    .join(".git")
+                    .join("worktrees"),
+            ) && stamp.is_none()
         }),
         "the worktrees directory is tracked though missing: {first:?}"
     );
@@ -2622,8 +2707,15 @@ fn a_rescan_tracks_the_directories_where_a_new_run_appears() {
     fs::create_dir_all(&pending).unwrap();
     fixture.refresh(&[]);
     let now_tracked = tracked(&fixture);
-    assert!(now_tracked.iter().any(|(dir, stamp)| is_runs_dir(dir) && stamp.is_some()));
-    assert!(now_tracked.iter().any(|(dir, _)| is_pending(dir)), "{now_tracked:?}");
+    assert!(
+        now_tracked
+            .iter()
+            .any(|(dir, stamp)| is_runs_dir(dir) && stamp.is_some())
+    );
+    assert!(
+        now_tracked.iter().any(|(dir, _)| is_pending(dir)),
+        "{now_tracked:?}"
+    );
     assert!(!fixture.state.test_run_tracked_dirs_changed());
     // A stamp older than the directory's reads as a change. (A real change
     // can land in the same modification-time tick as the stat; the 10 s full
@@ -2662,11 +2754,26 @@ fn the_background_rescan_is_due_when_running_changed_or_idle_long_enough() {
         false
     };
     assert!(test_run_rescan_due(false, None, || false), "no rescan yet");
-    assert!(test_run_rescan_due(true, Some(Duration::ZERO), || false), "a run is running");
-    assert!(test_run_rescan_due(false, Some(Duration::ZERO), || true), "a directory changed");
-    assert!(test_run_rescan_due(false, Some(TEST_RUN_IDLE_RESCAN_INTERVAL), || false), "backstop");
-    assert!(!test_run_rescan_due(false, Some(Duration::from_secs(9)), ask), "idle and unchanged");
-    assert!(changed.get(), "the directories are asked only when nothing else decides");
+    assert!(
+        test_run_rescan_due(true, Some(Duration::ZERO), || false),
+        "a run is running"
+    );
+    assert!(
+        test_run_rescan_due(false, Some(Duration::ZERO), || true),
+        "a directory changed"
+    );
+    assert!(
+        test_run_rescan_due(false, Some(TEST_RUN_IDLE_RESCAN_INTERVAL), || false),
+        "backstop"
+    );
+    assert!(
+        !test_run_rescan_due(false, Some(Duration::from_secs(9)), ask),
+        "idle and unchanged"
+    );
+    assert!(
+        changed.get(),
+        "the directories are asked only when nothing else decides"
+    );
     changed.set(false);
     assert!(test_run_rescan_due(true, Some(Duration::ZERO), ask));
     assert!(!changed.get(), "no stats while a run is running");
@@ -2726,11 +2833,25 @@ fn an_abandoned_run_is_read_again_once_not_on_every_rescan() {
     };
 
     fixture.state.refresh_test_runs_with(&gone, &publish);
-    assert_eq!(fixture.summary("test-abandoned").state, TestRunState::Unknown);
-    assert_eq!(checks.get(), 2, "first rescan: a check, a read after it, a check");
+    assert_eq!(
+        fixture.summary("test-abandoned").state,
+        TestRunState::Unknown
+    );
+    assert_eq!(
+        checks.get(),
+        2,
+        "first rescan: a check, a read after it, a check"
+    );
 
     checks.set(0);
     fixture.state.refresh_test_runs_with(&gone, &publish);
-    assert_eq!(fixture.summary("test-abandoned").state, TestRunState::Unknown);
-    assert_eq!(checks.get(), 1, "unchanged files: one check and no further read");
+    assert_eq!(
+        fixture.summary("test-abandoned").state,
+        TestRunState::Unknown
+    );
+    assert_eq!(
+        checks.get(),
+        1,
+        "unchanged files: one check and no further read"
+    );
 }

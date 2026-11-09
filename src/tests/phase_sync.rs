@@ -10,7 +10,10 @@ pub(super) use crate::TEST_PHASE_DEADLOCK_GUARD as DEADLOCK_GUARD;
 /// whole test process and lose every other result of the run, so a poisoned gate
 /// still opens.
 pub(super) fn set_gate(gate: &(Mutex<bool>, Condvar), value: bool) {
-    *gate.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = value;
+    *gate
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = value;
     gate.1.notify_all();
 }
 
@@ -223,14 +226,18 @@ pub(crate) fn wait_for_gate(gate: &(Mutex<bool>, Condvar), value: bool) {
 #[track_caller]
 pub(super) fn wait_for_gate_within(gate: &(Mutex<bool>, Condvar), value: bool, limit: Duration) {
     let deadline = std::time::Instant::now() + limit;
-    let mut flag = gate.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut flag = gate
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     while *flag != value {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         if remaining.is_zero() {
             drop(flag);
             panic!("a test gate stayed closed for {limit:?}: something is hung");
         }
-        flag = gate.1
+        flag = gate
+            .1
             .wait_timeout(flag, remaining)
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .0;
@@ -249,8 +256,9 @@ pub(super) struct CapturedStderrProcess {
 impl CapturedStderrProcess {
     pub(super) fn spawn(command: &mut Command) -> Self {
         command.stdout(Stdio::null()).stderr(Stdio::piped());
-        let process =
-            Arc::new(host_command::spawn_shared(command).expect("spawn captured diagnostic process"));
+        let process = Arc::new(
+            host_command::spawn_shared(command).expect("spawn captured diagnostic process"),
+        );
         let (exit_tx, exit_rx) = mpsc::channel();
         let mut owner = Self {
             process,

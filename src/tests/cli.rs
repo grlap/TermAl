@@ -105,13 +105,18 @@ fn cli_help_preserves_consumed_bridge_values() {
         base_url,
     } = Mode::parse(
         [
-            "delegation-mcp", "--parent-session-id", "help", "--base-url", "help",
+            "delegation-mcp",
+            "--parent-session-id",
+            "help",
+            "--base-url",
+            "help",
         ]
         .into_iter()
         .map(str::to_owned)
         .collect(),
     )
-    .unwrap() else {
+    .unwrap()
+    else {
         panic!("bare help consumed as a flag value must remain data");
     };
     assert_eq!(parent_session_id, "help");
@@ -121,7 +126,11 @@ fn cli_help_preserves_consumed_bridge_values() {
             vec!["repl", "--agent"],
             vec!["delegation-mcp", "--parent-session-id"],
         ] {
-            let args = prefix.into_iter().chain([spelling]).map(str::to_owned).collect();
+            let args = prefix
+                .into_iter()
+                .chain([spelling])
+                .map(str::to_owned)
+                .collect();
             assert!(matches!(
                 Mode::parse(args).unwrap(),
                 Mode::CoordinationCli(CoordinationCliInvocation {

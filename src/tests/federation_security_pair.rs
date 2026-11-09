@@ -101,7 +101,12 @@ impl Pair {
                     .take()
                     .expect("reserved forward socket");
                 assert_eq!(socket.local_addr().unwrap().port(), port);
-                *owned = Some(TestChild::start(&runtime_handle, start_relay.clone(), socket, s_number)?);
+                *owned = Some(TestChild::start(
+                    &runtime_handle,
+                    start_relay.clone(),
+                    socket,
+                    s_number,
+                )?);
                 Ok(())
             }),
             reconcile_interval: Duration::from_millis(20),

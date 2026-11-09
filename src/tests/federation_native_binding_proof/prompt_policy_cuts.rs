@@ -3,8 +3,8 @@
 use super::*;
 
 #[tokio::test]
-async fn federation_prompt_policy_revocation_cannot_borrow_another_enrolled_peers_authenticated_link(
-) {
+async fn federation_prompt_policy_revocation_cannot_borrow_another_enrolled_peers_authenticated_link()
+ {
     let mut fixture = policy_fixture(true).await;
     let scope = scope(&fixture, true);
     let consent = consent(&fixture, &scope);
@@ -33,21 +33,23 @@ async fn federation_prompt_policy_revocation_cannot_borrow_another_enrolled_peer
     );
     assert!(result.is_err());
     assert_eq!(version(&fixture.central), before);
-    assert!(fixture
-        .central
-        .inner
-        .lock()
-        .unwrap()
-        .federation
-        .prompt_permissions
-        .as_ref()
-        .is_none_or(|policy| policy.find(&foreign.identity.id).is_none()));
+    assert!(
+        fixture
+            .central
+            .inner
+            .lock()
+            .unwrap()
+            .federation
+            .prompt_permissions
+            .as_ref()
+            .is_none_or(|policy| policy.find(&foreign.identity.id).is_none())
+    );
     fixture.server.finish().await;
 }
 
 #[tokio::test]
-async fn federation_prompt_policy_expired_or_foreign_proof_refuses_before_rpc_counter_or_policy_mutation(
-) {
+async fn federation_prompt_policy_expired_or_foreign_proof_refuses_before_rpc_counter_or_policy_mutation()
+ {
     let mut fixture = policy_fixture(true).await;
     let scope = scope(&fixture, true);
     let consent = consent(&fixture, &scope);
@@ -94,11 +96,13 @@ async fn federation_prompt_policy_expired_or_foreign_proof_refuses_before_rpc_co
     )
     .unwrap();
     for proof in [stale, foreign] {
-        assert!(fixture
-            .satellite
-            .observe_remote_prompt_grant(&receiver_lease, &unavailable_rpc, &intent, &proof)
-            .await
-            .is_err());
+        assert!(
+            fixture
+                .satellite
+                .observe_remote_prompt_grant(&receiver_lease, &unavailable_rpc, &intent, &proof)
+                .await
+                .is_err()
+        );
         assert_eq!(
             security.sender.lock().unwrap().next,
             before_counter,
@@ -106,16 +110,18 @@ async fn federation_prompt_policy_expired_or_foreign_proof_refuses_before_rpc_co
         );
         assert_eq!(version(&fixture.satellite), before_version);
     }
-    assert!(fixture
-        .satellite
-        .inner
-        .lock()
-        .unwrap()
-        .federation
-        .prompt_permissions
-        .as_ref()
-        .unwrap()
-        .find(&grant.identity.id)
-        .is_none());
+    assert!(
+        fixture
+            .satellite
+            .inner
+            .lock()
+            .unwrap()
+            .federation
+            .prompt_permissions
+            .as_ref()
+            .unwrap()
+            .find(&grant.identity.id)
+            .is_none()
+    );
     fixture.server.finish().await;
 }

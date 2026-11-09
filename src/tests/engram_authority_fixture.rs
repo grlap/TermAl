@@ -5,7 +5,6 @@
 
 use super::*;
 
-
 #[test]
 fn authority_command() {
     let Some(output) = std::env::var_os("TERMAL_TEST_AUTHORITY_FIXTURE") else {

@@ -13,8 +13,12 @@ fn named_turn(label: &str) -> (EOCheckedTurn, String) {
             .unadmitted_active_turn
             .as_ref()
             .unwrap()
-            .opening_root.as_ref().unwrap()
-            .source_root.as_ref().unwrap()
+            .opening_root
+            .as_ref()
+            .unwrap()
+            .source_root
+            .as_ref()
+            .unwrap()
             .root
             .clone()
     });
@@ -268,7 +272,12 @@ fn refused_admission_codex_caret_and_arguments_have_one_actionable_outcome() {
                     &check,
                     &turn.root,
                     Some(&root),
-                    turn.record(|record| record.engram.unadmitted_active_turn.as_ref().and_then(|trace| trace.opening_root.as_ref()).and_then(|opening| opening.source_root.clone()))
+                    turn.record(|record| record
+                        .engram
+                        .unadmitted_active_turn
+                        .as_ref()
+                        .and_then(|trace| trace.opening_root.as_ref())
+                        .and_then(|opening| opening.source_root.clone()))
                         .as_ref()
                         .map(|named| (FsPath::new(&named.root), named.common_dir_key.as_str()))
                 )
@@ -298,8 +307,10 @@ fn refused_admission_codex_caret_and_arguments_have_one_actionable_outcome() {
             );
             let request = finish_uncredited(&turn);
             assert!(turn.record(|record| record.engram.active_turn_checks.is_empty()));
-            assert!(request.get("verification_evidence").is_none(),
-                "the refused command supplies no automatic verification: {request:#}");
+            assert!(
+                request.get("verification_evidence").is_none(),
+                "the refused command supplies no automatic verification: {request:#}"
+            );
         }
     }
 }
@@ -455,14 +466,21 @@ fn refused_admission_shared_root_notice_keeps_the_primary_check_admitted() {
     other.short_ref = "other-held-item".to_owned();
     other.work_id = "other-work".to_owned();
     other.claim_id = "other-claim".to_owned();
-    turn.transport.replace_held_claims([Ok(serde_json::from_value(json!({
-        "items": [{"work_id":primary.work_id, "short_ref":primary.short_ref,
-            "claim_id":primary.claim_id, "claim_fence":primary.claim_fence},
-            {"work_id":other.work_id, "short_ref":other.short_ref,
-            "claim_id":other.claim_id, "claim_fence":other.claim_fence}],
-        "omitted":0
-    })).unwrap())]);
-    turn.state.inner.lock().unwrap().engram_work_source_roots.push(other);
+    turn.transport
+        .replace_held_claims([Ok(serde_json::from_value(json!({
+            "items": [{"work_id":primary.work_id, "short_ref":primary.short_ref,
+                "claim_id":primary.claim_id, "claim_fence":primary.claim_fence},
+                {"work_id":other.work_id, "short_ref":other.short_ref,
+                "claim_id":other.claim_id, "claim_fence":other.claim_fence}],
+            "omitted":0
+        }))
+        .unwrap())]);
+    turn.state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .push(other);
     let command = format!("{LAUNCHER} --test-name-pattern \"^MCP\" fixture.test.mjs");
     let item = command_item(&command, &root);
     let mut recorder = turn.recorder();

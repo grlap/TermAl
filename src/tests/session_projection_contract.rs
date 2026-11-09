@@ -105,8 +105,10 @@ async fn serialized_session_projection_preserves_metadata_and_redacts_private_bo
     };
     let full = serde_json::to_value(full).expect("full projection serializes");
     let full_object = full.as_object().unwrap();
-    assert!(full.get("engramControlOff").is_none(),
-        "the current ordinary projection has no retired control-mode selector");
+    assert!(
+        full.get("engramControlOff").is_none(),
+        "the current ordinary projection has no retired control-mode selector"
+    );
     let app = app_router(state.clone());
 
     // No handoffFrom/handoffTo query is used here: those optional bounds

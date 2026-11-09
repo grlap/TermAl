@@ -82,7 +82,9 @@ fn kimi_allows(command: &str) -> bool {
         approved_args: None,
     };
     matches!(
-        kimi_read_only_permission_decision(&params, Some(&observation), WORKSPACE, false, &|_| true),
+        kimi_read_only_permission_decision(&params, Some(&observation), WORKSPACE, false, &|_| {
+            true
+        }),
         KimiReadOnlyDecision::Allow { .. }
     )
 }

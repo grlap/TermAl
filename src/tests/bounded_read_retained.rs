@@ -49,12 +49,20 @@ fn bounded_read_cleanup_retained_overflow_drops_oldest_without_cleanup() {
     let mut ring = BoundedReadRetainedOwners::new();
     for pid in 1..=32 {
         assert!(
-            ring.insert(pid, Arc::new(DropOnly(drops.clone(), pid)), "unresolved".into())
-                .is_none()
+            ring.insert(
+                pid,
+                Arc::new(DropOnly(drops.clone(), pid)),
+                "unresolved".into()
+            )
+            .is_none()
         );
     }
     let evicted = ring
-        .insert(33, Arc::new(DropOnly(drops.clone(), 33)), "unresolved".into())
+        .insert(
+            33,
+            Arc::new(DropOnly(drops.clone(), 33)),
+            "unresolved".into(),
+        )
         .unwrap();
     assert_eq!(evicted.pid, 1);
     assert_eq!(evicted.sequence, 1);
@@ -99,7 +107,11 @@ fn bounded_read_cleanup_retained_reused_pid_preserves_distinct_owners_in_both_or
         };
         assert!(ring.insert(41, first.clone(), "first".into()).is_none());
         assert!(ring.insert(41, second.clone(), "second".into()).is_none());
-        assert_eq!(ring.entries.len(), 2, "distinct PID incarnations must survive");
+        assert_eq!(
+            ring.entries.len(),
+            2,
+            "distinct PID incarnations must survive"
+        );
         assert_eq!(Arc::strong_count(&old), 2);
         assert_eq!(Arc::strong_count(&newer), 2);
 
@@ -117,7 +129,10 @@ fn bounded_read_cleanup_retained_refresh_matches_owner_not_just_pid() {
     let mut ring = BoundedReadRetainedOwners::new();
     ring.insert(41, old.clone(), "old".into());
     ring.insert(41, newer.clone(), "newer".into());
-    assert!(ring.insert(41, old.clone(), "old refreshed".into()).is_none());
+    assert!(
+        ring.insert(41, old.clone(), "old refreshed".into())
+            .is_none()
+    );
     assert_eq!(ring.entries.len(), 2);
     assert!(Arc::ptr_eq(&ring.entries[0]._owner, &newer));
     assert!(Arc::ptr_eq(&ring.entries[1]._owner, &old));
@@ -134,7 +149,9 @@ fn bounded_read_cleanup_retained_pid_collision_at_capacity_reports_eviction() {
         ring.insert(pid, Arc::new(()), "other".into());
     }
     let newer = Arc::new(());
-    let evicted = ring.insert(41, newer.clone(), "new incarnation".into()).unwrap();
+    let evicted = ring
+        .insert(41, newer.clone(), "new incarnation".into())
+        .unwrap();
     assert_eq!(ring.entries.len(), 32);
     assert!(!evicted.retained);
     assert!(Arc::ptr_eq(&evicted._owner, &oldest));

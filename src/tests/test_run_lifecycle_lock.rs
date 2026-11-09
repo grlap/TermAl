@@ -19,7 +19,8 @@ fn reference_changed_row_summary(inner: &StateInner, id: &str) -> TestRunSummary
             row.artifact.as_ref().and_then(|artifact| {
                 runs.iter().find(|run| {
                     run.run_id == artifact.run_id
-                        && test_run_path_key(&run.run_dir) == test_run_path_key(&artifact.run_directory)
+                        && test_run_path_key(&run.run_dir)
+                            == test_run_path_key(&artifact.run_directory)
                 })
             })
         })
@@ -29,16 +30,29 @@ fn reference_changed_row_summary(inner: &StateInner, id: &str) -> TestRunSummary
 
 fn assert_identity_projection_equals_full(inner: &StateInner, label: &str) {
     let full = test_run_summaries_locked(inner);
-    let ids: std::collections::BTreeSet<String> = full.iter().map(|run| run.run_id.clone())
+    let ids: std::collections::BTreeSet<String> = full
+        .iter()
+        .map(|run| run.run_id.clone())
         .chain(inner.test_run_observations.keys().cloned())
-        .chain(inner.test_run_observations.values()
-            .filter_map(|row| row.artifact.as_ref().map(|artifact| artifact.run_id.clone())))
+        .chain(inner.test_run_observations.values().filter_map(|row| {
+            row.artifact
+                .as_ref()
+                .map(|artifact| artifact.run_id.clone())
+        }))
         .chain(inner.test_run_compacted.keys().cloned())
         .chain(inner.test_run_registrations.keys().cloned())
         .collect();
     for id in &ids {
-        let expected: Vec<_> = full.iter().filter(|run| &run.run_id == id).cloned().collect();
-        assert_eq!(test_run_identity_summaries_locked(inner, id), expected, "identity {id} at {label}");
+        let expected: Vec<_> = full
+            .iter()
+            .filter(|run| &run.run_id == id)
+            .cloned()
+            .collect();
+        assert_eq!(
+            test_run_identity_summaries_locked(inner, id),
+            expected,
+            "identity {id} at {label}"
+        );
     }
     for (id, row) in &inner.test_run_observations {
         assert_eq!(
@@ -56,7 +70,10 @@ fn lifecycle_lock_changed_row_lookup_equals_the_full_projection_first_match() {
     for change in 0..8 {
         match change {
             // Registered fallback: the entry is gone, the registration stays.
-            1 => inner.test_runs.entries.retain(|entry| entry.summary.run_id != "test-history-0000"),
+            1 => inner
+                .test_runs
+                .entries
+                .retain(|entry| entry.summary.run_id != "test-history-0000"),
             // Retained, uncompacted artifact with no entry or registration.
             2 => {
                 let entry = inner.test_runs.find("test-history-0001").unwrap();
@@ -72,9 +89,14 @@ fn lifecycle_lock_changed_row_lookup_equals_the_full_projection_first_match() {
                     artifact_conflict: false,
                     artifact_unavailable: false,
                 };
-                inner.test_runs.entries.retain(|entry| entry.summary.run_id != "test-history-0001");
+                inner
+                    .test_runs
+                    .entries
+                    .retain(|entry| entry.summary.run_id != "test-history-0001");
                 inner.test_run_registrations.remove("test-history-0001");
-                inner.test_run_compacted.insert("test-history-0001".to_owned(), retained);
+                inner
+                    .test_run_compacted
+                    .insert("test-history-0001".to_owned(), retained);
             }
             // Duplicate entries for one run id.
             3 => {
@@ -83,71 +105,140 @@ fn lifecycle_lock_changed_row_lookup_equals_the_full_projection_first_match() {
             }
             // An observation its artifact no longer merges, and one with none.
             4 => {
-                inner.test_run_observations.get_mut("observed-history-0003").unwrap()
-                    .artifact.as_mut().unwrap().run_directory.push_str("-different");
-                inner.test_run_observations.get_mut("observed-history-0004").unwrap().artifact = None;
+                inner
+                    .test_run_observations
+                    .get_mut("observed-history-0003")
+                    .unwrap()
+                    .artifact
+                    .as_mut()
+                    .unwrap()
+                    .run_directory
+                    .push_str("-different");
+                inner
+                    .test_run_observations
+                    .get_mut("observed-history-0004")
+                    .unwrap()
+                    .artifact = None;
             }
             // An installed compacted summary with no entry or registration,
             // still awaiting revalidation, so it stays in the public list.
             5 => {
-                let mut summary = inner.test_runs.find("test-history-0005").unwrap().summary.clone();
+                let mut summary = inner
+                    .test_runs
+                    .find("test-history-0005")
+                    .unwrap()
+                    .summary
+                    .clone();
                 summary.run_id = "compacted-history".to_owned();
-                inner.test_runs.compactions_durable.insert("compacted-history".to_owned());
-                inner.test_runs.compactions_revalidating.insert("compacted-history".to_owned());
-                inner.test_run_compacted.insert("compacted-history".to_owned(), TestRunCompacted {
-                    compacted: true,
-                    request_identity: None,
-                    request_stamp: None,
-                    results_stamp: None,
-                    summary,
-                    registration: None,
-                    observations: Vec::new(),
-                    reason: "fixture compacted artifact".to_owned(),
-                    artifact_conflict: false,
-                    artifact_unavailable: true,
-                });
+                inner
+                    .test_runs
+                    .compactions_durable
+                    .insert("compacted-history".to_owned());
+                inner
+                    .test_runs
+                    .compactions_revalidating
+                    .insert("compacted-history".to_owned());
+                inner.test_run_compacted.insert(
+                    "compacted-history".to_owned(),
+                    TestRunCompacted {
+                        compacted: true,
+                        request_identity: None,
+                        request_stamp: None,
+                        results_stamp: None,
+                        summary,
+                        registration: None,
+                        observations: Vec::new(),
+                        reason: "fixture compacted artifact".to_owned(),
+                        artifact_conflict: false,
+                        artifact_unavailable: true,
+                    },
+                );
             }
             // An unmerged observation whose summary run id is not its key.
             6 => {
-                let mut row = inner.test_run_observations.get_mut("observed-history-0006").unwrap();
+                let mut row = inner
+                    .test_run_observations
+                    .get_mut("observed-history-0006")
+                    .unwrap();
                 row.artifact = None;
                 row.summary.run_id = "test-history-0007".to_owned();
             }
             // Retained rows keyed apart from the run id their fallback carries.
             7 => {
-                let registration = inner.test_run_registrations.remove("test-history-0004").unwrap();
-                inner.test_run_registrations.insert("re-keyed-registration".to_owned(), registration);
-                let retained = inner.test_run_compacted.remove("test-history-0001").unwrap();
-                inner.test_run_compacted.insert("re-keyed-retained".to_owned(), retained);
+                let registration = inner
+                    .test_run_registrations
+                    .remove("test-history-0004")
+                    .unwrap();
+                inner
+                    .test_run_registrations
+                    .insert("re-keyed-registration".to_owned(), registration);
+                let retained = inner
+                    .test_run_compacted
+                    .remove("test-history-0001")
+                    .unwrap();
+                inner
+                    .test_run_compacted
+                    .insert("re-keyed-retained".to_owned(), retained);
             }
             _ => {}
         }
         assert_identity_projection_equals_full(&inner, &format!("change {change}"));
     }
     let full = test_run_summaries_locked(&inner);
-    for exercised in ["test-history-0000", "test-history-0001", "observed-history-0003",
-        "observed-history-0004", "compacted-history"]
-    {
-        assert!(full.iter().any(|run| run.run_id == exercised), "{exercised} is in the public list");
+    for exercised in [
+        "test-history-0000",
+        "test-history-0001",
+        "observed-history-0003",
+        "observed-history-0004",
+        "compacted-history",
+    ] {
+        assert!(
+            full.iter().any(|run| run.run_id == exercised),
+            "{exercised} is in the public list"
+        );
     }
-    assert_eq!(full.iter().filter(|run| run.run_id == "test-history-0002").count(), 2);
-    assert_eq!(full.iter().filter(|run| run.run_id == "test-history-0007").count(), 2);
+    assert_eq!(
+        full.iter()
+            .filter(|run| run.run_id == "test-history-0002")
+            .count(),
+        2
+    );
+    assert_eq!(
+        full.iter()
+            .filter(|run| run.run_id == "test-history-0007")
+            .count(),
+        2
+    );
     // The re-keyed registration still yields its own run id's fallback.
-    assert_eq!(full.iter().filter(|run| run.run_id == "test-history-0004").count(), 2);
+    assert_eq!(
+        full.iter()
+            .filter(|run| run.run_id == "test-history-0004")
+            .count(),
+        2
+    );
     assert!(!full.iter().any(|run| run.run_id.starts_with("re-keyed")));
 }
 
 // A populated history whose first `associated` rows carry an association to
 // one completed lifecycle, so a revalidation changes exactly those rows.
-fn associated_history(count: usize, associated: usize) -> (
-    RunFixture, EngramAuthorityStoreKey, EngramControlWorkBinding, EngramNamedRootReadResponse,
+fn associated_history(
+    count: usize,
+    associated: usize,
+) -> (
+    RunFixture,
+    EngramAuthorityStoreKey,
+    EngramControlWorkBinding,
+    EngramNamedRootReadResponse,
     mpsc::Receiver<PersistRequest>,
 ) {
     let mut fixture = populated_history(count);
     // Production-style queued persistence and broadcast, as the idle witnesses.
     let (persist_tx, persist_rx) = mpsc::channel();
     fixture.state.persist_tx = persist_tx;
-    fixture.state.persist_worker_alive.store(true, Ordering::Release);
+    fixture
+        .state
+        .persist_worker_alive
+        .store(true, Ordering::Release);
     fixture.state.state_broadcast_mailbox = Some(Arc::new(StateBroadcastMailbox::default()));
     let store = EngramAuthorityStoreKey {
         database_path: fixture.root.join("tracker.db"),
@@ -163,7 +254,10 @@ fn associated_history(count: usize, associated: usize) -> (
     };
     let mut inner = fixture.state.inner.lock().unwrap();
     for ordinal in 0..associated {
-        let mut row = inner.test_run_observations.get_mut(&format!("observed-history-{ordinal:04}")).unwrap();
+        let mut row = inner
+            .test_run_observations
+            .get_mut(&format!("observed-history-{ordinal:04}"))
+            .unwrap();
         row.work_binding = Some(binding.clone());
         row.evidence.push(TestRunEvidenceAssociation {
             store: store.clone(),
@@ -218,11 +312,19 @@ fn revalidation_cost(count: usize, associated: usize) -> RevalidationCost {
     // guard of update_unindexed_fields is skipped for this scope only.
     let (_, visits) = {
         let _timing = SkipContractGuardForTiming::new();
-        measure(&format!("lifecycle_revalidation_{count}_{associated}"), || {
-            fixture.state.revalidate_test_run_lifecycle(&store, &binding, &read)
-        })
+        measure(
+            &format!("lifecycle_revalidation_{count}_{associated}"),
+            || {
+                fixture
+                    .state
+                    .revalidate_test_run_lifecycle(&store, &binding, &read)
+            },
+        )
     };
-    assert!(!contract_guard_skipped(), "the timing scope restores the contract guard");
+    assert!(
+        !contract_guard_skipped(),
+        "the timing scope restores the contract guard"
+    );
     let projections = TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.get());
     let candidates = TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.get());
     let indexed = TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.get());
@@ -231,11 +333,18 @@ fn revalidation_cost(count: usize, associated: usize) -> RevalidationCost {
     for ordinal in 0..associated {
         assert!(
             inner.test_run_observations[&format!("observed-history-{ordinal:04}")].evidence[0]
-                .lifecycle_read.is_some(),
+                .lifecycle_read
+                .is_some(),
             "associated row {ordinal} is revalidated"
         );
     }
-    RevalidationCost { visits, projections, candidates, indexed, maintenance }
+    RevalidationCost {
+        visits,
+        projections,
+        candidates,
+        indexed,
+        maintenance,
+    }
 }
 
 /// Unrelated history adds no projection, no association matching and no
@@ -245,13 +354,28 @@ fn revalidation_cost(count: usize, associated: usize) -> RevalidationCost {
 fn lifecycle_lock_revalidation_builds_no_full_projection_or_unrelated_matching() {
     let small = revalidation_cost(16, 1);
     let large = revalidation_cost(256, 1);
-    assert_eq!((small.projections, large.projections), (0, 0),
-        "the revalidating hold builds no full-history summary projection");
-    assert_eq!(small.visits, large.visits,
-        "unrelated history adds no association matching: 16 rows {}, 256 rows {}", small.visits, large.visits);
-    assert_eq!((small.indexed, large.indexed), (1, 1),
-        "selection visits only the lifecycle bucket: 16 rows {}, 256 rows {}", small.indexed, large.indexed);
-    assert_eq!((small.maintenance, large.maintenance), (0, 0), "revalidation performs no index maintenance");
+    assert_eq!(
+        (small.projections, large.projections),
+        (0, 0),
+        "the revalidating hold builds no full-history summary projection"
+    );
+    assert_eq!(
+        small.visits, large.visits,
+        "unrelated history adds no association matching: 16 rows {}, 256 rows {}",
+        small.visits, large.visits
+    );
+    assert_eq!(
+        (small.indexed, large.indexed),
+        (1, 1),
+        "selection visits only the lifecycle bucket: 16 rows {}, 256 rows {}",
+        small.indexed,
+        large.indexed
+    );
+    assert_eq!(
+        (small.maintenance, large.maintenance),
+        (0, 0),
+        "revalidation performs no index maintenance"
+    );
 }
 
 /// Every retained row changed in one batch: the lookups share one index, so
@@ -260,13 +384,28 @@ fn lifecycle_lock_revalidation_builds_no_full_projection_or_unrelated_matching()
 fn lifecycle_lock_batch_lookup_stays_linear_when_every_row_changes() {
     for count in [16, 256] {
         let cost = revalidation_cost(count, count);
-        assert_eq!(cost.projections, 0, "{count} changed rows build no full projection");
-        assert!(cost.candidates <= 8 * count,
-            "{count} changed rows examined {} lookup candidates, not linear", cost.candidates);
-        assert!(cost.visits <= 4 * count,
-            "{count} changed rows made {} association matches, not linear", cost.visits);
+        assert_eq!(
+            cost.projections, 0,
+            "{count} changed rows build no full projection"
+        );
+        assert!(
+            cost.candidates <= 8 * count,
+            "{count} changed rows examined {} lookup candidates, not linear",
+            cost.candidates
+        );
+        assert!(
+            cost.visits <= 4 * count,
+            "{count} changed rows made {} association matches, not linear",
+            cost.visits
+        );
         // A hot bucket: every row shares the lifecycle, so the bucket is the history.
-        assert_eq!(cost.indexed, count, "{count} rows in one lifecycle bucket are each visited once");
-        assert_eq!(cost.maintenance, 0, "{count} revalidated rows need no index remove or re-add");
+        assert_eq!(
+            cost.indexed, count,
+            "{count} rows in one lifecycle bucket are each visited once"
+        );
+        assert_eq!(
+            cost.maintenance, 0,
+            "{count} revalidated rows need no index remove or re-add"
+        );
     }
 }

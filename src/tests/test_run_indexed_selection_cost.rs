@@ -21,16 +21,21 @@ fn add_history(
         let mut row = second_observation(&original, &format!("unrelated-{ordinal:04}"));
         row.summary.owner_session_id = Some(format!("another-owner-{ordinal}"));
         for association in &mut row.evidence {
-            association.producer_observation_id = sha256_hex(format!("another-producer-{ordinal}").as_bytes());
+            association.producer_observation_id =
+                sha256_hex(format!("another-producer-{ordinal}").as_bytes());
         }
-        inner.test_run_observations.insert(row.execution_id.clone(), row);
+        inner
+            .test_run_observations
+            .insert(row.execution_id.clone(), row);
     }
     for ordinal in 0..distractors {
         let mut row = original.clone();
         row.execution_id = format!("{}-distractor-{ordinal:04}", original.execution_id);
         row.summary.run_id = row.execution_id.clone();
         distract(&mut row);
-        inner.test_run_observations.insert(row.execution_id.clone(), row);
+        inner
+            .test_run_observations
+            .insert(row.execution_id.clone(), row);
     }
 }
 
@@ -52,7 +57,10 @@ fn settlement_candidates(unrelated: usize, distractors: usize) -> usize {
     record_native_evidence(&fixture, &native);
     let id = native.execution_id.clone();
     let producer = engram_verification_record_producers(&native.registration.run_id, &native.body)
-        .into_iter().next().unwrap().1;
+        .into_iter()
+        .next()
+        .unwrap()
+        .1;
     let record_id = native.receipt.verifications[0].record_id.clone();
     {
         let mut inner = fixture.state.inner.lock().unwrap();
@@ -67,17 +75,37 @@ fn settlement_candidates(unrelated: usize, distractors: usize) -> usize {
     }
     let (candidates, maintenance) = indexed_candidates(|| {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let changed = AppState::settle_test_run_producer_records_locked(&mut inner,
-            HashMap::from([(producer.observation_id.as_str(), vec![(&producer, &record_id)])]),
-            &store, &binding);
+        let changed = AppState::settle_test_run_producer_records_locked(
+            &mut inner,
+            HashMap::from([(
+                producer.observation_id.as_str(),
+                vec![(&producer, &record_id)],
+            )]),
+            &store,
+            &binding,
+        );
         assert_eq!(changed.len(), 1);
     });
-    assert_eq!(maintenance, 0, "settlement fills results without index maintenance");
+    assert_eq!(
+        maintenance, 0,
+        "settlement fills results without index maintenance"
+    );
     let inner = fixture.state.inner.lock().unwrap();
-    assert!(inner.test_run_observations[&id].evidence[0].verification_record_id.is_some(), "the exact row settles");
-    for (key, row) in inner.test_run_observations.iter().filter(|(key, _)| key.as_str() != id) {
+    assert!(
+        inner.test_run_observations[&id].evidence[0]
+            .verification_record_id
+            .is_some(),
+        "the exact row settles"
+    );
+    for (key, row) in inner
+        .test_run_observations
+        .iter()
+        .filter(|(key, _)| key.as_str() != id)
+    {
         assert!(
-            row.evidence.iter().all(|association| association.verification_record_id.is_none()),
+            row.evidence
+                .iter()
+                .all(|association| association.verification_record_id.is_none()),
             "{key} stays unsettled"
         );
     }
@@ -89,6 +117,14 @@ fn settlement_candidates(unrelated: usize, distractors: usize) -> usize {
 #[test]
 fn receipt_settlement_visits_only_the_producer_bucket() {
     assert_eq!(settlement_candidates(16, 0), 1);
-    assert_eq!(settlement_candidates(256, 0), 1, "unrelated history adds no settlement candidate");
-    assert_eq!(settlement_candidates(16, 8), 9, "same-producer distractors are measured as the bucket");
+    assert_eq!(
+        settlement_candidates(256, 0),
+        1,
+        "unrelated history adds no settlement candidate"
+    );
+    assert_eq!(
+        settlement_candidates(16, 8),
+        9,
+        "same-producer distractors are measured as the bucket"
+    );
 }

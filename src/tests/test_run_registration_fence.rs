@@ -35,21 +35,40 @@ fn monitoring_interruption_waits_for_its_exact_durable_row_without_reconciling_o
         inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
     }
     for key in ["selected", "unrelated"] {
-        state.note_engram_command_started(&session, &EngramObservationProvenance::Ambient,
-            key, Some("cargo test"), Some(&test_run_display_path(&root)));
+        state.note_engram_command_started(
+            &session,
+            &EngramObservationProvenance::Ambient,
+            key,
+            Some("cargo test"),
+            Some(&test_run_display_path(&root)),
+        );
     }
     let (selected, unrelated, request) = {
         let mut inner = state.inner.lock().unwrap();
-        let selected = inner.test_run_observations.values()
-            .find(|row| row.tool_identity == sha256_hex(b"selected")).unwrap().clone();
-        let unrelated = inner.test_run_observations.values()
-            .find(|row| row.tool_identity == sha256_hex(b"unrelated")).unwrap().execution_id.clone();
+        let selected = inner
+            .test_run_observations
+            .values()
+            .find(|row| row.tool_identity == sha256_hex(b"selected"))
+            .unwrap()
+            .clone();
+        let unrelated = inner
+            .test_run_observations
+            .values()
+            .find(|row| row.tool_identity == sha256_hex(b"unrelated"))
+            .unwrap()
+            .execution_id
+            .clone();
         // Model an unrelated runtime that has disappeared since its last tick.
         // This operator action has no authority to reconcile that observation.
-        inner.test_run_observations.update(&unrelated,
-            |row| row.runtime_identity = Some("previous-provider-runtime".to_owned())).unwrap();
+        inner
+            .test_run_observations
+            .update(&unrelated, |row| {
+                row.runtime_identity = Some("previous-provider-runtime".to_owned())
+            })
+            .unwrap();
         let request = InterruptTestRunMonitoringRequest {
-            owner_session_id: session.clone(), started_at: selected.summary.started_at.clone().unwrap(),
+            owner_session_id: session.clone(),
+            started_at: selected.summary.started_at.clone().unwrap(),
             reason: "Terminal event missing for this selected observation".to_owned(),
         };
         (selected.execution_id, unrelated, request)
@@ -63,7 +82,9 @@ fn monitoring_interruption_waits_for_its_exact_durable_row_without_reconciling_o
         let state = state.clone();
         let selected = selected.clone();
         std::thread::spawn(move || {
-            reply_tx.send(state.interrupt_test_run_monitoring(&selected, request)).unwrap();
+            reply_tx
+                .send(state.interrupt_test_run_monitoring(&selected, request))
+                .unwrap();
         })
     };
     // The observation owner's fence and this API request's exact read-back
@@ -72,40 +93,79 @@ fn monitoring_interruption_waits_for_its_exact_durable_row_without_reconciling_o
         fixture.receive(false);
         assert!(!fixture.batch.drain(&fixture.rx, false));
     }
-    assert!(matches!(reply_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "enqueue is not a durable acknowledgement");
+    assert!(
+        matches!(reply_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "enqueue is not a durable acknowledgement"
+    );
     {
         let inner = state.inner.lock().unwrap();
-        assert_eq!(inner.test_run_observations[&unrelated].summary.state, TestRunState::Running);
+        assert_eq!(
+            inner.test_run_observations[&unrelated].summary.state,
+            TestRunState::Running
+        );
         assert!(!inner.test_runs.observations_durable.contains(&selected));
     }
     let delta = fixture.collect();
-    assert!(fixture.batch.pending.iter().all(|fence| fence.target.is_in_delta(&delta)));
+    assert!(
+        fixture
+            .batch
+            .pending
+            .iter()
+            .all(|fence| fence.target.is_in_delta(&delta))
+    );
     fixture.write(&delta).unwrap();
-    let response = reply_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap().unwrap();
+    let response = reply_rx
+        .recv_timeout(phase_sync::DEADLOCK_GUARD)
+        .unwrap()
+        .unwrap();
     worker.join().unwrap();
     assert_eq!(response.state, TestRunState::Unknown);
     assert!(response.interrupted);
     assert!(response.ended_at.is_none());
     let inner = state.inner.lock().unwrap();
     assert!(inner.test_runs.observations_durable.contains(&selected));
-    assert_eq!(inner.test_run_observations[&unrelated].summary.state, TestRunState::Running);
+    assert_eq!(
+        inner.test_run_observations[&unrelated].summary.state,
+        TestRunState::Running
+    );
     drop(inner);
     let stored: PersistedState = serde_json::from_str(
-        &read_persisted_metadata_json(fixture.cache.connection.as_ref().unwrap()).unwrap().unwrap()
-    ).unwrap();
-    assert_eq!(stored.test_run_observations[&unrelated].summary.state, TestRunState::Running,
-        "the API persisted only its selected disposition");
-    assert!(stored.test_run_observations[&unrelated].monitoring_interrupted_at.is_none());
+        &read_persisted_metadata_json(fixture.cache.connection.as_ref().unwrap())
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        stored.test_run_observations[&unrelated].summary.state,
+        TestRunState::Running,
+        "the API persisted only its selected disposition"
+    );
+    assert!(
+        stored.test_run_observations[&unrelated]
+            .monitoring_interrupted_at
+            .is_none()
+    );
     assert!(stored.test_run_observations[&selected].summary.interrupted);
-    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let loaded = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
     assert!(loaded.test_run_observations[&selected].summary.interrupted);
-    assert_eq!(loaded.test_run_observations[&selected].monitoring_interrupted_at,
-        stored.test_run_observations[&selected].monitoring_interrupted_at);
-    assert_eq!(loaded.test_run_observations[&unrelated].summary.state, TestRunState::Unknown,
-        "boot interrupts unfinished monitoring separately from the operator action");
+    assert_eq!(
+        loaded.test_run_observations[&selected].monitoring_interrupted_at,
+        stored.test_run_observations[&selected].monitoring_interrupted_at
+    );
+    assert_eq!(
+        loaded.test_run_observations[&unrelated].summary.state,
+        TestRunState::Unknown,
+        "boot interrupts unfinished monitoring separately from the operator action"
+    );
     assert!(loaded.test_run_observations[&unrelated].summary.interrupted);
-    assert!(loaded.test_run_observations[&unrelated].summary.ended_at.is_none());
+    assert!(
+        loaded.test_run_observations[&unrelated]
+            .summary
+            .ended_at
+            .is_none()
+    );
 }
 
 #[test]
@@ -311,11 +371,14 @@ async fn registration_fence_failures_report_the_actual_phase_and_writer_progress
                 .contains(&run_id)
         );
         let response = error.into_response();
-        assert_eq!(response.status(), if deadline {
-            StatusCode::SERVICE_UNAVAILABLE
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        });
+        assert_eq!(
+            response.status(),
+            if deadline {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        );
         let bytes = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .unwrap();
@@ -442,12 +505,27 @@ fn test_run_compaction_keeps_full_detail_until_its_exact_proof_reaches_sqlite() 
         .find(|fence| matches!(&fence.target, PersistFenceTarget::TestRunCompaction(_)))
         .unwrap();
     assert!(fence.target.is_in_delta(&delta));
-    assert!(delta.metadata.metadata_collection_is_omitted("testRunObservations"));
-    let retained = read_metadata_for_fence(fixture.cache.connection.as_ref().unwrap(), &["testRunObservations"])
-        .unwrap().unwrap();
-    assert_eq!(retained.test_run_observations.get(&oldest),
-        state.inner.lock().unwrap().test_run_observations.get(&oldest),
-        "unchanged old detail remains durable while the exact proof is selected");
+    assert!(
+        delta
+            .metadata
+            .metadata_collection_is_omitted("testRunObservations")
+    );
+    let retained = read_metadata_for_fence(
+        fixture.cache.connection.as_ref().unwrap(),
+        &["testRunObservations"],
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        retained.test_run_observations.get(&oldest),
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_observations
+            .get(&oldest),
+        "unchanged old detail remains durable while the exact proof is selected"
+    );
     assert!(
         state
             .inner

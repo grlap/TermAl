@@ -1,7 +1,7 @@
 // Phase-controlled reconnect races and retained report evidence. Uses the
 // authenticated loopback pair, never a live host or provider.
-use super::federation_onboarding_fixture::{Pair, io};
 use super::federation_build_compatibility::federation_requalification_refusal_status;
+use super::federation_onboarding_fixture::{Pair, io};
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

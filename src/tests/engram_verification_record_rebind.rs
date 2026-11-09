@@ -84,9 +84,9 @@ fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_r
     let (session, _recording) = engram_session(&fixture, false);
     // The exact ordinary response is explicit, including the original store
     // and session identity. Reload loses the process-local capability cache.
-    let transport = ScriptedEngramControlTransport::new([
-        ScriptedEngramControlResponse::Reply(Ok(receipt_for("failed"))),
-    ]);
+    let transport = ScriptedEngramControlTransport::new([ScriptedEngramControlResponse::Reply(
+        Ok(receipt_for("failed")),
+    )]);
     transport.set_current_work_binding(Some(binding()));
     transport.enable_named_roots(&session, &binding());
     {
@@ -120,14 +120,27 @@ fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_r
 
     // A historical token remains passive data across reload.
     with_session_engram(&fixture, &session, |engram| {
-        engram.historical_control.insert("engramRoutingToken".to_owned(), json!("historical-token"));
+        engram
+            .historical_control
+            .insert("engramRoutingToken".to_owned(), json!("historical-token"));
     });
     reload(&fixture, &session, &transport);
-    transport.named_roots.lock().unwrap().as_mut().unwrap().work_session_read_reply =
-        Some(Err(EngramTransportError::transport("ordinary child unavailable after reload")));
+    transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .work_session_read_reply = Some(Err(EngramTransportError::transport(
+        "ordinary child unavailable after reload",
+    )));
     let before_tick = operations(&transport).len();
     fixture.state.engram_verification_records_tick();
-    assert_eq!(operations(&transport).len(), before_tick + 1, "only ordinary read attempted");
+    assert_eq!(
+        operations(&transport).len(),
+        before_tick + 1,
+        "only ordinary read attempted"
+    );
     assert!(matches!(
         engram_verification_record_progress(&run.run_dir),
         Some(EngramVerificationRecordProgress::Pending {
@@ -139,14 +152,27 @@ fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_r
 
     // The same held claim/root keeps its generation and does not alter the
     // original passive history.
-    transport.named_roots.lock().unwrap().as_mut().unwrap().work_session_read_reply =
-        Some(Ok(work_supported(&session)));
+    transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .work_session_read_reply = Some(Ok(work_supported(&session)));
     let again = name_the_root(&fixture, &session);
     assert_eq!(again.generation, first.generation);
     let binds = of_kind(&operations(&transport), "session_bind");
-    assert!(binds.is_empty(), "ordinary naming never replaces control identity");
-    assert_eq!(session_engram(&fixture, &session, |engram|
-        engram.historical_control.get("engramRoutingToken").cloned()), Some(json!("historical-token")));
+    assert!(
+        binds.is_empty(),
+        "ordinary naming never replaces control identity"
+    );
+    assert_eq!(
+        session_engram(&fixture, &session, |engram| engram
+            .historical_control
+            .get("engramRoutingToken")
+            .cloned()),
+        Some(json!("historical-token"))
+    );
 
     // The next tick uses the ordinary child and the original registration.
     let before_tick = operations(&transport).len();
@@ -158,10 +184,8 @@ fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_r
         of_kind(&sent, "session_bind").is_empty(),
         "the sender binds nothing"
     );
-    let expected = serde_json::to_value(engram_verification_record_request(
-        &ready(&original),
-    ))
-    .expect("the request serializes");
+    let expected = serde_json::to_value(engram_verification_record_request(&ready(&original)))
+        .expect("the request serializes");
     assert!(records[0] == expected, "the same frozen body and key");
     assert_eq!(
         records[0]["operation_key"],
@@ -171,7 +195,10 @@ fn ordinary_naming_after_reload_preserves_historical_token_and_the_same_frozen_r
         records[0]["registration"]["binding"],
         serde_json::to_value(binding()).unwrap()
     );
-    assert!(fs::read_to_string(&body_path).unwrap() == frozen_text, "never rebuilt");
+    assert!(
+        fs::read_to_string(&body_path).unwrap() == frozen_text,
+        "never rebuilt"
+    );
     assert_eq!(current(&fixture, &run).named_root, original.named_root);
     assert!(matches!(
         engram_verification_record_prepare(&current(&fixture, &run)),

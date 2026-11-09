@@ -156,18 +156,39 @@ fn preinsertion_deadline_retains_holder_evidence_without_claiming_pending_durabi
     let (mut diagnostic, holder_line, waiter_line) = contended_registration_diagnostics();
     let traces = TestRunPhaseTraces::default();
     let id = "test-preinsertion-deadline";
-    diagnostic.trace = Some(traces.begin("registration", Some(id), "preinsertion", diagnostic.started));
+    diagnostic.trace =
+        Some(traces.begin("registration", Some(id), "preinsertion", diagnostic.started));
     diagnostic.category = Some("deadline");
-    let mut error = ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
-        "test run registration budget expired before publication");
+    let mut error = ApiError::from_status(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "test run registration budget expired before publication",
+    );
     diagnostic.report(id, &mut error);
     assert!(error.durability_deadline.is_none(), "nothing was enqueued");
     assert!(error.message.contains("category=deadline"));
     let retained = traces.selected(Some(id), None);
     assert_eq!(retained.len(), 1);
-    let block = serde_json::to_value(retained[0].state_lock.as_ref().expect("exact trace keeps holder evidence")).unwrap();
-    assert!(block["holders"].as_array().unwrap().iter().any(|row| row["site"]["line"] == holder_line));
-    assert!(block["waits"].as_array().unwrap().iter().any(|row| row["site"]["line"] == waiter_line));
+    let block = serde_json::to_value(
+        retained[0]
+            .state_lock
+            .as_ref()
+            .expect("exact trace keeps holder evidence"),
+    )
+    .unwrap();
+    assert!(
+        block["holders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["site"]["line"] == holder_line)
+    );
+    assert!(
+        block["waits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["site"]["line"] == waiter_line)
+    );
 }
 
 #[test]

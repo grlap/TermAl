@@ -49,7 +49,10 @@ fn not_clean(root: &FsPath) -> Vec<SourceRevisionDirtyPath> {
 
 #[test]
 fn the_launcher_selects_automatically_while_the_host_source_default_stays_off() {
-    assert!(!ORDINARY_COMMIT_INPUT_DEFAULT, "ordinary host measurements retain content-v1");
+    assert!(
+        !ORDINARY_COMMIT_INPUT_DEFAULT,
+        "ordinary host measurements retain content-v1"
+    );
     let launcher = fs::read_to_string(
         FsPath::new(env!("CARGO_MANIFEST_DIR"))
             .join("scripts")
@@ -84,8 +87,8 @@ fn with_the_switch_off_the_revision_is_the_content_revision() {
         }
     );
     let place = workdir_place(&root);
-    let basis = engram_place_source_basis_with(&place, false)
-        .expect("a content revision gives a basis");
+    let basis =
+        engram_place_source_basis_with(&place, false).expect("a content revision gives a basis");
     assert_eq!(basis.source_revision, expected);
     if !ORDINARY_COMMIT_INPUT_DEFAULT {
         assert_eq!(engram_place_source_basis(&place), Some(basis));
@@ -200,7 +203,10 @@ fn with_the_switch_on_ignored_files_leave_the_root_clean() {
 fn assume_unchanged_edits_are_a_documented_status_limitation() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let root = repository(&mut cleanup);
-    run_git_test_command(&root, &["update-index", "--assume-unchanged", "tracked.txt"]);
+    run_git_test_command(
+        &root,
+        &["update-index", "--assume-unchanged", "tracked.txt"],
+    );
     fs::write(root.join("tracked.txt"), "hidden edit\n").unwrap();
     assert_eq!(committed_source_clean_head(&root), Some(head(&root)));
 }
@@ -239,7 +245,10 @@ fn with_the_switch_on_an_uninitialized_submodule_gives_no_revision() {
     run_git_test_command(&root, &["update-index", "--add", "--cacheinfo", &cacheinfo]);
     run_git_test_command(&root, &["commit", "--quiet", "-m", "gitlink"]);
     fs::create_dir_all(root.join("sub")).unwrap();
-    assert_eq!(run_git_test_command_output(&root, &["status", "--porcelain"]), "");
+    assert_eq!(
+        run_git_test_command_output(&root, &["status", "--porcelain"]),
+        ""
+    );
     let error = source_revision(&root, true).unwrap_err().to_string();
     assert!(error.contains("submodule initialization/pin"), "{error}");
     assert_eq!(committed_source_clean_head(&root), None);
@@ -249,8 +258,20 @@ fn with_the_switch_on_an_uninitialized_submodule_gives_no_revision() {
 fn repository_with_child(cleanup: &mut RemoveDirsOnDrop) -> (PathBuf, PathBuf) {
     let dependency = repository(cleanup);
     let root = repository(cleanup);
-    run_git_test_command(&root, &["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always", "submodule", "add", "--quiet",
-        dependency.to_str().unwrap(), "child with spaces"]);
+    run_git_test_command(
+        &root,
+        &[
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "--quiet",
+            dependency.to_str().unwrap(),
+            "child with spaces",
+        ],
+    );
     run_git_test_command(&root, &["commit", "--quiet", "-m", "pin child"]);
     let child = root.join("child with spaces");
     run_git_test_command(&child, &["config", "core.autocrlf", "false"]);
@@ -275,35 +296,111 @@ fn windows_long_child_paths_are_measured_without_persistent_config_changes() {
     let tracked = child.join(&relative).join("tracked.txt");
     fs::write(&tracked, "long-path baseline\n").unwrap();
     let tracked_relative = relative.join("tracked.txt");
-    run_git_test_command(&child, &["-c", "core.longpaths=true", "add", "--", tracked_relative.to_str().unwrap()]);
-    run_git_test_command(&child, &["-c", "core.longpaths=true", "-c", "user.name=Fixture",
-        "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "long child path"]);
-    run_git_test_command(&root, &["-c", "core.longpaths=true", "add", "--", "child with spaces"]);
-    run_git_test_command(&root, &["-c", "core.longpaths=true", "commit", "--quiet", "-m", "pin long child"]);
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "core.longpaths=true",
+            "add",
+            "--",
+            tracked_relative.to_str().unwrap(),
+        ],
+    );
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "core.longpaths=true",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "long child path",
+        ],
+    );
+    run_git_test_command(
+        &root,
+        &[
+            "-c",
+            "core.longpaths=true",
+            "add",
+            "--",
+            "child with spaces",
+        ],
+    );
+    run_git_test_command(
+        &root,
+        &[
+            "-c",
+            "core.longpaths=true",
+            "commit",
+            "--quiet",
+            "-m",
+            "pin long child",
+        ],
+    );
     let root_config = root.join(".git/config");
-    let child_config = PathBuf::from(run_git_test_command_output(&child,
-        &["rev-parse", "--absolute-git-dir"])).join("config");
-    let before = [fs::read(&root_config).unwrap(), fs::read(&child_config).unwrap()];
+    let child_config = PathBuf::from(run_git_test_command_output(
+        &child,
+        &["rev-parse", "--absolute-git-dir"],
+    ))
+    .join("config");
+    let before = [
+        fs::read(&root_config).unwrap(),
+        fs::read(&child_config).unwrap(),
+    ];
     let original = head(&root);
-    assert_eq!(source_revision(&root, true).unwrap(), SourceRevision::Taken {
-        root: fs::canonicalize(&root).unwrap(), revision: format!("git-commit:{original}"),
-    }, "a clean child beyond MAX_PATH must not become apparent dirt");
+    assert_eq!(
+        source_revision(&root, true).unwrap(),
+        SourceRevision::Taken {
+            root: fs::canonicalize(&root).unwrap(),
+            revision: format!("git-commit:{original}"),
+        },
+        "a clean child beyond MAX_PATH must not become apparent dirt"
+    );
     assert_eq!(committed_source_clean_head(&root), Some(original.clone()));
 
     fs::write(&tracked, "actual child change\n").unwrap();
     assert_eq!(fs::read(&tracked).unwrap(), b"actual child change\n");
-    eprintln!("original long-path diagnostic relative_chars={} absolute_chars={} bytes={} modified={:?}",
-        tracked_relative.as_os_str().len(), tracked.as_os_str().len(), fs::metadata(&tracked).unwrap().len(),
-        fs::metadata(&tracked).unwrap().modified());
+    eprintln!(
+        "original long-path diagnostic relative_chars={} absolute_chars={} bytes={} modified={:?}",
+        tracked_relative.as_os_str().len(),
+        tracked.as_os_str().len(),
+        fs::metadata(&tracked).unwrap().len(),
+        fs::metadata(&tracked).unwrap().modified()
+    );
     for (place, directory) in [("root", &root), ("child", &child)] {
         let git = ReviewFreezeGit::new(directory).unwrap();
         for setting in ["core.longpaths=false", "core.longpaths=true"] {
-            let mut command = git.command(&["-c", setting, "-c", "status.showUntrackedFiles=all",
-                "-c", "diff.ignoreSubmodules=none", "status", "--porcelain=v1",
-                "--untracked-files=all", "--ignore-submodules=none", "-z"]);
-            let output = run_bounded_read_command(&mut command, git.deadline, REVIEW_FREEZE_OUTPUT_LIMIT, false).unwrap();
-            eprintln!("original long-path diagnostic place={place} {setting} code={:?} stdout={:?} stderr={:?}",
-                output.status.code(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            let mut command = git.command(&[
+                "-c",
+                setting,
+                "-c",
+                "status.showUntrackedFiles=all",
+                "-c",
+                "diff.ignoreSubmodules=none",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignore-submodules=none",
+                "-z",
+            ]);
+            let output = run_bounded_read_command(
+                &mut command,
+                git.deadline,
+                REVIEW_FREEZE_OUTPUT_LIMIT,
+                false,
+            )
+            .unwrap();
+            eprintln!(
+                "original long-path diagnostic place={place} {setting} code={:?} stdout={:?} stderr={:?}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
     let dirty = not_clean(&root);
@@ -331,35 +428,115 @@ fn windows_long_path_status_diagnostic_distinguishes_config_from_stat_cache() {
     for directory in [&root, &child] {
         run_git_test_command(directory, &["config", "core.longpaths", "false"]);
     }
-    let relative = PathBuf::from("a".repeat(96)).join("b".repeat(96)).join("c".repeat(96)).join("tracked.txt");
+    let relative = PathBuf::from("a".repeat(96))
+        .join("b".repeat(96))
+        .join("c".repeat(96))
+        .join("tracked.txt");
     assert!(relative.as_os_str().len() > 260);
     let tracked = child.join(&relative);
     fs::create_dir_all(tracked.parent().unwrap()).unwrap();
     fs::write(&tracked, "base\n").unwrap();
-    run_git_test_command(&child, &["-c", "core.longpaths=true", "add", "--", relative.to_str().unwrap()]);
-    run_git_test_command(&child, &["-c", "core.longpaths=true", "-c", "user.name=Fixture",
-        "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "long relative path"]);
-    run_git_test_command(&root, &["-c", "core.longpaths=true", "add", "--", "child with spaces"]);
-    run_git_test_command(&root, &["-c", "core.longpaths=true", "commit", "--quiet", "-m", "pin long relative path"]);
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "core.longpaths=true",
+            "add",
+            "--",
+            relative.to_str().unwrap(),
+        ],
+    );
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "core.longpaths=true",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "long relative path",
+        ],
+    );
+    run_git_test_command(
+        &root,
+        &[
+            "-c",
+            "core.longpaths=true",
+            "add",
+            "--",
+            "child with spaces",
+        ],
+    );
+    run_git_test_command(
+        &root,
+        &[
+            "-c",
+            "core.longpaths=true",
+            "commit",
+            "--quiet",
+            "-m",
+            "pin long relative path",
+        ],
+    );
     let mut measurements = Vec::new();
-    for (state, contents) in [("clean", "base\n"), ("dirty", "a visibly different-size child change\n")] {
+    for (state, contents) in [
+        ("clean", "base\n"),
+        ("dirty", "a visibly different-size child change\n"),
+    ] {
         fs::write(&tracked, contents).unwrap();
         assert_eq!(fs::read(&tracked).unwrap(), contents.as_bytes());
-        eprintln!("long-path diagnostic state={state} relative_chars={} absolute_chars={} bytes={} modified={:?}",
-            relative.as_os_str().len(), tracked.as_os_str().len(), contents.len(), fs::metadata(&tracked).unwrap().modified());
+        eprintln!(
+            "long-path diagnostic state={state} relative_chars={} absolute_chars={} bytes={} modified={:?}",
+            relative.as_os_str().len(),
+            tracked.as_os_str().len(),
+            contents.len(),
+            fs::metadata(&tracked).unwrap().modified()
+        );
         for (place, directory) in [("root", &root), ("child", &child)] {
             let git = ReviewFreezeGit::new(directory).unwrap();
             for setting in ["core.longpaths=false", "core.longpaths=true"] {
-                let mut command = git.command(&["-c", setting, "-c", "status.showUntrackedFiles=all",
-                    "-c", "diff.ignoreSubmodules=none", "status", "--porcelain=v1",
-                    "--untracked-files=all", "--ignore-submodules=none", "-z"]);
-                let output = run_bounded_read_command(&mut command, git.deadline, REVIEW_FREEZE_OUTPUT_LIMIT, false).unwrap();
-                eprintln!("long-path diagnostic state={state} place={place} {setting} code={:?} stdout={:?} stderr={:?}",
-                    output.status.code(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+                let mut command = git.command(&[
+                    "-c",
+                    setting,
+                    "-c",
+                    "status.showUntrackedFiles=all",
+                    "-c",
+                    "diff.ignoreSubmodules=none",
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                    "--ignore-submodules=none",
+                    "-z",
+                ]);
+                let output = run_bounded_read_command(
+                    &mut command,
+                    git.deadline,
+                    REVIEW_FREEZE_OUTPUT_LIMIT,
+                    false,
+                )
+                .unwrap();
+                eprintln!(
+                    "long-path diagnostic state={state} place={place} {setting} code={:?} stdout={:?} stderr={:?}",
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
                 if setting.ends_with("=true") {
                     assert!(output.status.success(), "enabled Git must read the fixture");
-                    assert_eq!(output.stdout.is_empty(), state == "clean", "enabled {place} status must distinguish actual dirt");
-                    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+                    assert_eq!(
+                        output.stdout.is_empty(),
+                        state == "clean",
+                        "enabled {place} status must distinguish actual dirt"
+                    );
+                    assert!(
+                        output.stderr.is_empty(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
                 } else {
                     // Reproduce Git's exit-zero partial read. The raw control
                     // deliberately overrides the production long-path option;
@@ -367,11 +544,26 @@ fn windows_long_path_status_diagnostic_distinguishes_config_from_stat_cache() {
                     assert!(output.status.success());
                     assert!(output.stdout.is_empty());
                     assert!(String::from_utf8_lossy(&output.stderr).contains("Filename too long"));
-                    let error = git.run(&["-c", setting, "status", "--porcelain=v1",
-                        "--untracked-files=all", "--ignore-submodules=none", "-z"], false)
-                        .unwrap_err().to_string();
+                    let error = git
+                        .run(
+                            &[
+                                "-c",
+                                setting,
+                                "status",
+                                "--porcelain=v1",
+                                "--untracked-files=all",
+                                "--ignore-submodules=none",
+                                "-z",
+                            ],
+                            false,
+                        )
+                        .unwrap_err()
+                        .to_string();
                     assert!(error.contains("long-path read failed"), "{error}");
-                    assert!(error.contains("shorten the worktree or child path"), "{error}");
+                    assert!(
+                        error.contains("shorten the worktree or child path"),
+                        "{error}"
+                    );
                     assert!(!error.contains('\n'), "the refusal is safe for a log line");
                 }
             }
@@ -380,10 +572,22 @@ fn windows_long_path_status_diagnostic_distinguishes_config_from_stat_cache() {
         eprintln!("long-path diagnostic production state={state} outcome={measurement:?}");
         measurements.push(measurement);
     }
-    assert!(matches!(measurements[0].as_ref().unwrap(), SourceRevision::Taken { .. }),
-        "clean long child must measure clean: {:?}", measurements[0]);
-    assert!(matches!(measurements[1].as_ref().unwrap(), SourceRevision::NotClean { .. }),
-        "different-size child dirt must be observed: {:?}", measurements[1]);
+    assert!(
+        matches!(
+            measurements[0].as_ref().unwrap(),
+            SourceRevision::Taken { .. }
+        ),
+        "clean long child must measure clean: {:?}",
+        measurements[0]
+    );
+    assert!(
+        matches!(
+            measurements[1].as_ref().unwrap(),
+            SourceRevision::NotClean { .. }
+        ),
+        "different-size child dirt must be observed: {:?}",
+        measurements[1]
+    );
 }
 
 #[cfg(windows)]
@@ -392,7 +596,8 @@ fn windows_crlf_warnings_are_suppressed_without_ignoring_other_git_diagnostics()
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let root = repository(&mut cleanup);
     let expected = head(&root);
-    let original_fingerprint = capture_review_freeze(&ReviewFreezeGit::new(&root).unwrap()).unwrap();
+    let original_fingerprint =
+        capture_review_freeze(&ReviewFreezeGit::new(&root).unwrap()).unwrap();
     run_git_test_command(&root, &["config", "core.autocrlf", "true"]);
     run_git_test_command(&root, &["config", "core.safecrlf", "warn"]);
     let config_before = fs::read(root.join(".git/config")).unwrap();
@@ -400,17 +605,42 @@ fn windows_crlf_warnings_are_suppressed_without_ignoring_other_git_diagnostics()
     let git = ReviewFreezeGit::new(&root).unwrap();
     // This is the real benign Windows warning, deliberately re-enabled only
     // for the control. Residual stderr is never accepted by text matching.
-    let args = ["-c", "core.safecrlf=warn", "diff", "--no-ext-diff", "--no-textconv"];
+    let args = [
+        "-c",
+        "core.safecrlf=warn",
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+    ];
     let mut control = git.command(&args);
-    let output = run_bounded_read_command(&mut control, git.deadline, REVIEW_FREEZE_OUTPUT_LIMIT, false).unwrap();
+    let output = run_bounded_read_command(
+        &mut control,
+        git.deadline,
+        REVIEW_FREEZE_OUTPUT_LIMIT,
+        false,
+    )
+    .unwrap();
     assert!(output.status.success());
-    assert!(!output.stderr.is_empty(), "the control must actually emit the conversion warning");
+    assert!(
+        !output.stderr.is_empty(),
+        "the control must actually emit the conversion warning"
+    );
     let error = git.run(&args, false).unwrap_err().to_string();
-    assert!(error.contains("Git emitted stderr; source measurement refused"), "{error}");
-    assert!(!git.run(&["diff", "--no-ext-diff", "--no-textconv"], false).unwrap().is_empty());
+    assert!(
+        error.contains("Git emitted stderr; source measurement refused"),
+        "{error}"
+    );
+    assert!(
+        !git.run(&["diff", "--no-ext-diff", "--no-textconv"], false)
+            .unwrap()
+            .is_empty()
+    );
     fs::write(root.join("tracked.txt"), "base\n").unwrap();
     assert_eq!(committed_source_clean_head(&root), Some(expected));
-    assert_eq!(capture_review_freeze(&ReviewFreezeGit::new(&root).unwrap()).unwrap(), original_fingerprint);
+    assert_eq!(
+        capture_review_freeze(&ReviewFreezeGit::new(&root).unwrap()).unwrap(),
+        original_fingerprint
+    );
     assert_eq!(fs::read(root.join(".git/config")).unwrap(), config_before);
 }
 
@@ -420,11 +650,27 @@ fn sha256_roots_are_outside_the_registered_commit_wire_domain() {
     let root = test_temp_dir().join(format!("ordinary-sha256-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     cleanup.0.push(root.clone());
-    run_git_test_command(&root, &["init", "--quiet", "--template=", "--object-format=sha256"]);
+    run_git_test_command(
+        &root,
+        &["init", "--quiet", "--template=", "--object-format=sha256"],
+    );
     fs::write(root.join("tracked.txt"), "base\n").unwrap();
     run_git_test_command(&root, &["add", "--", "tracked.txt"]);
-    let commit = |message| run_git_test_command(&root, &["-c", "user.name=Fixture",
-        "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", message]);
+    let commit = |message| {
+        run_git_test_command(
+            &root,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ],
+        )
+    };
     commit("base");
     let original = head(&root);
     assert_eq!(original.len(), 64);
@@ -441,20 +687,30 @@ fn pinned_submodule_has_the_existing_revision_and_root_status_reports_child_dirt
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let (root, child) = repository_with_child(&mut cleanup);
     let original = head(&root);
-    assert_eq!(source_revision(&root, true).unwrap(), SourceRevision::Taken {
-        root: fs::canonicalize(&root).unwrap(), revision: format!("git-commit:{original}"),
-    });
+    assert_eq!(
+        source_revision(&root, true).unwrap(),
+        SourceRevision::Taken {
+            root: fs::canonicalize(&root).unwrap(),
+            revision: format!("git-commit:{original}"),
+        }
+    );
     assert_eq!(committed_source_clean_head(&root), Some(original.clone()));
     assert!(engram_place_source_basis_with(&workdir_place(&root), true).is_some());
-    run_git_test_command(&root, &["config", "submodule.child with spaces.ignore", "all"]);
+    run_git_test_command(
+        &root,
+        &["config", "submodule.child with spaces.ignore", "all"],
+    );
     for name in ["tracked.txt", "untracked.txt"] {
         fs::write(child.join(name), "child change\n").unwrap();
         let dirty = not_clean(&root);
         assert_eq!(dirty.len(), 1);
         assert_eq!(dirty[0].path, "child with spaces");
         assert_eq!(committed_source_clean_head(&root), None);
-        if name == "tracked.txt" { run_git_test_command(&child, &["checkout", "--", name]); }
-        else { fs::remove_file(child.join(name)).unwrap(); }
+        if name == "tracked.txt" {
+            run_git_test_command(&child, &["checkout", "--", name]);
+        } else {
+            fs::remove_file(child.join(name)).unwrap();
+        }
     }
     assert_eq!(committed_source_clean_head(&root), Some(original.clone()));
     fs::write(root.join("tracked.txt"), "root change\n").unwrap();
@@ -482,10 +738,34 @@ fn initialized_nested_pinned_children_are_admitted() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let (root, child) = repository_with_child(&mut cleanup);
     let donor = repository(&mut cleanup);
-    run_git_test_command(&child, &["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always",
-        "submodule", "add", "--quiet", donor.to_str().unwrap(), "nested"]);
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "--quiet",
+            donor.to_str().unwrap(),
+            "nested",
+        ],
+    );
     run_git_test_command(&child.join("nested"), &["config", "core.autocrlf", "false"]);
-    run_git_test_command(&child, &["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-am", "nested pin"]);
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--quiet",
+            "-am",
+            "nested pin",
+        ],
+    );
     run_git_test_command(&root, &["add", "--", "child with spaces"]);
     run_git_test_command(&root, &["commit", "--quiet", "-m", "nested parent pin"]);
     assert_eq!(committed_source_clean_head(&root), Some(head(&root)));
@@ -500,8 +780,18 @@ fn a_child_local_status_setting_cannot_hide_untracked_input() {
     let (root, child) = repository_with_child(&mut cleanup);
     run_git_test_command(&child, &["config", "status.showUntrackedFiles", "no"]);
     fs::write(child.join("untracked.txt"), "child input\n").unwrap();
-    assert_eq!(run_git_test_command_output(&root, &["status", "--porcelain=v1",
-        "--untracked-files=all", "--ignore-submodules=none"]), "");
+    assert_eq!(
+        run_git_test_command_output(
+            &root,
+            &[
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignore-submodules=none"
+            ]
+        ),
+        ""
+    );
     let dirty = not_clean(&root);
     assert_eq!(dirty.len(), 1);
     assert_eq!(dirty[0].path, "child with spaces");
@@ -512,11 +802,26 @@ fn a_child_local_status_setting_cannot_hide_untracked_input() {
 fn off_pin_and_deinitialized_submodules_are_named_refusals() {
     let mut cleanup = RemoveDirsOnDrop(Vec::new());
     let (root, child) = repository_with_child(&mut cleanup);
-    run_git_test_command(&child, &["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid",
-        "commit", "--quiet", "--allow-empty", "-m", "off pin"]);
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "off pin",
+        ],
+    );
     let error = source_revision(&root, true).unwrap_err().to_string();
     assert!(error.contains("not initialized at its pin"), "{error}");
-    run_git_test_command(&root, &["submodule", "deinit", "--force", "--", "child with spaces"]);
+    run_git_test_command(
+        &root,
+        &["submodule", "deinit", "--force", "--", "child with spaces"],
+    );
     let error = source_revision(&root, true).unwrap_err().to_string();
     assert!(error.contains("not initialized at its pin"), "{error}");
 }
@@ -531,9 +836,18 @@ fn a_clean_pinned_child_without_a_gitmodules_mapping_is_refused_by_name() {
     run_git_test_command(&root, &["add", "--", ".gitmodules"]);
     run_git_test_command(&root, &["commit", "--quiet", "-m", "remove child mapping"]);
     assert_eq!(head(&child), pin);
-    assert_eq!(run_git_test_command_output(&root, &["status", "--porcelain=v1", "--ignore-submodules=none"]), "");
+    assert_eq!(
+        run_git_test_command_output(
+            &root,
+            &["status", "--porcelain=v1", "--ignore-submodules=none"]
+        ),
+        ""
+    );
     let error = format!("{:#}", source_revision(&root, true).unwrap_err());
-    assert!(error.contains(".gitmodules mapping check failed") && error.contains("child with spaces"), "{error}");
+    assert!(
+        error.contains(".gitmodules mapping check failed") && error.contains("child with spaces"),
+        "{error}"
+    );
     assert_eq!(committed_source_clean_head(&root), None);
 }
 

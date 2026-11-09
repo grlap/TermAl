@@ -32,13 +32,23 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
         let record = inner.session_mut(&session).unwrap();
         record.runtime = SessionRuntime::Acp(runtime);
         record.session.status = SessionStatus::Idle;
-        let started = state.start_turn_on_record(record, message,
-            "queued before stop".into(), Vec::new(), None, None, None, false).unwrap();
+        let started = state
+            .start_turn_on_record(
+                record,
+                message,
+                "queued before stop".into(),
+                Vec::new(),
+                None,
+                None,
+                None,
+                false,
+            )
+            .unwrap();
         state.commit_locked(&mut inner).unwrap();
         started.dispatch
     };
     deliver_turn_dispatch(&state, dispatch)
-    .expect("live ACP writer channel should accept the prompt");
+        .expect("live ACP writer channel should accept the prompt");
 
     assert!(
         *turn_lifecycle
@@ -47,8 +57,10 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
             .expect("ACP turn lifecycle mutex poisoned"),
         "stop must observe a queued/starting prompt before the writer consumes it"
     );
-    assert!(matches!(input_rx.try_recv().unwrap(), AcpRuntimeCommand::Prompt(command)
-        if command.prompt.ends_with("queued before stop")));
+    assert!(
+        matches!(input_rx.try_recv().unwrap(), AcpRuntimeCommand::Prompt(command)
+        if command.prompt.ends_with("queued before stop"))
+    );
     assert!(input_rx.try_recv().is_err());
 }
 
@@ -286,9 +298,11 @@ fn acp_json_rpc_response_wait_timeout_clears_pending_request() {
         ),
         "{err:#}"
     );
-    assert!(String::from_utf8(writer)
-        .expect("request payload should be UTF-8")
-        .contains("\"method\":\"initialize\""));
+    assert!(
+        String::from_utf8(writer)
+            .expect("request payload should be UTF-8")
+            .contains("\"method\":\"initialize\"")
+    );
     assert!(
         pending_requests
             .lock()

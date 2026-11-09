@@ -13,7 +13,10 @@ fn a_batchs_member_lines_merge_and_never_push_a_bind_or_name_line_out() {
             "its claim moved",
         ));
     }
-    engram.set_pending_source_root_line(engram_batch_member_lost_line("member-g", "before it settled"));
+    engram.set_pending_source_root_line(engram_batch_member_lost_line(
+        "member-g",
+        "before it settled",
+    ));
     let pending = engram.pending_source_root_line.clone().unwrap_or_default();
     assert!(pending.contains(&named), "{pending}");
     assert!(pending.contains("member-g"), "{pending}");

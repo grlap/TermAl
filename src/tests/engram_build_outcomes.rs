@@ -8,16 +8,29 @@ fn summary(turn: &EOCheckedTurn) -> String {
     diagnostic_summary(turn)
 }
 
-fn rejected_terminal(turn: &EOCheckedTurn, request: &Value, revision: &str, code: i64, reason: &str) {
+fn rejected_terminal(
+    turn: &EOCheckedTurn,
+    request: &Value,
+    revision: &str,
+    code: i64,
+    reason: &str,
+) {
     one_build(request, revision, "indeterminate");
     let text = summary(turn);
-    assert!(text.contains(&format!("observed native exit {code}")),
-        "the runtime terminal remains diagnostic, independent of credit: {text}");
-    assert!(text.contains(reason), "must name rejection {reason}: {text}");
+    assert!(
+        text.contains(&format!("observed native exit {code}")),
+        "the runtime terminal remains diagnostic, independent of credit: {text}"
+    );
+    assert!(
+        text.contains(reason),
+        "must name rejection {reason}: {text}"
+    );
     assert!(!text.contains("without an exit status"), "{text}");
     assert!(text.len() <= ENGRAM_CHECK_SUMMARY_MAX_BYTES, "{text}");
-    assert!(!diagnostic_refs(turn).contains(&format!("exit:{code}")),
-        "a rejected observed exit supplies no eligible native reference");
+    assert!(
+        !diagnostic_refs(turn).contains(&format!("exit:{code}")),
+        "a rejected observed exit supplies no eligible native reference"
+    );
 }
 
 fn typed_item(
@@ -103,8 +116,15 @@ fn engram_build_outcome_typed_yield_and_foreign_key_do_not_end_the_owned_attempt
     );
     turn.record(|record| {
         let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
-        let owned = trace.commands.iter().find(|entry| entry.tool_key == "owned").unwrap();
-        assert!(owned.check.finished_at.is_none(), "yield cannot terminalize the owned EO fact");
+        let owned = trace
+            .commands
+            .iter()
+            .find(|entry| entry.tool_key == "owned")
+            .unwrap();
+        assert!(
+            owned.check.finished_at.is_none(),
+            "yield cannot terminalize the owned EO fact"
+        );
     });
     complete_typed(
         &turn,
@@ -117,15 +137,20 @@ fn engram_build_outcome_typed_yield_and_foreign_key_do_not_end_the_owned_attempt
     let request = finish_observation(&turn);
     let turn_ref = request["occurrence"]["host_turn_ref"].as_str().unwrap();
     let id = unadmitted_host_check_id(turn_ref, "owned");
-    let owned = request["occurrence"]["observed_checks"].as_array().unwrap().iter()
-        .filter(|check| check["host_check_id"] == id).collect::<Vec<_>>();
+    let owned = request["occurrence"]["observed_checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|check| check["host_check_id"] == id)
+        .collect::<Vec<_>>();
     assert_eq!(owned.len(), 1, "one exact owned occurrence: {request:#}");
     assert_eq!(owned[0]["observed_result"], "failed");
-    assert_eq!(request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], revision);
-    assert!(summary(&turn).contains("exited 101"));
-    assert!(
-        diagnostic_refs(&turn).contains(&"exit:101".to_owned())
+    assert_eq!(
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        revision
     );
+    assert!(summary(&turn).contains("exited 101"));
+    assert!(diagnostic_refs(&turn).contains(&"exit:101".to_owned()));
 }
 
 #[test]
@@ -207,7 +232,9 @@ fn engram_build_outcome_interval_rejection_retains_native_exit() {
 
 #[test]
 fn engram_build_outcome_input_rejection_retains_native_exit() {
-    focused_rejection("input", |f| f.results["sourceIdAfter"]["tree"] = json!("a".repeat(40)));
+    focused_rejection("input", |f| {
+        f.results["sourceIdAfter"]["tree"] = json!("a".repeat(40))
+    });
 }
 
 #[test]
@@ -350,7 +377,13 @@ fn engram_build_outcome_mismatched_command_has_association_reason_and_no_pass() 
         )
         .unwrap();
     fixture.turn.wait_for_snapshots();
-    rejected_terminal(&fixture.turn, &finish_observation(&fixture.turn), &revision, 0, "association");
+    rejected_terminal(
+        &fixture.turn,
+        &finish_observation(&fixture.turn),
+        &revision,
+        0,
+        "association",
+    );
 }
 
 #[test]

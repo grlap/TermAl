@@ -1,7 +1,7 @@
 //! Persisted queued-bind images stay passive. The removed non-admission
 //! retained original was process memory only; no stored owner is invented.
-use super::*;
 use super::uncertain_begin::OrdinaryRoot;
+use super::*;
 
 fn install_queued_bind_history(turn: &OrdinaryRoot) -> Value {
     turn.enqueue("historical queued payload", QueuedPromptSource::User);
@@ -25,16 +25,25 @@ fn original_queued_bind_payload_and_unknown_outcome_roundtrip_without_replay() {
     turn.edit(|record| {
         assert!(record.session.messages.is_empty());
         for index in 0..=SQLITE_SESSION_TAIL_MESSAGES {
-            push_message_on_record(record, Message::Text {
-                id: format!("bind-history-{index}"), timestamp: stamp_now(),
-                author: Author::Assistant, text: format!("Earlier history {index}"),
-                expanded_text: None, source: None, attachments: Vec::new(),
-            });
+            push_message_on_record(
+                record,
+                Message::Text {
+                    id: format!("bind-history-{index}"),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: format!("Earlier history {index}"),
+                    expanded_text: None,
+                    source: None,
+                    attachments: Vec::new(),
+                },
+            );
         }
     });
     turn.edit(|record| trim_retained_session_messages(record, SQLITE_SESSION_TAIL_MESSAGES));
-    let prefix = serde_json::to_value(load_persisted_message_range(
-        &turn.state.persistence_path, &turn.session, 0, 1).unwrap()).unwrap();
+    let prefix = serde_json::to_value(
+        load_persisted_message_range(&turn.state.persistence_path, &turn.session, 0, 1).unwrap(),
+    )
+    .unwrap();
     assert_eq!(prefix.as_array().unwrap().len(), 1);
     install_queued_bind_history(&turn);
     let history = turn.edit(|record| {
@@ -54,17 +63,39 @@ fn original_queued_bind_payload_and_unknown_outcome_roundtrip_without_replay() {
         assert_eq!(record.message_start_index, 1);
         assert!(!record.queued_prompts[0].promotion_disposition_known);
         assert!(record.queued_prompts[0].engram_ordinary_handoff);
-        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), history);
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+            history
+        );
         assert!(ordinary_queue_position(record).is_none());
-        assert!(!record.engram.historical_control.contains_key("engramOwedBinds"));
+        assert!(
+            !record
+                .engram
+                .historical_control
+                .contains_key("engramOwedBinds")
+        );
         assert!(record.engram.unadmitted_active_turn.is_none());
     }
     let dispatch = turn.prepare("independent ordinary work");
-    assert!(matches!(deliver_turn_dispatch(&turn.state, dispatch), TurnDispatchDeliveryOutcome::Delivered));
+    assert!(matches!(
+        deliver_turn_dispatch(&turn.state, dispatch),
+        TurnDispatchDeliveryOutcome::Delivered
+    ));
     assert!(turn.prompt().prompt.contains("independent ordinary work"));
-    turn.record(|record| assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), history));
-    assert_eq!(serde_json::to_value(load_persisted_message_range(
-        &turn.state.persistence_path, &turn.session, 0, 1).unwrap()).unwrap(), prefix);
+    turn.record(|record| {
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+            history
+        )
+    });
+    assert_eq!(
+        serde_json::to_value(
+            load_persisted_message_range(&turn.state.persistence_path, &turn.session, 0, 1)
+                .unwrap()
+        )
+        .unwrap(),
+        prefix
+    );
     turn.assert_no_control();
 }
 
@@ -75,11 +106,25 @@ fn ordinary_settings_toggle_preserves_unknown_queued_bind_history_and_new_conten
     turn.edit(|record| record.set_auto_dispatch_blocked(true));
     let id = turn.enqueue("ordinary queued content", QueuedPromptSource::User);
     let queue = turn.record(|record| serde_json::to_value(&record.queued_prompts).unwrap());
-    let mut settings = turn.state.inner.lock().unwrap().find_project(&turn.project).unwrap().engram.clone().unwrap();
+    let mut settings = turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .find_project(&turn.project)
+        .unwrap()
+        .engram
+        .clone()
+        .unwrap();
     settings.enabled = false;
-    turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
+    turn.state
+        .update_project_engram_settings(&turn.project, settings)
+        .unwrap();
     turn.record(|record| {
-        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), history);
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+            history
+        );
         assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), queue);
         assert_eq!(record.queued_prompts[1].pending_prompt.id, id);
         assert!(record.orchestrator_auto_dispatch_blocked);
@@ -94,7 +139,12 @@ fn changing_ordinary_session_title_does_not_send_an_old_bind_or_allocate_a_bind_
     let before = install_queued_bind_history(&turn);
     for title in ["different title", "original title"] {
         turn.edit(|record| record.session.name = title.into());
-        turn.record(|record| assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before));
+        turn.record(|record| {
+            assert_eq!(
+                serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+                before
+            )
+        });
     }
     turn.assert_no_prompt();
     turn.assert_no_control();
@@ -106,21 +156,41 @@ fn ordinary_same_or_different_connection_save_never_reinterprets_the_old_unknown
         let turn = OrdinaryRoot::new("ordinary-connection-history");
         let history = install_queued_bind_history(&turn);
         turn.edit(|record| {
-            record.engram.historical_control.insert("engramUncertainGrantId".into(), json!("historical-grant"));
+            record
+                .engram
+                .historical_control
+                .insert("engramUncertainGrantId".into(), json!("historical-grant"));
             record.set_auto_dispatch_blocked(true);
         });
         let id = turn.enqueue("ordinary independent content", QueuedPromptSource::User);
-        let mut settings = turn.state.inner.lock().unwrap().find_project(&turn.project).unwrap().engram.clone().unwrap();
+        let mut settings = turn
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .find_project(&turn.project)
+            .unwrap()
+            .engram
+            .clone()
+            .unwrap();
         settings.enabled = false;
         if different_home {
             let home = turn.root.join("different-store");
             fs::create_dir_all(&home).unwrap();
             settings.home = Some(home.to_string_lossy().into_owned());
         }
-        turn.state.update_project_engram_settings(&turn.project, settings).unwrap();
+        turn.state
+            .update_project_engram_settings(&turn.project, settings)
+            .unwrap();
         turn.record(|record| {
-            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), history);
-            assert_eq!(record.engram.historical_control["engramUncertainGrantId"], "historical-grant");
+            assert_eq!(
+                serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+                history
+            );
+            assert_eq!(
+                record.engram.historical_control["engramUncertainGrantId"],
+                "historical-grant"
+            );
             assert_eq!(record.queued_prompts[1].pending_prompt.id, id);
         });
         turn.assert_no_prompt();

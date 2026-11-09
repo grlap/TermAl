@@ -256,8 +256,11 @@ fn a_member_is_bound_only_with_its_newest_sighting_at_the_gate_revision() {
 #[test]
 fn a_shared_sighting_summary_does_not_supply_a_legacy_binding_identity() {
     let target = EngramBindTarget {
-        work_id: "work-member".to_owned(), short_ref: "w-member".to_owned(),
-        claim_id: "claim-member".to_owned(), claim_fence: 3, root_generation: 12,
+        work_id: "work-member".to_owned(),
+        short_ref: "w-member".to_owned(),
+        claim_id: "claim-member".to_owned(),
+        claim_fence: 3,
+        root_generation: 12,
     };
     let roots = vec![entry("member", ROOT, 12)];
     let claims = held(&[("member", 3)]);
@@ -270,9 +273,13 @@ fn a_shared_sighting_summary_does_not_supply_a_legacy_binding_identity() {
     ));
     if let EngramSightingRoot::Bound { sighting, .. } = &mut read.root {
         *sighting = EngramRootSighting::PresentShared {
-            record: "a".repeat(32), position: 30,
+            record: "a".repeat(32),
+            position: 30,
             source_id_summary: AcceptanceSightingSourceSummary {
-                commit: "a".repeat(40), tree: "b".repeat(40), changes: 0, submodules: 0,
+                commit: "a".repeat(40),
+                tree: "b".repeat(40),
+                changes: 0,
+                submodules: 0,
             },
         };
     }
@@ -309,14 +316,23 @@ fn a_bind_request_carries_one_member_under_a_key_stable_per_gate_and_member() {
         wire["idempotency_key"],
         format!("termal-verification-bind:{}:work-member", "f".repeat(32))
     );
-    assert_eq!(wire["measurement"]["measured_at"], "2026-10-18T23:10:00.000Z");
+    assert_eq!(
+        wire["measurement"]["measured_at"],
+        "2026-10-18T23:10:00.000Z"
+    );
     assert_eq!(wire["targets"].as_array().map(Vec::len), Some(1));
     assert_eq!(wire["targets"][0]["binding"]["claim_fence"], 3);
-    assert_eq!(wire["targets"][0]["sighting"]["observation"], "a".repeat(32));
+    assert_eq!(
+        wire["targets"][0]["sighting"]["observation"],
+        "a".repeat(32)
+    );
     assert!(wire["targets"][0].get("criteria").is_none(), "{wire}");
     // The same gate and member always give the same bytes, which a resend
     // sends again.
-    assert_eq!(serde_json::to_vec(&build()).unwrap(), serde_json::to_vec(&build()).unwrap());
+    assert_eq!(
+        serde_json::to_vec(&build()).unwrap(),
+        serde_json::to_vec(&build()).unwrap()
+    );
     assert!(engram_bind_idempotency_key(&"f".repeat(64), &"w".repeat(36)).len() <= 512);
 }
 
@@ -334,7 +350,10 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
     assert_eq!(
         outcome(Ok(json!({"original": original, "replayed": true,
             "bound": [{"work_id": "work-member", "verification": "b".repeat(32)}]}))),
-        EngramBindOutcome::Bound { verification: "b".repeat(32), replayed: true }
+        EngramBindOutcome::Bound {
+            verification: "b".repeat(32),
+            replayed: true
+        }
     );
     // A receipt that does not name the member, names another gate's record,
     // or no valid record id, says nothing certain: it is sent again, and
@@ -348,7 +367,10 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
         json!({"original": original, "replayed": false,
             "bound": [{"work_id": "work-member", "verification": ""}]}),
     ] {
-        assert!(matches!(outcome(Ok(receipt.clone())), EngramBindOutcome::Resend(_)), "{receipt}");
+        assert!(
+            matches!(outcome(Ok(receipt.clone())), EngramBindOutcome::Resend(_)),
+            "{receipt}"
+        );
     }
     // Bound before under another key.
     assert_eq!(
@@ -372,7 +394,10 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
             );
             assert!(detail.contains(&format!("original {original}")), "{detail}");
             assert!(detail.contains("work work-member"), "{detail}");
-            assert!(detail.contains("control_operation_idempotency_conflict"), "{detail}");
+            assert!(
+                detail.contains("control_operation_idempotency_conflict"),
+                "{detail}"
+            );
         }
         other => panic!("an idempotency conflict is an identity collision: {other:?}"),
     }
@@ -401,14 +426,20 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
         "unknown_routing_token",
     ] {
         assert!(
-            matches!(outcome(remote(code, "refused")), EngramBindOutcome::Resend(_)),
+            matches!(
+                outcome(remote(code, "refused")),
+                EngramBindOutcome::Resend(_)
+            ),
             "{code}"
         );
     }
     // Only a request Engram cannot decode at all wrote nothing and is met
     // again by the same bytes: final, and its holder is told (an Engram
     // without verification_bind).
-    match outcome(remote("invalid_request", "unknown variant `verification_bind`")) {
+    match outcome(remote(
+        "invalid_request",
+        "unknown variant `verification_bind`",
+    )) {
         EngramBindOutcome::Final(reason) => assert!(reason.contains("invalid_request"), "{reason}"),
         other => panic!("invalid_request: {other:?}"),
     }
@@ -432,7 +463,9 @@ fn each_engram_answer_settles_a_member_by_its_outcome_class() {
         remote("control_store_busy", "the store is busy"),
         remote("storage_error", "database is locked"),
         Err(EngramTransportError::deadline("no answer within 10 s")),
-        Err(EngramTransportError::transport("the control process exited")),
+        Err(EngramTransportError::transport(
+            "the control process exited",
+        )),
         Err(EngramTransportError::spawn_failed("engram not found")),
         Err(EngramTransportError::protocol("the answer was not JSON")),
     ] {
@@ -445,7 +478,10 @@ fn the_holder_is_told_each_member_bound_or_not_with_its_reason() {
     assert_eq!(
         engram_bind_notice_line(
             "w-member",
-            &EngramBindOutcome::Bound { verification: "b".repeat(32), replayed: false }
+            &EngramBindOutcome::Bound {
+                verification: "b".repeat(32),
+                replayed: false
+            }
         )
         .as_deref(),
         Some(
@@ -461,8 +497,11 @@ fn the_holder_is_told_each_member_bound_or_not_with_its_reason() {
         )
     );
     assert_eq!(
-        engram_bind_notice_line("w-member", &EngramBindOutcome::Final("its claim moved".to_owned()))
-            .as_deref(),
+        engram_bind_notice_line(
+            "w-member",
+            &EngramBindOutcome::Final("its claim moved".to_owned())
+        )
+        .as_deref(),
         Some("[TermAl] Check credit: the full gate is not recorded for w-member: its claim moved.")
     );
     assert_eq!(
@@ -470,7 +509,10 @@ fn the_holder_is_told_each_member_bound_or_not_with_its_reason() {
         None
     );
     assert_eq!(
-        engram_bind_notice_line("w-member", &EngramBindOutcome::Resend("superseded".to_owned())),
+        engram_bind_notice_line(
+            "w-member",
+            &EngramBindOutcome::Resend("superseded".to_owned())
+        ),
         None
     );
     // An identity collision is told as not recorded, never as bound, with
@@ -481,10 +523,22 @@ fn the_holder_is_told_each_member_bound_or_not_with_its_reason() {
         &EngramBindOutcome::Collision("key termal-verification-bind:o:w; conflict".to_owned()),
     )
     .expect("a collision is told to its holder");
-    assert!(collision.contains("the full gate is not recorded for w-member"), "{collision}");
-    assert!(collision.contains(ENGRAM_BIND_COLLISION_PHRASE), "{collision}");
-    assert!(collision.contains("termal-verification-bind:o:w"), "{collision}");
+    assert!(
+        collision.contains("the full gate is not recorded for w-member"),
+        "{collision}"
+    );
+    assert!(
+        collision.contains(ENGRAM_BIND_COLLISION_PHRASE),
+        "{collision}"
+    );
+    assert!(
+        collision.contains("termal-verification-bind:o:w"),
+        "{collision}"
+    );
     assert!(collision.contains("not sent again"), "{collision}");
-    assert!(collision.contains("earlier operation is not known"), "{collision}");
+    assert!(
+        collision.contains("earlier operation is not known"),
+        "{collision}"
+    );
     assert!(!collision.contains("(bound)"), "{collision}");
 }

@@ -299,8 +299,7 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
     let origin = std::time::Instant::now();
     let phase_number = Arc::new(AtomicUsize::new(1));
     let holds = Arc::new(Mutex::new(Vec::<HoldSample>::new()));
-    let (cut_tx, cut_rx) =
-        mpsc::channel::<(std::time::Instant, Duration, std::thread::ThreadId)>();
+    let (cut_tx, cut_rx) = mpsc::channel::<(std::time::Instant, Duration, std::thread::ThreadId)>();
     let (tick_tx, tick_rx) = mpsc::channel::<(std::time::Instant, PersistObservedTick)>();
     let hold_rows = holds.clone();
     let hold_phase = phase_number.clone();
@@ -413,7 +412,11 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
     let mut receiver = tick_rx;
     let mut warm_started = None;
     for (phase_index, phase, iterations) in [(1, "cold", 10), (2, "warm", MODEL_WARM_ROUNDS)] {
-        timings.phase(if phase_index == 1 { "cold_operations" } else { "warm_operations" });
+        timings.phase(if phase_index == 1 {
+            "cold_operations"
+        } else {
+            "warm_operations"
+        });
         phase_number.store(phase_index, Ordering::SeqCst);
         if phase_index == 2 {
             warm_started = Some(std::time::Instant::now());
@@ -573,11 +576,16 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
             // report is synchronous after unlocking, before another acquisition
             // on that thread. Classify the entire acquisition, never a residual.
             let position = indexes.partition_point(|index| holds[*index].reported_at < ended_at);
-            let index = *indexes.get(position).expect("cut owner released StateInner");
+            let index = *indexes
+                .get(position)
+                .expect("cut owner released StateInner");
             let hold = &mut holds[index];
             hold.snapshot_cut_count += 1;
             hold.snapshot_cut_us += micros(elapsed);
-            assert!(hold.snapshot_cut_us <= hold.held_us, "cut duration is inside its whole hold");
+            assert!(
+                hold.snapshot_cut_us <= hold.held_us,
+                "cut duration is inside its whole hold"
+            );
             json!({
                 "phase":sample_phase(at),
                 "requestedUs":micros(at.duration_since(origin)),"elapsedUs":micros(elapsed),
@@ -635,12 +643,16 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
             holds.iter().filter(|r| r.phase == phase).map(|r| r.held_us).collect())}),
         );
         for (kind, projection) in [("stateHoldProjection", true), ("stateHoldOther", false)] {
-            let rows = holds.iter().filter(|row| {
-                row.phase == phase && (row.snapshot_cut_count > 0) == projection
-            }).collect::<Vec<_>>();
+            let rows = holds
+                .iter()
+                .filter(|row| row.phase == phase && (row.snapshot_cut_count > 0) == projection)
+                .collect::<Vec<_>>();
             let mut sites = std::collections::BTreeMap::<String, Vec<&HoldSample>>::new();
             for row in &rows {
-                sites.entry(format!("{}:{}", row.file, row.line)).or_default().push(row);
+                sites
+                    .entry(format!("{}:{}", row.file, row.line))
+                    .or_default()
+                    .push(row);
             }
             let sites = sites.into_iter().map(|(site, rows)| json!({
                 "site":site,
@@ -723,7 +735,11 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
         .collect::<Vec<_>>();
     let _ = std::io::Write::write_all(
         &mut std::io::stderr(),
-        format!("MODELED_PARALLEL_TIME_REPORT {}\n", Value::from(time_report)).as_bytes(),
+        format!(
+            "MODELED_PARALLEL_TIME_REPORT {}\n",
+            Value::from(time_report)
+        )
+        .as_bytes(),
     );
     // What decides the test is the work counted under and around the state lock,
     // so no host's speed changes the result. It catches a tick that collects more
@@ -740,17 +756,27 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
         .iter()
         .filter(|row| row.phase == "warm")
         .map(|row| {
-            assert!(row.snapshot_cut_count <= 1, "one cut per state hold: {}:{}", row.file, row.line);
+            assert!(
+                row.snapshot_cut_count <= 1,
+                "one cut per state hold: {}:{}",
+                row.file,
+                row.line
+            );
             row.snapshot_cut_count
         })
         .sum::<usize>();
     // One for each writer commit, and two for a resume: its commit and its response.
     let cuts_allowed = MODEL_WARM_ROUNDS + 2 * MODEL_LANES * MODEL_WARM_ROUNDS;
     assert!(warm_cuts > 0, "warm holds report their snapshot cuts");
-    assert!(warm_cuts <= cuts_allowed, "{warm_cuts} warm snapshot cuts, {cuts_allowed} allowed");
+    assert!(
+        warm_cuts <= cuts_allowed,
+        "{warm_cuts} warm snapshot cuts, {cuts_allowed} allowed"
+    );
     // The checkout path is in every session row, and may be at any depth.
     let session_metadata_allowed = MODEL_MAX_SESSION_METADATA_BYTES
-        + 4 * Value::from(root.path().to_string_lossy().as_ref()).to_string().len();
+        + 4 * Value::from(root.path().to_string_lossy().as_ref())
+            .to_string()
+            .len();
     let mut warm_messages = 0;
     for (at, tick) in &all_ticks {
         if sample_phase(*at) != "warm" {
@@ -758,7 +784,11 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
         }
         let (counts, locks) = (&tick.counts, tick.phases.collect_lock_count);
         let changed = counts.changed_sessions;
-        assert!(changed <= MODEL_LANES, "tick {} collected {changed} sessions", tick.tick);
+        assert!(
+            changed <= MODEL_LANES,
+            "tick {} collected {changed} sessions",
+            tick.tick
+        );
         assert!(
             changed == 0 || locks > changed,
             "tick {} held the lock across sessions: {locks} locks for {changed}",

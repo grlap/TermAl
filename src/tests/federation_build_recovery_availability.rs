@@ -203,8 +203,10 @@ async fn federation_build_compatibility_reconnect_does_not_spend_probe_archive()
         let report = &inner.federation.onboarding.reports[&pair.id];
         assert!(report.termal_complete());
         assert_eq!(report.probe_session_id, initial.probe_session_id);
-        assert_eq!(report.attempt_id, initial.attempt_id,
-            "ordinary reconnect retains the original diagnostic report");
+        assert_eq!(
+            report.attempt_id, initial.attempt_id,
+            "ordinary reconnect retains the original diagnostic report"
+        );
         assert_eq!(
             inner.federation.peers[&pair.id].membership,
             FederationMembershipState::Active
@@ -259,16 +261,30 @@ async fn federation_build_compatibility_preserves_membership_while_quarantine_re
             .federation
             .admission_quarantine = Some(FederationQuarantineReason::DeclaredRestore);
         pair.rpc.health(&pair.lease).await.unwrap();
-        assert!(pair.lease.with_incarnation(|| Ok(())).is_ok(),
-            "admission quarantine does not erase the authenticated transport");
+        assert!(
+            pair.lease.with_incarnation(|| Ok(())).is_ok(),
+            "admission quarantine does not erase the authenticated transport"
+        );
         assert!(pair.central.ensure_federation_admission_allowed().is_err());
-        pair.lease.with_current(&pair.central, |inner, current| {
-            assert!(federation_participation_qualified(&inner.federation,
-                &inner.preferences.federation, current, &pair.lease.incarnation).is_err(),
-                "ordinary routing must still refuse quarantine");
-            Ok(())
-        }).unwrap();
-        assert_eq!(pair.rpc.requalify(&pair.lease).await.unwrap_err().status, StatusCode::LOCKED);
+        pair.lease
+            .with_current(&pair.central, |inner, current| {
+                assert!(
+                    federation_participation_qualified(
+                        &inner.federation,
+                        &inner.preferences.federation,
+                        current,
+                        &pair.lease.incarnation
+                    )
+                    .is_err(),
+                    "ordinary routing must still refuse quarantine"
+                );
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            pair.rpc.requalify(&pair.lease).await.unwrap_err().status,
+            StatusCode::LOCKED
+        );
         assert!(
             !pair.central.inner.lock().unwrap().federation.peers[&pair.id]
                 .verified_on(Some(&pair.lease.incarnation))

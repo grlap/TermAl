@@ -176,9 +176,21 @@ async fn link_pre_receipt_failure_uses_the_reused_channels_attempt_basis() {
     let basis = channel.transport_basis();
     assert!(basis.transport_generation > channel.snapshot.transport_generation);
     let owner = channel.next_security_owner().unwrap();
-    let context = Arc::new(FederationSecurityContext::derive(owner, Uuid::new_v4().to_string(),
-        vec![], &[1; 32], &[2; 32], &[3; 32]).unwrap());
-    app.inner.lock().unwrap().set_federation_durable(false, "test_hold");
+    let context = Arc::new(
+        FederationSecurityContext::derive(
+            owner,
+            Uuid::new_v4().to_string(),
+            vec![],
+            &[1; 32],
+            &[2; 32],
+            &[3; 32],
+        )
+        .unwrap(),
+    );
+    app.inner
+        .lock()
+        .unwrap()
+        .set_federation_durable(false, "test_hold");
     let result = channel.install_security(context).await;
     assert!(matches!(result, Err(error) if error.status == StatusCode::LOCKED));
     let after = snapshot(&app);
@@ -199,18 +211,36 @@ async fn channel_hold_probes_and_repeated_wire_refusals_preserve_the_opening_cau
     let (_peer, proof) = federation_control_fixture::establish(&channel).await;
     let lease = channel.current_lease().unwrap();
     let client = FederationRpcClient::new(1, channel.clone(), Arc::new(|| Ok(()))).unwrap();
-    app.inner.lock().unwrap().set_federation_durable(false, "test_install_hold");
+    app.inner
+        .lock()
+        .unwrap()
+        .set_federation_durable(false, "test_install_hold");
     let before = snapshot(&app);
     // The same predicate used by both monitor loops and diagnostic health handling.
     for _ in 0..70 {
-        assert!(matches!(channel.current_authority_checked(false), Err(error) if error.status == StatusCode::LOCKED));
-        assert!(client.retain_health_refusal(&lease, &ApiError::from_status(StatusCode::LOCKED, "held")));
+        assert!(
+            matches!(channel.current_authority_checked(false), Err(error) if error.status == StatusCode::LOCKED)
+        );
+        assert!(
+            client
+                .retain_health_refusal(&lease, &ApiError::from_status(StatusCode::LOCKED, "held"))
+        );
     }
-    assert_eq!(snapshot(&app), before, "idle probes must not append refusal observations");
+    assert_eq!(
+        snapshot(&app),
+        before,
+        "idle probes must not append refusal observations"
+    );
     // Genuine inbound operation checks still record, even during a long hold.
     for _ in 0..70 {
-        assert!(matches!(channel.current_authority(), Err(error) if error.status == StatusCode::LOCKED));
-        app.inner.lock().unwrap().federation_durability_diagnostics.refusal(false, "central_authority_durability", 409);
+        assert!(
+            matches!(channel.current_authority(), Err(error) if error.status == StatusCode::LOCKED)
+        );
+        app.inner
+            .lock()
+            .unwrap()
+            .federation_durability_diagnostics
+            .refusal(false, "central_authority_durability", 409);
     }
     let after = snapshot(&app);
     let before_rows = before["records"].as_array().unwrap();
@@ -224,7 +254,10 @@ async fn channel_hold_probes_and_repeated_wire_refusals_preserve_the_opening_cau
         assert!(row["lastFalseForMs"].as_u64().unwrap() >= row["falseForMs"].as_u64().unwrap());
         assert!(chrono::DateTime::parse_from_rfc3339(row["lastAt"].as_str().unwrap()).is_ok());
     }
-    app.inner.lock().unwrap().set_federation_durable(true, "test_settled");
+    app.inner
+        .lock()
+        .unwrap()
+        .set_federation_durable(true, "test_settled");
     assert!(channel.current_authority().is_ok());
     drop(proof);
 }

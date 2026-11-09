@@ -19,7 +19,11 @@ async fn federation_security_owned_stream_eof_records_reason_before_withdrawing_
     let lease = satellite.handle.channel.current_lease().unwrap();
     // Supply a graceful EOF while retaining the read half. Dropping the
     // socket here can instead make the peer observe a connection reset.
-    control.io.shutdown().await.expect("control write half closes");
+    control
+        .io
+        .shutdown()
+        .await
+        .expect("control write half closes");
     let fenced = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
         while lease.with_incarnation(|| Ok(())).is_ok() {
             tokio::task::yield_now().await;

@@ -12,7 +12,12 @@ pub(super) fn bind_native_host(fixture: &RunFixture) -> FederationHostIdentity {
     }
     let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
     let mut inner = fixture.state.inner.lock().unwrap();
-    bind_loaded_federation(&mut inner, &connection, fixture.state.persistence_path.as_path()).unwrap();
+    bind_loaded_federation(
+        &mut inner,
+        &connection,
+        fixture.state.persistence_path.as_path(),
+    )
+    .unwrap();
     inner.federation.local.clone().unwrap()
 }
 
@@ -24,23 +29,38 @@ fn native_registration_keeps_its_original_host_session_and_project_on_replay() {
     let creation = {
         let inner = fixture.state.inner.lock().unwrap();
         inner.sessions[inner.find_session_index(&session).unwrap()]
-            .federation_native_creation_id.clone()
+            .federation_native_creation_id
+            .clone()
     };
     let run_id = "test-native-registration-origin";
     let directory = registered_run(&fixture, &session, run_id);
-    fixture.state.register_test_run(&session, registration_request(run_id, &directory)).unwrap();
+    fixture
+        .state
+        .register_test_run(&session, registration_request(run_id, &directory))
+        .unwrap();
     let original = fixture.state.inner.lock().unwrap().test_run_registrations[run_id].clone();
-    let origin = original.native_origin.as_ref().expect("registration captured native provenance");
+    let origin = original
+        .native_origin
+        .as_ref()
+        .expect("registration captured native provenance");
     assert_eq!(origin.host, host);
     assert_eq!(origin.native_session_id, session);
     assert_eq!(origin.native_creation_id, creation);
     assert_eq!(origin.project_id, fixture.project_id);
     assert_eq!(origin.project_scope, None);
     assert!(original.verification_record.is_none());
-    assert_eq!(serde_json::from_value::<TestRunRegistration>(
-        serde_json::to_value(&original).unwrap()).unwrap(), original);
-    let reloaded = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
-    assert_eq!(reloaded.test_run_registrations[run_id].native_origin, original.native_origin);
+    assert_eq!(
+        serde_json::from_value::<TestRunRegistration>(serde_json::to_value(&original).unwrap())
+            .unwrap(),
+        original
+    );
+    let reloaded = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        reloaded.test_run_registrations[run_id].native_origin,
+        original.native_origin
+    );
 
     // Use the existing continuity owner to advance the durable host generation.
     // A replay must not bless that generation or a replacement native session
@@ -52,8 +72,14 @@ fn native_registration_keeps_its_original_host_session_and_project_on_replay() {
         let index = inner.find_session_index(&session).unwrap();
         inner.sessions[index].federation_native_creation_id = Uuid::new_v4().to_string();
     }
-    fixture.state.register_test_run(&session, registration_request(run_id, &directory)).unwrap();
-    assert_eq!(fixture.state.inner.lock().unwrap().test_run_registrations[run_id], original);
+    fixture
+        .state
+        .register_test_run(&session, registration_request(run_id, &directory))
+        .unwrap();
+    assert_eq!(
+        fixture.state.inner.lock().unwrap().test_run_registrations[run_id],
+        original
+    );
 }
 
 #[test]
@@ -63,8 +89,11 @@ fn native_registration_retains_validated_logical_scope_without_exposing_store_pa
     bind_native_host(&fixture);
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let project = inner.projects.iter_mut()
-            .find(|project| project.id == fixture.project_id).unwrap();
+        let project = inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == fixture.project_id)
+            .unwrap();
         project.engram = Some(EngramProjectSettings {
             authority_store_key: Some(EngramAuthorityStoreKey {
                 database_path: fixture.root.join("private-store.db"),
@@ -75,11 +104,17 @@ fn native_registration_retains_validated_logical_scope_without_exposing_store_pa
     }
     let run_id = "test-native-registration-project-scope";
     let directory = registered_run(&fixture, &session, run_id);
-    fixture.state.register_test_run(&session, registration_request(run_id, &directory)).unwrap();
+    fixture
+        .state
+        .register_test_run(&session, registration_request(run_id, &directory))
+        .unwrap();
     let inner = fixture.state.inner.lock().unwrap();
     let registration = &inner.test_run_registrations[run_id];
     let origin = registration.native_origin.as_ref().unwrap();
-    assert_eq!(origin.project_scope.as_deref(), Some("example.test/owner/repository"));
+    assert_eq!(
+        origin.project_scope.as_deref(),
+        Some("example.test/owner/repository")
+    );
     let wire = serde_json::to_value(origin).unwrap();
     assert!(!wire.to_string().contains("private-store.db"));
     assert!(wire.get("databasePath").is_none());
@@ -93,7 +128,10 @@ fn legacy_registration_cannot_acquire_native_provenance_after_the_fact() {
     bind_native_host(&fixture);
     let run_id = "test-native-registration-legacy";
     let directory = registered_run(&fixture, &session, run_id);
-    fixture.state.register_test_run(&session, registration_request(run_id, &directory)).unwrap();
+    fixture
+        .state
+        .register_test_run(&session, registration_request(run_id, &directory))
+        .unwrap();
     let original = fixture.state.inner.lock().unwrap().test_run_registrations[run_id].clone();
     assert!(original.native_origin.is_some());
     let mut legacy = serde_json::to_value(&original).unwrap();
@@ -104,11 +142,25 @@ fn legacy_registration_cannot_acquire_native_provenance_after_the_fact() {
     // actual native identity or bypassing its persistence guards.
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        inner.test_run_registrations.insert(run_id.to_owned(), reloaded.clone());
+        inner
+            .test_run_registrations
+            .insert(run_id.to_owned(), reloaded.clone());
         fixture.state.persist_internal_locked(&inner).unwrap();
     }
-    let restored = load_state(fixture.state.persistence_path.as_path()).unwrap().unwrap();
-    assert!(restored.test_run_registrations[run_id].native_origin.is_none());
-    fixture.state.register_test_run(&session, registration_request(run_id, &directory)).unwrap();
-    assert_eq!(fixture.state.inner.lock().unwrap().test_run_registrations[run_id], reloaded);
+    let restored = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert!(
+        restored.test_run_registrations[run_id]
+            .native_origin
+            .is_none()
+    );
+    fixture
+        .state
+        .register_test_run(&session, registration_request(run_id, &directory))
+        .unwrap();
+    assert_eq!(
+        fixture.state.inner.lock().unwrap().test_run_registrations[run_id],
+        reloaded
+    );
 }

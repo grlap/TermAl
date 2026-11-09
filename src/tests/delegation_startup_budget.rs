@@ -168,16 +168,27 @@ fn delegation_startup_budget_own_writer_contention_does_not_terminalize_inventor
             }
         })
     });
-    phase_sync::receive(&expired_rx, "real FIFO admission reports the expired local wait");
+    phase_sync::receive(
+        &expired_rx,
+        "real FIFO admission reports the expired local wait",
+    );
     {
-        let inner = fixture.state.inner.try_lock_now()
-            .expect("inventory admission never holds StateInner while waiting for its own writer");
-        assert!(matches!(inner.delegation_inventory, DelegationInventoryState::Loading { .. }));
+        let inner =
+            fixture.state.inner.try_lock_now().expect(
+                "inventory admission never holds StateInner while waiting for its own writer",
+            );
+        assert!(matches!(
+            inner.delegation_inventory,
+            DelegationInventoryState::Loading { .. }
+        ));
         assert!(inner.delegations.is_empty());
     }
     drop(occupied);
     released_tx.send(()).unwrap();
-    worker.join().unwrap().expect("ordinary writer contention must settle into a complete inventory");
+    worker
+        .join()
+        .unwrap()
+        .expect("ordinary writer contention must settle into a complete inventory");
     let inner = fixture.state.inner.lock().unwrap();
     assert!(inner.delegation_inventory_complete());
     assert_eq!(inner.delegations.len(), 1);
@@ -217,11 +228,24 @@ fn delegation_startup_budget_expired_wait_keeps_inventory_ahead_of_later_writer(
     wait_for_sqlite_state_writer_issued_tickets(&writer, tickets_before_inventory + 2);
     drop(occupied);
     resume_tx.send(()).unwrap();
-    assert_eq!(phase_sync::receive(&order_rx, "next admitted owner"), "inventory");
-    assert_eq!(phase_sync::receive(&order_rx, "later admitted owner"), "later writer");
+    assert_eq!(
+        phase_sync::receive(&order_rx, "next admitted owner"),
+        "inventory"
+    );
+    assert_eq!(
+        phase_sync::receive(&order_rx, "later admitted owner"),
+        "later writer"
+    );
     inventory.join().unwrap().unwrap();
     later.join().unwrap();
-    assert!(fixture.state.inner.lock().unwrap().delegation_inventory_complete());
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .delegation_inventory_complete()
+    );
 }
 
 #[test]
@@ -232,20 +256,31 @@ fn delegation_startup_budget_shutdown_cancels_own_writer_admission() {
     let mut occupied = Some(lock_sqlite_state_writer(&writer));
     TEST_DELEGATION_INVENTORY_EXPIRE_ADMISSION.with(|expire| expire.set(true));
     let mut observed_wait = false;
-    let error = fixture.state.load_delegation_inventory_observed(|phase| {
-        if phase == "writer_admission_timed_out" {
-            observed_wait = true;
-            fixture.state.trigger_shutdown_signal();
-            drop(occupied.take());
-        }
-    }).expect_err("shutdown must stop the pending inventory owner");
+    let error = fixture
+        .state
+        .load_delegation_inventory_observed(|phase| {
+            if phase == "writer_admission_timed_out" {
+                observed_wait = true;
+                fixture.state.trigger_shutdown_signal();
+                drop(occupied.take());
+            }
+        })
+        .expect_err("shutdown must stop the pending inventory owner");
     assert!(observed_wait);
-    assert!(error.to_string().contains("interrupted by shutdown"), "{error:#}");
-    assert!(lock_sqlite_state_writer_for(&writer, Duration::ZERO).is_some(),
-        "cancelled inventory ticket must not strand subsequent writers");
+    assert!(
+        error.to_string().contains("interrupted by shutdown"),
+        "{error:#}"
+    );
+    assert!(
+        lock_sqlite_state_writer_for(&writer, Duration::ZERO).is_some(),
+        "cancelled inventory ticket must not strand subsequent writers"
+    );
     let inner = fixture.state.inner.lock().unwrap();
     assert!(!inner.delegation_inventory_complete());
-    assert!(inner.delegations.is_empty(), "shutdown cannot publish the decoded inventory");
+    assert!(
+        inner.delegations.is_empty(),
+        "shutdown cannot publish the decoded inventory"
+    );
 }
 
 #[test]
@@ -276,14 +311,27 @@ fn delegation_startup_budget_full_publication_and_sql_boundaries_leave_state_ava
             phases.push(phase.to_owned());
         })
         .unwrap();
-    assert_eq!(phases, ["before_sql", "source_checked", "connection_opened", "after_decode", "before_publish", "publication_reserved", "publication_state_acquired"]);
+    assert_eq!(
+        phases,
+        [
+            "before_sql",
+            "source_checked",
+            "connection_opened",
+            "after_decode",
+            "before_publish",
+            "publication_reserved",
+            "publication_state_acquired"
+        ]
+    );
     let inner = state.inner.lock().unwrap();
     assert!(inner.delegation_inventory_complete());
     assert_eq!(inner.delegations.len(), 1);
     assert_eq!(inner.delegations[0].prompt, "private original payload");
-    assert!(inner
-        .find_delegation_index_by_child_session_id(&fixture.child_id)
-        .is_some());
+    assert!(
+        inner
+            .find_delegation_index_by_child_session_id(&fixture.child_id)
+            .is_some()
+    );
 }
 
 #[test]
@@ -294,39 +342,71 @@ fn delegation_startup_budget_catalog_waits_for_atomic_records_and_child_index() 
         host_generation: 1,
     };
     let mut checked_publication_lock = false;
-    fixture.state.load_delegation_inventory_observed(|phase| {
-        if phase == "publication_state_acquired" {
-            assert!(fixture.state.inner.try_lock_now().is_none(),
-                "catalog and record installation share the publication state lock");
-            checked_publication_lock = true;
-            return;
-        }
-        let inner = fixture.state.inner.try_lock_now().unwrap();
-        let child = inner.find_session_index(&fixture.child_id).unwrap();
-        assert!(inner.sessions[child].session.parent_delegation_id.is_none());
-        // Empty records and a cold empty index are not proof that roots are
-        // independent. Both production catalog and Describe selectors must hold.
-        assert!(inner.delegation_catalog_children.lock().unwrap().ready(0));
-        assert_eq!(federation_native_catalog_locked(
-            &inner, None, host.clone(), host.clone(), String::new(),
-        ).err().unwrap().status, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(federation_mailbox_root_locked(&inner, &fixture.child_id)
-            .err().unwrap().status, StatusCode::SERVICE_UNAVAILABLE);
-    }).unwrap();
+    fixture
+        .state
+        .load_delegation_inventory_observed(|phase| {
+            if phase == "publication_state_acquired" {
+                assert!(
+                    fixture.state.inner.try_lock_now().is_none(),
+                    "catalog and record installation share the publication state lock"
+                );
+                checked_publication_lock = true;
+                return;
+            }
+            let inner = fixture.state.inner.try_lock_now().unwrap();
+            let child = inner.find_session_index(&fixture.child_id).unwrap();
+            assert!(inner.sessions[child].session.parent_delegation_id.is_none());
+            // Empty records and a cold empty index are not proof that roots are
+            // independent. Both production catalog and Describe selectors must hold.
+            assert!(inner.delegation_catalog_children.lock().unwrap().ready(0));
+            assert_eq!(
+                federation_native_catalog_locked(
+                    &inner,
+                    None,
+                    host.clone(),
+                    host.clone(),
+                    String::new(),
+                )
+                .err()
+                .unwrap()
+                .status,
+                StatusCode::SERVICE_UNAVAILABLE
+            );
+            assert_eq!(
+                federation_mailbox_root_locked(&inner, &fixture.child_id)
+                    .err()
+                    .unwrap()
+                    .status,
+                StatusCode::SERVICE_UNAVAILABLE
+            );
+        })
+        .unwrap();
     assert!(checked_publication_lock);
     let inner = fixture.state.inner.lock().unwrap();
     {
         let index = inner.delegation_catalog_children.lock().unwrap();
         assert!(index.ready(inner.delegations.len()));
-        assert_eq!(index.progress, 0, "publication installs an already built index");
+        assert_eq!(
+            index.progress, 0,
+            "publication installs an already built index"
+        );
         assert!(index.children.contains_key(&fixture.child_id));
     }
-    let catalog = federation_native_catalog_locked(
-        &inner, None, host.clone(), host, String::new(),
-    ).unwrap();
+    let catalog =
+        federation_native_catalog_locked(&inner, None, host.clone(), host, String::new()).unwrap();
     assert!(catalog.next.is_none());
-    assert!(catalog.roots.iter().any(|root| root.session_id == fixture.parent_id));
-    assert!(!catalog.roots.iter().any(|root| root.session_id == fixture.child_id));
+    assert!(
+        catalog
+            .roots
+            .iter()
+            .any(|root| root.session_id == fixture.parent_id)
+    );
+    assert!(
+        !catalog
+            .roots
+            .iter()
+            .any(|root| root.session_id == fixture.child_id)
+    );
 }
 
 #[test]
@@ -334,18 +414,32 @@ fn delegation_startup_budget_failed_inventory_cannot_publish_an_empty_native_cat
     let fixture = PendingInventoryFixture::new();
     let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
     connection.execute("DROP TABLE delegations", []).unwrap();
-    assert!(fixture.state.load_delegation_inventory_after_listen().is_err());
+    assert!(
+        fixture
+            .state
+            .load_delegation_inventory_after_listen()
+            .is_err()
+    );
     let inner = fixture.state.inner.lock().unwrap();
     let host = FederationHostIdentity {
         host_id: Uuid::new_v4().to_string(),
         host_generation: 1,
     };
     assert!(inner.delegations.is_empty());
-    assert_eq!(federation_native_catalog_locked(
-        &inner, None, host.clone(), host, String::new(),
-    ).err().unwrap().status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(federation_mailbox_root_locked(&inner, &fixture.parent_id)
-        .err().unwrap().status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        federation_native_catalog_locked(&inner, None, host.clone(), host, String::new(),)
+            .err()
+            .unwrap()
+            .status,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        federation_mailbox_root_locked(&inner, &fixture.parent_id)
+            .err()
+            .unwrap()
+            .status,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
 }
 
 #[test]
@@ -357,25 +451,50 @@ fn delegation_startup_budget_write_guards_hold_unknown_scopes_without_file_effec
     for failed in [false, true] {
         if failed {
             fixture.state.inner.lock().unwrap().delegation_inventory =
-                DelegationInventoryState::Failed { reason: "loadFailed" };
+                DelegationInventoryState::Failed {
+                    reason: "loadFailed",
+                };
         }
-        for session in [None, Some(fixture.parent_id.as_str()), Some(fixture.child_id.as_str())] {
+        for session in [
+            None,
+            Some(fixture.parent_id.as_str()),
+            Some(fixture.child_id.as_str()),
+        ] {
             assert_eq!(fixture.state.ensure_read_only_delegation_allows_session_write_action(
                 session, "file writes",
             ).unwrap_err().status, StatusCode::SERVICE_UNAVAILABLE);
-            assert_eq!(fixture.state.ensure_read_only_delegation_allows_write_action(
-                session, None, Some(fixture._root.path().to_str().unwrap()), "terminal commands",
-            ).unwrap_err().status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(
+                fixture
+                    .state
+                    .ensure_read_only_delegation_allows_write_action(
+                        session,
+                        None,
+                        Some(fixture._root.path().to_str().unwrap()),
+                        "terminal commands",
+                    )
+                    .unwrap_err()
+                    .status,
+                StatusCode::SERVICE_UNAVAILABLE
+            );
         }
         runtime.block_on(async {
-            let response = app_router(fixture.state.clone()).oneshot(
-                Request::builder().method("PUT").uri("/api/file")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&json!({
-                        "sessionId": fixture.parent_id, "path": target,
-                        "content": "must not be written", "overwrite": true,
-                    })).unwrap())).unwrap(),
-            ).await.unwrap();
+            let response = app_router(fixture.state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/api/file")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            serde_json::to_vec(&json!({
+                                "sessionId": fixture.parent_id, "path": target,
+                                "content": "must not be written", "overwrite": true,
+                            }))
+                            .unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         });
         assert_eq!(fs::read_to_string(&target).unwrap(), "unchanged");
@@ -442,27 +561,46 @@ fn delegation_startup_budget_late_durable_changes_cannot_cross_publication() {
         "DELETE FROM delegations",
     ] {
         let fixture = PendingInventoryFixture::new();
-        let error = fixture.state.load_delegation_inventory_observed(|phase| {
-            if phase == "before_publish" {
-                rusqlite::Connection::open(fixture.state.persistence_path.as_path())
-                    .unwrap().execute(sql, []).unwrap();
-            }
-        }).err().expect("a late durable change must prevent stale publication");
-        assert!(error.to_string().contains("changed while loading"), "{error:#}");
+        let error = fixture
+            .state
+            .load_delegation_inventory_observed(|phase| {
+                if phase == "before_publish" {
+                    rusqlite::Connection::open(fixture.state.persistence_path.as_path())
+                        .unwrap()
+                        .execute(sql, [])
+                        .unwrap();
+                }
+            })
+            .err()
+            .expect("a late durable change must prevent stale publication");
+        assert!(
+            error.to_string().contains("changed while loading"),
+            "{error:#}"
+        );
         let inner = fixture.state.inner.lock().unwrap();
         assert!(!inner.delegation_inventory_complete());
         assert!(inner.delegations.is_empty());
-        let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
-        let before: Vec<(String, String)> = connection.prepare(
-            "SELECT id,value_json FROM delegations ORDER BY rowid",
-        ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        let connection =
+            rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
+        let before: Vec<(String, String)> = connection
+            .prepare("SELECT id,value_json FROM delegations ORDER BY rowid")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
         fixture.state.persist_internal_locked(&inner).unwrap();
-        let after: Vec<(String, String)> = connection.prepare(
-            "SELECT id,value_json FROM delegations ORDER BY rowid",
-        ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap().collect::<rusqlite::Result<_>>().unwrap();
-        assert_eq!(before, after, "a failed inventory cannot undo the late writer");
+        let after: Vec<(String, String)> = connection
+            .prepare("SELECT id,value_json FROM delegations ORDER BY rowid")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            before, after,
+            "a failed inventory cannot undo the late writer"
+        );
     }
 }
 
@@ -470,21 +608,46 @@ fn delegation_startup_budget_late_durable_changes_cannot_cross_publication() {
 fn delegation_startup_budget_unreadable_sql_row_remains_durable_and_unavailable() {
     let fixture = PendingInventoryFixture::new();
     let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
-    connection.execute("INSERT INTO delegations(id,value_json) VALUES('unreadable-row',X'FF00')", []).unwrap();
-    let error = fixture.state.load_delegation_inventory_after_listen().unwrap_err();
-    assert!(error.to_string().contains("complete delegation inventory"), "{error:#}");
+    connection
+        .execute(
+            "INSERT INTO delegations(id,value_json) VALUES('unreadable-row',X'FF00')",
+            [],
+        )
+        .unwrap();
+    let error = fixture
+        .state
+        .load_delegation_inventory_after_listen()
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("complete delegation inventory"),
+        "{error:#}"
+    );
     let inner = fixture.state.inner.lock().unwrap();
     assert!(!inner.delegation_inventory_complete());
     assert!(inner.delegations.is_empty());
-    assert_eq!(federation_mailbox_root_locked(&inner, &fixture.child_id)
-        .err().unwrap().status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        federation_mailbox_root_locked(&inner, &fixture.child_id)
+            .err()
+            .unwrap()
+            .status,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
     fixture.state.persist_internal_locked(&inner).unwrap();
-    let bytes: Vec<u8> = connection.query_row(
-        "SELECT value_json FROM delegations WHERE id='unreadable-row'", [], |row| row.get(0),
-    ).unwrap();
+    let bytes: Vec<u8> = connection
+        .query_row(
+            "SELECT value_json FROM delegations WHERE id='unreadable-row'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(bytes, [255, 0]);
-    assert_eq!(connection.query_row("SELECT count(*) FROM delegations", [],
-        |row| row.get::<_, usize>(0)).unwrap(), 2);
+    assert_eq!(
+        connection
+            .query_row("SELECT count(*) FROM delegations", [], |row| row
+                .get::<_, usize>(0))
+            .unwrap(),
+        2
+    );
 }
 
 #[test]
@@ -495,11 +658,15 @@ fn delegation_startup_budget_connection_must_match_the_captured_physical_source(
     let original = rusqlite::Connection::open(path).unwrap();
     verify_delegation_inventory_source(&original, path, &source).unwrap();
     let memory = rusqlite::Connection::open_in_memory().unwrap();
-    assert!(verify_delegation_inventory_source(&memory, path, &source).is_err(),
-        "unverifiable connection identity must not fall back to the pathname");
+    assert!(
+        verify_delegation_inventory_source(&memory, path, &source).is_err(),
+        "unverifiable connection identity must not fall back to the pathname"
+    );
     let other = path.with_extension("other-source");
     let connection = rusqlite::Connection::open(&other).unwrap();
-    connection.execute_batch("CREATE TABLE delegations(id TEXT PRIMARY KEY,value_json TEXT)").unwrap();
+    connection
+        .execute_batch("CREATE TABLE delegations(id TEXT PRIMARY KEY,value_json TEXT)")
+        .unwrap();
     let error = verify_delegation_inventory_source(&connection, path, &source)
         .expect_err("a valid pathname cannot certify a connection to a different file");
     assert!(error.to_string().contains("source"), "{error:#}");
@@ -516,25 +683,36 @@ fn delegation_startup_budget_open_swap_restore_cannot_publish_another_database()
     let opened = path.with_extension("opened-source");
     {
         let connection = rusqlite::Connection::open(&replacement).unwrap();
-        connection.execute_batch("CREATE TABLE delegations(id TEXT PRIMARY KEY,value_json TEXT)").unwrap();
+        connection
+            .execute_batch("CREATE TABLE delegations(id TEXT PRIMARY KEY,value_json TEXT)")
+            .unwrap();
     }
     let source = delegation_inventory_file_identity(path).unwrap();
-    let error = fixture.state.load_delegation_inventory_observed(|phase| {
-        if phase == "source_checked" {
-            fs::rename(path, &original).unwrap();
-            fs::rename(&replacement, path).unwrap();
-        } else if phase == "connection_opened" {
-            fs::rename(path, &opened).unwrap();
-            fs::rename(&original, path).unwrap();
-        }
-    }).err().expect("the restored pathname cannot authorize the replacement connection");
+    let error = fixture
+        .state
+        .load_delegation_inventory_observed(|phase| {
+            if phase == "source_checked" {
+                fs::rename(path, &original).unwrap();
+                fs::rename(&replacement, path).unwrap();
+            } else if phase == "connection_opened" {
+                fs::rename(path, &opened).unwrap();
+                fs::rename(&original, path).unwrap();
+            }
+        })
+        .err()
+        .expect("the restored pathname cannot authorize the replacement connection");
     assert!(error.to_string().contains("source"), "{error:#}");
     assert_eq!(delegation_inventory_file_identity(path).unwrap(), source);
     let inner = fixture.state.inner.lock().unwrap();
     assert!(!inner.delegation_inventory_complete());
     assert!(inner.delegations.is_empty());
-    assert_eq!(federation_mailbox_root_locked(&inner, &fixture.child_id)
-        .err().unwrap().status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        federation_mailbox_root_locked(&inner, &fixture.child_id)
+            .err()
+            .unwrap()
+            .status,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
     fixture.state.persist_internal_locked(&inner).unwrap();
     let reloaded = load_state(path).unwrap().unwrap();
     assert_eq!(reloaded.delegations.len(), 1);
@@ -559,18 +737,40 @@ fn delegation_startup_budget_source_replacement_at_publication_is_not_adopted() 
                 Err(error) => {
                     // Windows SQLite may exclude rename while the validated
                     // connection remains open. That is an enforced fence too.
-                    assert!(cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32)), "{error}");
+                    assert!(
+                        cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32)),
+                        "{error}"
+                    );
                 }
             }
         }
     });
     if replaced {
-        let error = result.err().expect("the replacement cannot receive stale records");
-        assert!(error.to_string().contains("source was replaced"), "{error:#}");
-        assert!(!fixture.state.inner.lock().unwrap().delegation_inventory_complete());
+        let error = result
+            .err()
+            .expect("the replacement cannot receive stale records");
+        assert!(
+            error.to_string().contains("source was replaced"),
+            "{error:#}"
+        );
+        assert!(
+            !fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .delegation_inventory_complete()
+        );
     } else {
         result.unwrap();
-        assert!(fixture.state.inner.lock().unwrap().delegation_inventory_complete());
+        assert!(
+            fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .delegation_inventory_complete()
+        );
     }
 }
 
@@ -579,48 +779,90 @@ fn delegation_startup_budget_publication_releases_writer_before_waiting_for_stat
     let fixture = PendingInventoryFixture::new();
     let mut worker = None;
     let mut writer_admitted = None;
-    fixture.state.load_delegation_inventory_observed(|phase| {
-        if phase == "publication_reserved" {
-            let (held, held_rx) = mpsc::channel();
-            let (admitted, admitted_rx) = mpsc::channel();
-            let state = fixture.state.clone();
-            worker = Some(std::thread::spawn(move || {
-                let mut inner = state.inner.lock().unwrap();
-                held.send(()).unwrap();
-                inner.revision += 1;
-                state.persist_internal_locked(&inner).unwrap();
-                admitted.send(()).unwrap();
-            }));
-            held_rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
-            writer_admitted = Some(admitted_rx);
-        }
-    }).unwrap();
-    writer_admitted.unwrap().recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
+    fixture
+        .state
+        .load_delegation_inventory_observed(|phase| {
+            if phase == "publication_reserved" {
+                let (held, held_rx) = mpsc::channel();
+                let (admitted, admitted_rx) = mpsc::channel();
+                let state = fixture.state.clone();
+                worker = Some(std::thread::spawn(move || {
+                    let mut inner = state.inner.lock().unwrap();
+                    held.send(()).unwrap();
+                    inner.revision += 1;
+                    state.persist_internal_locked(&inner).unwrap();
+                    admitted.send(()).unwrap();
+                }));
+                held_rx
+                    .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
+                    .unwrap();
+                writer_admitted = Some(admitted_rx);
+            }
+        })
+        .unwrap();
+    writer_admitted
+        .unwrap()
+        .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
+        .unwrap();
     worker.unwrap().join().unwrap();
-    assert!(fixture.state.inner.lock().unwrap().delegation_inventory_complete());
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .delegation_inventory_complete()
+    );
 }
 
 #[test]
 fn delegation_startup_budget_sql_writer_is_excluded_through_installation() {
     let fixture = PendingInventoryFixture::new();
     let mut checked = Vec::new();
-    fixture.state.load_delegation_inventory_observed(|phase| {
-        if matches!(phase, "publication_reserved" | "publication_state_acquired") {
-            assert_eq!(fixture.state.inner.try_lock_now().is_some(), phase == "publication_reserved");
-            let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
-            connection.busy_timeout(Duration::ZERO).unwrap();
-            let error = connection.execute("DELETE FROM delegations", []).unwrap_err();
-            assert!(matches!(error, rusqlite::Error::SqliteFailure(ref failure, _)
-                if failure.code == rusqlite::ErrorCode::DatabaseBusy), "{error}");
-            checked.push(phase.to_owned());
-        }
-    }).unwrap();
-    assert_eq!(checked, ["publication_reserved", "publication_state_acquired"]);
-    assert!(fixture.state.inner.lock().unwrap().delegation_inventory_complete());
+    fixture
+        .state
+        .load_delegation_inventory_observed(|phase| {
+            if matches!(phase, "publication_reserved" | "publication_state_acquired") {
+                assert_eq!(
+                    fixture.state.inner.try_lock_now().is_some(),
+                    phase == "publication_reserved"
+                );
+                let connection =
+                    rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
+                connection.busy_timeout(Duration::ZERO).unwrap();
+                let error = connection
+                    .execute("DELETE FROM delegations", [])
+                    .unwrap_err();
+                assert!(
+                    matches!(error, rusqlite::Error::SqliteFailure(ref failure, _)
+                if failure.code == rusqlite::ErrorCode::DatabaseBusy),
+                    "{error}"
+                );
+                checked.push(phase.to_owned());
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        checked,
+        ["publication_reserved", "publication_state_acquired"]
+    );
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .delegation_inventory_complete()
+    );
     // The worker's reservation ends at install; it is not a retained global
     // write hold and does not block ordinary persistence after recovery.
     let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
-    assert_eq!(connection.execute("DELETE FROM delegations WHERE id='no-such-record'", []).unwrap(), 0);
+    assert_eq!(
+        connection
+            .execute("DELETE FROM delegations WHERE id='no-such-record'", [])
+            .unwrap(),
+        0
+    );
 }
 
 #[test]
@@ -628,26 +870,32 @@ fn delegation_startup_budget_state_wait_does_not_exhaust_sql_admission_budget() 
     let fixture = PendingInventoryFixture::new();
     let mut holder = None;
     let mut release = None;
-    fixture.state.load_delegation_inventory_observed(|phase| {
-        if phase == "publication_reserved" {
-            let state = fixture.state.clone();
-            let (held, held_rx) = mpsc::channel();
-            let (release_tx, release_rx) = mpsc::channel::<()>();
-            holder = Some(std::thread::spawn(move || {
-                let _inner = state.inner.lock().unwrap();
-                let started = std::time::Instant::now();
-                held.send(()).unwrap();
-                // The receive timeout establishes an actual state-lock hold
-                // beyond the SQL budget, without relying on scheduling sleeps.
-                assert!(matches!(release_rx.recv_timeout(
-                    SQLITE_BUSY_TIMEOUT + Duration::from_millis(50),
-                ), Err(mpsc::RecvTimeoutError::Timeout)));
-                assert!(started.elapsed() > SQLITE_BUSY_TIMEOUT);
-            }));
-            held_rx.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap();
-            release = Some(release_tx);
-        }
-    }).expect("ordinary state contention must not make inventory permanently unavailable");
+    fixture
+        .state
+        .load_delegation_inventory_observed(|phase| {
+            if phase == "publication_reserved" {
+                let state = fixture.state.clone();
+                let (held, held_rx) = mpsc::channel();
+                let (release_tx, release_rx) = mpsc::channel::<()>();
+                holder = Some(std::thread::spawn(move || {
+                    let _inner = state.inner.lock().unwrap();
+                    let started = std::time::Instant::now();
+                    held.send(()).unwrap();
+                    // The receive timeout establishes an actual state-lock hold
+                    // beyond the SQL budget, without relying on scheduling sleeps.
+                    assert!(matches!(
+                        release_rx.recv_timeout(SQLITE_BUSY_TIMEOUT + Duration::from_millis(50),),
+                        Err(mpsc::RecvTimeoutError::Timeout)
+                    ));
+                    assert!(started.elapsed() > SQLITE_BUSY_TIMEOUT);
+                }));
+                held_rx
+                    .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
+                    .unwrap();
+                release = Some(release_tx);
+            }
+        })
+        .expect("ordinary state contention must not make inventory permanently unavailable");
     holder.unwrap().join().unwrap();
     drop(release);
     let inner = fixture.state.inner.lock().unwrap();
@@ -665,12 +913,14 @@ fn delegation_startup_budget_shutdown_keeps_durable_inventory_unavailable_and_in
         .err()
         .unwrap();
     assert!(error.to_string().contains("shutdown"), "{error:#}");
-    assert!(!fixture
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .delegation_inventory_complete());
+    assert!(
+        !fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .delegation_inventory_complete()
+    );
     assert_eq!(
         load_state(&fixture.state.persistence_path)
             .unwrap()
@@ -751,9 +1001,13 @@ fn delegation_startup_budget_real_listener_serves_before_the_owned_loader_runs()
                 }
             })
             .unwrap();
-        tokio::task::spawn_blocking(move || arrived.recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD).unwrap())
-            .await
-            .unwrap();
+        tokio::task::spawn_blocking(move || {
+            arrived
+                .recv_timeout(crate::TEST_PHASE_DEADLOCK_GUARD)
+                .unwrap()
+        })
+        .await
+        .unwrap();
         assert!(
             state.load_delegation_inventory_after_listen().is_err(),
             "only one inventory loader may own boot"
@@ -799,11 +1053,13 @@ fn delegation_startup_budget_real_listener_serves_before_the_owned_loader_runs()
             .unwrap();
         assert_eq!(ready.status(), StatusCode::OK);
         let ready: Value = ready.json().await.unwrap();
-        assert!(ready["sessions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|s| s["id"] == fixture.parent_id));
+        assert!(
+            ready["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["id"] == fixture.parent_id)
+        );
         let child = ready["sessions"]
             .as_array()
             .unwrap()
@@ -855,10 +1111,12 @@ fn delegation_startup_budget_history_results_child_guards_and_waits_do_not_see_a
             .status,
         StatusCode::SERVICE_UNAVAILABLE
     );
-    assert!(fixture
-        .state
-        .reconcile_delegation_waits_after_boot()
-        .is_err());
+    assert!(
+        fixture
+            .state
+            .reconcile_delegation_waits_after_boot()
+            .is_err()
+    );
     assert_eq!(
         fixture.state.schedule_engram_root_reclamation(true),
         "delegation inventory is unavailable; reclamation is deferred"
@@ -934,10 +1192,12 @@ fn delegation_startup_budget_failed_sql_is_typed_unavailable_not_empty_ready() {
     let fixture = PendingInventoryFixture::new();
     let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
     connection.execute("DROP TABLE delegations", []).unwrap();
-    assert!(fixture
-        .state
-        .load_delegation_inventory_after_listen()
-        .is_err());
+    assert!(
+        fixture
+            .state
+            .load_delegation_inventory_after_listen()
+            .is_err()
+    );
     {
         let inner = fixture.state.inner.lock().unwrap();
         assert!(matches!(
@@ -1078,16 +1338,20 @@ fn delegation_startup_budget_pending_snapshot_and_delta_cannot_delete_unknown_an
         assert!(plan.changed_delegations.is_empty());
         assert!(plan.removed_delegation_ids.is_empty());
         assert!(plan.removed_session_ids.is_empty());
-        assert!(inner
-            .removed_delegation_ids
-            .contains_key("delegation-history-one"));
+        assert!(
+            inner
+                .removed_delegation_ids
+                .contains_key("delegation-history-one")
+        );
         assert!(inner.removed_session_ids.contains(&fixture.child_id));
         fixture.state.persist_internal_locked(&inner).unwrap();
     }
-    assert!(fixture
-        .state
-        .load_delegation_inventory_after_listen()
-        .is_err());
+    assert!(
+        fixture
+            .state
+            .load_delegation_inventory_after_listen()
+            .is_err()
+    );
     let inner = fixture.state.inner.lock().unwrap();
     assert!(matches!(
         inner.delegation_inventory,

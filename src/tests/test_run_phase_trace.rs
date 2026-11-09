@@ -591,11 +591,10 @@ fn assert_refused_at_recheck(
 
 #[test]
 fn registration_refuses_a_request_changed_while_its_durability_fence_waited() {
-    let (_fixture, state, run_id, result) = register_with_request_changed_at_fence(
-        "changed-registration",
-        None,
-        |request| request["creatorPid"] = json!(std::process::id() + 1),
-    );
+    let (_fixture, state, run_id, result) =
+        register_with_request_changed_at_fence("changed-registration", None, |request| {
+            request["creatorPid"] = json!(std::process::id() + 1)
+        });
     assert_refused_at_recheck(&state, &run_id, result);
 }
 

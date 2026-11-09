@@ -2052,7 +2052,9 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
         runtime_observation_lifetime: Arc::new(EngramRuntimeObservationLifetime::default()),
-        capture_lifetime: Arc::new(CaptureLifetime::with_test_root(Some(test_temp_root.clone()))),
+        capture_lifetime: Arc::new(CaptureLifetime::with_test_root(Some(
+            test_temp_root.clone(),
+        ))),
         state_broadcast_mailbox: None,
         state_broadcast_worker: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
@@ -4265,12 +4267,15 @@ fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metada
         // Delegations are a normalized-table carrier, skipped by metadata
         // serde. Keep the exact fixture rows alongside each independent image.
         snapshot.delegations = inner.delegations.clone();
-        let source = snapshot.into_inner()
+        let source = snapshot
+            .into_inner()
             .expect("the initial fixture image should restore");
         persist_state(path, &source).expect("the independent fixture store should persist");
-        assert_eq!(sqlite_table_ids(path, "delegations"),
+        assert_eq!(
+            sqlite_table_ids(path, "delegations"),
             vec![delegation.id.clone(), mismatched_delegation.id.clone()],
-            "both specimen rows must exist before either is corrupted");
+            "both specimen rows must exist before either is corrupted"
+        );
     }
 
     {

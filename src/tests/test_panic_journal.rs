@@ -6,8 +6,7 @@
 // the journal (scripts/test-launcher.mjs). New file, not split from another.
 use super::*;
 
-const CASE: &str =
-    "tests::test_panic_journal::a_panic_is_recorded_even_when_a_second_panic_aborts_the_test_process";
+const CASE: &str = "tests::test_panic_journal::a_panic_is_recorded_even_when_a_second_panic_aborts_the_test_process";
 const CHILD: &str = "TERMAL_TEST_PANIC_JOURNAL_CHILD";
 /// The variable the launcher sets to name a run's journal file.
 const JOURNAL: &str = "TERMAL_TEST_PANIC_JOURNAL";
@@ -31,15 +30,14 @@ fn a_panic_is_recorded_even_when_a_second_panic_aborts_the_test_process() {
         .args(["--exact", CASE, "--test-threads=1"])
         .env(CHILD, CASE)
         .env(JOURNAL, &journal);
-    let (status, stderr) =
-        phase_sync::CapturedStderrProcess::spawn(&mut command).wait_with_stderr("panic journal child");
+    let (status, stderr) = phase_sync::CapturedStderrProcess::spawn(&mut command)
+        .wait_with_stderr("panic journal child");
     assert!(
         !status.success() && status.code() != Some(101),
         "the second panic must abort the child, not fail it normally: {status:?}\n{stderr}"
     );
-    let text = fs::read_to_string(&journal).unwrap_or_else(|error| {
-        panic!("the child's panic journal must exist: {error}\n{stderr}")
-    });
+    let text = fs::read_to_string(&journal)
+        .unwrap_or_else(|error| panic!("the child's panic journal must exist: {error}\n{stderr}"));
     let lines: Vec<Value> = text
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -53,10 +51,15 @@ fn a_panic_is_recorded_even_when_a_second_panic_aborts_the_test_process() {
     let thread = lines
         .iter()
         .find(|line| {
-            line.get("thread").is_some() && line["pid"] == first["pid"] && line["seq"] == first["seq"]
+            line.get("thread").is_some()
+                && line["pid"] == first["pid"]
+                && line["seq"] == first["seq"]
         })
         .unwrap_or_else(|| panic!("the journal must name the first panic's thread: {text}"));
-    assert_eq!(thread["thread"], CASE, "the record names the test: {thread}");
+    assert_eq!(
+        thread["thread"], CASE,
+        "the record names the test: {thread}"
+    );
     assert!(
         first["location"]
             .as_str()

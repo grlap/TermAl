@@ -24,18 +24,39 @@ fn result(is_error: bool) -> Value {
 }
 
 fn forbidden_requests(turn: &EOCheckedTurn) -> Vec<Value> {
-    turn.transport.requests().into_iter().filter(|sent| matches!(sent.request["operation"].as_str(),
-        Some("session_bind" | "session_status" | "turn_grant_read" | "turn_evaluate"
-            | "turn_begin" | "turn_checkpoint" | "verification_record" | "verification_bind")))
-        .map(|sent| sent.request).collect()
+    turn.transport
+        .requests()
+        .into_iter()
+        .filter(|sent| {
+            matches!(
+                sent.request["operation"].as_str(),
+                Some(
+                    "session_bind"
+                        | "session_status"
+                        | "turn_grant_read"
+                        | "turn_evaluate"
+                        | "turn_begin"
+                        | "turn_checkpoint"
+                        | "verification_record"
+                        | "verification_bind"
+                )
+            )
+        })
+        .map(|sent| sent.request)
+        .collect()
 }
 
 // The old grant is opaque history, not a current execution/settlement owner.
-fn adopted_with_historical_grant(label: &str) -> (EOCheckedTurn, RuntimeToken, u64, ClaudeTurnOwnership) {
+fn adopted_with_historical_grant(
+    label: &str,
+) -> (EOCheckedTurn, RuntimeToken, u64, ClaudeTurnOwnership) {
     let turn = EOCheckedTurn::start(label, true);
     turn.finish();
     turn.record_mut(|record| {
-        record.engram.historical_control.insert("engramOpenGrantId".into(), json!(HISTORICAL_GRANT));
+        record
+            .engram
+            .historical_control
+            .insert("engramOpenGrantId".into(), json!(HISTORICAL_GRANT));
     });
     let token = turn.record(|record| record.runtime.runtime_token().unwrap());
     let ownership = new_claude_turn_ownership();
@@ -44,7 +65,10 @@ fn adopted_with_historical_grant(label: &str) -> (EOCheckedTurn, RuntimeToken, u
     }
     let generation = turn.record(|record| {
         assert!(unmediated_claude_turn_is_current(record));
-        assert!(record.engram.unadmitted_active_turn.is_some(), "the adopted interval has its own EO trace");
+        assert!(
+            record.engram.unadmitted_active_turn.is_some(),
+            "the adopted interval has its own EO trace"
+        );
         record.active_turn_generation
     });
     (turn, token, generation, ownership)
@@ -65,11 +89,20 @@ fn feed(turn: &EOCheckedTurn, token: &RuntimeToken, ownership: &ClaudeTurnOwners
 }
 
 fn assert_historical_grant_untouched(turn: &EOCheckedTurn, before: usize, path: &str) {
-    assert_eq!(before, 0, "the ordinary fixture starts with no gated/native request");
-    assert!(forbidden_requests(turn).is_empty(), "{path}: no current request consumes old grant history");
+    assert_eq!(
+        before, 0,
+        "the ordinary fixture starts with no gated/native request"
+    );
+    assert!(
+        forbidden_requests(turn).is_empty(),
+        "{path}: no current request consumes old grant history"
+    );
     turn.record(|record| {
-        assert_eq!(record.engram.historical_control.get("engramOpenGrantId"), Some(&json!(HISTORICAL_GRANT)),
-            "{path}: old grant history is unchanged");
+        assert_eq!(
+            record.engram.historical_control.get("engramOpenGrantId"),
+            Some(&json!(HISTORICAL_GRANT)),
+            "{path}: old grant history is unchanged"
+        );
     });
 }
 #[test]
@@ -99,7 +132,8 @@ fn an_adopted_turns_immediate_success_or_error_preserves_historical_grant_withou
 }
 
 #[test]
-fn a_deferred_adopted_finish_replayed_after_a_stop_still_preserves_historical_grant_without_control_calls() {
+fn a_deferred_adopted_finish_replayed_after_a_stop_still_preserves_historical_grant_without_control_calls()
+ {
     for is_error in [false, true] {
         let (turn, token, generation, ownership) =
             adopted_with_historical_grant(&format!("adopted-deferred-{is_error}"));
@@ -148,9 +182,9 @@ fn a_deferred_adopted_finish_replayed_after_a_stop_still_preserves_historical_gr
 }
 
 #[test]
-fn a_runtime_exit_or_missing_runtime_failure_of_an_adopted_turn_preserves_historical_grant_without_control_calls() {
-    let (turn, token, generation, _ownership) =
-        adopted_with_historical_grant("adopted-exit");
+fn a_runtime_exit_or_missing_runtime_failure_of_an_adopted_turn_preserves_historical_grant_without_control_calls()
+ {
+    let (turn, token, generation, _ownership) = adopted_with_historical_grant("adopted-exit");
     let before = forbidden_requests(&turn).len();
     turn.state
         .handle_runtime_exit_if_matches(&turn.session_id, &token, Some("the runtime exited"))
@@ -217,9 +251,17 @@ fn revoke(turn: &EOCheckedTurn, context: &str) {
 
 #[test]
 fn revocation_teardown_ends_the_adopted_runtime_without_consuming_historical_grant_data() {
-    let (turn, _token, generation, _ownership) = adopted_with_historical_grant("adopted-revocation");
-    let turn_ref = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().host_turn_ref.clone());
+    let (turn, _token, generation, _ownership) =
+        adopted_with_historical_grant("adopted-revocation");
+    let turn_ref = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .host_turn_ref
+            .clone()
+    });
     revoke(&turn, "test revocation of an adopted turn");
     let report = turn.observation_for(&turn_ref);
     assert_eq!(report["occurrence"]["outcome"], "unknown");
@@ -237,43 +279,81 @@ fn revocation_teardown_ends_the_adopted_runtime_without_consuming_historical_gra
 fn ordinary_deletion_waits_for_its_observed_turn_and_revocation_reports_its_own_execution() {
     for path in ["deletion", "revocation"] {
         let turn = EOCheckedTurn::start(&format!("ordinary-{path}"), true);
-        let (turn_ref, token, generation) = turn.record(|record| (
-            record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref.clone(),
-            record.runtime.runtime_token().unwrap(), record.active_turn_generation,
-        ));
+        let (turn_ref, token, generation) = turn.record(|record| {
+            (
+                record
+                    .engram
+                    .unadmitted_active_turn
+                    .as_ref()
+                    .unwrap()
+                    .host_turn_ref
+                    .clone(),
+                record.runtime.runtime_token().unwrap(),
+                record.active_turn_generation,
+            )
+        });
         if path == "deletion" {
-            let error = turn.state.kill_session(&turn.session_id).err()
+            let error = turn
+                .state
+                .kill_session(&turn.session_id)
+                .err()
                 .expect("captured active facts cannot be deleted before their turn ends");
             assert_eq!(error.status, StatusCode::CONFLICT);
             turn.record(|record| {
                 assert_eq!(record.session.status, SessionStatus::Active);
                 assert_eq!(record.active_turn_generation, generation);
                 assert!(record.runtime.matches_runtime_token(&token));
-                assert_eq!(record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref, turn_ref);
+                assert_eq!(
+                    record
+                        .engram
+                        .unadmitted_active_turn
+                        .as_ref()
+                        .unwrap()
+                        .host_turn_ref,
+                    turn_ref
+                );
             });
             turn.state.stop_session(&turn.session_id).unwrap();
         } else {
             revoke(&turn, "test revocation of an ordinary turn");
         }
         let report = turn.observation_for(&turn_ref);
-        assert_eq!(report["occurrence"]["outcome"],
-            if path == "deletion" { "cancelled" } else { "unknown" });
+        assert_eq!(
+            report["occurrence"]["outcome"],
+            if path == "deletion" {
+                "cancelled"
+            } else {
+                "unknown"
+            }
+        );
         assert_ordinary_observation_has_no_native_credit(&turn, &report);
         assert!(forbidden_requests(&turn).is_empty());
         if path == "deletion" {
             let guard = phase_sync::PollGuard::new();
             loop {
                 let pending = turn.record(runtime_observation_has_removal_duty);
-                if !pending { break; }
-                guard.wait(format_args!("the exact ordinary report must settle before Delete"));
+                if !pending {
+                    break;
+                }
+                guard.wait(format_args!(
+                    "the exact ordinary report must settle before Delete"
+                ));
             }
             turn.state.kill_session(&turn.session_id).unwrap();
-            assert!(turn.state.inner.lock().unwrap().find_session_index(&turn.session_id).is_none());
+            assert!(
+                turn.state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .find_session_index(&turn.session_id)
+                    .is_none()
+            );
         }
     }
 }
 #[test]
-fn the_atomic_failure_of_an_adopted_turn_preserves_historical_grant_without_control_calls_in_any_mode() {
+fn the_atomic_failure_of_an_adopted_turn_preserves_historical_grant_without_control_calls_in_any_mode()
+ {
     // A matching runtime's confirmed failure, under its terminalization claim.
     let (turn, token, generation, _ownership) =
         adopted_with_historical_grant("adopted-atomic-matching");
@@ -324,10 +404,23 @@ fn a_stale_adopted_generation_cannot_terminalize_a_successor() {
         record.active_turn_generation = generation + 1;
         assert!(!unmediated_claude_turn_is_current(record));
     });
-    assert!(turn.state.claim_turn_terminalization_if_runtime_matches(
-        &turn.session_id, &token, generation).unwrap().is_none());
-    assert!(!turn.state.fail_rejected_turn_delivery(&turn.session_id, &token, generation,
-        "a stale predecessor failure").unwrap());
+    assert!(
+        turn.state
+            .claim_turn_terminalization_if_runtime_matches(&turn.session_id, &token, generation)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !turn
+            .state
+            .fail_rejected_turn_delivery(
+                &turn.session_id,
+                &token,
+                generation,
+                "a stale predecessor failure"
+            )
+            .unwrap()
+    );
     turn.record(|record| {
         assert_eq!(record.active_turn_generation, generation + 1);
         assert_eq!(record.session.status, SessionStatus::Active);
@@ -357,8 +450,7 @@ fn an_error_session_adopts_a_runtime_started_turn_and_its_result_ends_it() {
 
 #[test]
 fn a_user_stop_of_an_adopted_turn_preserves_historical_grant_without_control_calls() {
-    let (turn, _token, _generation, _ownership) =
-        adopted_with_historical_grant("adopted-stop");
+    let (turn, _token, _generation, _ownership) = adopted_with_historical_grant("adopted-stop");
     let before = forbidden_requests(&turn).len();
     turn.state
         .stop_session(&turn.session_id)
@@ -368,14 +460,18 @@ fn a_user_stop_of_an_adopted_turn_preserves_historical_grant_without_control_cal
 }
 
 #[test]
-fn an_adopted_interval_ended_by_an_unresolved_result_preserves_historical_grant_without_control_calls() {
+fn an_adopted_interval_ended_by_an_unresolved_result_preserves_historical_grant_without_control_calls()
+ {
     // An ordinary turn completed and the idle session retains opaque grant
     // history. Every frame then goes through the reader's own application
     // function, which adopts the turn Claude Code starts by itself.
     let turn = EOCheckedTurn::start("adopted-unresolved", true);
     turn.finish();
     turn.record_mut(|record| {
-        record.engram.historical_control.insert("engramOpenGrantId".into(), json!(HISTORICAL_GRANT));
+        record
+            .engram
+            .historical_control
+            .insert("engramOpenGrantId".into(), json!(HISTORICAL_GRANT));
     });
     let token = turn.record(|record| record.runtime.runtime_token().expect("runtime"));
     let (input_tx, _input_rx) = std::sync::mpsc::channel();

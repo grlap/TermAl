@@ -15,7 +15,10 @@ fn bounded_read_cleanup_admission_failure_retains_before_any_group_operation() {
             .map(|_| group_started = true);
 
         let error = result.unwrap_err();
-        assert!(!group_started, "invalid group must never reach signal or wait");
+        assert!(
+            !group_started,
+            "invalid group must never reach signal or wait"
+        );
         assert_eq!(retained.len(), 1);
         assert!(retained[0].contains("pid=4242 reason=admission"));
         assert!(retained[0].contains("probe_attempted=false"));

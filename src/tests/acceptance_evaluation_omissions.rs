@@ -21,7 +21,10 @@ fn refused_floor_and_limit(message: &str) -> (usize, usize) {
             .and_then(|bytes| bytes.parse().ok())
             .unwrap_or_else(|| panic!("not a contract refusal: {message}"))
     };
-    (number_after("the brief is "), number_after("against a limit of "))
+    (
+        number_after("the brief is "),
+        number_after("against a limit of "),
+    )
 }
 
 /// The criterion length that holds a brief's floor the slack below its
@@ -29,7 +32,10 @@ fn refused_floor_and_limit(message: &str) -> (usize, usize) {
 /// byte for byte with a one-line ASCII criterion.
 fn fitting_criterion_len(probe: usize, message: &str) -> usize {
     let (floor, limit) = refused_floor_and_limit(message);
-    assert!(floor > limit, "a refusal reports a floor above its limit: {message}");
+    assert!(
+        floor > limit,
+        "a refusal reports a floor above its limit: {message}"
+    );
     probe - (floor - (limit - CONTRACT_SLACK_BYTES))
 }
 
@@ -304,9 +310,11 @@ fn acceptance_omissions_failed_second_page_preserves_the_unread_locator_boundary
             Ok(full_receipt())
         } else if args.iter().any(|arg| arg == "--after") {
             if reads.fetch_add(1, Ordering::SeqCst) == 0 {
-                Ok(json!({"work":{"short_ref":"w-task", "title":"Ship the route"},
+                Ok(
+                    json!({"work":{"short_ref":"w-task", "title":"Ship the route"},
                     "notes": [evidence_note(1, "scattered older proof")],
-                    "notes_window": canonical_notes_window(7, 2, 1, 43, Some("second-token"))}))
+                    "notes_window": canonical_notes_window(7, 2, 1, 43, Some("second-token"))}),
+                )
             } else {
                 Err(EngramTransportError::transport("cut expired"))
             }
@@ -343,14 +351,31 @@ fn acceptance_omissions_missing_or_oversized_canonical_continuation_is_refused()
         let token = oversized.then(|| "x".repeat(MAX_ACCEPTANCE_CONTINUATION_BYTES + 1));
         show["notes_window"] = canonical_notes_window(41, 0, 40, 42, token.as_deref());
         let calls: RecordedEngramCalls = Arc::default();
-        let error = state.request_acceptance_evaluation_with_runner(
-            &parent,
-            evaluation_request(Some(Agent::Codex)),
-            fixture_reader(calls.clone(), show, Ok(policy_receipt(Some(&["independent_session"])))),
-        ).err().expect("an invalid canonical cursor must not admit an evaluator");
+        let error = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                evaluation_request(Some(Agent::Codex)),
+                fixture_reader(
+                    calls.clone(),
+                    show,
+                    Ok(policy_receipt(Some(&["independent_session"]))),
+                ),
+            )
+            .err()
+            .expect("an invalid canonical cursor must not admit an evaluator");
         assert_eq!(error.status, StatusCode::BAD_GATEWAY);
-        assert!(error.message.contains("notes continuation: malformed catalog window"));
-        assert!(!calls.lock().unwrap().iter().any(|(_, args)| args.iter().any(|arg| arg == "--after")));
+        assert!(
+            error
+                .message
+                .contains("notes continuation: malformed catalog window")
+        );
+        assert!(
+            !calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, args)| args.iter().any(|arg| arg == "--after"))
+        );
         assert!(state.inner.lock().unwrap().delegations.is_empty());
     }
 }
@@ -376,18 +401,29 @@ fn acceptance_omissions_final_page_without_canonical_window_is_refused() {
                 Ok(full_receipt())
             } else if args.iter().any(|arg| arg == "--after") {
                 observed.fetch_add(1, Ordering::SeqCst);
-                Ok(json!({"work":{"short_ref":"w-task", "title":"Ship the route"},
+                Ok(
+                    json!({"work":{"short_ref":"w-task", "title":"Ship the route"},
                     "notes": (0..5 - remaining).map(|index| evidence_note(index, "final older proof")).collect::<Vec<_>>(),
-                    "notes_omitted": remaining}))
+                    "notes_omitted": remaining}),
+                )
             } else {
                 Ok(first.clone())
             }
         };
-        let error = state.request_acceptance_evaluation_with_runner(
-            &parent, evaluation_request(Some(Agent::Codex)), reader,
-        ).err().expect("a header without its canonical window cannot close the capture");
+        let error = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                evaluation_request(Some(Agent::Codex)),
+                reader,
+            )
+            .err()
+            .expect("a header without its canonical window cannot close the capture");
         assert_eq!(error.status, StatusCode::BAD_GATEWAY);
-        assert!(error.message.contains("notes continuation: malformed catalog window"));
+        assert!(
+            error
+                .message
+                .contains("notes continuation: malformed catalog window")
+        );
         assert_eq!(pages.load(Ordering::SeqCst), 1);
         assert!(state.inner.lock().unwrap().delegations.is_empty());
     }
@@ -401,7 +437,9 @@ fn acceptance_omissions_valid_terminal_page_drops_the_consumed_boundary() {
     first["notes_window"] = canonical_notes_window(7, 0, 2, 42, Some("consumed-token"));
     first["notes_omitted"] = json!(5);
     let base = fixture_reader(
-        Arc::default(), first, Ok(policy_receipt(Some(&["independent_session"]))),
+        Arc::default(),
+        first,
+        Ok(policy_receipt(Some(&["independent_session"]))),
     );
     let pages = AtomicUsize::new(0);
     let response = state.request_acceptance_evaluation_with_runner(

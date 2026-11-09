@@ -219,8 +219,13 @@ async fn federation_established_failure_keeps_observed_credential_fence() {
         .event(|e| matches!(e, Event::Attempt(StatusCode::CONFLICT)))
         .await;
     let observation = fixture.app.federation_registry_view().unwrap();
-    let worker = observation["peers"].as_array().unwrap().iter()
-        .find(|peer| peer["host"]["hostId"] == fixture.id).unwrap()["attestation"]["worker"].clone();
+    let worker = observation["peers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|peer| peer["host"]["hostId"] == fixture.id)
+        .unwrap()["attestation"]["worker"]
+        .clone();
     fixture.finish(runtime).await;
     assert_eq!(worker["stage"], "materialChanged");
     assert_eq!(worker["quarantinedForRuntime"], false);
@@ -264,11 +269,21 @@ async fn federation_unknown_cleanup_retains_the_child_instead_of_replacing() {
     let app = fixture.app.clone();
     fixture.finish(runtime).await;
     let view = app.federation_registry_view().unwrap();
-    let worker = &view["peers"].as_array().unwrap().iter()
-        .find(|peer| peer["host"]["hostId"] == id).unwrap()["attestation"]["worker"];
+    let worker = &view["peers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|peer| peer["host"]["hostId"] == id)
+        .unwrap()["attestation"]["worker"];
     assert!(classified);
     assert!(quarantined.lock().unwrap().contains(&id));
-    assert!(matches!(worker["stage"].as_str(), Some("sshCleanupPending" | "sshCleanupRetry")));
-    assert!(matches!(worker["recoveryReason"].as_str(), Some("ownedSshCleanupPending" | "ownedSshCleanupRetry")));
+    assert!(matches!(
+        worker["stage"].as_str(),
+        Some("sshCleanupPending" | "sshCleanupRetry")
+    ));
+    assert!(matches!(
+        worker["recoveryReason"].as_str(),
+        Some("ownedSshCleanupPending" | "ownedSshCleanupRetry")
+    ));
     assert_eq!(worker["quarantinedForRuntime"], true);
 }

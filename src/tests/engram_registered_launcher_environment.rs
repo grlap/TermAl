@@ -117,8 +117,12 @@ pub(super) fn isolated_launcher_for(
     // including when the launcher measures a linked worktree.
     let temporary = &service.temporary;
     fs::create_dir_all(temporary).unwrap();
-    assert!(!fs::canonicalize(temporary).unwrap().starts_with(fs::canonicalize(root).unwrap()),
-        "owner scratch stays outside the measured checkout");
+    assert!(
+        !fs::canonicalize(temporary)
+            .unwrap()
+            .starts_with(fs::canonicalize(root).unwrap()),
+        "owner scratch stays outside the measured checkout"
+    );
     command
         .env("TMPDIR", temporary)
         .env("TMP", temporary)

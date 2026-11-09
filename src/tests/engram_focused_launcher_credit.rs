@@ -16,8 +16,7 @@ const CAPTURED_REQUEST: &str = include_str!("fixtures/focused-launcher-pass/requ
 const CAPTURED_RESULTS: &str = include_str!("fixtures/focused-launcher-pass/results.json");
 const CAPTURED_RUN: &str = "test-f3f7e586-ec86-45f1-af3e-78afa04108cb";
 const CAPTURED_DIRECTORY: &str = "C:\\github\\Personal\\TermAl\\.git\\worktrees\\wt-focused-credit-9474\\review-runs\\test-f3f7e586-ec86-45f1-af3e-78afa04108cb";
-const FOCUSED_COMMAND: &str =
-    "node scripts/test-launcher.mjs focused -- cargo test --bin termal -q -- tests::delegation_result_parser";
+const FOCUSED_COMMAND: &str = "node scripts/test-launcher.mjs focused -- cargo test --bin termal -q -- tests::delegation_result_parser";
 
 /// The captured run placed under `runs`: its records written there, with
 /// `results` edited by `edit`, and its summary naming that directory.
@@ -60,31 +59,49 @@ fn a_captured_passing_focused_run_is_credited_from_its_own_results_record() {
 fn a_focused_run_is_not_credited_without_counts_its_record_backs() {
     let temp = TestTempRoot::create("termal-engram-focused-controls");
     let cases: Vec<(&str, Box<dyn FnOnce(&mut Value)>)> = vec![
-        ("no counts", Box::new(|results| {
-            results["stages"][0]
-                .as_object_mut()
-                .expect("a stage object")
-                .remove("tests");
-        })),
-        ("zero passed", Box::new(|results| {
-            results["stages"][0]["tests"]["passed"] = json!(0);
-        })),
-        ("a failed test", Box::new(|results| {
-            results["stages"][0]["tests"]["failed"] = json!(1);
-        })),
-        ("another run's record", Box::new(|results| {
-            results["runId"] = json!("test-other");
-        })),
-        ("a failed stage", Box::new(|results| {
-            results["stages"][0]["state"] = json!("failed");
-        })),
+        (
+            "no counts",
+            Box::new(|results| {
+                results["stages"][0]
+                    .as_object_mut()
+                    .expect("a stage object")
+                    .remove("tests");
+            }),
+        ),
+        (
+            "zero passed",
+            Box::new(|results| {
+                results["stages"][0]["tests"]["passed"] = json!(0);
+            }),
+        ),
+        (
+            "a failed test",
+            Box::new(|results| {
+                results["stages"][0]["tests"]["failed"] = json!(1);
+            }),
+        ),
+        (
+            "another run's record",
+            Box::new(|results| {
+                results["runId"] = json!("test-other");
+            }),
+        ),
+        (
+            "a failed stage",
+            Box::new(|results| {
+                results["stages"][0]["state"] = json!("failed");
+            }),
+        ),
     ];
     for (case, edit) in cases {
         let runs = temp.path().join(case.replace(' ', "-"));
         let (_, summary) = captured_run(&runs, edit);
         // The summary still prints its counts line: text alone earns nothing.
         assert!(summary.contains("tests: passed=39"), "{case}");
-        assert!(engram_launcher_output_test_stages(&summary).is_empty(), "{case}");
+        assert!(
+            engram_launcher_output_test_stages(&summary).is_empty(),
+            "{case}"
+        );
         assert!(!focused_showed(FOCUSED_COMMAND, &summary), "{case}");
     }
 
@@ -149,7 +166,10 @@ fn a_focused_command_never_takes_a_full_gates_stages() {
         "PASS test-full exit=0\nresults: {}\nrust-tests: passed exit=0\nvitest: passed exit=0",
         full.join("results.json").display()
     );
-    assert_eq!(engram_launcher_output_test_stages(&output), ["rust-tests", "vitest"]);
+    assert_eq!(
+        engram_launcher_output_test_stages(&output),
+        ["rust-tests", "vitest"]
+    );
     assert!(!focused_showed(FOCUSED_COMMAND, &output));
 }
 
@@ -166,8 +186,15 @@ fn a_credited_focused_run_is_recorded_as_its_test_command_not_a_full_gate() {
         recorded.starts_with(&format!("`{}` exited 0", check.normalized)),
         "{recorded}"
     );
-    assert!(check.normalized.contains("focused -- cargo test --bin termal"));
-    assert!(recorded.contains(&format!("\nPASS {CAPTURED_RUN} exit=0")), "{recorded}");
+    assert!(
+        check
+            .normalized
+            .contains("focused -- cargo test --bin termal")
+    );
+    assert!(
+        recorded.contains(&format!("\nPASS {CAPTURED_RUN} exit=0")),
+        "{recorded}"
+    );
     assert!(recorded.contains("\nfocused: passed"), "{recorded}");
     assert!(!recorded.contains("full gate"), "{recorded}");
 }
@@ -176,19 +203,31 @@ fn a_credited_focused_run_is_recorded_as_its_test_command_not_a_full_gate() {
 fn a_focused_record_needs_an_integer_count_and_exit_zero_throughout() {
     let temp = TestTempRoot::create("termal-engram-focused-exits");
     let cases: Vec<(&str, Box<dyn FnOnce(&mut Value)>)> = vec![
-        ("run exit 1 while passed", Box::new(|results| {
-            results["exitCode"] = json!(1);
-        })),
-        ("stage code 1 while passed", Box::new(|results| {
-            results["stages"][0]["code"] = json!(1);
-        })),
-        ("passed count as text", Box::new(|results| {
-            results["stages"][0]["tests"]["passed"] = json!("39");
-        })),
+        (
+            "run exit 1 while passed",
+            Box::new(|results| {
+                results["exitCode"] = json!(1);
+            }),
+        ),
+        (
+            "stage code 1 while passed",
+            Box::new(|results| {
+                results["stages"][0]["code"] = json!(1);
+            }),
+        ),
+        (
+            "passed count as text",
+            Box::new(|results| {
+                results["stages"][0]["tests"]["passed"] = json!("39");
+            }),
+        ),
     ];
     for (case, edit) in cases {
         let (_, summary) = captured_run(&temp.path().join(case.replace(' ', "-")), edit);
-        assert!(engram_launcher_output_test_stages(&summary).is_empty(), "{case}");
+        assert!(
+            engram_launcher_output_test_stages(&summary).is_empty(),
+            "{case}"
+        );
         assert!(!focused_showed(FOCUSED_COMMAND, &summary), "{case}");
     }
 }
@@ -232,7 +271,11 @@ fn a_focused_run_takes_counts_only_from_the_run_its_own_verdict_names() {
 fn non_focused_record(runs: &FsPath, run_id: &str, request: Value) -> String {
     let directory = runs.join(run_id);
     fs::create_dir_all(&directory).unwrap();
-    fs::write(directory.join("request.json"), serde_json::to_vec(&request).unwrap()).unwrap();
+    fs::write(
+        directory.join("request.json"),
+        serde_json::to_vec(&request).unwrap(),
+    )
+    .unwrap();
     format!(
         "PASS {run_id} exit=0\nresults: {}\nfocused: passed exit=0 log=x",
         directory.join("results.json").display()
@@ -253,16 +296,26 @@ fn a_full_record_with_a_test_stage_named_focused_never_credits_a_focused_command
             "stages": [{ "name": "focused", "kind": "test" }],
         }),
     );
-    assert!(engram_launcher_output_test_stages(&kinded).is_empty(), "kinded");
+    assert!(
+        engram_launcher_output_test_stages(&kinded).is_empty(),
+        "kinded"
+    );
     assert!(!focused_showed(FOCUSED_COMMAND, &kinded), "kinded");
     // A one-stage `focused` record that does not say it is not a full gate.
-    for (run_id, full) in [("test-missing-full", None), ("test-full-no", Some(json!("no")))] {
-        let mut request = json!({ "runId": run_id, "stages": [{ "name": "focused", "kind": "test" }] });
+    for (run_id, full) in [
+        ("test-missing-full", None),
+        ("test-full-no", Some(json!("no"))),
+    ] {
+        let mut request =
+            json!({ "runId": run_id, "stages": [{ "name": "focused", "kind": "test" }] });
         if let Some(full) = full {
             request["full"] = full;
         }
         let summary = non_focused_record(temp.path(), run_id, request);
-        assert!(engram_launcher_output_test_stages(&summary).is_empty(), "{run_id}");
+        assert!(
+            engram_launcher_output_test_stages(&summary).is_empty(),
+            "{run_id}"
+        );
         assert!(!focused_showed(FOCUSED_COMMAND, &summary), "{run_id}");
     }
 }

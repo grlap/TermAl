@@ -88,15 +88,16 @@ fn windows_writable_codex_briefs_explain_parser_errors_and_encoding_without_tran
             assert_eq!(prompt.matches(CODEX_WRITE_GUIDANCE_START).count(), 1);
             assert!(prompt.contains(&child.prompt));
             assert!(!prompt.contains(CODEX_READ_GUIDANCE_START));
-            assert!(!build_delegation_prompt_on(&child, false)
-                .contains(CODEX_WRITE_GUIDANCE_START));
+            assert!(
+                !build_delegation_prompt_on(&child, false).contains(CODEX_WRITE_GUIDANCE_START)
+            );
             child.agent = Agent::Claude;
-            assert!(!build_delegation_prompt_on(&child, true)
-                .contains(CODEX_WRITE_GUIDANCE_START));
+            assert!(!build_delegation_prompt_on(&child, true).contains(CODEX_WRITE_GUIDANCE_START));
         }
     }
-    assert!(!build_delegation_prompt_on(&read_only_codex(), true)
-        .contains(CODEX_WRITE_GUIDANCE_START));
+    assert!(
+        !build_delegation_prompt_on(&read_only_codex(), true).contains(CODEX_WRITE_GUIDANCE_START)
+    );
 }
 
 /// On Windows a read-only Codex delegation is told to read source through
@@ -207,6 +208,8 @@ fn the_guidance_asks_for_inspection_unavailable_rather_than_claiming_fidelity() 
     assert!(WINDOWS_CODEX_READ_ONLY_SOURCE_READS.ends_with(
         "If exact text or complete coverage cannot be obtained, report inspection unavailable rather than a clean review."
     ));
-    assert!(WINDOWS_CODEX_READ_ONLY_SOURCE_READS
-        .contains("nonterminating errors can still leave exit code 0"));
+    assert!(
+        WINDOWS_CODEX_READ_ONLY_SOURCE_READS
+            .contains("nonterminating errors can still leave exit code 0")
+    );
 }

@@ -16,7 +16,9 @@ impl MailboxCase {
 
     pub async fn with_writer_timeout(timeout: Duration) -> Self {
         let mut central = super::super::federation_mailboxes::central_store();
-        Arc::get_mut(&mut central.mailbox_store).unwrap().write_admission_timeout = timeout;
+        Arc::get_mut(&mut central.mailbox_store)
+            .unwrap()
+            .write_admission_timeout = timeout;
         let (_, target) = super::super::federation_mailboxes::local_participant(&central, "Target");
         let pair = HostPair::new(central, io()).await;
         let connected = pair.central.federation_peer_snapshot(&pair.id).unwrap();

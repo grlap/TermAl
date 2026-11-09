@@ -186,16 +186,36 @@ fn global_file_changes_summary_covers_distinct_workdir_and_named_root() {
     let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
     let workdir = root.join("session-dir");
     fs::create_dir_all(&workdir).unwrap();
-    state.inner.lock().unwrap().sessions[0].session.workdir = workdir.to_string_lossy().into_owned();
-    let source_path = root.join("sibling-root/source.rs").to_string_lossy().into_owned();
-    state.record_active_turn_file_changes(&[file_change_capture_event(&owner, &source_path, WorkspaceFileChangeKind::Modified)]);
-    state.record_active_turn_file_changes(&[file_change_capture_event(&owner, "", WorkspaceFileChangeKind::Subtree)]);
+    state.inner.lock().unwrap().sessions[0].session.workdir =
+        workdir.to_string_lossy().into_owned();
+    let source_path = root
+        .join("sibling-root/source.rs")
+        .to_string_lossy()
+        .into_owned();
+    state.record_active_turn_file_changes(&[file_change_capture_event(
+        &owner,
+        &source_path,
+        WorkspaceFileChangeKind::Modified,
+    )]);
+    state.record_active_turn_file_changes(&[file_change_capture_event(
+        &owner,
+        "",
+        WorkspaceFileChangeKind::Subtree,
+    )]);
     let mut inner = state.inner.lock().unwrap();
     let record = &mut inner.sessions[0];
     assert_eq!(record.active_turn_file_changes.len(), 1);
-    assert_eq!(record.active_turn_file_changes.get(""), Some(&WorkspaceFileChangeKind::Subtree));
-    assert!(push_active_turn_file_changes_on_record(record, "global-summary".to_owned()));
-    let Message::FileChanges { files, .. } = record.session.messages.last().unwrap() else { panic!("persisted file summary") };
+    assert_eq!(
+        record.active_turn_file_changes.get(""),
+        Some(&WorkspaceFileChangeKind::Subtree)
+    );
+    assert!(push_active_turn_file_changes_on_record(
+        record,
+        "global-summary".to_owned()
+    ));
+    let Message::FileChanges { files, .. } = record.session.messages.last().unwrap() else {
+        panic!("persisted file summary")
+    };
     assert_eq!(files.len(), 1);
     assert!(files[0].path.is_empty());
     assert_eq!(files[0].kind, WorkspaceFileChangeKind::Subtree);
@@ -207,8 +227,10 @@ fn ignored_tree_delivery(state: &AppState, paths: &[PathBuf]) -> Vec<WorkspaceFi
     let mut pending = WorkspacePendingChanges::default();
     for path in paths {
         pending.ingest(
-            Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
-                .add_path(path.clone())),
+            Ok(
+                NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                    .add_path(path.clone()),
+            ),
             EngramHost::watcher_arrival_now(),
             std::time::Instant::now(),
         );
@@ -230,10 +252,21 @@ fn watcher_ignored_tree_does_not_publish_or_attribute_checkout_contents() {
         fs::write(file, "fixture\n").unwrap();
     }
     let publication = ignored_tree_delivery(&state, &files);
-    assert!(publication.is_empty(), "ignored checkout must not reach UI publication: {} entries", publication.len());
+    assert!(
+        publication.is_empty(),
+        "ignored checkout must not reach UI publication: {} entries",
+        publication.len()
+    );
     let inner = state.inner.lock().unwrap();
-    let record = inner.sessions.iter().find(|r| r.session.id == owner).unwrap();
-    assert!(record.active_turn_file_changes.is_empty(), "ignored checkout must not enter the turn summary");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == owner)
+        .unwrap();
+    assert!(
+        record.active_turn_file_changes.is_empty(),
+        "ignored checkout must not enter the turn summary"
+    );
 }
 
 #[test]
@@ -250,11 +283,23 @@ fn watcher_ignored_tree_filter_keeps_tracked_and_nonignored_untracked_changes() 
     fs::write(&untracked, "untracked fixture\n").unwrap();
     let files = [tracked, untracked];
     let publication = ignored_tree_delivery(&state, &files);
-    assert_eq!(publication.len(), 2, "Git-ignored tracked files still require refresh");
+    assert_eq!(
+        publication.len(),
+        2,
+        "Git-ignored tracked files still require refresh"
+    );
     let inner = state.inner.lock().unwrap();
-    let record = inner.sessions.iter().find(|r| r.session.id == owner).unwrap();
+    let record = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == owner)
+        .unwrap();
     for path in &files {
-        assert!(record.active_turn_file_changes.contains_key(&path.to_string_lossy().into_owned()));
+        assert!(
+            record
+                .active_turn_file_changes
+                .contains_key(&path.to_string_lossy().into_owned())
+        );
     }
 }
 
@@ -267,11 +312,38 @@ fn watcher_ignored_tree_routes_active_nested_worktree_changes_to_its_own_turn() 
     fs::write(root.join(".gitignore"), ".worktrees/\n").unwrap();
     let nested = root.join(".worktrees").join("active");
     run_git_test_command_output(&root, &["add", "--", ".gitignore"]);
-    run_git_test_command_output(&root, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-m", "fixture"]);
-    run_git_test_command_output(&root, &["worktree", "add", "--detach", nested.to_str().unwrap(), "HEAD"]);
+    run_git_test_command_output(
+        &root,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--no-gpg-sign",
+            "-m",
+            "fixture",
+        ],
+    );
+    run_git_test_command_output(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            nested.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
     let child = {
         let mut inner = state.inner.lock().unwrap();
-        let created = inner.create_session(Agent::Codex, None, nested.to_string_lossy().into_owned(), None, None);
+        let created = inner.create_session(
+            Agent::Codex,
+            None,
+            nested.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
         let record = inner.sessions.last_mut().unwrap();
         record.active_turn_generation = 1;
         record.active_turn_start_message_count = Some(record.session.messages.len());
@@ -280,14 +352,35 @@ fn watcher_ignored_tree_routes_active_nested_worktree_changes_to_its_own_turn() 
     let path = nested.join("real.rs");
     fs::write(&path, "real nested source\n").unwrap();
     let publication = ignored_tree_delivery(&state, &[path.clone()]);
-    assert_eq!(publication.len(), 1, "only the nested source change is published");
+    assert_eq!(
+        publication.len(),
+        1,
+        "only the nested source change is published"
+    );
     assert_eq!(publication[0].path, path.to_string_lossy());
-    assert!(publication[0].root_path.is_none(), "publication must also refresh tabs opened from sibling session roots");
+    assert!(
+        publication[0].root_path.is_none(),
+        "publication must also refresh tabs opened from sibling session roots"
+    );
     let inner = state.inner.lock().unwrap();
-    let ancestor = inner.sessions.iter().find(|r| r.session.id == owner).unwrap();
-    let own = inner.sessions.iter().find(|r| r.session.id == child).unwrap();
-    assert!(ancestor.active_turn_file_changes.is_empty(), "parent ignore policy must suppress nested checkout attribution");
-    assert!(own.active_turn_file_changes.contains_key(&path.to_string_lossy().into_owned()));
+    let ancestor = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == owner)
+        .unwrap();
+    let own = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == child)
+        .unwrap();
+    assert!(
+        ancestor.active_turn_file_changes.is_empty(),
+        "parent ignore policy must suppress nested checkout attribution"
+    );
+    assert!(
+        own.active_turn_file_changes
+            .contains_key(&path.to_string_lossy().into_owned())
+    );
 }
 
 #[test]
@@ -298,12 +391,39 @@ fn watcher_ignored_covering_marker_preserves_active_nested_root_refresh() {
     run_git_test_command_output(&root, &["init"]);
     fs::write(root.join(".gitignore"), ".worktrees/\n").unwrap();
     run_git_test_command_output(&root, &["add", "--", ".gitignore"]);
-    run_git_test_command_output(&root, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-m", "fixture"]);
+    run_git_test_command_output(
+        &root,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--no-gpg-sign",
+            "-m",
+            "fixture",
+        ],
+    );
     let nested = root.join(".worktrees").join("active");
-    run_git_test_command_output(&root, &["worktree", "add", "--detach", nested.to_str().unwrap(), "HEAD"]);
+    run_git_test_command_output(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            nested.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
     let child = {
         let mut inner = state.inner.lock().unwrap();
-        let created = inner.create_session(Agent::Codex, None, nested.to_string_lossy().into_owned(), None, None);
+        let created = inner.create_session(
+            Agent::Codex,
+            None,
+            nested.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
         let record = inner.sessions.last_mut().unwrap();
         record.active_turn_generation = 1;
         record.active_turn_start_message_count = Some(record.session.messages.len());
@@ -313,23 +433,48 @@ fn watcher_ignored_covering_marker_preserves_active_nested_root_refresh() {
     fs::write(&path, "real nested source\n").unwrap();
     let mut pending = WorkspacePendingChanges::default();
     for event in [
-        NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::Folder)).add_path(root.join(".worktrees")),
-        NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File)).add_path(path.clone()),
+        NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::Folder))
+            .add_path(root.join(".worktrees")),
+        NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+            .add_path(path.clone()),
     ] {
-        pending.ingest(Ok(event), EngramHost::watcher_arrival_now(), std::time::Instant::now());
+        pending.ingest(
+            Ok(event),
+            EngramHost::watcher_arrival_now(),
+            std::time::Instant::now(),
+        );
     }
     let batch = pending.take();
-    assert_eq!(batch.len(), 1, "covering ingress must absorb the exact child fact");
+    assert_eq!(
+        batch.len(),
+        1,
+        "covering ingress must absorb the exact child fact"
+    );
     let publication = state.process_workspace_dirty_batch(batch);
-    assert_eq!(publication.len(), 1, "retain only the known nested root's covering refresh");
+    assert_eq!(
+        publication.len(),
+        1,
+        "retain only the known nested root's covering refresh"
+    );
     assert_eq!(publication[0].path, nested.to_string_lossy());
     assert_eq!(publication[0].kind, WorkspaceFileChangeKind::Subtree);
     assert!(publication[0].root_path.is_none());
     let inner = state.inner.lock().unwrap();
-    let ancestor = inner.sessions.iter().find(|r| r.session.id == owner).unwrap();
-    let own = inner.sessions.iter().find(|r| r.session.id == child).unwrap();
+    let ancestor = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == owner)
+        .unwrap();
+    let own = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == child)
+        .unwrap();
     assert!(ancestor.active_turn_file_changes.is_empty());
-    assert_eq!(own.active_turn_file_changes.get(nested.to_str().unwrap()), Some(&WorkspaceFileChangeKind::Subtree));
+    assert_eq!(
+        own.active_turn_file_changes.get(nested.to_str().unwrap()),
+        Some(&WorkspaceFileChangeKind::Subtree)
+    );
 }
 
 #[cfg(unix)]
@@ -349,9 +494,17 @@ fn watcher_ignore_query_preserves_literal_posix_backslashes() {
     assert_eq!(publication.len(), 1);
     assert_eq!(publication[0].path, literal.to_string_lossy());
     let inner = state.inner.lock().unwrap();
-    let record = inner.sessions.iter().find(|r| r.session.id == owner).unwrap();
+    let record = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == owner)
+        .unwrap();
     assert_eq!(record.active_turn_file_changes.len(), 1);
-    assert!(record.active_turn_file_changes.contains_key(literal.to_str().unwrap()));
+    assert!(
+        record
+            .active_turn_file_changes
+            .contains_key(literal.to_str().unwrap())
+    );
 }
 
 #[test]
@@ -364,8 +517,13 @@ fn watcher_repeated_file_notifications_keep_a_complete_summary_title() {
     ignored_tree_delivery(&state, &[PathBuf::from(&path)]);
     let mut inner = state.inner.lock().unwrap();
     let record = &mut inner.sessions[0];
-    assert!(push_active_turn_file_changes_on_record(record, "repeated-summary".to_owned()));
-    let Message::FileChanges { title, files, .. } = record.session.messages.last().unwrap() else { panic!("file summary") };
+    assert!(push_active_turn_file_changes_on_record(
+        record,
+        "repeated-summary".to_owned()
+    ));
+    let Message::FileChanges { title, files, .. } = record.session.messages.last().unwrap() else {
+        panic!("file summary")
+    };
     assert_eq!(files.len(), 1);
     assert_eq!(title, "1 file changed during turn");
 }
@@ -376,34 +534,66 @@ fn watcher_late_summary_counts_only_its_own_notifications() {
     for late_count in [1, 40] {
         let (state, _, _) = file_change_capture_fixture();
         let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
-        let paths = (0..200).map(|n| {
-            let path = root.join(format!("source-{n}.rs"));
-            fs::write(&path, "source\n").unwrap();
-            path
-        }).collect::<Vec<_>>();
+        let paths = (0..200)
+            .map(|n| {
+                let path = root.join(format!("source-{n}.rs"));
+                fs::write(&path, "source\n").unwrap();
+                path
+            })
+            .collect::<Vec<_>>();
         // Deliver already-converted batches to isolate turn-summary bounding
         // from the pending trie's independent child limit.
-        let events = paths.iter().map(|path| file_change_capture_event("", path.to_str().unwrap(), WorkspaceFileChangeKind::Modified))
-            .map(|mut event| { event.session_id = None; event }).collect::<Vec<_>>();
+        let events = paths
+            .iter()
+            .map(|path| {
+                file_change_capture_event(
+                    "",
+                    path.to_str().unwrap(),
+                    WorkspaceFileChangeKind::Modified,
+                )
+            })
+            .map(|mut event| {
+                event.session_id = None;
+                event
+            })
+            .collect::<Vec<_>>();
         state.record_active_turn_file_changes(&events);
         {
             let mut inner = state.inner.lock().unwrap();
             let record = &mut inner.sessions[0];
-            assert!(push_active_turn_file_changes_on_record(record, "end-summary".to_owned()));
+            assert!(push_active_turn_file_changes_on_record(
+                record,
+                "end-summary".to_owned()
+            ));
             finish_active_turn_file_change_tracking(record);
         }
         state.record_active_turn_file_changes(&events[..late_count]);
         let inner = state.inner.lock().unwrap();
-        let summaries = inner.sessions[0].session.messages.iter().filter_map(|message| match message {
-            Message::FileChanges { title, files, .. } => Some((title, files)), _ => None,
-        }).collect::<Vec<_>>();
+        let summaries = inner.sessions[0]
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::FileChanges { title, files, .. } => Some((title, files)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert_eq!(summaries.len(), 2);
-        assert!(summaries[0].0.starts_with("200 workspace change notifications"));
+        assert!(
+            summaries[0]
+                .0
+                .starts_with("200 workspace change notifications")
+        );
         assert!(summaries.iter().all(|(_, files)| files.len() <= 32));
         if late_count == 1 {
             assert_eq!(summaries[1].0, "1 file changed during turn");
         } else {
-            assert!(summaries[1].0.starts_with("40 workspace change notifications"), "late card must exclude the first card's 200 notifications");
+            assert!(
+                summaries[1]
+                    .0
+                    .starts_with("40 workspace change notifications"),
+                "late card must exclude the first card's 200 notifications"
+            );
         }
     }
 }
@@ -415,31 +605,49 @@ fn watcher_large_change_publication_is_bounded_before_transport_and_turn_summary
     let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
     run_git_test_command_output(&root, &["init"]);
     let mut receiver = state.file_events.subscribe();
-    let paths = (0..200).map(|n| {
-        let path = root.join(format!("src/d{}/f{}.rs", n / 20, n % 20));
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, "source fixture\n").unwrap();
-        path
-    }).collect::<Vec<_>>();
+    let paths = (0..200)
+        .map(|n| {
+            let path = root.join(format!("src/d{}/f{}.rs", n / 20, n % 20));
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "source fixture\n").unwrap();
+            path
+        })
+        .collect::<Vec<_>>();
     ignored_tree_delivery(&state, &paths);
-    let payload = receiver.try_recv().expect("own source changes must reach transport");
+    let payload = receiver
+        .try_recv()
+        .expect("own source changes must reach transport");
     let event: Value = serde_json::from_str(&payload).unwrap();
     let changes = event["changes"].as_array().unwrap();
-    assert!(changes.len() <= 32, "large change set must be bounded before SSE transport: {} entries", changes.len());
+    assert!(
+        changes.len() <= 32,
+        "large change set must be bounded before SSE transport: {} entries",
+        changes.len()
+    );
     assert_eq!(event["summary"]["observedChanges"].as_u64(), Some(200));
     // A sample alone would hide refreshes for the other files. Covering
     // markers must preserve invalidation for every observed source path.
     for path in &paths {
-        assert!(changes.iter().any(|change| {
-            let candidate = change["path"].as_str().unwrap();
-            path == FsPath::new(candidate)
-                || change["kind"] == "subtree"
-                    && (candidate.is_empty() || path.starts_with(candidate))
-        }), "source refresh must remain covered");
+        assert!(
+            changes.iter().any(|change| {
+                let candidate = change["path"].as_str().unwrap();
+                path == FsPath::new(candidate)
+                    || change["kind"] == "subtree"
+                        && (candidate.is_empty() || path.starts_with(candidate))
+            }),
+            "source refresh must remain covered"
+        );
     }
     let inner = state.inner.lock().unwrap();
-    let record = inner.sessions.iter().find(|r| r.session.id == owner).unwrap();
-    assert!(record.active_turn_file_changes.len() <= 32, "turn summary storage must also remain bounded");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|r| r.session.id == owner)
+        .unwrap();
+    assert!(
+        record.active_turn_file_changes.len() <= 32,
+        "turn summary storage must also remain bounded"
+    );
 }
 
 #[test]
@@ -451,12 +659,20 @@ fn watcher_subdirectory_session_uses_its_known_project_ignore_policy() {
     fs::write(root.join(".gitignore"), "src/cache/\n").unwrap();
     let workdir = root.join("src");
     fs::create_dir_all(workdir.join("cache")).unwrap();
-    let project = state.create_project(CreateProjectRequest {
-        name: None, root_path: root.to_string_lossy().into_owned(), remote_id: default_local_remote_id(),
-    }).unwrap();
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: None,
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .unwrap();
     {
         let mut inner = state.inner.lock().unwrap();
-        let record = inner.sessions.iter_mut().find(|record| record.session.id == owner).unwrap();
+        let record = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == owner)
+            .unwrap();
         record.session.workdir = workdir.to_string_lossy().into_owned();
         record.session.project_id = Some(project.project_id);
     }
@@ -465,16 +681,36 @@ fn watcher_subdirectory_session_uses_its_known_project_ignore_policy() {
     fs::write(&ignored, "ignored checkout\n").unwrap();
     fs::write(&own, "visible source\n").unwrap();
     let publication = ignored_tree_delivery(&state, &[ignored.clone(), own.clone()]);
-    assert_eq!(publication.len(), 1, "the subdirectory policy must inherit Git discovery from its project");
+    assert_eq!(
+        publication.len(),
+        1,
+        "the subdirectory policy must inherit Git discovery from its project"
+    );
     assert_eq!(publication[0].path, own.to_string_lossy());
     // Attribution can also receive converted events directly, without the
     // publication filter. Its independent query must use the same boundary.
-    state.record_active_turn_file_changes(&[file_change_capture_event(&owner, ignored.to_str().unwrap(), WorkspaceFileChangeKind::Created)]);
+    state.record_active_turn_file_changes(&[file_change_capture_event(
+        &owner,
+        ignored.to_str().unwrap(),
+        WorkspaceFileChangeKind::Created,
+    )]);
     let inner = state.inner.lock().unwrap();
-    let record = inner.sessions.iter().find(|record| record.session.id == owner).unwrap();
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == owner)
+        .unwrap();
     assert_eq!(record.active_turn_file_changes.len(), 1);
-    assert!(record.active_turn_file_changes.contains_key(own.to_str().unwrap()));
-    assert!(!record.active_turn_file_changes.contains_key(ignored.to_str().unwrap()));
+    assert!(
+        record
+            .active_turn_file_changes
+            .contains_key(own.to_str().unwrap())
+    );
+    assert!(
+        !record
+            .active_turn_file_changes
+            .contains_key(ignored.to_str().unwrap())
+    );
 }
 
 #[test]
@@ -482,36 +718,66 @@ fn watcher_expired_ignore_read_keeps_bounded_conservative_delivery() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let (state, owner, _) = file_change_capture_fixture();
     let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
-    let paths = (0..200).map(|n| {
-        let path = root.join("src").join(format!("d{}", n / 20)).join(format!("f{}.rs", n % 20));
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, "source\n").unwrap();
-        path
-    }).collect::<Vec<_>>();
+    let paths = (0..200)
+        .map(|n| {
+            let path = root
+                .join("src")
+                .join(format!("d{}", n / 20))
+                .join(format!("f{}.rs", n % 20));
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "source\n").unwrap();
+            path
+        })
+        .collect::<Vec<_>>();
     let expired = std::time::Instant::now();
-    let events = [file_change_capture_event(&owner, paths[0].to_str().unwrap(), WorkspaceFileChangeKind::Created)];
-    assert!(query_workspace_ignored_changes(root.to_str().unwrap(), &events, &[], expired).unwrap_err()
-        .to_string().contains("deadline exceeded before launch"));
+    let events = [file_change_capture_event(
+        &owner,
+        paths[0].to_str().unwrap(),
+        WorkspaceFileChangeKind::Created,
+    )];
+    assert!(
+        query_workspace_ignored_changes(root.to_str().unwrap(), &events, &[], expired)
+            .unwrap_err()
+            .to_string()
+            .contains("deadline exceeded before launch")
+    );
     struct ResetDeadline(Option<std::time::Instant>);
     impl Drop for ResetDeadline {
-        fn drop(&mut self) { WORKSPACE_IGNORE_DEADLINE_TEST_OVERRIDE.with(|value| value.set(self.0)); }
+        fn drop(&mut self) {
+            WORKSPACE_IGNORE_DEADLINE_TEST_OVERRIDE.with(|value| value.set(self.0));
+        }
     }
-    let _reset = ResetDeadline(WORKSPACE_IGNORE_DEADLINE_TEST_OVERRIDE.with(|value| value.replace(Some(expired))));
+    let _reset = ResetDeadline(
+        WORKSPACE_IGNORE_DEADLINE_TEST_OVERRIDE.with(|value| value.replace(Some(expired))),
+    );
     let mut receiver = state.file_events.subscribe();
     let publication = ignored_tree_delivery(&state, &paths);
-    assert_eq!(publication.len(), paths.len(), "unknown ignore policy cannot hide real changes");
+    assert_eq!(
+        publication.len(),
+        paths.len(),
+        "unknown ignore policy cannot hide real changes"
+    );
     let event: Value = serde_json::from_str(&receiver.try_recv().unwrap()).unwrap();
     let changes = event["changes"].as_array().unwrap();
     assert!(changes.len() <= 32);
     assert_eq!(event["summary"]["observedChanges"].as_u64(), Some(200));
     for path in &paths {
-        assert!(changes.iter().any(|change| {
-            let candidate = change["path"].as_str().unwrap();
-            path == FsPath::new(candidate) || change["kind"] == "subtree" && (candidate.is_empty() || path.starts_with(candidate))
-        }), "classification failure must retain covering refreshes");
+        assert!(
+            changes.iter().any(|change| {
+                let candidate = change["path"].as_str().unwrap();
+                path == FsPath::new(candidate)
+                    || change["kind"] == "subtree"
+                        && (candidate.is_empty() || path.starts_with(candidate))
+            }),
+            "classification failure must retain covering refreshes"
+        );
     }
     let inner = state.inner.lock().unwrap();
-    let record = inner.sessions.iter().find(|record| record.session.id == owner).unwrap();
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == owner)
+        .unwrap();
     assert!(!record.active_turn_file_changes.is_empty());
     assert!(record.active_turn_file_changes.len() <= 32);
 }
@@ -577,11 +843,8 @@ fn file_change_capture_retains_original_evidence_across_owner_changes() {
                 // All keep the root generation and path unchanged. Neither is
                 // enough to identify the captured naming authority.
                 "root-claim" => {
-                    record
-                        .engram
-                        .observed_source_root_mut()
-                        .unwrap()
-                        .claim_id = "replacement-claim".to_owned()
+                    record.engram.observed_source_root_mut().unwrap().claim_id =
+                        "replacement-claim".to_owned()
                 }
                 "root-store" => {
                     record

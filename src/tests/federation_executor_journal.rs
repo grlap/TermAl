@@ -55,25 +55,49 @@ fn assert_constraint(result: rusqlite::Result<usize>) {
 fn federation_m4_journal_bootstrap_has_qualified_identity_and_distinct_stage_evidence() {
     let root = TestTempRoot::create("federation-journal-schema");
     let connection = open_journal(&root.path().join("coordination.sqlite"));
-    let mut statement = connection.prepare("PRAGMA table_info(federation_executor_operations)").unwrap();
+    let mut statement = connection
+        .prepare("PRAGMA table_info(federation_executor_operations)")
+        .unwrap();
     let columns = statement
         .query_map([], |row| row.get::<_, String>(1))
         .unwrap()
         .collect::<rusqlite::Result<BTreeSet<_>>>()
         .unwrap();
     for required in [
-        "central_host_id", "central_epoch", "operation_key", "target_host_id",
-        "enrollment_generation", "session_id", "creation_id", "placement_generation",
-        "command_kind", "payload_digest", "stage", "effect_state",
-        "queue_entry_id", "delivery_attempt_id", "runtime_ack", "processed_evidence",
+        "central_host_id",
+        "central_epoch",
+        "operation_key",
+        "target_host_id",
+        "enrollment_generation",
+        "session_id",
+        "creation_id",
+        "placement_generation",
+        "command_kind",
+        "payload_digest",
+        "stage",
+        "effect_state",
+        "queue_entry_id",
+        "delivery_attempt_id",
+        "runtime_ack",
+        "processed_evidence",
         "processed_evidence_kind",
     ] {
-        assert!(columns.contains(required), "missing durable operation field {required}");
+        assert!(
+            columns.contains(required),
+            "missing durable operation field {required}"
+        );
     }
-    let version: String = connection.query_row(
-        "SELECT value FROM meta WHERE key='coordination_schema_version'", [], |row| row.get(0),
-    ).unwrap();
-    assert_ne!(version, "2", "adding journal schema must explicitly migrate the schema version");
+    let version: String = connection
+        .query_row(
+            "SELECT value FROM meta WHERE key='coordination_schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_ne!(
+        version, "2",
+        "adding journal schema must explicitly migrate the schema version"
+    );
 }
 
 #[test]
@@ -93,15 +117,19 @@ fn federation_m4_journal_exact_v2_upgrade_preserves_mailbox_receipts_and_cursor(
                VALUES('mailbox-fixture','participant-fixture','Participant',4,'joined');
              INSERT INTO mailbox_read_pages VALUES
                ('receipt-fixture','mailbox-fixture','participant-fixture',4,8);",
-        ).unwrap();
+        )
+        .unwrap();
     }
     let upgraded = open_journal(&path);
-    let observed: (i64, String, i64, i64) = upgraded.query_row(
-        "SELECT p.processed_through,r.receipt,r.after_sequence,r.through_sequence
+    let observed: (i64, String, i64, i64) = upgraded
+        .query_row(
+            "SELECT p.processed_through,r.receipt,r.after_sequence,r.through_sequence
          FROM mailbox_participants p JOIN mailbox_read_pages r
            ON p.mailbox_id=r.mailbox_id AND p.session_id=r.session_id",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    ).unwrap();
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
     assert_eq!(observed, (4, "receipt-fixture".to_owned(), 4, 8));
     drop(upgraded);
     drop(open_journal(&path));
@@ -115,12 +143,29 @@ fn federation_m4_journal_scoped_key_remains_unique_after_reopen_and_digest_confl
     insert_received(&connection, "operation-fixture", &"a".repeat(64)).unwrap();
     drop(connection);
     let reopened = open_journal(&path);
-    assert_constraint(insert_received(&reopened, "operation-fixture", &"a".repeat(64)));
-    assert_constraint(insert_received(&reopened, "operation-fixture", &"b".repeat(64)));
+    assert_constraint(insert_received(
+        &reopened,
+        "operation-fixture",
+        &"a".repeat(64),
+    ));
+    assert_constraint(insert_received(
+        &reopened,
+        "operation-fixture",
+        &"b".repeat(64),
+    ));
     let identity_columns = [
-        "central_host_id", "central_epoch", "operation_key", "target_host_id",
-        "enrollment_generation", "session_id", "creation_id", "placement_generation",
-        "command_kind", "payload_digest", "stage", "effect_state",
+        "central_host_id",
+        "central_epoch",
+        "operation_key",
+        "target_host_id",
+        "enrollment_generation",
+        "session_id",
+        "creation_id",
+        "placement_generation",
+        "command_kind",
+        "payload_digest",
+        "stage",
+        "effect_state",
     ];
     // Captured authority/target fields fence the original operation; changing
     // them must not manufacture another namespace for that operation's key.
@@ -133,9 +178,11 @@ fn federation_m4_journal_scoped_key_remains_unique_after_reopen_and_digest_confl
         ("placement_generation", "placement_generation+1"),
         ("command_kind", "'stop'"),
     ] {
-        let selected = identity_columns.iter()
+        let selected = identity_columns
+            .iter()
             .map(|column| if *column == field { changed } else { *column })
-            .collect::<Vec<_>>().join(",");
+            .collect::<Vec<_>>()
+            .join(",");
         assert_constraint(reopened.execute(
             &format!(
                 "INSERT INTO federation_executor_operations ({})
@@ -145,13 +192,21 @@ fn federation_m4_journal_scoped_key_remains_unique_after_reopen_and_digest_confl
             [],
         ));
     }
-    let rows: i64 = reopened.query_row(
-        "SELECT COUNT(*) FROM federation_executor_operations", [], |row| row.get(0),
-    ).unwrap();
+    let rows: i64 = reopened
+        .query_row(
+            "SELECT COUNT(*) FROM federation_executor_operations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(rows, 1);
-    let digest: String = reopened.query_row(
-        "SELECT payload_digest FROM federation_executor_operations", [], |row| row.get(0),
-    ).unwrap();
+    let digest: String = reopened
+        .query_row(
+            "SELECT payload_digest FROM federation_executor_operations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(digest, "a".repeat(64));
 }
 
@@ -162,24 +217,34 @@ fn federation_m4_journal_stage_constraints_do_not_equate_received_with_processed
     insert_received(&connection, "operation-fixture", &"a".repeat(64)).unwrap();
     for stage in ["accepted", "processed"] {
         assert_constraint(connection.execute(
-            "UPDATE federation_executor_operations SET stage=?1", [stage],
+            "UPDATE federation_executor_operations SET stage=?1",
+            [stage],
         ));
     }
-    connection.execute(
-        "UPDATE federation_executor_operations
+    connection
+        .execute(
+            "UPDATE federation_executor_operations
          SET stage='queued', queue_entry_id='queue-fixture', delivery_attempt_id='attempt-fixture'",
-        [],
-    ).unwrap();
-    connection.execute(
-        "UPDATE federation_executor_operations SET effect_state='unknown'", [],
-    ).unwrap();
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE federation_executor_operations SET effect_state='unknown'",
+            [],
+        )
+        .unwrap();
     assert_constraint(connection.execute(
-        "UPDATE federation_executor_operations SET stage='processed'", [],
+        "UPDATE federation_executor_operations SET stage='processed'",
+        [],
     ));
-    let observed: (String, String) = connection.query_row(
-        "SELECT stage,effect_state FROM federation_executor_operations", [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+    let observed: (String, String) = connection
+        .query_row(
+            "SELECT stage,effect_state FROM federation_executor_operations",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
     assert_eq!(observed, ("queued".to_owned(), "unknown".to_owned()));
 }
 
@@ -188,22 +253,33 @@ fn federation_m4_journal_ack_evidence_needs_no_fabricated_runtime_acceptance() {
     let root = TestTempRoot::create("federation-journal-ack-evidence");
     let connection = open_journal(&root.path().join("coordination.sqlite"));
     insert_received(&connection, "operation-fixture", &"a".repeat(64)).unwrap();
-    connection.execute(
-        "UPDATE federation_executor_operations SET effect_state='unknown'", [],
-    ).unwrap();
+    connection
+        .execute(
+            "UPDATE federation_executor_operations SET effect_state='unknown'",
+            [],
+        )
+        .unwrap();
     // A central receipt can arrive from an already-active continuation. It
     // proves cursor processing, without settling an uncertain runtime effect.
-    connection.execute(
-        "UPDATE federation_executor_operations SET stage='processed',
+    connection
+        .execute(
+            "UPDATE federation_executor_operations SET stage='processed',
              processed_evidence_kind='mailbox_ack',processed_evidence='central-issued-receipt'",
-        [],
-    ).unwrap();
-    let observed: (Option<String>, Option<String>, String, String) = connection.query_row(
-        "SELECT queue_entry_id,runtime_ack,processed_evidence_kind,effect_state
-         FROM federation_executor_operations", [],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    ).unwrap();
-    assert_eq!(observed, (None, None, "mailbox_ack".to_owned(), "unknown".to_owned()));
+            [],
+        )
+        .unwrap();
+    let observed: (Option<String>, Option<String>, String, String) = connection
+        .query_row(
+            "SELECT queue_entry_id,runtime_ack,processed_evidence_kind,effect_state
+         FROM federation_executor_operations",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        observed,
+        (None, None, "mailbox_ack".to_owned(), "unknown".to_owned())
+    );
 }
 
 #[test]
@@ -223,11 +299,19 @@ fn federation_m4_journal_transaction_rollback_and_committed_receive_survive_reop
     }
     drop(connection);
     let reopened = open_journal(&path);
-    let rows: Vec<(String, String)> = reopened.prepare(
-        "SELECT operation_key,stage FROM federation_executor_operations ORDER BY operation_key",
-    ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap().collect::<rusqlite::Result<_>>().unwrap();
-    assert_eq!(rows, vec![("durable-receive".to_owned(), "received".to_owned())]);
+    let rows: Vec<(String, String)> = reopened
+        .prepare(
+            "SELECT operation_key,stage FROM federation_executor_operations ORDER BY operation_key",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![("durable-receive".to_owned(), "received".to_owned())]
+    );
 }
 
 #[test]
@@ -238,20 +322,29 @@ fn federation_m4_journal_retains_more_than_the_prompt_receipt_display_limit() {
     for index in 0..70 {
         let key = format!("operation-{index}");
         insert_received(&connection, &key, &"a".repeat(64)).unwrap();
-        connection.execute(
-            "UPDATE federation_executor_operations
+        connection
+            .execute(
+                "UPDATE federation_executor_operations
              SET stage='processed',effect_state='confirmed',queue_entry_id=?1,
                  delivery_attempt_id=?1,runtime_ack=?1,processed_evidence=?1,
                  processed_evidence_kind='mailbox_ack'
-             WHERE operation_key=?1", [&key],
-        ).unwrap();
+             WHERE operation_key=?1",
+                [&key],
+            )
+            .unwrap();
     }
     drop(connection);
     let reopened = open_journal(&path);
-    let rows: i64 = reopened.query_row(
-        "SELECT COUNT(*) FROM federation_executor_operations WHERE stage='processed'", [],
-        |row| row.get(0),
-    ).unwrap();
-    assert_eq!(rows, 70, "settled display receipt pruning must not erase operation dedup evidence");
+    let rows: i64 = reopened
+        .query_row(
+            "SELECT COUNT(*) FROM federation_executor_operations WHERE stage='processed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        rows, 70,
+        "settled display receipt pruning must not erase operation dedup evidence"
+    );
     assert_constraint(insert_received(&reopened, "operation-0", &"b".repeat(64)));
 }

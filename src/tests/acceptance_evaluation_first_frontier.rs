@@ -61,7 +61,11 @@ fn learn_read(
 
 fn history_revision(state: &AppState) -> u64 {
     let inner = state.inner.lock().unwrap();
-    assert_eq!(inner.engram_work_naming_history.len(), 1, "one fixture work");
+    assert_eq!(
+        inner.engram_work_naming_history.len(),
+        1,
+        "one fixture work"
+    );
     inner.engram_work_naming_history[0].revision
 }
 
@@ -90,7 +94,14 @@ fn evaluation_first_frontier(held: bool) {
     let worktree = root.join(".worktrees").join("wt");
     run_git_test_command(
         &root,
-        &["worktree", "add", "--quiet", "-b", "wt", worktree.to_str().unwrap()],
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "wt",
+            worktree.to_str().unwrap(),
+        ],
     );
     fs::write(worktree.join("judged.txt"), "the work's own tree\n").unwrap();
     let store = established_store(&state, &project).expect("the store is established");
@@ -134,7 +145,12 @@ fn evaluation_first_frontier(held: bool) {
     }
     // The last canonical read of the run before the request predates the
     // naming's Bound event: the history has not learned it yet.
-    learn_read(&state, &store, &binding, &named_root_read(&store, &binding, &named_root, false));
+    learn_read(
+        &state,
+        &store,
+        &binding,
+        &named_root_read(&store, &binding, &named_root, false),
+    );
     super::delegation_support::install_delegation_codex_runtime(
         &state,
         "acceptance-evaluation-runtime",
@@ -150,7 +166,8 @@ fn evaluation_first_frontier(held: bool) {
         // historical held fixture intentionally allowed an unmeasured source.
         let mut source = super::shared_source::identity();
         source.commit = run_git_test_command_output(&worktree, &["rev-parse", "HEAD"]);
-        source.tree = run_git_test_command_output(&worktree, &["show", "-s", "--format=%T", "HEAD"]);
+        source.tree =
+            run_git_test_command_output(&worktree, &["show", "-s", "--format=%T", "HEAD"]);
         let canonical = fs::canonicalize(&worktree).unwrap();
         super::shared_source::install_owner(&state, &project, move |path| {
             (fs::canonicalize(path).ok().as_ref() == Some(&canonical)).then(|| source.clone())
@@ -176,8 +193,16 @@ fn evaluation_first_frontier(held: bool) {
     };
     let child = delegation.delegation.child_session_id.clone();
     if !held {
-        assert!(delegation.delegation.acceptance_evaluation.as_ref().unwrap().source_id.is_some(),
-            "the unheld first-frontier attempt must carry its captured tree");
+        assert!(
+            delegation
+                .delegation
+                .acceptance_evaluation
+                .as_ref()
+                .unwrap()
+                .source_id
+                .is_some(),
+            "the unheld first-frontier attempt must carry its captured tree"
+        );
     }
     // The evaluator echoes the attempt key its host-authored brief names.
     let attempt_key = delegation
@@ -191,7 +216,12 @@ fn evaluation_first_frontier(held: bool) {
 
     // The evaluator's own turn admission reads the run and learns the naming
     // the evaluation was requested on: the same binding's Bound event.
-    learn_read(&state, &store, &binding, &named_root_read(&store, &binding, &named_root, true));
+    learn_read(
+        &state,
+        &store,
+        &binding,
+        &named_root_read(&store, &binding, &named_root, true),
+    );
     assert_eq!(
         history_revision(&state),
         requested_at + 1,

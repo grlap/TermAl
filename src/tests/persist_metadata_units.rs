@@ -16,7 +16,10 @@ fn metadata_units_connection(fixture: &FenceFixture) -> &rusqlite::Connection {
 
 fn metadata_units_seed_legacy(connection: &rusqlite::Connection, metadata: &PersistedState) {
     let mut legacy = serde_json::to_value(metadata).unwrap();
-    legacy.as_object_mut().unwrap().remove("engramSessionObligations");
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("engramSessionObligations");
     legacy.as_object_mut().unwrap().remove("remoteTestRunFacts");
     connection
         .execute_batch(include_str!("fixtures/state_schema2.sql"))
@@ -37,10 +40,7 @@ fn metadata_units_seed_legacy(connection: &rusqlite::Connection, metadata: &Pers
     connection
         .execute(
             "INSERT INTO app_state(key,value_json) VALUES(?1,?2)",
-            rusqlite::params![
-                SQLITE_METADATA_KEY,
-                serde_json::to_string(&legacy).unwrap()
-            ],
+            rusqlite::params![SQLITE_METADATA_KEY, serde_json::to_string(&legacy).unwrap()],
         )
         .unwrap();
 }
@@ -297,7 +297,11 @@ fn metadata_collection_capture_skips_unchanged_collections() {
     scope.finish(true, &PersistTickTimings::default());
     let snapshot = observer.snapshot_at(std::time::Instant::now());
     let root_values = [
-        "federation", "codex", "preferences", "engramSessionObligations", "testRunCardsEpoch",
+        "federation",
+        "codex",
+        "preferences",
+        "engramSessionObligations",
+        "testRunCardsEpoch",
     ];
     let cloned = &snapshot.recent[0].counts.metadata_cloned_fields;
     assert_eq!(
@@ -728,20 +732,32 @@ fn metadata_units_old_reader(connection: &rusqlite::Connection) -> Result<Value>
 // This offline rollback contract is only for the pre-handoff units layout.
 fn metadata_units_seed_rollback_predecessor(connection: &rusqlite::Connection) {
     // Extend the existing historical fixture owner; never downgrade custody.
-    assert_eq!(metadata_units_version(connection), SQLITE_SCHEMA_VERSION,
-        "only construct the historical fixture from the known current layout");
-    let custody_rows: u64 = connection.query_row(
-        "SELECT count(*) FROM sessions WHERE
+    assert_eq!(
+        metadata_units_version(connection),
+        SQLITE_SCHEMA_VERSION,
+        "only construct the historical fixture from the known current layout"
+    );
+    let custody_rows: u64 = connection
+        .query_row(
+            "SELECT count(*) FROM sessions WHERE
          json_type(value_json,'$.engramRuntimeCheckpoint') IS NOT NULL OR
          json_type(value_json,'$.engramUnadmittedActiveTurn') IS NOT NULL OR
          json_type(value_json,'$.engramUnadmittedClosingJobs') IS NOT NULL OR
          json_type(value_json,'$.engramUnadmittedReports') IS NOT NULL",
-        [], |row| row.get(0),
-    ).unwrap();
-    assert_eq!(custody_rows, 0, "historical rollback fixture must contain no observation custody");
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        custody_rows, 0,
+        "historical rollback fixture must contain no observation custody"
+    );
     let ledger: EngramSessionObligationLedger = serde_json::from_value(
-        read_persisted_metadata_field(connection, "engramSessionObligations").unwrap().unwrap(),
-    ).unwrap();
+        read_persisted_metadata_field(connection, "engramSessionObligations")
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
     assert!(ledger.entries.is_empty() && ledger.checkpoint_operations.is_empty());
     connection.execute_batch("BEGIN IMMEDIATE;
         DELETE FROM state_metadata_units WHERE field_name IN ('engramSessionObligations','remoteTestRunFacts');
@@ -753,7 +769,8 @@ fn metadata_units_seed_rollback_predecessor(connection: &rusqlite::Connection) {
 // never stored or supplied to the production reader as validity evidence.
 fn metadata_units_predecessor_view(mut value: Value) -> PersistedState {
     assert!(value.get("engramSessionObligations").is_none());
-    value["engramSessionObligations"] = serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
+    value["engramSessionObligations"] =
+        serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
     serde_json::from_value(value).unwrap()
 }
 
@@ -763,7 +780,11 @@ fn metadata_units_rollback_refuses_joint_floor_without_mutating_its_authority() 
     let connection = metadata_units_connection(&fixture);
     let original = read_metadata_units_unchecked(connection).unwrap();
     let generation = metadata_unit_generation(connection).unwrap();
-    assert!(connection.execute_batch(&metadata_units_rollback_sql()).is_err());
+    assert!(
+        connection
+            .execute_batch(&metadata_units_rollback_sql())
+            .is_err()
+    );
     if !connection.is_autocommit() {
         connection.execute_batch("ROLLBACK").unwrap();
     }
@@ -780,7 +801,11 @@ fn metadata_units_rollback_refuses_observation_reader_floor_without_data_loss() 
     let connection = metadata_units_connection(&fixture);
     let metadata = read_metadata_units_unchecked(connection).unwrap();
     let generation = metadata_unit_generation(connection).unwrap();
-    assert!(connection.execute_batch(&metadata_units_rollback_sql()).is_err());
+    assert!(
+        connection
+            .execute_batch(&metadata_units_rollback_sql())
+            .is_err()
+    );
     if !connection.is_autocommit() {
         connection.execute_batch("ROLLBACK").unwrap();
     }

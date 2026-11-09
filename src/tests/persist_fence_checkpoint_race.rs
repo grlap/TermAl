@@ -38,7 +38,12 @@ fn enqueue_counted(
     let fence = fence.on_acknowledged(move || {
         counter.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     });
-    assert!(fixture.tx.send(PersistRequest::Fence(Box::new(fence))).is_ok());
+    assert!(
+        fixture
+            .tx
+            .send(PersistRequest::Fence(Box::new(fence)))
+            .is_ok()
+    );
     (waiter, runs)
 }
 
@@ -68,19 +73,30 @@ fn checkpoint_mirror_race_keeps_every_fence_and_deadline_until_exact_proof() {
     // Two refused ticks in a row: neither settles, extends or replaces a fence.
     for refusal in 0..2 {
         let delta = fixture.collect();
-        let result =
-            persist_delta_with_fences_using(&delta, &mut fixture.batch, || {
-                Err(checkpoint_mirror_race())
-            });
+        let result = persist_delta_with_fences_using(&delta, &mut fixture.batch, || {
+            Err(checkpoint_mirror_race())
+        });
         assert!(result.is_err());
-        assert_eq!(poll(&proven_waiter), None, "refusal {refusal} settled a fence");
-        assert_eq!(poll(&unrelated_waiter), None, "refusal {refusal} settled a fence");
+        assert_eq!(
+            poll(&proven_waiter),
+            None,
+            "refusal {refusal} settled a fence"
+        );
+        assert_eq!(
+            poll(&unrelated_waiter),
+            None,
+            "refusal {refusal} settled a fence"
+        );
         assert_eq!(fixture.batch.pending.len(), 2);
         for (fence, completion) in fixture.batch.pending.iter().zip(&completions) {
             assert!(Arc::ptr_eq(&fence.completion, completion));
             assert_eq!(fence.completion.deadline, deadline);
         }
-        assert_eq!((runs(&proven_runs), runs(&unrelated_runs)), (0, 0), "no hook on a refusal");
+        assert_eq!(
+            (runs(&proven_runs), runs(&unrelated_runs)),
+            (0, 0),
+            "no hook on a refusal"
+        );
     }
 
     // The next coherent tick proves only what it wrote: the unrelated fence
@@ -88,7 +104,11 @@ fn checkpoint_mirror_race_keeps_every_fence_and_deadline_until_exact_proof() {
     let delta = fixture.collect();
     fixture.write(&delta).unwrap();
     assert_eq!(poll(&proven_waiter), Some(Ok(())));
-    assert_eq!(poll(&unrelated_waiter), None, "a coherent write is not a blanket ACK");
+    assert_eq!(
+        poll(&unrelated_waiter),
+        None,
+        "a coherent write is not a blanket ACK"
+    );
     assert_eq!(fixture.batch.pending.len(), 1);
     assert_eq!((runs(&proven_runs), runs(&unrelated_runs)), (1, 0));
 }
@@ -138,7 +158,10 @@ fn checkpoint_mirror_race_negatives_stay_terminal() {
         let message = format!("{error:#}");
         let result = persist_delta_with_fences_using(&delta, &mut fixture.batch, || Err(error));
         assert!(result.is_err());
-        assert_eq!(poll(&waiter), Some(Err(PersistFenceError::WriteFailed(message))));
+        assert_eq!(
+            poll(&waiter),
+            Some(Err(PersistFenceError::WriteFailed(message)))
+        );
         assert_eq!(runs(&hook_runs), 0);
     }
 
@@ -175,6 +198,10 @@ fn checkpoint_mirror_race_negatives_stay_terminal() {
             }
         };
         assert_eq!(poll(&waiter), Some(Err(expected)), "{ending}");
-        assert_eq!(runs(&hook_runs), 0, "{ending}: a retained fence never publishes");
+        assert_eq!(
+            runs(&hook_runs),
+            0,
+            "{ending}: a retained fence never publishes"
+        );
     }
 }

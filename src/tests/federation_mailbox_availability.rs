@@ -23,7 +23,10 @@ impl NativeWakeOwner {
             }
             worker.shutdown().await;
         });
-        Self { stop, task: Some(task) }
+        Self {
+            stop,
+            task: Some(task),
+        }
     }
 
     async fn finish(mut self) {
@@ -63,7 +66,9 @@ fn canonical_counts(state: &AppState) -> [u64; 3] {
     ]
     .map(|table| {
         connection
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
             .unwrap()
     })
 }
@@ -78,13 +83,18 @@ async fn append_commit_and_same_key_reply_do_not_wait_for_native_wake() {
     let (release, released) = std::sync::mpsc::channel();
     let (finished, settled) = tokio::sync::oneshot::channel();
     let mut release = ReleaseWake(Some(release));
-    *case.pair.central.mailbox_store.before_native_wake.lock().unwrap() =
-        Some(Box::new(move || {
-            let _ = entered.send(());
-            let result = released.recv_timeout(phase_sync::DEADLOCK_GUARD);
-            let _ = finished.send(());
-            result.expect("post-COMMIT wake pause must be released by its owner");
-        }));
+    *case
+        .pair
+        .central
+        .mailbox_store
+        .before_native_wake
+        .lock()
+        .unwrap() = Some(Box::new(move || {
+        let _ = entered.send(());
+        let result = released.recv_timeout(phase_sync::DEADLOCK_GUARD);
+        let _ = finished.send(());
+        result.expect("post-COMMIT wake pause must be released by its owner");
+    }));
     let client = case.client(case.central_port());
     let lease = client.channel.current_lease().unwrap();
     let first_client = client.clone();
@@ -122,7 +132,13 @@ async fn append_commit_and_same_key_reply_do_not_wait_for_native_wake() {
         .unwrap();
     let drained = tokio::time::timeout(
         phase_sync::DEADLOCK_GUARD,
-        case.pair.lease.channel.bound.permits.clone().acquire_many_owned(4),
+        case.pair
+            .lease
+            .channel
+            .bound
+            .permits
+            .clone()
+            .acquire_many_owned(4),
     )
     .await
     .unwrap()
@@ -162,8 +178,13 @@ async fn append_precommit_refusal_keeps_message_dedup_and_wake_absent() {
         ))
         .await;
     let refused_counts = canonical_counts(&case.pair.central);
-    case.pair.central.mailbox_store.connection().unwrap()
-        .execute_batch("DROP TRIGGER reject_available_append").unwrap();
+    case.pair
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .execute_batch("DROP TRIGGER reject_available_append")
+        .unwrap();
     let retried = client
         .request::<FederationMailboxResponse>(FederationRpcRoute::Mailbox(lease, case.request))
         .await;
@@ -173,7 +194,10 @@ async fn append_precommit_refusal_keeps_message_dedup_and_wake_absent() {
     assert_eq!(refused_counts, [0, 0, 0]);
     assert_eq!(committed_counts, [1, 1, 1]);
     let retried = retried.unwrap().value;
-    assert_eq!(retried["sequence"], 1, "a rollback cannot consume a sequence");
+    assert_eq!(
+        retried["sequence"], 1,
+        "a rollback cannot consume a sequence"
+    );
     assert_eq!(retried["duplicate"], false);
 }
 
@@ -191,19 +215,23 @@ async fn append_lost_reply_reopens_and_recovers_the_original_committed_identity(
         ))
         .await
         .unwrap();
-    let stored: (String, u64) = case.pair.central.mailbox_store.connection().unwrap()
+    let stored: (String, u64) = case
+        .pair
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
         .query_row("SELECT id, sequence FROM mailbox_messages", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
-        }).unwrap();
+        })
+        .unwrap();
     let path = resolve_coordination_persistence_path(case.pair.central.persistence_path.as_path());
     let reopened = AppState {
         mailbox_store: Arc::new(MailboxStore::open(&path).unwrap()),
         ..case.pair.central.clone()
     };
-    let recovered = reopened.execute_federation_mailbox(
-        case.request,
-        Some(case.pair.lease.clone()),
-    );
+    let recovered =
+        reopened.execute_federation_mailbox(case.request, Some(case.pair.lease.clone()));
     let counts = canonical_counts(&reopened);
     case.pair.finish().await;
     let recovered = recovered.unwrap().value;
@@ -214,16 +242,29 @@ async fn append_lost_reply_reopens_and_recovers_the_original_committed_identity(
 }
 
 fn committed_target(case: &MailboxCase) -> FederationMailboxBinding {
-    let encoded: String = case.pair.central.mailbox_store.connection().unwrap()
-        .query_row("SELECT target_binding_json FROM federation_mailbox_wake_obligations", [],
-            |row| row.get(0)).unwrap();
+    let encoded: String = case
+        .pair
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT target_binding_json FROM federation_mailbox_wake_obligations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     serde_json::from_str(&encoded).unwrap()
 }
 
 fn queued_mailbox_boundaries(app: &AppState, binding: &FederationMailboxBinding) -> Vec<u64> {
     let inner = app.inner.lock().unwrap();
-    let index = inner.find_session_index(&binding.identity.session_id).unwrap();
-    inner.sessions[index].queued_prompts.iter()
+    let index = inner
+        .find_session_index(&binding.identity.session_id)
+        .unwrap();
+    inner.sessions[index]
+        .queued_prompts
+        .iter()
         .filter_map(|queued| queued.pending_prompt.source.as_ref()?.mailbox.as_ref())
         .map(|mailbox| mailbox.sequence)
         .collect()
@@ -234,9 +275,13 @@ async fn append_native_obligation_recovers_after_reopen_without_an_http_owner() 
     let case = MailboxCase::new().await;
     let client = case.client(case.central_port());
     let lease = client.channel.current_lease().unwrap();
-    let response = client.request::<FederationMailboxResponse>(FederationRpcRoute::Mailbox(
-        lease, case.request.clone(),
-    )).await.unwrap();
+    let response = client
+        .request::<FederationMailboxResponse>(FederationRpcRoute::Mailbox(
+            lease,
+            case.request.clone(),
+        ))
+        .await
+        .unwrap();
     let binding = committed_target(&case);
     let before = queued_mailbox_boundaries(&case.pair.central, &binding);
     let path = resolve_coordination_persistence_path(case.pair.central.persistence_path.as_path());
@@ -245,19 +290,33 @@ async fn append_native_obligation_recovers_after_reopen_without_an_http_owner() 
         ..case.pair.central.clone()
     };
     let first_batch = reopened.clone();
-    tokio::task::spawn_blocking(move || first_batch.run_native_mailbox_wake_batch(0)).await.unwrap();
+    tokio::task::spawn_blocking(move || first_batch.run_native_mailbox_wake_batch(0))
+        .await
+        .unwrap();
     let after = queued_mailbox_boundaries(&reopened, &binding);
-    let pending = reopened.mailbox_store.native_mailbox_wake_pending(
-        response.value["messageId"].as_str().unwrap(),
-    ).unwrap();
+    let pending = reopened
+        .mailbox_store
+        .native_mailbox_wake_pending(response.value["messageId"].as_str().unwrap())
+        .unwrap();
     let second_batch = reopened.clone();
-    tokio::task::spawn_blocking(move || second_batch.run_native_mailbox_wake_batch(0)).await.unwrap();
+    tokio::task::spawn_blocking(move || second_batch.run_native_mailbox_wake_batch(0))
+        .await
+        .unwrap();
     let repeated = queued_mailbox_boundaries(&reopened, &binding);
     case.pair.finish().await;
-    assert!(before.is_empty(), "the HTTP receipt does not dispatch the native wake");
+    assert!(
+        before.is_empty(),
+        "the HTTP receipt does not dispatch the native wake"
+    );
     assert_eq!(after, [1]);
-    assert_eq!(repeated, after, "recovery cannot append a duplicate notification");
-    assert!(!pending, "durable queue ownership settles the native pending projection");
+    assert_eq!(
+        repeated, after,
+        "recovery cannot append a duplicate notification"
+    );
+    assert!(
+        !pending,
+        "durable queue ownership settles the native pending projection"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -265,39 +324,72 @@ async fn append_native_worker_rechecks_the_exact_target_binding_at_queue_apply()
     let case = MailboxCase::new().await;
     let client = case.client(case.central_port());
     let lease = client.channel.current_lease().unwrap();
-    client.request::<FederationMailboxResponse>(FederationRpcRoute::Mailbox(
-        lease, case.request.clone(),
-    )).await.unwrap();
+    client
+        .request::<FederationMailboxResponse>(FederationRpcRoute::Mailbox(
+            lease,
+            case.request.clone(),
+        ))
+        .await
+        .unwrap();
     let binding = committed_target(&case);
     let (entered, reached) = tokio::sync::oneshot::channel();
     let (release, released) = std::sync::mpsc::channel();
     let mut release = ReleaseWake(Some(release));
-    *case.pair.central.mailbox_store.before_native_wake.lock().unwrap() =
-        Some(Box::new(move || {
-            let _ = entered.send(());
-            released.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
-        }));
+    *case
+        .pair
+        .central
+        .mailbox_store
+        .before_native_wake
+        .lock()
+        .unwrap() = Some(Box::new(move || {
+        let _ = entered.send(());
+        released.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
+    }));
     let app = case.pair.central.clone();
     let batch = tokio::task::spawn_blocking(move || app.run_native_mailbox_wake_batch(0));
-    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, reached).await.unwrap().unwrap();
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, reached)
+        .await
+        .unwrap()
+        .unwrap();
     {
         let mut inner = case.pair.central.inner.lock().unwrap();
-        let index = inner.find_session_index(&binding.identity.session_id).unwrap();
-        inner.session_mut_by_index(index).unwrap().federation_mailbox_binding
-            .as_mut().unwrap().placement_generation += 1;
+        let index = inner
+            .find_session_index(&binding.identity.session_id)
+            .unwrap();
+        inner
+            .session_mut_by_index(index)
+            .unwrap()
+            .federation_mailbox_binding
+            .as_mut()
+            .unwrap()
+            .placement_generation += 1;
     }
     release.release();
     batch.await.unwrap();
     let withheld = queued_mailbox_boundaries(&case.pair.central, &binding);
     {
         let mut inner = case.pair.central.inner.lock().unwrap();
-        let index = inner.find_session_index(&binding.identity.session_id).unwrap();
-        inner.session_mut_by_index(index).unwrap().federation_mailbox_binding = Some(binding.clone());
+        let index = inner
+            .find_session_index(&binding.identity.session_id)
+            .unwrap();
+        inner
+            .session_mut_by_index(index)
+            .unwrap()
+            .federation_mailbox_binding = Some(binding.clone());
     }
     let app = case.pair.central.clone();
-    tokio::task::spawn_blocking(move || app.run_native_mailbox_wake_batch(0)).await.unwrap();
+    tokio::task::spawn_blocking(move || app.run_native_mailbox_wake_batch(0))
+        .await
+        .unwrap();
     let recovered = queued_mailbox_boundaries(&case.pair.central, &binding);
     case.pair.finish().await;
-    assert!(withheld.is_empty(), "a stale target binding cannot enqueue into its successor");
-    assert_eq!(recovered, [1], "the obligation remains recoverable under its exact binding");
+    assert!(
+        withheld.is_empty(),
+        "a stale target binding cannot enqueue into its successor"
+    );
+    assert_eq!(
+        recovered,
+        [1],
+        "the obligation remains recoverable under its exact binding"
+    );
 }

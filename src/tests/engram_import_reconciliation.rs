@@ -78,7 +78,11 @@ fn entry(id: &str, state: EngramImportEntryState) -> EngramImportResponsibilityE
     }
 }
 
-fn snapshot(id: &str, entry_refs: &[&str], disposition: EngramImportReadiness) -> EngramImportResponsibilitySnapshot {
+fn snapshot(
+    id: &str,
+    entry_refs: &[&str],
+    disposition: EngramImportReadiness,
+) -> EngramImportResponsibilitySnapshot {
     EngramImportResponsibilitySnapshot {
         schema_version: ENGRAM_IMPORT_RECONCILIATION_RECORD_VERSION,
         record_id: id.to_owned(),
@@ -101,17 +105,38 @@ fn snapshot(id: &str, entry_refs: &[&str], disposition: EngramImportReadiness) -
 
 fn one_of_each() -> EngramImportReconciliationJournal {
     let mut journal = EngramImportReconciliationJournal::activated_empty();
-    journal.record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner("owner-record-1"))).unwrap();
-    journal.record(EngramImportReconciliationRecord::LocalImportFence(fence("fence-1", 1))).unwrap();
-    journal.record(EngramImportReconciliationRecord::ResponsibilityEntry(
-        entry("entry-1", EngramImportEntryState::Terminal))).unwrap();
-    journal.record(EngramImportReconciliationRecord::ResponsibilitySnapshot(snapshot(
-        "manifest-1", &["responsibility_entry/entry-1"], EngramImportReadiness::Pending))).unwrap();
+    journal
+        .record(
+            EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner("owner-record-1")),
+        )
+        .unwrap();
+    journal
+        .record(EngramImportReconciliationRecord::LocalImportFence(fence(
+            "fence-1", 1,
+        )))
+        .unwrap();
+    journal
+        .record(EngramImportReconciliationRecord::ResponsibilityEntry(
+            entry("entry-1", EngramImportEntryState::Terminal),
+        ))
+        .unwrap();
+    journal
+        .record(EngramImportReconciliationRecord::ResponsibilitySnapshot(
+            snapshot(
+                "manifest-1",
+                &["responsibility_entry/entry-1"],
+                EngramImportReadiness::Pending,
+            ),
+        ))
+        .unwrap();
     journal
 }
 
 fn owner_value() -> Value {
-    serde_json::to_value(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner("owner-record-1"))).unwrap()
+    serde_json::to_value(
+        EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner("owner-record-1")),
+    )
+    .unwrap()
 }
 
 fn decode_one(key: &str, record: Value) -> Result<EngramImportReconciliationJournal> {
@@ -126,17 +151,33 @@ fn every_variant_round_trips_exactly() {
     let encoded = journal.to_value().unwrap();
     let decoded = EngramImportReconciliationJournal::decode(&encoded).unwrap();
     assert_eq!(decoded, journal);
-    assert_eq!(serde_json::to_vec(&decoded.to_value().unwrap()).unwrap(), serde_json::to_vec(&encoded).unwrap());
-    assert_eq!(encoded.as_object().unwrap().keys().cloned().collect::<Vec<_>>(), vec![
-        "enrolled_responsibility_owner/owner-record-1", "local_import_fence/fence-1",
-        "responsibility_entry/entry-1", "responsibility_snapshot/manifest-1",
-    ]);
+    assert_eq!(
+        serde_json::to_vec(&decoded.to_value().unwrap()).unwrap(),
+        serde_json::to_vec(&encoded).unwrap()
+    );
+    assert_eq!(
+        encoded
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![
+            "enrolled_responsibility_owner/owner-record-1",
+            "local_import_fence/fence-1",
+            "responsibility_entry/entry-1",
+            "responsibility_snapshot/manifest-1",
+        ]
+    );
 }
 
 #[test]
 fn the_journal_projects_one_metadata_unit_per_record() {
     let journal = one_of_each();
-    let units = metadata_value_to_units(json!({ "engramImportReconciliation": journal.to_value().unwrap() })).unwrap();
+    let units = metadata_value_to_units(
+        json!({ "engramImportReconciliation": journal.to_value().unwrap() }),
+    )
+    .unwrap();
     let descriptor = &units[&("engramImportReconciliation".to_owned(), String::new())];
     assert_eq!(descriptor, &("object".to_owned(), "4".to_owned()));
     for key in journal.records.keys() {
@@ -151,13 +192,22 @@ fn decoding_refuses_an_unknown_variant_field_or_missing_field() {
     let key = "enrolled_responsibility_owner/owner-record-1";
     let mut unknown_variant = owner_value();
     unknown_variant["variant"] = json!("unknown_responsibility_kind");
-    assert!(decode_one(key, unknown_variant).is_err(), "an unknown variant");
+    assert!(
+        decode_one(key, unknown_variant).is_err(),
+        "an unknown variant"
+    );
     let mut unknown_field = owner_value();
     unknown_field["routingToken"] = json!("must-never-be-carried");
-    assert!(decode_one(key, unknown_field).is_err(), "an unknown field, such as a routing token");
+    assert!(
+        decode_one(key, unknown_field).is_err(),
+        "an unknown field, such as a routing token"
+    );
     let mut nested_unknown = owner_value();
     nested_unknown["scope"]["credential"] = json!("must-never-be-carried");
-    assert!(decode_one(key, nested_unknown).is_err(), "an unknown nested field");
+    assert!(
+        decode_one(key, nested_unknown).is_err(),
+        "an unknown nested field"
+    );
     let mut missing = owner_value();
     missing.as_object_mut().unwrap().remove("coverage");
     assert!(decode_one(key, missing).is_err(), "a missing field");
@@ -172,14 +222,22 @@ fn decoding_refuses_an_unsupported_schema_version() {
 
 #[test]
 fn decoding_refuses_a_key_that_does_not_match_its_records_identity() {
-    for key in ["enrolled_responsibility_owner/another-record", "local_import_fence/owner-record-1", "owner-record-1"] {
+    for key in [
+        "enrolled_responsibility_owner/another-record",
+        "local_import_fence/owner-record-1",
+        "owner-record-1",
+    ] {
         assert!(decode_one(key, owner_value()).is_err(), "{key}");
     }
 }
 
 #[test]
 fn decoding_refuses_an_empty_overlong_or_control_character_identity() {
-    for id in [String::new(), "x".repeat(ENGRAM_IMPORT_RECONCILIATION_MAX_ID_CHARS + 1), "a\nb".to_owned()] {
+    for id in [
+        String::new(),
+        "x".repeat(ENGRAM_IMPORT_RECONCILIATION_MAX_ID_CHARS + 1),
+        "a\nb".to_owned(),
+    ] {
         let record = EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner(&id));
         let value = serde_json::to_value(&record).unwrap();
         assert!(decode_one(&record.key(), value).is_err(), "{id:?}");
@@ -190,15 +248,32 @@ fn decoding_refuses_an_empty_overlong_or_control_character_identity() {
 fn a_journal_over_its_record_limit_is_refused_and_recording_past_it_changes_nothing() {
     let mut journal = EngramImportReconciliationJournal::activated_empty();
     for number in 0..ENGRAM_IMPORT_RECONCILIATION_MAX_RECORDS {
-        journal.record(EngramImportReconciliationRecord::ResponsibilityEntry(
-            entry(&format!("entry-{number}"), EngramImportEntryState::Outstanding))).unwrap();
+        journal
+            .record(EngramImportReconciliationRecord::ResponsibilityEntry(
+                entry(
+                    &format!("entry-{number}"),
+                    EngramImportEntryState::Outstanding,
+                ),
+            ))
+            .unwrap();
     }
     let full = journal.clone();
-    assert!(journal.record(EngramImportReconciliationRecord::ResponsibilityEntry(
-        entry("one-too-many", EngramImportEntryState::Outstanding))).is_err());
-    assert_eq!(journal, full, "the refused record left the journal unchanged");
+    assert!(
+        journal
+            .record(EngramImportReconciliationRecord::ResponsibilityEntry(
+                entry("one-too-many", EngramImportEntryState::Outstanding)
+            ))
+            .is_err()
+    );
+    assert_eq!(
+        journal, full,
+        "the refused record left the journal unchanged"
+    );
     let mut encoded = full.to_value().unwrap();
-    let extra = EngramImportReconciliationRecord::ResponsibilityEntry(entry("one-too-many", EngramImportEntryState::Outstanding));
+    let extra = EngramImportReconciliationRecord::ResponsibilityEntry(entry(
+        "one-too-many",
+        EngramImportEntryState::Outstanding,
+    ));
     encoded[extra.key()] = serde_json::to_value(&extra).unwrap();
     assert!(EngramImportReconciliationJournal::decode(&encoded).is_err());
 }
@@ -208,12 +283,21 @@ fn a_record_or_journal_over_its_byte_limit_is_refused_without_change() {
     let mut oversized = entry("oversized", EngramImportEntryState::Outstanding);
     oversized.existing_ref = "r".repeat(ENGRAM_IMPORT_RECONCILIATION_MAX_RECORD_BYTES);
     let mut journal = EngramImportReconciliationJournal::activated_empty();
-    assert!(journal.record(EngramImportReconciliationRecord::ResponsibilityEntry(oversized)).is_err());
+    assert!(
+        journal
+            .record(EngramImportReconciliationRecord::ResponsibilityEntry(
+                oversized
+            ))
+            .is_err()
+    );
     assert!(journal.records.is_empty());
     // Equal-sized records, each within the per-record limit, reach the total
     // limit: exactly as many as fit are recorded, and the next is refused.
     let large = |number: usize| {
-        let mut record = entry(&format!("large-{number:04}"), EngramImportEntryState::Outstanding);
+        let mut record = entry(
+            &format!("large-{number:04}"),
+            EngramImportEntryState::Outstanding,
+        );
         record.existing_ref = "r".repeat(60_000);
         EngramImportReconciliationRecord::ResponsibilityEntry(record)
     };
@@ -231,12 +315,25 @@ fn a_record_or_journal_over_its_byte_limit_is_refused_without_change() {
 #[test]
 fn fence_generation_overflow_refuses_and_a_scope_fence_never_moves_backwards() {
     assert_eq!(engram_import_next_fence_generation(1).unwrap(), 2);
-    assert!(engram_import_next_fence_generation(u64::MAX).is_err(), "overflow refuses, never wraps");
+    assert!(
+        engram_import_next_fence_generation(u64::MAX).is_err(),
+        "overflow refuses, never wraps"
+    );
     let mut journal = EngramImportReconciliationJournal::activated_empty();
-    journal.record(EngramImportReconciliationRecord::LocalImportFence(fence("fence-2", 2))).unwrap();
+    journal
+        .record(EngramImportReconciliationRecord::LocalImportFence(fence(
+            "fence-2", 2,
+        )))
+        .unwrap();
     let before = journal.clone();
-    assert!(journal.record(EngramImportReconciliationRecord::LocalImportFence(fence("fence-1", 1))).is_err(),
-        "a lower generation for the same scope is refused");
+    assert!(
+        journal
+            .record(EngramImportReconciliationRecord::LocalImportFence(fence(
+                "fence-1", 1
+            )))
+            .is_err(),
+        "a lower generation for the same scope is refused"
+    );
     assert_eq!(journal, before);
 }
 
@@ -246,33 +343,63 @@ fn coverage_is_complete_only_for_an_admitted_exactly_bound_owner() {
         (EngramImportAssociationState::Pending, exact_binding()),
         (EngramImportAssociationState::Legacy, exact_binding()),
         (EngramImportAssociationState::Foreign, exact_binding()),
-        (EngramImportAssociationState::Admitted, EngramImportOriginalBinding::Unknown),
-        (EngramImportAssociationState::Admitted, EngramImportOriginalBinding::Legacy),
+        (
+            EngramImportAssociationState::Admitted,
+            EngramImportOriginalBinding::Unknown,
+        ),
+        (
+            EngramImportAssociationState::Admitted,
+            EngramImportOriginalBinding::Legacy,
+        ),
     ] {
         let mut claimed = owner("owner-record-1");
         claimed.association = association;
         claimed.original_binding = binding.clone();
         let mut journal = EngramImportReconciliationJournal::activated_empty();
-        assert!(journal.record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(claimed.clone())).is_err(),
-            "{association:?} {binding:?}: complete coverage is refused");
+        assert!(
+            journal
+                .record(
+                    EngramImportReconciliationRecord::EnrolledResponsibilityOwner(claimed.clone())
+                )
+                .is_err(),
+            "{association:?} {binding:?}: complete coverage is refused"
+        );
         assert!(journal.records.is_empty());
         claimed.coverage = EngramImportCoverage::Unknown;
-        assert_eq!(journal.record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(claimed)).unwrap(),
-            EngramImportRecordOutcome::Recorded, "{association:?}: recorded with coverage unknown");
+        assert_eq!(
+            journal
+                .record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(claimed))
+                .unwrap(),
+            EngramImportRecordOutcome::Recorded,
+            "{association:?}: recorded with coverage unknown"
+        );
     }
     let mut admitted_without_receipt = owner("owner-record-1");
     admitted_without_receipt.enrollment_receipt_ref = None;
-    assert!(EngramImportReconciliationJournal::activated_empty()
-        .record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(admitted_without_receipt)).is_err(),
-        "an admitted association carries its enrollment receipt");
+    assert!(
+        EngramImportReconciliationJournal::activated_empty()
+            .record(
+                EngramImportReconciliationRecord::EnrolledResponsibilityOwner(
+                    admitted_without_receipt
+                )
+            )
+            .is_err(),
+        "an admitted association carries its enrollment receipt"
+    );
 }
 
 #[test]
 fn recording_the_same_record_again_is_idempotent() {
     let mut journal = one_of_each();
     let before = journal.clone();
-    assert_eq!(journal.record(EngramImportReconciliationRecord::LocalImportFence(fence("fence-1", 1))).unwrap(),
-        EngramImportRecordOutcome::Unchanged);
+    assert_eq!(
+        journal
+            .record(EngramImportReconciliationRecord::LocalImportFence(fence(
+                "fence-1", 1
+            )))
+            .unwrap(),
+        EngramImportRecordOutcome::Unchanged
+    );
     assert_eq!(journal, before);
 }
 
@@ -294,7 +421,11 @@ fn a_changed_body_under_the_same_identity_conflicts_and_changes_nothing() {
     ] {
         let mut journal = one_of_each();
         let before = journal.clone();
-        assert!(journal.record(changed.clone()).is_err(), "{}", changed.key());
+        assert!(
+            journal.record(changed.clone()).is_err(),
+            "{}",
+            changed.key()
+        );
         assert_eq!(journal, before, "{}", changed.key());
     }
 }
@@ -302,20 +433,45 @@ fn a_changed_body_under_the_same_identity_conflicts_and_changes_nothing() {
 #[test]
 fn a_ready_snapshot_cannot_be_built_from_incomplete_coverage() {
     let ready = |journal: &mut EngramImportReconciliationJournal, snapshot| {
-        journal.record(EngramImportReconciliationRecord::ResponsibilitySnapshot(snapshot))
+        journal.record(EngramImportReconciliationRecord::ResponsibilitySnapshot(
+            snapshot,
+        ))
     };
     // Control: complete coverage, every entry terminal.
     let mut journal = one_of_each();
-    ready(&mut journal, snapshot("manifest-ready", &["responsibility_entry/entry-1"], EngramImportReadiness::Ready)).unwrap();
+    ready(
+        &mut journal,
+        snapshot(
+            "manifest-ready",
+            &["responsibility_entry/entry-1"],
+            EngramImportReadiness::Ready,
+        ),
+    )
+    .unwrap();
 
-    let mut gaps = snapshot("manifest-gaps", &["responsibility_entry/entry-1"], EngramImportReadiness::Ready);
+    let mut gaps = snapshot(
+        "manifest-gaps",
+        &["responsibility_entry/entry-1"],
+        EngramImportReadiness::Ready,
+    );
     gaps.coverage_gaps = vec!["legacy-unbound-owner".to_owned()];
-    let mut miscounted = snapshot("manifest-count", &["responsibility_entry/entry-1"], EngramImportReadiness::Ready);
+    let mut miscounted = snapshot(
+        "manifest-count",
+        &["responsibility_entry/entry-1"],
+        EngramImportReadiness::Ready,
+    );
     miscounted.entry_count = 2;
     for (label, refused) in [
         ("a coverage gap", gaps),
         ("a miscounted manifest", miscounted),
-        ("a missing entry", snapshot("manifest-missing", &["responsibility_entry/absent"], EngramImportReadiness::Ready)),
+        (
+            "a missing entry",
+            snapshot(
+                "manifest-missing",
+                &["responsibility_entry/absent"],
+                EngramImportReadiness::Ready,
+            ),
+        ),
     ] {
         let mut journal = one_of_each();
         let before = journal.clone();
@@ -323,43 +479,101 @@ fn a_ready_snapshot_cannot_be_built_from_incomplete_coverage() {
         assert_eq!(journal, before, "{label}");
     }
     let mut outstanding = one_of_each();
-    outstanding.record(EngramImportReconciliationRecord::ResponsibilityEntry(
-        entry("entry-2", EngramImportEntryState::Outstanding))).unwrap();
-    assert!(ready(&mut outstanding, snapshot("manifest-outstanding",
-        &["responsibility_entry/entry-1", "responsibility_entry/entry-2"], EngramImportReadiness::Ready)).is_err(),
-        "an outstanding entry");
+    outstanding
+        .record(EngramImportReconciliationRecord::ResponsibilityEntry(
+            entry("entry-2", EngramImportEntryState::Outstanding),
+        ))
+        .unwrap();
+    assert!(
+        ready(
+            &mut outstanding,
+            snapshot(
+                "manifest-outstanding",
+                &[
+                    "responsibility_entry/entry-1",
+                    "responsibility_entry/entry-2"
+                ],
+                EngramImportReadiness::Ready
+            )
+        )
+        .is_err(),
+        "an outstanding entry"
+    );
     let mut unknown_owner = EngramImportReconciliationJournal::activated_empty();
     let mut uncovered = owner("owner-record-1");
     uncovered.coverage = EngramImportCoverage::Unknown;
-    unknown_owner.record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(uncovered)).unwrap();
-    unknown_owner.record(EngramImportReconciliationRecord::ResponsibilityEntry(
-        entry("entry-1", EngramImportEntryState::Terminal))).unwrap();
-    assert!(ready(&mut unknown_owner, snapshot("manifest-unknown-owner",
-        &["responsibility_entry/entry-1"], EngramImportReadiness::Ready)).is_err(),
-        "an owner in scope whose coverage is unknown");
+    unknown_owner
+        .record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(uncovered))
+        .unwrap();
+    unknown_owner
+        .record(EngramImportReconciliationRecord::ResponsibilityEntry(
+            entry("entry-1", EngramImportEntryState::Terminal),
+        ))
+        .unwrap();
+    assert!(
+        ready(
+            &mut unknown_owner,
+            snapshot(
+                "manifest-unknown-owner",
+                &["responsibility_entry/entry-1"],
+                EngramImportReadiness::Ready
+            )
+        )
+        .is_err(),
+        "an owner in scope whose coverage is unknown"
+    );
     // A pending snapshot records whatever the coverage.
-    assert_eq!(ready(&mut unknown_owner, snapshot("manifest-pending",
-        &["responsibility_entry/entry-1"], EngramImportReadiness::Pending)).unwrap(), EngramImportRecordOutcome::Recorded);
+    assert_eq!(
+        ready(
+            &mut unknown_owner,
+            snapshot(
+                "manifest-pending",
+                &["responsibility_entry/entry-1"],
+                EngramImportReadiness::Pending
+            )
+        )
+        .unwrap(),
+        EngramImportRecordOutcome::Recorded
+    );
 }
 
 fn other_scope() -> EngramImportReconciliationScope {
-    EngramImportReconciliationScope { association_id: "association-receipt-2".to_owned(), ..scope() }
+    EngramImportReconciliationScope {
+        association_id: "association-receipt-2".to_owned(),
+        ..scope()
+    }
 }
 
 #[test]
 fn a_later_uncovered_owner_cannot_break_an_accepted_ready_snapshot() {
     let mut journal = one_of_each();
-    journal.record(EngramImportReconciliationRecord::ResponsibilitySnapshot(snapshot(
-        "manifest-ready", &["responsibility_entry/entry-1"], EngramImportReadiness::Ready))).unwrap();
+    journal
+        .record(EngramImportReconciliationRecord::ResponsibilitySnapshot(
+            snapshot(
+                "manifest-ready",
+                &["responsibility_entry/entry-1"],
+                EngramImportReadiness::Ready,
+            ),
+        ))
+        .unwrap();
     let mut uncovered = owner("owner-record-2");
     uncovered.owner_id = "owner-2".to_owned();
     uncovered.coverage = EngramImportCoverage::Unknown;
     let before = journal.clone();
-    assert!(journal.record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(uncovered.clone())).is_err(),
-        "an uncovered owner in the scope of a ready snapshot is refused");
+    assert!(
+        journal
+            .record(
+                EngramImportReconciliationRecord::EnrolledResponsibilityOwner(uncovered.clone())
+            )
+            .is_err(),
+        "an uncovered owner in the scope of a ready snapshot is refused"
+    );
     assert_eq!(journal, before, "the refusal left the journal unchanged");
-    assert_eq!(EngramImportReconciliationJournal::decode(&journal.to_value().unwrap()).unwrap(), journal,
-        "what recording accepted, a decoder accepts");
+    assert_eq!(
+        EngramImportReconciliationJournal::decode(&journal.to_value().unwrap()).unwrap(),
+        journal,
+        "what recording accepted, a decoder accepts"
+    );
     // A decoder refuses the same combination.
     let mut encoded = journal.to_value().unwrap();
     let refused = EngramImportReconciliationRecord::EnrolledResponsibilityOwner(uncovered.clone());
@@ -369,13 +583,27 @@ fn a_later_uncovered_owner_cannot_break_an_accepted_ready_snapshot() {
     // with only a pending snapshot; both journals round-trip.
     let mut elsewhere = uncovered.clone();
     elsewhere.scope = other_scope();
-    assert_eq!(journal.record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(elsewhere)).unwrap(),
-        EngramImportRecordOutcome::Recorded);
-    assert_eq!(EngramImportReconciliationJournal::decode(&journal.to_value().unwrap()).unwrap(), journal);
+    assert_eq!(
+        journal
+            .record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(elsewhere))
+            .unwrap(),
+        EngramImportRecordOutcome::Recorded
+    );
+    assert_eq!(
+        EngramImportReconciliationJournal::decode(&journal.to_value().unwrap()).unwrap(),
+        journal
+    );
     let mut pending_only = one_of_each();
-    assert_eq!(pending_only.record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(uncovered)).unwrap(),
-        EngramImportRecordOutcome::Recorded);
-    assert_eq!(EngramImportReconciliationJournal::decode(&pending_only.to_value().unwrap()).unwrap(), pending_only);
+    assert_eq!(
+        pending_only
+            .record(EngramImportReconciliationRecord::EnrolledResponsibilityOwner(uncovered))
+            .unwrap(),
+        EngramImportRecordOutcome::Recorded
+    );
+    assert_eq!(
+        EngramImportReconciliationJournal::decode(&pending_only.to_value().unwrap()).unwrap(),
+        pending_only
+    );
 }
 
 #[test]
@@ -383,34 +611,78 @@ fn a_ready_snapshot_cannot_be_covered_by_another_scopes_entries() {
     let mut journal = one_of_each();
     let mut foreign = entry("entry-other", EngramImportEntryState::Terminal);
     foreign.scope = other_scope();
-    journal.record(EngramImportReconciliationRecord::ResponsibilityEntry(foreign)).unwrap();
+    journal
+        .record(EngramImportReconciliationRecord::ResponsibilityEntry(
+            foreign,
+        ))
+        .unwrap();
     let cross = EngramImportReconciliationRecord::ResponsibilitySnapshot(snapshot(
-        "manifest-cross", &["responsibility_entry/entry-other"], EngramImportReadiness::Ready));
+        "manifest-cross",
+        &["responsibility_entry/entry-other"],
+        EngramImportReadiness::Ready,
+    ));
     let before = journal.clone();
-    assert!(journal.record(cross.clone()).is_err(), "a terminal entry of another scope is not coverage");
+    assert!(
+        journal.record(cross.clone()).is_err(),
+        "a terminal entry of another scope is not coverage"
+    );
     assert_eq!(journal, before);
     let mut encoded = journal.to_value().unwrap();
     encoded[cross.key()] = serde_json::to_value(&cross).unwrap();
-    assert!(EngramImportReconciliationJournal::decode(&encoded).is_err(), "a decoder refuses it too");
+    assert!(
+        EngramImportReconciliationJournal::decode(&encoded).is_err(),
+        "a decoder refuses it too"
+    );
     // Control: the entry's own scope may cite it.
-    let mut own = snapshot("manifest-own", &["responsibility_entry/entry-other"], EngramImportReadiness::Ready);
+    let mut own = snapshot(
+        "manifest-own",
+        &["responsibility_entry/entry-other"],
+        EngramImportReadiness::Ready,
+    );
     own.scope = other_scope();
-    assert_eq!(journal.record(EngramImportReconciliationRecord::ResponsibilitySnapshot(own)).unwrap(),
-        EngramImportRecordOutcome::Recorded);
+    assert_eq!(
+        journal
+            .record(EngramImportReconciliationRecord::ResponsibilitySnapshot(
+                own
+            ))
+            .unwrap(),
+        EngramImportRecordOutcome::Recorded
+    );
 }
 
 #[test]
 fn the_cached_byte_total_matches_a_recomputation_after_recording() {
     let mut journal = one_of_each();
     // Recorded, unchanged and refused calls all leave the cache exact.
-    journal.record(EngramImportReconciliationRecord::ResponsibilityEntry(
-        entry("entry-2", EngramImportEntryState::Outstanding))).unwrap();
-    assert_eq!(journal.record(EngramImportReconciliationRecord::LocalImportFence(fence("fence-1", 1))).unwrap(),
-        EngramImportRecordOutcome::Unchanged);
+    journal
+        .record(EngramImportReconciliationRecord::ResponsibilityEntry(
+            entry("entry-2", EngramImportEntryState::Outstanding),
+        ))
+        .unwrap();
+    assert_eq!(
+        journal
+            .record(EngramImportReconciliationRecord::LocalImportFence(fence(
+                "fence-1", 1
+            )))
+            .unwrap(),
+        EngramImportRecordOutcome::Unchanged
+    );
     let mut conflicting = fence("fence-1", 1);
     conflicting.candidate_id = "candidate-2".to_owned();
-    assert!(journal.record(EngramImportReconciliationRecord::LocalImportFence(conflicting)).is_err());
-    assert!(journal.record(EngramImportReconciliationRecord::LocalImportFence(fence("fence-0", 0))).is_err());
+    assert!(
+        journal
+            .record(EngramImportReconciliationRecord::LocalImportFence(
+                conflicting
+            ))
+            .is_err()
+    );
+    assert!(
+        journal
+            .record(EngramImportReconciliationRecord::LocalImportFence(fence(
+                "fence-0", 0
+            )))
+            .is_err()
+    );
     assert_eq!(journal.bytes, journal.measure().unwrap());
     journal.validate().unwrap();
     // A decoder recomputes the total from the records, never trusting a cache.
@@ -421,6 +693,10 @@ fn the_cached_byte_total_matches_a_recomputation_after_recording() {
 
 #[test]
 fn not_activated_is_not_an_empty_journal() {
-    assert_ne!(EngramImportReconciliationState::NotActivated,
-        EngramImportReconciliationState::Activated(Arc::new(EngramImportReconciliationJournal::activated_empty())));
+    assert_ne!(
+        EngramImportReconciliationState::NotActivated,
+        EngramImportReconciliationState::Activated(Arc::new(
+            EngramImportReconciliationJournal::activated_empty()
+        ))
+    );
 }

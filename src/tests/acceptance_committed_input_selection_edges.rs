@@ -226,9 +226,11 @@ fn a_compacted_newer_failure_still_supersedes_an_older_pass() {
         "the active newer failure already refuses"
     );
     retain_registration(&state, &newer);
-    assert!(PathBuf::from(&newer.run_directory)
-        .join("results.json")
-        .is_file());
+    assert!(
+        PathBuf::from(&newer.run_directory)
+            .join("results.json")
+            .is_file()
+    );
     assert_eq!(
         decide(&state, &parent),
         Err(AcceptanceCommittedInputRefusal::NoEligibleRun {

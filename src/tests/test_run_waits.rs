@@ -10,12 +10,12 @@
 
 use super::*;
 
-mod run_wait_evidence;
 mod heartbeat_evidence;
-mod registration;
-mod prompt_evidence;
-mod observations;
 mod no_trace_declared;
+mod observations;
+mod prompt_evidence;
+mod registration;
+mod run_wait_evidence;
 
 struct WaitFixture {
     state: AppState,
@@ -120,11 +120,18 @@ fn registration_validates_its_runs_and_session() {
     fixture.write("test-a", Some(running(7)));
     fixture.scan(&[7]);
 
-    let status = |result: Result<TestRunWaitResponse, ApiError>| result.err().map(|error| error.status);
-    assert_eq!(status(fixture.register(&[], "all")), Some(StatusCode::BAD_REQUEST));
+    let status =
+        |result: Result<TestRunWaitResponse, ApiError>| result.err().map(|error| error.status);
+    assert_eq!(
+        status(fixture.register(&[], "all")),
+        Some(StatusCode::BAD_REQUEST)
+    );
     let many: Vec<String> = (0..17).map(|index| format!("test-{index}")).collect();
     let many: Vec<&str> = many.iter().map(String::as_str).collect();
-    assert_eq!(status(fixture.register(&many, "all")), Some(StatusCode::BAD_REQUEST));
+    assert_eq!(
+        status(fixture.register(&many, "all")),
+        Some(StatusCode::BAD_REQUEST)
+    );
 
     // An unknown id gets one forced rescan, then rejects the whole call.
     let rescans = std::cell::Cell::new(0);
@@ -142,7 +149,9 @@ fn registration_validates_its_runs_and_session() {
     assert!(fixture.pending_waits().is_empty());
 
     // A run in another project is foreign.
-    let other_root = fixture.root.with_file_name("test-run-waits-validation-other");
+    let other_root = fixture
+        .root
+        .with_file_name("test-run-waits-validation-other");
     fs::create_dir_all(&other_root).unwrap();
     run_git_test_command(&other_root, &["init", "--quiet"]);
     let other_project = create_test_project(&fixture.state, &other_root, "Other");
@@ -158,7 +167,13 @@ fn registration_validates_its_runs_and_session() {
         .err()
         .unwrap();
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(error.message.contains("not in the waiting session's project"), "{}", error.message);
+    assert!(
+        error
+            .message
+            .contains("not in the waiting session's project"),
+        "{}",
+        error.message
+    );
 
     // A session without a project is told so, not that the run is foreign.
     {
@@ -176,7 +191,11 @@ fn registration_validates_its_runs_and_session() {
         .err()
         .unwrap();
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(error.message.contains("has no project"), "{}", error.message);
+    assert!(
+        error.message.contains("has no project"),
+        "{}",
+        error.message
+    );
 
     // An unknown session.
     let error = fixture
@@ -227,7 +246,9 @@ fn an_all_wait_resumes_once_with_every_verdict_when_all_runs_settle() {
     let fail_dir = fixture.write("test-fail", Some(running(8)));
     fixture.scan(&[7, 8]);
     fixture.busy();
-    fixture.register(&["test-pass", "test-fail"], "all").unwrap();
+    fixture
+        .register(&["test-pass", "test-fail"], "all")
+        .unwrap();
 
     let mut results = passed();
     results["runId"] = json!("test-pass");
@@ -246,10 +267,22 @@ fn an_all_wait_resumes_once_with_every_verdict_when_all_runs_settle() {
     assert!(prompt.contains("### Run `test-pass` (full)"), "{prompt}");
     assert!(prompt.contains("- Verdict: PASS"), "{prompt}");
     assert!(prompt.contains("- Verdict: FAIL"), "{prompt}");
-    assert!(prompt.contains("- First failing: stage `rust-tests`"), "{prompt}");
-    assert!(prompt.contains("assertion failed: left == right"), "the failure excerpt");
-    assert!(prompt.contains("test-launcher.mjs summary"), "the inspect command");
-    assert!(!prompt.contains("recover"), "no settle command without UNKNOWN");
+    assert!(
+        prompt.contains("- First failing: stage `rust-tests`"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("assertion failed: left == right"),
+        "the failure excerpt"
+    );
+    assert!(
+        prompt.contains("test-launcher.mjs summary"),
+        "the inspect command"
+    );
+    assert!(
+        !prompt.contains("recover"),
+        "no settle command without UNKNOWN"
+    );
     assert!(fixture.pending_waits().is_empty(), "consumed");
 
     // Never repeated.
@@ -264,14 +297,20 @@ fn an_any_wait_resumes_on_the_first_settled_run() {
     fixture.write("test-second", Some(running(8)));
     fixture.scan(&[7, 8]);
     fixture.busy();
-    fixture.register(&["test-first", "test-second"], "any").unwrap();
+    fixture
+        .register(&["test-first", "test-second"], "any")
+        .unwrap();
     let mut results = passed();
     results["runId"] = json!("test-first");
     fs::write(first.join("results.json"), results.to_string()).unwrap();
     fixture.scan(&[8]);
     let prompts = fixture.queued_prompts();
     assert_eq!(prompts.len(), 1);
-    assert!(prompts[0].contains("`test-second`: NOT SETTLED YET"), "{}", prompts[0]);
+    assert!(
+        prompts[0].contains("`test-second`: NOT SETTLED YET"),
+        "{}",
+        prompts[0]
+    );
 }
 
 #[test]
@@ -293,11 +332,24 @@ fn only_a_confirmed_unknown_settles_and_it_is_never_a_pass() {
     let prompts = fixture.queued_prompts();
     assert_eq!(prompts.len(), 1, "{prompts:?}");
     let prompt = &prompts[0];
-    assert!(prompt.contains("`test-gone`: UNKNOWN (process gone)"), "{prompt}");
-    assert!(prompt.contains("test-launcher.mjs recover"), "names recover to settle it");
-    assert!(prompt.contains("- Stage at the last observation: `rust-tests`"), "{prompt}");
+    assert!(
+        prompt.contains("`test-gone`: UNKNOWN (process gone)"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("test-launcher.mjs recover"),
+        "names recover to settle it"
+    );
+    assert!(
+        prompt.contains("- Stage at the last observation: `rust-tests`"),
+        "{prompt}"
+    );
     assert!(!prompt.contains("PASS"), "{prompt}");
-    assert_eq!(fixture.pending_waits().len(), 1, "the unreadable run's wait stays");
+    assert_eq!(
+        fixture.pending_waits().len(),
+        1,
+        "the unreadable run's wait stays"
+    );
 }
 
 #[test]
@@ -311,7 +363,10 @@ fn a_run_that_leaves_the_index_resumes_as_not_indexed_with_its_label() {
     fixture.scan(&[7]);
     let prompt = fixture.queued_prompts().pop().expect("resumed");
     assert!(prompt.contains("UNKNOWN (not indexed)"), "{prompt}");
-    assert!(prompt.contains(&response.wait.runs[0].run_dir), "the label names its evidence");
+    assert!(
+        prompt.contains(&response.wait.runs[0].run_dir),
+        "the label names its evidence"
+    );
 }
 
 #[test]
@@ -322,17 +377,29 @@ fn a_run_dropped_from_the_index_but_still_on_disk_waits_for_the_next_scan() {
     fixture.scan(&[7, 8]);
     fixture.busy();
     fixture.register(&["test-kept"], "all").unwrap();
-    fixture.register(&["test-unreadable-request"], "all").unwrap();
+    fixture
+        .register(&["test-unreadable-request"], "all")
+        .unwrap();
     // Both pass. A rescan that started before the registrations commits
     // without their retention exemption and drops both runs; one of them has
     // also lost its request.json.
-    for (run_dir, run_id) in [(&kept, "test-kept"), (&unreadable, "test-unreadable-request")] {
+    for (run_dir, run_id) in [
+        (&kept, "test-kept"),
+        (&unreadable, "test-unreadable-request"),
+    ] {
         let mut results = passed();
         results["runId"] = json!(run_id);
         fs::write(run_dir.join("results.json"), results.to_string()).unwrap();
     }
     fs::remove_file(unreadable.join("request.json")).unwrap();
-    fixture.state.inner.lock().unwrap().test_runs.entries.clear();
+    fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_runs
+        .entries
+        .clear();
 
     fixture.state.refresh_test_run_waits();
     let prompts = fixture.queued_prompts();
@@ -347,13 +414,21 @@ fn a_run_dropped_from_the_index_but_still_on_disk_waits_for_the_next_scan() {
         .iter()
         .map(|wait| wait.run_ids[0].clone())
         .collect();
-    assert_eq!(pending, vec!["test-kept".to_owned()], "a run still on disk is not settled");
+    assert_eq!(
+        pending,
+        vec!["test-kept".to_owned()],
+        "a run still on disk is not settled"
+    );
 
     // The next scan, with the wait's exemption, indexes it again.
     fixture.scan(&[]);
     let prompts = fixture.queued_prompts();
     assert_eq!(prompts.len(), 2, "{prompts:?}");
-    assert!(prompts[1].contains("`test-kept`: PASS"), "its real verdict: {}", prompts[1]);
+    assert!(
+        prompts[1].contains("`test-kept`: PASS"),
+        "its real verdict: {}",
+        prompts[1]
+    );
     assert!(fixture.pending_waits().is_empty());
 }
 
@@ -376,8 +451,14 @@ fn a_run_of_a_removed_project_resumes_as_not_indexed() {
     // repository, and the run's files are all still there.
     fixture.state.delete_project(&project_id).unwrap();
     fixture.scan(&[7]);
-    let prompt = fixture.queued_prompts().pop().expect("resumed, not pending for good");
-    assert!(prompt.contains("`test-orphaned`: UNKNOWN (not indexed)"), "{prompt}");
+    let prompt = fixture
+        .queued_prompts()
+        .pop()
+        .expect("resumed, not pending for good");
+    assert!(
+        prompt.contains("`test-orphaned`: UNKNOWN (not indexed)"),
+        "{prompt}"
+    );
     assert!(fixture.pending_waits().is_empty());
 }
 
@@ -397,7 +478,10 @@ fn a_preflight_failure_resumes_naming_the_check() {
     fixture.scan(&[]);
     let prompt = fixture.queued_prompts().pop().expect("resumed");
     assert!(prompt.contains("- Verdict: FAIL"), "{prompt}");
-    assert!(prompt.contains("- First failing: preflight `cargo`"), "{prompt}");
+    assert!(
+        prompt.contains("- First failing: preflight `cargo`"),
+        "{prompt}"
+    );
     assert!(prompt.contains("cargo: command not found"), "{prompt}");
 }
 
@@ -427,7 +511,10 @@ fn a_run_that_fails_after_the_reads_are_picked_is_read_before_resuming() {
     assert_eq!(fixture.pending_waits().len(), 1);
 
     fixture.state.refresh_test_run_waits();
-    let prompt = fixture.queued_prompts().pop().expect("resumed on the next refresh");
+    let prompt = fixture
+        .queued_prompts()
+        .pop()
+        .expect("resumed on the next refresh");
     assert!(prompt.contains("late assertion failed"), "{prompt}");
     assert!(!prompt.contains("not available here"), "{prompt}");
 }
@@ -445,11 +532,17 @@ fn a_latched_session_gets_its_resume_queued_but_not_dispatched() {
     }
     let response = fixture.register(&["test-latched"], "all").unwrap();
     assert!(response.resume_prompt_queued);
-    assert!(!response.resume_dispatch_requested, "the latch holds automatic resumes");
+    assert!(
+        !response.resume_dispatch_requested,
+        "the latch holds automatic resumes"
+    );
     let inner = fixture.state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&fixture.session).unwrap()];
     assert_eq!(record.session.status, SessionStatus::Idle);
-    assert!(record.orchestrator_auto_dispatch_blocked, "only the user lifts it");
+    assert!(
+        record.orchestrator_auto_dispatch_blocked,
+        "only the user lifts it"
+    );
     assert_eq!(record.queued_prompts.len(), 1, "the prompt stays queued");
 }
 
@@ -463,7 +556,10 @@ fn a_delegation_child_cannot_wait_on_runs() {
         let index = inner.find_session_index(&fixture.session).unwrap();
         inner.sessions[index].session.parent_delegation_id = Some("delegation-1".to_owned());
     }
-    let error = fixture.register(&["test-a"], "all").err().expect("a child is refused");
+    let error = fixture
+        .register(&["test-a"], "all")
+        .err()
+        .expect("a child is refused");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("root session"), "{}", error.message);
     assert!(fixture.pending_waits().is_empty());
@@ -491,7 +587,10 @@ fn stop_consumes_the_sessions_run_waits_and_nothing_resumes_later() {
     let mut deltas = fixture.state.subscribe_delta_events();
     let registered = fixture.register(&["test-stopped"], "all").unwrap();
 
-    fixture.state.stop_session(&fixture.session).expect("stop should succeed");
+    fixture
+        .state
+        .stop_session(&fixture.session)
+        .expect("stop should succeed");
 
     assert!(fixture.pending_waits().is_empty());
     let mut consumed = Vec::new();
@@ -505,11 +604,20 @@ fn stop_consumes_the_sessions_run_waits_and_nothing_resumes_later() {
             Err(_) => break,
         };
         match serde_json::from_str::<DeltaEvent>(&payload).expect("published delta should decode") {
-            DeltaEvent::TestRunWaitCreated { server_instance_id, wait, .. } => {
+            DeltaEvent::TestRunWaitCreated {
+                server_instance_id,
+                wait,
+                ..
+            } => {
                 assert_eq!(server_instance_id, fixture.state.server_instance_id);
                 created_ids.push(wait.id);
             }
-            DeltaEvent::TestRunWaitConsumed { server_instance_id, reason, session_id, .. } => {
+            DeltaEvent::TestRunWaitConsumed {
+                server_instance_id,
+                reason,
+                session_id,
+                ..
+            } => {
                 assert_eq!(server_instance_id, fixture.state.server_instance_id);
                 consumed.push((reason, session_id));
             }
@@ -519,7 +627,10 @@ fn stop_consumes_the_sessions_run_waits_and_nothing_resumes_later() {
     assert_eq!(created_ids, vec![registered.wait.id]);
     assert_eq!(
         consumed,
-        vec![(TestRunWaitConsumedReason::SessionStopped, fixture.session.clone())]
+        vec![(
+            TestRunWaitConsumedReason::SessionStopped,
+            fixture.session.clone()
+        )]
     );
     let mut results = passed();
     results["runId"] = json!("test-stopped");
@@ -549,10 +660,12 @@ fn a_removed_session_consumes_its_waits() {
     fixture.scan(&[7]);
     assert!(fixture.pending_waits().is_empty());
     let reasons: Vec<TestRunWaitConsumedReason> = std::iter::from_fn(|| deltas.try_recv().ok())
-        .filter_map(|payload| match serde_json::from_str::<DeltaEvent>(&payload) {
-            Ok(DeltaEvent::TestRunWaitConsumed { reason, .. }) => Some(reason),
-            _ => None,
-        })
+        .filter_map(
+            |payload| match serde_json::from_str::<DeltaEvent>(&payload) {
+                Ok(DeltaEvent::TestRunWaitConsumed { reason, .. }) => Some(reason),
+                _ => None,
+            },
+        )
         .collect();
     assert_eq!(reasons, vec![TestRunWaitConsumedReason::SessionRemoved]);
 }
@@ -573,10 +686,12 @@ fn a_session_that_became_an_archived_codex_thread_has_its_waits_consumed() {
     assert!(fixture.pending_waits().is_empty());
     assert!(fixture.queued_prompts().is_empty(), "consumed, not resumed");
     let reasons: Vec<TestRunWaitConsumedReason> = std::iter::from_fn(|| deltas.try_recv().ok())
-        .filter_map(|payload| match serde_json::from_str::<DeltaEvent>(&payload) {
-            Ok(DeltaEvent::TestRunWaitConsumed { reason, .. }) => Some(reason),
-            _ => None,
-        })
+        .filter_map(
+            |payload| match serde_json::from_str::<DeltaEvent>(&payload) {
+                Ok(DeltaEvent::TestRunWaitConsumed { reason, .. }) => Some(reason),
+                _ => None,
+            },
+        )
         .collect();
     assert_eq!(reasons, vec![TestRunWaitConsumedReason::SessionUnavailable]);
 }
@@ -620,9 +735,14 @@ async fn the_route_answers_201_with_the_wait_and_422_for_a_malformed_body() {
 
     let response = request_response(&app, post("{ not json".to_owned())).await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let response = request_response(&app, post(json!({ "runIds": "test-routed" }).to_string())).await;
+    let response =
+        request_response(&app, post(json!({ "runIds": "test-routed" }).to_string())).await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(fixture.pending_waits().len(), 1, "nothing registered by a rejected body");
+    assert_eq!(
+        fixture.pending_waits().len(),
+        1,
+        "nothing registered by a rejected body"
+    );
 }
 
 #[test]
@@ -638,9 +758,17 @@ fn nothing_settles_before_the_first_scan_of_a_process() {
         inner.test_runs = TestRunIndex::default();
     }
     fixture.state.refresh_test_run_waits();
-    assert_eq!(fixture.pending_waits().len(), 1, "an empty index proves nothing");
+    assert_eq!(
+        fixture.pending_waits().len(),
+        1,
+        "an empty index proves nothing"
+    );
     fixture.scan(&[7]);
-    assert_eq!(fixture.pending_waits().len(), 1, "still running after the scan");
+    assert_eq!(
+        fixture.pending_waits().len(),
+        1,
+        "still running after the scan"
+    );
 }
 
 #[test]
@@ -694,7 +822,10 @@ fn a_run_named_by_a_pending_wait_stays_indexed_past_retention() {
     );
     fixture.state.refresh_test_run_waits();
     let prompt = fixture.queued_prompts().pop().expect("resumed");
-    assert!(prompt.contains("`test-a-old`: PASS"), "with its verdict, not as not indexed");
+    assert!(
+        prompt.contains("`test-a-old`: PASS"),
+        "with its verdict, not as not indexed"
+    );
 }
 
 /// A failed run as the index summarizes it, for prompt tests.
@@ -736,7 +867,10 @@ fn wait_on(summaries: &[TestRunSummary]) -> TestRunWaitRecord {
     TestRunWaitRecord {
         id: "test-run-wait-1".to_owned(),
         session_id: "session-1".to_owned(),
-        run_ids: summaries.iter().map(|summary| summary.run_id.clone()).collect(),
+        run_ids: summaries
+            .iter()
+            .map(|summary| summary.run_id.clone())
+            .collect(),
         mode: DelegationWaitMode::All,
         created_at: "now".to_owned(),
         title: None,
@@ -790,20 +924,42 @@ fn the_prompt_keeps_headers_whole_and_bounds_excerpts() {
     let summaries: Vec<TestRunSummary> = run_ids.iter().map(|id| failed_summary(id)).collect();
     let failures: HashMap<String, TestRunCardFailureRead> = run_ids
         .iter()
-        .map(|id| (id.clone(), failure_read("x".repeat(TEST_RUN_WAIT_EXCERPT_MAX_BYTES), false)))
+        .map(|id| {
+            (
+                id.clone(),
+                failure_read("x".repeat(TEST_RUN_WAIT_EXCERPT_MAX_BYTES), false),
+            )
+        })
         .collect();
     let prompt = failed_prompt(&summaries, &failures);
-    assert!(prompt.len() <= TEST_RUN_WAIT_PROMPT_MAX_BYTES, "{}", prompt.len());
-    assert!(!prompt.contains(DELEGATION_WAIT_RESUME_TRUNCATED_MARKER), "budgeted, not truncated");
+    assert!(
+        prompt.len() <= TEST_RUN_WAIT_PROMPT_MAX_BYTES,
+        "{}",
+        prompt.len()
+    );
+    assert!(
+        !prompt.contains(DELEGATION_WAIT_RESUME_TRUNCATED_MARKER),
+        "budgeted, not truncated"
+    );
     for id in &run_ids {
-        assert!(prompt.contains(&format!("### Run `{id}` (full)")), "every header whole");
+        assert!(
+            prompt.contains(&format!("### Run `{id}` (full)")),
+            "every header whole"
+        );
         assert!(prompt.contains(&format!("summary \"/repo/.git/review-runs/{id}\"")));
     }
-    assert!(prompt.contains("Diagnostics (first failure) (cut)"), "excerpts share the rest");
+    assert!(
+        prompt.contains("Diagnostics (first failure) (cut)"),
+        "excerpts share the rest"
+    );
 
     // A single run gets at most 8 KiB of excerpt.
     let prompt = failed_prompt(&summaries[..1], &failures);
-    assert!(prompt.len() < TEST_RUN_WAIT_EXCERPT_MAX_BYTES + 2048, "{}", prompt.len());
+    assert!(
+        prompt.len() < TEST_RUN_WAIT_EXCERPT_MAX_BYTES + 2048,
+        "{}",
+        prompt.len()
+    );
 }
 
 #[test]
@@ -811,9 +967,15 @@ fn an_excerpt_cut_before_the_prompt_is_marked_and_its_fences_cannot_close_the_bl
     let summaries = vec![failed_summary("test-a"), failed_summary("test-b")];
     let failures = HashMap::from([
         // Short enough for the prompt, but the launcher capped it.
-        ("test-a".to_owned(), failure_read("partial output".to_owned(), true)),
+        (
+            "test-a".to_owned(),
+            failure_read("partial output".to_owned(), true),
+        ),
         // Test output that contains a fence of its own.
-        ("test-b".to_owned(), failure_read("expected:\n```\nleft\n```".to_owned(), false)),
+        (
+            "test-b".to_owned(),
+            failure_read("expected:\n```\nleft\n```".to_owned(), false),
+        ),
     ]);
     let prompt = failed_prompt(&summaries, &failures);
     let (first, second) = prompt.split_once("### Run `test-b`").expect("both runs");
@@ -842,11 +1004,15 @@ fn a_label_run_dir_names_its_directory() {
         );
         // Ordinary and historical UNC displays name the same native directory.
         assert_eq!(
-            test_run_fs_path(&display(r"\\?\UNC\server\share\repo\.git\review-runs\test-a")),
+            test_run_fs_path(&display(
+                r"\\?\UNC\server\share\repo\.git\review-runs\test-a"
+            )),
             PathBuf::from(r"\\?\UNC\server\share\repo\.git\review-runs\test-a")
         );
-        assert_eq!(test_run_fs_path("UNC/server/share/repo/.git/review-runs/test-a"),
-            test_run_fs_path("//server/share/repo/.git/review-runs/test-a"));
+        assert_eq!(
+            test_run_fs_path("UNC/server/share/repo/.git/review-runs/test-a"),
+            test_run_fs_path("//server/share/repo/.git/review-runs/test-a")
+        );
     }
 }
 
@@ -876,17 +1042,33 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
     };
     let value = serde_json::to_value(&wait).unwrap();
     let mut legacy = value.clone();
-    legacy["runs"][0].as_object_mut().unwrap().remove("registrationBacked");
-    legacy["runs"][0].as_object_mut().unwrap().remove("registrationProgress");
+    legacy["runs"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("registrationBacked");
+    legacy["runs"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("registrationProgress");
     let restored: TestRunWaitRecord = serde_json::from_value(legacy).unwrap();
     assert!(!restored.runs[0].registration_backed);
-    assert_eq!(restored.runs[0].registration_progress, TestRunWaitRegistrationProgress::default());
+    assert_eq!(
+        restored.runs[0].registration_progress,
+        TestRunWaitRegistrationProgress::default()
+    );
     for key in ["id", "sessionId", "runIds", "mode", "createdAt", "runs"] {
         assert!(value.get(key).is_some(), "{key}: {value}");
     }
     assert_eq!(value["mode"], "all");
     assert!(value.get("title").is_none());
-    for key in ["runId", "runDir", "preset", "worktree", "ownerSessionId", "startedAt"] {
+    for key in [
+        "runId",
+        "runDir",
+        "preset",
+        "worktree",
+        "ownerSessionId",
+        "startedAt",
+    ] {
         assert!(value["runs"][0].get(key).is_some(), "{key}");
     }
     let consumed = serde_json::to_value(DeltaEvent::TestRunWaitConsumed {
@@ -905,7 +1087,8 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
         revision: 2,
         server_instance_id: "instance-1".to_owned(),
         wait,
-    }).unwrap();
+    })
+    .unwrap();
     assert_eq!(created["type"], "testRunWaitCreated");
     assert_eq!(created["serverInstanceId"], "instance-1");
     // Older remotes omit identity; decoding must still succeed.
@@ -913,8 +1096,12 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
         value.as_object_mut().unwrap().remove("serverInstanceId");
         let decoded: DeltaEvent = serde_json::from_value(value).unwrap();
         let id = match decoded {
-            DeltaEvent::TestRunWaitCreated { server_instance_id, .. }
-            | DeltaEvent::TestRunWaitConsumed { server_instance_id, .. } => server_instance_id,
+            DeltaEvent::TestRunWaitCreated {
+                server_instance_id, ..
+            }
+            | DeltaEvent::TestRunWaitConsumed {
+                server_instance_id, ..
+            } => server_instance_id,
             _ => panic!("expected a wait-record delta"),
         };
         assert!(id.is_empty());
@@ -937,7 +1124,9 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
     }))
     .expect("a dispatch failure without serverInstanceId should decode");
     match legacy {
-        DeltaEvent::TestRunWaitResumeDispatchFailed { server_instance_id, .. } => {
+        DeltaEvent::TestRunWaitResumeDispatchFailed {
+            server_instance_id, ..
+        } => {
             assert_eq!(server_instance_id, "");
         }
         _ => panic!("expected a TestRunWaitResumeDispatchFailed delta"),

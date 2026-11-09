@@ -51,10 +51,16 @@ fn worktree(named_root: &str) -> PathBuf {
 // Explicit owner replies are fixture inputs. These tests exercise acceptance
 // admission and its owner boundary, not a second implementation of Git's
 // clean predicate. Git mutations below are paired with the owner's new reply.
-fn acceptance_owner_reports(state: &AppState, parent: &str, named_root: &str,
-    changes: Vec<EngramSourceIdChange>, submodules: Vec<EngramSourceIdSubmodule>)
-{
-    use crate::tests::engram_source_owner::{source_owner_fixture_binary, source_owner_output, source_owner_reply};
+fn acceptance_owner_reports(
+    state: &AppState,
+    parent: &str,
+    named_root: &str,
+    changes: Vec<EngramSourceIdChange>,
+    submodules: Vec<EngramSourceIdSubmodule>,
+) {
+    use crate::tests::engram_source_owner::{
+        source_owner_fixture_binary, source_owner_output, source_owner_reply,
+    };
     let root = worktree(named_root);
     let directory = root.join(".worktrees/acceptance-source-owner");
     fs::create_dir_all(&directory).unwrap();
@@ -62,42 +68,78 @@ fn acceptance_owner_reports(state: &AppState, parent: &str, named_root: &str,
     let identity = EngramSourceId {
         commit: run_git_test_command_output(&root, &["rev-parse", "HEAD"]),
         tree: run_git_test_command_output(&root, &["show", "-s", "--format=%T", "HEAD"]),
-        changes, submodules,
+        changes,
+        submodules,
     };
-    let mut entries: Vec<Value> = identity.changes.iter().map(|change|
-        json!({"path":change.path,"status":change.status,"origin":change.origin})).collect();
-    entries.extend(identity.submodules.iter().filter(|child| !child.changes.is_empty())
-        .map(|child| json!({"path":child.path,"status":" M"})));
+    let mut entries: Vec<Value> = identity
+        .changes
+        .iter()
+        .map(|change| json!({"path":change.path,"status":change.status,"origin":change.origin}))
+        .collect();
+    entries.extend(
+        identity
+            .submodules
+            .iter()
+            .filter(|child| !child.changes.is_empty())
+            .map(|child| json!({"path":child.path,"status":" M"})),
+    );
     let envelope = serde_json::to_vec(&json!({"version":1,
         "status":if entries.is_empty() {"clean"} else {"not_clean"},
         "root":engram_exact_path_key(&root),"source":format!("git-commit:{}",identity.commit),
-        "tree":identity.tree,"entries":entries,"refusal":null,"source_id":identity})).unwrap();
+        "tree":identity.tree,"entries":entries,"refusal":null,"source_id":identity}))
+    .unwrap();
     let mut inner = state.inner.lock().unwrap();
-    let project = engram_project_for_session_locked(&inner, parent).unwrap().id.clone();
-    inner.projects.iter_mut().find(|row| row.id == project).unwrap()
-        .engram.as_mut().unwrap().binary_path = Some(binary.to_string_lossy().into_owned());
-    inner.test_native_source_owner_metadata = Some(Arc::new(|state, session, deadline|
-        state.source_owner_metadata_snapshot_with(session, deadline,
-            |_, _, args, _, _| Ok(source_owner_reply(args)))));
+    let project = engram_project_for_session_locked(&inner, parent)
+        .unwrap()
+        .id
+        .clone();
+    inner
+        .projects
+        .iter_mut()
+        .find(|row| row.id == project)
+        .unwrap()
+        .engram
+        .as_mut()
+        .unwrap()
+        .binary_path = Some(binary.to_string_lossy().into_owned());
+    inner.test_native_source_owner_metadata = Some(Arc::new(|state, session, deadline| {
+        state.source_owner_metadata_snapshot_with(session, deadline, |_, _, args, _, _| {
+            Ok(source_owner_reply(args))
+        })
+    }));
     let observed = envelope.clone();
     inner.test_observation_source_owner = Some(Arc::new(move |_, _, args, _, _| {
-        if args[0] == "--version" { return Ok(source_owner_reply(args)); }
+        if args[0] == "--version" {
+            return Ok(source_owner_reply(args));
+        }
         Ok(source_owner_output(0, observed.clone()))
     }));
     let expected_root = fs::canonicalize(root).unwrap();
     inner.test_acceptance_source_owner_capture = Some(Arc::new(move |_, cwd, args, _, _| {
-        assert_eq!(fs::canonicalize(cwd).unwrap(), expected_root,
-            "capture uses the named root, not the initiating project's root");
+        assert_eq!(
+            fs::canonicalize(cwd).unwrap(),
+            expected_root,
+            "capture uses the named root, not the initiating project's root"
+        );
         assert_eq!(args[0], "source");
         Ok(source_owner_output(0, envelope.clone()))
     }));
 }
 
 fn acceptance_owner_reports_dirty(state: &AppState, parent: &str, named_root: &str, path: &str) {
-    acceptance_owner_reports(state, parent, named_root, vec![EngramSourceIdChange {
-        path:path.into(), status:" M".into(), origin:None,
-        blob:Some("d".repeat(40)), mode:Some(EngramSourceIdMode::Regular),
-    }], Vec::new());
+    acceptance_owner_reports(
+        state,
+        parent,
+        named_root,
+        vec![EngramSourceIdChange {
+            path: path.into(),
+            status: " M".into(),
+            origin: None,
+            blob: Some("d".repeat(40)),
+            mode: Some(EngramSourceIdMode::Regular),
+        }],
+        Vec::new(),
+    );
 }
 
 /// Commits the fixture's untracked file in the named root, which leaves it
@@ -105,7 +147,10 @@ fn acceptance_owner_reports_dirty(state: &AppState, parent: &str, named_root: &s
 fn commit_named_root(named_root: &str) -> String {
     let root = worktree(named_root);
     run_git_test_command(&root, &["add", "judged.txt"]);
-    run_git_test_command(&root, &["commit", "--quiet", "-m", "judged in the named root"]);
+    run_git_test_command(
+        &root,
+        &["commit", "--quiet", "-m", "judged in the named root"],
+    );
     run_git_test_command_output(&root, &["rev-parse", "HEAD"])
 }
 
@@ -196,7 +241,13 @@ fn try_register_committed_run_with_source_as(
     mut results: Value,
     source: Option<EngramSourceId>,
 ) -> Result<TestRunRegistration, ApiError> {
-    if state.inner.lock().unwrap().test_acceptance_source_owner_capture.is_none() {
+    if state
+        .inner
+        .lock()
+        .unwrap()
+        .test_acceptance_source_owner_capture
+        .is_none()
+    {
         acceptance_owner_reports(state, parent, named_root, Vec::new(), Vec::new());
     }
     let root = worktree(named_root);
@@ -223,14 +274,13 @@ fn try_register_committed_run_with_source_as(
     }
     fs::write(directory.join("request.json"), request.to_string()).unwrap();
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
-    state
-        .register_test_run(
-            parent,
-            RegisterTestRunRequest {
-                run_id: run_id.to_owned(),
-                run_directory: test_run_display_path(&directory),
-            },
-        )?;
+    state.register_test_run(
+        parent,
+        RegisterTestRunRequest {
+            run_id: run_id.to_owned(),
+            run_directory: test_run_display_path(&directory),
+        },
+    )?;
     let registration = state
         .inner
         .lock()
@@ -273,9 +323,13 @@ fn write_record(registration: &TestRunRegistration, commit: &str, progress: Valu
     };
     // This acceptance seam intentionally exercises a retained commit-format
     // record; its contract is separate from new owner-backed run production.
-    let mut body = engram_verification_record_build_body(registration,
-        &read("request.json"), &read("results.json"), Some(&input))
-        .expect("the historical fixture run rebuilds its verification record");
+    let mut body = engram_verification_record_build_body(
+        registration,
+        &read("request.json"),
+        &read("results.json"),
+        Some(&input),
+    )
+    .expect("the historical fixture run rebuilds its verification record");
     if body.input != input {
         body.input = input;
     }
@@ -313,7 +367,12 @@ fn acknowledged(state: &str) -> Value {
 /// the registration in state, kept through the sender's own function.
 /// A receipt is kept with the digest of the body it answered, as the sender
 /// keeps it: here the body just written.
-fn host_observed(state: &AppState, registration: &TestRunRegistration, commit: &str, progress: Value) {
+fn host_observed(
+    state: &AppState,
+    registration: &TestRunRegistration,
+    commit: &str,
+    progress: Value,
+) {
     write_record(registration, commit, progress.clone());
     let mut progress = progress;
     if progress.get("receipt").is_some() {
@@ -435,7 +494,11 @@ fn assert_refused_without_a_sighting(
         "{case}: the message leads with its code: {}",
         error.message
     );
-    assert_eq!(sighting_reads(transport), 0, "{case}: no sighting read in this flow");
+    assert_eq!(
+        sighting_reads(transport),
+        0,
+        "{case}: no sighting read in this flow"
+    );
     refusal
 }
 
@@ -454,7 +517,11 @@ fn assert_fell_back_to_the_sighting(
         "{case}: the sighting preflight decides: {}",
         error.message
     );
-    assert_eq!(sighting_reads(transport), 1, "{case}: the sighting was read");
+    assert_eq!(
+        sighting_reads(transport),
+        1,
+        "{case}: the sighting was read"
+    );
 }
 
 /// Requests the fixture's independent evaluation as `parent`.
@@ -497,12 +564,19 @@ fn an_acknowledged_committed_run_at_head_is_admitted_without_a_sighting_read() {
         );
         // The request itself is admitted the same way.
         let response = request(&state, &parent).unwrap_or_else(|error| {
-            panic!("{progress}: the committed run admits the request: {}", error.message)
+            panic!(
+                "{progress}: the committed run admits the request: {}",
+                error.message
+            )
         });
         let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
             panic!("{progress}: an independent evaluation spawns an evaluator");
         };
-        assert_eq!(sighting_reads(&transport), 0, "{progress}: no sighting read");
+        assert_eq!(
+            sighting_reads(&transport),
+            0,
+            "{progress}: no sighting read"
+        );
         let record = delegation.delegation;
         let target = record
             .acceptance_evaluation
@@ -516,20 +590,28 @@ fn an_acknowledged_committed_run_at_head_is_admitted_without_a_sighting_read() {
         let declared = state
             .acceptance_evaluation_declared_target(&record.child_session_id, &target)
             .unwrap_or_else(|error| {
-                panic!("{progress}: an unchanged root keeps its commit: {}", error.message)
+                panic!(
+                    "{progress}: an unchanged root keeps its commit: {}",
+                    error.message
+                )
             });
         assert_eq!(declared.source_id, target.source_id, "{progress}");
         assert!(declared.source_fingerprint.is_none());
         // A root no longer clean at that commit is the changed worktree.
-        fs::write(worktree(&named_root).join("judged.txt"), "changed after the request\n")
-            .unwrap();
+        fs::write(
+            worktree(&named_root).join("judged.txt"),
+            "changed after the request\n",
+        )
+        .unwrap();
         acceptance_owner_reports_dirty(&state, &parent, &named_root, "judged.txt");
         let error = state
             .acceptance_evaluation_declared_target(&record.child_session_id, &target)
             .expect_err("a root no longer clean at the admitted commit is refused");
         assert_eq!(error.status, StatusCode::CONFLICT, "{progress}");
         assert!(
-            error.message.contains("the worktree changed while it was evaluated"),
+            error
+                .message
+                .contains("the worktree changed while it was evaluated"),
             "{progress}: {}",
             error.message
         );
@@ -546,39 +628,105 @@ fn a_pinned_child_uses_the_existing_record_and_acceptance_but_child_dirt_refuses
     fs::write(origin.join("child.txt"), "pinned child\n").unwrap();
     run_git_test_command(&origin, &["add", "--", "child.txt"]);
     run_git_test_command(&origin, &["commit", "--quiet", "-m", "child"]);
-    run_git_test_command(&root, &["-c", "core.autocrlf=false", "-c", "protocol.file.allow=always", "submodule", "add", "--quiet",
-        origin.to_str().unwrap(), "dep"]);
+    run_git_test_command(
+        &root,
+        &[
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "--quiet",
+            origin.to_str().unwrap(),
+            "dep",
+        ],
+    );
     run_git_test_command(&root.join("dep"), &["config", "core.autocrlf", "false"]);
     run_git_test_command(&root, &["add", "--", "judged.txt"]);
     run_git_test_command(&root, &["commit", "--quiet", "-m", "pin child"]);
     let head = run_git_test_command_output(&root, &["rev-parse", "HEAD"]);
     assert_eq!(committed_source_clean_head(&root), Some(head.clone()));
     let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
-    let registration = register_committed_run(&state, &parent, &named_root,
-        committed_results("passed", input_record(&head, "clean")));
+    let registration = register_committed_run(
+        &state,
+        &parent,
+        &named_root,
+        committed_results("passed", input_record(&head, "clean")),
+    );
     host_observed(&state, &registration, &head, acknowledged("settled"));
-    let frozen = engram_verification_record_frozen(FsPath::new(&registration.run_directory), &registration.run_id).unwrap();
-    assert_eq!(frozen.record["input"], json!({"kind":"commit", "commit": head}));
-    assert_eq!(decide(&state, &parent), Ok(AcceptanceCommittedInputDecision::Admitted(
-        AcceptanceCommittedInputAdmission { run_id: COMMITTED_RUN_ID.to_owned(), commit: head },
-    )));
+    let frozen = engram_verification_record_frozen(
+        FsPath::new(&registration.run_directory),
+        &registration.run_id,
+    )
+    .unwrap();
+    assert_eq!(
+        frozen.record["input"],
+        json!({"kind":"commit", "commit": head})
+    );
+    assert_eq!(
+        decide(&state, &parent),
+        Ok(AcceptanceCommittedInputDecision::Admitted(
+            AcceptanceCommittedInputAdmission {
+                run_id: COMMITTED_RUN_ID.to_owned(),
+                commit: head
+            },
+        ))
+    );
     fs::write(root.join("dep/child.txt"), "dirty child\n").unwrap();
-    let child_change = EngramSourceIdChange { path:"child.txt".into(), status:" M".into(),
-        origin:None, blob:Some("d".repeat(40)), mode:Some(EngramSourceIdMode::Regular) };
-    acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), vec![EngramSourceIdSubmodule {
-        path:"dep".into(), commit:run_git_test_command_output(&root.join("dep"), &["rev-parse", "HEAD"]),
-        changes:vec![child_change.clone()],
-    }]);
-    assert_eq!(assert_refused_without_a_sighting(&transport, decide(&state, &parent),
-        "committed_input_not_clean", "tracked child edit"), AcceptanceCommittedInputRefusal::NotClean);
+    let child_change = EngramSourceIdChange {
+        path: "child.txt".into(),
+        status: " M".into(),
+        origin: None,
+        blob: Some("d".repeat(40)),
+        mode: Some(EngramSourceIdMode::Regular),
+    };
+    acceptance_owner_reports(
+        &state,
+        &parent,
+        &named_root,
+        Vec::new(),
+        vec![EngramSourceIdSubmodule {
+            path: "dep".into(),
+            commit: run_git_test_command_output(&root.join("dep"), &["rev-parse", "HEAD"]),
+            changes: vec![child_change.clone()],
+        }],
+    );
+    assert_eq!(
+        assert_refused_without_a_sighting(
+            &transport,
+            decide(&state, &parent),
+            "committed_input_not_clean",
+            "tracked child edit"
+        ),
+        AcceptanceCommittedInputRefusal::NotClean
+    );
     run_git_test_command(&root.join("dep"), &["checkout", "--", "child.txt"]);
     fs::write(root.join("dep/new.txt"), "child debris\n").unwrap();
-    acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), vec![EngramSourceIdSubmodule {
-        path:"dep".into(), commit:run_git_test_command_output(&root.join("dep"), &["rev-parse", "HEAD"]),
-        changes:vec![EngramSourceIdChange {path:"new.txt".into(),status:"??".into(),..child_change}],
-    }]);
-    assert_eq!(assert_refused_without_a_sighting(&transport, decide(&state, &parent),
-        "committed_input_not_clean", "untracked child edit"), AcceptanceCommittedInputRefusal::NotClean);
+    acceptance_owner_reports(
+        &state,
+        &parent,
+        &named_root,
+        Vec::new(),
+        vec![EngramSourceIdSubmodule {
+            path: "dep".into(),
+            commit: run_git_test_command_output(&root.join("dep"), &["rev-parse", "HEAD"]),
+            changes: vec![EngramSourceIdChange {
+                path: "new.txt".into(),
+                status: "??".into(),
+                ..child_change
+            }],
+        }],
+    );
+    assert_eq!(
+        assert_refused_without_a_sighting(
+            &transport,
+            decide(&state, &parent),
+            "committed_input_not_clean",
+            "untracked child edit"
+        ),
+        AcceptanceCommittedInputRefusal::NotClean
+    );
 }
 
 /// Asserts that `target`, an evaluation admitted on `registration`'s run at
@@ -593,10 +741,16 @@ fn assert_judges_the_admitted_commit(
     case: &str,
 ) {
     let judged = format!("git-commit:{head}");
-    let source = target.source_id.as_ref().expect("new requests retain complete source identity");
+    let source = target
+        .source_id
+        .as_ref()
+        .expect("new requests retain complete source identity");
     assert_eq!(source.commit, head, "{case}");
     assert!(target.source_fingerprint.is_none());
-    let source_root = target.source_root.as_ref().expect("the target records the root");
+    let source_root = target
+        .source_root
+        .as_ref()
+        .expect("the target records the root");
     assert_eq!(source_root.root, named_root, "{case}");
     let frozen = engram_verification_record_frozen(
         FsPath::new(&registration.run_directory),
@@ -629,23 +783,28 @@ fn assert_judges_the_admitted_commit(
         record(ON_SOURCE, &basis.source_revision),
         record(OFF_SOURCE, "content-v1:4983be8a"),
     ]);
-    let mut task = parse_acceptance_evaluation_task(show, full_receipt())
-        .expect("the show is a task");
+    let mut task =
+        parse_acceptance_evaluation_task(show, full_receipt()).expect("the show is a task");
     task.judged_revision = target.source_fingerprint.clone();
     task.judged_source_basis = Some(AcceptanceSourceBasis::Shared(AcceptanceSharedSourceBasis {
-        workspace_id: Some(source_root.root.clone()), source_id:source.clone(),
+        workspace_id: Some(source_root.root.clone()),
+        source_id: source.clone(),
     }));
     task.judged_workspace = acceptance_source_workspace(&source_root.root);
-    let independent = build_acceptance_evaluator_brief(&task, named_root, MAX_ACCEPTANCE_BRIEF_BYTES)
-        .expect("the brief builds")
-        .prompt;
+    let independent =
+        build_acceptance_evaluator_brief(&task, named_root, MAX_ACCEPTANCE_BRIEF_BYTES)
+            .expect("the brief builds")
+            .prompt;
     let same_session = build_same_session_acceptance_brief(
         &task,
         target.source_fingerprint.as_deref(),
         MAX_ACCEPTANCE_BRIEF_BYTES,
     )
     .expect("the brief builds");
-    for (name, prompt) in [("independent", &independent), ("same_session", &same_session)] {
+    for (name, prompt) in [
+        ("independent", &independent),
+        ("same_session", &same_session),
+    ] {
         let lines = |locator: &str| {
             prompt
                 .lines()
@@ -660,8 +819,7 @@ fn assert_judges_the_admitted_commit(
         );
         let off_source = lines(OFF_SOURCE);
         assert!(
-            !off_source.is_empty()
-                && off_source.iter().all(|line| line.contains("context only")),
+            !off_source.is_empty() && off_source.iter().all(|line| line.contains("context only")),
             "{case} {name}: a record of another revision stays context only"
         );
     }
@@ -686,7 +844,8 @@ fn an_admitted_shared_same_session_request_requires_a_persisted_attempt() {
             evaluation_request(None),
             reader_admitting("same_session"),
         )
-        .err().expect("shared same-session evaluation cannot bypass durable custody");
+        .err()
+        .expect("shared same-session evaluation cannot bypass durable custody");
     assert_eq!(sighting_reads(&transport), 0, "no sighting read");
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.contains("requires a persisted host attempt"));
@@ -703,7 +862,11 @@ fn a_sighted_request_without_a_registered_run_uses_the_complete_owner_identity()
 
     let response = request(&state, &parent)
         .unwrap_or_else(|error| panic!("a sighted root admits the request: {}", error.message));
-    assert_eq!(sighting_reads(&transport), 1, "the legacy flow reads the sighting");
+    assert_eq!(
+        sighting_reads(&transport),
+        1,
+        "the legacy flow reads the sighting"
+    );
     let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
         panic!("an independent evaluation spawns an evaluator");
     };
@@ -712,7 +875,10 @@ fn a_sighted_request_without_a_registered_run_uses_the_complete_owner_identity()
         .acceptance_evaluation
         .clone()
         .expect("an evaluator carries its target");
-    let expected = target.source_id.as_ref().expect("the owner supplied the complete identity");
+    let expected = target
+        .source_id
+        .as_ref()
+        .expect("the owner supplied the complete identity");
     assert_eq!(expected.commit, head);
     assert!(target.source_fingerprint.is_none());
     // Its first submission recaptures the complete identity through the owner.
@@ -730,8 +896,10 @@ fn an_unclassified_link_check_cannot_acknowledge_and_does_not_offer_a_wait() {
     acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
     let transport = install_sighting_transport(&state, &named_root, 1, present_sighting());
     let root = worktree(&named_root);
-    let directory = test_runs_git_common_dir(&root).unwrap()
-        .join("review-runs").join(COMMITTED_RUN_ID);
+    let directory = test_runs_git_common_dir(&root)
+        .unwrap()
+        .join("review-runs")
+        .join(COMMITTED_RUN_ID);
     fs::create_dir_all(&directory).unwrap();
     let command = json!(["node", "scripts/check-doc-links.mjs"]);
     let request_record = json!({
@@ -745,49 +913,121 @@ fn an_unclassified_link_check_cannot_acknowledge_and_does_not_offer_a_wait() {
     results["stages"][0]["command"] = command;
     fs::write(directory.join("request.json"), request_record.to_string()).unwrap();
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
-    state.register_test_run(&parent, RegisterTestRunRequest {
-        run_id: COMMITTED_RUN_ID.to_owned(), run_directory: test_run_display_path(&directory),
-    }).unwrap();
+    state
+        .register_test_run(
+            &parent,
+            RegisterTestRunRequest {
+                run_id: COMMITTED_RUN_ID.to_owned(),
+                run_directory: test_run_display_path(&directory),
+            },
+        )
+        .unwrap();
     let registration = current_registration(&state);
-    assert_eq!(registration.work_binding.as_ref().unwrap().claim_id, "claim-task");
-    assert_eq!(registration.named_root.as_ref().unwrap().workspace_id, named_root);
+    assert_eq!(
+        registration.work_binding.as_ref().unwrap().claim_id,
+        "claim-task"
+    );
+    assert_eq!(
+        registration.named_root.as_ref().unwrap().workspace_id,
+        named_root
+    );
     let pending = EngramVerificationRecordPending::UnclassifiedStages {
         stages: vec!["focused".to_owned()],
     };
     let progress_path = directory.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE);
-    assert!(!progress_path.exists(), "the sender has not examined this run");
-    assert!(!directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE).exists(),
-        "a link check must not become a Test or Build record");
+    assert!(
+        !progress_path.exists(),
+        "the sender has not examined this run"
+    );
+    assert!(
+        !directory
+            .join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)
+            .exists(),
+        "a link check must not become a Test or Build record"
+    );
     assert!(current_registration(&state).verification_record.is_none());
-    for phase in ["before sender", "after sender", "progress removed", "stale progress"] {
+    for phase in [
+        "before sender",
+        "after sender",
+        "progress removed",
+        "stale progress",
+    ] {
         match phase {
             "after sender" => {
                 assert!(matches!(engram_verification_record_prepare(&registration),
                     EngramVerificationRecordPrepared::Pending(reason) if reason == pending));
-                assert_eq!(engram_verification_record_progress(&directory),
-                    Some(EngramVerificationRecordProgress::Pending { reason: pending.clone() }));
+                assert_eq!(
+                    engram_verification_record_progress(&directory),
+                    Some(EngramVerificationRecordProgress::Pending {
+                        reason: pending.clone()
+                    })
+                );
             }
             "progress removed" => fs::remove_file(&progress_path).unwrap(),
-            "stale progress" => fs::write(&progress_path,
-                json!({"state":"pending", "reason":{"kind":"no_connection"}}).to_string()).unwrap(),
+            "stale progress" => fs::write(
+                &progress_path,
+                json!({"state":"pending", "reason":{"kind":"no_connection"}}).to_string(),
+            )
+            .unwrap(),
             _ => {}
         }
-        let refused = assert_refused_without_a_sighting(&transport, decide(&state, &parent),
-            "verification_record_unclassified_stages", "an unsupported documentation check");
-        assert_eq!(refused, AcceptanceCommittedInputRefusal::UnclassifiedStages {
-            run_id: COMMITTED_RUN_ID.to_owned(), commit: head.clone(),
-        });
-        let error = refusal(&state, request(&state, &parent), "an unsupported documentation check");
+        let refused = assert_refused_without_a_sighting(
+            &transport,
+            decide(&state, &parent),
+            "verification_record_unclassified_stages",
+            "an unsupported documentation check",
+        );
+        assert_eq!(
+            refused,
+            AcceptanceCommittedInputRefusal::UnclassifiedStages {
+                run_id: COMMITTED_RUN_ID.to_owned(),
+                commit: head.clone(),
+            }
+        );
+        let error = refusal(
+            &state,
+            request(&state, &parent),
+            "an unsupported documentation check",
+        );
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert!(error.message.contains("no classified verification route today"), "{}", error.message);
-        assert!(error.message.contains("recognized real test or build on this commit"), "{}", error.message);
-        assert!(error.message.contains("termal-tests.toml supports native declared tests"), "{}", error.message);
-        assert!(!error.message.contains("request again once Engram has received it"));
+        assert!(
+            error
+                .message
+                .contains("no classified verification route today"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error
+                .message
+                .contains("recognized real test or build on this commit"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error
+                .message
+                .contains("termal-tests.toml supports native declared tests"),
+            "{}",
+            error.message
+        );
+        assert!(
+            !error
+                .message
+                .contains("request again once Engram has received it")
+        );
         assert_eq!(sighting_reads(&transport), 0);
-        assert!(!directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE).exists());
+        assert!(
+            !directory
+                .join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)
+                .exists()
+        );
         assert!(current_registration(&state).verification_record.is_none());
         if phase == "before sender" {
-            assert!(!progress_path.exists(), "evaluation does not start or imitate the sender");
+            assert!(
+                !progress_path.exists(),
+                "evaluation does not start or imitate the sender"
+            );
         }
     }
 }
@@ -802,8 +1042,7 @@ fn a_record_engram_has_not_acknowledged_at_head_is_refused_without_a_sighting() 
     ] {
         let (state, parent, _store, named_root) = named_root_parent();
         let head = commit_named_root(&named_root);
-        let earlier =
-            run_git_test_command_output(&worktree(&named_root), &["rev-parse", "HEAD~1"]);
+        let earlier = run_git_test_command_output(&worktree(&named_root), &["rev-parse", "HEAD~1"]);
         let transport =
             install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
         let registration = register_committed_run(
@@ -843,9 +1082,13 @@ fn a_record_engram_has_not_acknowledged_at_head_is_refused_without_a_sighting() 
             "{case}: <details withheld>"
         );
         if case == "pending" {
-            assert!(refusal.into_api_error("w-task").message
-                .contains("request again once Engram has received it"),
-                "a pending connection can still receive an acknowledgement");
+            assert!(
+                refusal
+                    .into_api_error("w-task")
+                    .message
+                    .contains("request again once Engram has received it"),
+                "a pending connection can still receive an acknowledgement"
+            );
         }
     }
 }
@@ -870,7 +1113,10 @@ fn a_committed_run_on_another_commit_is_refused_without_a_sighting() {
         "committed_input_no_eligible_run",
         "another commit",
     );
-    assert_eq!(refused, AcceptanceCommittedInputRefusal::NoEligibleRun { commit: head });
+    assert_eq!(
+        refused,
+        AcceptanceCommittedInputRefusal::NoEligibleRun { commit: head }
+    );
     // The request itself is refused the same way, before any evaluator.
     let error = refusal(&state, request(&state, &parent), "another commit");
     assert_eq!(error.status, StatusCode::CONFLICT);
@@ -879,7 +1125,11 @@ fn a_committed_run_on_another_commit_is_refused_without_a_sighting() {
         "{}",
         error.message
     );
-    assert_eq!(sighting_reads(&transport), 0, "the request read no sighting");
+    assert_eq!(
+        sighting_reads(&transport),
+        0,
+        "the request read no sighting"
+    );
 }
 
 #[test]
@@ -913,8 +1163,7 @@ fn a_dirty_root_is_refused_without_a_sighting() {
 }
 
 #[test]
-fn a_debris_input_changed_failed_or_ineligible_run_is_refused_without_a_sighting()
-{
+fn a_debris_input_changed_failed_or_ineligible_run_is_refused_without_a_sighting() {
     for case in [
         "debris pending disposition",
         "input changed",
@@ -986,7 +1235,11 @@ fn a_task_without_a_committed_run_is_in_the_legacy_flow() {
             Ok(AcceptanceCommittedInputDecision::Legacy),
             "{case}"
         );
-        assert_eq!(sighting_reads(&transport), 0, "{case}: the decision reads no sighting");
+        assert_eq!(
+            sighting_reads(&transport),
+            0,
+            "{case}: the decision reads no sighting"
+        );
         // The request runs the sighting preflight for the legacy flow.
         let response = request(&state, &parent);
         assert_fell_back_to_the_sighting(&state, &transport, response, case);
@@ -1011,7 +1264,10 @@ fn an_acknowledged_record_rewritten_with_its_results_to_another_commit_is_not_ad
     // rebuild of the rewritten results, and the receipt still answers its
     // stages and outcome.
     let root = worktree(&named_root);
-    run_git_test_command(&root, &["commit", "--allow-empty", "--quiet", "-m", "untested"]);
+    run_git_test_command(
+        &root,
+        &["commit", "--allow-empty", "--quiet", "-m", "untested"],
+    );
     let untested = run_git_test_command_output(&root, &["rev-parse", "HEAD"]);
     acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
     fs::write(
@@ -1021,8 +1277,9 @@ fn an_acknowledged_record_rewritten_with_its_results_to_another_commit_is_not_ad
     .unwrap();
     write_record(&registration, &untested, acknowledged("received"));
     let current = current_registration(&state);
-    let frozen = engram_verification_record_frozen(FsPath::new(&current.run_directory), COMMITTED_RUN_ID)
-        .expect("the rewritten body reads back");
+    let frozen =
+        engram_verification_record_frozen(FsPath::new(&current.run_directory), COMMITTED_RUN_ID)
+            .expect("the rewritten body reads back");
     assert!(
         engram_verification_record_is_host_body(&current, &frozen.body),
         "the rewrite passes the host-rebuild check on its own"
@@ -1043,13 +1300,23 @@ fn an_acknowledged_record_rewritten_with_its_results_to_another_commit_is_not_ad
         ),
         "{refused:?}"
     );
-    let error = refusal(&state, request(&state, &parent), "rewritten to another commit");
+    let error = refusal(
+        &state,
+        request(&state, &parent),
+        "rewritten to another commit",
+    );
     assert!(
-        error.message.starts_with("verification_record_not_acknowledged"),
+        error
+            .message
+            .starts_with("verification_record_not_acknowledged"),
         "{}",
         error.message
     );
-    assert_eq!(sighting_reads(&transport), 0, "the request read no sighting");
+    assert_eq!(
+        sighting_reads(&transport),
+        0,
+        "the request read no sighting"
+    );
 }
 
 /// Terminal results of a committed-input run that ended before any stage:
@@ -1084,12 +1351,20 @@ fn never_started_results(case: &str, commit: &str) -> Value {
 
 #[test]
 fn a_committed_input_run_that_never_started_leaves_the_task_in_the_legacy_flow() {
-    for case in ["refused dirty before the run", "HEAD moved while the input was captured"] {
+    for case in [
+        "refused dirty before the run",
+        "HEAD moved while the input was captured",
+    ] {
         let (state, parent, _store, named_root) = named_root_parent();
         let head = commit_named_root(&named_root);
         let transport =
             install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
-        register_committed_run(&state, &parent, &named_root, never_started_results(case, &head));
+        register_committed_run(
+            &state,
+            &parent,
+            &named_root,
+            never_started_results(case, &head),
+        );
 
         assert_eq!(
             decide(&state, &parent),
@@ -1134,14 +1409,22 @@ fn a_committed_input_run_whose_results_show_neither_a_start_nor_none_is_refused(
             "committed_input_scan_incomplete",
             case,
         );
-        assert_eq!(refused, AcceptanceCommittedInputRefusal::ScanIncomplete, "{case}");
+        assert_eq!(
+            refused,
+            AcceptanceCommittedInputRefusal::ScanIncomplete,
+            "{case}"
+        );
         let error = refusal(&state, request(&state, &parent), case);
         assert!(
             error.message.starts_with("committed_input_scan_incomplete"),
             "{case}: {}",
             error.message
         );
-        assert_eq!(sighting_reads(&transport), 0, "{case}: the request read no sighting");
+        assert_eq!(
+            sighting_reads(&transport),
+            0,
+            "{case}: the request read no sighting"
+        );
     }
 }
 
@@ -1164,7 +1447,10 @@ fn a_committed_input_run_that_started_on_a_clean_checkout_selects_the_committed_
         "committed_input_no_eligible_run",
         "a started run",
     );
-    assert_eq!(refused, AcceptanceCommittedInputRefusal::NoEligibleRun { commit: head });
+    assert_eq!(
+        refused,
+        AcceptanceCommittedInputRefusal::NoEligibleRun { commit: head }
+    );
 }
 
 #[test]
@@ -1192,7 +1478,10 @@ fn an_acknowledgment_only_in_the_run_directory_is_not_admitted_and_does_not_stop
         );
         write_record(&registration, &head, progress);
         let current = current_registration(&state);
-        assert_eq!(current.verification_record, None, "{case}: the host observed nothing");
+        assert_eq!(
+            current.verification_record, None,
+            "{case}: the host observed nothing"
+        );
 
         let refusal = assert_refused_without_a_sighting(
             &transport,
@@ -1246,10 +1535,24 @@ fn a_root_that_moves_while_the_run_is_read_is_refused_as_changed() {
             *slot.borrow_mut() = Some(Box::new(move || {
                 if dirty {
                     fs::write(root.join("judged.txt"), "changed during the check\n").unwrap();
-                    acceptance_owner_reports_dirty(&owner_state, &owner_parent, &owner_root, "judged.txt");
+                    acceptance_owner_reports_dirty(
+                        &owner_state,
+                        &owner_parent,
+                        &owner_root,
+                        "judged.txt",
+                    );
                 } else {
-                    run_git_test_command(&root, &["commit", "--allow-empty", "--quiet", "-m", "moved on"]);
-                    acceptance_owner_reports(&owner_state, &owner_parent, &owner_root, Vec::new(), Vec::new());
+                    run_git_test_command(
+                        &root,
+                        &["commit", "--allow-empty", "--quiet", "-m", "moved on"],
+                    );
+                    acceptance_owner_reports(
+                        &owner_state,
+                        &owner_parent,
+                        &owner_root,
+                        Vec::new(),
+                        Vec::new(),
+                    );
                 }
             }));
         });
@@ -1288,11 +1591,17 @@ fn more_matching_runs_than_the_bound_none_started_is_refused_as_an_incomplete_sc
             let mut row = registration.clone();
             row.run_id = format!("{COMMITTED_RUN_ID}-{index}");
             row.run_directory = PathBuf::from(&registration.run_directory)
-                .with_file_name(&row.run_id).to_string_lossy().into_owned();
+                .with_file_name(&row.run_id)
+                .to_string_lossy()
+                .into_owned();
             let mut results = never_started_results("refused dirty before the run", &head);
             results["runId"] = json!(row.run_id);
             fs::create_dir_all(&row.run_directory).unwrap();
-            fs::write(PathBuf::from(&row.run_directory).join("results.json"), results.to_string()).unwrap();
+            fs::write(
+                PathBuf::from(&row.run_directory).join("results.json"),
+                results.to_string(),
+            )
+            .unwrap();
             inner.test_runs.registered.insert(row.run_id.clone());
             inner.test_run_registrations.insert(row.run_id.clone(), row);
         }
@@ -1334,7 +1643,11 @@ fn a_request_deadline_already_past_is_refused_without_reading_a_run_or_the_sight
         "deadline past",
     );
     assert_eq!(refusal, AcceptanceCommittedInputRefusal::ScanIncomplete);
-    assert_eq!(take_results_reads(), 0, "no run's results are read past the deadline");
+    assert_eq!(
+        take_results_reads(),
+        0,
+        "no run's results are read past the deadline"
+    );
 }
 
 #[test]
@@ -1355,14 +1668,19 @@ fn a_received_record_settled_for_the_same_body_during_the_check_is_still_admitte
     TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_RECHECK.with(|slot| {
         *slot.borrow_mut() = Some(Box::new(move || {
             let current = current_registration(&settling);
-            let Some(TestRunVerificationAck::Received { receipt, body_digest }) =
-                current.verification_record.clone()
+            let Some(TestRunVerificationAck::Received {
+                receipt,
+                body_digest,
+            }) = current.verification_record.clone()
             else {
                 panic!("the host holds a received receipt");
             };
             settling.note_engram_verification_record_ack(
                 &current,
-                TestRunVerificationAck::Settled { receipt, body_digest },
+                TestRunVerificationAck::Settled {
+                    receipt,
+                    body_digest,
+                },
             );
             assert!(matches!(
                 current_registration(&settling).verification_record,
@@ -1387,13 +1705,18 @@ fn a_received_record_settled_for_the_same_body_during_the_check_is_still_admitte
 /// listing the task's claim at `fence`.
 fn reader_at_fence(
     fence: i64,
-) -> impl Fn(&EngramConnectionConfig, &[String], Duration) -> std::result::Result<Value, EngramTransportError>
-{
+) -> impl Fn(
+    &EngramConnectionConfig,
+    &[String],
+    Duration,
+) -> std::result::Result<Value, EngramTransportError> {
     let reads = independent_reader();
     move |connection, args, timeout| {
         if args.iter().any(|arg| arg == "held") {
-            Ok(json!({"items":[{"work_id":SIGHTED_WORK_ID,"short_ref":"w-task",
-                "claim_id":"claim-task","claim_fence":fence}],"omitted":0}))
+            Ok(
+                json!({"items":[{"work_id":SIGHTED_WORK_ID,"short_ref":"w-task",
+                "claim_id":"claim-task","claim_fence":fence}],"omitted":0}),
+            )
         } else {
             reads(connection, args, timeout)
         }
@@ -1419,7 +1742,10 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         committed_results("passed", input_record(&head, "clean")),
     );
     let mut renewed = at_naming.work_binding.clone().expect("the run is bound");
-    assert_eq!(renewed.claim_fence, naming_fence, "the run is registered at F");
+    assert_eq!(
+        renewed.claim_fence, naming_fence,
+        "the run is registered at F"
+    );
     renewed.work_revision += 1;
     let live = current_claim(naming_fence, Some(renewed.clone()));
     assert_refused_without_a_sighting(
@@ -1461,10 +1787,14 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
     after_recovery_results["runId"] = json!(after_recovery_id);
     transport.replace_held_claims([Ok(EngramHeldClaims {
         items: vec![EngramHeldClaim {
-            work_id: same_holder.work_id.clone(), short_ref: "w-task".to_owned(),
-            claim_id: same_holder.claim_id.clone(), claim_fence: same_holder.claim_fence,
-            focused: false, control_binding: Some(same_holder.clone()),
-        }], omitted: 0,
+            work_id: same_holder.work_id.clone(),
+            short_ref: "w-task".to_owned(),
+            claim_id: same_holder.claim_id.clone(),
+            claim_fence: same_holder.claim_fence,
+            focused: false,
+            control_binding: Some(same_holder.clone()),
+        }],
+        omitted: 0,
     })]);
     let error = try_register_committed_run_as(
         &state,
@@ -1472,15 +1802,33 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         &named_root,
         after_recovery_id,
         after_recovery_results,
-    ).unwrap_err();
+    )
+    .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("name the source root again"), "{}", error.message);
-    assert!(!state.inner.lock().unwrap().test_run_registrations.contains_key(after_recovery_id));
+    assert!(
+        error.message.contains("name the source root again"),
+        "{}",
+        error.message
+    );
+    assert!(
+        !state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .contains_key(after_recovery_id)
+    );
     assert_eq!(
-        decide_task(&state, &parent, &task_under(recovered[0].clone()), deadline()),
+        decide_task(
+            &state,
+            &parent,
+            &task_under(recovered[0].clone()),
+            deadline()
+        ),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                run_id: COMMITTED_RUN_ID.to_owned(), commit: head.clone(),
+                run_id: COMMITTED_RUN_ID.to_owned(),
+                commit: head.clone(),
             }
         )),
         "the same work run keeps its original record after claim recovery"
@@ -1492,7 +1840,11 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
             "a different or unproven work run cannot inherit the record: {claim:?}"
         );
     }
-    assert_eq!(sighting_reads(&transport), 0, "the decision reads no sighting");
+    assert_eq!(
+        sighting_reads(&transport),
+        0,
+        "the decision reads no sighting"
+    );
     // This reader omits the live binding: the new fence alone cannot prove
     // the original work run, so the legacy sighting still decides this case.
     let response = state.request_acceptance_evaluation_with_runner(
@@ -1509,11 +1861,18 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         let mut inner = state.inner.lock().unwrap();
         inner.engram_work_source_roots[0].claim_fence = naming_fence + 1;
         for history in inner.engram_work_naming_history.iter_mut() {
-            for proof in &mut history.proofs { proof.binding = same_holder.clone(); }
+            for proof in &mut history.proofs {
+                proof.binding = same_holder.clone();
+            }
         }
     }
     assert_eq!(
-        decide_task(&state, &parent, &task_under(recovered[0].clone()), deadline()),
+        decide_task(
+            &state,
+            &parent,
+            &task_under(recovered[0].clone()),
+            deadline()
+        ),
         Ok(AcceptanceCommittedInputDecision::Legacy),
         "the runs at F are not candidates under the F+1 name"
     );
@@ -1524,7 +1883,12 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
     let renamed = state.inner.lock().unwrap().test_run_registrations[renamed_id].clone();
     host_observed(&state, &renamed, &head, acknowledged("settled"));
     assert_eq!(
-        decide_task(&state, &parent, &task_under(recovered[0].clone()), deadline()),
+        decide_task(
+            &state,
+            &parent,
+            &task_under(recovered[0].clone()),
+            deadline()
+        ),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
                 run_id: renamed_id.to_owned(),
@@ -1535,7 +1899,9 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
     );
     assert_eq!(
         state.inner.lock().unwrap().test_run_registrations[COMMITTED_RUN_ID]
-            .work_binding.as_ref().map(|binding| binding.claim_fence),
+            .work_binding
+            .as_ref()
+            .map(|binding| binding.claim_fence),
         Some(naming_fence),
         "the original run keeps the fence it was registered at"
     );
@@ -1549,7 +1915,10 @@ fn an_automatic_clean_start_keeps_the_committed_flow_after_dirty_work_and_a_plai
         let root = worktree(&named_root);
         let transport =
             install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
-        assert_eq!(decide(&state, &parent), Ok(AcceptanceCommittedInputDecision::Legacy));
+        assert_eq!(
+            decide(&state, &parent),
+            Ok(AcceptanceCommittedInputDecision::Legacy)
+        );
         // Use real automatic selection and execution, including a failed RED
         // baseline. The second run explicitly selects plain after the edit.
         let source = r#"
@@ -1582,14 +1951,20 @@ await withHostedRegistrationFixture(root,env,async hosted=>{
         assert!(output.status.success(), "{}", output.stderr.len());
         let stdout = String::from_utf8(output.stdout).unwrap();
         let frame: Value = serde_json::from_str(
-            stdout.lines().find_map(|line| line.strip_prefix("LAUNCHER_RESULT=")).unwrap(),
+            stdout
+                .lines()
+                .find_map(|line| line.strip_prefix("LAUNCHER_RESULT="))
+                .unwrap(),
         )
         .unwrap();
         assert_eq!(frame["automaticRequest"]["input"], "commit");
         assert_eq!(frame["first"]["exitCode"], code);
         assert_eq!(frame["first"]["input"]["cleanBefore"], true);
         assert!(frame["first"]["stages"][0]["started"].is_string());
-        assert_eq!(frame["first"]["state"], if code == 0 { "passed" } else { "failed" });
+        assert_eq!(
+            frame["first"]["state"],
+            if code == 0 { "passed" } else { "failed" }
+        );
         assert!(frame["plainRequest"].get("input").is_none());
         assert_eq!(frame["second"]["state"], "passed");
         assert!(frame["second"].get("input").is_none());
@@ -1598,22 +1973,43 @@ await withHostedRegistrationFixture(root,env,async hosted=>{
         // test observes run/claim behavior, not the installed source CLI version.
         {
             let mut inner = state.inner.lock().unwrap();
-            let project_id = engram_project_for_session_locked(&inner, &parent).unwrap().id.clone();
-            inner.projects.iter_mut().find(|project| project.id == project_id).unwrap()
-                .engram.as_mut().unwrap().binary_path = Some(
-                    frame["automaticRequest"]["sourceOwner"]["binaryPath"].as_str().unwrap().to_owned(),
-                );
+            let project_id = engram_project_for_session_locked(&inner, &parent)
+                .unwrap()
+                .id
+                .clone();
+            inner
+                .projects
+                .iter_mut()
+                .find(|project| project.id == project_id)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap()
+                .binary_path = Some(
+                frame["automaticRequest"]["sourceOwner"]["binaryPath"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+            );
             let version = frame["automaticRequest"]["sourceOwner"]["binaryVersion"]
-                .as_str().unwrap().to_owned();
-            inner.test_native_source_owner_metadata = Some(Arc::new(move |state, session, deadline| {
-                state.source_owner_metadata_snapshot_with(session, deadline, |_, _, args, _, _| {
-                    let mut reply = crate::tests::engram_source_owner::source_owner_reply(args);
-                    if args == ["--version"] {
-                        reply.stdout = format!("{version}\n").into_bytes();
-                    }
-                    Ok(reply)
-                })
-            }));
+                .as_str()
+                .unwrap()
+                .to_owned();
+            inner.test_native_source_owner_metadata =
+                Some(Arc::new(move |state, session, deadline| {
+                    state.source_owner_metadata_snapshot_with(
+                        session,
+                        deadline,
+                        |_, _, args, _, _| {
+                            let mut reply =
+                                crate::tests::engram_source_owner::source_owner_reply(args);
+                            if args == ["--version"] {
+                                reply.stdout = format!("{version}\n").into_bytes();
+                            }
+                            Ok(reply)
+                        },
+                    )
+                }));
         }
         // Register the actual immutable requests and results through the host
         // seam, bound to the same claim, fence and naming generation.
@@ -1631,7 +2027,10 @@ await withHostedRegistrationFixture(root,env,async hosted=>{
             let inner = state.inner.lock().unwrap();
             let registration = &inner.test_run_registrations[run_id];
             assert!(inner.test_runs.registered.contains(run_id));
-            assert_eq!(registration.work_binding.as_ref().unwrap().work_id, SIGHTED_WORK_ID);
+            assert_eq!(
+                registration.work_binding.as_ref().unwrap().work_id,
+                SIGHTED_WORK_ID
+            );
         }
         acceptance_owner_reports_dirty(&state, &parent, &named_root, "judged.txt");
         assert_eq!(
@@ -1643,9 +2042,17 @@ await withHostedRegistrationFixture(root,env,async hosted=>{
             ),
             AcceptanceCommittedInputRefusal::NotClean,
         );
-        let error = refusal(&state, request(&state, &parent), "dirty after automatic start");
+        let error = refusal(
+            &state,
+            request(&state, &parent),
+            "dirty after automatic start",
+        );
         assert!(error.message.starts_with("committed_input_not_clean"));
-        assert!(error.message.contains("commit or remove its changes, run the gate on that commit"));
+        assert!(
+            error
+                .message
+                .contains("commit or remove its changes, run the gate on that commit")
+        );
         assert_eq!(sighting_reads(&transport), 0);
     }
 }

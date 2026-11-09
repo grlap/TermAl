@@ -36,25 +36,47 @@ fn real_process_named_root_reclamation_startup_budget_keeps_unsent_process() {
     let expired = EngramControlRequest::WorkSessionRead {};
     // Zero remaining time deterministically selects the post-startup,
     // pre-dispatch deadline branch, independently of process startup speed.
-    let error = transport.request(&connection, &expired, Duration::ZERO).unwrap_err();
+    let error = transport
+        .request(&connection, &expired, Duration::ZERO)
+        .unwrap_err();
     assert_eq!(error.kind, EngramTransportErrorKind::Deadline);
-    assert!(error.message.contains("budget exhausted during process startup"));
+    assert!(
+        error
+            .message
+            .contains("budget exhausted during process startup")
+    );
     // The request was never handed to the worker: it is proven unsent, not
     // an unknown outcome, and keeps its deadline kind for circuit accounting.
     assert!(error.request_never_sent);
     assert!(!error.process_never_started);
     assert!(error.counts_for_circuit_breaker());
     let cause = EngramCausalFailure::request(&error, &expired);
-    assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
-    let prepared = transport.processes.lock().unwrap()
-        .get(&connection.session_id).cloned().flatten()
+    assert_eq!(
+        cause.remote_application,
+        EngramRemoteApplication::NotStarted
+    );
+    let prepared = transport
+        .processes
+        .lock()
+        .unwrap()
+        .get(&connection.session_id)
+        .cloned()
+        .flatten()
         .expect("an unsent request must leave the prepared process available to a later pass");
     assert_control_deadline_child_state(&transport, &connection, &error, &prepared);
     // A fresh budget reuses the prepared process and completes an ordinary read.
-    let read = transport.request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
+    let read = transport
+        .request(
+            &connection,
+            &EngramControlRequest::WorkSessionRead {},
+            DEADLOCK_GUARD,
+        )
         .expect("the retained prepared process must serve the later read");
     assert_eq!(read, json!({"binding": null}));
-    assert!(Arc::ptr_eq(&prepared, &transport.process_for(&connection).unwrap()));
+    assert!(Arc::ptr_eq(
+        &prepared,
+        &transport.process_for(&connection).unwrap()
+    ));
     transport.shutdown_session(&connection.session_id);
 }
 
@@ -145,9 +167,15 @@ fn a_startup_handshake_failure_is_proven_unsent() {
         .expect_err("a mismatched startup handshake must fail");
 
     assert!(error.request_never_sent, "{error}");
-    assert!(!error.process_never_started, "the process did start: {error}");
+    assert!(
+        !error.process_never_started,
+        "the process did start: {error}"
+    );
     let cause = EngramCausalFailure::request(&error, &request);
-    assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
+    assert_eq!(
+        cause.remote_application,
+        EngramRemoteApplication::NotStarted
+    );
     assert!(transport.processes.lock().unwrap().is_empty());
 }
 
@@ -158,15 +186,22 @@ fn a_startup_handshake_failure_is_proven_unsent() {
 fn only_a_host_stopped_request_skips_transport_accounting() {
     let mut host_stopped = EngramTransportError::deadline("read preparation expired");
     host_stopped.causal_failure = Some(EngramCausalFailure::local(
-        &host_stopped, "work_session_read", "before transport"));
+        &host_stopped,
+        "work_session_read",
+        "before transport",
+    ));
     assert!(host_stopped.stopped_before_transport());
     for transport_unsent in [
         EngramTransportError::transport("worker gone").request_never_sent(),
-        EngramTransportError::deadline("budget exhausted during process startup").request_never_sent(),
+        EngramTransportError::deadline("budget exhausted during process startup")
+            .request_never_sent(),
         EngramTransportError::protocol("oversize frame").request_never_sent(),
     ] {
         let cause = EngramCausalFailure::error(&transport_unsent, "work_session_read", None, &[]);
-        assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
+        assert_eq!(
+            cause.remote_application,
+            EngramRemoteApplication::NotStarted
+        );
         assert!(cause.transport_unsent);
         let restored: EngramCausalFailure =
             serde_json::from_value(serde_json::to_value(&cause).unwrap()).unwrap();
@@ -180,7 +215,10 @@ fn only_a_host_stopped_request_skips_transport_accounting() {
     assert!(!possibly_sent.stopped_before_transport());
     let spawn = EngramTransportError::spawn_failed("missing binary");
     let cause = EngramCausalFailure::error(&spawn, "work_session_read", None, &[]);
-    assert_eq!(cause.remote_application, EngramRemoteApplication::NotStarted);
+    assert_eq!(
+        cause.remote_application,
+        EngramRemoteApplication::NotStarted
+    );
     assert!(spawn.process_never_started);
     assert!(!cause.transport_unsent);
 }
@@ -247,14 +285,21 @@ fn assert_control_deadline_child_state(
     assert_eq!(error.kind, EngramTransportErrorKind::Deadline, "{error:?}");
     if error.request_never_sent {
         assert!(
-            error.message.contains("budget exhausted during process startup"),
+            error
+                .message
+                .contains("budget exhausted during process startup"),
             "unsent deadline must identify admission exhaustion: {error:?}"
         );
         assert!(!child.retiring.load(Ordering::Acquire), "{error:?}");
         assert!(!child.cleanup_finished.load(Ordering::Acquire), "{error:?}");
         assert!(child.process.try_wait().unwrap().is_none(), "{error:?}");
-        let registered = transport.processes.lock().unwrap()
-            .get(&connection.session_id).cloned().flatten()
+        let registered = transport
+            .processes
+            .lock()
+            .unwrap()
+            .get(&connection.session_id)
+            .cloned()
+            .flatten()
             .expect("unsent deadline must retain the ready child");
         assert!(Arc::ptr_eq(child, &registered), "{error:?}");
     } else {
@@ -329,7 +374,9 @@ fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
         // Scheduling can exhaust even a ready child's admission budget. That
         // is a retained-child outcome, not a timeout-induced termination.
         // Explicitly retire it to keep the cleanup/respawn proof in this case.
-        hung_process.request_termination().expect("retained child should retire");
+        hung_process
+            .request_termination()
+            .expect("retained child should retire");
     }
 
     fs::write(&project_file, "fixture-ok\n").expect("ok mode should write");
@@ -389,8 +436,13 @@ fn real_process_eof_reports_the_control_process_identity_and_exit_state() {
         )
         .expect_err("fixture EOF should be a transport error");
     assert_eq!(eof.kind, EngramTransportErrorKind::Transport);
-    let cause =
-        serde_json::to_value(EngramCausalFailure::error(&eof, "work_session_read", None, &[])).unwrap();
+    let cause = serde_json::to_value(EngramCausalFailure::error(
+        &eof,
+        "work_session_read",
+        None,
+        &[],
+    ))
+    .unwrap();
     assert_eq!(cause["controlProcess"]["identity"], format!("pid {pid}"));
     let exit = cause["controlProcess"]["exitState"]
         .as_str()
@@ -508,10 +560,19 @@ fn real_process_eof_kills_the_entire_control_process_tree() {
         .expect("request thread should not panic")
         .expect_err("fixture EOF should fail the request");
     assert_eq!(error.kind, EngramTransportErrorKind::Transport);
-    let observed = error.control_process.as_ref().expect("EOF retains its observed child");
-    assert_eq!(observed.pid, original_pid, "the failed child, not a replacement or descendant");
+    let observed = error
+        .control_process
+        .as_ref()
+        .expect("EOF retains its observed child");
+    assert_eq!(
+        observed.pid, original_pid,
+        "the failed child, not a replacement or descendant"
+    );
     let cause = EngramCausalFailure::request(&error, &engram_control_process_tree_request("eof"));
-    assert_eq!(cause.control_process.identity, format!("pid {original_pid}"));
+    assert_eq!(
+        cause.control_process.identity,
+        format!("pid {original_pid}")
+    );
     assert_eq!(cause.control_process.exit_state, observed.exit_state);
     assert_engram_control_descendant_was_terminated(&descendant, "control EOF");
 }
@@ -539,14 +600,27 @@ fn real_process_shutdown_kills_the_entire_control_process_tree() {
 #[test]
 fn real_process_bounded_reset_shutdown_uses_the_existing_reaping_worker() {
     let temp_root = TestTempRoot::create("engram-control-bounded-shutdown");
-    let (project_file, ready) = prepare_engram_control_process_tree_fixture(&temp_root, "fixture-tree-reply");
-    let connection = engram_control_process_tree_connection(&temp_root, project_file, "bounded-shutdown");
+    let (project_file, ready) =
+        prepare_engram_control_process_tree_fixture(&temp_root, "fixture-tree-reply");
+    let connection =
+        engram_control_process_tree_connection(&temp_root, project_file, "bounded-shutdown");
     let transport = real_process_fixture_transport(temp_root.path());
-    transport.request(&connection, &engram_control_process_tree_request("bounded-shutdown"), DEADLOCK_GUARD).unwrap();
+    transport
+        .request(
+            &connection,
+            &engram_control_process_tree_request("bounded-shutdown"),
+            DEADLOCK_GUARD,
+        )
+        .unwrap();
     let descendant = ready.wait();
     let clock = EngramBudgetClock::Real;
-    transport.shutdown_session_until(&connection.session_id, &clock,
-        clock.now() + ENGRAM_CONTROL_SETTLE_TIMEOUT).unwrap();
+    transport
+        .shutdown_session_until(
+            &connection.session_id,
+            &clock,
+            clock.now() + ENGRAM_CONTROL_SETTLE_TIMEOUT,
+        )
+        .unwrap();
     assert!(transport.processes.lock().unwrap().is_empty());
     assert_engram_control_descendant_was_terminated(&descendant, "bounded reset shutdown");
 }
@@ -556,7 +630,9 @@ fn real_process_concurrent_cold_start_reserves_one_child_and_keeps_other_session
     let temp_root = TestTempRoot::create("engram-control-concurrent-start");
     fs::write(temp_root.path().join(".engram-project"), "fixture-ok\n").unwrap();
     let connection = unsent_boundary_connection(
-        &temp_root, real_engram_control_fixture_path(), "concurrent-start",
+        &temp_root,
+        real_engram_control_fixture_path(),
+        "concurrent-start",
     );
     let transport = real_process_fixture_transport(temp_root.path());
     let (entered_tx, entered) = mpsc::sync_channel(1);
@@ -567,15 +643,27 @@ fn real_process_concurrent_cold_start_reserves_one_child_and_keeps_other_session
         entered.recv_timeout(DEADLOCK_GUARD).unwrap();
         let observed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let competing = transport.process_for_until(&connection, std::time::Instant::now());
-            let error = competing.err().expect("the second caller must not spawn a losing child");
+            let error = competing
+                .err()
+                .expect("the second caller must not spawn a losing child");
             assert_eq!(error.code.as_deref(), Some("control_start_pending"));
             assert!(error.request_never_sent);
             assert!(!error.process_never_started);
             assert!(transport.processes.lock().unwrap()[&connection.session_id].is_none());
             let clock = EngramBudgetClock::Real;
-            let stop = transport.shutdown_session_until(&connection.session_id, &clock, clock.now());
-            assert_eq!(stop.unwrap_err().code.as_deref(), Some("control_start_pending"));
-            assert!(transport.processes.lock().unwrap().contains_key(&connection.session_id));
+            let stop =
+                transport.shutdown_session_until(&connection.session_id, &clock, clock.now());
+            assert_eq!(
+                stop.unwrap_err().code.as_deref(),
+                Some("control_start_pending")
+            );
+            assert!(
+                transport
+                    .processes
+                    .lock()
+                    .unwrap()
+                    .contains_key(&connection.session_id)
+            );
             let mut other = connection.clone();
             other.session_id = "independent-start".to_owned();
             let independent = transport.process_for(&other).unwrap();
@@ -587,7 +675,10 @@ fn real_process_concurrent_cold_start_reserves_one_child_and_keeps_other_session
         observed.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         first
     });
-    assert!(Arc::ptr_eq(&first, &transport.process_for(&connection).unwrap()));
+    assert!(Arc::ptr_eq(
+        &first,
+        &transport.process_for(&connection).unwrap()
+    ));
     assert_eq!(transport.processes.lock().unwrap().len(), 1);
     transport.shutdown_session(&connection.session_id);
     assert!(first.process.try_wait().unwrap().is_some());
@@ -597,27 +688,51 @@ fn real_process_concurrent_cold_start_reserves_one_child_and_keeps_other_session
 fn real_process_reset_cleanup_deadline_retains_the_exact_child_and_refuses_a_successor() {
     let temp_root = TestTempRoot::create("engram-control-retained-shutdown");
     fs::write(temp_root.path().join(".engram-project"), "fixture-ok\n").unwrap();
-    let connection = unsent_boundary_connection(&temp_root, real_engram_control_fixture_path(), "retained-shutdown");
+    let connection = unsent_boundary_connection(
+        &temp_root,
+        real_engram_control_fixture_path(),
+        "retained-shutdown",
+    );
     let transport = real_process_fixture_transport(temp_root.path());
     let request = EngramControlRequest::WorkSessionRead {};
-    transport.request(&connection, &request, DEADLOCK_GUARD).unwrap();
-    let original = transport.processes.lock().unwrap()[&connection.session_id].clone().unwrap();
+    transport
+        .request(&connection, &request, DEADLOCK_GUARD)
+        .unwrap();
+    let original = transport.processes.lock().unwrap()[&connection.session_id]
+        .clone()
+        .unwrap();
     // Delay only the worker's cleanup publication. The real existing worker
     // still owns/reaps the child. Even an already-exited child must not be
     // replaced on the basis of a missing cleanup acknowledgement.
     let retained = Arc::new(EngramControlProcess {
-        config: original.config.clone(), process: original.process.clone(),
-        process_tree: original.process_tree.clone(), requests: original.requests.clone(),
-        worker_finished: original.worker_finished.clone(), retiring: AtomicBool::new(false),
+        config: original.config.clone(),
+        process: original.process.clone(),
+        process_tree: original.process_tree.clone(),
+        requests: original.requests.clone(),
+        worker_finished: original.worker_finished.clone(),
+        retiring: AtomicBool::new(false),
         cleanup_finished: Arc::new(AtomicBool::new(false)),
         cleanup_failure: Arc::new(std::sync::Mutex::new(None)),
     });
-    transport.processes.lock().unwrap().insert(connection.session_id.clone(), Some(retained.clone()));
+    transport
+        .processes
+        .lock()
+        .unwrap()
+        .insert(connection.session_id.clone(), Some(retained.clone()));
     let clock = EngramBudgetClock::scripted();
-    let expired = transport.shutdown_session_until(&connection.session_id, &clock, clock.now()).unwrap_err();
+    let expired = transport
+        .shutdown_session_until(&connection.session_id, &clock, clock.now())
+        .unwrap_err();
     assert_eq!(expired.kind, EngramTransportErrorKind::Deadline);
-    assert!(Arc::ptr_eq(transport.processes.lock().unwrap()[&connection.session_id].as_ref().unwrap(), &retained));
-    let refused = transport.request(&connection, &request, Duration::ZERO).unwrap_err();
+    assert!(Arc::ptr_eq(
+        transport.processes.lock().unwrap()[&connection.session_id]
+            .as_ref()
+            .unwrap(),
+        &retained
+    ));
+    let refused = transport
+        .request(&connection, &request, Duration::ZERO)
+        .unwrap_err();
     assert_eq!(refused.kind, EngramTransportErrorKind::LocalState);
     assert_eq!(refused.code.as_deref(), Some("control_cleanup_pending"));
     assert!(refused.request_never_sent);
@@ -625,12 +740,22 @@ fn real_process_reset_cleanup_deadline_retains_the_exact_child_and_refuses_a_suc
         !refused.process_never_started,
         "the retained original child was already started"
     );
-    assert_eq!(EngramCausalFailure::request(&refused, &request).remote_application,
-        EngramRemoteApplication::NotStarted);
-    assert!(Arc::ptr_eq(transport.processes.lock().unwrap()[&connection.session_id].as_ref().unwrap(), &retained));
+    assert_eq!(
+        EngramCausalFailure::request(&refused, &request).remote_application,
+        EngramRemoteApplication::NotStarted
+    );
+    assert!(Arc::ptr_eq(
+        transport.processes.lock().unwrap()[&connection.session_id]
+            .as_ref()
+            .unwrap(),
+        &retained
+    ));
     assert_eq!(retained.process.id(), original.process.id());
     transport.shutdown_session(&connection.session_id);
-    assert!(original.process.try_wait().unwrap().is_some(), "explicit cleanup reaped the fixture");
+    assert!(
+        original.process.try_wait().unwrap().is_some(),
+        "explicit cleanup reaped the fixture"
+    );
 }
 
 #[test]
@@ -638,7 +763,9 @@ fn real_process_work_session_waits_for_same_session_predecessor_cleanup() {
     let temp_root = TestTempRoot::create("engram-work-predecessor-fence");
     fs::write(temp_root.path().join(".engram-project"), "fixture-ok\n").unwrap();
     let connection = unsent_boundary_connection(
-        &temp_root, real_engram_control_fixture_path(), "work-predecessor-fence",
+        &temp_root,
+        real_engram_control_fixture_path(),
+        "work-predecessor-fence",
     );
     let transport = real_process_fixture_transport(temp_root.path());
     let original = transport.process_for(&connection).unwrap();
@@ -657,18 +784,38 @@ fn real_process_work_session_waits_for_same_session_predecessor_cleanup() {
         cleanup_finished: Arc::new(AtomicBool::new(false)),
         cleanup_failure: Arc::new(Mutex::new(None)),
     });
-    transport.processes.lock().unwrap().insert(connection.session_id.clone(), Some(retained.clone()));
-    let refused = transport.request(&connection, &EngramControlRequest::WorkSessionRead {}, Duration::ZERO)
+    transport
+        .processes
+        .lock()
+        .unwrap()
+        .insert(connection.session_id.clone(), Some(retained.clone()));
+    let refused = transport
+        .request(
+            &connection,
+            &EngramControlRequest::WorkSessionRead {},
+            Duration::ZERO,
+        )
         .expect_err("an ordinary read must not start a successor while cleanup is unconfirmed");
     assert_eq!(refused.code.as_deref(), Some("control_cleanup_pending"));
     assert!(refused.request_never_sent);
     assert!(!refused.process_never_started);
-    assert_eq!(transport.generations.lock().unwrap()[&connection.session_id], 1);
-    assert!(Arc::ptr_eq(transport.processes.lock().unwrap()[&connection.session_id].as_ref().unwrap(), &retained));
+    assert_eq!(
+        transport.generations.lock().unwrap()[&connection.session_id],
+        1
+    );
+    assert!(Arc::ptr_eq(
+        transport.processes.lock().unwrap()[&connection.session_id]
+            .as_ref()
+            .unwrap(),
+        &retained
+    ));
 
     let deadline = std::time::Instant::now() + DEADLOCK_GUARD;
     while !original.cleanup_finished.load(Ordering::Acquire) {
-        assert!(std::time::Instant::now() < deadline, "the real predecessor worker must finish cleanup");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the real predecessor worker must finish cleanup"
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(original.process.try_wait().unwrap().is_some());
@@ -677,8 +824,14 @@ fn real_process_work_session_waits_for_same_session_predecessor_cleanup() {
     retained.cleanup_finished.store(true, Ordering::Release);
     let successor = transport.process_for(&connection).unwrap();
     assert_ne!(successor.process.id(), original_pid);
-    assert!(original.process.try_wait().unwrap().is_some(), "the predecessor is reaped before the successor exists");
-    assert_eq!(transport.generations.lock().unwrap()[&connection.session_id], 2);
+    assert!(
+        original.process.try_wait().unwrap().is_some(),
+        "the predecessor is reaped before the successor exists"
+    );
+    assert_eq!(
+        transport.generations.lock().unwrap()[&connection.session_id],
+        2
+    );
     assert_eq!(transport.processes.lock().unwrap().len(), 1);
     transport.shutdown_session(&connection.session_id);
     assert!(successor.process.try_wait().unwrap().is_some());
@@ -1109,10 +1262,16 @@ fn kill_session_reaps_a_live_control_child_without_project_configuration() {
     fs::write(root.path().join(".engram-project"), "fixture-ok\n").unwrap();
     let project = create_test_project(&state, root.path(), "Live control child");
     let session = create_test_project_session(&state, Agent::Codex, &project, root.path());
-    let connection = unsent_boundary_connection(&root, real_engram_control_fixture_path(), &session);
+    let connection =
+        unsent_boundary_connection(&root, real_engram_control_fixture_path(), &session);
     let transport = Arc::new(real_process_fixture_transport(root.path()));
     state.install_control_test_transport(transport.clone());
-    transport.request(&connection, &EngramControlRequest::WorkSessionRead {}, DEADLOCK_GUARD)
+    transport
+        .request(
+            &connection,
+            &EngramControlRequest::WorkSessionRead {},
+            DEADLOCK_GUARD,
+        )
         .expect("the actual published child must serve a request before Kill");
     let child = transport.process_for(&connection).unwrap();
     assert!(transport.has_live_child(&session));
@@ -1124,7 +1283,10 @@ fn kill_session_reaps_a_live_control_child_without_project_configuration() {
             && record.engram_mcp_installed.is_none()
             && !record.engram_mcp_runtime_quarantined
     };
-    assert!(unconfigured, "only the actual live child can cause this Kill cleanup");
+    assert!(
+        unconfigured,
+        "only the actual live child can cause this Kill cleanup"
+    );
     let killed = state.kill_session(&session);
     // Keep both the transport and exact child alive: Drop cannot provide the
     // cleanup this assertion attributes to the product's Kill path.
@@ -1133,7 +1295,10 @@ fn kill_session_reaps_a_live_control_child_without_project_configuration() {
     transport.shutdown_session(&session); // failure teardown
     killed.expect("Kill must succeed for the session with its owned control child");
     assert!(reaped, "Kill must reap the exact child before returning");
-    assert!(!registered, "Kill must remove its existing process-registry entry");
+    assert!(
+        !registered,
+        "Kill must remove its existing process-registry entry"
+    );
 }
 
 /// Every spawn or respawn of a session's control child starts a new
@@ -1155,7 +1320,10 @@ fn real_process_respawn_starts_a_new_connection_generation() {
     };
     let request = EngramControlRequest::WorkSessionRead {};
     let transport = real_process_fixture_transport(temp_root.path());
-    assert_eq!(transport.connection_generation(&connection.session_id), None);
+    assert_eq!(
+        transport.connection_generation(&connection.session_id),
+        None
+    );
 
     transport
         .request(&connection, &request, DEADLOCK_GUARD)
@@ -1163,12 +1331,18 @@ fn real_process_respawn_starts_a_new_connection_generation() {
     let first = transport.connection_generation(&connection.session_id);
     assert!(first.is_some(), "a live child is a connection");
     transport.shutdown_session(&connection.session_id);
-    assert_eq!(transport.connection_generation(&connection.session_id), None);
+    assert_eq!(
+        transport.connection_generation(&connection.session_id),
+        None
+    );
 
     transport
         .request(&connection, &request, DEADLOCK_GUARD)
         .expect("fixture process should respawn and reply");
     let second = transport.connection_generation(&connection.session_id);
-    assert!(second.is_some() && second != first, "a respawn is a new connection");
+    assert!(
+        second.is_some() && second != first,
+        "a respawn is a new connection"
+    );
     transport.shutdown_session(&connection.session_id);
 }

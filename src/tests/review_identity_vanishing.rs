@@ -57,9 +57,15 @@ fn a_git_object_removed_after_it_was_listed_does_not_fail_the_identity() {
         .expect("an entry removed mid-walk is no failure");
     drop(hook);
     assert_eq!(value["complete"], true);
-    assert!(!temporary.exists(), "the walk reached the entry and it was removed");
+    assert!(
+        !temporary.exists(),
+        "the walk reached the entry and it was removed"
+    );
     let unchanged = identity_result(&root, &capture_request()).unwrap();
-    assert_eq!(value["fingerprint"], unchanged["fingerprint"], "the same identity");
+    assert_eq!(
+        value["fingerprint"], unchanged["fingerprint"],
+        "the same identity"
+    );
 }
 
 /// A quarantine directory removed after it was queued is no failure either,
@@ -77,7 +83,10 @@ fn a_git_metadata_directory_removed_before_it_was_listed_does_not_fail_the_ident
             .unwrap_or_else(|error| panic!("removed {step}: {error:#}"));
         drop(hook);
         assert_eq!(value["complete"], true, "removed {step}");
-        assert!(!quarantine.exists(), "the walk reached the directory {step}");
+        assert!(
+            !quarantine.exists(),
+            "the walk reached the directory {step}"
+        );
     }
 }
 
@@ -87,7 +96,11 @@ fn a_git_metadata_directory_removed_before_it_was_listed_does_not_fail_the_ident
 #[test]
 fn a_vanished_metadata_tree_fails_the_identity_naming_its_path() {
     for (name, nth, step) in [
-        ("incoming-queued", 2, "before a queued directory's link check"),
+        (
+            "incoming-queued",
+            2,
+            "before a queued directory's link check",
+        ),
         ("tmp_obj_listed", 1, "while its own listing is read"),
     ] {
         let root = local_root("review-identity-vanishing-tree");
@@ -103,7 +116,11 @@ fn a_vanished_metadata_tree_fails_the_identity_naming_its_path() {
         let error = identity_result(&root, &capture_request()).unwrap_err();
         drop(hook);
         let message = format!("{error:#}");
-        assert_eq!(identity_error_code(&error), "input_unavailable", "{step}: {message}");
+        assert_eq!(
+            identity_error_code(&error),
+            "input_unavailable",
+            "{step}: {message}"
+        );
         assert!(
             message.contains(&objects.display().to_string()),
             "{step}: the failure names the vanished tree: {message}"

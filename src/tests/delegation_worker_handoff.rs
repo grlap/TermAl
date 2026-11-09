@@ -537,16 +537,30 @@ async fn assert_unstarted_followup_handoff(prior_status: &str, canceled: bool) {
     let (reset_project, reset_generation) = {
         let mut inner = fixture.state.inner.lock().expect("state lock");
         let index = inner.find_session_index(&child).expect("worker child");
-        assert!(matches!(inner.sessions[index].session.status, SessionStatus::Idle | SessionStatus::Error));
-        assert!(matches!(inner.sessions[index].runtime, SessionRuntime::None));
-        let project = inner.create_project(
-            Some("Queued worker reset".to_owned()),
-            fixture.worktree.to_string_lossy().into_owned(),
-            default_local_remote_id(),
-        ).id;
+        assert!(matches!(
+            inner.sessions[index].session.status,
+            SessionStatus::Idle | SessionStatus::Error
+        ));
+        assert!(matches!(
+            inner.sessions[index].runtime,
+            SessionRuntime::None
+        ));
+        let project = inner
+            .create_project(
+                Some("Queued worker reset".to_owned()),
+                fixture.worktree.to_string_lossy().into_owned(),
+                default_local_remote_id(),
+            )
+            .id;
         inner.sessions[index].session.project_id = Some(project.clone());
-        let generation = inner.engram_project_resets.claim(&project).expect("resource reset owner");
-        assert!(session_resource_reset_in_progress(&inner, &inner.sessions[index]));
+        let generation = inner
+            .engram_project_resets
+            .claim(&project)
+            .expect("resource reset owner");
+        assert!(session_resource_reset_in_progress(
+            &inner,
+            &inner.sessions[index]
+        ));
         if let Some(index) = inner.find_session_index(&fixture.parent) {
             inner.sessions[index].session.status = SessionStatus::Active;
         }
@@ -554,9 +568,16 @@ async fn assert_unstarted_followup_handoff(prior_status: &str, canceled: bool) {
     };
     let release_reset = || {
         let mut inner = fixture.state.inner.lock().expect("state lock");
-        assert!(inner.engram_project_resets.release(&reset_project, reset_generation));
+        assert!(
+            inner
+                .engram_project_resets
+                .release(&reset_project, reset_generation)
+        );
         let index = inner.find_session_index(&child).expect("worker child");
-        assert!(!session_resource_reset_in_progress(&inner, &inner.sessions[index]));
+        assert!(!session_resource_reset_in_progress(
+            &inner,
+            &inner.sessions[index]
+        ));
     };
     let admitted = fixture
         .state

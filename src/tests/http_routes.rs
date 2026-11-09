@@ -2784,7 +2784,10 @@ async fn state_events_route_emits_non_empty_lagged_marker_before_recovery_state(
 }
 
 /// Opens `/api/events` at `uri` and reads its initial full `state` frame.
-async fn open_state_events(app: &Router, uri: &str) -> std::pin::Pin<Box<axum::body::BodyDataStream>> {
+async fn open_state_events(
+    app: &Router,
+    uri: &str,
+) -> std::pin::Pin<Box<axum::body::BodyDataStream>> {
     open_state_events_with_initial(app, uri).await.0
 }
 
@@ -2864,21 +2867,36 @@ async fn state_events_route_forwards_state_diffs_only_to_opted_in_connections() 
     let read = |raw: String| parse_sse_event(&raw);
     assert_eq!(
         read(next_sse_event(&mut opted_in).await),
-        ("stateDiff".to_owned(), r#"{"revision":2,"baseRevision":1}"#.to_owned())
+        (
+            "stateDiff".to_owned(),
+            r#"{"revision":2,"baseRevision":1}"#.to_owned()
+        )
     );
     assert_eq!(
         read(next_sse_event(&mut opted_in).await),
-        ("state".to_owned(), r#"{"revision":3,"paired":false}"#.to_owned())
+        (
+            "state".to_owned(),
+            r#"{"revision":3,"paired":false}"#.to_owned()
+        )
     );
-    assert_no_ready_sse_chunk(&mut opted_in, "opted-in connection after the unpaired state");
+    assert_no_ready_sse_chunk(
+        &mut opted_in,
+        "opted-in connection after the unpaired state",
+    );
     for body in [&mut legacy, &mut unknown] {
         assert_eq!(
             read(next_sse_event(&mut *body).await),
-            ("state".to_owned(), r#"{"revision":2,"paired":true}"#.to_owned())
+            (
+                "state".to_owned(),
+                r#"{"revision":2,"paired":true}"#.to_owned()
+            )
         );
         assert_eq!(
             read(next_sse_event(&mut *body).await),
-            ("state".to_owned(), r#"{"revision":3,"paired":false}"#.to_owned())
+            (
+                "state".to_owned(),
+                r#"{"revision":3,"paired":false}"#.to_owned()
+            )
         );
         assert_no_ready_sse_chunk(&mut *body, "legacy connection after the unpaired state");
     }
@@ -2915,7 +2933,10 @@ async fn state_events_route_counts_legacy_connections_for_the_stream_lifetime() 
     assert_eq!(legacy_state_subscriber_count(&state), 0);
 
     let (observed, observations) = mpsc::channel();
-    let counter = state.state_broadcast_senders.legacy_state_subscribers.clone();
+    let counter = state
+        .state_broadcast_senders
+        .legacy_state_subscribers
+        .clone();
     let receivers = state.state_broadcast_senders.stream_events.clone();
     state
         .inner
@@ -2991,8 +3012,15 @@ async fn state_events_route_aligns_an_opted_in_connection_once_then_chains_diffs
 
     let app = app_router(state.clone());
     let (mut body, initial) = open_state_events_with_initial(&app, "/api/events?stateDiff=1").await;
-    assert!(initial.get("stateDiffBase").is_none(), "the initial capture is no diff base");
-    assert_eq!(full_state_request_generation(&senders), 1, "registration requests a base");
+    assert!(
+        initial.get("stateDiffBase").is_none(),
+        "the initial capture is no diff base"
+    );
+    assert_eq!(
+        full_state_request_generation(&senders),
+        1,
+        "registration requests a base"
+    );
 
     const CUTS: usize = 4;
     let mut revisions = Vec::new();
@@ -3102,7 +3130,11 @@ async fn full_state_request_on_an_idle_host_publishes_a_marked_full_state_withou
     assert_eq!(name, "state");
     assert_eq!(payload["stateDiffBase"], true);
     assert_eq!(payload["revision"].as_u64(), Some(idle_revision));
-    assert_eq!(state.inner.lock().unwrap().revision, idle_revision, "no commit");
+    assert_eq!(
+        state.inner.lock().unwrap().revision,
+        idle_revision,
+        "no commit"
+    );
     assert_eq!(full_state_request_generation(&senders), 2);
     assert_eq!(producer.satisfied_generation, 2);
     assert_no_ready_sse_chunk(&mut body, "one answer");
@@ -3158,7 +3190,11 @@ async fn full_state_cut_request_publishes_a_diff_without_a_new_generation() {
         post_full_state_request_as(&app, Some("application/json"), r#"{"mode":"cut"}"#).await,
         StatusCode::NO_CONTENT
     );
-    assert_eq!(full_state_request_generation(&senders), 2, "a cut request opens no generation");
+    assert_eq!(
+        full_state_request_generation(&senders),
+        2,
+        "a cut request opens no generation"
+    );
     flush(&mut producer);
     let (name, data) = parse_sse_event(&next_sse_event(&mut body).await);
     let payload: Value = serde_json::from_str(&data).unwrap();
@@ -3171,8 +3207,16 @@ async fn full_state_cut_request_publishes_a_diff_without_a_new_generation() {
         .iter()
         .map(|row| row["id"].as_str().unwrap())
         .collect();
-    assert_eq!(changed, [session_id.as_str()], "the touched row rides the diff");
-    assert_eq!(state.inner.lock().unwrap().revision, delta_revision, "no commit");
+    assert_eq!(
+        changed,
+        [session_id.as_str()],
+        "the touched row rides the diff"
+    );
+    assert_eq!(
+        state.inner.lock().unwrap().revision,
+        delta_revision,
+        "no commit"
+    );
     assert_no_ready_sse_chunk(&mut body, "one diff");
 
     // At the base's revision the cut has nothing to send.
@@ -3246,7 +3290,11 @@ async fn full_state_request_shares_the_event_stream_access_policy() {
             );
         }
         assert_eq!(allowed[0], allowed[1], "{origin}");
-        assert_eq!(allowed[0].is_some(), origin == "http://127.0.0.1:8787", "{origin}");
+        assert_eq!(
+            allowed[0].is_some(),
+            origin == "http://127.0.0.1:8787",
+            "{origin}"
+        );
     }
     // Simple-request shapes are refused before anything is requested.
     for (content_type, body) in [
@@ -3261,7 +3309,10 @@ async fn full_state_request_shares_the_event_stream_access_policy() {
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "{content_type:?}"
         );
-        assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 0);
+        assert_eq!(
+            full_state_request_generation(&state.state_broadcast_senders),
+            0
+        );
     }
     for body in ["not json", r#"{"mode":"unknown"}"#] {
         assert_eq!(
@@ -3270,14 +3321,24 @@ async fn full_state_request_shares_the_event_stream_access_policy() {
             "{body}"
         );
     }
-    assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 0);
     assert_eq!(
-        state.state_broadcast_senders.diff_counters.snapshot().cut_requests,
+        full_state_request_generation(&state.state_broadcast_senders),
+        0
+    );
+    assert_eq!(
+        state
+            .state_broadcast_senders
+            .diff_counters
+            .snapshot()
+            .cut_requests,
         0,
         "a refused cut request is not counted"
     );
     assert_eq!(post_full_state_request(&app).await, StatusCode::NO_CONTENT);
-    assert_eq!(full_state_request_generation(&state.state_broadcast_senders), 1);
+    assert_eq!(
+        full_state_request_generation(&state.state_broadcast_senders),
+        1
+    );
     let response = request_response(
         &app,
         Request::builder()

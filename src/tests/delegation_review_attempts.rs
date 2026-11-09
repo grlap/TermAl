@@ -105,13 +105,18 @@ fn reject_review_recut_back_to_original(
             false
         }));
     });
-    let error = state.retain_review_attempt(parent, delegation, 1).err().unwrap();
+    let error = state
+        .retain_review_attempt(parent, delegation, 1)
+        .err()
+        .unwrap();
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.contains("terminal cut changed"));
 }
 
 fn reopen_review_test_state(state: &AppState) -> AppState {
-    let loaded = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let loaded = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
     AppState {
         inner: Arc::new(StateMutex::new(loaded)),
         mailbox_store: Arc::new(
@@ -128,14 +133,20 @@ fn reopen_review_test_state(state: &AppState) -> AppState {
 fn obsolete_pending_recut_is_neutralized_without_losing_the_next_capture_or_confirmed_prose() {
     for restart in [false, true] {
         let (state, parent, delegation, child) = terminal_review("Confirmed original prose.");
-        let (original, original_id) = state.retain_review_attempt(&parent, &delegation, 1).unwrap();
+        let (original, original_id) = state
+            .retain_review_attempt(&parent, &delegation, 1)
+            .unwrap();
         let token = state.reserve_next_review_capture(&original).unwrap();
         let reserved = reserved_review_slot_body(&state, &child, &token);
         reject_review_recut_back_to_original(&state, &parent, &delegation, &child);
         let mut rows = state.review_custody_rows(&child, &delegation).unwrap();
         assert_eq!(rows.len(), 3);
         let saved = rows.pop().unwrap();
-        let key = state.mailbox_store.review_attempt_auth_key(false).unwrap().unwrap();
+        let key = state
+            .mailbox_store
+            .review_attempt_auth_key(false)
+            .unwrap()
+            .unwrap();
         let pending: ReviewCustodySlot = decode_review_value(&saved.body, &key).unwrap();
         assert!(pending.candidate.is_some());
         assert!(pending.publication.is_none());
@@ -146,8 +157,18 @@ fn obsolete_pending_recut_is_neutralized_without_losing_the_next_capture_or_conf
             predecessor_result_id: Some(original_id.clone()),
             ordinal: 2,
         });
-        let state = if restart { reopen_review_test_state(&state) } else { state };
-        assert_eq!(state.retain_review_attempt(&parent, &delegation, 1).unwrap().1, original_id);
+        let state = if restart {
+            reopen_review_test_state(&state)
+        } else {
+            state
+        };
+        assert_eq!(
+            state
+                .retain_review_attempt(&parent, &delegation, 1)
+                .unwrap()
+                .1,
+            original_id
+        );
         let after = state.review_custody_rows(&child, &delegation).unwrap();
         assert_eq!(after.len(), 3);
         let cleared: ReviewCustodySlot = decode_review_value(&after[2].body, &key).unwrap();
@@ -157,33 +178,64 @@ fn obsolete_pending_recut_is_neutralized_without_losing_the_next_capture_or_conf
         assert!(cleared.publication.is_none());
         assert_eq!(reserved_review_slot_body(&state, &child, &token), reserved);
         {
-            let _owner = state.mailbox_store.delegation_review_recovery_guard.lock().unwrap();
-            let error = state.mailbox_store.replace_review_custody_slot(
-                &saved, &pending, &stale_confirmed, &original.write_policy, &key,
-                Some(&original_id),
-            ).err().unwrap();
+            let _owner = state
+                .mailbox_store
+                .delegation_review_recovery_guard
+                .lock()
+                .unwrap();
+            let error = state
+                .mailbox_store
+                .replace_review_custody_slot(
+                    &saved,
+                    &pending,
+                    &stale_confirmed,
+                    &original.write_policy,
+                    &key,
+                    Some(&original_id),
+                )
+                .err()
+                .unwrap();
             assert_eq!(error.status, StatusCode::CONFLICT);
             assert!(error.message.contains("pending candidate changed"));
         }
         install_delegation_codex_runtime(&state, "neutralized-review-next-capture");
-        state.followup_delegation(&parent, &delegation, "Continue review.".to_owned()).unwrap();
-        state.submit_delegation_review_result(&child, structured_review_request()).unwrap();
+        state
+            .followup_delegation(&parent, &delegation, "Continue review.".to_owned())
+            .unwrap();
+        state
+            .submit_delegation_review_result(&child, structured_review_request())
+            .unwrap();
         finish_delegation_child_with_assistant_text(&state, &child, "Second attempt prose.");
         state.get_delegation_result(&parent, &delegation).unwrap();
-        let (second, _) = state.retain_review_attempt(&parent, &delegation, 2).unwrap();
+        let (second, _) = state
+            .retain_review_attempt(&parent, &delegation, 2)
+            .unwrap();
         assert_eq!(second.raw_output.as_deref(), Some("Second attempt prose."));
         let used = reserved_review_slot_body(&state, &child, &token);
         let used: ReviewCustodySlot = decode_review_value(&used, &key).unwrap();
         assert_eq!(used.submission_attempt, 2);
         assert!(used.publication.is_some());
-        assert_eq!(state.review_custody_rows(&child, &delegation).unwrap().len(), 3);
-        let old = state.get_delegation_result_output_selected(
-            &parent, &delegation, 0, 256, &selected(1, Some(&original_id)),
-        ).unwrap();
+        assert_eq!(
+            state
+                .review_custody_rows(&child, &delegation)
+                .unwrap()
+                .len(),
+            3
+        );
+        let old = state
+            .get_delegation_result_output_selected(
+                &parent,
+                &delegation,
+                0,
+                256,
+                &selected(1, Some(&original_id)),
+            )
+            .unwrap();
         assert_eq!(old.output, "Confirmed original prose.");
-        let error = state.get_delegation_result_selected(
-            &parent, &delegation, &selected(1, Some(&pending_id)),
-        ).err().unwrap();
+        let error = state
+            .get_delegation_result_selected(&parent, &delegation, &selected(1, Some(&pending_id)))
+            .err()
+            .unwrap();
         assert_eq!(error.status, StatusCode::CONFLICT);
     }
 }
@@ -191,7 +243,9 @@ fn obsolete_pending_recut_is_neutralized_without_losing_the_next_capture_or_conf
 #[test]
 fn pending_recut_after_custody_adoption_cannot_block_a_new_attempt_after_restart() {
     let (state, parent, delegation, child) = terminal_review("Confirmed original prose.");
-    let (original, original_id) = state.retain_review_attempt(&parent, &delegation, 1).unwrap();
+    let (original, original_id) = state
+        .retain_review_attempt(&parent, &delegation, 1)
+        .unwrap();
     let token = state.reserve_next_review_capture(&original).unwrap();
     let reserved = reserved_review_slot_body(&state, &child, &token);
     let racing = state.clone();
@@ -204,39 +258,63 @@ fn pending_recut_after_custody_adoption_cannot_block_a_new_attempt_after_restart
         }));
     });
     install_delegation_codex_runtime(&state, "late-obsolete-review-recut");
-    state.followup_delegation(&parent, &delegation, "Continue review.".to_owned()).unwrap();
+    state
+        .followup_delegation(&parent, &delegation, "Continue review.".to_owned())
+        .unwrap();
     assert_eq!(reserved_review_slot_body(&state, &child, &token), reserved);
     let rows = state.review_custody_rows(&child, &delegation).unwrap();
-    let key = state.mailbox_store.review_attempt_auth_key(false).unwrap().unwrap();
+    let key = state
+        .mailbox_store
+        .review_attempt_auth_key(false)
+        .unwrap()
+        .unwrap();
     let pending: ReviewCustodySlot = decode_review_value(&rows[2].body, &key).unwrap();
     assert!(pending.candidate.is_some());
     assert!(pending.publication.is_none());
     assert_eq!(pending.submission_attempt, 1);
-    state.submit_delegation_review_result(&child, structured_review_request()).unwrap();
+    state
+        .submit_delegation_review_result(&child, structured_review_request())
+        .unwrap();
     finish_delegation_child_with_assistant_text(&state, &child, "Second attempt after late recut.");
     state.get_delegation_result(&parent, &delegation).unwrap();
     let restarted = reopen_review_test_state(&state);
-    let (second, _) = restarted.retain_review_attempt(&parent, &delegation, 2).unwrap();
-    assert_eq!(second.raw_output.as_deref(), Some("Second attempt after late recut."));
+    let (second, _) = restarted
+        .retain_review_attempt(&parent, &delegation, 2)
+        .unwrap();
+    assert_eq!(
+        second.raw_output.as_deref(),
+        Some("Second attempt after late recut.")
+    );
     let rows = restarted.review_custody_rows(&child, &delegation).unwrap();
     assert_eq!(rows.len(), 3);
     let cleared: ReviewCustodySlot = decode_review_value(&rows[2].body, &key).unwrap();
     assert!(cleared.candidate.is_none());
     assert_eq!(cleared.submission_attempt, 1);
-    let protected: ReviewCustodySlot = decode_review_value(
-        &reserved_review_slot_body(&restarted, &child, &token), &key,
-    ).unwrap();
+    let protected: ReviewCustodySlot =
+        decode_review_value(&reserved_review_slot_body(&restarted, &child, &token), &key).unwrap();
     assert_eq!(protected.submission_attempt, 2);
     assert!(protected.publication.is_some());
-    assert_eq!(restarted.get_delegation_result_output_selected(
-        &parent, &delegation, 0, 256, &selected(1, Some(&original_id)),
-    ).unwrap().output, "Confirmed original prose.");
+    assert_eq!(
+        restarted
+            .get_delegation_result_output_selected(
+                &parent,
+                &delegation,
+                0,
+                256,
+                &selected(1, Some(&original_id)),
+            )
+            .unwrap()
+            .output,
+        "Confirmed original prose."
+    );
 }
 
 #[test]
 fn failed_pending_neutralization_refuses_rearm_and_keeps_confirmed_reads_and_capacity() {
     let (state, parent, delegation, child) = terminal_review("Confirmed original prose.");
-    let (original, original_id) = state.retain_review_attempt(&parent, &delegation, 1).unwrap();
+    let (original, original_id) = state
+        .retain_review_attempt(&parent, &delegation, 1)
+        .unwrap();
     let token = state.reserve_next_review_capture(&original).unwrap();
     let reserved = reserved_review_slot_body(&state, &child, &token);
     reject_review_recut_back_to_original(&state, &parent, &delegation, &child);
@@ -247,38 +325,90 @@ fn failed_pending_neutralization_refuses_rearm_and_keeps_confirmed_reads_and_cap
            AND json_extract(json_extract(NEW.body,'$.payload'),'$.candidate') IS NULL
          BEGIN SELECT RAISE(ABORT,'pending neutralization failed'); END;",
     ).unwrap();
-    let error = state.followup_delegation(&parent, &delegation, "Do not admit.".to_owned()).err().unwrap();
-    assert!(error.message.contains("pending neutralization failed"), "{}", error.message);
+    let error = state
+        .followup_delegation(&parent, &delegation, "Do not admit.".to_owned())
+        .err()
+        .unwrap();
+    assert!(
+        error.message.contains("pending neutralization failed"),
+        "{}",
+        error.message
+    );
     let selected_error = state
         .get_delegation_result_selected(&parent, &delegation, &selected(1, None))
         .err()
         .expect("explicit selection must propagate retention failure despite an older publication");
-    assert!(selected_error.message.contains("pending neutralization failed"));
+    assert!(
+        selected_error
+            .message
+            .contains("pending neutralization failed")
+    );
     let inner = state.inner.lock().unwrap();
     let record = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
     assert_eq!(record.review_result_submission_attempt, 1);
     assert_eq!(record.status, DelegationStatus::Completed);
-    assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
+    assert!(
+        !inner
+            .delegation_followup_admissions
+            .contains_key(&delegation)
+    );
     drop(inner);
-    assert_eq!(state.get_delegation_result_output_selected(
-        &parent, &delegation, 0, 256, &selected(1, Some(&original_id)),
-    ).unwrap().output, "Confirmed original prose.");
+    assert_eq!(
+        state
+            .get_delegation_result_output_selected(
+                &parent,
+                &delegation,
+                0,
+                256,
+                &selected(1, Some(&original_id)),
+            )
+            .unwrap()
+            .output,
+        "Confirmed original prose."
+    );
     assert_eq!(reserved_review_slot_body(&state, &child, &token), reserved);
-    assert_eq!(state.review_custody_rows(&child, &delegation).unwrap().len(), 3);
-    state.mailbox_store.connection().unwrap().execute_batch("DROP TRIGGER reject_pending_neutralization").unwrap();
-    assert_eq!(state.retain_review_attempt(&parent, &delegation, 1).unwrap().1, original_id);
+    assert_eq!(
+        state
+            .review_custody_rows(&child, &delegation)
+            .unwrap()
+            .len(),
+        3
+    );
+    state
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .execute_batch("DROP TRIGGER reject_pending_neutralization")
+        .unwrap();
+    assert_eq!(
+        state
+            .retain_review_attempt(&parent, &delegation, 1)
+            .unwrap()
+            .1,
+        original_id
+    );
 }
 
 #[test]
 fn pending_neutralization_lost_reply_uses_exact_readback_and_refuses_a_replaced_body() {
     for replace_after_commit in [false, true] {
         let (state, parent, delegation, child) = terminal_review("Confirmed original prose.");
-        let (original, original_id) = state.retain_review_attempt(&parent, &delegation, 1).unwrap();
+        let (original, original_id) = state
+            .retain_review_attempt(&parent, &delegation, 1)
+            .unwrap();
         let token = state.reserve_next_review_capture(&original).unwrap();
         let reserved = reserved_review_slot_body(&state, &child, &token);
         reject_review_recut_back_to_original(&state, &parent, &delegation, &child);
-        let saved = state.review_custody_rows(&child, &delegation).unwrap().pop().unwrap();
-        let key = state.mailbox_store.review_attempt_auth_key(false).unwrap().unwrap();
+        let saved = state
+            .review_custody_rows(&child, &delegation)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let key = state
+            .mailbox_store
+            .review_attempt_auth_key(false)
+            .unwrap()
+            .unwrap();
         let pending: ReviewCustodySlot = decode_review_value(&saved.body, &key).unwrap();
         let racing = state.clone();
         let head = original_id.clone();
@@ -289,39 +419,94 @@ fn pending_neutralization_lost_reply_uses_exact_readback_and_refuses_a_replaced_
             *slot.borrow_mut() = Some(Box::new(move || {
                 reached.store(true, Ordering::SeqCst);
                 if replace_after_commit {
-                    let current = racing.mailbox_store.read_idempotent_message(
-                        &pending.child_session_id,
-                        &review_attempt_key(&pending.delegation_id, pending.slot),
-                    ).unwrap().unwrap();
-                    let cleared: ReviewCustodySlot = decode_review_value(&current.body, &key).unwrap();
+                    let current = racing
+                        .mailbox_store
+                        .read_idempotent_message(
+                            &pending.child_session_id,
+                            &review_attempt_key(&pending.delegation_id, pending.slot),
+                        )
+                        .unwrap()
+                        .unwrap();
+                    let cleared: ReviewCustodySlot =
+                        decode_review_value(&current.body, &key).unwrap();
                     assert!(cleared.candidate.is_none());
                     assert!(cleared.publication.is_none());
                     // A real competing transaction replaces the committed body
                     // before the lost-reply path can read it back.
-                    racing.mailbox_store.replace_review_custody_slot(
-                        &current, &cleared, &pending, &policy, &key, Some(&head),
-                    ).unwrap();
+                    racing
+                        .mailbox_store
+                        .replace_review_custody_slot(
+                            &current,
+                            &cleared,
+                            &pending,
+                            &policy,
+                            &key,
+                            Some(&head),
+                        )
+                        .unwrap();
                 }
                 true
             }));
         });
         install_delegation_codex_runtime(&state, "neutralization-lost-reply");
-        let followed = state.followup_delegation(&parent, &delegation, "Continue only with proven custody.".to_owned());
-        assert!(observed.load(Ordering::SeqCst), "real neutralization commit hook must run");
+        let followed = state.followup_delegation(
+            &parent,
+            &delegation,
+            "Continue only with proven custody.".to_owned(),
+        );
+        assert!(
+            observed.load(Ordering::SeqCst),
+            "real neutralization commit hook must run"
+        );
         if replace_after_commit {
-            assert!(followed.err().unwrap().message.contains("lost reply after the real custody commit"));
+            assert!(
+                followed
+                    .err()
+                    .unwrap()
+                    .message
+                    .contains("lost reply after the real custody commit")
+            );
             let inner = state.inner.lock().unwrap();
-            assert_eq!(inner.delegations[inner.find_delegation_index(&delegation).unwrap()]
-                .review_result_submission_attempt, 1);
-            assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
+            assert_eq!(
+                inner.delegations[inner.find_delegation_index(&delegation).unwrap()]
+                    .review_result_submission_attempt,
+                1
+            );
+            assert!(
+                !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation)
+            );
         } else {
-            assert_eq!(followed.unwrap().delegation.review_result_submission_attempt, 2);
+            assert_eq!(
+                followed
+                    .unwrap()
+                    .delegation
+                    .review_result_submission_attempt,
+                2
+            );
         }
         assert_eq!(reserved_review_slot_body(&state, &child, &token), reserved);
-        assert_eq!(state.review_custody_rows(&child, &delegation).unwrap().len(), 3);
-        assert_eq!(state.get_delegation_result_output_selected(
-            &parent, &delegation, 0, 256, &selected(1, Some(&original_id)),
-        ).unwrap().output, "Confirmed original prose.");
+        assert_eq!(
+            state
+                .review_custody_rows(&child, &delegation)
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            state
+                .get_delegation_result_output_selected(
+                    &parent,
+                    &delegation,
+                    0,
+                    256,
+                    &selected(1, Some(&original_id)),
+                )
+                .unwrap()
+                .output,
+            "Confirmed original prose."
+        );
     }
 }
 
@@ -329,43 +514,101 @@ fn pending_neutralization_lost_reply_uses_exact_readback_and_refuses_a_replaced_
 fn future_or_unauthenticated_pending_state_is_not_neutralized_or_admitted() {
     for corrupt in [false, true] {
         let (state, parent, delegation, child) = terminal_review("Confirmed original prose.");
-        let (original, original_id) = state.retain_review_attempt(&parent, &delegation, 1).unwrap();
+        let (original, original_id) = state
+            .retain_review_attempt(&parent, &delegation, 1)
+            .unwrap();
         let token = state.reserve_next_review_capture(&original).unwrap();
-        let saved = state.mailbox_store.read_idempotent_message(&child, &token).unwrap().unwrap();
-        let key = state.mailbox_store.review_attempt_auth_key(false).unwrap().unwrap();
+        let saved = state
+            .mailbox_store
+            .read_idempotent_message(&child, &token)
+            .unwrap()
+            .unwrap();
+        let key = state
+            .mailbox_store
+            .review_attempt_auth_key(false)
+            .unwrap()
+            .unwrap();
         let old: ReviewCustodySlot = decode_review_value(&saved.body, &key).unwrap();
         let mut future = original.clone();
         future.submission_attempt = 2;
         let mut pending = old.clone();
-        pending.candidate = Some(serde_json::from_str(&encode_review_value(&future, &key).unwrap()).unwrap());
+        pending.candidate =
+            Some(serde_json::from_str(&encode_review_value(&future, &key).unwrap()).unwrap());
         let body = {
-            let _owner = state.mailbox_store.delegation_review_recovery_guard.lock().unwrap();
-            state.mailbox_store.replace_review_custody_slot(
-                &saved, &old, &pending, &original.write_policy, &key, Some(&original_id),
-            ).unwrap()
+            let _owner = state
+                .mailbox_store
+                .delegation_review_recovery_guard
+                .lock()
+                .unwrap();
+            state
+                .mailbox_store
+                .replace_review_custody_slot(
+                    &saved,
+                    &old,
+                    &pending,
+                    &original.write_policy,
+                    &key,
+                    Some(&original_id),
+                )
+                .unwrap()
         };
         let body = if corrupt {
             let mut signed: SignedReviewAttempt = serde_json::from_str(&body).unwrap();
             signed.authentication_tag = "0".repeat(64);
             let body = serde_json::to_string(&signed).unwrap();
-            state.mailbox_store.connection().unwrap().execute(
-                "UPDATE mailbox_messages SET body=?2 WHERE id=?1",
-                rusqlite::params![saved.message_id, body],
-            ).unwrap();
+            state
+                .mailbox_store
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE mailbox_messages SET body=?2 WHERE id=?1",
+                    rusqlite::params![saved.message_id, body],
+                )
+                .unwrap();
             body
-        } else { body };
-        let error = state.followup_delegation(&parent, &delegation, "Refuse unexplained state.".to_owned()).err().unwrap();
+        } else {
+            body
+        };
+        let error = state
+            .followup_delegation(&parent, &delegation, "Refuse unexplained state.".to_owned())
+            .err()
+            .unwrap();
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert!(error.message.contains(if corrupt { "unproven host provenance" } else { "future review attempt" }), "{}", error.message);
+        assert!(
+            error.message.contains(if corrupt {
+                "unproven host provenance"
+            } else {
+                "future review attempt"
+            }),
+            "{}",
+            error.message
+        );
         assert_eq!(reserved_review_slot_body(&state, &child, &token), body);
         let inner = state.inner.lock().unwrap();
-        assert_eq!(inner.delegations[inner.find_delegation_index(&delegation).unwrap()]
-            .review_result_submission_attempt, 1);
-        assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
+        assert_eq!(
+            inner.delegations[inner.find_delegation_index(&delegation).unwrap()]
+                .review_result_submission_attempt,
+            1
+        );
+        assert!(
+            !inner
+                .delegation_followup_admissions
+                .contains_key(&delegation)
+        );
         drop(inner);
-        assert_eq!(state.get_delegation_result_output_selected(
-            &parent, &delegation, 0, 256, &selected(1, Some(&original_id)),
-        ).unwrap().output, "Confirmed original prose.");
+        assert_eq!(
+            state
+                .get_delegation_result_output_selected(
+                    &parent,
+                    &delegation,
+                    0,
+                    256,
+                    &selected(1, Some(&original_id)),
+                )
+                .unwrap()
+                .output,
+            "Confirmed original prose."
+        );
     }
 }
 
@@ -1898,7 +2141,11 @@ fn explicit_latest_selection_keeps_current_cut_custody_separate_after_a_confirme
     let original_id = original.result_id.clone().unwrap();
     let original_page = state
         .get_delegation_result_output_selected(
-            &parent, &delegation, 0, 256, &selected(1, Some(&original_id)),
+            &parent,
+            &delegation,
+            0,
+            256,
+            &selected(1, Some(&original_id)),
         )
         .unwrap();
     {
@@ -1920,11 +2167,19 @@ fn explicit_latest_selection_keeps_current_cut_custody_separate_after_a_confirme
         state.commit_locked(&mut inner).unwrap();
     }
     finish_delegation_child_with_assistant_text(&state, &child, "Original A prose.");
-    let (custody, custody_id) = state.retain_review_attempt(&parent, &delegation, 1).unwrap();
+    let (custody, custody_id) = state
+        .retain_review_attempt(&parent, &delegation, 1)
+        .unwrap();
     assert_eq!(custody_id, original_id);
     assert_eq!(custody.result, original.result);
     assert_eq!(custody.raw_output.as_deref(), Some("Original A prose."));
-    assert_eq!(state.get_delegation_result(&parent, &delegation).unwrap().result, original.result);
+    assert_eq!(
+        state
+            .get_delegation_result(&parent, &delegation)
+            .unwrap()
+            .result,
+        original.result
+    );
     let latest = state
         .get_delegation_result_selected(&parent, &delegation, &selected(1, None))
         .unwrap();
@@ -1933,9 +2188,18 @@ fn explicit_latest_selection_keeps_current_cut_custody_separate_after_a_confirme
     let latest_page = state
         .get_delegation_result_output_selected(&parent, &delegation, 0, 256, &selected(1, None))
         .unwrap();
-    assert_eq!(latest_page.result_id.as_deref(), Some(confirmed_id.as_str()));
+    assert_eq!(
+        latest_page.result_id.as_deref(),
+        Some(confirmed_id.as_str())
+    );
     assert_eq!(latest_page.output, "Confirmed C prose.");
-    assert_eq!(state.review_custody_rows(&child, &delegation).unwrap().len(), 2);
+    assert_eq!(
+        state
+            .review_custody_rows(&child, &delegation)
+            .unwrap()
+            .len(),
+        2
+    );
     let token = state.reserve_next_review_capture(&custody).unwrap();
     let reserved = reserved_review_slot_body(&state, &child, &token);
     let inspected = Arc::new(AtomicBool::new(false));
@@ -1951,38 +2215,71 @@ fn explicit_latest_selection_keeps_current_cut_custody_separate_after_a_confirme
             let actual = admission.review_custody.as_ref().unwrap();
             assert_eq!(actual.result, expected);
             assert_eq!(actual.raw_output.as_deref(), Some("Original A prose."));
-            assert_eq!(admission.review_capture_reservation.as_deref(), Some(expected_token.as_str()));
+            assert_eq!(
+                admission.review_capture_reservation.as_deref(),
+                Some(expected_token.as_str())
+            );
             observed.store(true, Ordering::SeqCst);
         }));
     });
     install_delegation_codex_runtime(&state, "latest-selection-current-custody");
-    let followed = state.followup_delegation(&parent, &delegation, "Continue with actual A custody.".to_owned()).unwrap();
+    let followed = state
+        .followup_delegation(
+            &parent,
+            &delegation,
+            "Continue with actual A custody.".to_owned(),
+        )
+        .unwrap();
     assert_eq!(followed.delegation.review_result_submission_attempt, 2);
     assert!(inspected.load(Ordering::SeqCst));
     assert_eq!(reserved_review_slot_body(&state, &child, &token), reserved);
-    state.submit_delegation_review_result(&child, structured_review_request()).unwrap();
+    state
+        .submit_delegation_review_result(&child, structured_review_request())
+        .unwrap();
     finish_delegation_child_with_assistant_text(&state, &child, "New attempt D prose.");
     state.get_delegation_result(&parent, &delegation).unwrap();
-    let second = state.get_delegation_result_selected(&parent, &delegation, &selected(2, None)).unwrap();
+    let second = state
+        .get_delegation_result_selected(&parent, &delegation, &selected(2, None))
+        .unwrap();
     assert_ne!(second.result_id.as_deref(), Some(confirmed_id.as_str()));
-    let historical = state.get_delegation_result_selected(&parent, &delegation, &selected(1, None)).unwrap();
+    let historical = state
+        .get_delegation_result_selected(&parent, &delegation, &selected(1, None))
+        .unwrap();
     assert_eq!(historical.result_id.as_deref(), Some(confirmed_id.as_str()));
     assert_eq!(historical.result, confirmed.result);
-    let historical_page = state.get_delegation_result_output_selected(
-        &parent, &delegation, 0, 256, &selected(1, Some(&confirmed_id)),
-    ).unwrap();
+    let historical_page = state
+        .get_delegation_result_output_selected(
+            &parent,
+            &delegation,
+            0,
+            256,
+            &selected(1, Some(&confirmed_id)),
+        )
+        .unwrap();
     assert_eq!(historical_page.output, latest_page.output);
-    let pinned_original = state.get_delegation_result_selected(
-        &parent, &delegation, &selected(1, Some(&original_id)),
-    ).unwrap();
+    let pinned_original = state
+        .get_delegation_result_selected(&parent, &delegation, &selected(1, Some(&original_id)))
+        .unwrap();
     assert_eq!(pinned_original.result, original.result);
-    let pinned_page = state.get_delegation_result_output_selected(
-        &parent, &delegation, 0, 256, &selected(1, Some(&original_id)),
-    ).unwrap();
+    let pinned_page = state
+        .get_delegation_result_output_selected(
+            &parent,
+            &delegation,
+            0,
+            256,
+            &selected(1, Some(&original_id)),
+        )
+        .unwrap();
     assert_eq!(pinned_page.output, original_page.output);
     assert_eq!(pinned_page.result_id, original_page.result_id);
     assert_eq!(pinned_page.total_bytes, original_page.total_bytes);
-    assert_eq!(state.review_custody_rows(&child, &delegation).unwrap().len(), 3);
+    assert_eq!(
+        state
+            .review_custody_rows(&child, &delegation)
+            .unwrap()
+            .len(),
+        3
+    );
 }
 
 #[test]

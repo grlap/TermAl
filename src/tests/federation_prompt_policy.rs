@@ -44,12 +44,16 @@ fn version(state: &AppState) -> u64 {
 fn federation_prompt_policy_consent_exact_replay_is_a_durable_history_read() {
     let (state, scope) = satellite();
     let original_version = version(&state);
-    let consent = state.issue_federation_prompt_consent(
-        original_version, "exact-replay".into(), scope.clone(),
-    ).unwrap();
+    let consent = state
+        .issue_federation_prompt_consent(original_version, "exact-replay".into(), scope.clone())
+        .unwrap();
     let after_issue = version(&state);
     let connection = rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
-    let data_version = || connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0)).unwrap();
+    let data_version = || {
+        connection
+            .query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+    };
     let before_retry = data_version();
     assert_eq!(state.issue_federation_prompt_consent(
         original_version, "exact-replay".into(), scope.clone(),
@@ -58,18 +62,27 @@ fn federation_prompt_policy_consent_exact_replay_is_a_durable_history_read() {
     assert_eq!(data_version(), before_retry);
     let mut conflicting = scope.clone();
     conflicting.target.creation_id = Uuid::new_v4().to_string();
-    assert!(state.issue_federation_prompt_consent(
-        original_version, "exact-replay".into(), conflicting,
-    ).is_err());
-    assert!(state.issue_federation_prompt_consent(
-        original_version, "new-key".into(), scope.clone(),
-    ).is_err());
-    let revoked = state.revoke_federation_prompt_permission(after_issue, &consent.identity.id).unwrap();
+    assert!(
+        state
+            .issue_federation_prompt_consent(original_version, "exact-replay".into(), conflicting,)
+            .is_err()
+    );
+    assert!(
+        state
+            .issue_federation_prompt_consent(original_version, "new-key".into(), scope.clone(),)
+            .is_err()
+    );
+    let revoked = state
+        .revoke_federation_prompt_permission(after_issue, &consent.identity.id)
+        .unwrap();
     let after_revocation = version(&state);
     let revoked_data_version = data_version();
-    assert_eq!(state.issue_federation_prompt_consent(
-        original_version, "exact-replay".into(), scope,
-    ).unwrap(), revoked);
+    assert_eq!(
+        state
+            .issue_federation_prompt_consent(original_version, "exact-replay".into(), scope,)
+            .unwrap(),
+        revoked
+    );
     assert!(revoked.revoked);
     assert_eq!(version(&state), after_revocation);
     assert_eq!(data_version(), revoked_data_version);
@@ -127,29 +140,37 @@ fn federation_prompt_policy_consent_and_revocation_use_primary_federation_image(
 fn federation_prompt_policy_issuance_is_version_and_native_creation_fenced() {
     let (state, scope) = satellite();
     let current = version(&state);
-    assert!(state
-        .issue_federation_prompt_consent(current - 1, "stale".into(), scope.clone())
-        .is_err());
+    assert!(
+        state
+            .issue_federation_prompt_consent(current - 1, "stale".into(), scope.clone())
+            .is_err()
+    );
     let mut successor = scope.clone();
     successor.target.creation_id = Uuid::new_v4().to_string();
-    assert!(state
-        .issue_federation_prompt_consent(current, "wrong-creation".into(), successor)
-        .is_err());
+    assert!(
+        state
+            .issue_federation_prompt_consent(current, "wrong-creation".into(), successor)
+            .is_err()
+    );
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&scope.target.session_id).unwrap();
         inner.sessions[index].hidden = true;
     }
-    assert!(state
-        .issue_federation_prompt_consent(current, "hidden".into(), scope)
-        .is_err());
-    assert!(state
-        .inner
-        .lock()
-        .unwrap()
-        .federation
-        .prompt_permissions
-        .is_none());
+    assert!(
+        state
+            .issue_federation_prompt_consent(current, "hidden".into(), scope)
+            .is_err()
+    );
+    assert!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .federation
+            .prompt_permissions
+            .is_none()
+    );
 }
 
 #[test]
@@ -194,10 +215,12 @@ fn federation_prompt_policy_scope_and_duplicate_records_fail_closed() {
     );
     let mut wire = serde_json::to_value(&consent).unwrap();
     wire["scope"]["placementGeneration"] = json!(0);
-    assert!(serde_json::from_value::<FederationPromptPermission>(wire)
-        .unwrap()
-        .validate()
-        .is_err());
+    assert!(
+        serde_json::from_value::<FederationPromptPermission>(wire)
+            .unwrap()
+            .validate()
+            .is_err()
+    );
     let mut wire = serde_json::to_value(&consent).unwrap();
     wire["scope"]["extra"] = json!(true);
     assert!(serde_json::from_value::<FederationPromptPermission>(wire).is_err());
@@ -205,7 +228,9 @@ fn federation_prompt_policy_scope_and_duplicate_records_fail_closed() {
     for field in ["consent", "receiverObservedGeneration"] {
         let mut missing = encoded.clone();
         missing.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<FederationPromptPermission>(missing).is_err(),
-            "nullable {field} remains required on the wire and in retained policy");
+        assert!(
+            serde_json::from_value::<FederationPromptPermission>(missing).is_err(),
+            "nullable {field} remains required on the wire and in retained policy"
+        );
     }
 }

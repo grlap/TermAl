@@ -27,9 +27,14 @@ fn delayed_retirement_cannot_lend_run(
         // Unit seam: defer only the existing factual window publication.
         // The original execution is real and remains immutable; no gate,
         // source owner or pending diagnostic is fabricated.
-        turn.record_mut(|record| record.engram.carried_unmatched_launches.retain(|(root, at)| {
-            *root != engram_path_key(&worktree) || at != launch_start(&mark)
-        }));
+        turn.record_mut(|record| {
+            record
+                .engram
+                .carried_unmatched_launches
+                .retain(|(root, at)| {
+                    *root != engram_path_key(&worktree) || at != launch_start(&mark)
+                })
+        });
     }
     turn.record_mut(|record| {
         record.engram.work_binding = binding;
@@ -72,11 +77,15 @@ fn delayed_retirement_cannot_lend_run(
             record.engram.carried_checks[0].fence.is_none(),
             "no unrelated fence"
         );
-        assert_eq!(record.engram.carried_checks[0].ambiguous, !saved_eligible_carry);
+        assert_eq!(
+            record.engram.carried_checks[0].ambiguous,
+            !saved_eligible_carry
+        );
     });
     assert_launch_identity(&turn, &mark);
-    let earlier_at = (engram_parse_time(launch_start(&mark)).unwrap() - chrono::Duration::seconds(1))
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let earlier_at = (engram_parse_time(launch_start(&mark)).unwrap()
+        - chrono::Duration::seconds(1))
+    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let runs = review_runs(&worktree);
     if published_before_retirement {
         let run = publish_running_run(&runs, &cwd, &earlier_at);
@@ -104,15 +113,18 @@ fn delayed_retirement_cannot_lend_run(
     if saved_eligible_carry {
         // Publish the captured original root/time through the genuine
         // current exclusion owner after the real poll saved a match.
-        turn.record_mut(|record| engram_note_unmatched_launch(
-            record, &worktree, launch_start(&mark)));
+        turn.record_mut(|record| {
+            engram_note_unmatched_launch(record, &worktree, launch_start(&mark))
+        });
     }
     assert_launch_identity(&turn, &mark);
     turn.record(|record| {
-        assert!(record.engram.carried_unmatched_launches.contains(&(
-            engram_path_key(&worktree),
-            launch_start(&mark).to_owned()
-        )));
+        assert!(
+            record
+                .engram
+                .carried_unmatched_launches
+                .contains(&(engram_path_key(&worktree), launch_start(&mark).to_owned()))
+        );
         if saved_eligible_carry {
             assert!(
                 record.engram.carried_checks[0].ambiguous,
@@ -124,7 +136,14 @@ fn delayed_retirement_cannot_lend_run(
         publish_running_run(&runs, &cwd, &earlier_at);
         turn.state.poll_engram_carried_runs();
     }
-    write_run(&runs, "test-earlier-uncredited", &cwd, &earlier_at, "passed", &"f".repeat(64));
+    write_run(
+        &runs,
+        "test-earlier-uncredited",
+        &cwd,
+        &earlier_at,
+        "passed",
+        &"f".repeat(64),
+    );
     assert_carried_ambiguity(&turn);
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     assert_carried_ambiguity(&turn);
@@ -164,12 +183,18 @@ fn retirement_during_an_in_flight_artifact_read_keeps_the_saved_match_ambiguous(
         turn.record(|record| assert!(record.engram.carried_checks[0].ambiguous));
     }));
     let _ = release.send(());
-    poll.join().expect("the artifact read always releases and joins");
-    if let Err(panic) = inspected { std::panic::resume_unwind(panic); }
+    poll.join()
+        .expect("the artifact read always releases and joins");
+    if let Err(panic) = inspected {
+        std::panic::resume_unwind(panic);
+    }
     let digest = engram_terminal_record_digest(&run).unwrap();
     turn.record(|record| {
         let carried = &record.engram.carried_checks[0];
-        assert!(carried.ambiguous, "installing a previously read artifact cannot restore association");
+        assert!(
+            carried.ambiguous,
+            "installing a previously read artifact cannot restore association"
+        );
         assert_eq!(carried.run_directory.as_deref(), Some(run.as_path()));
         assert_eq!(carried.terminal_digest.as_deref(), Some(digest.as_str()));
     });
@@ -269,18 +294,27 @@ fn medium_repair_ambiguous_saved_match_is_not_described_as_pending_credit() {
             .refresh_test_runs_with(&|_, _| false, &|inner, event| {
                 turn.state.publish_delta_locked(inner, event.clone())
             });
-        let registration = turn.state
+        let registration = turn
+            .state
             .test_run_summaries(None)
             .into_iter()
             .find(|row| row.run_id == "test-carried")
             .expect("the exact artifact")
             .registration;
-        (registration.restart_would_void_evidence, registration.restart_evidence_reason)
+        (
+            registration.restart_would_void_evidence,
+            registration.restart_evidence_reason,
+        )
     };
     let (risk, reason) = view();
-    assert_eq!(risk, None, "artifact custody alone establishes no native evidence obligation");
-    assert!(!reason.contains("Exact carried run is awaiting host verification settlement"),
-        "ordinary artifacts never promise automatic native settlement");
+    assert_eq!(
+        risk, None,
+        "artifact custody alone establishes no native evidence obligation"
+    );
+    assert!(
+        !reason.contains("Exact carried run is awaiting host verification settlement"),
+        "ordinary artifacts never promise automatic native settlement"
+    );
     turn.record_mut(|record| record.engram.carried_checks[0].ambiguous = true);
     let (risk, reason) = view();
     assert_eq!(risk, None);

@@ -88,8 +88,12 @@ impl CrashChild {
             }
         };
         assert_eq!(receipt.phase, phase);
-        assert!(receipt.path.starts_with(process.root.as_ref().unwrap().path()),
-            "the child must use the parent's explicitly assigned fixture root");
+        assert!(
+            receipt
+                .path
+                .starts_with(process.root.as_ref().unwrap().path()),
+            "the child must use the parent's explicitly assigned fixture root"
+        );
         (process, receipt)
     }
 
@@ -132,7 +136,10 @@ impl Drop for CrashChild {
             let marker = TestTempRoot::owner_marker(&path);
             drop(root);
             if !std::thread::panicking() {
-                assert!(!path.exists(), "reaped crash child left its parent-owned fixture root");
+                assert!(
+                    !path.exists(),
+                    "reaped crash child left its parent-owned fixture root"
+                );
                 assert!(!marker.exists(), "reaped crash child left its owner marker");
             }
         }
@@ -211,19 +218,32 @@ fn crash_cut_child() {
             assert_eq!(value["state"], "localIntentDurable");
         }
         "afterLocalCapabilityRefusal" => {
-            let delivery = FederationDelivery { version: 1, sender: actor.binding.clone(),
-                target: target.binding.clone(), key: "crash-key".into(), message: "crash body".into(),
-                topic: None, state_stamp: None };
+            let delivery = FederationDelivery {
+                version: 1,
+                sender: actor.binding.clone(),
+                target: target.binding.clone(),
+                key: "crash-key".into(),
+                message: "crash body".into(),
+                topic: None,
+                state_stamp: None,
+            };
             let creation = state.federation_intent_owner(&sender).unwrap();
-            state.mailbox_store.prepare_federation_intent(&delivery, &sender, &creation, || {
-                state.lock_federation_intent_owner(&sender, &creation, &delivery.sender)
-            }).unwrap();
-            let reason = state.mailbox_store.refuse_unattempted_federation_intent(
-                &delivery, &sender, &creation, || {
+            state
+                .mailbox_store
+                .prepare_federation_intent(&delivery, &sender, &creation, || {
                     state.lock_federation_intent_owner(&sender, &creation, &delivery.sender)
-                },
-            ).unwrap();
-            assert!(matches!(reason, Some(FederationIntentRefusal::CentralCapabilityUnsupported)));
+                })
+                .unwrap();
+            let reason = state
+                .mailbox_store
+                .refuse_unattempted_federation_intent(&delivery, &sender, &creation, || {
+                    state.lock_federation_intent_owner(&sender, &creation, &delivery.sender)
+                })
+                .unwrap();
+            assert!(matches!(
+                reason,
+                Some(FederationIntentRefusal::CentralCapabilityUnsupported)
+            ));
         }
         "beforeCentralCommit" | "afterCentralCommit" => {
             let request = federation_mailboxes::request(

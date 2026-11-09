@@ -63,7 +63,9 @@ fn captured_assessment(text: &str) -> Value {
 fn after_token(command: &Value) -> String {
     let command = command.as_str().expect("a continuation command");
     let mut words = command.split_whitespace();
-    words.find(|word| *word == "--after").expect("an --after token");
+    words
+        .find(|word| *word == "--after")
+        .expect("an --after token");
     words.next().expect("a token after --after").to_owned()
 }
 
@@ -71,7 +73,11 @@ fn after_token(command: &Value) -> String {
 /// exact read carries `first` as the record's assessment; an `--after` read
 /// returns the page `pages` maps its token to, and any other token fails as a
 /// transport failure.
-fn evaluate_record(record: &'static str, first: Value, pages: Vec<(String, Value)>) -> (Value, String) {
+fn evaluate_record(
+    record: &'static str,
+    first: Value,
+    pages: Vec<(String, Value)>,
+) -> (Value, String) {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     super::super::super::delegation_support::install_delegation_codex_runtime(
@@ -135,7 +141,10 @@ fn evaluate_record(record: &'static str, first: Value, pages: Vec<(String, Value
 /// continuation.
 fn two_page_continuation() -> Vec<(String, Value)> {
     let first = captured_assessment(TWO_PAGE_FIRST);
-    vec![(after_token(&first["continuation"]), captured_assessment(TWO_PAGE_SECOND))]
+    vec![(
+        after_token(&first["continuation"]),
+        captured_assessment(TWO_PAGE_SECOND),
+    )]
 }
 
 fn has_group(summary: &Value, status: &str, reason: &str, count: u64) -> bool {
@@ -169,7 +178,9 @@ fn a_summary_view_assessment_is_rendered_from_its_counts_and_must_show_rows() {
     let rows = summary["rows"].as_array().expect("rows");
     assert_eq!(rows.len(), 9, "{summary}");
     assert_eq!(
-        rows.iter().filter(|row| row["status"] == json!("mismatch")).count(),
+        rows.iter()
+            .filter(|row| row["status"] == json!("mismatch"))
+            .count(),
         6,
         "the six mismatches: {summary}"
     );
@@ -180,10 +191,22 @@ fn a_summary_view_assessment_is_rendered_from_its_counts_and_must_show_rows() {
         3,
         "the three left-out rows still open: {summary}"
     );
-    assert!(has_group(summary, "left_out", "already_closed", 2), "{summary}");
-    assert!(has_group(summary, "left_out", "not_yet_defined", 125), "{summary}");
-    assert!(has_group(summary, "mismatch", "stale_source_revision", 6), "{summary}");
-    assert_eq!(summary["historyContinuation"], first["history"], "{summary}");
+    assert!(
+        has_group(summary, "left_out", "already_closed", 2),
+        "{summary}"
+    );
+    assert!(
+        has_group(summary, "left_out", "not_yet_defined", 125),
+        "{summary}"
+    );
+    assert!(
+        has_group(summary, "mismatch", "stale_source_revision", 6),
+        "{summary}"
+    );
+    assert_eq!(
+        summary["historyContinuation"], first["history"],
+        "{summary}"
+    );
     assert_eq!(summary["carried"], json!(true), "{summary}");
 
     assert!(
@@ -192,9 +215,14 @@ fn a_summary_view_assessment_is_rendered_from_its_counts_and_must_show_rows() {
         )),
         "{prompt}"
     );
-    assert!(prompt.contains("125 left_out (not_yet_defined)"), "{prompt}");
     assert!(
-        prompt.contains("for a record in the tracker's summary view, its must_show rows are listed in full"),
+        prompt.contains("125 left_out (not_yet_defined)"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains(
+            "for a record in the tracker's summary view, its must_show rows are listed in full"
+        ),
         "{prompt}"
     );
     assert_eq!(rendered_rows(&prompt).len(), 9, "{prompt}");
@@ -222,7 +250,11 @@ fn a_summary_view_assessment_read_through_its_continuation_is_whole() {
     assert_eq!(summary["total"], json!(77), "{summary}");
     assert_eq!(summary["mustShowTotal"], json!(37), "{summary}");
     assert_eq!(summary["rowsRead"], json!(37), "{summary}");
-    assert_eq!(summary["rows"].as_array().map(Vec::len), Some(37), "{summary}");
+    assert_eq!(
+        summary["rows"].as_array().map(Vec::len),
+        Some(37),
+        "{summary}"
+    );
     assert!(
         summary["groups"]
             .as_array()
@@ -231,9 +263,18 @@ fn a_summary_view_assessment_read_through_its_continuation_is_whole() {
             .any(|group| group == &json!({"status": "matches", "count": 37})),
         "{summary}"
     );
-    assert!(has_group(summary, "left_out", "not_yet_defined", 40), "{summary}");
-    assert_eq!(summary["historyContinuation"], first["history"], "{summary}");
-    assert!(prompt.contains("37 matches, 40 left_out (not_yet_defined)"), "{prompt}");
+    assert!(
+        has_group(summary, "left_out", "not_yet_defined", 40),
+        "{summary}"
+    );
+    assert_eq!(
+        summary["historyContinuation"], first["history"],
+        "{summary}"
+    );
+    assert!(
+        prompt.contains("37 matches, 40 left_out (not_yet_defined)"),
+        "{prompt}"
+    );
     assert_eq!(rendered_rows(&prompt).len(), 37, "{prompt}");
 }
 
@@ -247,7 +288,11 @@ fn an_incomplete_summary_view_read_names_its_must_show_rows_read_and_its_history
     let (wire, prompt) = evaluate_record(TWO_PAGE_RECORD, first.clone(), Vec::new());
 
     let summary = &wire["obligationAssessments"][0];
-    assert_eq!(summary["incompleteReason"], json!("transport_failure"), "{summary}");
+    assert_eq!(
+        summary["incompleteReason"],
+        json!("transport_failure"),
+        "{summary}"
+    );
     assert_eq!(summary["rowsRead"], json!(35), "{summary}");
     assert_eq!(summary["resume"], first["continuation"], "{summary}");
     let resume = first["continuation"].as_str().unwrap();
@@ -259,19 +304,34 @@ fn an_incomplete_summary_view_read_names_its_must_show_rows_read_and_its_history
         )),
         "{notice}"
     );
-    assert!(notice.contains(&format!("resume at the same cut with `{resume}`")), "{notice}");
-    assert!(notice.contains(&format!("is `{history}` and then each page's continuation")), "{notice}");
+    assert!(
+        notice.contains(&format!("resume at the same cut with `{resume}`")),
+        "{notice}"
+    );
+    assert!(
+        notice.contains(&format!("is `{history}` and then each page's continuation")),
+        "{notice}"
+    );
     assert_eq!(summary["carried"], json!(true), "{summary}");
     assert!(
         prompt.contains("INCOMPLETE: 35 of 37 must_show rows read, of 77 rows (transport_failure). The counts cover every row; an unread must_show row may be open or a mismatch."),
         "{prompt}"
     );
-    assert!(prompt.contains(&format!("Resume at the same cut: `{resume}`")), "{prompt}");
     assert!(
-        prompt.contains(&format!("Full history at this cut, oldest first: `{history}`")),
+        prompt.contains(&format!("Resume at the same cut: `{resume}`")),
         "{prompt}"
     );
-    assert_eq!(rendered_rows(&prompt).len(), 35, "every must_show row read is listed whole");
+    assert!(
+        prompt.contains(&format!(
+            "Full history at this cut, oldest first: `{history}`"
+        )),
+        "{prompt}"
+    );
+    assert_eq!(
+        rendered_rows(&prompt).len(),
+        35,
+        "every must_show row read is listed whole"
+    );
 }
 
 /// A summary page the reader cannot trust whole stops the read as
@@ -283,13 +343,27 @@ fn a_malformed_summary_page_stops_the_read() {
         ("a missing must_show total", |page| {
             page.as_object_mut().unwrap().remove("must_show_total");
         }),
-        ("a negative must_show offset", |page| page["must_show_earlier"] = json!(-1)),
-        ("a total that is not a number", |page| page["total"] = json!("133")),
-        ("counts that are not an array", |page| page["counts"] = json!({})),
-        ("must_show that is not an array", |page| page["must_show"] = json!({})),
-        ("a count entry whose reason is not a string", |page| page["counts"][0]["reason"] = json!(7)),
-        ("counts that do not sum to the total", |page| page["counts"][0]["count"] = json!(3)),
-        ("more must_show rows than the must_show total", |page| page["must_show_total"] = json!(5)),
+        ("a negative must_show offset", |page| {
+            page["must_show_earlier"] = json!(-1)
+        }),
+        ("a total that is not a number", |page| {
+            page["total"] = json!("133")
+        }),
+        ("counts that are not an array", |page| {
+            page["counts"] = json!({})
+        }),
+        ("must_show that is not an array", |page| {
+            page["must_show"] = json!({})
+        }),
+        ("a count entry whose reason is not a string", |page| {
+            page["counts"][0]["reason"] = json!(7)
+        }),
+        ("counts that do not sum to the total", |page| {
+            page["counts"][0]["count"] = json!(3)
+        }),
+        ("more must_show rows than the must_show total", |page| {
+            page["must_show_total"] = json!(5)
+        }),
         ("a must_show total above the total", |page| {
             page["must_show_total"] = json!(134);
             page["must_show_remaining"] = json!(125);
@@ -297,7 +371,9 @@ fn a_malformed_summary_page_stops_the_read() {
         ("two count entries for one status and reason", |page| {
             let duplicate = page["counts"][0].clone();
             let counts = page["counts"].as_array_mut().unwrap();
-            counts.push(json!({"status": duplicate["status"], "reason": duplicate["reason"], "count": 0}));
+            counts.push(
+                json!({"status": duplicate["status"], "reason": duplicate["reason"], "count": 0}),
+            );
         }),
     ];
     for (case, break_page) in cases {
@@ -307,7 +383,11 @@ fn a_malformed_summary_page_stops_the_read() {
         let (wire, _) = evaluate_record(ONE_PAGE_RECORD, first, Vec::new());
 
         let summary = &wire["obligationAssessments"][0];
-        assert_eq!(summary["incompleteReason"], json!("malformed_page"), "{case}: {summary}");
+        assert_eq!(
+            summary["incompleteReason"],
+            json!("malformed_page"),
+            "{case}: {summary}"
+        );
         assert_eq!(summary["rowsRead"], json!(0), "{case}: {summary}");
         assert_eq!(summary["rows"], json!([]), "{case}: {summary}");
         assert_eq!(summary["groups"], json!([]), "{case}: {summary}");
@@ -321,13 +401,21 @@ fn a_malformed_summary_page_stops_the_read() {
 #[test]
 fn a_rejected_first_summary_page_leaves_nothing_counted() {
     let cases: [(&str, &str, fn(&mut Value)); 2] = [
-        ("a must_show offset that does not start the read", "assessment_changed", |page| {
-            page["must_show_earlier"] = json!(1);
-            page["must_show_remaining"] = json!(1);
-        }),
-        ("a must_show row that cannot be shown whole", "malformed_row", |page| {
-            page["must_show"][0]["rule"] = json!("r".repeat(300));
-        }),
+        (
+            "a must_show offset that does not start the read",
+            "assessment_changed",
+            |page| {
+                page["must_show_earlier"] = json!(1);
+                page["must_show_remaining"] = json!(1);
+            },
+        ),
+        (
+            "a must_show row that cannot be shown whole",
+            "malformed_row",
+            |page| {
+                page["must_show"][0]["rule"] = json!("r".repeat(300));
+            },
+        ),
     ];
     for (case, reason, break_page) in cases {
         let mut first = captured_assessment(TWO_PAGE_FIRST);
@@ -336,7 +424,11 @@ fn a_rejected_first_summary_page_leaves_nothing_counted() {
         let (wire, _) = evaluate_record(TWO_PAGE_RECORD, first, Vec::new());
 
         let summary = &wire["obligationAssessments"][0];
-        assert_eq!(summary["incompleteReason"], json!(reason), "{case}: {summary}");
+        assert_eq!(
+            summary["incompleteReason"],
+            json!(reason),
+            "{case}: {summary}"
+        );
         assert_eq!(summary["rowsRead"], json!(0), "{case}: {summary}");
         assert_eq!(summary["rows"], json!([]), "{case}: {summary}");
         assert_eq!(summary["groups"], json!([]), "{case}: {summary}");
@@ -361,15 +453,21 @@ fn a_later_summary_page_from_another_cut_or_with_a_bad_row_stops_the_read() {
             page["must_show_total"] = json!(38);
             page["must_show_remaining"] = json!(1);
         }),
-        ("another cut position", "assessment_changed", |page| page["cut_position"] = json!(508)),
+        ("another cut position", "assessment_changed", |page| {
+            page["cut_position"] = json!(508)
+        }),
         ("another total", "assessment_changed", |page| {
             page["total"] = json!(78);
             page["counts"][0]["count"] = json!(41);
         }),
-        ("an offset that repeats rows already read", "assessment_changed", |page| {
-            page["must_show_earlier"] = json!(34);
-            page["must_show_remaining"] = json!(1);
-        }),
+        (
+            "an offset that repeats rows already read",
+            "assessment_changed",
+            |page| {
+                page["must_show_earlier"] = json!(34);
+                page["must_show_remaining"] = json!(1);
+            },
+        ),
         ("a row it cannot show whole", "malformed_row", |page| {
             page["must_show"][0]["rule"] = json!("r".repeat(300));
         }),
@@ -380,17 +478,39 @@ fn a_later_summary_page_from_another_cut_or_with_a_bad_row_stops_the_read() {
         let mut second = captured_assessment(TWO_PAGE_SECOND);
         break_page(&mut second);
 
-        let (wire, _) = evaluate_record(TWO_PAGE_RECORD, first.clone(), vec![(token.clone(), second)]);
+        let (wire, _) = evaluate_record(
+            TWO_PAGE_RECORD,
+            first.clone(),
+            vec![(token.clone(), second)],
+        );
 
         let summary = &wire["obligationAssessments"][0];
-        assert_eq!(summary["incompleteReason"], json!(reason), "{case}: {summary}");
+        assert_eq!(
+            summary["incompleteReason"],
+            json!(reason),
+            "{case}: {summary}"
+        );
         assert_eq!(summary["rowsRead"], json!(35), "{case}: {summary}");
-        assert_eq!(summary["rows"].as_array().map(Vec::len), Some(35), "{case}: {summary}");
+        assert_eq!(
+            summary["rows"].as_array().map(Vec::len),
+            Some(35),
+            "{case}: {summary}"
+        );
         assert_eq!(summary["total"], json!(77), "{case}: {summary}");
         assert_eq!(summary["mustShowTotal"], json!(37), "{case}: {summary}");
-        assert_eq!(summary["groups"].as_array().map(Vec::len), Some(2), "{case}: {summary}");
-        assert!(has_group(summary, "left_out", "not_yet_defined", 40), "{case}: {summary}");
-        assert_eq!(summary["resume"], first["continuation"], "{case}: {summary}");
+        assert_eq!(
+            summary["groups"].as_array().map(Vec::len),
+            Some(2),
+            "{case}: {summary}"
+        );
+        assert!(
+            has_group(summary, "left_out", "not_yet_defined", 40),
+            "{case}: {summary}"
+        );
+        assert_eq!(
+            summary["resume"], first["continuation"],
+            "{case}: {summary}"
+        );
     }
 }
 
@@ -421,7 +541,11 @@ fn a_change_of_shape_mid_read_stops_it_as_malformed() {
     let (wire, _) = evaluate_record(TWO_PAGE_RECORD, first.clone(), pages);
 
     let summary = &wire["obligationAssessments"][0];
-    assert_eq!(summary["incompleteReason"], json!("malformed_page"), "{summary}");
+    assert_eq!(
+        summary["incompleteReason"],
+        json!("malformed_page"),
+        "{summary}"
+    );
     assert_eq!(summary["rowsRead"], json!(35), "{summary}");
     assert_eq!(summary["resume"], first["continuation"], "{summary}");
 }
@@ -438,7 +562,11 @@ fn a_history_view_page_is_read_as_the_old_shape() {
     assert!(summary.get("mustShowTotal").is_none(), "{summary}");
     assert_eq!(summary["total"], json!(133), "{summary}");
     assert_eq!(summary["rowsRead"], json!(8), "{summary}");
-    assert_eq!(summary["incompleteReason"], json!("transport_failure"), "{summary}");
+    assert_eq!(
+        summary["incompleteReason"],
+        json!("transport_failure"),
+        "{summary}"
+    );
 }
 
 /// The tracker that serves only the old shape is read as before.
@@ -453,5 +581,9 @@ fn an_old_shape_page_from_the_installed_tracker_is_read_as_before() {
     assert!(summary.get("mustShowTotal").is_none(), "{summary}");
     assert_eq!(summary["total"], json!(133), "{summary}");
     assert_eq!(summary["rowsRead"], json!(8), "{summary}");
-    assert_eq!(summary["incompleteReason"], json!("transport_failure"), "{summary}");
+    assert_eq!(
+        summary["incompleteReason"],
+        json!("transport_failure"),
+        "{summary}"
+    );
 }

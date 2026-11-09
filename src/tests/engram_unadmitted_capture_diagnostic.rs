@@ -40,14 +40,9 @@ fn an_over_budget_capture_prints_its_attempt_elapsed_and_budget() {
 
 #[test]
 fn a_failed_measurement_prints_a_diagnostic_even_within_its_budget() {
-    let line = unadmitted_capture_diagnostic(
-        "session-1",
-        1,
-        BUDGET,
-        Duration::from_millis(10),
-        false,
-    )
-    .expect("a failed measurement prints a diagnostic");
+    let line =
+        unadmitted_capture_diagnostic("session-1", 1, BUDGET, Duration::from_millis(10), false)
+            .expect("a failed measurement prints a diagnostic");
     assert_eq!(
         line,
         "UNADMITTED_CAPTURE_DIAGNOSTIC session=session-1 attempt=1 budget_us=250000 elapsed_us=10000 measured=false"

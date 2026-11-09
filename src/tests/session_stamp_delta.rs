@@ -57,11 +57,15 @@ impl DurableSessionSnapshot {
                     self.durable.get(&record.session.id) != Some(&durable_session_json(record))
                 })
                 .collect();
-            let missed = changed.iter()
+            let missed = changed
+                .iter()
                 .filter(|record| record.mutation_stamp <= self.watermark)
                 .map(|record| record.session.id.clone())
                 .collect();
-            let changed_ids = changed.iter().map(|record| record.session.id.clone()).collect();
+            let changed_ids = changed
+                .iter()
+                .map(|record| record.session.id.clone())
+                .collect();
             (missed, changed_ids)
         };
         assert!(
@@ -78,8 +82,10 @@ impl DurableSessionSnapshot {
         let mut baseline = self.baseline.clone();
         let baseline_image = serde_json::to_value(&baseline).unwrap();
         let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
-        assert!(ensure_sqlite_state_schema_for_path_with_initialization(&connection, &path).unwrap(),
-            "this helper initializes a new disposable destination, never an existing store");
+        assert!(
+            ensure_sqlite_state_schema_for_path_with_initialization(&connection, &path).unwrap(),
+            "this helper initializes a new disposable destination, never an existing store"
+        );
         let initialized_generation = metadata_unit_generation(&connection).unwrap();
         assert_eq!(initialized_generation, 1);
         if let Some(identity) = &baseline.federation.local {
@@ -89,48 +95,86 @@ impl DurableSessionSnapshot {
             // or bypass the production writer's host/predecessor checks.
             assert_eq!(federation_meta_version(&connection).unwrap(), 0);
             let transaction = rusqlite::Transaction::new_unchecked(
-                &connection, rusqlite::TransactionBehavior::Immediate,
-            ).unwrap();
-            transaction.execute("UPDATE meta SET value=?1 WHERE key='federation_host_id'",
-                [&identity.host_id]).unwrap();
-            transaction.execute("UPDATE meta SET value=?1 WHERE key='federation_host_generation'",
-                [identity.host_generation.to_string()]).unwrap();
+                &connection,
+                rusqlite::TransactionBehavior::Immediate,
+            )
+            .unwrap();
+            transaction
+                .execute(
+                    "UPDATE meta SET value=?1 WHERE key='federation_host_id'",
+                    [&identity.host_id],
+                )
+                .unwrap();
+            transaction
+                .execute(
+                    "UPDATE meta SET value=?1 WHERE key='federation_host_generation'",
+                    [identity.host_generation.to_string()],
+                )
+                .unwrap();
             transaction.commit().unwrap();
-            assert_eq!(read_federation_host_identity(&connection).unwrap(), *identity);
+            assert_eq!(
+                read_federation_host_identity(&connection).unwrap(),
+                *identity
+            );
         }
-        baseline.metadata_capture = PersistMetadataCapture::new(Arc::new(
-            AtomicU64::new(initialized_generation),
-        ));
-        assert_eq!(serde_json::to_value(&baseline).unwrap(), baseline_image,
-            "destination setup preserves the complete serialized baseline");
+        baseline.metadata_capture =
+            PersistMetadataCapture::new(Arc::new(AtomicU64::new(initialized_generation)));
+        assert_eq!(
+            serde_json::to_value(&baseline).unwrap(),
+            baseline_image,
+            "destination setup preserves the complete serialized baseline"
+        );
         drop(connection);
         let generation = persist_state_from_persisted(&path, &baseline).unwrap();
         let mut delta = collect_persist_delta_from_shared_state(&state.inner, self.watermark);
         for id in changed_ids {
-            assert!(delta.changed_sessions.iter().any(|record| record.session.id == id),
-                "the production delta selects the changed durable session {id}");
+            assert!(
+                delta
+                    .changed_sessions
+                    .iter()
+                    .any(|record| record.session.id == id),
+                "the production delta selects the changed durable session {id}"
+            );
         }
         delta.metadata = baseline.metadata_only();
-        delta.metadata.metadata_capture = PersistMetadataCapture::new(Arc::new(
-            AtomicU64::new(generation),
-        ));
+        delta.metadata.metadata_capture =
+            PersistMetadataCapture::new(Arc::new(AtomicU64::new(generation)));
         persist_delta_via_cache(&mut SqlitePersistConnectionCache::new(), &path, &delta).unwrap();
         let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
         let reloaded = load_session_records_from_sqlite(&connection, &path).unwrap();
         for selected in &delta.changed_sessions {
-            let before = self.durable.get(&selected.session.id)
+            let before = self
+                .durable
+                .get(&selected.session.id)
                 .map(|json| serde_json::from_str::<Value>(json).unwrap());
             let expected = serde_json::to_value(selected).unwrap();
-            let actual = serde_json::to_value(reloaded.iter()
-                .find(|record| record.session.id == selected.session.id)
-                .expect("the selected session reloads from SQLite")).unwrap();
-            let keys: BTreeSet<_> = expected.as_object().unwrap().keys()
-                .chain(before.as_ref().and_then(Value::as_object).into_iter().flat_map(|object| object.keys()))
+            let actual = serde_json::to_value(
+                reloaded
+                    .iter()
+                    .find(|record| record.session.id == selected.session.id)
+                    .expect("the selected session reloads from SQLite"),
+            )
+            .unwrap();
+            let keys: BTreeSet<_> = expected
+                .as_object()
+                .unwrap()
+                .keys()
+                .chain(
+                    before
+                        .as_ref()
+                        .and_then(Value::as_object)
+                        .into_iter()
+                        .flat_map(|object| object.keys()),
+                )
                 .collect();
             for key in keys {
                 if before.as_ref().and_then(|before| before.get(key)) != expected.get(key) {
-                    assert_eq!(actual.get(key), expected.get(key),
-                        "changed durable field {key} reloads for {}", selected.session.id);
+                    assert_eq!(
+                        actual.get(key),
+                        expected.get(key),
+                        "changed durable field {key} reloads for {}",
+                        selected.session.id
+                    );
                 }
             }
         }
@@ -197,15 +241,24 @@ fn a_failed_stop_commit_restamps_the_restored_capacity_clear() {
     state.persistence_path = Arc::new(directory);
     let snapshot = DurableSessionSnapshot::take(&state);
 
-    assert!(state
-        .begin_requested_stop_session(&session, &StopSessionOptions::default())
-        .is_err());
+    assert!(
+        state
+            .begin_requested_stop_session(&session, &StopSessionOptions::default())
+            .is_err()
+    );
 
     {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.provider_capacity_retry.is_none(), "the clear made before the copy stays");
-        assert_eq!(record.session.status, SessionStatus::Active, "the Stop rolled back");
+        assert!(
+            record.provider_capacity_retry.is_none(),
+            "the clear made before the copy stays"
+        );
+        assert_eq!(
+            record.session.status,
+            SessionStatus::Active,
+            "the Stop rolled back"
+        );
     }
     snapshot.assert_changes_reach_the_delta(&state);
 }

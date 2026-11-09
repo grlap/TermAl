@@ -882,16 +882,28 @@ fn review_freeze_git_diagnostics_are_bounded_and_safe_with_explicit_long_path_re
     assert!(!diagnostic.chars().any(char::is_control), "{diagnostic:?}");
     let large = review_freeze_git_diagnostic(&vec![b'x'; 8192]);
     assert!(large.len() < 600);
-    for cause in ["Filename too long", "file name too long", "path too long",
-        "The filename or extension is too long"] {
+    for cause in [
+        "Filename too long",
+        "file name too long",
+        "path too long",
+        "The filename or extension is too long",
+    ] {
         let diagnostic = review_freeze_git_diagnostic(cause.as_bytes());
         assert!(diagnostic.contains("long-path read failed"), "{diagnostic}");
-        assert!(diagnostic.contains("shorten the worktree or child path"), "{diagnostic}");
-        assert!(diagnostic.contains("no source revision was taken"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("shorten the worktree or child path"),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("no source revision was taken"),
+            "{diagnostic}"
+        );
     }
     let beyond_display_bound = format!("{}: Filename too long", "x".repeat(8192));
-    assert!(review_freeze_git_diagnostic(beyond_display_bound.as_bytes())
-        .contains("long-path read failed"));
+    assert!(
+        review_freeze_git_diagnostic(beyond_display_bound.as_bytes())
+            .contains("long-path read failed")
+    );
 }
 
 #[test]
@@ -940,13 +952,38 @@ fn review_freeze_matches_independent_nonempty_engram_golden() {
         vec!["submodule", "status", "--recursive"],
         vec!["ls-files", "--stage", "-z"],
         vec!["ls-tree", "-r", "-z", "HEAD"],
-        vec!["diff", "--cached", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all"],
-        vec!["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all"],
+        vec![
+            "diff",
+            "--cached",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--ignore-submodules=all",
+        ],
+        vec![
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--ignore-submodules=all",
+        ],
         vec!["ls-files", "--others", "--exclude-standard", "-z"],
     ] {
-        let previous = git_command().current_dir(&root).args(&args).output().unwrap();
+        let previous = git_command()
+            .current_dir(&root)
+            .args(&args)
+            .output()
+            .unwrap();
         let mut command = git.command(&args);
-        let current = run_bounded_read_command(&mut command, git.deadline, REVIEW_FREEZE_OUTPUT_LIMIT, false).unwrap();
+        let current = run_bounded_read_command(
+            &mut command,
+            git.deadline,
+            REVIEW_FREEZE_OUTPUT_LIMIT,
+            false,
+        )
+        .unwrap();
         assert_eq!(previous.status.code(), current.status.code(), "{args:?}");
         assert_eq!(previous.stdout, current.stdout, "{args:?}");
         assert_eq!(previous.stderr, current.stderr, "{args:?}");
@@ -1136,11 +1173,18 @@ fn review_freeze_accepts_a_manifest_in_the_linked_worktrees_own_git_dir_only() {
     // outside its root, in its own Git directory.
     let own = git_output(
         &linked,
-        &["rev-parse", "--path-format=absolute", "--git-path", "engram-review-freeze.json"],
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "engram-review-freeze.json",
+        ],
     );
-    assert!(!fs::canonicalize(FsPath::new(&own).parent().unwrap())
-        .unwrap()
-        .starts_with(fs::canonicalize(&linked).unwrap()));
+    assert!(
+        !fs::canonicalize(FsPath::new(&own).parent().unwrap())
+            .unwrap()
+            .starts_with(fs::canonicalize(&linked).unwrap())
+    );
     assert_eq!(check_at(&own).unwrap(), expected);
 
     // For a linked worktree's review: not the shared common directory, nor

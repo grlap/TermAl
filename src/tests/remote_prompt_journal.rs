@@ -40,7 +40,9 @@ fn prepare(
     value: &Intent,
 ) -> RemotePromptJournalRecord {
     store
-        .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, side, value, |_| Ok(()))
+        .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, side, value, |_| {
+            Ok(())
+        })
         .unwrap()
         .record
 }
@@ -56,10 +58,15 @@ fn remote_prompt_journal_exact_retry_and_reopen_keep_body_identity() {
     let (_root, path, store) = store();
     let value = intent("same-key", "complete å\r\nbody\n");
     let admitted = store
-        .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Sender, &value, |new| {
-            assert!(new);
-            Ok(())
-        })
+        .admit_remote_prompt_journal(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Sender,
+            &value,
+            |new| {
+                assert!(new);
+                Ok(())
+            },
+        )
         .unwrap();
     assert!(admitted.inserted);
     let first = admitted.record;
@@ -67,10 +74,15 @@ fn remote_prompt_journal_exact_retry_and_reopen_keep_body_identity() {
     drop(store);
     let reopened = MailboxStore::open(&path).unwrap();
     let retry = reopened
-        .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Sender, &value, |new| {
-            assert!(!new);
-            Ok(())
-        })
+        .admit_remote_prompt_journal(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Sender,
+            &value,
+            |new| {
+                assert!(!new);
+                Ok(())
+            },
+        )
         .unwrap();
     assert!(!retry.inserted);
     assert_eq!(retry.record, first);
@@ -85,18 +97,28 @@ fn remote_prompt_journal_first_receive_is_not_recaptured_by_duplicate_or_reopen(
     let (_root, path, store) = store();
     let value = intent("received", "body");
     let first = store
-        .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Receiver, &value, |new| {
-            assert!(new);
-            Ok(())
-        })
+        .admit_remote_prompt_journal(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Receiver,
+            &value,
+            |new| {
+                assert!(new);
+                Ok(())
+            },
+        )
         .unwrap();
     assert!(first.inserted);
     assert!(first.record.evidence.may_have_entered);
     let duplicate = store
-        .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Receiver, &value, |new| {
-            assert!(!new);
-            Ok(())
-        })
+        .admit_remote_prompt_journal(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Receiver,
+            &value,
+            |new| {
+                assert!(!new);
+                Ok(())
+            },
+        )
         .unwrap();
     assert!(!duplicate.inserted);
     assert_eq!(duplicate.record, first.record);
@@ -104,7 +126,12 @@ fn remote_prompt_journal_first_receive_is_not_recaptured_by_duplicate_or_reopen(
     let reopened = MailboxStore::open(&path).unwrap();
     assert!(
         !reopened
-            .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Receiver, &value, |_| Ok(()))
+            .admit_remote_prompt_journal(
+                RemotePromptJournalWriteMode::Fixture,
+                RemotePromptJournalSide::Receiver,
+                &value,
+                |_| Ok(())
+            )
             .unwrap()
             .inserted
     );
@@ -114,40 +141,72 @@ fn remote_prompt_journal_first_receive_is_not_recaptured_by_duplicate_or_reopen(
 fn remote_prompt_journal_commit_capture_keeps_authority_and_is_first_receive_only() {
     struct Authority<'a>(&'a std::cell::Cell<bool>);
     impl Drop for Authority<'_> {
-        fn drop(&mut self) { self.0.set(false); }
+        fn drop(&mut self) {
+            self.0.set(false);
+        }
     }
     let (_root, path, store) = store();
     let value = intent("commit-capture", "exact body\r\nå\n");
     let held = std::cell::Cell::new(false);
     let captures = std::cell::Cell::new(0);
-    let first = store.admit_remote_prompt_journal_while_running(RemotePromptJournalWriteMode::Fixture,
-        RemotePromptJournalSide::Receiver, &value, || Ok(()), |new| {
-            assert!(new);
-            assert!(remote_prompt_read_row(&rusqlite::Connection::open(&path).unwrap(),
-                RemotePromptJournalSide::Receiver, &value.components().0.source,
-                value.components().2).unwrap().is_none(), "not visible before COMMIT");
-            held.set(true);
-            Ok(Authority(&held))
-        }, |guard, record| {
-            assert!(guard.0.get(), "commit authority must survive capture");
-            assert_eq!(remote_prompt_read_row(&rusqlite::Connection::open(&path).unwrap(),
-                RemotePromptJournalSide::Receiver, &value.components().0.source,
-                value.components().2).unwrap().as_ref(), Some(record),
-                "capture must follow actual SQLite COMMIT");
-            captures.set(captures.get() + 1);
-        },
-    ).unwrap();
+    let first = store
+        .admit_remote_prompt_journal_while_running(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Receiver,
+            &value,
+            || Ok(()),
+            |new| {
+                assert!(new);
+                assert!(
+                    remote_prompt_read_row(
+                        &rusqlite::Connection::open(&path).unwrap(),
+                        RemotePromptJournalSide::Receiver,
+                        &value.components().0.source,
+                        value.components().2
+                    )
+                    .unwrap()
+                    .is_none(),
+                    "not visible before COMMIT"
+                );
+                held.set(true);
+                Ok(Authority(&held))
+            },
+            |guard, record| {
+                assert!(guard.0.get(), "commit authority must survive capture");
+                assert_eq!(
+                    remote_prompt_read_row(
+                        &rusqlite::Connection::open(&path).unwrap(),
+                        RemotePromptJournalSide::Receiver,
+                        &value.components().0.source,
+                        value.components().2
+                    )
+                    .unwrap()
+                    .as_ref(),
+                    Some(record),
+                    "capture must follow actual SQLite COMMIT"
+                );
+                captures.set(captures.get() + 1);
+            },
+        )
+        .unwrap();
     assert!(first.inserted);
     assert!(!held.get());
     assert_eq!(captures.get(), 1);
     drop(store);
     let reopened = MailboxStore::open(&path).unwrap();
-    let duplicate = reopened.admit_remote_prompt_journal_while_running(RemotePromptJournalWriteMode::Fixture,
-        RemotePromptJournalSide::Receiver, &value, || Ok(()), |new| {
-            assert!(!new);
-            Ok(())
-        }, |_, _| panic!("duplicate/reload cannot capture activation"),
-    ).unwrap();
+    let duplicate = reopened
+        .admit_remote_prompt_journal_while_running(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Receiver,
+            &value,
+            || Ok(()),
+            |new| {
+                assert!(!new);
+                Ok(())
+            },
+            |_, _| panic!("duplicate/reload cannot capture activation"),
+        )
+        .unwrap();
     assert!(!duplicate.inserted);
     assert_eq!(duplicate.record, first.record);
 }
@@ -162,8 +221,12 @@ fn remote_prompt_journal_commit_cuts_never_lose_or_repeat_capture() {
         let value = intent("commit-cut", "retained exact body");
         let captures = std::cell::Cell::new(0);
         FEDERATION_EXECUTOR_TEST_CUT.with(|cut| *cut.borrow_mut() = Some(phase));
-        let result = store.admit_remote_prompt_journal_while_running(RemotePromptJournalWriteMode::Fixture,
-            RemotePromptJournalSide::Receiver, &value, || Ok(()), |_| Ok(()),
+        let result = store.admit_remote_prompt_journal_while_running(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Receiver,
+            &value,
+            || Ok(()),
+            |_| Ok(()),
             |_, _| captures.set(captures.get() + 1),
         );
         let error = result.unwrap_err();
@@ -171,16 +234,27 @@ fn remote_prompt_journal_commit_cuts_never_lose_or_repeat_capture() {
         assert_eq!(captures.get(), usize::from(committed));
         drop(store);
         let reopened = MailboxStore::open(&path).unwrap();
-        let retained = remote_prompt_read_row(&reopened.connection().unwrap(),
-            RemotePromptJournalSide::Receiver, &value.components().0.source,
-            value.components().2).unwrap();
+        let retained = remote_prompt_read_row(
+            &reopened.connection().unwrap(),
+            RemotePromptJournalSide::Receiver,
+            &value.components().0.source,
+            value.components().2,
+        )
+        .unwrap();
         assert_eq!(retained.is_some(), committed);
-        let retry = reopened.admit_remote_prompt_journal_while_running(RemotePromptJournalWriteMode::Fixture,
-            RemotePromptJournalSide::Receiver, &value, || Ok(()), |new| {
-                assert_eq!(new, !committed);
-                Ok(())
-            }, |_, _| captures.set(captures.get() + 1),
-        ).unwrap();
+        let retry = reopened
+            .admit_remote_prompt_journal_while_running(
+                RemotePromptJournalWriteMode::Fixture,
+                RemotePromptJournalSide::Receiver,
+                &value,
+                || Ok(()),
+                |new| {
+                    assert_eq!(new, !committed);
+                    Ok(())
+                },
+                |_, _| captures.set(captures.get() + 1),
+            )
+            .unwrap();
         assert_eq!(retry.inserted, !committed);
         assert_eq!(captures.get(), 1, "lost reply must not capture twice");
     }
@@ -191,19 +265,37 @@ fn remote_prompt_journal_stop_after_writer_admission_refuses_before_authorizatio
     let (_root, _path, store) = store();
     let value = intent("stop-at-writer", "not received");
     let checks = std::cell::Cell::new(0);
-    let result = store.admit_remote_prompt_journal_while_running(RemotePromptJournalWriteMode::Fixture,
-        RemotePromptJournalSide::Receiver, &value, || {
+    let result = store.admit_remote_prompt_journal_while_running(
+        RemotePromptJournalWriteMode::Fixture,
+        RemotePromptJournalSide::Receiver,
+        &value,
+        || {
             checks.set(checks.get() + 1);
-            if checks.get() == 2 { bail!("executor stopping after writer admission"); }
+            if checks.get() == 2 {
+                bail!("executor stopping after writer admission");
+            }
             Ok(())
-        }, |_| -> Result<()> { panic!("stopped receive must not acquire commit authority") },
+        },
+        |_| -> Result<()> { panic!("stopped receive must not acquire commit authority") },
         |_, _| panic!("stopped receive must not capture activation"),
     );
-    assert!(result.unwrap_err().to_string().contains("executor stopping"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("executor stopping")
+    );
     assert_eq!(checks.get(), 2);
-    assert!(remote_prompt_read_row(&store.connection().unwrap(),
-        RemotePromptJournalSide::Receiver, &value.components().0.source,
-        value.components().2).unwrap().is_none());
+    assert!(
+        remote_prompt_read_row(
+            &store.connection().unwrap(),
+            RemotePromptJournalSide::Receiver,
+            &value.components().0.source,
+            value.components().2
+        )
+        .unwrap()
+        .is_none()
+    );
 }
 
 #[test]
@@ -211,29 +303,53 @@ fn remote_prompt_journal_failed_sqlite_commit_cannot_capture_receive() {
     let (_root, _path, store) = store();
     // A deferred FK reaches the actual COMMIT failure, rather than merely
     // failing statement execution or simulating a failure after success.
-    store.connection().unwrap().execute_batch(
-        "CREATE TABLE prompt_commit_parent(id INTEGER PRIMARY KEY);
+    store
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE prompt_commit_parent(id INTEGER PRIMARY KEY);
          CREATE TABLE prompt_commit_child(parent_id INTEGER REFERENCES
              prompt_commit_parent(id) DEFERRABLE INITIALLY DEFERRED);
          CREATE TRIGGER fail_prompt_receive_commit AFTER INSERT ON remote_prompt_receives
-         BEGIN INSERT INTO prompt_commit_child VALUES(1); END;"
-    ).unwrap();
+         BEGIN INSERT INTO prompt_commit_child VALUES(1); END;",
+        )
+        .unwrap();
     let value = intent("failed-real-commit", "must remain unreceived");
     let authorized = std::cell::Cell::new(false);
-    let error = store.admit_remote_prompt_journal_while_running(RemotePromptJournalWriteMode::Fixture,
-        RemotePromptJournalSide::Receiver, &value, || Ok(()), |new| {
-            assert!(new);
-            authorized.set(true);
-            Ok(())
-        }, |_, _| panic!("failed COMMIT must not capture activation"),
-    ).unwrap_err();
+    let error = store
+        .admit_remote_prompt_journal_while_running(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Receiver,
+            &value,
+            || Ok(()),
+            |new| {
+                assert!(new);
+                authorized.set(true);
+                Ok(())
+            },
+            |_, _| panic!("failed COMMIT must not capture activation"),
+        )
+        .unwrap_err();
     assert!(authorized.get(), "failure must follow commit authorization");
     assert!(error.to_string().contains("FOREIGN KEY"), "{error:#}");
     let connection = store.connection().unwrap();
-    assert_eq!(connection.query_row("SELECT COUNT(*) FROM prompt_commit_child", [],
-        |row| row.get::<_, u64>(0)).unwrap(), 0);
-    assert!(remote_prompt_read_row(&connection, RemotePromptJournalSide::Receiver,
-        &value.components().0.source, value.components().2).unwrap().is_none());
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM prompt_commit_child", [], |row| row
+                .get::<_, u64>(0))
+            .unwrap(),
+        0
+    );
+    assert!(
+        remote_prompt_read_row(
+            &connection,
+            RemotePromptJournalSide::Receiver,
+            &value.components().0.source,
+            value.components().2
+        )
+        .unwrap()
+        .is_none()
+    );
 }
 
 #[test]
@@ -243,7 +359,8 @@ fn remote_prompt_journal_changed_intent_cannot_reuse_original_key() {
     let first = prepare(&store, RemotePromptJournalSide::Sender, &original);
     assert!(
         store
-            .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture,
+            .admit_remote_prompt_journal(
+                RemotePromptJournalWriteMode::Fixture,
                 RemotePromptJournalSide::Sender,
                 &intent("same-key", "changed"),
                 |_| Ok(())
@@ -267,11 +384,16 @@ fn remote_prompt_journal_authorization_refusal_rolls_back_before_commit() {
         let reached = std::cell::Cell::new(false);
         assert!(
             store
-                .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, side, &value, |new| {
-                    assert!(new);
-                    reached.set(true);
-                    Err::<(), _>(anyhow!("authority retired at commit"))
-                })
+                .admit_remote_prompt_journal(
+                    RemotePromptJournalWriteMode::Fixture,
+                    side,
+                    &value,
+                    |new| {
+                        assert!(new);
+                        reached.set(true);
+                        Err::<(), _>(anyhow!("authority retired at commit"))
+                    }
+                )
                 .is_err()
         );
         assert!(reached.get());
@@ -289,10 +411,15 @@ fn remote_prompt_journal_authorization_refusal_rolls_back_before_commit() {
         let first = prepare(&store, side, &value);
         assert!(
             store
-                .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, side, &value, |new| {
-                    assert!(!new);
-                    Err::<(), _>(anyhow!("foreign original owner"))
-                })
+                .admit_remote_prompt_journal(
+                    RemotePromptJournalWriteMode::Fixture,
+                    side,
+                    &value,
+                    |new| {
+                        assert!(!new);
+                        Err::<(), _>(anyhow!("foreign original owner"))
+                    }
+                )
                 .is_err()
         );
         assert_eq!(prepare(&store, side, &value), first);
@@ -310,22 +437,36 @@ fn remote_prompt_journal_possible_entry_is_monotonic_and_survives_reopen() {
     assert!(entered.evidence.may_have_entered);
     assert_eq!(
         store
-            .mark_remote_prompt_possible_entry(RemotePromptJournalWriteMode::Fixture, &first, || Ok(()))
+            .mark_remote_prompt_possible_entry(
+                RemotePromptJournalWriteMode::Fixture,
+                &first,
+                || Ok(())
+            )
             .unwrap(),
         entered
     );
     assert!(
         store
-            .record_remote_prompt_journal_evidence(RemotePromptJournalWriteMode::Fixture, &entered, first.evidence, || Ok(()))
+            .record_remote_prompt_journal_evidence(
+                RemotePromptJournalWriteMode::Fixture,
+                &entered,
+                first.evidence,
+                || Ok(())
+            )
             .is_err()
     );
     drop(store);
     let reopened = MailboxStore::open(&path).unwrap();
     let retry = reopened
-        .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Sender, &value, |new| {
-            assert!(!new);
-            Ok(())
-        })
+        .admit_remote_prompt_journal(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Sender,
+            &value,
+            |new| {
+                assert!(!new);
+                Ok(())
+            },
+        )
         .unwrap();
     assert!(!retry.inserted);
     assert_eq!(retry.record, entered);
@@ -348,7 +489,11 @@ fn remote_prompt_journal_failed_evidence_guard_preserves_committed_record() {
     let first = prepare(&store, RemotePromptJournalSide::Sender, &value);
     assert!(
         store
-            .mark_remote_prompt_possible_entry(RemotePromptJournalWriteMode::Fixture, &first, || Err::<(), _>(anyhow!("retired")))
+            .mark_remote_prompt_possible_entry(
+                RemotePromptJournalWriteMode::Fixture,
+                &first,
+                || Err::<(), _>(anyhow!("retired"))
+            )
             .is_err()
     );
     assert_eq!(
@@ -374,14 +519,20 @@ fn remote_prompt_journal_history_does_not_need_a_regrant_or_authorize_new_send()
     };
     assert_eq!(
         store
-            .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Sender, &value, new_policy)
+            .admit_remote_prompt_journal(
+                RemotePromptJournalWriteMode::Fixture,
+                RemotePromptJournalSide::Sender,
+                &value,
+                new_policy
+            )
             .unwrap()
             .record,
         entered
     );
     assert!(
         store
-            .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture,
+            .admit_remote_prompt_journal(
+                RemotePromptJournalWriteMode::Fixture,
                 RemotePromptJournalSide::Sender,
                 &intent("new-after-revoke", "new"),
                 new_policy
@@ -400,14 +551,23 @@ fn remote_prompt_journal_receiver_cannot_become_a_source_retry_instruction() {
     );
     assert!(
         store
-            .mark_remote_prompt_possible_entry(RemotePromptJournalWriteMode::Fixture, &received, || Ok(()))
+            .mark_remote_prompt_possible_entry(
+                RemotePromptJournalWriteMode::Fixture,
+                &received,
+                || Ok(())
+            )
             .is_err()
     );
     let mut reset = received.evidence.clone();
     reset.may_have_entered = false;
     assert!(
         store
-            .record_remote_prompt_journal_evidence(RemotePromptJournalWriteMode::Fixture, &received, reset, || Ok(()))
+            .record_remote_prompt_journal_evidence(
+                RemotePromptJournalWriteMode::Fixture,
+                &received,
+                reset,
+                || Ok(())
+            )
             .is_err()
     );
 }
@@ -481,7 +641,11 @@ fn remote_prompt_journal_sender_limit_is_separate_and_exact_retry_is_free() {
     let original = intent("retained", "original");
     let first = prepare(&store, RemotePromptJournalSide::Sender, &original);
     fill_old_sender_rows(&store, 1000);
-    prepare(&store, RemotePromptJournalSide::Sender, &intent("independent", "new"));
+    prepare(
+        &store,
+        RemotePromptJournalSide::Sender,
+        &intent("independent", "new"),
+    );
     seed_prompt_rows(&store, RemotePromptJournalSide::Sender, 998);
     assert_eq!(
         prepare(&store, RemotePromptJournalSide::Sender, &original),
@@ -489,7 +653,12 @@ fn remote_prompt_journal_sender_limit_is_separate_and_exact_retry_is_free() {
     );
     let new = intent("new-key", "new");
     let error = store
-        .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Sender, &new, |_| Ok(()))
+        .admit_remote_prompt_journal(
+            RemotePromptJournalWriteMode::Fixture,
+            RemotePromptJournalSide::Sender,
+            &new,
+            |_| Ok(()),
+        )
         .unwrap_err();
     assert!(format!("{error:#}").contains("full"), "{error:#}");
 }
@@ -517,7 +686,12 @@ fn remote_prompt_journal_receiver_byte_limit_does_not_block_old_executor() {
     let new = intent("cannot-fit", "new");
     assert!(
         store
-            .admit_remote_prompt_journal(RemotePromptJournalWriteMode::Fixture, RemotePromptJournalSide::Receiver, &new, |_| Ok(()))
+            .admit_remote_prompt_journal(
+                RemotePromptJournalWriteMode::Fixture,
+                RemotePromptJournalSide::Receiver,
+                &new,
+                |_| Ok(())
+            )
             .is_err()
     );
     let old = FederationExecutorOperation {
@@ -575,28 +749,104 @@ fn remote_prompt_journal_production_writes_refuse_before_callbacks_or_storage() 
     let (_root, _path, store) = store();
     let value = intent("production-block", "retained body");
     let called = std::cell::Cell::new(false);
-    for side in [RemotePromptJournalSide::Sender, RemotePromptJournalSide::Receiver] {
-        let error = store.admit_remote_prompt_journal(RemotePromptJournalWriteMode::Production,
-            side, &value, |_| { called.set(true); Ok(()) }).unwrap_err();
+    for side in [
+        RemotePromptJournalSide::Sender,
+        RemotePromptJournalSide::Receiver,
+    ] {
+        let error = store
+            .admit_remote_prompt_journal(
+                RemotePromptJournalWriteMode::Production,
+                side,
+                &value,
+                |_| {
+                    called.set(true);
+                    Ok(())
+                },
+            )
+            .unwrap_err();
         assert!(format!("{error:#}").contains("production writes unavailable"));
-        assert!(store.admit_remote_prompt_journal_while_running(
-            RemotePromptJournalWriteMode::Production, side, &value,
-            || { called.set(true); Ok(()) }, |_| { called.set(true); Ok(()) },
-            |_, _| called.set(true)).is_err());
-        assert_eq!(store.connection().unwrap().query_row(
-            &format!("SELECT COUNT(*) FROM {}", side.table()), [],
-            |row| row.get::<_, u64>(0)).unwrap(), 0);
+        assert!(
+            store
+                .admit_remote_prompt_journal_while_running(
+                    RemotePromptJournalWriteMode::Production,
+                    side,
+                    &value,
+                    || {
+                        called.set(true);
+                        Ok(())
+                    },
+                    |_| {
+                        called.set(true);
+                        Ok(())
+                    },
+                    |_, _| called.set(true)
+                )
+                .is_err()
+        );
+        assert_eq!(
+            store
+                .connection()
+                .unwrap()
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {}", side.table()),
+                    [],
+                    |row| row.get::<_, u64>(0)
+                )
+                .unwrap(),
+            0
+        );
     }
     let retained = prepare(&store, RemotePromptJournalSide::Sender, &value);
-    assert!(store.admit_remote_prompt_journal(RemotePromptJournalWriteMode::Production,
-        RemotePromptJournalSide::Sender, &value, |_| { called.set(true); Ok(()) }).is_err());
-    assert!(store.mark_remote_prompt_possible_entry(RemotePromptJournalWriteMode::Production,
-        &retained, || { called.set(true); Ok(()) }).is_err());
-    assert!(store.record_remote_prompt_journal_evidence(RemotePromptJournalWriteMode::Production,
-        &retained, retained.evidence.clone(), || { called.set(true); Ok(()) }).is_err());
+    assert!(
+        store
+            .admit_remote_prompt_journal(
+                RemotePromptJournalWriteMode::Production,
+                RemotePromptJournalSide::Sender,
+                &value,
+                |_| {
+                    called.set(true);
+                    Ok(())
+                }
+            )
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_remote_prompt_possible_entry(
+                RemotePromptJournalWriteMode::Production,
+                &retained,
+                || {
+                    called.set(true);
+                    Ok(())
+                }
+            )
+            .is_err()
+    );
+    assert!(
+        store
+            .record_remote_prompt_journal_evidence(
+                RemotePromptJournalWriteMode::Production,
+                &retained,
+                retained.evidence.clone(),
+                || {
+                    called.set(true);
+                    Ok(())
+                }
+            )
+            .is_err()
+    );
     assert!(!called.get());
-    assert_eq!(store.read_remote_prompt_journal(RemotePromptJournalSide::Sender,
-        &value.components().0.source, value.components().2, || Ok(())).unwrap(), Some(retained));
+    assert_eq!(
+        store
+            .read_remote_prompt_journal(
+                RemotePromptJournalSide::Sender,
+                &value.components().0.source,
+                value.components().2,
+                || Ok(())
+            )
+            .unwrap(),
+        Some(retained)
+    );
 }
 
 #[test]

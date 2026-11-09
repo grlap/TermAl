@@ -3557,8 +3557,16 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
     assert_eq!(session.status, SessionStatus::Idle);
     assert!(session.queue_paused);
     let wire = serde_json::to_value(session).unwrap();
-    for field in ["queueHold", "promptAdmissionBudgets", "engramBootRecoveryPending", "engramControlOff"] {
-        assert!(wire.get(field).is_none(), "retired admission field is absent from current wire: {field}");
+    for field in [
+        "queueHold",
+        "promptAdmissionBudgets",
+        "engramBootRecoveryPending",
+        "engramControlOff",
+    ] {
+        assert!(
+            wire.get(field).is_none(),
+            "retired admission field is absent from current wire: {field}"
+        );
     }
     assert_eq!(
         session.queue_projection_hash.as_deref(),
@@ -3616,7 +3624,12 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
             assert_eq!(status, SessionStatus::Idle);
             let session_queue = session_queue.expect("queue metadata should bridge atomically");
             assert!(session_queue.queue_paused);
-            assert!(serde_json::to_value(&session_queue).unwrap().get("queueHold").is_none());
+            assert!(
+                serde_json::to_value(&session_queue)
+                    .unwrap()
+                    .get("queueHold")
+                    .is_none()
+            );
             assert_eq!(
                 session_queue.queue_projection_hash.as_deref(),
                 Some("remote-queue-held")

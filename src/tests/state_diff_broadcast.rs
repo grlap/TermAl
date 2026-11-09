@@ -36,7 +36,10 @@ fn cut(revision: u64, sessions: &[&Arc<StateSessionSummary>]) -> ImmutableStateS
     header.revision = revision;
     ImmutableStateSnapshot {
         header,
-        sessions: sessions.iter().map(|session| Arc::clone(*session)).collect(),
+        sessions: sessions
+            .iter()
+            .map(|session| Arc::clone(*session))
+            .collect(),
         request_generation: 0,
         before_materialize: None,
     }
@@ -85,9 +88,7 @@ fn forward_cut(
     senders: &StateBroadcastSenders,
     mut snapshot: ImmutableStateSnapshot,
 ) {
-    snapshot.request_generation = senders
-        .full_state_request_generation
-        .load(Ordering::SeqCst);
+    snapshot.request_generation = senders.full_state_request_generation.load(Ordering::SeqCst);
     producer.forward(StateBroadcastWork::ImmutableSnapshot(snapshot), senders);
 }
 
@@ -147,7 +148,10 @@ fn state_diff_without_a_base_sends_a_full_state_then_diffs_from_it() {
     let events = emitted(&mut receiver);
     assert_eq!(kinds(&events), ["state"], "worker start has no base");
     assert_eq!(events[0].1["revision"], 10);
-    assert_eq!(events[0].1["stateDiffBase"], true, "a worker base is marked");
+    assert_eq!(
+        events[0].1["stateDiffBase"], true,
+        "a worker base is marked"
+    );
 
     let b_changed = Arc::new(StateSessionSummary {
         name: "Renamed".to_owned(),
@@ -255,7 +259,10 @@ fn state_diff_through_the_cache_reports_a_reverted_session_captured_in_between()
     let quiet = metadata_commit(&state);
     forward_pending(&mut producer);
     let diff = only_diff(&mut receiver);
-    assert_eq!((diff["baseRevision"].as_u64(), diff["revision"].as_u64()), (Some(base_revision), Some(quiet)));
+    assert_eq!(
+        (diff["baseRevision"].as_u64(), diff["revision"].as_u64()),
+        (Some(base_revision), Some(quiet))
+    );
     assert!(ids(&diff["sessions"]["changed"], "id").is_empty());
 
     // Changed, captured, then reverted: the reverted value is a new Arc and
@@ -266,7 +273,10 @@ fn state_diff_through_the_cache_reports_a_reverted_session_captured_in_between()
     let reverted = metadata_commit(&state);
     forward_pending(&mut producer);
     let diff = only_diff(&mut receiver);
-    assert_eq!((diff["baseRevision"].as_u64(), diff["revision"].as_u64()), (Some(quiet), Some(reverted)));
+    assert_eq!(
+        (diff["baseRevision"].as_u64(), diff["revision"].as_u64()),
+        (Some(quiet), Some(reverted))
+    );
     assert_eq!(ids(&diff["sessions"]["changed"], "id"), [session]);
     assert_eq!(diff["sessions"]["changed"][0], base_session);
 }
@@ -317,8 +327,12 @@ fn state_diff_sends_delta_touched_keys_absolutely_and_absent_ones_as_removed() {
         let mut snapshot = cut(revision, &[&a, &b]);
         snapshot.header.delegations = vec![delegation("d1", "b"), delegation("d2", "b")];
         snapshot.header.test_run_overview.wire = test_run_overview(
-            &[test_run("r1", "running"), test_run("r2", "running")], true, 1, &HashSet::new(),
-        ).0;
+            &[test_run("r1", "running"), test_run("r2", "running")],
+            true,
+            1,
+            &HashSet::new(),
+        )
+        .0;
         snapshot
     };
     let senders = diff_senders();
@@ -373,7 +387,10 @@ fn state_diff_sends_delta_touched_keys_absolutely_and_absent_ones_as_removed() {
     assert!(diff["sessions"].get("order").is_none());
     assert_eq!(ids(&diff["delegations"]["changed"], "id"), ["d1"]);
     assert_eq!(keys(&diff["delegations"]["removed"]), ["ghost-delegation"]);
-    assert!(diff.get("testRuns").is_none(), "global diffs never grow a run-row collection");
+    assert!(
+        diff.get("testRuns").is_none(),
+        "global diffs never grow a run-row collection"
+    );
     assert_eq!(diff["header"]["testRunOverview"]["running"], 2);
 
     // The emitted cut clears the touched keys.
@@ -395,8 +412,12 @@ fn state_diff_rows_compare_values_and_report_keys_absent_from_the_cut() {
     let mut base = cut(1, &[&a]);
     base.header.delegations = vec![delegation("d1", "a"), delegation("d2", "a")];
     base.header.test_run_overview.wire = test_run_overview(
-        &[test_run("r1", "running"), test_run("r2", "running")], true, 1, &HashSet::new(),
-    ).0;
+        &[test_run("r1", "running"), test_run("r2", "running")],
+        true,
+        1,
+        &HashSet::new(),
+    )
+    .0;
     forward_cut(&mut producer, &senders, base);
     emitted(&mut receiver);
 
@@ -405,12 +426,19 @@ fn state_diff_rows_compare_values_and_report_keys_absent_from_the_cut() {
     d1.review_freeze_allowed = true;
     next.header.delegations = vec![d1, delegation("d3", "a")];
     next.header.test_run_overview.wire = test_run_overview(
-        &[test_run("r1", "passed"), test_run("r2", "running")], true, 2, &HashSet::new(),
-    ).0;
+        &[test_run("r1", "passed"), test_run("r2", "running")],
+        true,
+        2,
+        &HashSet::new(),
+    )
+    .0;
     forward_cut(&mut producer, &senders, next);
     let diff = only_diff(&mut receiver);
     assert_eq!(ids(&diff["delegations"]["changed"], "id"), ["d1", "d3"]);
-    assert_eq!(diff["delegations"]["changed"][0]["reviewFreezeAllowed"], true);
+    assert_eq!(
+        diff["delegations"]["changed"][0]["reviewFreezeAllowed"],
+        true
+    );
     assert_eq!(keys(&diff["delegations"]["removed"]), ["d2"]);
     assert!(diff.get("testRuns").is_none());
     assert_eq!(diff["header"]["testRunOverview"]["running"], 1);
@@ -490,7 +518,10 @@ fn state_diff_restarts_from_a_full_state_after_loss_prebuilt_snapshot_or_new_ins
     forward_cut(&mut producer, &senders, cut(7, &[&a]));
     let events = emitted(&mut receiver);
     assert_eq!(kinds(&events), ["state", "state"]);
-    assert!(events[0].1.get("stateDiffBase").is_none(), "a pre-built snapshot is no base");
+    assert!(
+        events[0].1.get("stateDiffBase").is_none(),
+        "a pre-built snapshot is no base"
+    );
     assert_eq!(events[1].1["stateDiffBase"], true);
 
     // A different server instance cannot diff from the old one's cut.
@@ -561,18 +592,28 @@ fn state_diff_pairs_a_full_state_only_while_legacy_connections_are_counted() {
         paired.push(event);
     }
     assert_eq!(projections.load(Ordering::SeqCst), 1);
-    let [SseStreamEvent::StateDiff(diff), SseStreamEvent::LegacyState(full)] = paired.as_slice()
+    let [
+        SseStreamEvent::StateDiff(diff),
+        SseStreamEvent::LegacyState(full),
+    ] = paired.as_slice()
     else {
         panic!("a counted legacy connection gets the diff's full state: {paired:?}");
     };
     assert_eq!(serde_json::from_str::<Value>(diff).unwrap()["revision"], 3);
-    assert_eq!(&**full, expected_full.as_str(), "legacy payloads stay bit-identical");
+    assert_eq!(
+        &**full,
+        expected_full.as_str(),
+        "legacy payloads stay bit-identical"
+    );
 
     drop(legacy);
     forward_cut(&mut producer, &senders, cut(4, &[&a]));
     drop(observer);
     let diff = only_diff(&mut receiver);
-    assert_eq!(diff["baseRevision"], 3, "a paired emission advances the base");
+    assert_eq!(
+        diff["baseRevision"], 3,
+        "a paired emission advances the base"
+    );
     assert_eq!(projections.load(Ordering::SeqCst), 1);
 }
 
@@ -722,7 +763,11 @@ fn state_diff_same_revision_cut_keeps_the_base_and_its_changes_ride_the_next_dif
     assert_eq!(diff["revision"], 3);
     let mut changed = ids(&diff["sessions"]["changed"], "id");
     changed.sort();
-    assert_eq!(changed, ["a", "b"], "the released change and the touched key both ride");
+    assert_eq!(
+        changed,
+        ["a", "b"],
+        "the released change and the touched key both ride"
+    );
     let released = diff["sessions"]["changed"]
         .as_array()
         .unwrap()
@@ -792,14 +837,22 @@ fn state_diff_in_flight_cut_captured_before_a_request_does_not_answer_it() {
         producer.forward(work, &senders);
     }
     let events = emitted(&mut receiver);
-    assert_eq!(kinds(&events), ["stateDiff", "state"], "the old cut stays a diff");
+    assert_eq!(
+        kinds(&events),
+        ["stateDiff", "state"],
+        "the old cut stays a diff"
+    );
     assert!(events[0].1.get("stateDiffBase").is_none());
     assert_eq!(events[1].1["stateDiffBase"], true);
     assert_eq!(events[1].1["revision"].as_u64(), Some(revision));
     assert_eq!(events[1].1["sessions"][0]["id"], session);
     assert_eq!(events[1].1["sessions"][0]["name"], "Changed without a bump");
     assert_eq!(
-        senders.diff_counters.snapshot().marked_full_states.alignment_request,
+        senders
+            .diff_counters
+            .snapshot()
+            .marked_full_states
+            .alignment_request,
         1
     );
 
@@ -811,7 +864,10 @@ fn state_diff_in_flight_cut_captured_before_a_request_does_not_answer_it() {
     for work in mailbox.take_pending_for_test() {
         producer.forward(work, &senders);
     }
-    assert!(emitted(&mut receiver).is_empty(), "same revision, already answered");
+    assert!(
+        emitted(&mut receiver).is_empty(),
+        "same revision, already answered"
+    );
 }
 
 // The requested cut and a later commit's cut coalesce in the mailbox; the
@@ -847,7 +903,11 @@ fn state_diff_request_cut_coalesced_with_a_commit_cut_is_one_marked_full_state()
     assert_eq!(generation, 1);
     assert_eq!(producer.satisfied_generation, generation);
     assert_eq!(
-        senders.diff_counters.snapshot().marked_full_states.alignment_request,
+        senders
+            .diff_counters
+            .snapshot()
+            .marked_full_states
+            .alignment_request,
         1
     );
 }

@@ -53,7 +53,9 @@ fn rejected_build_evaluation(
     assert!(
         !output.status.success(),
         "must refuse this citation (exit {:?}, stdout {} bytes, stderr {} bytes)",
-        output.status.code(), output.stdout.len(), output.stderr.len()
+        output.status.code(),
+        output.stdout.len(),
+        output.stderr.len()
     );
     let refusal: Value = serde_json::from_slice(&output.stderr)
         .or_else(|_| serde_json::from_slice(&output.stdout))
@@ -65,8 +67,15 @@ fn rejected_build_evaluation(
     let cause = &refusal["error"]["details"]["cause"];
     assert_eq!(cause["kind"], "citation", "<refusal details withheld>");
     assert_eq!(cause["mismatch"], mismatch, "<refusal details withheld>");
-    assert_eq!(cause["criterion"].as_u64(), Some(1), "<refusal details withheld>");
-    assert_eq!(cause["requirement"]["check_kind"], "build", "<refusal details withheld>");
+    assert_eq!(
+        cause["criterion"].as_u64(),
+        Some(1),
+        "<refusal details withheld>"
+    );
+    assert_eq!(
+        cause["requirement"]["check_kind"], "build",
+        "<refusal details withheld>"
+    );
     assert_eq!(cause["citation"], citation, "<refusal details withheld>");
 }
 
@@ -87,10 +96,12 @@ fn newest_build_record(
         .filter(|row| row["verification"]["check_kind"] == kind)
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1, "one store-minted {kind}: <shown withheld>");
-    assert_eq!(rows[0]["verification"]["result"], result, "<shown withheld>");
+    assert_eq!(
+        rows[0]["verification"]["result"], result,
+        "<shown withheld>"
+    );
     rows[0]["locator"].as_str().unwrap().to_owned()
 }
-
 
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
@@ -99,34 +110,91 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
         let fixture = completion_fixture();
         let session = &fixture.live.session_id;
         if fails {
-            fs::write(fixture.root.join("src/lib.rs"), "compile_error!(\"deliberate failed build fixture\");\n").unwrap();
+            fs::write(
+                fixture.root.join("src/lib.rs"),
+                "compile_error!(\"deliberate failed build fixture\");\n",
+            )
+            .unwrap();
             run_git_test_command(&fixture.root, &["add", "src/lib.rs"]);
-            run_git_test_command(&fixture.root, &["commit", "--quiet", "-m", "deliberate failed build input"]);
+            run_git_test_command(
+                &fixture.root,
+                &["commit", "--quiet", "-m", "deliberate failed build input"],
+            );
         }
-        let added = fixture.work(session, &["add", "Observe a real Build", "--accept",
-            "The host records a passing Build on this source", "--bind", "1=build", "--json"]);
-        let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+        let added = fixture.work(
+            session,
+            &[
+                "add",
+                "Observe a real Build",
+                "--accept",
+                "The host records a passing Build on this source",
+                "--bind",
+                "1=build",
+                "--json",
+            ],
+        );
+        let work = added["work"]["short_ref"]
+            .as_str()
+            .or_else(|| added["short_ref"].as_str())
+            .unwrap();
         fixture.work(session, &["claim", work, "--json"]);
-        let named = fixture.live.state.name_engram_source_root(session, EngramSourceRootRequest {
-            work: work.to_owned(), path: Some(Some(fixture.root.to_string_lossy().into_owned())),
-        }).unwrap();
-        fixture.work(session, &["note", work, "Run the claimed Build in the named source", "--status", "--json"]);
+        let named = fixture
+            .live
+            .state
+            .name_engram_source_root(
+                session,
+                EngramSourceRootRequest {
+                    work: work.to_owned(),
+                    path: Some(Some(fixture.root.to_string_lossy().into_owned())),
+                },
+            )
+            .unwrap();
+        fixture.work(
+            session,
+            &[
+                "note",
+                work,
+                "Run the claimed Build in the named source",
+                "--status",
+                "--json",
+            ],
+        );
         let source = content_revision(&fixture.root).unwrap().1;
         fixture.begin(session, "Run the actual Cargo build.");
-        let (body, receipt) = fixture.historical_registered_check(session, &fixture.root, "cargo build --offline");
+        let (body, receipt) =
+            fixture.historical_registered_check(session, &fixture.root, "cargo build --offline");
         let id = &receipt.verifications[0].record_id;
         let stored = fixture.object(id);
         assert_eq!(stored["check_kind"], "build", "<stored withheld>");
-        assert_eq!(stored["source_basis"]["source_root_generation"], named.generation, "<stored withheld>");
-        assert_eq!(stored["source_basis"], serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap());
-        assert_eq!(newest_build_record(&fixture, work, "build", if fails { "failed" } else { "passed" }), *id);
-        let EngramVerificationRecordInput::Commit { commit: revision } = &body.input else { panic!("historical evaluation witness requires its retained Commit record"); };
+        assert_eq!(
+            stored["source_basis"]["source_root_generation"], named.generation,
+            "<stored withheld>"
+        );
+        assert_eq!(
+            stored["source_basis"],
+            serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap()
+        );
+        assert_eq!(
+            newest_build_record(
+                &fixture,
+                work,
+                "build",
+                if fails { "failed" } else { "passed" }
+            ),
+            *id
+        );
+        let EngramVerificationRecordInput::Commit { commit: revision } = &body.input else {
+            panic!("historical evaluation witness requires its retained Commit record");
+        };
         let shown = fixture.work(session, &["show", work, "--json"]);
         let args = build_evaluation_args(work, &shown, id, revision);
         if fails {
             rejected_build_evaluation(&fixture, &args, id, "passed_verification_required");
         } else {
-            let evaluated = fixture.work(session, &args.iter().map(String::as_str).collect::<Vec<_>>());
+            let evaluated = fixture.work(
+                session,
+                &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
             assert_eq!(evaluated["evaluation"]["passed"], 1, "<evaluated withheld>");
             assert_eq!(evaluated["evaluation"]["verdicts_total"], 1);
             assert_eq!(evaluated["evaluation"]["verdicts_omitted"], 0);
@@ -140,16 +208,25 @@ fn engram_build_live_producer_admits_actual_build_and_refuses_failed_or_test_onl
             finish_live_root(&fixture.live.state, session);
             fixture.wait_for_reports(session);
             fixture.begin(session, "Run a real Test as the wrong-kind control.");
-            let (_, receipt) = fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
+            let (_, receipt) =
+                fixture.historical_registered_check(session, &fixture.root, "cargo test --offline");
             let test = newest_build_record(&fixture, work, "test", "passed");
             assert_eq!(test, receipt.verifications[0].record_id);
             let shown = fixture.work(session, &["show", work, "--json"]);
-            rejected_build_evaluation(&fixture, &build_evaluation_args(work, &shown, &test, revision),
-                &test, "bound_verification_mismatch");
+            rejected_build_evaluation(
+                &fixture,
+                &build_evaluation_args(work, &shown, &test, revision),
+                &test,
+                "bound_verification_mismatch",
+            );
         }
         finish_live_root(&fixture.live.state, session);
         fixture.wait_for_reports(session);
-        assert_eq!(content_revision(&fixture.root).unwrap().1, source, "the actual command did not mutate its named source");
+        assert_eq!(
+            content_revision(&fixture.root).unwrap().1,
+            source,
+            "the actual command did not mutate its named source"
+        );
         assert_no_live_turn_gate(&fixture.live.transport);
     }
 }

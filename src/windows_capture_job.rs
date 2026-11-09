@@ -99,18 +99,27 @@ impl CaptureJob {
         let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
         if unsafe {
             QueryInformationJobObject(
-                self.job.as_raw_handle(), JobObjectBasicAccountingInformation,
+                self.job.as_raw_handle(),
+                JobObjectBasicAccountingInformation,
                 &mut accounting as *mut _ as *mut c_void,
                 size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
                 null_mut(),
             )
-        } == 0 {
-            return format!("capture job counts unavailable: {}", io::Error::last_os_error());
+        } == 0
+        {
+            return format!(
+                "capture job counts unavailable: {}",
+                io::Error::last_os_error()
+            );
         }
         let members = self.members.lock().unwrap();
-        format!("active={} total={} notifications={} pending_wait_handles={}",
-            accounting.ActiveProcesses, accounting.TotalProcesses,
-            members.notifications, members.handles.iter().flatten().count())
+        format!(
+            "active={} total={} notifications={} pending_wait_handles={}",
+            accounting.ActiveProcesses,
+            accounting.TotalProcesses,
+            members.notifications,
+            members.handles.iter().flatten().count()
+        )
     }
 
     #[cfg(test)]
@@ -225,7 +234,11 @@ impl CaptureJob {
     pub(crate) fn finish(&self, deadline: Option<Instant>) -> io::Result<bool> {
         #[cfg(test)]
         if let Some(probe) = &self.probe {
-            probe.finish_entries.lock().unwrap().push((deadline, Instant::now()));
+            probe
+                .finish_entries
+                .lock()
+                .unwrap()
+                .push((deadline, Instant::now()));
             *probe.port.lock().unwrap() = Some(self.port.clone());
         }
         loop {

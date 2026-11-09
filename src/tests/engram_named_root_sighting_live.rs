@@ -174,7 +174,10 @@ fn live_sighting_preflight_follows_each_state_of_the_real_producer() {
         .to_owned();
     fixture.work(&session, &["claim", &work_ref, "--json"]);
     let binding = fixture.claim_binding(&session);
-    assert_eq!(fixture.canonical_read(&session, &binding).named_root, EngramNamedRootState::None);
+    assert_eq!(
+        fixture.canonical_read(&session, &binding).named_root,
+        EngramNamedRootState::None
+    );
 
     // Neither side binds a root: the evaluation may go ahead.
     let unnamed = live_task(&fixture, &session, &work_ref);

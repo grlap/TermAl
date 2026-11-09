@@ -57,7 +57,12 @@ impl DeliveryWriter {
                 let _ = held_tx.send((kind, fence));
             }
         });
-        Self { tx, held, stop, thread: Mutex::new(Some(thread)) }
+        Self {
+            tx,
+            held,
+            stop,
+            thread: Mutex::new(Some(thread)),
+        }
     }
 
     pub(super) fn take(&self, expected: HeldFence) -> Box<PersistFence> {
@@ -104,7 +109,14 @@ impl Fixture {
             session
         };
         let (token, runtime_input, prompts) = install_test_claude_runtime(&state, &session, label);
-        Self { state, session, token, runtime_input, prompts, _root: root }
+        Self {
+            state,
+            session,
+            token,
+            runtime_input,
+            prompts,
+            _root: root,
+        }
     }
 
     /// Enqueues a receipted prompt and commits it; returns its id.
@@ -131,7 +143,10 @@ impl Fixture {
     fn delivery(&self, prompt_id: &str) -> Option<PromptDelivery> {
         let inner = self.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&self.session).unwrap();
-        inner.sessions[index].prompt_deliveries.get(prompt_id).cloned()
+        inner.sessions[index]
+            .prompt_deliveries
+            .get(prompt_id)
+            .cloned()
     }
 
     fn view(&self) -> Vec<PromptDeliveryView> {
@@ -173,7 +188,10 @@ impl Fixture {
     fn set_paused(&self, paused: bool) {
         let mut inner = self.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&self.session).unwrap();
-        inner.session_mut_by_index(index).unwrap().set_auto_dispatch_blocked(paused);
+        inner
+            .session_mut_by_index(index)
+            .unwrap()
+            .set_auto_dispatch_blocked(paused);
         self.state.commit_locked(&mut inner).unwrap();
     }
 
@@ -241,17 +259,35 @@ fn install_test_claude_runtime(
 /// A receipted prompt goes from pending through its held durability
 /// acknowledgement to a write-ahead hand-off record; the runtime is called
 /// only once that record is acknowledged durable.
-fn hand_off_through_held_fences(fixture: &Fixture, writer: &DeliveryWriter, prompt: &str) -> String {
+fn hand_off_through_held_fences(
+    fixture: &Fixture,
+    writer: &DeliveryWriter,
+    prompt: &str,
+) -> String {
     let id = fixture.enqueue_receipted(prompt);
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::Pending);
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::Pending
+    );
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &id)
+    );
     writer.take(HeldFence::Durability).finish(Ok(()));
     let write_ahead = writer.take(HeldFence::WriteAhead);
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
     assert_eq!(delivery.attempt, 1);
-    assert_eq!(delivery.turn_generation, None, "not promoted before the write-ahead");
-    assert_eq!(fixture.delivered_prompts(), 0, "no runtime call before the write-ahead");
+    assert_eq!(
+        delivery.turn_generation, None,
+        "not promoted before the write-ahead"
+    );
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "no runtime call before the write-ahead"
+    );
     assert_eq!(fixture.queue_ids(), vec![id.clone()]);
     write_ahead.finish(Ok(()));
     id
@@ -268,7 +304,10 @@ fn the_write_ahead_record_is_durable_before_the_runtime_is_called() {
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
     assert_eq!(delivery.turn_generation, Some(command.turn_generation));
-    assert_eq!(delivery.attempt_key.as_deref(), Some(command.replay_generation.as_str()));
+    assert_eq!(
+        delivery.attempt_key.as_deref(),
+        Some(command.replay_generation.as_str())
+    );
     assert!(delivery.message_id.is_some());
     assert!(fixture.queue_ids().is_empty());
     let view = fixture.view();
@@ -288,7 +327,11 @@ fn a_failed_write_ahead_returns_the_prompt_to_pending_and_a_late_acknowledgement
     let writer = DeliveryWriter::attach(&mut state);
     let fixture = Fixture::new(state, "failed-write-ahead");
     let id = fixture.enqueue_receipted("never sent by a lost write-ahead");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &id)
+    );
     writer.take(HeldFence::Durability).finish(Ok(()));
     let write_ahead = writer.take(HeldFence::WriteAhead);
     let old_nonce = fixture.delivery(&id).unwrap().write_ahead;
@@ -297,15 +340,30 @@ fn a_failed_write_ahead_returns_the_prompt_to_pending_and_a_late_acknowledgement
         delivery.disposition == PromptDeliveryDisposition::Pending
     });
     let pending = fixture.delivery(&id).unwrap();
-    assert_ne!(pending.write_ahead, old_nonce, "the restore supersedes the hand-off record");
-    assert!(pending.reason.as_deref().is_some_and(|reason| reason.contains("not sent")));
+    assert_ne!(
+        pending.write_ahead, old_nonce,
+        "the restore supersedes the hand-off record"
+    );
+    assert!(
+        pending
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("not sent"))
+    );
 
     // A late acknowledgement of the superseded write-ahead.
     fixture
         .state
         .settle_prompt_delivery_write_ahead(&fixture.session, &id, &old_nonce, Ok(()));
-    assert_eq!(fixture.delivered_prompts(), 0, "a late acknowledgement delivers nothing");
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::Pending);
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "a late acknowledgement delivers nothing"
+    );
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::Pending
+    );
     assert_eq!(fixture.queue_ids(), vec![id.clone()]);
 
     // The row as a restart reads it back.
@@ -321,10 +379,19 @@ fn a_failed_write_ahead_returns_the_prompt_to_pending_and_a_late_acknowledgement
         PromptDeliveryDisposition::Pending,
         "pending across a restart"
     );
-    assert_eq!(reloaded.queued_prompts.front().unwrap().pending_prompt.id, id);
+    assert_eq!(
+        reloaded.queued_prompts.front().unwrap().pending_prompt.id,
+        id
+    );
 
     // The next ordinary dispatch starts a new attempt.
-    assert!(fixture.state.dispatch_next_queued_turn(&fixture.session, false).unwrap().is_none());
+    assert!(
+        fixture
+            .state
+            .dispatch_next_queued_turn(&fixture.session, false)
+            .unwrap()
+            .is_none()
+    );
     let _second = writer.take(HeldFence::WriteAhead);
     assert_eq!(fixture.delivery(&id).unwrap().attempt, 2);
 }
@@ -344,7 +411,10 @@ fn claude_accepts_the_prompt_with_its_command_lifecycle_started() {
         &mut wire,
         ClaudeRuntimeCommand::Prompt(command)
     ));
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::HandingOff);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::HandingOff
+    );
     let mut frames = ClaudeReaderFrames::new(&context, fixture.runtime_input.clone(), None);
     let mut recorder = SessionRecorder::new(fixture.state.clone(), fixture.session.clone());
     let _ = apply_claude_frame(
@@ -362,7 +432,10 @@ struct BrokenStdin;
 
 impl std::io::Write for BrokenStdin {
     fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-        Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "stdin closed"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "stdin closed",
+        ))
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -385,7 +458,12 @@ fn a_claude_stdin_write_error_leaves_the_delivery_ambiguous() {
     ));
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Ambiguous);
-    assert!(delivery.reason.as_deref().is_some_and(|reason| reason.contains("stdin")));
+    assert!(
+        delivery
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("stdin"))
+    );
 }
 
 /// A Codex session whose receipted delivery is handing off under
@@ -430,17 +508,13 @@ fn codex_handing_off(state: &AppState, generation: u64) -> (String, SharedCodexR
             },
         );
     }
-    runtime
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(
-            session_id.clone(),
-            SharedCodexSessionState {
-                thread_id: Some("thread-receipted".to_owned()),
-                ..SharedCodexSessionState::default()
-            },
-        );
+    runtime.sessions.lock().unwrap().insert(
+        session_id.clone(),
+        SharedCodexSessionState {
+            thread_id: Some("thread-receipted".to_owned()),
+            ..SharedCodexSessionState::default()
+        },
+    );
     runtime
         .thread_sessions
         .lock()
@@ -518,19 +592,24 @@ fn a_codex_turn_start_response_accepts_the_prompt() {
 
 #[test]
 fn a_codex_turn_start_timeout_leaves_the_delivery_ambiguous() {
-    let (state, session_id, prompt_id) = answer_codex_turn_start(Err(
-        CodexResponseError::Timeout("timed out waiting for turn/start".to_owned()),
-    ));
+    let (state, session_id, prompt_id) = answer_codex_turn_start(Err(CodexResponseError::Timeout(
+        "timed out waiting for turn/start".to_owned(),
+    )));
     let delivery = codex_delivery(&state, &session_id, &prompt_id);
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Ambiguous);
-    assert!(delivery.reason.as_deref().is_some_and(|reason| reason.contains("Timeout")));
+    assert!(
+        delivery
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("Timeout"))
+    );
 }
 
 #[test]
 fn a_codex_refused_turn_rejects_the_prompt() {
-    let (state, session_id, prompt_id) = answer_codex_turn_start(Err(
-        CodexResponseError::JsonRpc("the thread is archived".to_owned()),
-    ));
+    let (state, session_id, prompt_id) = answer_codex_turn_start(Err(CodexResponseError::JsonRpc(
+        "the thread is archived".to_owned(),
+    )));
     assert_eq!(
         codex_delivery(&state, &session_id, &prompt_id).disposition,
         PromptDeliveryDisposition::Rejected
@@ -598,7 +677,11 @@ fn a_codex_turn_that_starts_and_fails_before_its_turn_start_response_accepts_the
     let reloaded = {
         let inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session_id).unwrap();
-        assert_ne!(inner.sessions[index].session.status, SessionStatus::Active, "the turn failed");
+        assert_ne!(
+            inner.sessions[index].session.status,
+            SessionStatus::Active,
+            "the turn failed"
+        );
         PersistedSessionRecord::from_record(&inner.sessions[index])
             .into_record()
             .expect("the row loads")
@@ -685,10 +768,23 @@ fn acp_delivery(state: &AppState, session_id: &str, prompt_id: &str) -> PromptDe
 fn an_acp_failure_before_session_prompt_rejects_the_delivery() {
     let state = test_app_state();
     let (session_id, prompt_id) = acp_handing_off(&state, "acp-unready", 4);
-    assert!(acp_prompt_on(&state, &session_id, "acp-unready", AcpRuntimeState::default()).is_err());
+    assert!(
+        acp_prompt_on(
+            &state,
+            &session_id,
+            "acp-unready",
+            AcpRuntimeState::default()
+        )
+        .is_err()
+    );
     let delivery = acp_delivery(&state, &session_id, &prompt_id);
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Rejected);
-    assert!(delivery.reason.as_deref().is_some_and(|reason| reason.contains("before the prompt")));
+    assert!(
+        delivery
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("before the prompt"))
+    );
 }
 
 /// A failed session/prompt write may have reached the runtime: ambiguous.
@@ -703,7 +799,12 @@ fn a_failed_acp_session_prompt_write_leaves_the_delivery_ambiguous() {
     assert!(acp_prompt_on(&state, &session_id, "acp-ready", ready).is_err());
     let delivery = acp_delivery(&state, &session_id, &prompt_id);
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Ambiguous);
-    assert!(delivery.reason.as_deref().is_some_and(|reason| reason.contains("session/prompt")));
+    assert!(
+        delivery
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("session/prompt"))
+    );
 }
 
 /// A host with a real persist writer and a receipted Claude session, which a
@@ -720,18 +821,23 @@ impl DurableHost {
     fn new() -> Self {
         let (root, project_root, persistence_path, templates_path) =
             super::delegation_support::temp_delegation_state_paths();
-        Self { project_root, persistence_path, templates_path, root }
+        Self {
+            project_root,
+            persistence_path,
+            templates_path,
+            root,
+        }
     }
 
     fn boot(&self) -> AppState {
-        super::delegation_support::boot_on_delegation_root(&self.root, ||
+        super::delegation_support::boot_on_delegation_root(&self.root, || {
             AppState::new_with_paths(
                 self.project_root.to_string_lossy().into_owned(),
                 self.persistence_path.clone(),
                 self.templates_path.clone(),
             )
             .expect("state should boot")
-        )
+        })
     }
 
     /// Ends the test only once every thread that cloned a booted state (a
@@ -748,13 +854,25 @@ impl DurableHost {
     /// Stops `fixture`'s host (its writer flushes), boots it again, and
     /// gives the session a fresh test runtime.
     fn restart(&self, fixture: Fixture) -> Fixture {
-        let Fixture { state, session, _root, .. } = fixture;
+        let Fixture {
+            state,
+            session,
+            _root,
+            ..
+        } = fixture;
         state.shutdown_persist_blocking();
         drop(state);
         let state = self.boot();
         let (token, runtime_input, prompts) =
             install_test_claude_runtime(&state, &session, "restarted");
-        Fixture { state, session, token, runtime_input, prompts, _root }
+        Fixture {
+            state,
+            session,
+            token,
+            runtime_input,
+            prompts,
+            _root,
+        }
     }
 }
 
@@ -775,9 +893,20 @@ fn restart_before_the_write_ahead_commit_keeps_the_prompt_pending_and_sends_it_o
     // Read back, its content is durable: the next dispatch writes ahead, and
     // the real writer's acknowledgement hands it off exactly once.
     fixture.set_paused(false);
-    assert!(fixture.state.dispatch_next_queued_turn(&fixture.session, false).unwrap().is_none());
-    assert_eq!(fixture.received_prompt("the restarted hand-off").text, "pending across the restart");
-    fixture.wait_for(&id, "the promotion", |delivery| delivery.turn_generation.is_some());
+    assert!(
+        fixture
+            .state
+            .dispatch_next_queued_turn(&fixture.session, false)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        fixture.received_prompt("the restarted hand-off").text,
+        "pending across the restart"
+    );
+    fixture.wait_for(&id, "the promotion", |delivery| {
+        delivery.turn_generation.is_some()
+    });
     assert_eq!(fixture.delivered_prompts(), 0, "sent once");
     fixture.state.shutdown_persist_blocking();
     host.finish(fixture);
@@ -789,7 +918,11 @@ fn restart_after_the_write_ahead_commit_is_ambiguous_and_never_replayed() {
     let writer = DeliveryWriter::attach(&mut state);
     let fixture = Fixture::new(state, "restart-after-write-ahead");
     let id = fixture.enqueue_receipted("written ahead, then the host went down");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &id)
+    );
     writer.take(HeldFence::Durability).finish(Ok(()));
     // The write-ahead record is committed and its acknowledgement is still in
     // flight: the host goes down now. From the row alone, whether the hand-off
@@ -804,7 +937,12 @@ fn restart_after_the_write_ahead_commit_is_ambiguous_and_never_replayed() {
     };
     let delivery = &reloaded.prompt_deliveries[&id];
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Ambiguous);
-    assert!(delivery.reason.as_deref().is_some_and(|reason| reason.contains("restarted")));
+    assert!(
+        delivery
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("restarted"))
+    );
     assert!(
         !reloaded
             .queued_prompts
@@ -813,8 +951,12 @@ fn restart_after_the_write_ahead_commit_is_ambiguous_and_never_replayed() {
         "its entry never runs again"
     );
     assert!(
-        reloaded.session.prompt_deliveries.iter().any(|view| view.prompt_id == id
-            && view.disposition == PromptDeliveryDisposition::Ambiguous),
+        reloaded
+            .session
+            .prompt_deliveries
+            .iter()
+            .any(|view| view.prompt_id == id
+                && view.disposition == PromptDeliveryDisposition::Ambiguous),
         "the wire says so"
     );
     drop(in_flight);
@@ -829,7 +971,11 @@ fn an_acknowledged_write_ahead_that_promotes_nothing_returns_to_pending() {
     let writer = DeliveryWriter::attach(&mut state);
     let fixture = Fixture::new(state, "busy-at-write-ahead");
     let id = fixture.enqueue_receipted("overtaken while written ahead");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &id)
+    );
     writer.take(HeldFence::Durability).finish(Ok(()));
     let write_ahead = writer.take(HeldFence::WriteAhead);
     let nonce = fixture.delivery(&id).unwrap().write_ahead;
@@ -855,8 +1001,14 @@ fn an_acknowledged_write_ahead_that_promotes_nothing_returns_to_pending() {
             .into_record()
             .expect("the row loads")
     };
-    assert_eq!(reloaded.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Pending);
-    assert_eq!(reloaded.queued_prompts.front().unwrap().pending_prompt.id, id);
+    assert_eq!(
+        reloaded.prompt_deliveries[&id].disposition,
+        PromptDeliveryDisposition::Pending
+    );
+    assert_eq!(
+        reloaded.queued_prompts.front().unwrap().pending_prompt.id,
+        id
+    );
     drop(write_ahead);
 }
 
@@ -871,9 +1023,11 @@ fn turn_end_events_settle_only_their_own_runtime_turn() {
     let id = hand_off_through_held_fences(&fixture, &writer, "ended by its runtime");
     fixture.received_prompt("the hand-off");
     let earlier_runtime = RuntimeToken::Claude("an-earlier-runtime".to_owned());
-    let _ = fixture
-        .state
-        .handle_runtime_exit_if_matches(&fixture.session, &earlier_runtime, Some("gone"));
+    let _ = fixture.state.handle_runtime_exit_if_matches(
+        &fixture.session,
+        &earlier_runtime,
+        Some("gone"),
+    );
     let _ = fixture
         .state
         .finish_turn_ok_if_runtime_matches(&fixture.session, &earlier_runtime);
@@ -882,12 +1036,19 @@ fn turn_end_events_settle_only_their_own_runtime_turn() {
         PromptDeliveryDisposition::HandingOff,
         "an earlier runtime's events settle nothing"
     );
-    let _ = fixture
-        .state
-        .handle_runtime_exit_if_matches(&fixture.session, &fixture.token, Some("crashed"));
+    let _ = fixture.state.handle_runtime_exit_if_matches(
+        &fixture.session,
+        &fixture.token,
+        Some("crashed"),
+    );
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Ambiguous);
-    assert!(delivery.reason.as_deref().is_some_and(|reason| reason.contains("exited")));
+    assert!(
+        delivery
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("exited"))
+    );
 }
 
 #[test]
@@ -900,7 +1061,10 @@ fn a_finished_turn_accepts_a_prompt_not_yet_acknowledged() {
     let _ = fixture
         .state
         .finish_turn_ok_if_runtime_matches(&fixture.session, &fixture.token);
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::Accepted);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::Accepted
+    );
 }
 
 /// Makes a receipted head durable on a paused queue: its hold is acknowledged
@@ -908,12 +1072,19 @@ fn a_finished_turn_accepts_a_prompt_not_yet_acknowledged() {
 fn durable_paused_head(fixture: &Fixture, writer: &DeliveryWriter, text: &str) -> String {
     let id = fixture.enqueue_receipted(text);
     fixture.set_paused(true);
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &id)
+    );
     writer.take(HeldFence::Durability).finish(Ok(()));
     fixture.wait_for_hold_acknowledged(&id);
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
-    assert_eq!(delivery.attempt, 0, "a paused queue begins no write-ahead by itself");
+    assert_eq!(
+        delivery.attempt, 0,
+        "a paused queue begins no write-ahead by itself"
+    );
     assert_eq!(fixture.delivered_prompts(), 0);
     id
 }
@@ -925,12 +1096,17 @@ fn queue_paused(fixture: &Fixture) -> bool {
 }
 
 fn resume(fixture: &Fixture) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
-    fixture.state.resume_local_session_queue(&fixture.session, None)
+    fixture
+        .state
+        .resume_local_session_queue(&fixture.session, None)
 }
 
 fn assert_preparing(fixture: &Fixture) {
     assert!(
-        matches!(resume(fixture), Ok(Some(TurnDispatchDeliveryOutcome::Scheduled))),
+        matches!(
+            resume(fixture),
+            Ok(Some(TurnDispatchDeliveryOutcome::Scheduled))
+        ),
         "the Resume is accepted as preparing the hand-off"
     );
 }
@@ -950,7 +1126,11 @@ fn enqueue_successor(fixture: &Fixture, text: &str) -> String {
     };
     let id = prompt.id.clone();
     let index = inner.find_session_index(&fixture.session).unwrap();
-    queue_prompt_on_record(inner.session_mut_by_index(index).unwrap(), prompt, Vec::new());
+    queue_prompt_on_record(
+        inner.session_mut_by_index(index).unwrap(),
+        prompt,
+        Vec::new(),
+    );
     fixture.state.commit_locked(&mut inner).unwrap();
     id
 }
@@ -971,22 +1151,47 @@ fn resume_of_a_paused_queue_prepares_then_sends_its_receipted_head_once() {
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
     assert_eq!(delivery.attempt, 1);
     assert!(delivery.resume.is_some(), "the attempt carries this Resume");
-    assert!(queue_paused(&fixture), "the pause stays until the turn starts");
-    assert_eq!(fixture.delivered_prompts(), 0, "nothing before the write-ahead");
+    assert!(
+        queue_paused(&fixture),
+        "the pause stays until the turn starts"
+    );
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "nothing before the write-ahead"
+    );
 
     assert_preparing(&fixture);
-    assert_eq!(fixture.delivery(&id).unwrap().attempt, 1, "the same attempt");
+    assert_eq!(
+        fixture.delivery(&id).unwrap().attempt,
+        1,
+        "the same attempt"
+    );
     assert!(writer.held.try_recv().is_err(), "no second write-ahead");
 
     write_ahead.finish(Ok(()));
-    assert_eq!(fixture.received_prompt("the resumed head").text, "resumed explicitly");
-    fixture.wait_for(&id, "the promotion", |delivery| delivery.turn_generation.is_some());
+    assert_eq!(
+        fixture.received_prompt("the resumed head").text,
+        "resumed explicitly"
+    );
+    fixture.wait_for(&id, "the promotion", |delivery| {
+        delivery.turn_generation.is_some()
+    });
     assert_eq!(fixture.delivered_prompts(), 0, "sent once");
 }
 
 #[test]
 fn a_promoted_handing_off_entry_requires_its_exact_resume_continuation() {
-    for changed in ["missing", "nonce", "attempt", "generation", "stop", "pause", "content", "promotion"] {
+    for changed in [
+        "missing",
+        "nonce",
+        "attempt",
+        "generation",
+        "stop",
+        "pause",
+        "content",
+        "promotion",
+    ] {
         let mut state = test_app_state();
         let writer = DeliveryWriter::attach(&mut state);
         let fixture = Fixture::new(state, changed);
@@ -999,19 +1204,37 @@ fn a_promoted_handing_off_entry_requires_its_exact_resume_continuation() {
             let mut inner = fixture.state.inner.lock().unwrap();
             let record = inner.session_mut(&fixture.session).unwrap();
             let queued = record.queued_prompts[0].clone();
-            let index = push_message_on_record(record, Message::Text {
-                id: id.clone(), timestamp: queued.pending_prompt.timestamp.clone(),
-                author: Author::You, text: queued.pending_prompt.text.clone(),
-                expanded_text: queued.pending_prompt.expanded_text.clone(),
-                attachments: queued.attachments.iter().map(|attachment| attachment.metadata.clone()).collect(),
-                source: queued.pending_prompt.source.clone(),
-            });
-            record.queued_prompts[0].promoted_message_index = Some(global_message_index(record, index));
+            let index = push_message_on_record(
+                record,
+                Message::Text {
+                    id: id.clone(),
+                    timestamp: queued.pending_prompt.timestamp.clone(),
+                    author: Author::You,
+                    text: queued.pending_prompt.text.clone(),
+                    expanded_text: queued.pending_prompt.expanded_text.clone(),
+                    attachments: queued
+                        .attachments
+                        .iter()
+                        .map(|attachment| attachment.metadata.clone())
+                        .collect(),
+                    source: queued.pending_prompt.source.clone(),
+                },
+            );
+            record.queued_prompts[0].promoted_message_index =
+                Some(global_message_index(record, index));
             let content = queued_prompt_durability_content(&record.queued_prompts[0]);
-            record.queued_prompt_durability_holds.get_mut(&id).unwrap().content = content;
+            record
+                .queued_prompt_durability_holds
+                .get_mut(&id)
+                .unwrap()
+                .content = content;
             fixture.state.commit_locked(&mut inner).unwrap();
         }
-        assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+        assert!(
+            fixture
+                .state
+                .request_queued_prompt_durability(&fixture.session, &id)
+        );
         writer.take(HeldFence::Durability).finish(Ok(()));
         fixture.wait_for_hold_acknowledged(&id);
         assert_preparing(&fixture);
@@ -1020,7 +1243,10 @@ fn a_promoted_handing_off_entry_requires_its_exact_resume_continuation() {
         {
             let mut inner = fixture.state.inner.lock().unwrap();
             let record = inner.session_mut(&fixture.session).unwrap();
-            assert!(prompt_delivery_resume_holds(record, &id), "{changed}: the original Resume holds");
+            assert!(
+                prompt_delivery_resume_holds(record, &id),
+                "{changed}: the original Resume holds"
+            );
             assert_eq!(ordinary_queue_position(record), Some(0));
             let receipt = record.prompt_deliveries.get_mut(&id).unwrap();
             match changed {
@@ -1030,18 +1256,32 @@ fn a_promoted_handing_off_entry_requires_its_exact_resume_continuation() {
                 "generation" => record.active_turn_generation += 1,
                 "stop" => record.runtime_stop_generation += 1,
                 "pause" => record.set_auto_dispatch_blocked(true),
-                "content" => record.queued_prompts[0].pending_prompt.text = "different content".into(),
+                "content" => {
+                    record.queued_prompts[0].pending_prompt.text = "different content".into()
+                }
                 "promotion" => {
                     let index = record.queued_prompts[0].promoted_message_index.unwrap();
                     record.queued_prompts[0].promoted_message_index = Some(index + 1);
                 }
                 _ => unreachable!(),
             }
-            assert!(!prompt_delivery_resume_holds(record, &id), "{changed}: stale Resume is rejected");
-            assert!(ordinary_queue_position(record).is_none(), "{changed}: no blanket HandingOff replay");
+            assert!(
+                !prompt_delivery_resume_holds(record, &id),
+                "{changed}: stale Resume is rejected"
+            );
+            assert!(
+                ordinary_queue_position(record).is_none(),
+                "{changed}: no blanket HandingOff replay"
+            );
         }
-        fixture.state.settle_prompt_delivery_write_ahead(&fixture.session, &id, &nonce, Ok(()));
-        assert_eq!(fixture.delivered_prompts(), 0, "{changed}: no provider handoff");
+        fixture
+            .state
+            .settle_prompt_delivery_write_ahead(&fixture.session, &id, &nonce, Ok(()));
+        assert_eq!(
+            fixture.delivered_prompts(),
+            0,
+            "{changed}: no provider handoff"
+        );
         assert_eq!(fixture.queue_ids(), vec![id]);
         assert!(queue_paused(&fixture));
     }
@@ -1057,7 +1297,11 @@ fn resume_before_the_head_is_saved_is_refused_and_keeps_nothing() {
     let fixture = Fixture::new(state, "resume-during-hold");
     let id = fixture.enqueue_receipted("resumed before it was saved");
     fixture.set_paused(true);
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &id)
+    );
     let durability = writer.take(HeldFence::Durability);
 
     let refused = match resume(&fixture) {
@@ -1065,7 +1309,11 @@ fn resume_before_the_head_is_saved_is_refused_and_keeps_nothing() {
         Ok(_) => panic!("a Resume of an unsaved head is refused"),
     };
     assert_eq!(refused.status, StatusCode::CONFLICT);
-    assert!(refused.message.contains("still being saved"), "{}", refused.message);
+    assert!(
+        refused.message.contains("still being saved"),
+        "{}",
+        refused.message
+    );
 
     durability.finish(Ok(()));
     fixture.wait_for_hold_acknowledged(&id);
@@ -1078,7 +1326,10 @@ fn resume_before_the_head_is_saved_is_refused_and_keeps_nothing() {
 
     assert_preparing(&fixture);
     writer.take(HeldFence::WriteAhead).finish(Ok(()));
-    assert_eq!(fixture.received_prompt("the head, resumed again").text, "resumed before it was saved");
+    assert_eq!(
+        fixture.received_prompt("the head, resumed again").text,
+        "resumed before it was saved"
+    );
     assert_eq!(fixture.delivered_prompts(), 0, "sent once");
 }
 
@@ -1105,7 +1356,11 @@ fn a_stop_after_the_resume_ends_it() {
     fixture
         .state
         .settle_prompt_delivery_write_ahead(&fixture.session, &id, &nonce, Ok(()));
-    assert_eq!(fixture.delivered_prompts(), 0, "nothing past the pause after the Stop");
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "nothing past the pause after the Stop"
+    );
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
     assert!(delivery.resume.is_none());
@@ -1129,8 +1384,15 @@ fn a_later_pause_ends_the_resume_even_when_the_queue_reads_paused_again() {
     fixture
         .state
         .settle_prompt_delivery_write_ahead(&fixture.session, &id, &nonce, Ok(()));
-    assert_eq!(fixture.delivered_prompts(), 0, "the later pause is not crossed");
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::Pending);
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the later pause is not crossed"
+    );
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::Pending
+    );
     assert!(queue_paused(&fixture));
 }
 
@@ -1178,8 +1440,14 @@ fn a_cancel_between_the_acknowledgement_and_the_promotion_starts_no_successor() 
         fixture.state.commit_locked(&mut inner).unwrap();
     }
     assert_eq!(fixture.queue_ids(), vec![successor.clone()]);
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
-    assert_eq!(fixture.delivered_prompts(), 0, "no successor past the pause");
+    fixture
+        .state
+        .dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "no successor past the pause"
+    );
     assert_eq!(fixture.queue_ids(), vec![successor]);
     assert!(queue_paused(&fixture));
 }
@@ -1198,10 +1466,21 @@ fn a_content_change_between_the_acknowledgement_and_the_promotion_sends_nothing(
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.queued_prompts.front_mut().unwrap().pending_prompt.text = "something else".to_owned();
+        record
+            .queued_prompts
+            .front_mut()
+            .unwrap()
+            .pending_prompt
+            .text = "something else".to_owned();
     }
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
-    assert_eq!(fixture.delivered_prompts(), 0, "not the content the Resume saw");
+    fixture
+        .state
+        .dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "not the content the Resume saw"
+    );
     assert_eq!(fixture.queue_ids(), vec![id]);
     assert!(queue_paused(&fixture));
 }
@@ -1218,8 +1497,14 @@ fn a_pause_between_the_acknowledgement_and_the_promotion_sends_nothing() {
     let nonce = owner.receipt_resume.as_ref().unwrap().write_ahead.clone();
     fixture.set_paused(false);
     fixture.set_paused(true);
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
-    assert_eq!(fixture.delivered_prompts(), 0, "the later pause is not crossed");
+    fixture
+        .state
+        .dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the later pause is not crossed"
+    );
     assert_eq!(fixture.queue_ids(), vec![id]);
 }
 
@@ -1232,20 +1517,30 @@ fn a_failed_write_ahead_after_a_resume_leaves_a_paused_head_for_a_fresh_resume()
     let fixture = Fixture::new(state, "resume-then-failed-write-ahead");
     let id = durable_paused_head(&fixture, &writer, "its first record was not saved");
     assert_preparing(&fixture);
-    writer.take(HeldFence::WriteAhead).finish(Err(PersistFenceError::Deadline));
+    writer
+        .take(HeldFence::WriteAhead)
+        .finish(Err(PersistFenceError::Deadline));
     fixture.wait_for(&id, "the return to pending", |delivery| {
         delivery.disposition == PromptDeliveryDisposition::Pending && delivery.attempt == 1
     });
     let delivery = fixture.delivery(&id).unwrap();
     assert!(delivery.resume.is_none());
-    assert!(delivery.reason.as_deref().is_some_and(|reason| reason.contains("not acknowledged")));
+    assert!(
+        delivery
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("not acknowledged"))
+    );
     assert!(queue_paused(&fixture));
     assert_eq!(fixture.delivered_prompts(), 0);
 
     assert_preparing(&fixture);
     assert_eq!(fixture.delivery(&id).unwrap().attempt, 2);
     writer.take(HeldFence::WriteAhead).finish(Ok(()));
-    assert_eq!(fixture.received_prompt("the second attempt").text, "its first record was not saved");
+    assert_eq!(
+        fixture.received_prompt("the second attempt").text,
+        "its first record was not saved"
+    );
     assert_eq!(fixture.delivered_prompts(), 0, "sent once");
 }
 
@@ -1258,11 +1553,13 @@ fn a_drain_that_is_not_an_explicit_resume_begins_no_hand_off_on_a_paused_queue()
     let writer = DeliveryWriter::attach(&mut state);
     let fixture = Fixture::new(state, "paused-internal-drain");
     let id = durable_paused_head(&fixture, &writer, "paused, drained internally");
-    assert!(fixture
-        .state
-        .dispatch_next_queued_turn(&fixture.session, true)
-        .unwrap()
-        .is_none());
+    assert!(
+        fixture
+            .state
+            .dispatch_next_queued_turn(&fixture.session, true)
+            .unwrap()
+            .is_none()
+    );
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
     assert_eq!(delivery.attempt, 0);
@@ -1290,14 +1587,20 @@ fn claude_accepts_the_prompt_with_its_command_lifecycle_queued_by_uuid() {
         &mut recorder,
         &json!({"type": "command_lifecycle", "command_uuid": "another-command", "state": "queued"}),
     );
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::HandingOff);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::HandingOff
+    );
     let _ = apply_claude_frame(
         &context,
         &mut frames,
         &mut recorder,
         &json!({"type": "command_lifecycle", "command_uuid": uuid, "state": "queued"}),
     );
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::Accepted);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::Accepted
+    );
 }
 
 /// An error `result` naming the attempt's command uuid, with no lifecycle
@@ -1320,7 +1623,10 @@ fn claude_accepts_the_prompt_its_correlated_error_result_names() {
     ));
     let mut frames = ClaudeReaderFrames::new(&context, fixture.runtime_input.clone(), None);
     let mut recorder = SessionRecorder::new(fixture.state.clone(), fixture.session.clone());
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::HandingOff);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::HandingOff
+    );
     let _ = apply_claude_frame(
         &context,
         &mut frames,
@@ -1368,7 +1674,10 @@ fn claude_accepts_a_prompt_its_unowned_turn_took_up() {
         &mut recorder,
         &json!({"type": "command_lifecycle", "command_uuid": uuid, "state": "started"}),
     );
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::Accepted);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::Accepted
+    );
 }
 
 /// Drives a receipted prompt through the real writer to its hand-off and
@@ -1378,11 +1687,19 @@ fn hand_off_durably(fixture: &Fixture, text: &str) -> (String, String, u64) {
     let nonce = {
         let inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
-        inner.sessions[index].queued_prompt_durability_holds[&id].nonce.clone()
+        inner.sessions[index].queued_prompt_durability_holds[&id]
+            .nonce
+            .clone()
     };
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &id));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &id)
+    );
     let command = fixture.received_prompt("the durable hand-off");
-    fixture.wait_for(&id, "the promotion", |delivery| delivery.turn_generation.is_some());
+    fixture.wait_for(&id, "the promotion", |delivery| {
+        delivery.turn_generation.is_some()
+    });
     (id, nonce, command.turn_generation)
 }
 
@@ -1398,11 +1715,20 @@ fn restart_after_acceptance_reads_delivered_and_never_replays() {
     );
     let fixture = host.restart(fixture);
     assert_eq!(
-        fixture.delivery(&id).expect("the receipt reloads").disposition,
+        fixture
+            .delivery(&id)
+            .expect("the receipt reloads")
+            .disposition,
         PromptDeliveryDisposition::Accepted
     );
     assert!(fixture.queue_ids().is_empty());
-    assert!(fixture.state.dispatch_next_queued_turn(&fixture.session, false).unwrap().is_none());
+    assert!(
+        fixture
+            .state
+            .dispatch_next_queued_turn(&fixture.session, false)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(fixture.delivered_prompts(), 0, "never replayed");
     fixture.state.shutdown_persist_blocking();
     host.finish(fixture);
@@ -1424,10 +1750,16 @@ fn restart_after_rejection_requeues_only_under_a_new_prompt_id_and_prerequisite(
     );
     let mut restarted = host.restart(fixture);
     assert_eq!(
-        restarted.delivery(&id).expect("the receipt reloads").disposition,
+        restarted
+            .delivery(&id)
+            .expect("the receipt reloads")
+            .disposition,
         PromptDeliveryDisposition::Rejected
     );
-    assert!(restarted.queue_ids().is_empty(), "a rejected prompt is not replayed by itself");
+    assert!(
+        restarted.queue_ids().is_empty(),
+        "a rejected prompt is not replayed by itself"
+    );
 
     // Re-queued, it is a new prompt id with a new hold.
     let writer = DeliveryWriter::attach(&mut restarted.state);
@@ -1460,7 +1792,10 @@ fn restart_after_rejection_requeues_only_under_a_new_prompt_id_and_prerequisite(
         );
     }
     assert_eq!(restarted.delivered_prompts(), 0);
-    assert_eq!(restarted.delivery(&new_id).unwrap().disposition, PromptDeliveryDisposition::Pending);
+    assert_eq!(
+        restarted.delivery(&new_id).unwrap().disposition,
+        PromptDeliveryDisposition::Pending
+    );
     assert!(
         restarted
             .state
@@ -1503,8 +1838,14 @@ fn a_prompt_without_a_receipt_dispatches_exactly_as_before() {
         .unwrap()
         .expect("an ordinary prompt promotes at once");
     let _ = deliver_turn_dispatch(&fixture.state, dispatch);
-    assert_eq!(fixture.received_prompt("the ordinary prompt").text, "ordinary");
-    assert!(fixture.view().is_empty(), "no receipt for an ordinary prompt");
+    assert_eq!(
+        fixture.received_prompt("the ordinary prompt").text,
+        "ordinary"
+    );
+    assert!(
+        fixture.view().is_empty(),
+        "no receipt for an ordinary prompt"
+    );
 }
 
 /// Another drain that reaches the promotion gate after the acknowledgement
@@ -1528,19 +1869,27 @@ fn another_drain_after_the_acknowledgement_completes_the_authorized_promotion_on
         .unwrap()
         .expect("the authorized head is promoted");
     let _ = deliver_turn_dispatch(&fixture.state, dispatch);
-    assert_eq!(fixture.received_prompt("the authorized head").text, "promoted by another drain");
+    assert_eq!(
+        fixture.received_prompt("the authorized head").text,
+        "promoted by another drain"
+    );
     let delivery = fixture.delivery(&id).unwrap();
     assert!(delivery.turn_generation.is_some());
     assert!(delivery.resume.is_none(), "consumed by that promotion");
 
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
+    fixture
+        .state
+        .dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     fixture
         .state
         .return_unpromoted_write_ahead_to_pending(&fixture.session, &id, &nonce);
     assert_eq!(fixture.delivered_prompts(), 0, "sent once");
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
-    assert!(delivery.turn_generation.is_some(), "the promoted attempt is not reset");
+    assert!(
+        delivery.turn_generation.is_some(),
+        "the promoted attempt is not reset"
+    );
     assert_eq!(fixture.queue_ids(), vec![successor]);
 }
 
@@ -1555,12 +1904,18 @@ fn another_drain_after_a_later_pause_promotes_nothing() {
         acknowledged_resume(&fixture, &writer, "paused again before another drain");
     fixture.set_paused(false);
     fixture.set_paused(true);
-    assert!(fixture
-        .state
-        .dispatch_next_queued_turn(&fixture.session, true)
-        .unwrap()
-        .is_none());
-    assert_eq!(fixture.delivered_prompts(), 0, "the later pause is not crossed");
+    assert!(
+        fixture
+            .state
+            .dispatch_next_queued_turn(&fixture.session, true)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the later pause is not crossed"
+    );
     assert_eq!(fixture.queue_ids(), vec![id]);
 }
 
@@ -1593,19 +1948,32 @@ fn a_manual_send_after_the_acknowledgement_inherits_nothing() {
         Ok(_) => panic!("the manual send starts its own prompt"),
         Err(error) => panic!("the manual send failed: {}", error.message),
     }
-    assert_eq!(fixture.received_prompt("the manual send").text, "a manual send");
+    assert_eq!(
+        fixture.received_prompt("the manual send").text,
+        "a manual send"
+    );
 
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
+    fixture
+        .state
+        .dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     fixture
         .state
         .return_unpromoted_write_ahead_to_pending(&fixture.session, &id, &nonce);
-    assert_eq!(fixture.delivered_prompts(), 0, "the receipted head is not sent");
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the receipted head is not sent"
+    );
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
     assert!(delivery.resume.is_none());
     let inner = fixture.state.inner.lock().unwrap();
     let index = inner.find_session_index(&fixture.session).unwrap();
-    assert_eq!(inner.sessions[index].prompt_deliveries.len(), 1, "the manual prompt keeps no receipt");
+    assert_eq!(
+        inner.sessions[index].prompt_deliveries.len(),
+        1,
+        "the manual prompt keeps no receipt"
+    );
 }
 
 /// A Stop after the acknowledgement, as a Stop advances the stop generation.
@@ -1638,14 +2006,21 @@ fn another_drain_after(label: &str, revoke: fn(&Fixture, &str)) {
     let mut state = test_app_state();
     let writer = DeliveryWriter::attach(&mut state);
     let fixture = Fixture::new(state, label);
-    let (id, _owner, _write_ahead) = acknowledged_resume(&fixture, &writer, "revoked before another drain");
+    let (id, _owner, _write_ahead) =
+        acknowledged_resume(&fixture, &writer, "revoked before another drain");
     revoke(&fixture, &id);
-    assert!(fixture
-        .state
-        .dispatch_next_queued_turn(&fixture.session, true)
-        .unwrap()
-        .is_none());
-    assert_eq!(fixture.delivered_prompts(), 0, "the ended Resume authorizes nothing");
+    assert!(
+        fixture
+            .state
+            .dispatch_next_queued_turn(&fixture.session, true)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the ended Resume authorizes nothing"
+    );
     assert_eq!(fixture.queue_ids(), vec![id]);
 }
 
@@ -1666,7 +2041,8 @@ fn manual_send_after(label: &str, revoke: fn(&Fixture, &str)) {
     let mut state = test_app_state();
     let writer = DeliveryWriter::attach(&mut state);
     let fixture = Fixture::new(state, label);
-    let (id, owner, _write_ahead) = acknowledged_resume(&fixture, &writer, "revoked before a manual send");
+    let (id, owner, _write_ahead) =
+        acknowledged_resume(&fixture, &writer, "revoked before a manual send");
     let nonce = fixture.delivery(&id).unwrap().write_ahead;
     revoke(&fixture, &id);
     let sent = fixture.state.dispatch_turn(
@@ -1687,12 +2063,21 @@ fn manual_send_after(label: &str, revoke: fn(&Fixture, &str)) {
         Ok(_) => panic!("the manual send starts its own prompt"),
         Err(error) => panic!("the manual send failed: {}", error.message),
     }
-    assert_eq!(fixture.received_prompt("the manual send").text, "a manual send");
-    fixture.state.dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
+    assert_eq!(
+        fixture.received_prompt("the manual send").text,
+        "a manual send"
+    );
+    fixture
+        .state
+        .dispatch_after_write_ahead(&fixture.session, &id, &nonce, Some(owner));
     fixture
         .state
         .return_unpromoted_write_ahead_to_pending(&fixture.session, &id, &nonce);
-    assert_eq!(fixture.delivered_prompts(), 0, "the receipted head is not sent");
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the receipted head is not sent"
+    );
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
     assert!(delivery.resume.is_none());
@@ -1739,7 +2124,10 @@ fn a_change_between_the_resume_and_its_write_ahead_begins_nothing() {
         let id = durable_paused_head(&fixture, &writer, "changed after the Resume accepted it");
         let accepted = accepted_identity(&fixture);
         revoke(&fixture, &id);
-        match fixture.state.resume_receipted_head(&fixture.session, None, &accepted) {
+        match fixture
+            .state
+            .resume_receipted_head(&fixture.session, None, &accepted)
+        {
             ReceiptedResume::Refused(message) => {
                 assert_eq!(message, RESUME_QUEUE_CHANGED_REFUSAL, "{label}")
             }
@@ -1748,9 +2136,16 @@ fn a_change_between_the_resume_and_its_write_ahead_begins_nothing() {
             }
         }
         let delivery = fixture.delivery(&id).unwrap();
-        assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending, "{label}");
+        assert_eq!(
+            delivery.disposition,
+            PromptDeliveryDisposition::Pending,
+            "{label}"
+        );
         assert_eq!(delivery.attempt, 0, "{label}: no write-ahead");
-        assert!(writer.held.try_recv().is_err(), "{label}: no write-ahead fence");
+        assert!(
+            writer.held.try_recv().is_err(),
+            "{label}: no write-ahead fence"
+        );
         assert_eq!(fixture.delivered_prompts(), 0, "{label}");
         assert!(queue_paused(&fixture), "{label}: the pause stays");
     }
@@ -1770,8 +2165,11 @@ fn promoted_retained_receipt(fixture: &Fixture, writer: &DeliveryWriter) -> (Str
     delivery.attempt = 1;
     delivery.write_ahead_acknowledged = true;
     delivery.turn_generation = Some(turn_generation);
-    assert_eq!(handing_off_head(record), Some((id.clone(), turn_generation)),
-        "the queued receipt belongs to the current turn before removal");
+    assert_eq!(
+        handing_off_head(record),
+        Some((id.clone(), turn_generation)),
+        "the queued receipt belongs to the current turn before removal"
+    );
     fixture.state.commit_locked(&mut inner).unwrap();
     (id, turn_generation)
 }
@@ -1798,7 +2196,9 @@ fn a_dispatch_held_before_its_hand_off_returns_the_receipt_to_pending() {
     assert_preparing(&fixture);
     writer.take(HeldFence::WriteAhead).finish(Ok(()));
     assert_eq!(
-        fixture.received_prompt("the head after a fresh Resume").text,
+        fixture
+            .received_prompt("the head after a fresh Resume")
+            .text,
         "promoted, then held before its hand-off"
     );
     assert_eq!(fixture.delivered_prompts(), 0, "sent once");
@@ -1847,15 +2247,20 @@ fn deferred_hand_off(fixture: &Fixture, turn_generation: u64, text: &str) -> Def
 
 fn defer(fixture: &Fixture, turn_generation: u64, carrier: &DeferredTurnHandoff) {
     with_record(fixture, |record| {
-        record.deferred_stop_callbacks.push(DeferredStopCallback::TurnHandoff {
-            active_turn_generation: turn_generation,
-            dispatch: carrier.clone(),
-        })
+        record
+            .deferred_stop_callbacks
+            .push(DeferredStopCallback::TurnHandoff {
+                active_turn_generation: turn_generation,
+                dispatch: carrier.clone(),
+            })
     });
 }
 
 fn remove_by_cancel(fixture: &Fixture, id: &str) {
-    fixture.state.cancel_queued_prompt(&fixture.session, id).unwrap();
+    fixture
+        .state
+        .cancel_queued_prompt(&fixture.session, id)
+        .unwrap();
 }
 
 fn remove_by_source(fixture: &Fixture, _id: &str) {
@@ -1900,7 +2305,11 @@ fn a_removed_head_promoted_for_its_hand_off_is_rejected_durably_and_never_sent()
         remove(&fixture, &id);
         assert!(!fixture.queue_ids().contains(&id), "{label}: removed");
         let delivery = fixture.delivery(&id).unwrap();
-        assert_eq!(delivery.disposition, PromptDeliveryDisposition::Rejected, "{label}");
+        assert_eq!(
+            delivery.disposition,
+            PromptDeliveryDisposition::Rejected,
+            "{label}"
+        );
         assert_eq!(delivery.turn_generation, Some(turn_generation), "{label}");
         assert_eq!(
             reloaded_delivery(&fixture, &id).disposition,
@@ -1920,7 +2329,12 @@ fn a_head_already_handed_off_keeps_its_receipt_through_every_removal() {
     let fixture = Fixture::new(host.boot(), "hand-off-wins");
     let (id, _, turn_generation) = hand_off_durably(&fixture, "handed off before the removals");
     assert!(fixture.queue_ids().is_empty());
-    assert!(fixture.state.cancel_queued_prompt(&fixture.session, &id).is_err());
+    assert!(
+        fixture
+            .state
+            .cancel_queued_prompt(&fixture.session, &id)
+            .is_err()
+    );
     remove_by_source(&fixture, &id);
     remove_without_delivery_owner(&fixture, &id);
     // A carrier the hand-off emptied belongs to that hand-off.
@@ -1946,10 +2360,16 @@ fn a_deferred_hand_off_stays_live_until_its_discard_settles_it_once() {
     let (id, turn_generation) = promoted_retained_receipt(&fixture, &writer);
     let carrier = deferred_hand_off(&fixture, turn_generation, "deferred, then discarded");
     defer(&fixture, turn_generation, &carrier);
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::HandingOff);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::HandingOff
+    );
 
     assert!(with_record(&fixture, discard_deferred_stop_callbacks));
-    assert!(carrier.0.lock().unwrap().is_none(), "the discard took the dispatch");
+    assert!(
+        carrier.0.lock().unwrap().is_none(),
+        "the discard took the dispatch"
+    );
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
     assert_eq!(delivery.turn_generation, None);
@@ -1958,7 +2378,11 @@ fn a_deferred_hand_off_stays_live_until_its_discard_settles_it_once() {
     // A second discard of the same carrier settles nothing more.
     defer(&fixture, turn_generation, &carrier);
     assert!(!with_record(&fixture, discard_deferred_stop_callbacks));
-    assert_eq!(fixture.delivery(&id).unwrap().write_ahead, delivery.write_ahead, "settled once");
+    assert_eq!(
+        fixture.delivery(&id).unwrap().write_ahead,
+        delivery.write_ahead,
+        "settled once"
+    );
     assert_eq!(fixture.delivered_prompts(), 0, "never sent");
 }
 
@@ -1969,9 +2393,20 @@ fn a_deferred_hand_off_stays_live_until_its_discard_settles_it_once() {
 /// it.
 #[test]
 fn a_direct_hand_off_that_did_not_reach_the_runtime_settles_its_receipt() {
-    let outcomes: [(&str, std::result::Result<HandoffPreparedTurnDispatchOutcome, ApiError>); 2] = [
-        ("superseded", Ok(HandoffPreparedTurnDispatchOutcome::Superseded)),
-        ("rejected", Err(ApiError::internal("failed to queue prompt for Claude session"))),
+    let outcomes: [(
+        &str,
+        std::result::Result<HandoffPreparedTurnDispatchOutcome, ApiError>,
+    ); 2] = [
+        (
+            "superseded",
+            Ok(HandoffPreparedTurnDispatchOutcome::Superseded),
+        ),
+        (
+            "rejected",
+            Err(ApiError::internal(
+                "failed to queue prompt for Claude session",
+            )),
+        ),
     ];
     for (label, outcome) in outcomes {
         let mut state = test_app_state();
@@ -1982,13 +2417,23 @@ fn a_direct_hand_off_that_did_not_reach_the_runtime_settles_its_receipt() {
             .state
             .note_direct_hand_off_outcome(&fixture.session, turn_generation, &outcome);
         let delivery = fixture.delivery(&id).unwrap();
-        assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending, "{label}");
+        assert_eq!(
+            delivery.disposition,
+            PromptDeliveryDisposition::Pending,
+            "{label}"
+        );
         assert_eq!(delivery.turn_generation, None, "{label}");
         assert!(delivery.resume.is_none(), "{label}");
     }
     for (label, outcome) in [
-        ("delivered", Ok(HandoffPreparedTurnDispatchOutcome::Delivered)),
-        ("scheduled", Ok(HandoffPreparedTurnDispatchOutcome::Scheduled)),
+        (
+            "delivered",
+            Ok(HandoffPreparedTurnDispatchOutcome::Delivered),
+        ),
+        (
+            "scheduled",
+            Ok(HandoffPreparedTurnDispatchOutcome::Scheduled),
+        ),
     ] {
         let mut state = test_app_state();
         let writer = DeliveryWriter::attach(&mut state);
@@ -2022,7 +2467,10 @@ fn a_stale_turn_or_an_accepted_receipt_is_left_untouched() {
         stale,
         &Ok(HandoffPreparedTurnDispatchOutcome::Superseded),
     );
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::HandingOff);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::HandingOff
+    );
 
     fixture.state.note_prompt_delivery_outcome(
         &fixture.session,
@@ -2035,10 +2483,15 @@ fn a_stale_turn_or_an_accepted_receipt_is_left_untouched() {
     fixture.state.note_direct_hand_off_outcome(
         &fixture.session,
         turn_generation,
-        &Err(ApiError::internal("failed to queue prompt for Claude session")),
+        &Err(ApiError::internal(
+            "failed to queue prompt for Claude session",
+        )),
     );
     remove_by_source(&fixture, &id);
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::Accepted);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::Accepted
+    );
     assert_eq!(fixture.delivered_prompts(), 0);
 }
 
@@ -2170,7 +2623,11 @@ fn a_stop_wakes_its_receipted_successor_only_after_its_own_commit() {
             stop_revisions.push(revision);
         }
     }
-    assert_eq!(stop_revisions.len(), 1, "the Stop's message is published once");
+    assert_eq!(
+        stop_revisions.len(),
+        1,
+        "the Stop's message is published once"
+    );
     assert!(
         stop_revisions[0] < write_ahead_revision,
         "the Stop committed and published before the write-ahead began: {stop_revisions:?} vs {write_ahead_revision}"
@@ -2182,7 +2639,10 @@ fn a_stop_wakes_its_receipted_successor_only_after_its_own_commit() {
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
     assert_eq!(delivery.attempt, 1);
     assert_eq!(delivery.turn_generation, None);
-    assert!(successor_input_rx.try_recv().is_err(), "nothing before the acknowledgement");
+    assert!(
+        successor_input_rx.try_recv().is_err(),
+        "nothing before the acknowledgement"
+    );
     write_ahead.finish(Ok(()));
     match recv_within_guard(&successor_input_rx, "the successor's hand-off") {
         Ok(AcpRuntimeCommand::Prompt(_)) => {}
@@ -2194,7 +2654,9 @@ fn a_stop_wakes_its_receipted_successor_only_after_its_own_commit() {
         settled.wait("the successor's promotion");
     }
     assert!(
-        !successor_input_rx.try_iter().any(|command| matches!(command, AcpRuntimeCommand::Prompt(_))),
+        !successor_input_rx
+            .try_iter()
+            .any(|command| matches!(command, AcpRuntimeCommand::Prompt(_))),
         "handed off once"
     );
     drop(original_owner);
@@ -2216,7 +2678,9 @@ fn a_direct_send_behind_a_pending_receipted_head_wakes_its_hand_off() {
         &fixture.session,
         "the receipted head",
     );
-    with_record(&fixture, |record| record.session.status = SessionStatus::Idle);
+    with_record(&fixture, |record| {
+        record.session.status = SessionStatus::Idle
+    });
     let result = fixture.state.dispatch_turn(
         &fixture.session,
         SendMessageRequest {
@@ -2227,11 +2691,23 @@ fn a_direct_send_behind_a_pending_receipted_head_wakes_its_hand_off() {
             source_mailbox: None,
         },
     );
-    assert!(matches!(result, Ok(DispatchTurnResult::Queued)), "it queues behind the head");
+    assert!(
+        matches!(result, Ok(DispatchTurnResult::Queued)),
+        "it queues behind the head"
+    );
     writer.take(HeldFence::WriteAhead).finish(Ok(()));
-    assert_eq!(fixture.received_prompt("the head's hand-off").text, "the receipted head");
-    fixture.wait_for(&id, "the promotion", |delivery| delivery.turn_generation.is_some());
-    assert_eq!(fixture.delivered_prompts(), 0, "the direct send waits behind the running head");
+    assert_eq!(
+        fixture.received_prompt("the head's hand-off").text,
+        "the receipted head"
+    );
+    fixture.wait_for(&id, "the promotion", |delivery| {
+        delivery.turn_generation.is_some()
+    });
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the direct send waits behind the running head"
+    );
 }
 
 /// A Stop that retires the runtime a receipted prompt was handed to, before
@@ -2245,7 +2721,9 @@ fn a_stop_after_the_hand_off_settles_the_unacknowledged_attempt_ambiguous() {
     let fixture = Fixture::new(state, "stop-after-hand-off");
     let id = hand_off_through_held_fences(&fixture, &writer, "handed off, then stopped");
     let _ = fixture.received_prompt("the hand-off");
-    fixture.wait_for(&id, "the promotion", |delivery| delivery.turn_generation.is_some());
+    fixture.wait_for(&id, "the promotion", |delivery| {
+        delivery.turn_generation.is_some()
+    });
     fixture.state.stop_session(&fixture.session).unwrap();
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Ambiguous);
@@ -2255,7 +2733,13 @@ fn a_stop_after_the_hand_off_settles_the_unacknowledged_attempt_ambiguous() {
         "the ambiguity survives a restart"
     );
     assert!(fixture.queue_ids().is_empty());
-    assert!(fixture.state.dispatch_next_queued_turn(&fixture.session, true).unwrap().is_none());
+    assert!(
+        fixture
+            .state
+            .dispatch_next_queued_turn(&fixture.session, true)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(fixture.delivered_prompts(), 0, "never replayed");
 
     let mut state = test_app_state();
@@ -2263,14 +2747,19 @@ fn a_stop_after_the_hand_off_settles_the_unacknowledged_attempt_ambiguous() {
     let fixture = Fixture::new(state, "stop-after-acceptance");
     let id = hand_off_through_held_fences(&fixture, &writer, "accepted, then stopped");
     let command = fixture.received_prompt("the hand-off");
-    fixture.wait_for(&id, "the promotion", |delivery| delivery.turn_generation.is_some());
+    fixture.wait_for(&id, "the promotion", |delivery| {
+        delivery.turn_generation.is_some()
+    });
     fixture.state.note_prompt_delivery_outcome(
         &fixture.session,
         Some(command.turn_generation),
         PromptDeliveryOutcome::Accepted,
     );
     fixture.state.stop_session(&fixture.session).unwrap();
-    assert_eq!(fixture.delivery(&id).unwrap().disposition, PromptDeliveryDisposition::Accepted);
+    assert_eq!(
+        fixture.delivery(&id).unwrap().disposition,
+        PromptDeliveryDisposition::Accepted
+    );
 }
 
 /// The retired runtime's unacknowledged attempt is ambiguous even while its
@@ -2281,7 +2770,11 @@ fn a_stop_after_the_hand_off_settles_the_unacknowledged_attempt_ambiguous() {
 #[test]
 fn a_retired_runtime_leaves_a_queued_unacknowledged_attempt_ambiguous_unless_proven_unsent() {
     for proven_unsent in [false, true] {
-        let label = if proven_unsent { "carried" } else { "uncertain" };
+        let label = if proven_unsent {
+            "carried"
+        } else {
+            "uncertain"
+        };
         let mut state = test_app_state();
         let writer = DeliveryWriter::attach(&mut state);
         let fixture = Fixture::new(state, &format!("retired-queued-{label}"));
@@ -2309,22 +2802,40 @@ fn a_retired_runtime_leaves_a_queued_unacknowledged_attempt_ambiguous_unless_pro
             .unwrap();
         let delivery = fixture.delivery(&id).unwrap();
         if proven_unsent {
-            assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending, "{label}");
+            assert_eq!(
+                delivery.disposition,
+                PromptDeliveryDisposition::Pending,
+                "{label}"
+            );
             assert_eq!(fixture.queue_ids(), vec![id.clone()], "{label}");
         } else {
-            assert_eq!(delivery.disposition, PromptDeliveryDisposition::Ambiguous, "{label}");
-            assert!(!fixture.queue_ids().contains(&id), "{label}: the entry left the queue");
+            assert_eq!(
+                delivery.disposition,
+                PromptDeliveryDisposition::Ambiguous,
+                "{label}"
+            );
+            assert!(
+                !fixture.queue_ids().contains(&id),
+                "{label}: the entry left the queue"
+            );
             assert_eq!(
                 reloaded_delivery(&fixture, &id).disposition,
                 PromptDeliveryDisposition::Ambiguous,
                 "{label}"
             );
             assert!(
-                fixture.state.resume_local_session_queue(&fixture.session, None).is_ok(),
+                fixture
+                    .state
+                    .resume_local_session_queue(&fixture.session, None)
+                    .is_ok(),
                 "{label}"
             );
             assert!(
-                fixture.state.dispatch_next_queued_turn(&fixture.session, true).unwrap().is_none(),
+                fixture
+                    .state
+                    .dispatch_next_queued_turn(&fixture.session, true)
+                    .unwrap()
+                    .is_none(),
                 "{label}"
             );
         }
@@ -2388,7 +2899,10 @@ fn a_failed_stop_commit_wakes_no_receipted_successor() {
     assert!(result.is_err(), "the Stop's commit fails");
     let delivery = receipt_of(&state, &session, &id);
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Pending);
-    assert_eq!(delivery.attempt, 0, "no write-ahead escaped the failed Stop");
+    assert_eq!(
+        delivery.attempt, 0,
+        "no write-ahead escaped the failed Stop"
+    );
     assert!(successor_input_rx.try_recv().is_err(), "nothing sent");
     drop(original_owner);
     drop(successor_owner);
@@ -2426,7 +2940,11 @@ fn a_runtime_exit_or_failure_during_a_stop_leaves_its_carried_hand_off_unsent() 
                 .unwrap();
         }
         let delivery = fixture.delivery(&id).unwrap();
-        assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff, "{label}");
+        assert_eq!(
+            delivery.disposition,
+            PromptDeliveryDisposition::HandingOff,
+            "{label}"
+        );
         assert_eq!(fixture.queue_ids(), vec![id.clone()], "{label}");
         // The Stop's own retirement takes its carrier: proven unsent.
         assert!(with_record(&fixture, |record| {
@@ -2458,23 +2976,38 @@ fn a_failed_requeue_commit_leaves_the_rejected_receipt_retryable() {
     );
     assert!(fixture.delivery(&id).unwrap().entry.is_some());
     let holds_before = with_record(&fixture, |record| {
-        record.queued_prompt_durability_holds.keys().cloned().collect::<BTreeSet<_>>()
+        record
+            .queued_prompt_durability_holds
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>()
     });
     // Every commit from here on fails: no writer, and a store path that is a
     // directory.
-    let failing =
-        test_temp_dir().join(format!("termal-receipted-requeue-failure-{}", Uuid::new_v4()));
+    let failing = test_temp_dir().join(format!(
+        "termal-receipted-requeue-failure-{}",
+        Uuid::new_v4()
+    ));
     fs::create_dir_all(&failing).unwrap();
     fixture.state.shutdown_persist_blocking();
     fixture.state.persistence_path = Arc::new(failing.clone());
-    assert!(fixture.state.requeue_rejected_prompt_delivery(&fixture.session, &id).is_err());
+    assert!(
+        fixture
+            .state
+            .requeue_rejected_prompt_delivery(&fixture.session, &id)
+            .is_err()
+    );
     let delivery = fixture.delivery(&id).unwrap();
     assert_eq!(delivery.disposition, PromptDeliveryDisposition::Rejected);
     assert!(delivery.entry.is_some(), "the retry entry stays");
     assert!(fixture.queue_ids().is_empty(), "no tentative prompt");
     let inner = fixture.state.inner.lock().unwrap();
     let index = inner.find_session_index(&fixture.session).unwrap();
-    assert_eq!(inner.sessions[index].prompt_deliveries.len(), 1, "no tentative receipt");
+    assert_eq!(
+        inner.sessions[index].prompt_deliveries.len(),
+        1,
+        "no tentative receipt"
+    );
     assert_eq!(
         inner.sessions[index]
             .queued_prompt_durability_holds
@@ -2496,8 +3029,14 @@ fn a_failed_requeue_commit_leaves_the_rejected_receipt_retryable() {
 #[test]
 fn a_failed_codex_thread_setup_rejects_its_parked_receipted_prompt() {
     for (label, error) in [
-        ("refused", CodexResponseError::JsonRpc("thread/start refused".to_owned())),
-        ("timed out", CodexResponseError::Timeout("no thread/start reply".to_owned())),
+        (
+            "refused",
+            CodexResponseError::JsonRpc("thread/start refused".to_owned()),
+        ),
+        (
+            "timed out",
+            CodexResponseError::Timeout("no thread/start reply".to_owned()),
+        ),
     ] {
         let state = test_app_state();
         let generation = 7;
@@ -2529,9 +3068,8 @@ fn a_failed_codex_thread_setup_rejects_its_parked_receipted_prompt() {
                 },
             });
         }
-        let mut setup = super::shared_codex_thread_setup::test_pending_codex_thread_setup(
-            "receipted-setup",
-        );
+        let mut setup =
+            super::shared_codex_thread_setup::test_pending_codex_thread_setup("receipted-setup");
         setup.command.active_turn_generation = generation;
         runtime
             .sessions
@@ -2550,7 +3088,11 @@ fn a_failed_codex_thread_setup_rejects_its_parked_receipted_prompt() {
             error,
         );
         let delivery = codex_delivery(&state, &session_id, &prompt_id);
-        assert_eq!(delivery.disposition, PromptDeliveryDisposition::Rejected, "{label}");
+        assert_eq!(
+            delivery.disposition,
+            PromptDeliveryDisposition::Rejected,
+            "{label}"
+        );
         assert!(delivery.entry.is_some(), "{label}: the retry entry stays");
         let reloaded = {
             let inner = state.inner.lock().unwrap();
@@ -2575,7 +3117,10 @@ fn a_codex_thread_setup_whose_request_was_never_written_rejects_its_parked_recei
     struct FailingWriter;
     impl std::io::Write for FailingWriter {
         fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "codex stdin closed"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "codex stdin closed",
+            ))
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
@@ -2613,7 +3158,13 @@ fn a_codex_thread_setup_whose_request_was_never_written_rejects_its_parked_recei
         });
     }
     // The session has no thread yet, so the prompt needs a thread setup.
-    runtime.sessions.lock().unwrap().get_mut(&session_id).unwrap().thread_id = None;
+    runtime
+        .sessions
+        .lock()
+        .unwrap()
+        .get_mut(&session_id)
+        .unwrap()
+        .thread_id = None;
     runtime.thread_sessions.lock().unwrap().clear();
 
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));

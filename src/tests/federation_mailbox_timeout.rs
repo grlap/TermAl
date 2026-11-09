@@ -120,7 +120,9 @@ async fn mailbox_deadline_keeps_link_and_worker_capacity_until_worker_settlement
         .unwrap();
     let refused_status = refused.status();
     let refused_body: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(refused.into_body(), 4096).await.unwrap(),
+        &axum::body::to_bytes(refused.into_body(), 4096)
+            .await
+            .unwrap(),
     )
     .unwrap();
     let link_current_after_refusal = lease.with_current(&state, |_, _| Ok(())).is_ok();
@@ -171,7 +173,9 @@ async fn mailbox_deadline_keeps_link_and_worker_capacity_until_worker_settlement
         .unwrap();
     let response_status = response.status();
     let response_body: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(response.into_body(), 4096).await.unwrap(),
+        &axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap(),
     )
     .unwrap();
     let link_current_at_deadline = lease.with_current(&state, |_, _| Ok(())).is_ok();

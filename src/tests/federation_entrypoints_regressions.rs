@@ -242,14 +242,16 @@ async fn placement_recovery_refuses_material_port_change_after_fresh_verificatio
     // A stale teardown must never remove a link belonging to a new basis.
     pair.retire_central_channel().await;
     assert!(pair.channel.current_lease().is_err());
-    assert!(!pair
-        .central
-        .inner
-        .lock()
-        .unwrap()
-        .federation
-        .links
-        .contains_key(&id));
+    assert!(
+        !pair
+            .central
+            .inner
+            .lock()
+            .unwrap()
+            .federation
+            .links
+            .contains_key(&id)
+    );
     pair.central
         .mutate_federation(|domain, _| {
             let peer = domain.peers.get_mut(&id).unwrap();

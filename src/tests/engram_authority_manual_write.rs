@@ -5,7 +5,7 @@
 // these tests drive (src/tests/engram_source_root_naming.rs). New module.
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 const STALE: &str = "stale metadata snapshot: durable predecessor changed";
 
@@ -31,24 +31,45 @@ fn a_stale_capture_stays_refused_unless_the_store_already_holds_the_content() {
     // Only the durable generation moves between capture and write, so the
     // store cannot have taken this capture's content from another commit.
     let moved = path.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "after_delta_capture" {
-                set_durable_generation(moved.as_path(), original + 1);
-            }
-        }));
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "after_delta_capture" {
+            set_durable_generation(moved.as_path(), original + 1);
+        }
+    }));
 
-    let refused = claimed.state.engram_authority_manual_write(|_| Ok(false)).unwrap_err();
+    let refused = claimed
+        .state
+        .engram_authority_manual_write(|_| Ok(false))
+        .unwrap_err();
     assert_eq!(format!("{refused:#}"), STALE);
 
     let read_backs = Mutex::new(0);
-    assert!(claimed.state.engram_authority_manual_write(|_| {
-        *read_backs.lock().unwrap() += 1;
-        Ok(true)
-    }).unwrap());
-    assert_eq!(*read_backs.lock().unwrap(), 1, "the store is read back once");
+    assert!(
+        claimed
+            .state
+            .engram_authority_manual_write(|_| {
+                *read_backs.lock().unwrap() += 1;
+                Ok(true)
+            })
+            .unwrap()
+    );
+    assert_eq!(
+        *read_backs.lock().unwrap(),
+        1,
+        "the store is read back once"
+    );
 
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
     set_durable_generation(path.as_path(), original);
 }
 
@@ -59,11 +80,17 @@ fn a_write_failure_other_than_a_stale_capture_is_never_read_back() {
     // only the refusal's type keeps this write from being read back.
     METADATA_COMMIT_INTEGRITY_FAULT.with(|fault| fault.set(true));
     let read_backs = Mutex::new(0);
-    let error = claimed.state.engram_authority_manual_write(|_| {
-        *read_backs.lock().unwrap() += 1;
-        Ok(true)
-    }).unwrap_err();
-    assert!(format!("{error:#}").contains("injected metadata post-commit integrity failure"), "{error:#}");
+    let error = claimed
+        .state
+        .engram_authority_manual_write(|_| {
+            *read_backs.lock().unwrap() += 1;
+            Ok(true)
+        })
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("injected metadata post-commit integrity failure"),
+        "{error:#}"
+    );
     assert_eq!(*read_backs.lock().unwrap(), 0);
 }
 
@@ -75,20 +102,31 @@ fn manual_writes_of_one_store_take_turns_across_capture_and_write() {
     let path = claimed.state.persistence_path.clone();
     let observed = Arc::new(Mutex::new(None));
     let recorded = observed.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "after_delta_capture" {
-                let turn = engram_authority_manual_write_turn(path.as_path());
-                *recorded.lock().unwrap() = Some(turn.try_lock().is_err());
-            }
-        }));
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "after_delta_capture" {
+            let turn = engram_authority_manual_write_turn(path.as_path());
+            *recorded.lock().unwrap() = Some(turn.try_lock().is_err());
+        }
+    }));
     let path = claimed.state.persistence_path.clone();
     let turn = engram_authority_manual_write_turn(path.as_path());
     assert!(
-        claimed.state.engram_authority_manual_write(|_| Ok(turn.try_lock().is_err())).unwrap(),
+        claimed
+            .state
+            .engram_authority_manual_write(|_| Ok(turn.try_lock().is_err()))
+            .unwrap(),
         "the turn lasts through the write to its read-back",
     );
-    assert_eq!(*observed.lock().unwrap(), Some(true), "the turn is held at the capture");
+    assert_eq!(
+        *observed.lock().unwrap(),
+        Some(true),
+        "the turn is held at the capture"
+    );
     assert!(turn.try_lock().is_ok(), "the turn ends with the write");
 }
 
@@ -108,11 +146,16 @@ fn a_closing_install_inside_the_manual_write_leaves_the_clear_clean() {
     request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
     claimed.begin("The original ordinary turn.");
     let store = naming_store(&claimed);
-    let work = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap()).work_id;
+    let work = claimed
+        .record_mut(|record| record.engram.work_binding.clone().unwrap())
+        .work_id;
     assert!(
         engram_work_source_root_for_work(
-            &claimed.state.inner.lock().unwrap().engram_work_source_roots, &store, &work,
-        ).is_some(),
+            &claimed.state.inner.lock().unwrap().engram_work_source_roots,
+            &store,
+            &work,
+        )
+        .is_some(),
         "the root is named before the clear",
     );
 
@@ -123,18 +166,25 @@ fn a_closing_install_inside_the_manual_write_leaves_the_clear_clean() {
     let release_rx = Mutex::new(release_rx);
     let installed = Mutex::new(installed);
     let held = AtomicBool::new(false);
-    *claimed.state.runtime_observation_lifetime.install_hook.lock().unwrap() =
-        Some(Arc::new(move |phase| match phase {
-            "capture" if !held.swap(true, Ordering::SeqCst) => {
-                at_install.lock().unwrap().send(()).unwrap();
-                release_rx.lock().unwrap().recv_timeout(guard)
-                    .expect("the writer released the closing install");
-            }
-            "closing_installed" => {
-                let _ = installed.lock().unwrap().send(());
-            }
-            _ => {}
-        }));
+    *claimed
+        .state
+        .runtime_observation_lifetime
+        .install_hook
+        .lock()
+        .unwrap() = Some(Arc::new(move |phase| match phase {
+        "capture" if !held.swap(true, Ordering::SeqCst) => {
+            at_install.lock().unwrap().send(()).unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(guard)
+                .expect("the writer released the closing install");
+        }
+        "closing_installed" => {
+            let _ = installed.lock().unwrap().send(());
+        }
+        _ => {}
+    }));
 
     let generations = Arc::new(Mutex::new(None::<(u64, u64)>));
     let recorded = generations.clone();
@@ -158,15 +208,24 @@ fn a_closing_install_inside_the_manual_write_leaves_the_clear_clean() {
         let publishing_the_clear = {
             let inner = fence_inner.lock().unwrap();
             inner.sessions[inner.find_session_index(&fence_session).unwrap()]
-                .engram.source_root_bind_owner.is_none()
-                && engram_work_source_root_for_work(&inner.engram_work_source_roots, &store, &work).is_none()
+                .engram
+                .source_root_bind_owner
+                .is_none()
+                && engram_work_source_root_for_work(&inner.engram_work_source_roots, &store, &work)
+                    .is_none()
         };
-        if phase != "after_delta_capture" || !publishing_the_clear || fired.swap(true, Ordering::SeqCst) {
+        if phase != "after_delta_capture"
+            || !publishing_the_clear
+            || fired.swap(true, Ordering::SeqCst)
+        {
             return;
         }
         let before = durable_generation(path.as_path());
         release.lock().unwrap().send(()).unwrap();
-        installed_rx.lock().unwrap().recv_timeout(guard)
+        installed_rx
+            .lock()
+            .unwrap()
+            .recv_timeout(guard)
             .expect("the closing install committed");
         *recorded.lock().unwrap() = Some((before, durable_generation(path.as_path())));
     });
@@ -178,34 +237,75 @@ fn a_closing_install_inside_the_manual_write_leaves_the_clear_clean() {
         *hook.borrow_mut() = Some(Box::new(move || {
             let token = {
                 let inner = state.inner.lock().unwrap();
-                inner.sessions[inner.find_session_index(&session).unwrap()].runtime.runtime_token().unwrap()
+                inner.sessions[inner.find_session_index(&session).unwrap()]
+                    .runtime
+                    .runtime_token()
+                    .unwrap()
             };
-            state.finish_turn_ok_if_runtime_matches(&session, &token).unwrap();
-            let dispatch = match state.dispatch_turn(&session, SendMessageRequest {
-                text: "The successor ordinary turn.".into(), expanded_text: None, attachments: Vec::new(),
-                source_session_id: None, source_mailbox: None,
-            }).unwrap() {
-                DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+            state
+                .finish_turn_ok_if_runtime_matches(&session, &token)
+                .unwrap();
+            let dispatch = match state
+                .dispatch_turn(
+                    &session,
+                    SendMessageRequest {
+                        text: "The successor ordinary turn.".into(),
+                        expanded_text: None,
+                        attachments: Vec::new(),
+                        source_session_id: None,
+                        source_mailbox: None,
+                    },
+                )
+                .unwrap()
+            {
+                DispatchTurnResult::Dispatched(dispatch)
+                | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
                 DispatchTurnResult::Queued => panic!("the real successor must dispatch"),
             };
             deliver_turn_dispatch(&state, dispatch).unwrap();
-            assert!(matches!(receive(&runtime.lock().unwrap(), "successor provider handoff"),
-                CodexRuntimeCommand::Prompt { .. }));
+            assert!(matches!(
+                receive(&runtime.lock().unwrap(), "successor provider handoff"),
+                CodexRuntimeCommand::Prompt { .. }
+            ));
             // The worker's off-lock capture is done before the clear changes
             // anything: it now waits at the install.
-            at_install_rx.recv_timeout(guard)
+            at_install_rx
+                .recv_timeout(guard)
                 .expect("the closing capture reached its install");
-            state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(boundary);
+            state
+                .inner
+                .lock()
+                .unwrap()
+                .test_engram_authority_ack_boundary = Some(boundary);
         }));
     });
 
     let cleared = request_naming(&claimed, label, None, vec![naming_claim(label)]).unwrap();
     assert!(cleared.sealed.is_none());
-    let (before, after) = generations.lock().unwrap().expect("the writer released the install");
-    assert!(after > before, "the closing install moved the durable generation: {before} -> {after}");
-    assert!(refused.load(Ordering::SeqCst), "the write really was refused as stale");
-    *claimed.state.runtime_observation_lifetime.install_hook.lock().unwrap() = None;
+    let (before, after) = generations
+        .lock()
+        .unwrap()
+        .expect("the writer released the install");
+    assert!(
+        after > before,
+        "the closing install moved the durable generation: {before} -> {after}"
+    );
+    assert!(
+        refused.load(Ordering::SeqCst),
+        "the write really was refused as stale"
+    );
+    *claimed
+        .state
+        .runtime_observation_lifetime
+        .install_hook
+        .lock()
+        .unwrap() = None;
     // The boundary holds the state it is stored in; dropping it ends that cycle.
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
     claimed.end();
 }

@@ -88,8 +88,10 @@ fn engram_control_fixture_accepts_both_spellings_of_a_linked_user_temp() {
                 .output()
                 .expect("fixture should run");
             assert_eq!(output.status.code(), Some(4), "{}", refused.display());
-            assert!(String::from_utf8_lossy(&output.stderr)
-                .contains("refusing --home outside a TermAl test temp root"));
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("refusing --home outside a TermAl test temp root")
+            );
             assert!(!sibling.exists(), "a refused sibling must not be created");
         }
     }

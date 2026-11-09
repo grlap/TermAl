@@ -2,8 +2,8 @@
 //! No control grant or checkpoint authorizes these turns. Historical queue
 //! metadata stays passive; real receipt WAL, runtime/turn and Stop owners remain.
 use super::*;
-use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 use crate::tests::delegation_support::finish_delegation_child_with_assistant_text;
+use crate::tests::engram_host_adapter::uncertain_begin::OrdinaryRoot;
 
 // A known-unsent original carrying historical bytes is promoted by the real
 // ordinary queue owner. The product retains that row after promotion, so the
@@ -14,8 +14,11 @@ fn prepare_ordinary_owned_head(turn: &OrdinaryRoot) -> TurnDispatch {
         record.queued_prompts.back_mut().unwrap().engram_evaluate =
             Some(json!({"historical":"known-unsent","future":[null,"żółw"]}));
     });
-    turn.state.start_next_queued_turn_off_lock(&turn.session, false, false)
-        .unwrap().unwrap().dispatch
+    turn.state
+        .start_next_queued_turn_off_lock(&turn.session, false, false)
+        .unwrap()
+        .unwrap()
+        .dispatch
 }
 
 // A fresh receipted promotion keeps custody in delivery.entry, not a queued
@@ -25,15 +28,26 @@ fn prepare_ordinary_owned_head(turn: &OrdinaryRoot) -> TurnDispatch {
 fn prepare_receipted_ordinary_promotion(
     turn: &mut OrdinaryRoot,
     source: QueuedPromptSource,
-) -> (TurnDispatch, String, crate::tests::prompt_delivery::DeliveryWriter, Box<PersistFence>) {
+) -> (
+    TurnDispatch,
+    String,
+    crate::tests::prompt_delivery::DeliveryWriter,
+    Box<PersistFence>,
+) {
     use crate::tests::prompt_delivery::{DeliveryWriter, HeldFence};
     let writer = DeliveryWriter::attach(&mut turn.state);
     let id = turn.enqueue_durable("Prepared ordinary input", true);
     // Select the queue-source variant before its WAL intent is captured.
     // Neither variant is a Human prompt or a historical admission alias.
-    assert!(matches!(source, QueuedPromptSource::User | QueuedPromptSource::Orchestrator));
+    assert!(matches!(
+        source,
+        QueuedPromptSource::User | QueuedPromptSource::Orchestrator
+    ));
     turn.edit(|record| record.queued_prompts.back_mut().unwrap().source = source);
-    assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+    assert!(
+        turn.state
+            .request_queued_prompt_durability(&turn.session, &id)
+    );
     writer.take(HeldFence::Durability).finish(Ok(()));
     if source == QueuedPromptSource::User {
         // The producer initially held Orchestrator content. Its real
@@ -48,14 +62,26 @@ fn prepare_receipted_ordinary_promotion(
         assert!(!delivery.write_ahead_acknowledged);
         assert!(delivery.turn_generation.is_none() && delivery.entry.is_none());
     });
-    turn.edit(|record| record.prompt_deliveries.get_mut(&id).unwrap().write_ahead_acknowledged = true);
-    let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false)
-        .unwrap().expect("acknowledged receipted queue entry promotes");
+    turn.edit(|record| {
+        record
+            .prompt_deliveries
+            .get_mut(&id)
+            .unwrap()
+            .write_ahead_acknowledged = true
+    });
+    let started = turn
+        .state
+        .start_next_queued_turn_off_lock(&turn.session, false, false)
+        .unwrap()
+        .expect("acknowledged receipted queue entry promotes");
     turn.record(|record| {
         assert!(record.queued_prompts.is_empty());
         let delivery = &record.prompt_deliveries[&id];
         assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
-        assert_eq!(delivery.turn_generation, Some(started.dispatch.active_turn_generation()));
+        assert_eq!(
+            delivery.turn_generation,
+            Some(started.dispatch.active_turn_generation())
+        );
         let entry = delivery.entry.as_ref().unwrap();
         assert_eq!(entry.pending_prompt.id, id);
         assert_eq!(entry.pending_prompt.text, "Prepared ordinary input");
@@ -71,9 +97,9 @@ fn prepare_receipted_ordinary_promotion(
 fn ordinary_handoff_waits_for_real_stop_failure_or_success() {
     for failed_stop in [true, false] {
         let turn = OrdinaryRoot::new("ordinary-stop-handoff");
-    let state = turn.state.clone();
-    let session = turn.session.clone();
-    let root_rx = &turn.receiver;
+        let state = turn.state.clone();
+        let session = turn.session.clone();
+        let root_rx = &turn.receiver;
         let dispatch = prepare_ordinary_owned_head(&turn);
         let active_turn_generation = dispatch.active_turn_generation();
         // The real ordinary promotion is complete; provider handoff has not run.
@@ -198,7 +224,6 @@ fn ordinary_handoff_waits_for_real_stop_failure_or_success() {
     }
 }
 
-
 #[tokio::test]
 async fn unresolved_fast_ordinary_handoff_obeys_public_stop_outcome() {
     for failed_stop in [true, false] {
@@ -219,7 +244,10 @@ async fn unresolved_fast_ordinary_handoff_obeys_public_stop_outcome() {
             prepare_receipted_ordinary_promotion(&mut turn, QueuedPromptSource::Orchestrator);
         let state = turn.state.clone();
         let session = turn.session.clone();
-        turn.enqueue("ordinary orchestrator successor", QueuedPromptSource::Orchestrator);
+        turn.enqueue(
+            "ordinary orchestrator successor",
+            QueuedPromptSource::Orchestrator,
+        );
         let failure = failed_stop.then(|| force_test_kill_child_process_failure(&process, "Codex"));
         let stop_gate = install_test_stop_fence_gate(&state, &session);
         let mut events = state.subscribe_events();
@@ -239,12 +267,21 @@ async fn unresolved_fast_ordinary_handoff_obeys_public_stop_outcome() {
         let callbacks = {
             let inner = state.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-            assert!(record.queued_prompts.is_empty(), "Stop drops the Orchestrator successor");
+            assert!(
+                record.queued_prompts.is_empty(),
+                "Stop drops the Orchestrator successor"
+            );
             let receipt = &record.prompt_deliveries[&prompt_id];
             assert_eq!(receipt.disposition, PromptDeliveryDisposition::HandingOff);
             assert_eq!(receipt.turn_generation, Some(record.active_turn_generation));
-            assert_eq!(receipt.entry.as_ref().unwrap().pending_prompt.text, "Prepared ordinary input");
-            assert_eq!(receipt.entry.as_ref().unwrap().source, QueuedPromptSource::Orchestrator);
+            assert_eq!(
+                receipt.entry.as_ref().unwrap().pending_prompt.text,
+                "Prepared ordinary input"
+            );
+            assert_eq!(
+                receipt.entry.as_ref().unwrap().source,
+                QueuedPromptSource::Orchestrator
+            );
             assert!(matches!(
                 receiver.try_recv(),
                 Err(mpsc::TryRecvError::Empty)
@@ -286,7 +323,15 @@ async fn unresolved_fast_ordinary_handoff_obeys_public_stop_outcome() {
             let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
             assert_eq!(record.session.status, SessionStatus::Active);
             assert!(record.queued_prompts.is_empty());
-            assert_eq!(record.prompt_deliveries[&prompt_id].entry.as_ref().unwrap().pending_prompt.id, prompt_id);
+            assert_eq!(
+                record.prompt_deliveries[&prompt_id]
+                    .entry
+                    .as_ref()
+                    .unwrap()
+                    .pending_prompt
+                    .id,
+                prompt_id
+            );
             assert!(ordinary_queue_position(record).is_none());
         } else {
             tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
@@ -313,7 +358,6 @@ async fn unresolved_fast_ordinary_handoff_obeys_public_stop_outcome() {
     }
 }
 
-
 #[tokio::test]
 async fn public_failed_stop_restores_ordinary_handoff_before_replay() {
     for orchestrator_source in [false, true] {
@@ -333,13 +377,19 @@ async fn assert_public_failed_stop_restores_ordinary_handoff(
     orchestrator_source: bool,
 ) {
     let mut turn = OrdinaryRoot::new("ordinary-stop-handoff");
-    let source = if orchestrator_source { QueuedPromptSource::Orchestrator } else { QueuedPromptSource::User };
-    let (dispatch, prompt_id, _writer, _write_ahead) = prepare_receipted_ordinary_promotion(&mut turn, source);
+    let source = if orchestrator_source {
+        QueuedPromptSource::Orchestrator
+    } else {
+        QueuedPromptSource::User
+    };
+    let (dispatch, prompt_id, _writer, _write_ahead) =
+        prepare_receipted_ordinary_promotion(&mut turn, source);
     let state = turn.state.clone();
     let session = turn.session.clone();
     let root_rx = &turn.receiver;
     let active_turn_generation = dispatch.active_turn_generation();
-    let receipt_before_stop = turn.record(|record| serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap());
+    let receipt_before_stop =
+        turn.record(|record| serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap());
     let (runtime, receiver) =
         test_acp_runtime_handle(AcpAgent::OpenCode, "public-post-receipt-stop");
     let token = RuntimeToken::Acp(runtime.runtime_id.clone());
@@ -375,7 +425,10 @@ async fn assert_public_failed_stop_restores_ordinary_handoff(
                     if !record.runtime_stop_in_progress {
                         assert_eq!(record.session.status, SessionStatus::Active);
                         assert!(record.queued_prompts.is_empty());
-                        assert_eq!(serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap(), receipt_before_stop);
+                        assert_eq!(
+                            serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap(),
+                            receipt_before_stop
+                        );
                         assert!(record.deferred_stop_callbacks.is_empty());
                         break;
                     }
@@ -438,23 +491,40 @@ async fn assert_public_failed_stop_restores_ordinary_handoff(
         }
     }).await.expect("public Stop rollback did not release handoff");
     let prompt = loop {
-        if let AcpRuntimeCommand::Prompt(command) = phase_sync::receive(&receiver, "failed Stop releases the original ordinary handoff") {
+        if let AcpRuntimeCommand::Prompt(command) = phase_sync::receive(
+            &receiver,
+            "failed Stop releases the original ordinary handoff",
+        ) {
             break command.prompt;
         }
     };
     assert_eq!(prompt, "public ordinary prompt");
     state.replay_deferred_runtime_stop_callbacks(&session, &token, callbacks);
-    assert!(!receiver.try_iter().any(|command| matches!(command, AcpRuntimeCommand::Prompt(_))), "cloned callbacks cannot repeat the handoff");
+    assert!(
+        !receiver
+            .try_iter()
+            .any(|command| matches!(command, AcpRuntimeCommand::Prompt(_))),
+        "cloned callbacks cannot repeat the handoff"
+    );
     turn.record(|record| {
         assert!(record.queued_prompts.is_empty());
-        assert_eq!(serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap(), receipt_before_stop);
-        assert_eq!(record.prompt_deliveries[&prompt_id].entry.as_ref().unwrap().source, source);
+        assert_eq!(
+            serde_json::to_value(&record.prompt_deliveries[&prompt_id]).unwrap(),
+            receipt_before_stop
+        );
+        assert_eq!(
+            record.prompt_deliveries[&prompt_id]
+                .entry
+                .as_ref()
+                .unwrap()
+                .source,
+            source
+        );
         assert!(ordinary_queue_position(record).is_none());
     });
     assert!(root_rx.try_recv().is_err());
     turn.assert_no_control();
 }
-
 
 #[tokio::test]
 async fn successful_public_stop_never_retires_a_replacement_for_its_orchestrator_owner() {
@@ -550,7 +620,10 @@ fn an_ordinary_stop_wakes_its_receipted_successor_after_its_own_commit() {
         };
         let id = prompt.id.clone();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.engram.historical_control.insert("engramRoutingToken".into(), json!("old-token"));
+        record
+            .engram
+            .historical_control
+            .insert("engramRoutingToken".into(), json!("old-token"));
         // Exercise Stop's missing-runtime recovery of a running session; a
         // busy session's durability acknowledgement dispatches nothing.
         record.session.status = SessionStatus::Active;
@@ -602,13 +675,20 @@ fn an_ordinary_stop_wakes_its_receipted_successor_after_its_own_commit() {
             stop_revisions.push(revision);
         }
     }
-    assert_eq!(stop_revisions.len(), 1, "the Stop's message is published once");
+    assert_eq!(
+        stop_revisions.len(),
+        1,
+        "the Stop's message is published once"
+    );
     assert!(
         stop_revisions[0] < write_ahead_revision,
         "the Stop committed and published before the write-ahead began: {stop_revisions:?} vs {write_ahead_revision}"
     );
     let write_ahead = writer.take(HeldFence::WriteAhead);
-    assert!(receiver.try_recv().is_err(), "nothing before the acknowledgement");
+    assert!(
+        receiver.try_recv().is_err(),
+        "nothing before the acknowledgement"
+    );
     write_ahead.finish(Ok(()));
     match recv_within_guard(&receiver, "the woken successor's hand-off") {
         Ok(CodexRuntimeCommand::Prompt { .. }) => {}
@@ -623,7 +703,9 @@ fn an_ordinary_stop_wakes_its_receipted_successor_after_its_own_commit() {
         let done = {
             let inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
-            inner.sessions[index].prompt_deliveries[&prompt_id].turn_generation.is_some()
+            inner.sessions[index].prompt_deliveries[&prompt_id]
+                .turn_generation
+                .is_some()
         };
         if done {
             break;
@@ -631,7 +713,9 @@ fn an_ordinary_stop_wakes_its_receipted_successor_after_its_own_commit() {
         promoted.wait("the successor's promotion");
     }
     assert!(
-        !receiver.try_iter().any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. })),
+        !receiver
+            .try_iter()
+            .any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. })),
         "handed off once"
     );
     turn.assert_no_control();
@@ -707,7 +791,10 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
     {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert!(record.queued_prompts.is_empty(), "the Stop retired its promoted head");
+        assert!(
+            record.queued_prompts.is_empty(),
+            "the Stop retired its promoted head"
+        );
         let delivery = &record.prompt_deliveries[&prompt_id];
         assert_eq!(delivery.disposition, PromptDeliveryDisposition::Rejected);
         assert_eq!(delivery.turn_generation, Some(turn_generation));
@@ -722,11 +809,19 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
     }
     drop(dispatch);
     assert!(root_rx.try_recv().is_err(), "never handed off");
-    let durable: PersistedSessionRecord = serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
-    assert!(!durable.queued_prompts.iter().any(|row| row.pending_prompt.id == prompt_id));
-    assert_eq!(durable.prompt_deliveries[&prompt_id].disposition, PromptDeliveryDisposition::Rejected);
+    let durable: PersistedSessionRecord =
+        serde_json::from_str(&persisted_session_json(&state, &session)).unwrap();
+    assert!(
+        !durable
+            .queued_prompts
+            .iter()
+            .any(|row| row.pending_prompt.id == prompt_id)
+    );
+    assert_eq!(
+        durable.prompt_deliveries[&prompt_id].disposition,
+        PromptDeliveryDisposition::Rejected
+    );
     turn.assert_no_control();
-
 }
 
 #[test]
@@ -736,10 +831,19 @@ fn ordinary_send_commit_failure_never_reaches_the_provider() {
     let failing = turn.root.join("persistence-is-directory");
     fs::create_dir_all(&failing).unwrap();
     turn.state.persistence_path = Arc::new(failing);
-    let error = dispatch_turn_and_snapshot(&turn.state, &turn.session, SendMessageRequest {
-        text: "Uncommitted ordinary input.".into(), expanded_text: None,
-        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
-    }).err().expect("the real dispatch commit must refuse the unusable store");
+    let error = dispatch_turn_and_snapshot(
+        &turn.state,
+        &turn.session,
+        SendMessageRequest {
+            text: "Uncommitted ordinary input.".into(),
+            expanded_text: None,
+            attachments: Vec::new(),
+            source_session_id: None,
+            source_mailbox: None,
+        },
+    )
+    .err()
+    .expect("the real dispatch commit must refuse the unusable store");
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
     turn.assert_no_prompt();
     turn.assert_no_control();
@@ -749,19 +853,42 @@ fn ordinary_send_commit_failure_never_reaches_the_provider() {
 fn ordinary_orphan_recovery_keeps_original_ids_and_source_order_on_commit_failure() {
     for mailbox_first in [false, true] {
         let mut turn = OrdinaryRoot::new("ordinary-orphan-commit-refusal");
-        if mailbox_first { turn.enqueue("Mailbox before workflow.", QueuedPromptSource::Mailbox); }
+        if mailbox_first {
+            turn.enqueue("Mailbox before workflow.", QueuedPromptSource::Mailbox);
+        }
         turn.enqueue("Original workflow.", QueuedPromptSource::Orchestrator);
-        let before = turn.record(|record| record.queued_prompts.iter()
-            .map(|row| (row.pending_prompt.id.clone(), row.pending_prompt.text.clone(), row.source))
-            .collect::<Vec<_>>());
+        let before = turn.record(|record| {
+            record
+                .queued_prompts
+                .iter()
+                .map(|row| {
+                    (
+                        row.pending_prompt.id.clone(),
+                        row.pending_prompt.text.clone(),
+                        row.source,
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
         turn.state.shutdown_persist_blocking();
         let failing = turn.root.join("orphan-store-is-directory");
         fs::create_dir_all(&failing).unwrap();
         turn.state.persistence_path = Arc::new(failing);
         turn.state.dispatch_orphaned_workflow_prompts();
-        turn.record(|record| assert_eq!(record.queued_prompts.iter()
-            .map(|row| (row.pending_prompt.id.clone(), row.pending_prompt.text.clone(), row.source))
-            .collect::<Vec<_>>(), before));
+        turn.record(|record| {
+            assert_eq!(
+                record
+                    .queued_prompts
+                    .iter()
+                    .map(|row| (
+                        row.pending_prompt.id.clone(),
+                        row.pending_prompt.text.clone(),
+                        row.source
+                    ))
+                    .collect::<Vec<_>>(),
+                before
+            )
+        });
         turn.assert_no_prompt();
         turn.assert_no_control();
     }
@@ -778,12 +905,27 @@ fn stale_ordinary_rejection_cannot_terminalize_a_replacement_runtime_turn_or_sto
         turn.edit(|record| match change {
             "runtime" => record.runtime = SessionRuntime::Codex(runtime),
             "turn" => record.active_turn_generation += 1,
-            _ => { record.claim_runtime_stop(RuntimeStopOwnerKind::LostRuntimeTerminalization, token.clone()); },
+            _ => {
+                record.claim_runtime_stop(
+                    RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                    token.clone(),
+                );
+            }
         });
         let before = turn.saved();
-        assert!(!record_rejected_turn_dispatch(&turn.state, &turn.session,
-            "stale provider channel rejection", None, &token, generation));
-        assert_eq!(turn.saved(), before, "{change}: the newer owner stays untouched");
+        assert!(!record_rejected_turn_dispatch(
+            &turn.state,
+            &turn.session,
+            "stale provider channel rejection",
+            None,
+            &token,
+            generation
+        ));
+        assert_eq!(
+            turn.saved(),
+            before,
+            "{change}: the newer owner stays untouched"
+        );
         drop(dispatch);
         turn.assert_no_prompt();
         assert!(replacement_rx.try_recv().is_err());
@@ -797,30 +939,63 @@ fn ordinary_channel_rejection_preserves_history_and_only_the_fresh_successor_can
     let (runtime, closed) = test_codex_runtime_handle("ordinary-channel-rejection");
     turn.edit(|record| record.runtime = SessionRuntime::Codex(runtime));
     let dispatch = prepare_ordinary_owned_head(&turn);
-    let next = turn.enqueue("Successor after channel rejection.", QueuedPromptSource::User);
+    let next = turn.enqueue(
+        "Successor after channel rejection.",
+        QueuedPromptSource::User,
+    );
     drop(closed);
-    let error = deliver_turn_dispatch_now(&turn.state, dispatch).expect_err("the actual provider channel is closed");
-    assert!(error.message.contains("failed to queue prompt for Codex"), "{}", error.message);
+    let error = deliver_turn_dispatch_now(&turn.state, dispatch)
+        .expect_err("the actual provider channel is closed");
+    assert!(
+        error.message.contains("failed to queue prompt for Codex"),
+        "{}",
+        error.message
+    );
     turn.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Error);
         assert!(matches!(record.runtime, SessionRuntime::None));
-        assert!(record.queued_prompts.iter().any(|row| row.pending_prompt.id == next && row.pending_prompt.text == "Successor after channel rejection."));
-        let old = record.queued_prompts.iter().find(|row| row.pending_prompt.text == "Prepared ordinary input").unwrap();
-        assert!(old.engram_ordinary_handoff, "the saved original is not a runnable successor");
+        assert!(
+            record
+                .queued_prompts
+                .iter()
+                .any(|row| row.pending_prompt.id == next
+                    && row.pending_prompt.text == "Successor after channel rejection.")
+        );
+        let old = record
+            .queued_prompts
+            .iter()
+            .find(|row| row.pending_prompt.text == "Prepared ordinary input")
+            .unwrap();
+        assert!(
+            old.engram_ordinary_handoff,
+            "the saved original is not a runnable successor"
+        );
     });
-    let durable: PersistedSessionRecord = serde_json::from_str(&persisted_session_json(&turn.state, &turn.session)).unwrap();
-    assert!(durable.queued_prompts.iter().any(|row| row.pending_prompt.id == next));
+    let durable: PersistedSessionRecord =
+        serde_json::from_str(&persisted_session_json(&turn.state, &turn.session)).unwrap();
+    assert!(
+        durable
+            .queued_prompts
+            .iter()
+            .any(|row| row.pending_prompt.id == next)
+    );
     let (runtime, receiver) = test_codex_runtime_handle("ordinary-channel-successor");
     turn.edit(|record| {
         record.runtime = SessionRuntime::Codex(runtime);
         record.session.status = SessionStatus::Idle;
     });
     turn.state.resume_session_queue(&turn.session).unwrap();
-    let CodexRuntimeCommand::Prompt { command, .. } = phase_sync::receive(&receiver, "the ordinary successor") else {
+    let CodexRuntimeCommand::Prompt { command, .. } =
+        phase_sync::receive(&receiver, "the ordinary successor")
+    else {
         panic!("only the successor may reach the replacement runtime");
     };
     assert_eq!(command.prompt, "Successor after channel rejection.");
-    assert!(!receiver.try_iter().any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. })));
+    assert!(
+        !receiver
+            .try_iter()
+            .any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. }))
+    );
     turn.assert_no_prompt();
     turn.assert_no_control();
 }
@@ -841,8 +1016,16 @@ fn ordinary_channel_rejection_keeps_the_terminal_owner_visible_when_its_commit_f
     assert!(error.message.contains("failed to queue prompt for Codex"));
     turn.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Error);
-        assert!(matches!(record.runtime, SessionRuntime::None), "a dead runtime cannot be restored after a failed commit");
-        assert!(record.queued_prompts.iter().any(|row| row.pending_prompt.id == next));
+        assert!(
+            matches!(record.runtime, SessionRuntime::None),
+            "a dead runtime cannot be restored after a failed commit"
+        );
+        assert!(
+            record
+                .queued_prompts
+                .iter()
+                .any(|row| row.pending_prompt.id == next)
+        );
     });
     turn.assert_no_prompt();
     turn.assert_no_control();
@@ -857,22 +1040,43 @@ fn ordinary_fast_discovery_failure_keeps_the_successor_and_cannot_replay_the_fai
         record.session.model_options.clear();
     });
     let dispatch = prepare_ordinary_owned_head(&turn);
-    let next = turn.enqueue("Successor after discovery failure.", QueuedPromptSource::User);
+    let next = turn.enqueue(
+        "Successor after discovery failure.",
+        QueuedPromptSource::User,
+    );
     let state = turn.state.clone();
     let worker = std::thread::spawn(move || deliver_turn_dispatch_now(&state, dispatch));
-    let CodexRuntimeCommand::RefreshModelList { response_tx } = phase_sync::receive(&turn.receiver, "actual Fast discovery") else {
+    let CodexRuntimeCommand::RefreshModelList { response_tx } =
+        phase_sync::receive(&turn.receiver, "actual Fast discovery")
+    else {
         panic!("discovery precedes the provider prompt");
     };
-    response_tx.send(Err("forced catalog failure".into())).unwrap();
-    let error = worker.join().unwrap().expect_err("discovery failure must surface");
+    response_tx
+        .send(Err("forced catalog failure".into()))
+        .unwrap();
+    let error = worker
+        .join()
+        .unwrap()
+        .expect_err("discovery failure must surface");
     assert!(error.message.contains("failed to resolve Codex Fast"));
     turn.record(|record| {
         assert_eq!(record.session.status, SessionStatus::Error);
-        assert!(record.queued_prompts.iter().any(|row| row.pending_prompt.id == next));
+        assert!(
+            record
+                .queued_prompts
+                .iter()
+                .any(|row| row.pending_prompt.id == next)
+        );
         assert!(record.queued_prompts[0].engram_ordinary_handoff);
     });
-    let durable: PersistedSessionRecord = serde_json::from_str(&persisted_session_json(&turn.state, &turn.session)).unwrap();
-    assert!(durable.queued_prompts.iter().any(|row| row.pending_prompt.id == next));
+    let durable: PersistedSessionRecord =
+        serde_json::from_str(&persisted_session_json(&turn.state, &turn.session)).unwrap();
+    assert!(
+        durable
+            .queued_prompts
+            .iter()
+            .any(|row| row.pending_prompt.id == next)
+    );
     turn.edit(|record| {
         record.session.codex_fast_mode = false;
         record.session.status = SessionStatus::Idle;
@@ -886,29 +1090,65 @@ fn ordinary_fast_discovery_failure_keeps_the_successor_and_cannot_replay_the_fai
 #[test]
 fn ordinary_child_initial_and_followup_turns_survive_polling_without_control_authorization() {
     let turn = OrdinaryRoot::new("ordinary-child-initial-followup");
-    let response = turn.state.create_read_only_delegation(&turn.session, CreateDelegationRequest {
-        prompt: "Initial child input.".into(), title: None, cwd: None, agent: Some(Agent::Codex),
-        model: None, mode: Some(DelegationMode::Explorer), write_policy: Some(DelegationWritePolicy::ReadOnly),
-    }).unwrap();
+    let response = turn
+        .state
+        .create_read_only_delegation(
+            &turn.session,
+            CreateDelegationRequest {
+                prompt: "Initial child input.".into(),
+                title: None,
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Explorer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
     let child = response.delegation.child_session_id;
     let delegation = response.delegation.id;
-    let CodexRuntimeCommand::Prompt { session_id, command } = phase_sync::receive(&turn.receiver, "initial ordinary child handoff") else { panic!("child prompt"); };
+    let CodexRuntimeCommand::Prompt {
+        session_id,
+        command,
+    } = phase_sync::receive(&turn.receiver, "initial ordinary child handoff")
+    else {
+        panic!("child prompt");
+    };
     assert_eq!(session_id, child);
     assert!(command.prompt.contains("Initial child input."));
     let token = {
         let inner = turn.state.inner.lock().unwrap();
-        inner.sessions[inner.find_session_index(&child).unwrap()].runtime.runtime_token().unwrap()
+        inner.sessions[inner.find_session_index(&child).unwrap()]
+            .runtime
+            .runtime_token()
+            .unwrap()
     };
     finish_delegation_child_with_assistant_text(&turn.state, &child, "Initial result.");
     {
         let mut inner = turn.state.inner.lock().unwrap();
         inner.session_mut(&child).unwrap().session.status = SessionStatus::Active;
     }
-    turn.state.finish_turn_ok_if_runtime_matches(&child, &token).unwrap();
-    turn.state.refresh_delegation_for_child_session(&child).unwrap();
-    turn.state.followup_delegation(&turn.session, &delegation, "Follow-up child input.".into()).unwrap();
-    for _ in 0..3 { turn.state.refresh_delegation_for_child_session(&child).unwrap(); }
-    let CodexRuntimeCommand::Prompt { session_id, command } = phase_sync::receive(&turn.receiver, "ordinary child followup") else { panic!("child followup"); };
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&child, &token)
+        .unwrap();
+    turn.state
+        .refresh_delegation_for_child_session(&child)
+        .unwrap();
+    turn.state
+        .followup_delegation(&turn.session, &delegation, "Follow-up child input.".into())
+        .unwrap();
+    for _ in 0..3 {
+        turn.state
+            .refresh_delegation_for_child_session(&child)
+            .unwrap();
+    }
+    let CodexRuntimeCommand::Prompt {
+        session_id,
+        command,
+    } = phase_sync::receive(&turn.receiver, "ordinary child followup")
+    else {
+        panic!("child followup");
+    };
     assert_eq!(session_id, child);
     assert!(command.prompt.contains("Follow-up child input."));
     turn.assert_no_prompt();
@@ -916,8 +1156,16 @@ fn ordinary_child_initial_and_followup_turns_survive_polling_without_control_aut
     let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
     assert_eq!(record.session.status, SessionStatus::Active);
     assert!(record.queued_prompts.is_empty());
-    assert_eq!(record.session.messages.iter().filter(|message| matches!(message,
-        Message::Text { text, .. } if text == "Follow-up child input.")).count(), 1);
+    assert_eq!(
+        record
+            .session
+            .messages
+            .iter()
+            .filter(|message| matches!(message,
+        Message::Text { text, .. } if text == "Follow-up child input."))
+            .count(),
+        1
+    );
     drop(inner);
     turn.assert_no_control();
 }
@@ -927,32 +1175,66 @@ fn passive_unknown_authorization_keeps_exact_root_and_child_bytes_cancelable_wit
     for child in [false, true] {
         let turn = OrdinaryRoot::new("ordinary-passive-authority-cancel");
         let session = if child {
-            let response = turn.state.create_read_only_delegation(&turn.session, CreateDelegationRequest {
-                prompt: "Ordinary child setup.".into(), title: None, cwd: None, agent: Some(Agent::Codex),
-                model: None, mode: Some(DelegationMode::Explorer), write_policy: Some(DelegationWritePolicy::ReadOnly),
-            }).unwrap();
+            let response = turn
+                .state
+                .create_read_only_delegation(
+                    &turn.session,
+                    CreateDelegationRequest {
+                        prompt: "Ordinary child setup.".into(),
+                        title: None,
+                        cwd: None,
+                        agent: Some(Agent::Codex),
+                        model: None,
+                        mode: Some(DelegationMode::Explorer),
+                        write_policy: Some(DelegationWritePolicy::ReadOnly),
+                    },
+                )
+                .unwrap();
             let child = response.delegation.child_session_id;
-            let CodexRuntimeCommand::Prompt { session_id, .. } = phase_sync::receive(&turn.receiver, "ordinary child setup") else { panic!("child prompt"); };
+            let CodexRuntimeCommand::Prompt { session_id, .. } =
+                phase_sync::receive(&turn.receiver, "ordinary child setup")
+            else {
+                panic!("child prompt");
+            };
             assert_eq!(session_id, child);
             let token = {
                 let inner = turn.state.inner.lock().unwrap();
-                inner.sessions[inner.find_session_index(&child).unwrap()].runtime.runtime_token().unwrap()
+                inner.sessions[inner.find_session_index(&child).unwrap()]
+                    .runtime
+                    .runtime_token()
+                    .unwrap()
             };
-            turn.state.finish_turn_ok_if_runtime_matches(&child, &token).unwrap();
+            turn.state
+                .finish_turn_ok_if_runtime_matches(&child, &token)
+                .unwrap();
             child
-        } else { turn.session.clone() };
+        } else {
+            turn.session.clone()
+        };
         let (id, expected) = {
             let mut inner = turn.state.inner.lock().unwrap();
             let id = inner.next_message_id();
             let record = inner.session_mut(&session).unwrap();
             record.set_auto_dispatch_blocked(true);
-            queue_prompt_on_record_with_source(record, PendingPrompt {
-                engram_interrupted: false, is_engram_retained: false, attachments: Vec::new(),
-                id: id.clone(), timestamp: stamp_now(), text: "Original unknown provider attempt.".into(),
-                expanded_text: None, source: None,
-            }, Vec::new(), QueuedPromptSource::User);
+            queue_prompt_on_record_with_source(
+                record,
+                PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
+                    attachments: Vec::new(),
+                    id: id.clone(),
+                    timestamp: stamp_now(),
+                    text: "Original unknown provider attempt.".into(),
+                    expanded_text: None,
+                    source: None,
+                },
+                Vec::new(),
+                QueuedPromptSource::User,
+            );
             let row = record.queued_prompts.back_mut().unwrap();
-            row.engram_bind = Some(json!({"request":{"idempotency_key":"old-key"},"connection":{"session":"original"}}));
+            row.engram_bind = Some(
+                json!({"request":{"idempotency_key":"old-key"},"connection":{"session":"original"}}),
+            );
             row.engram_ordinary_handoff = true;
             row.promotion_disposition_known = false;
             let expected = serde_json::to_value(&*row).unwrap();
@@ -961,22 +1243,44 @@ fn passive_unknown_authorization_keeps_exact_root_and_child_bytes_cancelable_wit
         };
         {
             let mut inner = turn.state.inner.lock().unwrap();
-            inner.projects.iter_mut().find(|project| project.id == turn.project).unwrap()
-                .engram.as_mut().unwrap().binary_path = Some("changed-work-service".into());
+            inner
+                .projects
+                .iter_mut()
+                .find(|project| project.id == turn.project)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap()
+                .binary_path = Some("changed-work-service".into());
             turn.state.commit_locked(&mut inner).unwrap();
         }
-        if child { turn.state.refresh_delegation_for_child_session(&session).unwrap(); }
+        if child {
+            turn.state
+                .refresh_delegation_for_child_session(&session)
+                .unwrap();
+        }
         turn.state.resume_session_queue(&session).unwrap();
         let inner = turn.state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), expected);
-        assert!(ordinary_queue_position(record).is_none(), "no old grant may become an executor");
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+            expected
+        );
+        assert!(
+            ordinary_queue_position(record).is_none(),
+            "no old grant may become an executor"
+        );
         drop(inner);
         turn.assert_no_prompt();
         turn.assert_no_control();
         turn.state.cancel_queued_prompt(&session, &id).unwrap();
         let inner = turn.state.inner.lock().unwrap();
-        assert!(!inner.sessions[inner.find_session_index(&session).unwrap()].queued_prompts.iter().any(|row| row.pending_prompt.id == id));
+        assert!(
+            !inner.sessions[inner.find_session_index(&session).unwrap()]
+                .queued_prompts
+                .iter()
+                .any(|row| row.pending_prompt.id == id)
+        );
     }
 }
 
@@ -984,35 +1288,72 @@ fn passive_unknown_authorization_keeps_exact_root_and_child_bytes_cancelable_wit
 fn prepared_mailbox_history_deduplicates_equal_boundary_and_keeps_a_newer_wake_separate() {
     for newer in [false, true] {
         let mut turn = OrdinaryRoot::new("ordinary-mailbox-retained-boundary");
-        let coordination = resolve_coordination_persistence_path(turn.state.persistence_path.as_ref());
+        let coordination =
+            resolve_coordination_persistence_path(turn.state.persistence_path.as_ref());
         turn.state.mailbox_store = Arc::new(MailboxStore::open(&coordination).unwrap());
         let sender = test_session_id(&turn.state, Agent::Claude);
         turn.edit(|record| record.session.status = SessionStatus::Active);
-        let send = |key: &str| turn.state.append_mailbox_message_and_notify(&sender, SendMailboxMessageRequest {
-            target_session_id: turn.session.clone(), message: key.into(), idempotency_key: key.into(),
-            topic: None, state_stamp: None, class: Some("routine".into()),
-        }).unwrap();
+        let send = |key: &str| {
+            turn.state
+                .append_mailbox_message_and_notify(
+                    &sender,
+                    SendMailboxMessageRequest {
+                        target_session_id: turn.session.clone(),
+                        message: key.into(),
+                        idempotency_key: key.into(),
+                        topic: None,
+                        state_stamp: None,
+                        class: Some("routine".into()),
+                    },
+                )
+                .unwrap()
+        };
         send("ordinary-retained-one");
         turn.edit(|record| {
             record.session.status = SessionStatus::Idle;
-            record.queued_prompts[0].engram_evaluate = Some(json!({"historical":"original-mailbox-boundary"}));
+            record.queued_prompts[0].engram_evaluate =
+                Some(json!({"historical":"original-mailbox-boundary"}));
         });
-        let dispatch = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap().dispatch;
+        let dispatch = turn
+            .state
+            .start_next_queued_turn_off_lock(&turn.session, false, false)
+            .unwrap()
+            .unwrap()
+            .dispatch;
         let notification = dispatch.mailbox_notification().unwrap().clone();
         let before = turn.record(|record| serde_json::to_value(&record.queued_prompts[0]).unwrap());
         for _ in 0..2 {
-            turn.state.requeue_rejected_mailbox_notification(&notification).unwrap();
+            turn.state
+                .requeue_rejected_mailbox_notification(&notification)
+                .unwrap();
             turn.record(|record| {
                 assert_eq!(record.queued_prompts.len(), 1);
-                assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before);
+                assert_eq!(
+                    serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+                    before
+                );
             });
         }
         if newer {
             send("ordinary-retained-two");
             turn.record(|record| {
                 assert_eq!(record.queued_prompts.len(), 2);
-                assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before);
-                assert!(record.queued_prompts[1].pending_prompt.source.as_ref().unwrap().mailbox.as_ref().unwrap().sequence > notification.through_sequence);
+                assert_eq!(
+                    serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+                    before
+                );
+                assert!(
+                    record.queued_prompts[1]
+                        .pending_prompt
+                        .source
+                        .as_ref()
+                        .unwrap()
+                        .mailbox
+                        .as_ref()
+                        .unwrap()
+                        .sequence
+                        > notification.through_sequence
+                );
             });
         }
         // Sending the original dispatch completes its original boundary only.
@@ -1020,11 +1361,16 @@ fn prepared_mailbox_history_deduplicates_equal_boundary_and_keeps_a_newer_wake_s
         turn.prompt();
         turn.assert_no_prompt();
         turn.record(|record| {
-            assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), before);
+            assert_eq!(
+                serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+                before
+            );
             assert_eq!(record.queued_prompts.len(), 1 + usize::from(newer));
         });
         let token = turn.record(|record| record.runtime.runtime_token().unwrap());
-        turn.state.finish_turn_ok_if_runtime_matches(&turn.session, &token).unwrap();
+        turn.state
+            .finish_turn_ok_if_runtime_matches(&turn.session, &token)
+            .unwrap();
         if newer {
             let command = turn.prompt();
             assert!(command.prompt.contains(&notification.mailbox_id));
@@ -1080,7 +1426,7 @@ async fn a_stop_retirement_is_in_the_ordinary_post_shutdown_delta() {
             match request {
                 PersistRequest::Fence(fence) => fence.finish(Ok(())),
                 PersistRequest::Shutdown => break,
-                _ => {},
+                _ => {}
             }
         }
     });
@@ -1090,14 +1436,25 @@ async fn a_stop_retirement_is_in_the_ordinary_post_shutdown_delta() {
         let mut inner = state.inner.lock().unwrap();
         let record = inner.session_mut(&session).unwrap();
         let id = record.queued_prompts[0].pending_prompt.id.clone();
-        record.prompt_deliveries.insert(id.clone(), PromptDelivery {
-            federation_operation: None, federation_handoff_started: false,
-            disposition: PromptDeliveryDisposition::HandingOff, attempt: 1,
-            write_ahead: "ordinary-write-ahead".into(), sequence: 1, message_id: None,
-            turn_generation: Some(turn_generation), attempt_key: None, reason: None,
-            entry: None, write_ahead_acknowledged: true, resume: None,
-            runtime_write: PromptRuntimeWrite::Untracked,
-        });
+        record.prompt_deliveries.insert(
+            id.clone(),
+            PromptDelivery {
+                federation_operation: None,
+                federation_handoff_started: false,
+                disposition: PromptDeliveryDisposition::HandingOff,
+                attempt: 1,
+                write_ahead: "ordinary-write-ahead".into(),
+                sequence: 1,
+                message_id: None,
+                turn_generation: Some(turn_generation),
+                attempt_key: None,
+                reason: None,
+                entry: None,
+                write_ahead_acknowledged: true,
+                resume: None,
+                runtime_write: PromptRuntimeWrite::Untracked,
+            },
+        );
         id
     };
     let (runtime, receiver) = test_acp_runtime_handle(AcpAgent::OpenCode, "ordinary-stop-delta");
@@ -1112,8 +1469,13 @@ async fn a_stop_retirement_is_in_the_ordinary_post_shutdown_delta() {
             let (active_lock, settled) = &*lifecycle;
             let mut active = active_lock.lock().unwrap();
             held_tx.send(()).unwrap();
-            assert!(matches!(receiver.recv_timeout(phase_sync::DEADLOCK_GUARD), Ok(AcpRuntimeCommand::Cancel)),
-                "the real Stop cancels its runtime before retirement");
+            assert!(
+                matches!(
+                    receiver.recv_timeout(phase_sync::DEADLOCK_GUARD),
+                    Ok(AcpRuntimeCommand::Cancel)
+                ),
+                "the real Stop cancels its runtime before retirement"
+            );
             *watermark.lock().unwrap() = Some(observed.inner.lock().unwrap().last_mutation_stamp);
             *active = false;
             settled.notify_all();
@@ -1125,17 +1487,38 @@ async fn a_stop_retirement_is_in_the_ordinary_post_shutdown_delta() {
         inner.session_mut(&session).unwrap().runtime = SessionRuntime::Acp(runtime);
     }
     let options = StopSessionOptions::default();
-    let (_, claim) = state.begin_requested_stop_session(&session, &options).unwrap();
+    let (_, claim) = state
+        .begin_requested_stop_session(&session, &options)
+        .unwrap();
     let claim = claim.expect("Stop owns the actual runtime");
-    state.stop_local_session_with_options(&session, options, Some(claim)).unwrap();
+    state
+        .stop_local_session_with_options(&session, options, Some(claim))
+        .unwrap();
     watcher.join().unwrap();
-    let watermark = watermark.lock().unwrap().expect("shutdown recorded the delta watermark");
+    let watermark = watermark
+        .lock()
+        .unwrap()
+        .expect("shutdown recorded the delta watermark");
     let delta = collect_persist_delta_from_shared_state(&state.inner, watermark);
-    let selected = delta.changed_sessions.into_iter().find(|record| record.session.id == session)
+    let selected = delta
+        .changed_sessions
+        .into_iter()
+        .find(|record| record.session.id == session)
         .expect("the retirement image is selected after shutdown");
-    assert!(!selected.queued_prompts.iter().any(|row| row.pending_prompt.id == prompt_id));
-    assert_eq!(selected.prompt_deliveries[&prompt_id].disposition, PromptDeliveryDisposition::Rejected);
-    assert_eq!(selected.prompt_deliveries[&prompt_id].turn_generation, Some(turn_generation));
+    assert!(
+        !selected
+            .queued_prompts
+            .iter()
+            .any(|row| row.pending_prompt.id == prompt_id)
+    );
+    assert_eq!(
+        selected.prompt_deliveries[&prompt_id].disposition,
+        PromptDeliveryDisposition::Rejected
+    );
+    assert_eq!(
+        selected.prompt_deliveries[&prompt_id].turn_generation,
+        Some(turn_generation)
+    );
     drop(dispatch);
     turn.assert_no_prompt();
     turn.assert_no_control();

@@ -145,9 +145,18 @@ fn summary_wording_alone_never_yields_an_actionable_finding() {
 fn a_summary_that_counts_findings_yields_the_inconsistency_note() {
     for (summary, declared) in [
         ("Found one High-severity issue.", Some("High")),
-        ("Found one low-severity issue; no high-risk areas remain.", Some("High")),
-        ("Fixed one High-severity issue found earlier, but it remains open.", Some("High")),
-        ("Review found, after inspection, one High-severity issue.", Some("High")),
+        (
+            "Found one low-severity issue; no high-risk areas remain.",
+            Some("High"),
+        ),
+        (
+            "Fixed one High-severity issue found earlier, but it remains open.",
+            Some("High"),
+        ),
+        (
+            "Review found, after inspection, one High-severity issue.",
+            Some("High"),
+        ),
         ("Criterion 2 passes, but two issues remain.", None),
         ("3878 passed, but one regression was found.", None),
         ("Found one fail-open issue.", None),
@@ -166,8 +175,14 @@ fn a_summary_that_counts_findings_yields_the_inconsistency_note() {
         );
         let notes = inconsistency_notes(&parsed);
         assert_eq!(notes.len(), 1, "summary {summary:?}: {:?}", parsed.notes);
-        assert!(notes[0].contains("Findings section says None"), "summary {summary:?}");
-        assert!(notes[0].contains("Read the full output"), "summary {summary:?}");
+        assert!(
+            notes[0].contains("Findings section says None"),
+            "summary {summary:?}"
+        );
+        assert!(
+            notes[0].contains("Read the full output"),
+            "summary {summary:?}"
+        );
         match declared {
             Some(severity) => assert!(
                 notes[0].contains(&format!("declared severity: {severity}")),
@@ -197,7 +212,9 @@ fn contradiction_note_names_the_highest_severity_in_either_order() {
             for summary in [
                 format!("Found one {first}-severity issue. Found one {second}-severity issue."),
                 format!("Found one {first}-severity issue and one {second}-severity issue."),
-                format!("Found two issues: one {first}-severity issue, one {second}-severity issue."),
+                format!(
+                    "Found two issues: one {first}-severity issue, one {second}-severity issue."
+                ),
                 format!("Found one {first} issue, and one {second} issue."),
                 format!("Found one {first}-severity issue, one {second}-severity issue."),
                 format!("Found one {first}-severity issue; one {second}-severity issue."),
@@ -233,10 +250,20 @@ fn whole_sentence_diagnostics_keep_the_highest_attached_word_in_mixed_prose() {
         for (summary, expected) in [
             (format!("Found one Low-severity issue. {other}"), "Low"),
             (format!("{other} Found one Low-severity issue."), "Low"),
-            (format!("Found one Low-severity issue, {}.", other.trim_end_matches('.')),
-                if attached { "Critical" } else { "Low" }),
-            (format!("{}, found one Low-severity issue.", other.trim_end_matches('.')),
-                if attached { "Critical" } else { "Low" }),
+            (
+                format!(
+                    "Found one Low-severity issue, {}.",
+                    other.trim_end_matches('.')
+                ),
+                if attached { "Critical" } else { "Low" },
+            ),
+            (
+                format!(
+                    "{}, found one Low-severity issue.",
+                    other.trim_end_matches('.')
+                ),
+                if attached { "Critical" } else { "Low" },
+            ),
         ] {
             let parsed = parse_delegation_result_packet(&packet_with_summary(&summary))
                 .expect("a contradictory packet should parse");
@@ -282,13 +309,28 @@ fn ambiguous_prose_keeps_a_visible_diagnostic_without_inventing_a_finding() {
     for (summary, severity) in [
         // A possibility of resolution is not a definite resolution.
         ("Found one High-severity issue, possibly fixed.", "High"),
-        ("Found one High-severity issue and one Low-severity issue, now fixed.", "High"),
-        ("Fixed one Low-severity issue, found one Critical-severity issue.", "Critical"),
-        ("Fixed one Critical-severity issue, found one Low-severity issue.", "Critical"),
+        (
+            "Found one High-severity issue and one Low-severity issue, now fixed.",
+            "High",
+        ),
+        (
+            "Fixed one Low-severity issue, found one Critical-severity issue.",
+            "Critical",
+        ),
+        (
+            "Fixed one Critical-severity issue, found one Low-severity issue.",
+            "Critical",
+        ),
         // A non-clean joined sentence keeps its highest attached severity;
         // a negative comma clause cannot silence the entire sentence.
-        ("Did not find one Critical issue, one Low issue remains.", "Critical"),
-        ("Found not only one Low-severity issue but also one Critical-severity issue.", "Critical"),
+        (
+            "Did not find one Critical issue, one Low issue remains.",
+            "Critical",
+        ),
+        (
+            "Found not only one Low-severity issue but also one Critical-severity issue.",
+            "Critical",
+        ),
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary))
             .expect("an ambiguous packet should parse");
@@ -306,16 +348,40 @@ fn ambiguous_prose_keeps_a_visible_diagnostic_without_inventing_a_finding() {
 #[test]
 fn separate_discoveries_and_unrelated_negation_keep_the_diagnostic_visible() {
     for (summary, severity) in [
-        ("Fixed one issue, found one High-severity issue.", Some("High")),
-        ("Fixed one Low-severity issue, found one new issue.", Some("Low")),
-        ("Found one High-severity issue that the patch has not fixed.", Some("High")),
-        ("Found one High-severity issue in the dispatcher; the earlier parser race was fixed.", Some("High")),
-        ("Not ready to land: found one High-severity issue.", Some("High")),
+        (
+            "Fixed one issue, found one High-severity issue.",
+            Some("High"),
+        ),
+        (
+            "Fixed one Low-severity issue, found one new issue.",
+            Some("Low"),
+        ),
+        (
+            "Found one High-severity issue that the patch has not fixed.",
+            Some("High"),
+        ),
+        (
+            "Found one High-severity issue in the dispatcher; the earlier parser race was fixed.",
+            Some("High"),
+        ),
+        (
+            "Not ready to land: found one High-severity issue.",
+            Some("High"),
+        ),
         ("Found without doubt one High-severity issue.", Some("High")),
         ("Found in parser.rs one High-severity issue.", Some("High")),
-        ("Found in version 1.2 one High-severity issue.", Some("High")),
-        ("Found one High-severity issue that was never resolved.", Some("High")),
-        ("Found one High-severity issue that has not been addressed.", Some("High")),
+        (
+            "Found in version 1.2 one High-severity issue.",
+            Some("High"),
+        ),
+        (
+            "Found one High-severity issue that was never resolved.",
+            Some("High"),
+        ),
+        (
+            "Found one High-severity issue that has not been addressed.",
+            Some("High"),
+        ),
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary))
             .expect("a contradictory packet should parse");
@@ -366,11 +432,20 @@ fn explicit_suppress_list_keeps_clear_negated_resolved_and_clean_summaries_empty
 fn novel_phrasing_defaults_to_a_visible_note_without_a_count_or_discovery_verb() {
     for (summary, severity) in [
         ("A High issue awaits triage.", "High"),
-        ("Dispatcher manifests a Critical-severity fault.", "Critical"),
-        ("Low issue catalogued; a Critical-severity condition materializes.", "Critical"),
+        (
+            "Dispatcher manifests a Critical-severity fault.",
+            "Critical",
+        ),
+        (
+            "Low issue catalogued; a Critical-severity condition materializes.",
+            "Critical",
+        ),
         // A modal may describe impact rather than resolution. An extra note is
         // the accepted error direction; it never invents a structured finding.
-        ("Fixed one High-severity issue that may have caused crashes.", "High"),
+        (
+            "Fixed one High-severity issue that may have caused crashes.",
+            "High",
+        ),
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary))
             .expect("an unfamiliar summary should parse");
@@ -389,14 +464,35 @@ fn novel_phrasing_defaults_to_a_visible_note_without_a_count_or_discovery_verb()
 fn negated_or_unrelated_resolution_and_partial_clean_clauses_remain_visible() {
     for (summary, severity) in [
         ("Have not fixed the High-severity issue.", "High"),
-        ("Previously fixed code contains a High-severity issue.", "High"),
-        ("Fixed the tests but introduced one High-severity regression.", "High"),
-        ("Addressed the earlier comments and one Critical race now blocks landing.", "Critical"),
+        (
+            "Previously fixed code contains a High-severity issue.",
+            "High",
+        ),
+        (
+            "Fixed the tests but introduced one High-severity regression.",
+            "High",
+        ),
+        (
+            "Addressed the earlier comments and one Critical race now blocks landing.",
+            "Critical",
+        ),
         ("Fixed X but there is one High-severity issue.", "High"),
-        ("One High-severity issue remains but everything else is clean.", "High"),
-        ("One High-severity issue remains but the rest is clean.", "High"),
-        ("One High-severity issue but otherwise the diff is clean.", "High"),
-        ("Fixed one Low issue and one Critical race now blocks landing.", "Critical"),
+        (
+            "One High-severity issue remains but everything else is clean.",
+            "High",
+        ),
+        (
+            "One High-severity issue remains but the rest is clean.",
+            "High",
+        ),
+        (
+            "One High-severity issue but otherwise the diff is clean.",
+            "High",
+        ),
+        (
+            "Fixed one Low issue and one Critical race now blocks landing.",
+            "Critical",
+        ),
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary))
             .expect("a contradictory packet should parse");
@@ -418,7 +514,10 @@ fn discovery_negation_distinguishes_the_review_from_a_third_party_that_missed_a_
         ("I did not detect one High-severity race.", None),
         ("We did not flag one Critical regression.", None),
         ("The review did not find one High-severity issue.", None),
-        ("The existing tests did not detect one High-severity race in the dispatcher.", Some("High")),
+        (
+            "The existing tests did not detect one High-severity race in the dispatcher.",
+            Some("High"),
+        ),
         ("CI did not flag one Critical regression.", Some("Critical")),
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary))
@@ -445,8 +544,14 @@ fn direct_resolution_synonyms_and_without_errors_keep_the_clean_controls_empty()
         "Ran 3 suites without errors.".to_owned(),
     ];
     for resolution in [
-        "addressed", "closed", "corrected", "eliminated",
-        "fixed", "removed", "repaired", "resolved",
+        "addressed",
+        "closed",
+        "corrected",
+        "eliminated",
+        "fixed",
+        "removed",
+        "repaired",
+        "resolved",
     ] {
         summaries.extend([
             format!("{resolution} one High-severity issue."),
@@ -470,20 +575,44 @@ fn direct_resolution_synonyms_and_without_errors_keep_the_clean_controls_empty()
 #[test]
 fn mixed_zero_and_positive_counts_remain_visible_under_the_sentence_contract() {
     for (summary, severity) in [
-        ("No Low issues — one Critical-severity race remains.", "Critical"),
-        ("No Low issues: one Critical-severity race remains.", "Critical"),
+        (
+            "No Low issues — one Critical-severity race remains.",
+            "Critical",
+        ),
+        (
+            "No Low issues: one Critical-severity race remains.",
+            "Critical",
+        ),
         // A non-clean joined table, like comma-joined prose, retains its
         // highest attached word. Only an entirely zero table is CLEAN.
         ("Found 0 Critical / 2 High issues.", "Critical"),
-        ("Found 0 Critical / 0 High / 2 Medium / 1 Low findings.", "Critical"),
+        (
+            "Found 0 Critical / 0 High / 2 Medium / 1 Low findings.",
+            "Critical",
+        ),
         ("Critical 0 | High 1 | Medium 0 issues", "Critical"),
         ("None of the High-severity issues were addressed.", "High"),
         ("None of the three High issues has been fixed.", "High"),
-        ("No Low issues and one Critical-severity issue remains.", "Critical"),
-        ("No Low issues and a Critical-severity race remains.", "Critical"),
-        ("No Low issues and Critical-severity race remains.", "Critical"),
-        ("Found zero Low issues but two High-severity races remain.", "High"),
-        ("No Low issues – one Critical-severity race remains.", "Critical"),
+        (
+            "No Low issues and one Critical-severity issue remains.",
+            "Critical",
+        ),
+        (
+            "No Low issues and a Critical-severity race remains.",
+            "Critical",
+        ),
+        (
+            "No Low issues and Critical-severity race remains.",
+            "Critical",
+        ),
+        (
+            "Found zero Low issues but two High-severity races remain.",
+            "High",
+        ),
+        (
+            "No Low issues – one Critical-severity race remains.",
+            "Critical",
+        ),
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary))
             .expect("a packet with separate severity mentions should parse");
@@ -501,14 +630,38 @@ fn mixed_zero_and_positive_counts_remain_visible_under_the_sentence_contract() {
 #[test]
 fn negated_discovery_does_not_hide_a_different_object_or_unresolved_mention() {
     for (summary, severity) in [
-        ("Did not find one Low issue although one Critical-severity race remains.", "Critical"),
-        ("Did not find new issues and the earlier High-severity race remains open.", "High"),
-        ("Did not find a fix for one Critical regression.", "Critical"),
-        ("Could not find the root cause of one High-severity race.", "High"),
-        ("Did not find one Low issue: one Critical-severity race remains.", "Critical"),
-        ("Did not find one Low issue — one Critical-severity race remains.", "Critical"),
-        ("Did not find one Low issue / one Critical-severity race remains.", "Critical"),
-        ("Did not find one Low issue, but one Critical-severity race still blocks landing.", "Critical"),
+        (
+            "Did not find one Low issue although one Critical-severity race remains.",
+            "Critical",
+        ),
+        (
+            "Did not find new issues and the earlier High-severity race remains open.",
+            "High",
+        ),
+        (
+            "Did not find a fix for one Critical regression.",
+            "Critical",
+        ),
+        (
+            "Could not find the root cause of one High-severity race.",
+            "High",
+        ),
+        (
+            "Did not find one Low issue: one Critical-severity race remains.",
+            "Critical",
+        ),
+        (
+            "Did not find one Low issue — one Critical-severity race remains.",
+            "Critical",
+        ),
+        (
+            "Did not find one Low issue / one Critical-severity race remains.",
+            "Critical",
+        ),
+        (
+            "Did not find one Low issue, but one Critical-severity race still blocks landing.",
+            "Critical",
+        ),
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary))
             .expect("a packet with an unresolved mention should parse");
@@ -560,63 +713,169 @@ fn negative_mentions_keep_their_own_count_and_direct_object_controls_clean() {
 fn closed_sentence_classes_cover_every_negative_scope_review_witness() {
     use DelegationSummarySentenceClass::{Clean, Positive, Unresolved};
     for (summary, class, severity) in [
-        ("Found 0 Low issues and a Critical-severity race.", Unresolved, Some("Critical")),
-        ("Found 0 Critical / 2 High issues.", Unresolved, Some("Critical")),
-        ("Found 0 Critical / 0 High / 2 Medium / 1 Low findings.", Unresolved, Some("Critical")),
-        ("Critical 0 | High 1 | Medium 0 issues", Unresolved, Some("Critical")),
-        ("No Low issues and a High-severity race.", Unresolved, Some("High")),
-        ("No Low issues and the High-severity race found.", Unresolved, Some("High")),
-        ("The patch is not without a High-severity issue.", Unresolved, Some("High")),
-        ("Addressed none of the High-severity issues.", Unresolved, Some("High")),
-        ("Addressed none of the High issues.", Unresolved, Some("High")),
-        ("Fixed none of the three High issues.", Unresolved, Some("High")),
-        ("The patch fixes none of the Critical races.", Unresolved, Some("Critical")),
-        ("CI caught none of the Critical regressions.", Unresolved, Some("Critical")),
-        ("Tests cover none of the High-severity races.", Unresolved, Some("High")),
+        (
+            "Found 0 Low issues and a Critical-severity race.",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "Found 0 Critical / 2 High issues.",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "Found 0 Critical / 0 High / 2 Medium / 1 Low findings.",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "Critical 0 | High 1 | Medium 0 issues",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "No Low issues and a High-severity race.",
+            Unresolved,
+            Some("High"),
+        ),
+        (
+            "No Low issues and the High-severity race found.",
+            Unresolved,
+            Some("High"),
+        ),
+        (
+            "The patch is not without a High-severity issue.",
+            Unresolved,
+            Some("High"),
+        ),
+        (
+            "Addressed none of the High-severity issues.",
+            Unresolved,
+            Some("High"),
+        ),
+        (
+            "Addressed none of the High issues.",
+            Unresolved,
+            Some("High"),
+        ),
+        (
+            "Fixed none of the three High issues.",
+            Unresolved,
+            Some("High"),
+        ),
+        (
+            "The patch fixes none of the Critical races.",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "CI caught none of the Critical regressions.",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "Tests cover none of the High-severity races.",
+            Unresolved,
+            Some("High"),
+        ),
         ("Fixed no High-severity issues.", Unresolved, Some("High")),
-        ("After upgrading to 2.0 High-severity regressions remain.", Unresolved, Some("High")),
-        ("Found in version 2.0 a High-severity issue.", Unresolved, Some("High")),
+        (
+            "After upgrading to 2.0 High-severity regressions remain.",
+            Unresolved,
+            Some("High"),
+        ),
+        (
+            "Found in version 2.0 a High-severity issue.",
+            Unresolved,
+            Some("High"),
+        ),
         ("Found none of the High-severity issues.", Clean, None),
         ("Found none of the High issues.", Clean, None),
         ("Found none of the three High issues.", Clean, None),
         ("Without a High-severity issue.", Clean, None),
         ("Without High-severity issues.", Clean, None),
-        ("Found 0 Low issues and no Critical-severity race.", Clean, None),
+        (
+            "Found 0 Low issues and no Critical-severity race.",
+            Clean,
+            None,
+        ),
         // An unfamiliar version-prefixed negative is deliberately UNRESOLVED,
         // rather than a new prefix/polarity exception to the closed templates.
         ("Version 2.0 has no High issues.", Unresolved, Some("High")),
-        ("No High-severity issues found in the parser.", Unresolved, Some("High")),
+        (
+            "No High-severity issues found in the parser.",
+            Unresolved,
+            Some("High"),
+        ),
         ("No issues found in 3 files.", Unresolved, None),
         ("Found no issues in 2 files.", Unresolved, None),
-        ("CI is green; did not flag one Critical regression.", Unresolved, Some("Critical")),
-        ("CI is green, did not flag one Critical regression.", Unresolved, Some("Critical")),
-        ("CI is green: did not flag one Critical regression.", Unresolved, Some("Critical")),
-        ("Found one High-severity fail-open condition.", Positive, Some("High")),
-        ("Identified two Medium-severity issues.", Positive, Some("Medium")),
+        (
+            "CI is green; did not flag one Critical regression.",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "CI is green, did not flag one Critical regression.",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "CI is green: did not flag one Critical regression.",
+            Unresolved,
+            Some("Critical"),
+        ),
+        (
+            "Found one High-severity fail-open condition.",
+            Positive,
+            Some("High"),
+        ),
+        (
+            "Identified two Medium-severity issues.",
+            Positive,
+            Some("Medium"),
+        ),
         ("Detected one Low-severity race.", Positive, Some("Low")),
         ("FOUND ONE HIGH–SEVERITY ISSUE.", Positive, Some("High")),
-        ("A High—severity issue awaits triage.", Unresolved, Some("High")),
+        (
+            "A High—severity issue awaits triage.",
+            Unresolved,
+            Some("High"),
+        ),
         ("No High–severity issues.", Clean, None),
         ("Found one High.", Positive, Some("High")),
         ("One High.", Unresolved, Some("High")),
         ("Found two High conditions.", Positive, Some("High")),
-        ("A High-severity item awaits triage.", Unresolved, Some("High")),
+        (
+            "A High-severity item awaits triage.",
+            Unresolved,
+            Some("High"),
+        ),
     ] {
         let sentences = delegation_result_note_sentences(summary);
         assert_eq!(sentences.len(), 1, "summary {summary:?}");
         let owned = delegation_result_note_words(sentences[0]);
         let words = owned.iter().map(String::as_str).collect::<Vec<_>>();
-        assert_eq!(delegation_result_classify_summary_sentence(&words), class, "{summary:?}");
+        assert_eq!(
+            delegation_result_classify_summary_sentence(&words),
+            class,
+            "{summary:?}"
+        );
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary))
             .expect("a classified packet should parse");
         assert!(parsed.findings.is_empty(), "summary {summary:?}");
         let notes = inconsistency_notes(&parsed);
-        assert_eq!(notes.len(), usize::from(class != Clean), "{summary:?}: {:?}", parsed.notes);
+        assert_eq!(
+            notes.len(),
+            usize::from(class != Clean),
+            "{summary:?}: {:?}",
+            parsed.notes
+        );
         if class != Clean {
             if let Some(severity) = severity {
                 assert!(
                     notes[0].contains(&format!("declared severity: {severity}")),
-                    "summary {summary:?}: {}", notes[0]
+                    "summary {summary:?}: {}",
+                    notes[0]
                 );
             } else {
                 assert!(!notes[0].contains("declared severity"), "{}", notes[0]);
@@ -639,7 +898,10 @@ fn closed_clean_templates_consume_the_whole_sentence_and_their_item_lists() {
         ("Did not find one Low issue and one Critical issue.", Clean),
         ("We did not detect one Critical issue.", Clean),
         ("High-severity issue was not found.", Clean),
-        ("Found and resolved one High issue and one Low issue.", Clean),
+        (
+            "Found and resolved one High issue and one Low issue.",
+            Clean,
+        ),
         ("Resolved one High issue and one Low issue.", Clean),
         ("Fixed one High issue found earlier.", Clean),
         ("One High-severity issue has been fixed.", Clean),
@@ -651,29 +913,59 @@ fn closed_clean_templates_consume_the_whole_sentence_and_their_item_lists() {
         ("All 3906 tests passed without failures.", Clean),
         ("Ran 3 suites without errors.", Clean),
         ("No Low issues and a High-severity race.", Unresolved),
-        ("No Low issues and the High-severity race found.", Unresolved),
-        ("Did not find a fix for one Critical regression.", Unresolved),
-        ("Could not find the root cause of one High-severity race.", Unresolved),
-        ("One High-severity issue remains but the rest is clean.", Unresolved),
+        (
+            "No Low issues and the High-severity race found.",
+            Unresolved,
+        ),
+        (
+            "Did not find a fix for one Critical regression.",
+            Unresolved,
+        ),
+        (
+            "Could not find the root cause of one High-severity race.",
+            Unresolved,
+        ),
+        (
+            "One High-severity issue remains but the rest is clean.",
+            Unresolved,
+        ),
         ("Have not fixed the High-severity issue.", Unresolved),
-        ("Previously fixed code contains a High-severity issue.", Unresolved),
-        ("Found one High issue and one Low issue, now fixed.", Unresolved),
+        (
+            "Previously fixed code contains a High-severity issue.",
+            Unresolved,
+        ),
+        (
+            "Found one High issue and one Low issue, now fixed.",
+            Unresolved,
+        ),
     ] {
         let sentences = delegation_result_note_sentences(summary);
         assert_eq!(sentences.len(), 1, "{summary:?}");
         let owned = delegation_result_note_words(sentences[0]);
         let words = owned.iter().map(String::as_str).collect::<Vec<_>>();
-        assert_eq!(delegation_result_classify_summary_sentence(&words), class, "{summary:?}");
+        assert_eq!(
+            delegation_result_classify_summary_sentence(&words),
+            class,
+            "{summary:?}"
+        );
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary)).unwrap();
         assert!(parsed.findings.is_empty(), "{summary:?}");
         assert_eq!(
-            inconsistency_notes(&parsed).is_empty(), class == Clean,
-            "summary {summary:?}: {:?}", parsed.notes
+            inconsistency_notes(&parsed).is_empty(),
+            class == Clean,
+            "summary {summary:?}: {:?}",
+            parsed.notes
         );
     }
     for resolution in [
-        "addressed", "closed", "corrected", "eliminated", "fixed", "removed",
-        "repaired", "resolved",
+        "addressed",
+        "closed",
+        "corrected",
+        "eliminated",
+        "fixed",
+        "removed",
+        "repaired",
+        "resolved",
     ] {
         for summary in [
             format!("Found one High issue and one Low issue, now {resolution}."),
@@ -695,7 +987,8 @@ fn closed_clean_templates_consume_the_whole_sentence_and_their_item_lists() {
         let owned = delegation_result_note_words(sentences[0]);
         let words = owned.iter().map(String::as_str).collect::<Vec<_>>();
         assert_eq!(
-            delegation_result_classify_summary_sentence(&words), Unresolved,
+            delegation_result_classify_summary_sentence(&words),
+            Unresolved,
             "{summary:?}"
         );
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary)).unwrap();
@@ -704,7 +997,8 @@ fn closed_clean_templates_consume_the_whole_sentence_and_their_item_lists() {
         assert_eq!(notes.len(), 1, "{summary:?}: {:?}", parsed.notes);
         assert!(
             notes[0].contains("declared severity: High"),
-            "{summary:?}: {}", notes[0]
+            "{summary:?}: {}",
+            notes[0]
         );
     }
 }
@@ -717,7 +1011,11 @@ fn unlabelled_actionable_and_severity_adjectives_keep_the_base_diagnostic() {
         "Found a high-impact race.",
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary)).unwrap();
-        assert!(parsed.findings.is_empty(), "{summary:?}: {:?}", parsed.findings);
+        assert!(
+            parsed.findings.is_empty(),
+            "{summary:?}: {:?}",
+            parsed.findings
+        );
         let notes = inconsistency_notes(&parsed);
         assert_eq!(notes.len(), 1, "{summary:?}: {:?}", parsed.notes);
         assert!(!notes[0].contains("declared severity:"), "{summary:?}");
@@ -1034,44 +1332,153 @@ fn base_summary_diagnostic_parity_has_only_named_exceptions() {
     ];
     // Each exception names the numbered CLEAN rule in the documented contract.
     let clean_exceptions = [
-        ("Did not find one Critical issue", "CLEAN 2: closed reviewer negated-discovery head"),
-        ("Did not find even one Critical issue", "CLEAN 2: closed reviewer negated-discovery head"),
-        ("Did not find one Low issue", "CLEAN 2: closed reviewer negated-discovery head"),
-        ("Did not find one Low issue and one Critical issue", "CLEAN 2: closed head distributes over complete item list"),
-        ("Did not find even one High-severity issue", "CLEAN 2: closed reviewer negated-discovery head"),
-        ("Did not detect one High-severity race", "CLEAN 2: closed reviewer negated-discovery head"),
-        ("I did not detect one High-severity race", "CLEAN 2: explicit reviewer subject"),
-        ("We did not flag one Critical regression", "CLEAN 2: explicit reviewer subject"),
-        ("The review did not find one High-severity issue", "CLEAN 2: explicit reviewer subject"),
-        ("None of the three High issues were found", "CLEAN 1: own negative count plus terminal were found"),
-        ("Did not find even one Critical-severity race", "CLEAN 2: closed reviewer negated-discovery head"),
-        ("Did not find new issues and one High-severity race", "CLEAN 2: closed head distributes over complete item list"),
-        ("Could not find one High-severity race", "CLEAN 2: closed reviewer negated-discovery head"),
-        ("Did not find one Low issue and one Critical-severity race", "CLEAN 2: closed head distributes over complete item list"),
-        ("Found none of the three High issues", "CLEAN 1: closed discovery head and own negative count"),
-        ("We did not detect one Critical issue", "CLEAN 2: explicit reviewer subject"),
-        ("One High-severity issue was not found", "CLEAN 3: complete item plus was not found"),
-        ("One High-severity issue not found", "CLEAN 3: complete item plus not found"),
-        ("None of the High issues were found", "CLEAN 1: own negative item plus terminal were found"),
+        (
+            "Did not find one Critical issue",
+            "CLEAN 2: closed reviewer negated-discovery head",
+        ),
+        (
+            "Did not find even one Critical issue",
+            "CLEAN 2: closed reviewer negated-discovery head",
+        ),
+        (
+            "Did not find one Low issue",
+            "CLEAN 2: closed reviewer negated-discovery head",
+        ),
+        (
+            "Did not find one Low issue and one Critical issue",
+            "CLEAN 2: closed head distributes over complete item list",
+        ),
+        (
+            "Did not find even one High-severity issue",
+            "CLEAN 2: closed reviewer negated-discovery head",
+        ),
+        (
+            "Did not detect one High-severity race",
+            "CLEAN 2: closed reviewer negated-discovery head",
+        ),
+        (
+            "I did not detect one High-severity race",
+            "CLEAN 2: explicit reviewer subject",
+        ),
+        (
+            "We did not flag one Critical regression",
+            "CLEAN 2: explicit reviewer subject",
+        ),
+        (
+            "The review did not find one High-severity issue",
+            "CLEAN 2: explicit reviewer subject",
+        ),
+        (
+            "None of the three High issues were found",
+            "CLEAN 1: own negative count plus terminal were found",
+        ),
+        (
+            "Did not find even one Critical-severity race",
+            "CLEAN 2: closed reviewer negated-discovery head",
+        ),
+        (
+            "Did not find new issues and one High-severity race",
+            "CLEAN 2: closed head distributes over complete item list",
+        ),
+        (
+            "Could not find one High-severity race",
+            "CLEAN 2: closed reviewer negated-discovery head",
+        ),
+        (
+            "Did not find one Low issue and one Critical-severity race",
+            "CLEAN 2: closed head distributes over complete item list",
+        ),
+        (
+            "Found none of the three High issues",
+            "CLEAN 1: closed discovery head and own negative count",
+        ),
+        (
+            "We did not detect one Critical issue",
+            "CLEAN 2: explicit reviewer subject",
+        ),
+        (
+            "One High-severity issue was not found",
+            "CLEAN 3: complete item plus was not found",
+        ),
+        (
+            "One High-severity issue not found",
+            "CLEAN 3: complete item plus not found",
+        ),
+        (
+            "None of the High issues were found",
+            "CLEAN 1: own negative item plus terminal were found",
+        ),
         ("0 High issues", "CLEAN 1: own zero count and complete item"),
-        ("High-severity issue not found", "CLEAN 3: complete item plus not found"),
-        ("None of the High-severity issues were found", "CLEAN 1: own negative item plus terminal were found"),
-        ("High-severity race was not found", "CLEAN 3: complete item plus was not found"),
-        ("Found none of the High-severity issues", "CLEAN 1: discovery head plus own negative item"),
-        ("Found none of the High issues", "CLEAN 1: discovery head plus own negative item"),
-        ("High-severity issue was not found", "CLEAN 3: complete item plus was not found"),
-        ("One High-severity issue is clean", "CLEAN 7: complete item subject is clean"),
-        ("Found 0 Critical / 0 High issues", "CLEAN 1: every table item owns zero"),
-        ("Found 0 Critical / 0 High / 0 Medium / 0 Low findings", "CLEAN 1: every table item owns zero"),
-        ("Critical 0 | High 0 | Medium 0 issues", "CLEAN 1: every inverse table item owns zero"),
-        ("Found 0 Low issues and no Critical-severity race", "CLEAN 1: every item owns its negative"),
-        ("Found and resolved one High-severity issue and one Low-severity issue", "CLEAN 4: discovery-and-resolution head distributes over complete list"),
-        ("Found and resolved one High issue and one Low issue", "CLEAN 4: discovery-and-resolution head distributes over complete list"),
-        ("Resolved one High issue and one Low issue", "CLEAN 4: resolution head distributes over complete list"),
-        ("Resolved one Critical issue and one Low issue", "CLEAN 4: resolution head distributes over complete list"),
-        ("Found and resolved one Critical issue and one Low issue", "CLEAN 4: discovery-and-resolution head distributes over complete list"),
+        (
+            "High-severity issue not found",
+            "CLEAN 3: complete item plus not found",
+        ),
+        (
+            "None of the High-severity issues were found",
+            "CLEAN 1: own negative item plus terminal were found",
+        ),
+        (
+            "High-severity race was not found",
+            "CLEAN 3: complete item plus was not found",
+        ),
+        (
+            "Found none of the High-severity issues",
+            "CLEAN 1: discovery head plus own negative item",
+        ),
+        (
+            "Found none of the High issues",
+            "CLEAN 1: discovery head plus own negative item",
+        ),
+        (
+            "High-severity issue was not found",
+            "CLEAN 3: complete item plus was not found",
+        ),
+        (
+            "One High-severity issue is clean",
+            "CLEAN 7: complete item subject is clean",
+        ),
+        (
+            "Found 0 Critical / 0 High issues",
+            "CLEAN 1: every table item owns zero",
+        ),
+        (
+            "Found 0 Critical / 0 High / 0 Medium / 0 Low findings",
+            "CLEAN 1: every table item owns zero",
+        ),
+        (
+            "Critical 0 | High 0 | Medium 0 issues",
+            "CLEAN 1: every inverse table item owns zero",
+        ),
+        (
+            "Found 0 Low issues and no Critical-severity race",
+            "CLEAN 1: every item owns its negative",
+        ),
+        (
+            "Found and resolved one High-severity issue and one Low-severity issue",
+            "CLEAN 4: discovery-and-resolution head distributes over complete list",
+        ),
+        (
+            "Found and resolved one High issue and one Low issue",
+            "CLEAN 4: discovery-and-resolution head distributes over complete list",
+        ),
+        (
+            "Resolved one High issue and one Low issue",
+            "CLEAN 4: resolution head distributes over complete list",
+        ),
+        (
+            "Resolved one Critical issue and one Low issue",
+            "CLEAN 4: resolution head distributes over complete list",
+        ),
+        (
+            "Found and resolved one Critical issue and one Low issue",
+            "CLEAN 4: discovery-and-resolution head distributes over complete list",
+        ),
     ];
-    assert_eq!(corpus.len(), 297, "the retained corpus and three adjective cases");
+    assert_eq!(
+        corpus.len(),
+        297,
+        "the retained corpus and three adjective cases"
+    );
     let mut compared = 0;
     let mut base_visible = 0;
     let mut used_exceptions = std::collections::HashSet::new();
@@ -1080,15 +1487,23 @@ fn base_summary_diagnostic_parity_has_only_named_exceptions() {
         let base_note = base_8e438fbf::contradiction_note(summary);
         base_visible += usize::from(base_note.is_some());
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary)).unwrap();
-        assert!(parsed.findings.is_empty(), "{summary:?}: {:?}", parsed.findings);
+        assert!(
+            parsed.findings.is_empty(),
+            "{summary:?}: {:?}",
+            parsed.findings
+        );
         let notes = inconsistency_notes(&parsed);
         assert!(notes.len() <= 1, "{summary:?}: {:?}", parsed.notes);
         let normalized = summary.trim_end_matches(['.', '!', '?']).trim();
-        if let Some((_, rule)) = clean_exceptions.iter().find(|(text, _)| *text == normalized) {
+        if let Some((_, rule)) = clean_exceptions
+            .iter()
+            .find(|(text, _)| *text == normalized)
+        {
             assert!(base_note.is_some(), "unused {rule} exception {summary:?}");
             assert!(
                 notes.is_empty(),
-                "explicit {rule} exception {summary:?}: {:?}", parsed.notes
+                "explicit {rule} exception {summary:?}: {:?}",
+                parsed.notes
             );
             used_exceptions.insert(normalized);
             continue;
@@ -1098,19 +1513,28 @@ fn base_summary_diagnostic_parity_has_only_named_exceptions() {
             continue;
         }
         let rank = |severity: &str| match severity {
-            "Low" => 1, "Medium" => 2, "High" => 3, "Critical" => 4, _ => 0,
+            "Low" => 1,
+            "Medium" => 2,
+            "High" => 3,
+            "Critical" => 4,
+            _ => 0,
         };
-        let declared = ["Low", "Medium", "High", "Critical"].into_iter()
-            .find(|severity| notes.iter().any(|note| {
-                note.contains(&format!("declared severity: {severity}"))
-            }));
+        let declared = ["Low", "Medium", "High", "Critical"]
+            .into_iter()
+            .find(|severity| {
+                notes
+                    .iter()
+                    .any(|note| note.contains(&format!("declared severity: {severity}")))
+            });
         let actual_note = actual_note.unwrap_or_else(|| {
             panic!("base visibility was lost outside a named CLEAN exception: {summary:?}")
         });
         let reason = if base_note.is_some() {
             // Named exception: HighestAttachedSeverity. C2 and the whole-sentence
             // rank contract allow only an increased label, with all text retained.
-            let base_rank = base_8e438fbf::reported_severity(summary).map(rank).unwrap_or(0);
+            let base_rank = base_8e438fbf::reported_severity(summary)
+                .map(rank)
+                .unwrap_or(0);
             assert!(
                 declared.map(rank).unwrap_or(0) > base_rank,
                 "HighestAttachedSeverity must strictly promote base rank for {summary:?}"
@@ -1123,7 +1547,8 @@ fn base_summary_diagnostic_parity_has_only_named_exceptions() {
         };
         if let Some(severity) = declared {
             assert!(
-                summary.split(|character: char| !character.is_ascii_alphanumeric())
+                summary
+                    .split(|character: char| !character.is_ascii_alphanumeric())
                     .any(|word| word.eq_ignore_ascii_case(severity)),
                 "{reason} cannot invent a severity word: {summary:?}"
             );
@@ -1134,8 +1559,14 @@ fn base_summary_diagnostic_parity_has_only_named_exceptions() {
             "{reason}; complete note wording/excerpt must match for {summary:?}"
         );
     }
-    assert_eq!(compared, 297, "visibility/text parity considers every candidate");
-    assert!(base_visible > 0, "the frozen visibility oracle must be nonvacuous");
+    assert_eq!(
+        compared, 297,
+        "visibility/text parity considers every candidate"
+    );
+    assert!(
+        base_visible > 0,
+        "the frozen visibility oracle must be nonvacuous"
+    );
     for (summary, rule) in clean_exceptions {
         assert!(
             used_exceptions.contains(summary),
@@ -1180,21 +1611,18 @@ mod base_8e438fbf {
         value.to_owned()
     }
 
-    fn delegation_result_summary_reports_findings(
-        summary: &str,
-        reading: Reading,
-    ) -> bool {
+    fn delegation_result_summary_reports_findings(summary: &str, reading: Reading) -> bool {
         let (owned_tokens, clauses) = delegation_result_summary_tokens(summary, reading);
         let tokens = owned_tokens.iter().map(String::as_str).collect::<Vec<_>>();
         if delegation_result_summary_reported_severity(&tokens, &clauses, reading).is_some() {
             return true;
         }
-    
+
         tokens.iter().enumerate().any(|(index, token)| {
             if !delegation_result_token_is_finding_noun(token) {
                 return false;
             }
-    
+
             let context_start = index.saturating_sub(4);
             let context_end = (index + 5).min(tokens.len());
             let before = &tokens[context_start..index];
@@ -1205,7 +1633,7 @@ mod base_8e438fbf {
             {
                 return false;
             }
-    
+
             let context = before.iter().chain(after.iter());
             let reports_resolution = context.clone().any(|token| {
                 matches!(
@@ -1236,11 +1664,13 @@ mod base_8e438fbf {
             if reports_resolution && !reports_unresolved_work {
                 return false;
             }
-    
+
             (context_start..context_end)
                 .filter(|position| *position != index)
                 .any(|position| {
-                    delegation_result_token_counts_findings(&tokens, &clauses, position, index, reading)
+                    delegation_result_token_counts_findings(
+                        &tokens, &clauses, position, index, reading,
+                    )
                 })
                 || before.iter().any(|token| {
                     matches!(
@@ -1251,7 +1681,10 @@ mod base_8e438fbf {
         })
     }
     #[derive(Clone, Copy, PartialEq)]
-    enum Reading { AsBefore, ForNote }
+    enum Reading {
+        AsBefore,
+        ForNote,
+    }
 
     pub(super) fn reported_severity(summary: &str) -> Option<&'static str> {
         let (owned, clauses) = delegation_result_summary_tokens(summary, Reading::ForNote);
@@ -1276,9 +1709,7 @@ mod base_8e438fbf {
                 tokens.push(std::mem::take(&mut current));
                 clauses.push(clause);
             }
-            if reading == Reading::ForNote
-                && matches!(character, ',' | ';' | '.' | '!' | '?')
-            {
+            if reading == Reading::ForNote && matches!(character, ',' | ';' | '.' | '!' | '?') {
                 clause += 1;
             }
         }
@@ -1313,7 +1744,7 @@ mod base_8e438fbf {
                 if !is_finding_severity {
                     return None;
                 }
-    
+
                 let count_start = severity_index.saturating_sub(4);
                 let count_end = (severity_index + 5).min(tokens.len());
                 if !(count_start..count_end).any(|position| {
@@ -1327,7 +1758,7 @@ mod base_8e438fbf {
                 }) {
                     return None;
                 }
-    
+
                 let context_start = severity_index.saturating_sub(7);
                 let context_end = (severity_index + 8).min(tokens.len());
                 let context = &tokens[context_start..context_end];
@@ -1376,7 +1807,7 @@ mod base_8e438fbf {
                             | "unresolved"
                     )
                 });
-    
+
                 (reports_discovery && (!reports_resolution || reports_unresolved_work))
                     .then_some(severity)
             })
@@ -1507,7 +1938,8 @@ fn one_punctuation_separator_keeps_the_severity_label_attached() {
             assert_eq!(notes.len(), 1, "{summary:?}: {:?}", parsed.notes);
             assert!(
                 notes[0].contains("declared severity: High"),
-                "{summary:?}: {}", notes[0]
+                "{summary:?}: {}",
+                notes[0]
             );
         }
     }
@@ -1530,8 +1962,9 @@ fn one_punctuation_separator_keeps_the_severity_label_attached() {
         assert!(notes[0].contains("declared severity: High"), "{summary:?}");
     }
     let parsed = parse_delegation_result_packet(&packet_with_summary(
-        "Found one module with High : complexity."
-    )).unwrap();
+        "Found one module with High : complexity.",
+    ))
+    .unwrap();
     assert!(parsed.findings.is_empty());
     assert!(inconsistency_notes(&parsed).is_empty());
     for (text, expected) in [
@@ -1548,29 +1981,65 @@ fn one_punctuation_separator_keeps_the_severity_label_attached() {
 fn trailing_resolution_requires_one_complete_item_and_an_affirmative_marker() {
     use DelegationSummarySentenceClass::{Clean, Unresolved};
     for (summary, expected) in [
-        ("Found one Critical issue, one Low issue fixed.", Some("Critical")),
-        ("Found one Critical-severity issue and one Low-severity issue fixed.", Some("Critical")),
-        ("Found one Critical issue, one Low issue now fixed.", Some("Critical")),
-        ("One Critical issue, one Low issue removed.", Some("Critical")),
-        ("We found one Critical issue and one Low issue was fixed.", Some("Critical")),
-        ("Found one Critical issue and one Low issue, now fixed.", Some("Critical")),
-        ("One Critical issue and one Low issue both were fixed.", Some("Critical")),
-        ("One Critical issue and one Low issue, all of them are now resolved.", Some("Critical")),
+        (
+            "Found one Critical issue, one Low issue fixed.",
+            Some("Critical"),
+        ),
+        (
+            "Found one Critical-severity issue and one Low-severity issue fixed.",
+            Some("Critical"),
+        ),
+        (
+            "Found one Critical issue, one Low issue now fixed.",
+            Some("Critical"),
+        ),
+        (
+            "One Critical issue, one Low issue removed.",
+            Some("Critical"),
+        ),
+        (
+            "We found one Critical issue and one Low issue was fixed.",
+            Some("Critical"),
+        ),
+        (
+            "Found one Critical issue and one Low issue, now fixed.",
+            Some("Critical"),
+        ),
+        (
+            "One Critical issue and one Low issue both were fixed.",
+            Some("Critical"),
+        ),
+        (
+            "One Critical issue and one Low issue, all of them are now resolved.",
+            Some("Critical"),
+        ),
         ("One Critical issue was fixed.", None),
         ("Found one Critical issue has been fixed.", None),
         ("One Critical issue, now fixed.", None),
         ("One Critical issue since fixed.", None),
         ("Resolved one Critical issue and one Low issue.", None),
-        ("Found and resolved one Critical issue and one Low issue.", None),
+        (
+            "Found and resolved one Critical issue and one Low issue.",
+            None,
+        ),
     ] {
         check(summary, expected);
     }
     for resolution in [
-        "addressed", "closed", "corrected", "eliminated", "fixed", "removed",
-        "repaired", "resolved",
+        "addressed",
+        "closed",
+        "corrected",
+        "eliminated",
+        "fixed",
+        "removed",
+        "repaired",
+        "resolved",
     ] {
         check(&format!("One Critical issue was {resolution}."), None);
-        check(&format!("One Critical issue {resolution}."), Some("Critical"));
+        check(
+            &format!("One Critical issue {resolution}."),
+            Some("Critical"),
+        );
         check(
             &format!("Found one Critical issue and one Low issue was {resolution}."),
             Some("Critical"),
@@ -1584,7 +2053,11 @@ fn trailing_resolution_requires_one_complete_item_and_an_affirmative_marker() {
         let words = owned.iter().map(String::as_str).collect::<Vec<_>>();
         assert_eq!(
             delegation_result_classify_summary_sentence(&words),
-            if expected.is_some() { Unresolved } else { Clean },
+            if expected.is_some() {
+                Unresolved
+            } else {
+                Clean
+            },
             "{summary:?}"
         );
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary)).unwrap();
@@ -1594,7 +2067,8 @@ fn trailing_resolution_requires_one_complete_item_and_an_affirmative_marker() {
             assert_eq!(notes.len(), 1, "{summary:?}: {:?}", parsed.notes);
             assert!(
                 notes[0].contains(&format!("declared severity: {severity}")),
-                "{summary:?}: {}", notes[0]
+                "{summary:?}: {}",
+                notes[0]
             );
         } else {
             assert!(notes.is_empty(), "{summary:?}: {:?}", parsed.notes);
@@ -1609,8 +2083,14 @@ fn sentence_separation_controls_the_intentional_mixed_severity_diagnostic() {
         ("Found one Low issue. Found no Critical issues.", "Low"),
         ("Fixed one Critical issue, found one Low issue.", "Critical"),
         ("Fixed one Critical issue. Found one Low issue.", "Low"),
-        ("Did not find one Critical issue, one Low issue remains.", "Critical"),
-        ("Did not find one Critical issue. One Low issue remains.", "Low"),
+        (
+            "Did not find one Critical issue, one Low issue remains.",
+            "Critical",
+        ),
+        (
+            "Did not find one Critical issue. One Low issue remains.",
+            "Low",
+        ),
     ] {
         let parsed = parse_delegation_result_packet(&packet_with_summary(summary)).unwrap();
         assert!(parsed.findings.is_empty(), "{summary:?}");
@@ -1618,7 +2098,8 @@ fn sentence_separation_controls_the_intentional_mixed_severity_diagnostic() {
         assert_eq!(notes.len(), 1, "{summary:?}");
         assert!(
             notes[0].contains(&format!("declared severity: {severity}")),
-            "summary {summary:?}: {}", notes[0]
+            "summary {summary:?}: {}",
+            notes[0]
         );
     }
 }
@@ -1627,9 +2108,8 @@ fn sentence_separation_controls_the_intentional_mixed_severity_diagnostic() {
 fn mixed_summary_severities_do_not_relabel_explicit_or_recovered_findings() {
     let summary = "Found one Low-severity issue. Found one Critical-severity issue.";
     let finding = "- **[High]** `src/parser.rs:7` - Preserve the structured finding.";
-    let explicit = format!(
-        "## Result\n\nStatus: completed\n\nSummary:\n{summary}\n\nFindings:\n{finding}"
-    );
+    let explicit =
+        format!("## Result\n\nStatus: completed\n\nSummary:\n{summary}\n\nFindings:\n{finding}");
     let recovered = format!(
         "# Code Review\n\n## Actionable\n{finding}\n\n{}",
         packet_with_summary(summary)
@@ -1687,14 +2167,21 @@ Findings:\n\
             ));
         }
     }
-    assert!(failures.is_empty(), "clean packets:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "clean packets:\n{}",
+        failures.join("\n")
+    );
 }
 
 /// The note repeats only the start of a long summary, ending in an ellipsis,
 /// and points to the full output for the rest.
 #[test]
 fn the_inconsistency_note_repeats_only_the_start_of_a_long_summary() {
-    let summary = format!("Found one High-severity issue. {}", "Context words. ".repeat(200));
+    let summary = format!(
+        "Found one High-severity issue. {}",
+        "Context words. ".repeat(200)
+    );
     let parsed = parse_delegation_result_packet(&packet_with_summary(&summary))
         .expect("a contradictory packet should parse");
 
@@ -1703,8 +2190,10 @@ fn the_inconsistency_note_repeats_only_the_start_of_a_long_summary() {
     let (_, excerpt) = notes[0]
         .split_once("Summary: ")
         .expect("the note should repeat the summary");
-    assert!(excerpt.starts_with("Found one High-severity issue."), "{excerpt}");
+    assert!(
+        excerpt.starts_with("Found one High-severity issue."),
+        "{excerpt}"
+    );
     assert!(excerpt.ends_with('\u{2026}'), "{excerpt}");
     assert_eq!(excerpt.chars().count(), 301, "{excerpt}");
 }
-

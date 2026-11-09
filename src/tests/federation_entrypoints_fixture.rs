@@ -104,7 +104,9 @@ impl Satellite {
             if let Some((_, body)) = line.split_once(prefix) {
                 return body.to_owned();
             }
-            if recent.len() == 8 { recent.pop_front(); }
+            if recent.len() == 8 {
+                recent.pop_front();
+            }
             recent.push_back(line.chars().take(512).collect::<String>());
         }
     }

@@ -9,7 +9,8 @@ fn ordinary_observation_public_delete_retains_on_lost_or_deferred_removal_ack() 
         let mut report = fixture.report();
         for envelope in &mut report.envelopes {
             envelope.delivery = EngramRuntimeObservationDelivery::LocalFailure {
-                code: "runtime_observation_retry_exhausted".into(), message: "unknown outcome".into(),
+                code: "runtime_observation_retry_exhausted".into(),
+                message: "unknown outcome".into(),
             };
         }
         fixture.retain(report.clone());
@@ -19,39 +20,83 @@ fn ordinary_observation_public_delete_retains_on_lost_or_deferred_removal_ack() 
         let id = fixture.id.clone();
         let deleting = std::thread::spawn(move || state.kill_session(&id));
         let fence = loop {
-            match rx.recv_timeout(DEADLOCK_GUARD).expect("public Delete must issue its removal fence") {
+            match rx
+                .recv_timeout(DEADLOCK_GUARD)
+                .expect("public Delete must issue its removal fence")
+            {
                 PersistRequest::Fence(fence) => break fence,
-                _ => {},
+                _ => {}
             }
         };
-        assert!(matches!(&fence.target, PersistFenceTarget::EngramObservationRemoval { .. }));
+        assert!(matches!(
+            &fence.target,
+            PersistFenceTarget::EngramObservationRemoval { .. }
+        ));
         let mut delta = collect_persist_delta_from_shared_state(&fixture.state.inner, 0);
-        assert!(delta.changed_sessions.iter().any(|record| record.session.id == fixture.id));
+        assert!(
+            delta
+                .changed_sessions
+                .iter()
+                .any(|record| record.session.id == fixture.id)
+        );
         if defer_row {
-            delta.changed_sessions.retain(|record| record.session.id != fixture.id);
+            delta
+                .changed_sessions
+                .retain(|record| record.session.id != fixture.id);
             delta.deferred_session_ids.push(fixture.id.clone());
         }
         let mut cache = SqlitePersistConnectionCache::new();
-        persist_delta_via_cache(&mut cache, fixture.state.persistence_path.as_ref(), &delta).unwrap();
-        assert_eq!(fence.target.is_already_durable(cache.connection.as_ref().unwrap()).unwrap(), !defer_row);
-        fence.finish(Err(PersistFenceError::WriteFailed("removal acknowledgement unavailable".into())));
-        let error = deleting.join().unwrap().err().expect("public Delete cannot use an unknown local acknowledgement");
+        persist_delta_via_cache(&mut cache, fixture.state.persistence_path.as_ref(), &delta)
+            .unwrap();
+        assert_eq!(
+            fence
+                .target
+                .is_already_durable(cache.connection.as_ref().unwrap())
+                .unwrap(),
+            !defer_row
+        );
+        fence.finish(Err(PersistFenceError::WriteFailed(
+            "removal acknowledgement unavailable".into(),
+        )));
+        let error = deleting
+            .join()
+            .unwrap()
+            .err()
+            .expect("public Delete cannot use an unknown local acknowledgement");
         assert!(error.message.contains("persistence is uncertain"));
         fixture.record(|record| {
-            assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
+            assert!(
+                record.engram.observation_delete_requested
+                    && record.orchestrator_auto_dispatch_blocked
+            );
             assert_eq!(record.engram.unadmitted_reports, vec![report]);
         });
-        assert!(fixture.state.inner.lock().unwrap().find_visible_session_index(&fixture.id).is_some());
+        assert!(
+            fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .find_visible_session_index(&fixture.id)
+                .is_some()
+        );
     }
 }
 
 fn observation_closing_job(fixture: &ObservationSession) -> EngramRuntimeClosingJob {
     let root = FsPath::new(&fixture.state.default_workdir);
-    EngramRuntimeClosingJob::new(observation_trace(), None, EngramRuntimeClosingScope {
-        binding: Some(observation_binding()), store: observation_store(root),
-        connection: observation_connection(root), historical_fields: BTreeMap::new(),
-        root: EngramNamedRootState::None, workdir: fixture.state.default_workdir.clone(),
-    })
+    EngramRuntimeClosingJob::new(
+        observation_trace(),
+        None,
+        EngramRuntimeClosingScope {
+            binding: Some(observation_binding()),
+            store: observation_store(root),
+            connection: observation_connection(root),
+            historical_fields: BTreeMap::new(),
+            root: EngramNamedRootState::None,
+            workdir: fixture.state.default_workdir.clone(),
+        },
+    )
 }
 
 #[test]
@@ -62,8 +107,14 @@ fn ordinary_observation_superseded_capture_cannot_overwrite_a_newer_closing_job(
     newer.attempts += 1;
     newer.policy = Some(observation_policy());
     fixture.record(|record| record.engram.unadmitted_closing_jobs.push(newer.clone()));
-    fixture.state.install_runtime_closing_result(&fixture.id, &old,
-        Ok(EngramRuntimeClosingOutcome::Report(fixture.report(), None))).unwrap();
+    fixture
+        .state
+        .install_runtime_closing_result(
+            &fixture.id,
+            &old,
+            Ok(EngramRuntimeClosingOutcome::Report(fixture.report(), None)),
+        )
+        .unwrap();
     fixture.record(|record| {
         assert_eq!(record.engram.unadmitted_closing_jobs, vec![newer]);
         assert!(record.engram.unadmitted_reports.is_empty());
@@ -83,11 +134,21 @@ fn ordinary_observation_delete_during_capture_transfers_custody_to_original_repo
             };
         }
         let root = FsPath::new(&fixture.state.default_workdir);
-        let report = EngramRuntimeObservationReport::prepare(&job.trace, capture,
-            observation_connection(root), observation_store(root),
-            "fixture-observer".into(), Duration::from_secs(1)).unwrap();
+        let report = EngramRuntimeObservationReport::prepare(
+            &job.trace,
+            capture,
+            observation_connection(root),
+            observation_store(root),
+            "fixture-observer".into(),
+            Duration::from_secs(1),
+        )
+        .unwrap();
         if source_free {
-            assert_eq!(report.envelopes.len(), 1, "the source-free report has no sighting");
+            assert_eq!(
+                report.envelopes.len(),
+                1,
+                "the source-free report has no sighting"
+            );
         }
         let mut successor = observation_trace();
         successor.host_turn_ref = "newer-active-turn".into();
@@ -100,17 +161,33 @@ fn ordinary_observation_delete_during_capture_transfers_custody_to_original_repo
             record.set_auto_dispatch_blocked(true);
         });
         let refusal = source_free.then_some(SourceBasisRefusal::UnsupportedGitlinks);
-        fixture.state.install_runtime_closing_result(&fixture.id, &job,
-            Ok(EngramRuntimeClosingOutcome::Report(report.clone(), refusal))).unwrap();
+        fixture
+            .state
+            .install_runtime_closing_result(
+                &fixture.id,
+                &job,
+                Ok(EngramRuntimeClosingOutcome::Report(report.clone(), refusal)),
+            )
+            .unwrap();
         fixture.record(|record| {
             assert!(record.engram.unadmitted_closing_jobs.is_empty());
             assert_eq!(record.engram.unadmitted_reports, vec![report]);
             assert_eq!(record.engram.unadmitted_active_turn, Some(successor));
-            assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
+            assert!(
+                record.engram.observation_delete_requested
+                    && record.orchestrator_auto_dispatch_blocked
+            );
             assert!(runtime_observation_has_removal_duty(record));
-            let notices = record.session.messages.iter().filter(|message| matches!(message,
+            let notices = record
+                .session
+                .messages
+                .iter()
+                .filter(|message| {
+                    matches!(message,
                 Message::Text { author: Author::System, text, .. }
-                    if text.contains("has no measured source"))).count();
+                    if text.contains("has no measured source"))
+                })
+                .count();
             assert_eq!(notices, usize::from(source_free));
         });
     }
@@ -127,9 +204,14 @@ fn ordinary_observation_late_receipt_preserves_delete_marker_and_successor() {
         record.session.preview = "Delete retained this session".into();
         record.engram.unadmitted_active_turn = Some(observation_trace());
     });
-    fixture.state.install_runtime_observation_result(&fixture.id, &report, recorded_report(&report), 0).unwrap();
+    fixture
+        .state
+        .install_runtime_observation_result(&fixture.id, &report, recorded_report(&report), 0)
+        .unwrap();
     fixture.record(|record| {
-        assert!(record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked);
+        assert!(
+            record.engram.observation_delete_requested && record.orchestrator_auto_dispatch_blocked
+        );
         assert!(record.engram.unadmitted_active_turn.is_some());
         assert_eq!(record.session.preview, "Delete retained this session");
         assert!(record.engram.runtime_checkpoint.is_none());
@@ -142,8 +224,14 @@ fn ordinary_observation_closing_failure_retains_original_scope_without_inventing
     let mut job = observation_closing_job(&fixture);
     job.attempts = ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS - 1;
     fixture.record(|record| record.engram.unadmitted_closing_jobs.push(job.clone()));
-    fixture.state.install_runtime_closing_result(&fixture.id, &job,
-        Err(EngramTransportError::transport("capture unavailable"))).unwrap();
+    fixture
+        .state
+        .install_runtime_closing_result(
+            &fixture.id,
+            &job,
+            Err(EngramTransportError::transport("capture unavailable")),
+        )
+        .unwrap();
     fixture.record(|record| {
         let failed = &record.engram.unadmitted_closing_jobs[0];
         assert_eq!(failed.scope, job.scope);
@@ -160,17 +248,39 @@ fn ordinary_observation_delayed_result_after_connection_replacement_uses_retaine
     let report = fixture.report();
     fixture.retain(report.clone());
     fixture.record(|record| {
-        record.engram.work_binding = Some(EngramControlWorkBinding { run_id: "successor-run".into(), ..observation_binding() });
+        record.engram.work_binding = Some(EngramControlWorkBinding {
+            run_id: "successor-run".into(),
+            ..observation_binding()
+        });
     });
     let transport = Arc::new(ObservationReplies::default());
-    transport.replies.lock().unwrap().push_back(Ok(observation_receipt(&report_observation(&report, 0), &report.observing_session)));
-    let adapter = observation_adapter(transport.clone(), FsPath::new(&fixture.state.default_workdir));
-    let next = deliver_runtime_observation_envelope(&adapter, &report, 0, Duration::from_secs(1)).unwrap();
-    fixture.state.install_runtime_observation_result(&fixture.id, &report, next, 0).unwrap();
+    transport
+        .replies
+        .lock()
+        .unwrap()
+        .push_back(Ok(observation_receipt(
+            &report_observation(&report, 0),
+            &report.observing_session,
+        )));
+    let adapter = observation_adapter(
+        transport.clone(),
+        FsPath::new(&fixture.state.default_workdir),
+    );
+    let next =
+        deliver_runtime_observation_envelope(&adapter, &report, 0, Duration::from_secs(1)).unwrap();
+    fixture
+        .state
+        .install_runtime_observation_result(&fixture.id, &report, next, 0)
+        .unwrap();
     let sent = transport.sent.lock().unwrap();
     assert_eq!(sent[0].0, report.connection);
     assert_eq!(sent[0].1, report.envelopes[0].request);
-    fixture.record(|record| assert_eq!(record.engram.work_binding.as_ref().unwrap().run_id, "successor-run"));
+    fixture.record(|record| {
+        assert_eq!(
+            record.engram.work_binding.as_ref().unwrap().run_id,
+            "successor-run"
+        )
+    });
 }
 
 #[test]
@@ -186,27 +296,46 @@ fn ordinary_observation_delete_ack_requires_commit_receipt_and_current_owner() {
         fixture.state.persist_tx = tx;
         let state = fixture.state.clone();
         let id = fixture.id.clone();
-        let task = std::thread::spawn(move || state.confirm_source_observation_removal_durable(&id));
+        let task =
+            std::thread::spawn(move || state.confirm_source_observation_removal_durable(&id));
         let fence = loop {
-            match rx.recv_timeout(DEADLOCK_GUARD).expect("removal must issue a bounded persistence fence") {
+            match rx
+                .recv_timeout(DEADLOCK_GUARD)
+                .expect("removal must issue a bounded persistence fence")
+            {
                 PersistRequest::Fence(fence) => break fence,
-                _ => {},
+                _ => {}
             }
         };
-        assert!(matches!(&fence.target, PersistFenceTarget::EngramObservationRemoval { .. }));
+        assert!(matches!(
+            &fence.target,
+            PersistFenceTarget::EngramObservationRemoval { .. }
+        ));
         let delta = collect_persist_delta_from_shared_state(&fixture.state.inner, 0);
         let mut cache = SqlitePersistConnectionCache::new();
-        persist_delta_via_cache(&mut cache, fixture.state.persistence_path.as_ref(), &delta).unwrap();
-        assert!(fence.target.is_already_durable(cache.connection.as_ref().unwrap()).unwrap());
+        persist_delta_via_cache(&mut cache, fixture.state.persistence_path.as_ref(), &delta)
+            .unwrap();
+        assert!(
+            fence
+                .target
+                .is_already_durable(cache.connection.as_ref().unwrap())
+                .unwrap()
+        );
         if race == "lost_ack" {
-            fence.finish(Err(PersistFenceError::WriteFailed("commit acknowledgement lost".into())));
+            fence.finish(Err(PersistFenceError::WriteFailed(
+                "commit acknowledgement lost".into(),
+            )));
         } else if race == "owner_changed" {
             fixture.record(|record| record.engram.unadmitted_reports[0].version += 1);
             fence.finish(Ok(()));
         } else {
             fence.finish(Ok(()));
         }
-        assert_eq!(task.join().unwrap().is_ok(), race == "success", "wrong disposition for {race}");
+        assert_eq!(
+            task.join().unwrap().is_ok(),
+            race == "success",
+            "wrong disposition for {race}"
+        );
         fixture.record(|record| {
             assert!(record.engram.observation_delete_requested);
             assert!(record.orchestrator_auto_dispatch_blocked);
@@ -223,9 +352,18 @@ fn ordinary_observation_retired_process_cannot_install_delayed_capture_or_receip
     fixture.retain(report.clone());
     fixture.record(|record| record.engram.unadmitted_closing_jobs.push(job.clone()));
     fixture.state.runtime_observation_lifetime.stop_and_join();
-    fixture.state.install_runtime_observation_result(&fixture.id, &report, recorded_report(&report), 0).unwrap();
-    fixture.state.install_runtime_closing_result(&fixture.id, &job,
-        Ok(EngramRuntimeClosingOutcome::Report(report.clone(), None))).unwrap();
+    fixture
+        .state
+        .install_runtime_observation_result(&fixture.id, &report, recorded_report(&report), 0)
+        .unwrap();
+    fixture
+        .state
+        .install_runtime_closing_result(
+            &fixture.id,
+            &job,
+            Ok(EngramRuntimeClosingOutcome::Report(report.clone(), None)),
+        )
+        .unwrap();
     fixture.record(|record| {
         assert_eq!(record.engram.unadmitted_reports, vec![report]);
         assert_eq!(record.engram.unadmitted_closing_jobs, vec![job]);

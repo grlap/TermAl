@@ -73,12 +73,19 @@ fn a_read_only_codex_child_gets_the_read_only_sandbox_and_its_app_server_profile
 fn a_fresh_codex_worker_uses_the_filtered_profile_without_changing_permissions() {
     let mut inner = StateInner::new();
     let mut child = inner.create_session(
-        Agent::Codex, Some("Worker".to_owned()), "/tmp".to_owned(), None, None,
+        Agent::Codex,
+        Some("Worker".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
     );
     configure_delegation_child_prompt_settings(
-        &mut child, DelegationMode::Worker,
+        &mut child,
+        DelegationMode::Worker,
         &DelegationWritePolicy::IsolatedWorktree {
-            owned_paths: vec!["src".to_owned()], base: None, worktree_path: None,
+            owned_paths: vec!["src".to_owned()],
+            base: None,
+            worktree_path: None,
         },
     );
     // The real creation path sets this before starting the child's first turn.
@@ -90,19 +97,38 @@ fn a_fresh_codex_worker_uses_the_filtered_profile_without_changing_permissions()
     };
     assert_eq!(child.shared_codex_profile(), expected);
     assert_eq!(child.codex_sandbox_mode, CodexSandboxMode::WorkspaceWrite);
-    assert_eq!(child.session.sandbox_mode, Some(CodexSandboxMode::WorkspaceWrite));
-    assert_eq!(child.codex_approval_policy, CodexApprovalPolicy::AutoApprove);
-    assert_eq!(child.session.approval_policy, Some(CodexApprovalPolicy::AutoApprove));
+    assert_eq!(
+        child.session.sandbox_mode,
+        Some(CodexSandboxMode::WorkspaceWrite)
+    );
+    assert_eq!(
+        child.codex_approval_policy,
+        CodexApprovalPolicy::AutoApprove
+    );
+    assert_eq!(
+        child.session.approval_policy,
+        Some(CodexApprovalPolicy::AutoApprove)
+    );
     child.session.status = SessionStatus::Active;
-    assert_eq!(child.codex_sandbox_change_refusal(CodexSandboxMode::ReadOnly).is_some(), cfg!(windows),
-        "a first turn cannot change the app-server it may be creating its thread on");
+    assert_eq!(
+        child
+            .codex_sandbox_change_refusal(CodexSandboxMode::ReadOnly)
+            .is_some(),
+        cfg!(windows),
+        "a first turn cannot change the app-server it may be creating its thread on"
+    );
     child.session.status = SessionStatus::Idle;
 
     child.attach_to_shared_codex_profile(child.shared_codex_profile());
     set_record_external_session_id(&mut child, Some("worker-thread".to_owned()));
-    let reloaded = PersistedSessionRecord::from_record(&child).into_record().unwrap();
+    let reloaded = PersistedSessionRecord::from_record(&child)
+        .into_record()
+        .unwrap();
     assert_eq!(reloaded.shared_codex_profile(), expected);
-    assert_eq!(reloaded.codex_sandbox_mode, CodexSandboxMode::WorkspaceWrite);
+    assert_eq!(
+        reloaded.codex_sandbox_mode,
+        CodexSandboxMode::WorkspaceWrite
+    );
 }
 
 #[test]
@@ -120,7 +146,10 @@ fn an_existing_worker_keeps_its_home_and_a_root_keeps_its_default_profile() {
     for pinned in [None, Some(SharedCodexProfile::Default)] {
         root.codex_thread_profile = pinned;
         assert_eq!(root.shared_codex_profile(), SharedCodexProfile::Default);
-        assert!(root.codex_sandbox_change_refusal(CodexSandboxMode::WorkspaceWrite).is_none());
+        assert!(
+            root.codex_sandbox_change_refusal(CodexSandboxMode::WorkspaceWrite)
+                .is_none()
+        );
     }
     root.codex_sandbox_mode = CodexSandboxMode::DangerFullAccess;
     let refusal = root.codex_sandbox_change_refusal(CodexSandboxMode::WorkspaceWrite);
@@ -139,16 +168,34 @@ fn a_worker_profile_exit_leaves_reviewer_and_root_processes_running() {
         let (runtime, _, _) = test_shared_codex_runtime(runtime_id);
         *state.shared_codex_runtime_slot(profile).lock().unwrap() = Some(runtime);
     }
-    assert_eq!(state.shared_codex_profile_holding("isolated-worker"),
-        Some(SharedCodexProfile::WorkspaceWriteSandbox));
-    assert!(state.shared_codex_stdout_silence_if_matches("isolated-worker").is_some());
-    state.handle_shared_codex_runtime_exit("isolated-worker", None).unwrap();
-    assert!(state.running_shared_codex_runtime(SharedCodexProfile::WorkspaceWriteSandbox).is_none());
+    assert_eq!(
+        state.shared_codex_profile_holding("isolated-worker"),
+        Some(SharedCodexProfile::WorkspaceWriteSandbox)
+    );
+    assert!(
+        state
+            .shared_codex_stdout_silence_if_matches("isolated-worker")
+            .is_some()
+    );
+    state
+        .handle_shared_codex_runtime_exit("isolated-worker", None)
+        .unwrap();
+    assert!(
+        state
+            .running_shared_codex_runtime(SharedCodexProfile::WorkspaceWriteSandbox)
+            .is_none()
+    );
     for (profile, expected) in [
         (SharedCodexProfile::Default, "isolated-root"),
         (SharedCodexProfile::ReadOnlySandbox, "isolated-reviewer"),
     ] {
-        assert_eq!(state.running_shared_codex_runtime(profile).unwrap().runtime_id, expected);
+        assert_eq!(
+            state
+                .running_shared_codex_runtime(profile)
+                .unwrap()
+                .runtime_id,
+            expected
+        );
     }
 }
 

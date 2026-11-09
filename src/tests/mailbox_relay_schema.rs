@@ -11,12 +11,18 @@ fn historical(connection: &rusqlite::Connection, version: &str) {
             .execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)
             .unwrap();
     }
-    if matches!(version, "3" | "4" | "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1") {
+    if matches!(
+        version,
+        "3" | "4" | "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1"
+    ) {
         connection
             .execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL)
             .unwrap();
     }
-    if matches!(version, "4" | "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1") {
+    if matches!(
+        version,
+        "4" | "5" | "5-mailbox-relay-1" | "6-executor-outcomes-1"
+    ) {
         connection
             .execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)
             .unwrap();
@@ -30,7 +36,9 @@ fn historical(connection: &rusqlite::Connection, version: &str) {
         initialize_mailbox_relay_schema(connection).unwrap();
     }
     if version == "6-executor-outcomes-1" {
-        connection.execute_batch(FEDERATION_EXECUTOR_OUTCOMES_SCHEMA_SQL).unwrap();
+        connection
+            .execute_batch(FEDERATION_EXECUTOR_OUTCOMES_SCHEMA_SQL)
+            .unwrap();
     }
     connection
         .execute(
@@ -225,30 +233,64 @@ fn mailbox_relay_schema_partial_unknown_or_malformed_target_is_not_repaired() {
 #[test]
 fn executor_outcome_floor_upgrades_the_relay_floor_and_refuses_unknown_futures() {
     let connection = rusqlite::Connection::open_in_memory().unwrap();
-    connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
-    connection.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL).unwrap();
-    connection.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL).unwrap();
-    connection.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL).unwrap();
-    connection.execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL).unwrap();
+    connection
+        .execute_batch(COORDINATION_SCHEMA_V1_SQL)
+        .unwrap();
+    connection
+        .execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)
+        .unwrap();
+    connection
+        .execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL)
+        .unwrap();
+    connection
+        .execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)
+        .unwrap();
+    connection
+        .execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL)
+        .unwrap();
     initialize_mailbox_relay_schema(&connection).unwrap();
-    connection.execute("INSERT INTO meta VALUES('coordination_schema_version','5-mailbox-relay-1')", []).unwrap();
+    connection
+        .execute(
+            "INSERT INTO meta VALUES('coordination_schema_version','5-mailbox-relay-1')",
+            [],
+        )
+        .unwrap();
     validate_coordination_schema_version(&connection, "5-mailbox-relay-1").unwrap();
     let identity = mailbox_relay_store_id(&connection).unwrap();
     ensure_sqlite_coordination_schema(&connection).unwrap();
     assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION);
-    assert_eq!(mailbox_relay_store_id(&connection).unwrap(), identity, "the relay store identity is kept");
+    assert_eq!(
+        mailbox_relay_store_id(&connection).unwrap(),
+        identity,
+        "the relay store identity is kept"
+    );
     assert_eq!(connection.query_row(
         "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='federation_executor_outcomes'",
         [], |row| row.get::<_, u64>(0)).unwrap(), 1);
     ensure_sqlite_coordination_schema(&connection).unwrap();
-    assert_eq!(version(&connection), COORDINATION_SQLITE_SCHEMA_VERSION, "reopening the current floor is a no-op");
+    assert_eq!(
+        version(&connection),
+        COORDINATION_SQLITE_SCHEMA_VERSION,
+        "reopening the current floor is a no-op"
+    );
 
     for future in ["7", "6", "6-executor-outcomes-2", "7-direct-prompt-1"] {
-        assert!(expected_coordination_schema_objects_for_version(future).is_err(), "{future}");
+        assert!(
+            expected_coordination_schema_objects_for_version(future).is_err(),
+            "{future}"
+        );
     }
-    connection.execute("UPDATE meta SET value='7-direct-prompt-1' WHERE key='coordination_schema_version'", []).unwrap();
+    connection
+        .execute(
+            "UPDATE meta SET value='7-direct-prompt-1' WHERE key='coordination_schema_version'",
+            [],
+        )
+        .unwrap();
     let refused = ensure_sqlite_coordination_schema(&connection).unwrap_err();
-    assert!(format!("{refused:#}").contains("unsupported coordination database schema"), "{refused:#}");
+    assert!(
+        format!("{refused:#}").contains("unsupported coordination database schema"),
+        "{refused:#}"
+    );
 }
 
 #[test]
@@ -262,7 +304,12 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
     let body = "x".repeat(128 * 1024);
     let rows = 512;
     let transaction = connection.transaction().unwrap();
-    transaction.execute("INSERT INTO mailboxes VALUES('fixture-mailbox','fixture-pair','then',513)", []).unwrap();
+    transaction
+        .execute(
+            "INSERT INTO mailboxes VALUES('fixture-mailbox','fixture-pair','then',513)",
+            [],
+        )
+        .unwrap();
     for index in 0..rows {
         transaction.execute(
             "INSERT INTO mailbox_messages VALUES(?1,'fixture-mailbox',?2,'fixture-child','Child',
@@ -279,30 +326,86 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
     // includes existing schema admission and its one-time index construction.
     let started = std::time::Instant::now();
     let reopened = bootstrap_coordination_database(&path).unwrap();
-    eprintln!("REVIEW_CUSTODY_INDEX_COST rows={rows} body_bytes={} store_bytes={size} boot_upgrade_us={}",
-        body.len(), started.elapsed().as_micros());
+    eprintln!(
+        "REVIEW_CUSTODY_INDEX_COST rows={rows} body_bytes={} store_bytes={size} boot_upgrade_us={}",
+        body.len(),
+        started.elapsed().as_micros()
+    );
     assert_eq!(mailbox_relay_store_id(&reopened).unwrap(), identity);
     assert_eq!(version(&reopened), COORDINATION_SQLITE_SCHEMA_VERSION);
     let after = coordination_schema_objects(&reopened).unwrap();
-    let added = after.iter().filter(|object| !before.contains(object)).collect::<Vec<_>>();
-    assert_eq!(added.iter().map(|object| object.name.as_str()).collect::<BTreeSet<_>>(),
-        BTreeSet::from(["mailbox_messages_topic_key_sender", "remote_prompt_intents",
-            "remote_prompt_receives", "remote_prompt_intents_identity_immutable",
-            "remote_prompt_receives_identity_immutable"]));
-    assert!(before.iter().all(|object| after.contains(object)), "step six objects stay frozen");
-    assert_eq!(reopened.query_row("SELECT COUNT(*), SUM(length(body)) FROM mailbox_messages", [],
-        |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?))).unwrap(), (512, 512 * body.len() as u64));
-    let mut statement = reopened.prepare(&format!("EXPLAIN QUERY PLAN {REVIEW_CUSTODY_KEYS_WITHOUT_CHILD_SQL}")).unwrap();
-    let plan = statement.query_map(rusqlite::params![Option::<String>::None,
-        review_slot_prefix("fixture-delegation"), format!("{REVIEW_ATTEMPT_KEY_PREFIX}-fixture-delegation."),
-        REVIEW_ATTEMPT_TOPIC], |row| row.get::<_, String>(3)).unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>().unwrap();
-    assert!(plan.iter().any(|step| step.contains("SEARCH mailbox_messages USING COVERING INDEX mailbox_messages_topic_key_sender")
-        && step.contains("idempotency_key>")), "{plan:?}");
-    assert!(!plan.iter().any(|step| step.contains("SCAN ") || step.contains("TEMP B-TREE")), "{plan:?}");
+    let added = after
+        .iter()
+        .filter(|object| !before.contains(object))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        added
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "mailbox_messages_topic_key_sender",
+            "remote_prompt_intents",
+            "remote_prompt_receives",
+            "remote_prompt_intents_identity_immutable",
+            "remote_prompt_receives_identity_immutable"
+        ])
+    );
+    assert!(
+        before.iter().all(|object| after.contains(object)),
+        "step six objects stay frozen"
+    );
+    assert_eq!(
+        reopened
+            .query_row(
+                "SELECT COUNT(*), SUM(length(body)) FROM mailbox_messages",
+                [],
+                |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?))
+            )
+            .unwrap(),
+        (512, 512 * body.len() as u64)
+    );
+    let mut statement = reopened
+        .prepare(&format!(
+            "EXPLAIN QUERY PLAN {REVIEW_CUSTODY_KEYS_WITHOUT_CHILD_SQL}"
+        ))
+        .unwrap();
+    let plan = statement
+        .query_map(
+            rusqlite::params![
+                Option::<String>::None,
+                review_slot_prefix("fixture-delegation"),
+                format!("{REVIEW_ATTEMPT_KEY_PREFIX}-fixture-delegation."),
+                REVIEW_ATTEMPT_TOPIC
+            ],
+            |row| row.get::<_, String>(3),
+        )
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(
+        plan.iter().any(|step| step.contains(
+            "SEARCH mailbox_messages USING COVERING INDEX mailbox_messages_topic_key_sender"
+        ) && step.contains("idempotency_key>")),
+        "{plan:?}"
+    );
+    assert!(
+        !plan
+            .iter()
+            .any(|step| step.contains("SCAN ") || step.contains("TEMP B-TREE")),
+        "{plan:?}"
+    );
     drop(statement);
-    assert_eq!(review_slot_rows_on(&reopened, None, "fixture-delegation").unwrap().len(), 8);
-    assert!(validate_coordination_schema_version(&reopened, "6-executor-outcomes-1").is_err(), "old reader rejects the new floor");
+    assert_eq!(
+        review_slot_rows_on(&reopened, None, "fixture-delegation")
+            .unwrap()
+            .len(),
+        8
+    );
+    assert!(
+        validate_coordination_schema_version(&reopened, "6-executor-outcomes-1").is_err(),
+        "old reader rejects the new floor"
+    );
     drop(reopened);
     let reopened = bootstrap_coordination_database(&path).unwrap();
     assert_eq!(coordination_schema_objects(&reopened).unwrap(), after);
@@ -315,12 +418,21 @@ fn delegation_review_custody_index_upgrade_is_atomic_and_rejects_wrong_definitio
     historical(&connection, "6-executor-outcomes-1");
     let before = coordination_schema_objects(&connection).unwrap();
     TEST_COORDINATION_UPGRADE_BEFORE_COMMIT.with(|slot| {
-        *slot.borrow_mut() = Some(Box::new(|_| bail!("injected custody index pre-commit failure")));
+        *slot.borrow_mut() = Some(Box::new(|_| {
+            bail!("injected custody index pre-commit failure")
+        }));
     });
-    assert!(ensure_sqlite_coordination_schema(&connection).unwrap_err().to_string().contains("pre-commit"));
+    assert!(
+        ensure_sqlite_coordination_schema(&connection)
+            .unwrap_err()
+            .to_string()
+            .contains("pre-commit")
+    );
     assert_eq!(coordination_schema_objects(&connection).unwrap(), before);
     assert_eq!(version(&connection), "6-executor-outcomes-1");
-    connection.execute_batch("CREATE INDEX mailbox_messages_topic_key_sender ON mailbox_messages(topic)").unwrap();
+    connection
+        .execute_batch("CREATE INDEX mailbox_messages_topic_key_sender ON mailbox_messages(topic)")
+        .unwrap();
     let changes = connection.total_changes();
     let wrong = coordination_schema_objects(&connection).unwrap();
     assert!(ensure_sqlite_coordination_schema(&connection).is_err());

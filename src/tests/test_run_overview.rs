@@ -211,9 +211,20 @@ async fn filtered_pages_reach_every_active_run_and_bind_the_cursor_to_all_filter
 #[test]
 fn multi_run_scans_cover_hidden_revisions_before_public_cards() {
     for cards in [false, true] {
-        let mut fixture = RunFixture::new(if cards { "overview-cards-order" } else { "overview-batch-order" });
-        let owner = create_test_project_session(&fixture.state, Agent::Codex, &fixture.project_id, &fixture.root);
-        if cards { assert!(fixture.state.ensure_test_run_cards_epoch()); }
+        let mut fixture = RunFixture::new(if cards {
+            "overview-cards-order"
+        } else {
+            "overview-batch-order"
+        });
+        let owner = create_test_project_session(
+            &fixture.state,
+            Agent::Codex,
+            &fixture.project_id,
+            &fixture.root,
+        );
+        if cards {
+            assert!(fixture.state.ensure_test_run_cards_epoch());
+        }
         let mailbox = Arc::new(StateBroadcastMailbox::default());
         fixture.state.state_broadcast_mailbox = Some(mailbox.clone());
         let senders = fixture.state.state_broadcast_senders.clone();
@@ -225,18 +236,33 @@ fn multi_run_scans_cover_hidden_revisions_before_public_cards() {
             let inner = fixture.state.inner.lock().unwrap();
             fixture.state.publish_state_locked(&inner);
         }
-        for work in mailbox.take_pending_for_test() { producer.forward(work, &senders); }
-        assert!(matches!(stream.try_recv().unwrap(), SseStreamEvent::State(_)));
+        for work in mailbox.take_pending_for_test() {
+            producer.forward(work, &senders);
+        }
+        assert!(matches!(
+            stream.try_recv().unwrap(),
+            SseStreamEvent::State(_)
+        ));
         let started = (chrono::Utc::now() + chrono::TimeDelta::seconds(1)).to_rfc3339();
         for terminal in [false, true] {
             for id in ["test-batch-a", "test-batch-b"] {
                 let mut request = full_request(&fixture.root, &started);
                 request["owner"] = json!(owner);
-                write_run(&fixture.runs_dir(), id, request,
-                    Some(if terminal { passed_results() } else { running_results(Some(42)) }));
+                write_run(
+                    &fixture.runs_dir(),
+                    id,
+                    request,
+                    Some(if terminal {
+                        passed_results()
+                    } else {
+                        running_results(Some(42))
+                    }),
+                );
             }
             fixture.refresh(&[42]);
-            for work in mailbox.take_pending_for_test() { producer.forward(work, &senders); }
+            for work in mailbox.take_pending_for_test() {
+                producer.forward(work, &senders);
+            }
             let mut overview = None;
             let mut card_events = 0;
             while let Ok(event) = stream.try_recv() {
@@ -245,7 +271,10 @@ fn multi_run_scans_cover_hidden_revisions_before_public_cards() {
                         let value: Value = serde_json::from_str(&payload).unwrap();
                         assert_eq!(value["baseRevision"], baseline);
                         let revision = value["revision"].as_u64().unwrap();
-                        assert!(revision >= latest, "a cumulative cut can cover hidden revisions or follow equal-revision card deltas");
+                        assert!(
+                            revision >= latest,
+                            "a cumulative cut can cover hidden revisions or follow equal-revision card deltas"
+                        );
                         baseline = revision;
                         latest = revision;
                         assert!(value.get("testRuns").is_none());
@@ -254,12 +283,21 @@ fn multi_run_scans_cover_hidden_revisions_before_public_cards() {
                     SseStreamEvent::Delta(payload) => {
                         let value: Value = serde_json::from_str(&payload).unwrap();
                         let revision = value["revision"].as_u64().unwrap();
-                        assert_eq!(revision, latest + 1, "public deltas must not force a gap repair: {value}");
+                        assert_eq!(
+                            revision,
+                            latest + 1,
+                            "public deltas must not force a gap repair: {value}"
+                        );
                         latest = revision;
-                        assert!(matches!(value["type"].as_str(), Some("messageCreated" | "testRunCardUpdated")));
+                        assert!(matches!(
+                            value["type"].as_str(),
+                            Some("messageCreated" | "testRunCardUpdated")
+                        ));
                         card_events += 1;
                     }
-                    _ => panic!("expected the existing cumulative diff path, not a full state or loss signal"),
+                    _ => panic!(
+                        "expected the existing cumulative diff path, not a full state or loss signal"
+                    ),
                 }
             }
             let overview = overview.expect("the final aggregate cut is public");

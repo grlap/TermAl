@@ -66,7 +66,10 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
         // Fixture a distinct successor boundary through the current trace owner.
         record.engram.unadmitted_active_turn = None;
         adopt_runtime_observation(record, "successor-prompt", 6, None);
-        assert_ne!(record.engram.observed_turn_ref(), Some(original_turn.as_str()));
+        assert_ne!(
+            record.engram.observed_turn_ref(),
+            Some(original_turn.as_str())
+        );
     }
     for status in ["pending", "in_progress", "pending"] {
         handle_acp_session_update(
@@ -94,7 +97,10 @@ fn acp_repeated_starts_keep_the_first_provider_boundary_and_ownership() {
             Some(original_start.as_str())
         );
         assert_eq!(row.work_binding.as_ref(), Some(&original));
-        assert_eq!(row.grant_identity, Some(sha256_hex(original_turn.as_bytes())));
+        assert_eq!(
+            row.grant_identity,
+            Some(sha256_hex(original_turn.as_bytes()))
+        );
         assert_eq!(row.turn_generation, 5);
         assert!(row.evidence.is_empty());
         assert!(

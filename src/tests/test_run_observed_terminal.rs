@@ -234,13 +234,21 @@ fn lost_project_root_does_not_discover_an_enclosing_repository() {
     fs::create_dir_all(root.join(".git")).unwrap();
     assert_eq!(test_runs_git_common_dir(&root), Some(root.join(".git")));
     fs::remove_dir_all(&root).unwrap();
-    assert_eq!(test_runs_git_common_dir(&root), None,
-        "a lost project must not inherit another repository's run history");
-    assert!(matches!(engram_execution_source_capture_with(&root, false), Ok(None)),
-        "a missing source directory must not acquire its ancestor's identity");
+    assert_eq!(
+        test_runs_git_common_dir(&root),
+        None,
+        "a lost project must not inherit another repository's run history"
+    );
+    assert!(
+        matches!(engram_execution_source_capture_with(&root, false), Ok(None)),
+        "a missing source directory must not acquire its ancestor's identity"
+    );
     fs::write(&root, "not a project directory").unwrap();
     assert_eq!(test_runs_git_common_dir(&root), None);
-    assert!(matches!(engram_execution_source_capture_with(&root, false), Ok(None)));
+    assert!(matches!(
+        engram_execution_source_capture_with(&root, false),
+        Ok(None)
+    ));
 }
 
 #[test]
@@ -251,8 +259,14 @@ fn existing_project_subdirectory_keeps_its_repository_discovery() {
     fs::create_dir_all(root.join(".git")).unwrap();
     let subdirectory = root.join("src");
     fs::create_dir(&subdirectory).unwrap();
-    assert_eq!(test_runs_git_common_dir(&subdirectory), Some(root.join(".git")));
-    assert_eq!(engram_worktree_root_path(&subdirectory), fs::canonicalize(&root).unwrap());
+    assert_eq!(
+        test_runs_git_common_dir(&subdirectory),
+        Some(root.join(".git"))
+    );
+    assert_eq!(
+        engram_worktree_root_path(&subdirectory),
+        fs::canonicalize(&root).unwrap()
+    );
 }
 
 #[test]
@@ -269,8 +283,12 @@ fn file_writes_and_deleted_event_paths_keep_their_worktree_routing() {
     fs::remove_dir(&removed).unwrap();
     let canonical = fs::canonicalize(&root).unwrap();
     for path in [existing_file, future_file, removed] {
-        assert_eq!(engram_worktree_root_path(&path), canonical,
-            "host writes and deleted watcher paths still route: {}", path.display());
+        assert_eq!(
+            engram_worktree_root_path(&path),
+            canonical,
+            "host writes and deleted watcher paths still route: {}",
+            path.display()
+        );
         assert_eq!(engram_worktree_root(&path), engram_path_key(&canonical));
     }
 }
@@ -280,16 +298,26 @@ fn lost_project_rescan_does_not_import_enclosing_history() {
     let fixture = RunFixture::new("lost-project-rescan");
     let enclosing = fixture.root.parent().unwrap();
     let id = "test-enclosing-history";
-    let directory = write_run(&enclosing.join(".git/review-runs"), id,
-        full_request(enclosing, &test_run_timestamp()), Some(passed_results()));
+    let directory = write_run(
+        &enclosing.join(".git/review-runs"),
+        id,
+        full_request(enclosing, &test_run_timestamp()),
+        Some(passed_results()),
+    );
     let request = fs::read(directory.join("request.json")).unwrap();
     let results = fs::read(directory.join("results.json")).unwrap();
     fs::remove_dir_all(&fixture.root).unwrap();
 
     fixture.refresh(&[]);
-    assert!(fixture.summaries().is_empty(), "the enclosing run must not be imported");
+    assert!(
+        fixture.summaries().is_empty(),
+        "the enclosing run must not be imported"
+    );
     let inner = fixture.state.inner.lock().unwrap();
-    assert!(inner.test_run_compacted.is_empty(), "foreign history must not be persisted");
+    assert!(
+        inner.test_run_compacted.is_empty(),
+        "foreign history must not be persisted"
+    );
     assert!(inner.test_runs.parsed.is_empty());
     assert!(inner.test_runs.tracked_dirs.is_empty());
     assert_eq!(fs::read(directory.join("request.json")).unwrap(), request);
@@ -308,11 +336,27 @@ fn registration_refuses_lost_project_before_enclosing_run_identity() {
     let bytes = fs::read(directory.join("request.json")).unwrap();
     fs::remove_dir_all(&fixture.root).unwrap();
 
-    let error = fixture.state.register_test_run(&session, registration_request(id, &directory))
-        .err().expect("a missing configured project cannot authorize its parent");
+    let error = fixture
+        .state
+        .register_test_run(&session, registration_request(id, &directory))
+        .err()
+        .expect("a missing configured project cannot authorize its parent");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(error.message.starts_with("test run project Git directory is unavailable"), "{error:?}");
-    assert!(fixture.state.inner.lock().unwrap().test_run_registrations.is_empty());
+    assert!(
+        error
+            .message
+            .starts_with("test run project Git directory is unavailable"),
+        "{error:?}"
+    );
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .is_empty()
+    );
     assert_eq!(fs::read(directory.join("request.json")).unwrap(), bytes);
 }
 
@@ -328,11 +372,27 @@ fn registration_refuses_lost_request_worktree_in_existing_project() {
     let directory = write_run(&fixture.runs_dir(), id, request, None);
     fs::remove_dir_all(&missing).unwrap();
 
-    let error = fixture.state.register_test_run(&session, registration_request(id, &directory))
-        .err().expect("a missing request worktree cannot inherit the project's identity");
+    let error = fixture
+        .state
+        .register_test_run(&session, registration_request(id, &directory))
+        .err()
+        .expect("a missing request worktree cannot inherit the project's identity");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(error.message.starts_with("test run worktree is outside the configured project"), "{error:?}");
-    assert!(fixture.state.inner.lock().unwrap().test_run_registrations.is_empty());
+    assert!(
+        error
+            .message
+            .starts_with("test run worktree is outside the configured project"),
+        "{error:?}"
+    );
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_registrations
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -424,18 +484,37 @@ fn observed_terminal_launch_only_row_is_never_returned_as_ended() {
         Some(EngramCommandExit::NotFinished),
     );
     assert!(launched.is_empty(), "a background launch ends nothing");
-    assert!(fixture.state.inner.lock().unwrap()
-        .test_run_observations.get(&id).unwrap().launch_only);
+    assert!(
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_observations
+            .get(&id)
+            .unwrap()
+            .launch_only
+    );
     let later = fixture.state.observe_test_command_end(
         &session,
         &EngramObservationProvenance::Ambient,
         "launch-only-key",
         Some(EngramCommandExit::Code(0)),
     );
-    assert!(later.is_empty(), "an exit only notes a launch-only row, never ends it");
+    assert!(
+        later.is_empty(),
+        "an exit only notes a launch-only row, never ends it"
+    );
     let row = fixture.summary(&id);
-    assert!(row.ended_at.is_none(), "the workload end time stays unknown");
-    assert_ne!(row.state, TestRunState::Passed, "the launcher's exit is not the run's outcome");
+    assert!(
+        row.ended_at.is_none(),
+        "the workload end time stays unknown"
+    );
+    assert_ne!(
+        row.state,
+        TestRunState::Passed,
+        "the launcher's exit is not the run's outcome"
+    );
     assert_no_credit(&fixture);
 }
 

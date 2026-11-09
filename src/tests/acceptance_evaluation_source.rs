@@ -412,7 +412,9 @@ fn acceptance_requested_claim_controls_the_root_even_when_another_claim_is_bound
         let target = {
             let inner = state.inner.lock().unwrap();
             inner.delegations[inner.find_delegation_index(&record.id).unwrap()]
-                .acceptance_evaluation.clone().unwrap()
+                .acceptance_evaluation
+                .clone()
+                .unwrap()
         };
         // An unnamed source inherits the parent's cwd verbatim. A requested
         // named root passes through the delegation cwd resolver.
@@ -421,11 +423,7 @@ fn acceptance_requested_claim_controls_the_root_even_when_another_claim_is_bound
         } else {
             resolve_session_workdir(expected_dir.to_str().unwrap()).unwrap()
         };
-        assert_eq!(
-            record.cwd,
-            expected_cwd,
-            "{case}"
-        );
+        assert_eq!(record.cwd, expected_cwd, "{case}");
         assert_eq!(target.source_id, Some(expected), "{case}");
         assert!(target.source_fingerprint.is_none(), "{case}");
         if case == "unnamed" {
@@ -528,8 +526,12 @@ pub(super) fn make_workdir_a_worktree(root: &FsPath) {
 
 fn owner_identity_at(root: &FsPath) -> EngramSourceId {
     let mut source = super::shared_source::identity();
-    source.commit = run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim().into();
-    source.tree = run_git_test_command_output(root, &["rev-parse", "HEAD^{tree}"]).trim().into();
+    source.commit = run_git_test_command_output(root, &["rev-parse", "HEAD"])
+        .trim()
+        .into();
+    source.tree = run_git_test_command_output(root, &["rev-parse", "HEAD^{tree}"])
+        .trim()
+        .into();
     source
 }
 
@@ -576,11 +578,21 @@ fn acceptance_request_retains_the_complete_owner_identity_across_reload() {
     assert_eq!(record.cwd, root.to_string_lossy());
     assert!(!record.prompt.contains("private-path.txt"));
     assert!(public["delegation"]["acceptanceEvaluation"].is_object());
-    assert!(public["delegation"]["acceptanceEvaluation"].get("sourceId").is_none());
-    assert!(!serde_json::to_string(&public).unwrap().contains("private-path.txt"));
+    assert!(
+        public["delegation"]["acceptanceEvaluation"]
+            .get("sourceId")
+            .is_none()
+    );
+    assert!(
+        !serde_json::to_string(&public)
+            .unwrap()
+            .contains("private-path.txt")
+    );
     let inner = state.inner.lock().unwrap();
     let stored = inner.delegations[inner.find_delegation_index(&record.id).unwrap()]
-        .acceptance_evaluation.as_ref().unwrap();
+        .acceptance_evaluation
+        .as_ref()
+        .unwrap();
     assert_eq!(stored.source_id, Some(expected));
     assert!(stored.source_fingerprint.is_none());
     let restored: DelegationAcceptanceEvaluation =
@@ -640,8 +652,18 @@ fn acceptance_same_session_without_owner_identity_stays_undeclared() {
         } else {
             assert_eq!(wire["evidenceOmissions"]["leftOut"]["count"], 0);
         }
-        assert!(!wire["brief"].as_str().unwrap().contains("source_fingerprint"));
-        assert!(wire["notice"].as_str().unwrap().contains(ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE));
+        assert!(
+            !wire["brief"]
+                .as_str()
+                .unwrap()
+                .contains("source_fingerprint")
+        );
+        assert!(
+            wire["notice"]
+                .as_str()
+                .unwrap()
+                .contains(ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE)
+        );
     }
 }
 
@@ -651,19 +673,37 @@ fn acceptance_shared_same_session_refuses_without_a_persisted_host_attempt() {
         let (state, project, parent, root) = fixture();
         install_store(&state, &project, &root);
         make_workdir_a_worktree(&root);
-        super::shared_source::install_owner(&state, &project, |_| Some(super::shared_source::identity()));
+        super::shared_source::install_owner(&state, &project, |_| {
+            Some(super::shared_source::identity())
+        });
         let admitted: &[&str] = if pin.is_some() {
             &["same_session", "independent_session"]
         } else {
             &["same_session"]
         };
-        let error = state.request_acceptance_evaluation_with_runner(&parent, evaluation_request(None),
-            fixture_reader(Arc::default(), show_receipt(pin), Ok(policy_receipt(Some(admitted)))))
-            .err().expect("a shared same-session evaluation needs durable attempt custody");
+        let error = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                evaluation_request(None),
+                fixture_reader(
+                    Arc::default(),
+                    show_receipt(pin),
+                    Ok(policy_receipt(Some(admitted))),
+                ),
+            )
+            .err()
+            .expect("a shared same-session evaluation needs durable attempt custody");
         assert_eq!(error.status, StatusCode::CONFLICT);
         assert!(error.message.contains("requires a persisted host attempt"));
-        assert!(error.message.contains("admit independent_session or sub_agent"));
-        assert_eq!(error.message.contains("unpin the task's evaluation mode"), pin.is_some());
+        assert!(
+            error
+                .message
+                .contains("admit independent_session or sub_agent")
+        );
+        assert_eq!(
+            error.message.contains("unpin the task's evaluation mode"),
+            pin.is_some()
+        );
         assert!(state.inner.lock().unwrap().delegations.is_empty());
     }
 }
@@ -673,10 +713,15 @@ fn acceptance_shared_same_session_preference_uses_an_admitted_child_with_one_cap
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     make_workdir_a_worktree(&root);
-    state.update_acceptance_defaults(&project, AcceptanceEvaluatorDefaults {
-        default_mode: Some(AcceptanceEvaluationMode::SameSession),
-        ..Default::default()
-    }).unwrap();
+    state
+        .update_acceptance_defaults(
+            &project,
+            AcceptanceEvaluatorDefaults {
+                default_mode: Some(AcceptanceEvaluationMode::SameSession),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     let expected = owner_identity_at(&root);
     let captured = expected.clone();
     let captures = Arc::new(AtomicUsize::new(0));
@@ -689,21 +734,42 @@ fn acceptance_shared_same_session_preference_uses_an_admitted_child_with_one_cap
         Some(source)
     });
     super::delegation_support::install_delegation_codex_runtime(&state, "same-preference-runtime");
-    let response = state.request_acceptance_evaluation_with_runner(&parent,
-        evaluation_request(Some(Agent::Codex)), fixture_reader(Arc::default(), show_receipt(None),
-            Ok(policy_receipt(Some(&["same_session", "independent_session"])))))
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(Some(Agent::Codex)),
+            fixture_reader(
+                Arc::default(),
+                show_receipt(None),
+                Ok(policy_receipt(Some(&[
+                    "same_session",
+                    "independent_session",
+                ]))),
+            ),
+        )
         .unwrap();
-    let AcceptanceEvaluationRequestResponse::Spawned { delegation, mode, .. } = response else {
+    let AcceptanceEvaluationRequestResponse::Spawned {
+        delegation, mode, ..
+    } = response
+    else {
         panic!("an admitted independent evaluator resolves the shared-source preference");
     };
     assert_eq!(mode, AcceptanceEvaluationMode::IndependentSession);
     let inner = state.inner.lock().unwrap();
-    let target = inner.delegations[inner.find_delegation_index(&delegation.delegation.id).unwrap()]
-        .acceptance_evaluation.as_ref().unwrap();
+    let target = inner.delegations[inner
+        .find_delegation_index(&delegation.delegation.id)
+        .unwrap()]
+    .acceptance_evaluation
+    .as_ref()
+    .unwrap();
     assert_eq!(target.mode, AcceptanceEvaluationMode::IndependentSession);
     assert_eq!(target.source_id, Some(expected));
     assert!(target.source_fingerprint.is_none());
-    assert_eq!(captures.load(Ordering::SeqCst), 1, "fallback retains the captured source");
+    assert_eq!(
+        captures.load(Ordering::SeqCst),
+        1,
+        "fallback retains the captured source"
+    );
 }
 
 #[test]
@@ -711,16 +777,34 @@ fn acceptance_unavailable_source_keeps_the_same_session_preference() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     make_workdir_a_worktree(&root);
-    state.update_acceptance_defaults(&project, AcceptanceEvaluatorDefaults {
-        default_mode: Some(AcceptanceEvaluationMode::SameSession),
-        ..Default::default()
-    }).unwrap();
-    super::shared_source::install_owner(&state, &project, |_| None);
-    let response = state.request_acceptance_evaluation_with_runner(&parent,
-        evaluation_request(None), fixture_reader(Arc::default(), show_receipt(None),
-            Ok(policy_receipt(Some(&["same_session", "independent_session"])))))
+    state
+        .update_acceptance_defaults(
+            &project,
+            AcceptanceEvaluatorDefaults {
+                default_mode: Some(AcceptanceEvaluationMode::SameSession),
+                ..Default::default()
+            },
+        )
         .unwrap();
-    assert!(matches!(response, AcceptanceEvaluationRequestResponse::SameSession { .. }));
+    super::shared_source::install_owner(&state, &project, |_| None);
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(None),
+            fixture_reader(
+                Arc::default(),
+                show_receipt(None),
+                Ok(policy_receipt(Some(&[
+                    "same_session",
+                    "independent_session",
+                ]))),
+            ),
+        )
+        .unwrap();
+    assert!(matches!(
+        response,
+        AcceptanceEvaluationRequestResponse::SameSession { .. }
+    ));
     assert!(state.inner.lock().unwrap().delegations.is_empty());
 }
 
@@ -733,11 +817,23 @@ fn acceptance_new_shared_request_submission_checks_full_identity_without_a_legac
         let original = owner_identity_at(&root);
         let current = Arc::new(Mutex::new(Some(original.clone())));
         let capture = current.clone();
-        super::shared_source::install_owner(&state, &project, move |_| capture.lock().unwrap().clone());
-        super::delegation_support::install_delegation_codex_runtime(&state, "shared-submit-runtime");
-        let response = state.request_acceptance_evaluation_with_runner(&parent,
-            evaluation_request(Some(Agent::Codex)), fixture_reader(Arc::default(), show_receipt(None),
-                Ok(policy_receipt(Some(&["independent_session"])))))
+        super::shared_source::install_owner(&state, &project, move |_| {
+            capture.lock().unwrap().clone()
+        });
+        super::delegation_support::install_delegation_codex_runtime(
+            &state,
+            "shared-submit-runtime",
+        );
+        let response = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                evaluation_request(Some(Agent::Codex)),
+                fixture_reader(
+                    Arc::default(),
+                    show_receipt(None),
+                    Ok(policy_receipt(Some(&["independent_session"]))),
+                ),
+            )
             .unwrap();
         let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
             panic!("independent evaluation expected");
@@ -746,7 +842,9 @@ fn acceptance_new_shared_request_submission_checks_full_identity_without_a_legac
         let target = {
             let inner = state.inner.lock().unwrap();
             inner.delegations[inner.find_delegation_index(&record.id).unwrap()]
-                .acceptance_evaluation.clone().unwrap()
+                .acceptance_evaluation
+                .clone()
+                .unwrap()
         };
         // Persisted new targets retain the entire source, not a content revision.
         let restored: DelegationAcceptanceEvaluation =
@@ -756,26 +854,36 @@ fn acceptance_new_shared_request_submission_checks_full_identity_without_a_legac
         submission.attempt_key = Some(restored.attempt_key.clone());
         update_evaluation_target(&state, &record.id, |target| *target = restored);
         match case {
-            "dirty-change" => current.lock().unwrap().as_mut().unwrap().changes[0].blob = Some("e".repeat(40)),
+            "dirty-change" => {
+                current.lock().unwrap().as_mut().unwrap().changes[0].blob = Some("e".repeat(40))
+            }
             "unavailable" => *current.lock().unwrap() = None,
             _ => {}
         }
         let calls = AtomicUsize::new(0);
-        let result = state.submit_acceptance_evaluation_with_runner(&record.child_session_id,
-            submission, |_, args, _| {
+        let result = state.submit_acceptance_evaluation_with_runner(
+            &record.child_session_id,
+            submission,
+            |_, args, _| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 assert!(!args.iter().any(|arg| arg == "--source-fingerprint"));
                 let file = args.iter().position(|arg| arg == "--source-id-file");
                 if case == "match" {
-                    let path = FsPath::new(&args[file.expect("the original complete source is sent") + 1]);
-                    let sent: EngramSourceId = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+                    let path =
+                        FsPath::new(&args[file.expect("the original complete source is sent") + 1]);
+                    let sent: EngramSourceId =
+                        serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
                     assert_eq!(sent, original);
                 } else {
                     assert_eq!(case, "unavailable", "changed input cannot reach the runner");
-                    assert!(file.is_none(), "unavailable stays undeclared, never inferred from Git");
+                    assert!(
+                        file.is_none(),
+                        "unavailable stays undeclared, never inferred from Git"
+                    );
                 }
                 Ok(cli_output(true, &evaluate_receipt(false), ""))
-            });
+            },
+        );
         if case == "dirty-change" {
             assert_eq!(result.unwrap_err().status, StatusCode::CONFLICT);
             assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -1130,7 +1238,9 @@ fn acceptance_request_on_a_named_source_root_runs_and_measures_the_evaluator_the
     let target = {
         let inner = state.inner.lock().unwrap();
         inner.delegations[inner.find_delegation_index(&record.id).unwrap()]
-            .acceptance_evaluation.clone().unwrap()
+            .acceptance_evaluation
+            .clone()
+            .unwrap()
     };
     assert_eq!(target.source_id, Some(expected));
     assert!(target.source_fingerprint.is_none());

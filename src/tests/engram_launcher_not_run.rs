@@ -92,7 +92,11 @@ fn a_launcher_run_that_executed_still_ends_failed_or_passed() {
         );
         // A failed stage line alone is the run's own output too.
         assert_eq!(
-            launcher_outcome(command, "vitest: failed exit=1\n", EngramCommandExit::Code(1)),
+            launcher_outcome(
+                command,
+                "vitest: failed exit=1\n",
+                EngramCommandExit::Code(1)
+            ),
             Some(EngramExecutionOutcome::Failed),
             "`{command}`"
         );
@@ -109,7 +113,13 @@ fn a_launcher_run_that_executed_still_ends_failed_or_passed() {
 }
 
 /// The five stages of TermAl's own full gate.
-const FULL_STAGES: [&str; 5] = ["cargo-check", "typescript", "fingerprint-tests", "rust-tests", "vitest"];
+const FULL_STAGES: [&str; 5] = [
+    "cargo-check",
+    "typescript",
+    "fingerprint-tests",
+    "rust-tests",
+    "vitest",
+];
 
 /// Writes in `parent` the records of the full-gate run `run`, ended failed
 /// with exit 1: its stages `states`, in the order of `FULL_STAGES`, a stage
@@ -188,7 +198,9 @@ fn only_the_runs_own_record_of_no_stage_run_makes_its_failure_unknown() {
         "test-ran",
         ["passed", "passed", "passed", "failed", "unrun"],
     );
-    assert!(!engram_launcher_output_ran_no_stage(&failed_summary("test-ran", &ran)));
+    assert!(!engram_launcher_output_ran_no_stage(&failed_summary(
+        "test-ran", &ran
+    )));
     // A `results:` line of another run, printed after this run's verdict
     // (inside a stage's diagnostics), is not this run's record.
     assert!(!engram_launcher_output_ran_no_stage(&failed_summary(
@@ -242,7 +254,11 @@ fn a_carried_gate_that_ran_no_stage_is_refused_never_recorded_failed() {
         "test-first",
         ["failed", "unrun", "unrun", "unrun", "unrun"],
     );
-    assert!(!read(&first).expect("a gate that failed at its first stage is recorded").passed);
+    assert!(
+        !read(&first)
+            .expect("a gate that failed at its first stage is recorded")
+            .passed
+    );
 }
 
 #[test]
@@ -261,7 +277,13 @@ fn a_launcher_run_whose_results_record_every_stage_unrun_ends_unknown() {
         .expect("the fixture is a Git repository")
         .join(&run);
     fs::create_dir_all(&directory).expect("the run directory should be created");
-    let stages = ["cargo-check", "typescript", "fingerprint-tests", "rust-tests", "vitest"];
+    let stages = [
+        "cargo-check",
+        "typescript",
+        "fingerprint-tests",
+        "rust-tests",
+        "vitest",
+    ];
     fs::write(
         directory.join("request.json"),
         serde_json::to_vec(&json!({
@@ -304,18 +326,28 @@ fn a_launcher_run_whose_results_record_every_stage_unrun_ends_unknown() {
         .expect("the end should record");
     turn.wait_for_snapshots();
     turn.record(|record| {
-        let check = record.engram.active_turn_checks.iter()
-            .find(|check| check.key == "gate").expect("the launcher has a diagnostic check");
+        let check = record
+            .engram
+            .active_turn_checks
+            .iter()
+            .find(|check| check.key == "gate")
+            .expect("the launcher has a diagnostic check");
         let end = check.end.as_ref().expect("the launcher invocation ended");
-        assert!(end.launcher_ran_no_stage,
-            "the run's exact terminal artifact, not its FAIL summary, says no stage ran");
-        assert_eq!(engram_check_end_outcome(&check.command, end),
-            Some(EngramExecutionOutcome::Unknown));
+        assert!(
+            end.launcher_ran_no_stage,
+            "the run's exact terminal artifact, not its FAIL summary, says no stage ran"
+        );
+        assert_eq!(
+            engram_check_end_outcome(&check.command, end),
+            Some(EngramExecutionOutcome::Unknown)
+        );
     });
     let request = turn.finish();
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 1, "{request:#}");
-    assert_eq!(checks[0]["observed_result"], "indeterminate",
-        "a launcher that ran no stage supplies no failed-test fact: {request:#}");
+    assert_eq!(
+        checks[0]["observed_result"], "indeterminate",
+        "a launcher that ran no stage supplies no failed-test fact: {request:#}"
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &request);
 }

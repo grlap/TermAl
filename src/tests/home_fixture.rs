@@ -87,7 +87,10 @@ struct UnprovenHomeRoot(Option<TestTempRoot>);
 impl Drop for UnprovenHomeRoot {
     fn drop(&mut self) {
         if let Some(root) = self.0.take() {
-            eprintln!("retaining unproven consumer home at {}", root.path().display());
+            eprintln!(
+                "retaining unproven consumer home at {}",
+                root.path().display()
+            );
             std::mem::forget(root);
         }
     }
@@ -161,7 +164,10 @@ fn run_parent(
         };
     let stderr = String::from_utf8_lossy(&bytes);
     if !status.success() {
-        return Err(format!("isolated case {case} failed ({status}): {stderr}; retaining unproven consumer home at {}", path.display()));
+        return Err(format!(
+            "isolated case {case} failed ({status}): {stderr}; retaining unproven consumer home at {}",
+            path.display()
+        ));
     }
     let proof = completion(&identity);
     if stderr.lines().filter(|line| *line == proof).count() != 1 {
@@ -259,9 +265,13 @@ impl OwnedHomeConsumer {
         // This sibling owns no inner child's stderr writer or drain thread.
         let mut child = command.spawn().unwrap();
         let process = unsafe { BorrowedHandle::borrow_raw(child.as_raw_handle()) }
-            .try_clone_to_owned().unwrap();
+            .try_clone_to_owned()
+            .unwrap();
         let pid = child.id();
-        eprintln!("HOME supervisor spawned nonce={nonce} pid={pid} root={}", root.display());
+        eprintln!(
+            "HOME supervisor spawned nonce={nonce} pid={pid} root={}",
+            root.display()
+        );
         let expected_home = home.to_string_lossy().into_owned();
         let (release, release_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -271,9 +281,14 @@ impl OwnedHomeConsumer {
             let handshake = (|| -> Result<(), String> {
                 loop {
                     match listener.accept() {
-                        Ok((stream, _)) => { peer = Some(stream); break; }
+                        Ok((stream, _)) => {
+                            peer = Some(stream);
+                            break;
+                        }
                         Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                            if Instant::now() >= deadline { return Err("witness accept timed out".into()); }
+                            if Instant::now() >= deadline {
+                                return Err("witness accept timed out".into());
+                            }
                             std::thread::park_timeout(Duration::from_millis(1));
                         }
                         Err(error) => return Err(format!("witness accept: {error}")),
@@ -281,13 +296,19 @@ impl OwnedHomeConsumer {
                 }
                 let stream = peer.as_mut().unwrap();
                 stream.set_nonblocking(false).map_err(|e| e.to_string())?;
-                stream.set_read_timeout(Some(phase_sync::DEADLOCK_GUARD)).map_err(|e| e.to_string())?;
-                stream.set_write_timeout(Some(phase_sync::DEADLOCK_GUARD)).map_err(|e| e.to_string())?;
+                stream
+                    .set_read_timeout(Some(phase_sync::DEADLOCK_GUARD))
+                    .map_err(|e| e.to_string())?;
+                stream
+                    .set_write_timeout(Some(phase_sync::DEADLOCK_GUARD))
+                    .map_err(|e| e.to_string())?;
                 let mut line = String::new();
                 std::io::BufRead::read_line(&mut std::io::BufReader::new(stream), &mut line)
                     .map_err(|e| format!("witness handshake: {e}"))?;
                 let expected = format!("{nonce}|{pid}|{expected_home}");
-                if line.trim_end() != expected { return Err(format!("witness identity mismatch: {line:?}")); }
+                if line.trim_end() != expected {
+                    return Err(format!("witness identity mismatch: {line:?}"));
+                }
                 if child.try_wait().map_err(|e| e.to_string())?.is_some() {
                     return Err("witness consumer exited before readiness".into());
                 }
@@ -298,7 +319,9 @@ impl OwnedHomeConsumer {
             // Independent of the thread in run_parent and its stderr join.
             // This is failure containment, never an elapsed-time success oracle.
             let watchdog = handshake.is_ok()
-                && release_rx.recv_timeout(phase_sync::DEADLOCK_GUARD * 2).is_err();
+                && release_rx
+                    .recv_timeout(phase_sync::DEADLOCK_GUARD * 2)
+                    .is_err();
             if let Some(mut stream) = peer {
                 let _ = stream.write_all(&[2]);
                 let _ = stream.shutdown(std::net::Shutdown::Write);
@@ -307,19 +330,39 @@ impl OwnedHomeConsumer {
             let status = loop {
                 match child.try_wait() {
                     Ok(Some(status)) => break status,
-                    Ok(None) if Instant::now() < exit_deadline => std::thread::park_timeout(Duration::from_millis(1)),
-                    Ok(None) => return Err(format!("witness consumer pid={pid} did not settle; retain root")),
-                    Err(error) => return Err(format!("witness consumer wait: {error}; retain root")),
+                    Ok(None) if Instant::now() < exit_deadline => {
+                        std::thread::park_timeout(Duration::from_millis(1))
+                    }
+                    Ok(None) => {
+                        return Err(format!(
+                            "witness consumer pid={pid} did not settle; retain root"
+                        ));
+                    }
+                    Err(error) => {
+                        return Err(format!("witness consumer wait: {error}; retain root"));
+                    }
                 }
             };
-            eprintln!("HOME supervisor settled nonce={nonce} pid={pid} status={status} watchdog={watchdog}");
+            eprintln!(
+                "HOME supervisor settled nonce={nonce} pid={pid} status={status} watchdog={watchdog}"
+            );
             handshake?;
-            if watchdog { return Err("witness release watchdog timed out".into()); }
-            if !status.success() { return Err(format!("witness consumer failed: {status}")); }
+            if watchdog {
+                return Err("witness release watchdog timed out".into());
+            }
+            if !status.success() {
+                return Err(format!("witness consumer failed: {status}"));
+            }
             Ok(())
         });
-        let owner = Self { process, root, release, supervisor: Some(supervisor) };
-        let ready = ready_rx.recv_timeout(phase_sync::DEADLOCK_GUARD)
+        let owner = Self {
+            process,
+            root,
+            release,
+            supervisor: Some(supervisor),
+        };
+        let ready = ready_rx
+            .recv_timeout(phase_sync::DEADLOCK_GUARD)
             .expect("witness supervisor readiness timed out");
         ready.unwrap();
         owner
@@ -327,7 +370,11 @@ impl OwnedHomeConsumer {
 
     fn finish(mut self, child_settled: bool) -> Result<(), String> {
         let _ = self.release.send(());
-        let result = self.supervisor.take().unwrap().join()
+        let result = self
+            .supervisor
+            .take()
+            .unwrap()
+            .join()
             .map_err(|_| "witness supervisor panicked".to_owned())?;
         // run_parent has returned and relinquished its root owner. Never create
         // a competing guard while it is running. The process handle, not EOF,
@@ -335,7 +382,10 @@ impl OwnedHomeConsumer {
         if child_settled && self.has_settled() {
             drop(TestTempRoot::own(self.root.clone()));
         } else {
-            eprintln!("unproven HOME ownership retained at {}", self.root.display());
+            eprintln!(
+                "unproven HOME ownership retained at {}",
+                self.root.display()
+            );
         }
         result
     }
@@ -349,7 +399,10 @@ impl Drop for OwnedHomeConsumer {
             let _ = supervisor.join();
             // An unwind before run_parent returned proves no child/root-owner
             // settlement. Report and retain instead of cleaning by scope exit.
-            eprintln!("HOME owner unwound before settlement; retain {}", self.root.display());
+            eprintln!(
+                "HOME owner unwound before settlement; retain {}",
+                self.root.display()
+            );
         }
     }
 }
@@ -357,7 +410,8 @@ impl Drop for OwnedHomeConsumer {
 #[cfg(windows)]
 #[test]
 fn home_fixture_abrupt_child_retains_root_until_live_consumer_settles() {
-    const CASE: &str = "tests::home_fixture::home_fixture_abrupt_child_retains_root_until_live_consumer_settles";
+    const CASE: &str =
+        "tests::home_fixture::home_fixture_abrupt_child_retains_root_until_live_consumer_settles";
     if std::env::var_os(CHILD).is_some() {
         run(CASE, |_| {
             std::process::exit(0);
@@ -372,18 +426,33 @@ fn home_fixture_abrupt_child_retains_root_until_live_consumer_settles() {
             *owner.borrow_mut() = Some(OwnedHomeConsumer::start(home));
         },
         |_, _| assert!(owner.borrow().as_ref().unwrap().is_live()),
-    ).unwrap_err();
+    )
+    .unwrap_err();
     let owner = owner.into_inner().unwrap();
     let child_settled = error.contains("completion proof");
     let root = owner.root.clone();
     let assertions = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        assert!(owner.is_live(), "consumer remains independently parked after libtest exit");
-        assert!(owner.root.is_dir(), "unproven live consumer root must be retained");
-        assert!(TestTempRoot::owner_marker(&owner.root).is_file(), "unproven live consumer owner marker must be retained");
-        assert!(child_settled && error.contains(&owner.root.display().to_string()), "{error}");
+        assert!(
+            owner.is_live(),
+            "consumer remains independently parked after libtest exit"
+        );
+        assert!(
+            owner.root.is_dir(),
+            "unproven live consumer root must be retained"
+        );
+        assert!(
+            TestTempRoot::owner_marker(&owner.root).is_file(),
+            "unproven live consumer owner marker must be retained"
+        );
+        assert!(
+            child_settled && error.contains(&owner.root.display().to_string()),
+            "{error}"
+        );
     }));
     owner.finish(child_settled).unwrap();
-    if let Err(payload) = assertions { std::panic::resume_unwind(payload); }
+    if let Err(payload) = assertions {
+        std::panic::resume_unwind(payload);
+    }
     assert!(!root.exists());
     assert!(!TestTempRoot::owner_marker(&root).exists());
     assert_eq!(environment_snapshot(), before);
@@ -413,7 +482,9 @@ fn home_fixture_completion_probe() {
             panic!("intentional isolated body failure");
         }
     });
-    if let Some(proof) = duplicate_proof { eprintln!("{proof}"); }
+    if let Some(proof) = duplicate_proof {
+        eprintln!("{proof}");
+    }
 }
 
 /// These exact diagnostic bodies create no state, worker or descendant. Once
@@ -424,10 +495,17 @@ fn settled_consumer_free_probe_error(
     configure: impl FnOnce(&mut Command, &FsPath),
 ) -> String {
     let mut retained = None;
-    let error = run_parent(case, configure, |root, _| retained = Some(root.to_owned())).unwrap_err();
-    assert!(error.contains("lacks unique completion proof") || error.contains(" failed ("), "not a settled diagnostic child: {error}");
+    let error =
+        run_parent(case, configure, |root, _| retained = Some(root.to_owned())).unwrap_err();
+    assert!(
+        error.contains("lacks unique completion proof") || error.contains(" failed ("),
+        "not a settled diagnostic child: {error}"
+    );
     let root = retained.unwrap();
-    assert!(root.is_dir(), "negative probe must retain its unproven root");
+    assert!(
+        root.is_dir(),
+        "negative probe must retain its unproven root"
+    );
     assert!(TestTempRoot::owner_marker(&root).is_file());
     drop(TestTempRoot::own(root));
     error
@@ -461,12 +539,9 @@ fn home_fixture_requires_body_completion_and_preserves_parent_environment() {
     );
     assert_eq!(environment_snapshot(), before);
     for mode in ["panic", "missing", "exit", "duplicate"] {
-        let error = settled_consumer_free_probe_error(
-            PROBE,
-            |command, _| {
-                command.env("TERMAL_TEST_HOME_PROBE", mode);
-            },
-        );
+        let error = settled_consumer_free_probe_error(PROBE, |command, _| {
+            command.env("TERMAL_TEST_HOME_PROBE", mode);
+        });
         assert!(
             error.contains(if mode == "panic" {
                 "intentional isolated body failure"
@@ -477,31 +552,26 @@ fn home_fixture_requires_body_completion_and_preserves_parent_environment() {
         );
         assert_eq!(environment_snapshot(), before);
     }
-    let error = settled_consumer_free_probe_error(
-        "tests::home_fixture::nonexistent_case",
-        |_, _| {},
-    );
+    let error =
+        settled_consumer_free_probe_error("tests::home_fixture::nonexistent_case", |_, _| {});
     assert!(
         error.contains("completion proof"),
         "zero-selected case must fail: {error}"
     );
     assert_eq!(environment_snapshot(), before);
-    let error = settled_consumer_free_probe_error(
-        PROBE,
-        |command, _| {
-            let raw = command
-                .get_envs()
-                .find(|(key, _)| *key == CHILD)
-                .unwrap()
-                .1
-                .unwrap();
-            let mut identity: ChildIdentity = serde_json::from_str(&raw.to_string_lossy()).unwrap();
-            identity.case = "another-exact-case".to_owned();
-            command
-                .env(CHILD, serde_json::to_string(&identity).unwrap())
-                .env("TERMAL_TEST_HOME_PROBE", "success");
-        },
-    );
+    let error = settled_consumer_free_probe_error(PROBE, |command, _| {
+        let raw = command
+            .get_envs()
+            .find(|(key, _)| *key == CHILD)
+            .unwrap()
+            .1
+            .unwrap();
+        let mut identity: ChildIdentity = serde_json::from_str(&raw.to_string_lossy()).unwrap();
+        identity.case = "another-exact-case".to_owned();
+        command
+            .env(CHILD, serde_json::to_string(&identity).unwrap())
+            .env("TERMAL_TEST_HOME_PROBE", "success");
+    });
     assert!(
         error.contains("a child cannot delegate another case"),
         "{error}"

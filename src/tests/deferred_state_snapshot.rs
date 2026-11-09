@@ -447,7 +447,8 @@ fn warm_projection_scan_reports_measurement_at_live_session_count() {
                 record.queued_prompts = vec![
                     queue_projection_cache::queued("first"),
                     queue_projection_cache::queued("second"),
-                ].into();
+                ]
+                .into();
             }
             inner.push_session(record);
         }

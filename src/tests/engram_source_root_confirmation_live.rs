@@ -68,10 +68,23 @@ fn restored_live_selection_omits_the_obsolete_rename_instruction() {
         if generation == successor as i64)
     );
     let fence = EngramRootReadFence::capture(&fixture.live.state.inner.lock().unwrap());
-    fixture.live.state.reconcile_engram_named_root_with_route_classified_until(
-        session, Some(&binding), Some(changed.named_root), &fence, Some(&target.connection),
-        fixture.live.state.engram_budget_clock().now() + target.settings.call_timeout(),
-    ).unwrap_or_else(|failure| panic!("canonical root reconciliation failed: {}", failure.into_transport()));
+    fixture
+        .live
+        .state
+        .reconcile_engram_named_root_with_route_classified_until(
+            session,
+            Some(&binding),
+            Some(changed.named_root),
+            &fence,
+            Some(&target.connection),
+            fixture.live.state.engram_budget_clock().now() + target.settings.call_timeout(),
+        )
+        .unwrap_or_else(|failure| {
+            panic!(
+                "canonical root reconciliation failed: {}",
+                failure.into_transport()
+            )
+        });
     fixture.record(session, |record| {
         assert!(record.engram.source_root_notices.iter().any(|notice|
             matches!(&notice.kind, EngramSourceRootNoticeKind::SelectionLoss { selection }
@@ -113,10 +126,19 @@ fn restored_live_selection_omits_the_obsolete_rename_instruction() {
         command.prompt
     );
     fixture.record(session, |record| {
-        let opening = record.engram.unadmitted_active_turn.as_ref().unwrap().opening_root.as_ref().unwrap();
+        let opening = record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .opening_root
+            .as_ref()
+            .unwrap();
         assert_eq!(opening.binding, binding);
-        assert!(matches!(opening.provenance, EngramRootCapture::Recorded { generation, .. }
-            if generation == restored.generation as i64));
+        assert!(
+            matches!(opening.provenance, EngramRootCapture::Recorded { generation, .. }
+            if generation == restored.generation as i64)
+        );
         assert!(record.engram.source_root_notices.is_empty());
     });
     finish_live_root(&fixture.live.state, session);

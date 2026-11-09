@@ -626,7 +626,9 @@ fn prompt_resuming_the_thread_its_own_setup_just_started_parks_instead_of_supers
 // it gets its own test rather than riding on the happy path.
 #[test]
 fn failed_thread_setup_write_releases_the_setup_slot() {
-    struct FailingWriter { writes: usize }
+    struct FailingWriter {
+        writes: usize,
+    }
     impl std::io::Write for FailingWriter {
         fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
             self.writes += 1;

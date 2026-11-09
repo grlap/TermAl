@@ -155,10 +155,11 @@ async fn federation_journal_evidence_presence_tracks_retained_columns_without_va
         assert_eq!(row["queueEntryPresent"], json!(queued));
         assert_eq!(row["deliveryAttemptPresent"], json!(queued));
         assert_eq!(row["runtimeAckPresent"], json!(runtime));
-        assert!(row
-            .as_object()
-            .unwrap()
-            .contains_key("processedEvidenceKind"));
+        assert!(
+            row.as_object()
+                .unwrap()
+                .contains_key("processedEvidenceKind")
+        );
         assert_eq!(row["processedEvidenceKind"], json!(processed));
         assert!(!serde_json::to_string(&page).unwrap().contains("PRIVATE_"));
         assert_eq!(

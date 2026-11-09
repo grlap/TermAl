@@ -122,7 +122,11 @@ fn cargo_target_sibling_reported_end_preserves_inherited_candidate_but_fences_ne
             let carried = turn.record(|record| record.engram.carried_checks[0].clone());
             assert!(carried.fence.is_none());
             assert_eq!(carried.check.watcher_cargo_candidates.len(), 1);
-            assert!(carried.check.watcher_cargo_candidates[0].path.contains("targetVsXPcL"));
+            assert!(
+                carried.check.watcher_cargo_candidates[0]
+                    .path
+                    .contains("targetVsXPcL")
+            );
             // Closing preserves the candidate as data. The deleted
             // reported-end settlement can no longer consume or credit it.
             assert_ordinary_turn_has_no_native_requests(&turn);
@@ -189,10 +193,14 @@ fn cargo_target_sibling_arriving_during_off_lock_poll_keeps_its_candidate() {
         let state = turn.state.clone();
         std::thread::spawn(move || state.poll_engram_carried_runs())
     };
-    paused.recv_timeout(DEADLOCK_GUARD).expect("actual off-lock artifact read");
+    paused
+        .recv_timeout(DEADLOCK_GUARD)
+        .expect("actual off-lock artifact read");
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     turn.state.note_engram_workspace_file_changes(&[change(
-        &watched.join("targetAb1234"), WorkspaceFileChangeKind::Deleted)]);
+        &watched.join("targetAb1234"),
+        WorkspaceFileChangeKind::Deleted,
+    )]);
     release.send(()).unwrap();
     polling.join().unwrap();
     turn.record(|record| {
@@ -219,11 +227,17 @@ fn cargo_target_sibling_prelaunch_arrival_during_off_lock_poll_keeps_its_order()
         let state = turn.state.clone();
         std::thread::spawn(move || state.poll_engram_carried_runs())
     };
-    paused.recv_timeout(DEADLOCK_GUARD).expect("actual off-lock artifact read");
+    paused
+        .recv_timeout(DEADLOCK_GUARD)
+        .expect("actual off-lock artifact read");
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     turn.state.note_engram_workspace_file_changes_observed(
-        &[change(&watched.join("targetAb1234"), WorkspaceFileChangeKind::Deleted)],
-        Some(before));
+        &[change(
+            &watched.join("targetAb1234"),
+            WorkspaceFileChangeKind::Deleted,
+        )],
+        Some(before),
+    );
     release.send(()).unwrap();
     polling.join().unwrap();
     turn.record(|record| {
@@ -252,7 +266,13 @@ fn cargo_target_sibling_notified_between_registration_and_stamp_keeps_candidate_
     let arrival = engram_watcher_arrival_now();
     ordinary_launch_gate(&turn, &worktree, false);
     assert!(registration < arrival.order);
-    assert!(arrival.order < turn.record(|record| record.engram.carried_checks[0].check.started_order.expect("actual command start has a host order")));
+    assert!(
+        arrival.order
+            < turn.record(|record| record.engram.carried_checks[0]
+                .check
+                .started_order
+                .expect("actual command start has a host order"))
+    );
     let watched = normalize_user_facing_path(&fs::canonicalize(&worktree).unwrap());
     let sibling = watched.join("targetAb1234");
     fs::create_dir(&sibling).unwrap();
@@ -270,7 +290,9 @@ fn cargo_target_sibling_notified_between_registration_and_stamp_keeps_candidate_
         "a sibling is kept as a candidate, not exempted"
     );
     turn.record(|record| {
-        let candidates = &record.engram.carried_checks[0].check.watcher_cargo_candidates;
+        let candidates = &record.engram.carried_checks[0]
+            .check
+            .watcher_cargo_candidates;
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].before_launch);
         assert!(candidates[0].path.contains("targetAb1234"));
@@ -328,7 +350,9 @@ fn cargo_target_candidate_without_a_directory_is_data_not_a_verification_exempti
         let sibling = watched.join("targetAb1234");
         fs::create_dir(&sibling).unwrap();
         turn.state.note_engram_workspace_file_changes(&[change(
-            &sibling, WorkspaceFileChangeKind::Created)]);
+            &sibling,
+            WorkspaceFileChangeKind::Created,
+        )]);
         fs::remove_dir(&sibling).unwrap();
         let run = finish_run(&worktree, "passed", &"f".repeat(64));
         turn.state.poll_engram_carried_runs();
@@ -336,7 +360,11 @@ fn cargo_target_candidate_without_a_directory_is_data_not_a_verification_exempti
             let carried = &record.engram.carried_checks[0];
             assert!(carried.fence.is_none());
             assert_eq!(carried.check.watcher_cargo_candidates.len(), 1);
-            assert!(carried.check.watcher_cargo_candidates[0].path.contains("targetAb1234"));
+            assert!(
+                carried.check.watcher_cargo_candidates[0]
+                    .path
+                    .contains("targetAb1234")
+            );
             assert!(carried.check.watcher_exempted.is_none());
         });
         // The former target-directory credit decision was checkpoint-only.

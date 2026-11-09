@@ -74,17 +74,21 @@ fn failed_completion_fixture_retains_artifacts_after_worker_release() {
     let path = root.path().to_owned();
     fs::write(path.join("original-run.log"), "original failure\n").unwrap();
     let released = root.observe_cleanup();
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _evidence = CompletionEvidenceRetention(root.clone());
-        panic!("fixture failure witness");
-    }))
-    .is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _evidence = CompletionEvidenceRetention(root.clone());
+            panic!("fixture failure witness");
+        }))
+        .is_err()
+    );
     std::thread::spawn(move || drop(root)).join().unwrap();
-    assert!(released
-        .recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
-        .unwrap()
-        .unwrap_err()
-        .contains("retained failed fixture"));
+    assert!(
+        released
+            .recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
+            .unwrap()
+            .unwrap_err()
+            .contains("retained failed fixture")
+    );
     assert_eq!(
         fs::read_to_string(path.join("original-run.log")).unwrap(),
         "original failure\n"
@@ -118,8 +122,8 @@ impl CompletionFixture {
     pub(super) fn command(&self, session_id: &str, args: &[&str], work: bool) -> Value {
         let output = self.command_output(session_id, args, work);
         assert!(output.status.success(), "Engram fixture command failed");
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|_|
-            panic!("Engram fixture command returned invalid JSON"))
+        serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|_| panic!("Engram fixture command returned invalid JSON"))
     }
 
     fn command_output(&self, session_id: &str, args: &[&str], work: bool) -> std::process::Output {
@@ -161,29 +165,68 @@ impl CompletionFixture {
     }
 
     pub(super) fn store(&self) -> EngramAuthorityStoreKey {
-        self.live.state.inner.lock().unwrap().find_project(&self.project_id)
-            .unwrap().engram.as_ref().unwrap().authority_store_key.clone().unwrap()
+        self.live
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .find_project(&self.project_id)
+            .unwrap()
+            .engram
+            .as_ref()
+            .unwrap()
+            .authority_store_key
+            .clone()
+            .unwrap()
     }
 
     pub(super) fn target(&self, session: &str) -> EngramBindingTarget {
         AppState::engram_source_root_target_locked(&self.live.state.inner.lock().unwrap(), session)
-            .unwrap().expect("the ordinary work service is configured")
+            .unwrap()
+            .expect("the ordinary work service is configured")
     }
 
     pub(super) fn claim_binding(&self, session: &str) -> EngramControlWorkBinding {
         let target = self.target(session);
-        target.adapter.read_work_session(&target.connection, &self.store(), target.settings.call_timeout())
+        target
+            .adapter
+            .read_work_session(
+                &target.connection,
+                &self.store(),
+                target.settings.call_timeout(),
+            )
             .expect("the actual ordinary producer identifies this session");
-        target.adapter.read_work_binding(&target.connection, EngramBindingPreference { current: None },
-            target.settings.call_timeout()).unwrap().expect("the real session holds a claim")
+        target
+            .adapter
+            .read_work_binding(
+                &target.connection,
+                EngramBindingPreference { current: None },
+                target.settings.call_timeout(),
+            )
+            .unwrap()
+            .expect("the real session holds a claim")
     }
 
-    fn canonical_read(&self, session: &str, binding: &EngramControlWorkBinding) -> EngramNamedRootReadResponse {
+    fn canonical_read(
+        &self,
+        session: &str,
+        binding: &EngramControlWorkBinding,
+    ) -> EngramNamedRootReadResponse {
         let target = self.target(session);
-        let read: EngramNamedRootReadResponse = parse_engram_result(target.adapter.request(
-            &target.connection, &EngramControlRequest::NamedRootRead {
-                run_id: binding.run_id.clone(), claim_id: binding.claim_id.clone(),
-            }, target.settings.call_timeout()).expect("real canonical run is readable")).unwrap();
+        let read: EngramNamedRootReadResponse = parse_engram_result(
+            target
+                .adapter
+                .request(
+                    &target.connection,
+                    &EngramControlRequest::NamedRootRead {
+                        run_id: binding.run_id.clone(),
+                        claim_id: binding.claim_id.clone(),
+                    },
+                    target.settings.call_timeout(),
+                )
+                .expect("real canonical run is readable"),
+        )
+        .unwrap();
         read.validate_authority(&self.store(), binding).unwrap();
         read
     }
@@ -212,7 +255,9 @@ impl CompletionFixture {
             _ => panic!("expected a provider prompt"),
         }
         assert!(self.live.receiver.try_recv().is_err());
-        assert!(self.record(session_id, |record| record.engram.unadmitted_active_turn.is_some()));
+        assert!(self.record(session_id, |record| {
+            record.engram.unadmitted_active_turn.is_some()
+        }));
     }
 
     fn wait_for_check_capture(&self, session_id: &str) {
@@ -233,29 +278,56 @@ impl CompletionFixture {
         }
     }
 
-    fn prepare_registered_check(&self, session: &str, root: &FsPath, command: &str, observe: bool)
-        -> (TestRunRegistration, EngramVerificationRecordFrozen)
-    {
+    fn prepare_registered_check(
+        &self,
+        session: &str,
+        root: &FsPath,
+        command: &str,
+        observe: bool,
+    ) -> (TestRunRegistration, EngramVerificationRecordFrozen) {
         self.prepare_registered_check_in_lane(session, root, command, observe, false)
     }
 
-    fn prepare_registered_check_in_lane(&self, session: &str, root: &FsPath, command: &str,
-        observe: bool, historical: bool) -> (TestRunRegistration, EngramVerificationRecordFrozen)
-    {
+    fn prepare_registered_check_in_lane(
+        &self,
+        session: &str,
+        root: &FsPath,
+        command: &str,
+        observe: bool,
+        historical: bool,
+    ) -> (TestRunRegistration, EngramVerificationRecordFrozen) {
         let argv = engram_shell_words(command).unwrap();
         assert_eq!(argv.first().map(String::as_str), Some("cargo"));
         let clean_before = run_git_test_command_output(root, &["status", "--porcelain"]).is_empty();
-        assert!(clean_before, "registered native checks start on a clean commit");
-        let commit = run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim().to_owned();
+        assert!(
+            clean_before,
+            "registered native checks start on a clean commit"
+        );
+        let commit = run_git_test_command_output(root, &["rev-parse", "HEAD"])
+            .trim()
+            .to_owned();
         let owner_deadline = std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET;
-        let source_owner = self.live.state.source_owner_metadata_until(session, owner_deadline)
+        let source_owner = self
+            .live
+            .state
+            .source_owner_metadata_until(session, owner_deadline)
             .expect("the live check pins its actual source owner");
         let source_before = engram_source_id_until(&source_owner, root, owner_deadline)
             .expect("the pinned owner measures the actual pre-check identity");
         assert_eq!(source_before.commit, commit);
         let run_id = format!("test-live-{}", Uuid::new_v4().simple());
-        let runs = PathBuf::from(run_git_test_command_output(root,
-            &["rev-parse", "--path-format=absolute", "--git-path", "review-runs"]).trim());
+        let runs = PathBuf::from(
+            run_git_test_command_output(
+                root,
+                &[
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-path",
+                    "review-runs",
+                ],
+            )
+            .trim(),
+        );
         let directory = runs.join(&run_id);
         fs::create_dir_all(&directory).unwrap();
         let started = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -266,37 +338,85 @@ impl CompletionFixture {
             "sourceOwner": source_owner, "sourceId": source_before,
             "command": argv, "stages": [{ "name": "focused", "command": argv[0], "args": &argv[1..] }],
         });
-        fs::write(directory.join("request.json"), serde_json::to_vec(&request).unwrap()).unwrap();
-        self.live.state.register_test_run(session, RegisterTestRunRequest {
-            run_id: run_id.clone(), run_directory: directory.to_string_lossy().into_owned(),
-        }).unwrap();
-        let registration = self.live.state.inner.lock().unwrap().test_run_registrations[&run_id].clone();
-        assert_eq!(registration.work_binding.as_ref(), Some(&self.claim_binding(session)));
+        fs::write(
+            directory.join("request.json"),
+            serde_json::to_vec(&request).unwrap(),
+        )
+        .unwrap();
+        self.live
+            .state
+            .register_test_run(
+                session,
+                RegisterTestRunRequest {
+                    run_id: run_id.clone(),
+                    run_directory: directory.to_string_lossy().into_owned(),
+                },
+            )
+            .unwrap();
+        let registration =
+            self.live.state.inner.lock().unwrap().test_run_registrations[&run_id].clone();
+        assert_eq!(
+            registration.work_binding.as_ref(),
+            Some(&self.claim_binding(session))
+        );
         assert_eq!(registration.authority_store.as_ref(), Some(&self.store()));
-        assert!(registration.named_root.is_some(), "the actual naming owner pins the registered root");
-        let mut recorder = observe.then(|| SessionRecorder::new(self.live.state.clone(), session.to_owned()));
+        assert!(
+            registration.named_root.is_some(),
+            "the actual naming owner pins the registered root"
+        );
+        let mut recorder =
+            observe.then(|| SessionRecorder::new(self.live.state.clone(), session.to_owned()));
         if let Some(recorder) = &mut recorder {
-            recorder.command_started_in(&run_id, command, Some(command), Some(&root.to_string_lossy())).unwrap();
+            recorder
+                .command_started_in(
+                    &run_id,
+                    command,
+                    Some(command),
+                    Some(&root.to_string_lossy()),
+                )
+                .unwrap();
             self.wait_for_check_capture(session);
         }
         let stage_started = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let output = Command::new(&argv[0]).args(&argv[1..]).current_dir(root)
-            .env("CARGO_TARGET_DIR", root.join("target")).output().expect("actual native Cargo launches");
-        let text = format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        let output = Command::new(&argv[0])
+            .args(&argv[1..])
+            .current_dir(root)
+            .env("CARGO_TARGET_DIR", root.join("target"))
+            .output()
+            .expect("actual native Cargo launches");
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         fs::write(directory.join("focused.log"), &text).unwrap();
         let code = output.status.code().expect("native command exit");
         if command.contains(" test") {
-            assert!(code == 0 && text.contains("1 passed"), "the real embedded checked_content test passed: {text}");
+            assert!(
+                code == 0 && text.contains("1 passed"),
+                "the real embedded checked_content test passed: {text}"
+            );
         }
         let ended = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let after_commit = run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim().to_owned();
+        let after_commit = run_git_test_command_output(root, &["rev-parse", "HEAD"])
+            .trim()
+            .to_owned();
         let dirty = run_git_test_command_output(root, &["status", "--porcelain"]);
         assert_eq!(after_commit, commit);
-        assert!(dirty.is_empty(), "the real native check leaves source unchanged: {dirty}");
-        let source_after = engram_source_id_until(&source_owner, root,
-            std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET)
-            .expect("the same pinned owner measures the actual post-check identity");
-        assert!(source_before == source_after, "the complete source identity is unchanged");
+        assert!(
+            dirty.is_empty(),
+            "the real native check leaves source unchanged: {dirty}"
+        );
+        let source_after = engram_source_id_until(
+            &source_owner,
+            root,
+            std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET,
+        )
+        .expect("the same pinned owner measures the actual post-check identity");
+        assert!(
+            source_before == source_after,
+            "the complete source identity is unchanged"
+        );
         let results = json!({
             "runId": run_id, "state": if code == 0 { "passed" } else { "failed" },
             "exitCode": code, "started": started, "ended": ended,
@@ -307,22 +427,44 @@ impl CompletionFixture {
                 "after": { "commit": after_commit, "clean": true, "paths": [] },
                 "outcome": "clean", "eligible": true },
         });
-        fs::write(directory.join("results.json"), serde_json::to_vec(&results).unwrap()).unwrap();
+        fs::write(
+            directory.join("results.json"),
+            serde_json::to_vec(&results).unwrap(),
+        )
+        .unwrap();
         if let Some(recorder) = &mut recorder {
-            recorder.command_completed_with_exit(&run_id, command, &text,
-                if code == 0 { CommandStatus::Success } else { CommandStatus::Error },
-                EngramCommandExit::Code(i64::from(code))).unwrap();
+            recorder
+                .command_completed_with_exit(
+                    &run_id,
+                    command,
+                    &text,
+                    if code == 0 {
+                        CommandStatus::Success
+                    } else {
+                        CommandStatus::Error
+                    },
+                    EngramCommandExit::Code(i64::from(code)),
+                )
+                .unwrap();
             self.wait_for_check_capture(session);
         }
-        let prepared = if historical { Self::prepare_historical_record(&registration) }
-            else { engram_verification_record_prepare(&registration) };
-        let EngramVerificationRecordPrepared::Ready(frozen) = prepared
-            else { panic!("the real registered artifact must produce a native verification body"); };
+        let prepared = if historical {
+            Self::prepare_historical_record(&registration)
+        } else {
+            engram_verification_record_prepare(&registration)
+        };
+        let EngramVerificationRecordPrepared::Ready(frozen) = prepared else {
+            panic!("the real registered artifact must produce a native verification body");
+        };
         if !historical {
-            assert!(matches!(&frozen.body.input, EngramVerificationRecordInput::SourceId { source_id }
-                if source_id == &source_before));
-            assert!(matches!(&frozen.body.post_run, EngramVerificationRecordPostRun::SourceId(post_run)
-                if post_run.source_id == source_after));
+            assert!(
+                matches!(&frozen.body.input, EngramVerificationRecordInput::SourceId { source_id }
+                if source_id == &source_before)
+            );
+            assert!(
+                matches!(&frozen.body.post_run, EngramVerificationRecordPostRun::SourceId(post_run)
+                if post_run.source_id == source_after)
+            );
         }
         (registration, frozen)
     }
@@ -330,7 +472,9 @@ impl CompletionFixture {
     // Explicit retained-record witness for the installed commit-only
     // evaluation wire. This models the earlier producer before its first
     // receipt; it is never selected as a fallback for a new record.
-    fn prepare_historical_record(registration: &TestRunRegistration) -> EngramVerificationRecordPrepared {
+    fn prepare_historical_record(
+        registration: &TestRunRegistration,
+    ) -> EngramVerificationRecordPrepared {
         let directory = FsPath::new(&registration.run_directory);
         let read = |file: &str| -> Value {
             serde_json::from_slice(&fs::read(directory.join(file)).unwrap()).unwrap()
@@ -338,54 +482,112 @@ impl CompletionFixture {
         let request = read("request.json");
         let results = read("results.json");
         let input = TestRunCommittedInput::read(&results).unwrap();
-        let historical = EngramVerificationRecordInput::Commit { commit:input.commit.unwrap() };
-        let body = engram_verification_record_build_body(registration, &request, &results, Some(&historical)).unwrap();
-        fs::write(directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE), engram_verification_record_text(&body).unwrap()).unwrap();
+        let historical = EngramVerificationRecordInput::Commit {
+            commit: input.commit.unwrap(),
+        };
+        let body = engram_verification_record_build_body(
+            registration,
+            &request,
+            &results,
+            Some(&historical),
+        )
+        .unwrap();
+        fs::write(
+            directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE),
+            engram_verification_record_text(&body).unwrap(),
+        )
+        .unwrap();
         engram_verification_record_prepare(registration)
     }
 
-    fn historical_registered_check(&self, session: &str, root: &FsPath, command: &str)
-        -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
-    {
-        let (registration, frozen) = self.prepare_registered_check_in_lane(session, root, command, true, true);
+    fn historical_registered_check(
+        &self,
+        session: &str,
+        root: &FsPath,
+        command: &str,
+    ) -> (
+        EngramVerificationRecordBody,
+        EngramVerificationRecordReceipt,
+    ) {
+        let (registration, frozen) =
+            self.prepare_registered_check_in_lane(session, root, command, true, true);
         self.record_registered_check(registration, frozen)
     }
 
-    fn record_registered_check(&self, registration: TestRunRegistration, frozen: EngramVerificationRecordFrozen)
-        -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
-    {
+    fn record_registered_check(
+        &self,
+        registration: TestRunRegistration,
+        frozen: EngramVerificationRecordFrozen,
+    ) -> (
+        EngramVerificationRecordBody,
+        EngramVerificationRecordReceipt,
+    ) {
         let session = registration.initiating_session_id.as_str();
         let run_id = registration.run_id.clone();
-        let route = self.live.state.engram_verification_record_route(&registration).unwrap();
+        let route = self
+            .live
+            .state
+            .engram_verification_record_route(&registration)
+            .unwrap();
         let sent = engram_verification_record_send(frozen.clone(), Ok(route.link()));
-        let EngramVerificationRecordStep::Received { body, receipt } = &sent
-            else { panic!("actual producer must answer the registered native check"); };
-        self.live.state.note_engram_verification_record_step(&registration, &sent);
-        let loaded = load_state(self.live.state.persistence_path.as_path()).unwrap().unwrap();
-        assert!(matches!(&loaded.test_run_registrations[&run_id].verification_record,
+        let EngramVerificationRecordStep::Received { body, receipt } = &sent else {
+            panic!("actual producer must answer the registered native check");
+        };
+        self.live
+            .state
+            .note_engram_verification_record_step(&registration, &sent);
+        let loaded = load_state(self.live.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(&loaded.test_run_registrations[&run_id].verification_record,
             Some(TestRunVerificationAck::Received { receipt: saved, .. }) if saved == receipt),
-            "the actual receipt is durably retained on the registered run");
+            "the actual receipt is durably retained on the registered run"
+        );
         let duplicate = engram_verification_record_send(frozen, Ok(route.link()));
-        let EngramVerificationRecordStep::Received { body: again, receipt: replay } = duplicate
-            else { panic!("exact native record replay returns its original receipt"); };
+        let EngramVerificationRecordStep::Received {
+            body: again,
+            receipt: replay,
+        } = duplicate
+        else {
+            panic!("exact native record replay returns its original receipt");
+        };
         assert!(&again == body, "replay preserves the complete record body");
-        assert_eq!(serde_json::to_value(&replay).unwrap(), serde_json::to_value(receipt).unwrap());
+        assert_eq!(
+            serde_json::to_value(&replay).unwrap(),
+            serde_json::to_value(receipt).unwrap()
+        );
         assert_eq!(receipt.verifications.len(), 1);
         let positive = self.object(&receipt.verifications[0].record_id);
-        assert!(positive["source_basis"] == serde_json::to_value(
-            engram_verification_record_basis(body).expect("the full owner basis is retained")).unwrap(),
-            "Engram stores the complete producer identity and its original root provenance");
+        assert!(
+            positive["source_basis"]
+                == serde_json::to_value(
+                    engram_verification_record_basis(body)
+                        .expect("the full owner basis is retained")
+                )
+                .unwrap(),
+            "Engram stores the complete producer identity and its original root provenance"
+        );
         for mismatch in ["dirty-input", "claim-fence", "same-key-different-body"] {
             let mut refused = body.clone();
             if mismatch != "same-key-different-body" {
-                refused.registration.host_run_id = format!("{}-{mismatch}", body.registration.host_run_id);
+                refused.registration.host_run_id =
+                    format!("{}-{mismatch}", body.registration.host_run_id);
             }
             match mismatch {
                 "dirty-input" => match &mut refused.post_run {
-                    EngramVerificationRecordPostRun::Commit(post_run) => post_run.clean_before = false,
-                    EngramVerificationRecordPostRun::SourceId(post_run) => post_run.source_id.changes.push(
-                        EngramSourceIdChange { path:"src/lib.rs".into(), status:" M".into(), origin:None,
-                            blob:Some("e".repeat(40)), mode:Some(EngramSourceIdMode::Regular) }),
+                    EngramVerificationRecordPostRun::Commit(post_run) => {
+                        post_run.clean_before = false
+                    }
+                    EngramVerificationRecordPostRun::SourceId(post_run) => {
+                        post_run.source_id.changes.push(EngramSourceIdChange {
+                            path: "src/lib.rs".into(),
+                            status: " M".into(),
+                            origin: None,
+                            blob: Some("e".repeat(40)),
+                            mode: Some(EngramSourceIdMode::Regular),
+                        })
+                    }
                 },
                 "claim-fence" => refused.registration.binding.claim_fence += 1,
                 _ => refused.run.command.push_str(" --changed-body"),
@@ -397,9 +599,15 @@ impl CompletionFixture {
             let target = self.target(session);
             let error = target.adapter.request(&target.connection, &request, target.settings.call_timeout())
                 .expect_err("the real producer rejects invalid input, claim scope or an idempotency collision");
-            assert_eq!(error.kind, EngramTransportErrorKind::Remote, "{mismatch}: remote refusal required");
-            assert!(self.object(&receipt.verifications[0].record_id) == positive,
-                "a refused request never rewrites the original verification");
+            assert_eq!(
+                error.kind,
+                EngramTransportErrorKind::Remote,
+                "{mismatch}: remote refusal required"
+            );
+            assert!(
+                self.object(&receipt.verifications[0].record_id) == positive,
+                "a refused request never rewrites the original verification"
+            );
         }
 
         assert_no_live_turn_gate(&self.live.transport);
@@ -412,7 +620,11 @@ impl CompletionFixture {
         loop {
             let done = self.record(session, |record| {
                 record.engram.unadmitted_closing_jobs.is_empty()
-                    && record.engram.unadmitted_reports.iter().all(|report| report.is_settled())
+                    && record
+                        .engram
+                        .unadmitted_reports
+                        .iter()
+                        .all(|report| report.is_settled())
                     && !record.engram.unadmitted_worker_running
             });
             if done {
@@ -466,8 +678,14 @@ impl CompletionFixture {
 pub(super) fn completion_fixture() -> CompletionFixture {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let live = live_root_fixture(COMPLETION_SUFFIX, []);
-    let _setup_evidence = CompletionEvidenceRetention(live.state.test_temp_root.as_ref().unwrap().clone());
-    let root = live.state.test_temp_root.as_ref().unwrap().path()
+    let _setup_evidence =
+        CompletionEvidenceRetention(live.state.test_temp_root.as_ref().unwrap().clone());
+    let root = live
+        .state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
         .join(format!("live-root-project-{COMPLETION_SUFFIX}"));
     run_git_test_command(&root, &["init", "--quiet"]);
     run_git_test_command(&root, &["config", "user.email", "termal-tests@example.com"]);
@@ -620,16 +838,28 @@ fn objects_with_key<'a>(value: &'a Value, key: &str, found: &mut Vec<&'a Value>)
     }
 }
 
-
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     let fixture = completion_fixture();
     registered_launcher::install_launcher(&fixture);
     let first = &fixture.live.session_id;
-    let added = fixture.work(first, &["add", "Check the recovered named worktree",
-        "--accept", "A test passes in the named root", "--bind", "1=test", "--json"]);
-    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    let added = fixture.work(
+        first,
+        &[
+            "add",
+            "Check the recovered named worktree",
+            "--accept",
+            "A test passes in the named root",
+            "--bind",
+            "1=test",
+            "--json",
+        ],
+    );
+    let work = added["work"]["short_ref"]
+        .as_str()
+        .or_else(|| added["short_ref"].as_str())
+        .unwrap();
     fixture.work(first, &["claim", work, "--json"]);
     let original = fixture.claim_binding(first);
     let unnamed = fixture.canonical_read(first, &original);
@@ -640,97 +870,265 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
     finish_live_root(&fixture.live.state, first);
     fixture.wait_for_reports(first);
     let reports = fixture.live.transport.requests_for("execution_observe");
-    assert!(!reports.is_empty(), "the real producer receives the earlier ordinary mutation");
+    assert!(
+        !reports.is_empty(),
+        "the real producer receives the earlier ordinary mutation"
+    );
     let earlier = reports.clone();
-    fixture.work(first, &["note", work, "Earlier source change retained before release", "--status", "--json"]);
-    fixture.work(first, &["update", work, "--release", "--reason", "Continue in a recovered session", "--json"]);
-    fs::write(fixture.root.join("README.md"), "newer content before naming\n").unwrap();
+    fixture.work(
+        first,
+        &[
+            "note",
+            work,
+            "Earlier source change retained before release",
+            "--status",
+            "--json",
+        ],
+    );
+    fixture.work(
+        first,
+        &[
+            "update",
+            work,
+            "--release",
+            "--reason",
+            "Continue in a recovered session",
+            "--json",
+        ],
+    );
+    fs::write(
+        fixture.root.join("README.md"),
+        "newer content before naming\n",
+    )
+    .unwrap();
     run_git_test_command(&fixture.root, &["add", "README.md"]);
-    run_git_test_command(&fixture.root, &["commit", "--quiet", "-m", "newer fixture content"]);
+    run_git_test_command(
+        &fixture.root,
+        &["commit", "--quiet", "-m", "newer fixture content"],
+    );
     let worktree = fixture.root.join(COMPLETION_WORKTREE);
-    run_git_test_command(&fixture.root, &["worktree", "add", "--quiet", "-b", "new-root", worktree.to_str().unwrap()]);
-    let second = create_test_project_session(&fixture.live.state, Agent::Codex, &fixture.project_id, &fixture.root);
-    let _cleanup = LiveRootCleanup { transport: fixture.live.transport.clone(), session_id: second.clone() };
-    fixture.work(&second, &["claim", work, "--recover", "Recover the released run at newer content", "--json"]);
+    run_git_test_command(
+        &fixture.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "new-root",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    let second = create_test_project_session(
+        &fixture.live.state,
+        Agent::Codex,
+        &fixture.project_id,
+        &fixture.root,
+    );
+    let _cleanup = LiveRootCleanup {
+        transport: fixture.live.transport.clone(),
+        session_id: second.clone(),
+    };
+    fixture.work(
+        &second,
+        &[
+            "claim",
+            work,
+            "--recover",
+            "Recover the released run at newer content",
+            "--json",
+        ],
+    );
     let recovered = fixture.claim_binding(&second);
     assert_eq!(recovered.run_id, original.run_id);
     assert_eq!(recovered.claim_id, original.claim_id);
     assert!(recovered.claim_fence > original.claim_fence);
-    let named = fixture.live.state.name_engram_source_root(&second, EngramSourceRootRequest {
-        work: work.to_owned(), path: Some(Some(worktree.to_string_lossy().into_owned())),
-    }).unwrap();
+    let named = fixture
+        .live
+        .state
+        .name_engram_source_root(
+            &second,
+            EngramSourceRootRequest {
+                work: work.to_owned(),
+                path: Some(Some(worktree.to_string_lossy().into_owned())),
+            },
+        )
+        .unwrap();
     let bound = fixture.canonical_read(&second, &recovered);
-    assert!(matches!(bound.named_root, EngramNamedRootState::Bound { generation, .. }
-        if generation == named.generation as i64));
-    fixture.work(&second, &["note", work, "Recovered holder checks the named root without an edit", "--status", "--json"]);
+    assert!(
+        matches!(bound.named_root, EngramNamedRootState::Bound { generation, .. }
+        if generation == named.generation as i64)
+    );
+    fixture.work(
+        &second,
+        &[
+            "note",
+            work,
+            "Recovered holder checks the named root without an edit",
+            "--status",
+            "--json",
+        ],
+    );
     let before = content_revision(&worktree).unwrap().1;
     fixture.begin(&second, "Run the real check without changing source.");
-    let closing_turn = fixture.record(&second, |record|
-        record.engram.unadmitted_active_turn.as_ref().unwrap().host_turn_ref.clone());
+    let closing_turn = fixture.record(&second, |record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .host_turn_ref
+            .clone()
+    });
     let (body, receipt) = registered_launcher::run_historical_check(&fixture, &second, &worktree);
     assert_eq!(body.registration.binding, recovered);
     assert_eq!(body.registration.root.generation, named.generation as i64);
     let stored = fixture.object(&receipt.verifications[0].record_id);
-    assert!(stored["source_basis"] == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap(),
-        "the stored basis matches the complete prepared basis");
+    assert!(
+        stored["source_basis"]
+            == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap(),
+        "the stored basis matches the complete prepared basis"
+    );
     assert_eq!(stored["check_kind"], "test");
     assert_eq!(content_revision(&worktree).unwrap().1, before);
-    assert!(worktree.join(".git").is_file(), "naming never removes the worktree");
-    for prior in earlier { assert!(fixture.live.transport.requests_for("execution_observe").contains(&prior)); }
-    let checkpoint_before_close = fixture.record(&second, |record| record.engram.runtime_checkpoint.clone());
+    assert!(
+        worktree.join(".git").is_file(),
+        "naming never removes the worktree"
+    );
+    for prior in earlier {
+        assert!(
+            fixture
+                .live
+                .transport
+                .requests_for("execution_observe")
+                .contains(&prior)
+        );
+    }
+    let checkpoint_before_close =
+        fixture.record(&second, |record| record.engram.runtime_checkpoint.clone());
     finish_live_root(&fixture.live.state, &second);
     fixture.wait_for_reports(&second);
-    eprintln!("PINNED_LAUNCHER_CLOSING {}", json!({
-        "checkpoint_before_close": checkpoint_before_close.is_some(),
-        "reports": fixture.record(&second, |record| record.engram.unadmitted_reports.iter()
-            .filter(|report| report.host_turn_ref == closing_turn).count()),
-    }));
+    eprintln!(
+        "PINNED_LAUNCHER_CLOSING {}",
+        json!({
+            "checkpoint_before_close": checkpoint_before_close.is_some(),
+            "reports": fixture.record(&second, |record| record.engram.unadmitted_reports.iter()
+                .filter(|report| report.host_turn_ref == closing_turn).count()),
+        })
+    );
     let shown = fixture.work(&second, &["show", work, "--json"]);
     let acceptance = shown["acceptance_basis"].as_i64().unwrap().to_string();
     let evidence = shown["evidence_basis"].as_i64().unwrap().to_string();
-    let EngramVerificationRecordInput::Commit { commit } = &body.input else { panic!("historical evaluation witness requires its retained Commit record"); };
+    let EngramVerificationRecordInput::Commit { commit } = &body.input else {
+        panic!("historical evaluation witness requires its retained Commit record");
+    };
     let judged = acceptance_committed_judged_revision(commit);
     let verification = &receipt.verifications[0].record_id;
-    fixture.work(&second, &[
-        "evaluate", work, "--mode", "same-session", "--acceptance-basis", &acceptance,
-        "--evidence-basis", &evidence, "--verdict", "1=pass:observed", "--rationale",
-        "1=Real registered test in the recovered named root passed without an edit",
-        "--evidence", &format!("1={verification}"), "--source-fingerprint", &judged,
-        "--attempt", "named-completion", "--json",
-    ]);
+    fixture.work(
+        &second,
+        &[
+            "evaluate",
+            work,
+            "--mode",
+            "same-session",
+            "--acceptance-basis",
+            &acceptance,
+            "--evidence-basis",
+            &evidence,
+            "--verdict",
+            "1=pass:observed",
+            "--rationale",
+            "1=Real registered test in the recovered named root passed without an edit",
+            "--evidence",
+            &format!("1={verification}"),
+            "--source-fingerprint",
+            &judged,
+            "--attempt",
+            "named-completion",
+            "--json",
+        ],
+    );
     let evaluated = fixture.canonical_read(&second, &recovered);
-    assert_eq!(evaluated.run.state, "active", "evaluation alone does not complete the run");
-    assert!(matches!(evaluated.named_root, EngramNamedRootState::Bound { .. }));
-    let retained = fixture.live.state.inner.lock().unwrap().engram_work_source_roots.iter()
-        .find(|entry| entry.claim_id == recovered.claim_id).unwrap().clone();
+    assert_eq!(
+        evaluated.run.state, "active",
+        "evaluation alone does not complete the run"
+    );
+    assert!(matches!(
+        evaluated.named_root,
+        EngramNamedRootState::Bound { .. }
+    ));
+    let retained = fixture
+        .live
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .iter()
+        .find(|entry| entry.claim_id == recovered.claim_id)
+        .unwrap()
+        .clone();
     let plan = {
         let now = fixture.live.state.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_COOLDOWN;
         engram_root_reclamation_plan_locked(&fixture.live.state.inner.lock().unwrap(), now)
     };
     fixture.live.state.run_engram_root_reclamation_pass(plan);
-    assert!(fixture.live.state.inner.lock().unwrap().engram_work_source_roots.contains(&retained));
-    fixture.work(&second, &["done", work, "Named-root registered check passed without an edit",
-        "--source-fingerprint", &judged, "--json"]);
+    assert!(
+        fixture
+            .live
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .contains(&retained)
+    );
+    fixture.work(
+        &second,
+        &[
+            "done",
+            work,
+            "Named-root registered check passed without an edit",
+            "--source-fingerprint",
+            &judged,
+            "--json",
+        ],
+    );
     let final_show = fixture.work(&second, &["show", work, "--json"]);
-    assert_eq!(final_show["status"]["work"]["lifecycle"], "completed", "<final_show withheld>");
+    assert_eq!(
+        final_show["status"]["work"]["lifecycle"], "completed",
+        "<final_show withheld>"
+    );
     let terminal = fixture.canonical_read(&second, &recovered);
     assert_eq!(terminal.run.state, "completed");
     assert_eq!(terminal.named_root, EngramNamedRootState::None);
-    assert!(terminal.latest_event.is_some(), "completion retains canonical naming history");
+    assert!(
+        terminal.latest_event.is_some(),
+        "completion retains canonical naming history"
+    );
     let plan = {
         let now = fixture.live.state.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_COOLDOWN;
         engram_root_reclamation_plan_locked(&fixture.live.state.inner.lock().unwrap(), now)
     };
-    assert!(plan.iter().any(|task| task.root == retained), "the real planner chooses canonical reconciliation");
+    assert!(
+        plan.iter().any(|task| task.root == retained),
+        "the real planner chooses canonical reconciliation"
+    );
     let reads_before = fixture.live.transport.root_reads.lock().unwrap().len();
     fixture.live.state.run_engram_root_reclamation_pass(plan);
-    assert!(fixture.live.transport.root_reads.lock().unwrap()[reads_before..].iter()
-        .any(|read| read.run_id == recovered.run_id && read.run.state == "completed"));
+    assert!(
+        fixture.live.transport.root_reads.lock().unwrap()[reads_before..]
+            .iter()
+            .any(|read| read.run_id == recovered.run_id && read.run.state == "completed")
+    );
     let notice_id = {
         let inner = fixture.live.state.inner.lock().unwrap();
         assert!(!inner.engram_work_source_roots.contains(&retained));
-        let notices = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-            .filter(|notice| notice.selection == retained).collect::<Vec<_>>();
+        let notices = inner
+            .engram_work_naming_history
+            .iter()
+            .flat_map(|history| &history.retirements)
+            .filter(|notice| notice.selection == retained)
+            .collect::<Vec<_>>();
         assert_eq!(notices.len(), 1);
         assert!(notices[0].published);
         assert_eq!(notices[0].binding, recovered);
@@ -738,16 +1136,38 @@ fn recovered_claim_check_in_a_newly_named_root_completes_without_an_edit() {
         assert!(notices[0].line.contains("its run completed"));
         notices[0].id.clone()
     };
-    let later = fixture.work(&second, &["add", "Continue after named completion", "--json"]);
-    let later_work = later["work"]["short_ref"].as_str().or_else(|| later["short_ref"].as_str()).unwrap();
+    let later = fixture.work(
+        &second,
+        &["add", "Continue after named completion", "--json"],
+    );
+    let later_work = later["work"]["short_ref"]
+        .as_str()
+        .or_else(|| later["short_ref"].as_str())
+        .unwrap();
     fixture.work(&second, &["claim", later_work, "--json"]);
-    fixture.live.state.name_engram_source_root(&second, EngramSourceRootRequest {
-        work: later_work.to_owned(), path: Some(Some(worktree.to_string_lossy().into_owned())),
-    }).unwrap();
+    fixture
+        .live
+        .state
+        .name_engram_source_root(
+            &second,
+            EngramSourceRootRequest {
+                work: later_work.to_owned(),
+                path: Some(Some(worktree.to_string_lossy().into_owned())),
+            },
+        )
+        .unwrap();
     let inner = fixture.live.state.inner.lock().unwrap();
-    let notices = inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-        .filter(|notice| notice.selection == retained).collect::<Vec<_>>();
-    assert_eq!(notices.len(), 1, "ordinary naming does not retire the completed selection twice");
+    let notices = inner
+        .engram_work_naming_history
+        .iter()
+        .flat_map(|history| &history.retirements)
+        .filter(|notice| notice.selection == retained)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        notices.len(),
+        1,
+        "ordinary naming does not retire the completed selection twice"
+    );
     assert_eq!(notices[0].id, notice_id);
     assert!(notices[0].published);
     drop(inner);

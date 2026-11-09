@@ -29,24 +29,44 @@ fn fill_safe(fixture: &RunFixture, session: &str, count: usize) {
 pub(super) fn fill_unbound_history(fixture: &RunFixture, count: usize) {
     let settings = {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let settings = inner.projects.iter_mut().find(|project| project.id == fixture.project_id)
-            .unwrap().engram.take();
+        let settings = inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == fixture.project_id)
+            .unwrap()
+            .engram
+            .take();
         fixture.state.commit_locked(&mut inner).unwrap();
         settings
     };
     let session = running_owner(fixture, "compaction-unbound-history-runtime");
     fill_safe(fixture, &session, count);
     let mut inner = fixture.state.inner.lock().unwrap();
-    let history = inner.test_run_observations.values().chain(
-        inner.test_run_compacted.values().filter(|row| row.compacted)
-            .flat_map(|row| row.observations.iter()))
+    let history = inner
+        .test_run_observations
+        .values()
+        .chain(
+            inner
+                .test_run_compacted
+                .values()
+                .filter(|row| row.compacted)
+                .flat_map(|row| row.observations.iter()),
+        )
         .filter(|row| row.summary.owner_session_id.as_deref() == Some(session.as_str()))
         .collect::<Vec<_>>();
     assert_eq!(history.len(), count);
-    assert!(history.iter().all(|row| test_run_final_unbound_valid(row)
-        && row.evidence.is_empty() && row.work_binding.is_none()),
-        "the filler uses actual host final-unbound proof, never native credit");
-    inner.projects.iter_mut().find(|project| project.id == fixture.project_id).unwrap().engram = settings;
+    assert!(
+        history.iter().all(|row| test_run_final_unbound_valid(row)
+            && row.evidence.is_empty()
+            && row.work_binding.is_none()),
+        "the filler uses actual host final-unbound proof, never native credit"
+    );
+    inner
+        .projects
+        .iter_mut()
+        .find(|project| project.id == fixture.project_id)
+        .unwrap()
+        .engram = settings;
     fixture.state.commit_locked(&mut inner).unwrap();
 }
 
@@ -188,10 +208,22 @@ async fn merged_resolved_detail_is_bounded_with_counts_lookup_and_registration_i
     assert_eq!(list["omittedCount"], 3);
     assert_eq!(list["unresolvedBacklog"], 1);
     assert_eq!(list["total"], 54);
-    assert!(list["runs"].as_array().unwrap().iter().any(|row| row["runId"] == first
-        && row["historyCompacted"] == true), "complete pages retain resolved compact identities");
-    assert!(!list["runs"].as_array().unwrap().iter().any(|row| row["runId"] == alias),
-        "the retained canonical artifact absorbs its execution alias");
+    assert!(
+        list["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["runId"] == first && row["historyCompacted"] == true),
+        "complete pages retain resolved compact identities"
+    );
+    assert!(
+        !list["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["runId"] == alias),
+        "the retained canonical artifact absorbs its execution alias"
+    );
     for id in [&first, &alias] {
         let (status, detail): (StatusCode, Value) = request_json(
             &app,
@@ -308,8 +340,15 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
             let retained_identity = if !registered {
                 let mut inner = fixture.state.inner.lock().unwrap();
                 let mut cached = inner.test_run_compacted.get_mut(run_id).unwrap();
-                assert!(!cached.compacted && cached.registration.is_none() && cached.observations.is_empty());
-                let identity = (cached.request_identity.clone(), cached.summary.detail_version.clone());
+                assert!(
+                    !cached.compacted
+                        && cached.registration.is_none()
+                        && cached.observations.is_empty()
+                );
+                let identity = (
+                    cached.request_identity.clone(),
+                    cached.summary.detail_version.clone(),
+                );
                 // A historical cached display hint is not a native receipt.
                 // Exercise the retained-artifact fallback without adding proof.
                 cached.summary.registration.restart_would_void_evidence = Some(true);
@@ -336,12 +375,19 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
                 assert!(inner.test_run_compacted[run_id].summary.stages.is_empty());
                 assert!(inner.test_run_compacted[run_id].summary.command.is_none());
                 let cached = &inner.test_run_compacted[run_id];
-                assert_eq!(Some((cached.request_identity.clone(), cached.summary.detail_version.clone())),
-                    retained_identity);
+                assert_eq!(
+                    Some((
+                        cached.request_identity.clone(),
+                        cached.summary.detail_version.clone()
+                    )),
+                    retained_identity
+                );
                 assert!(cached.registration.is_none() && cached.observations.is_empty());
                 assert!(retained.registration.verification_record_ids.is_empty());
-                assert_eq!(retained.registration.restart_evidence_reason,
-                    "Retained artifact identity does not establish verification settlement or work completion.");
+                assert_eq!(
+                    retained.registration.restart_evidence_reason,
+                    "Retained artifact identity does not establish verification settlement or work completion."
+                );
             }
             if !terminal {
                 assert_eq!(retained.state, TestRunState::Unknown);
@@ -351,8 +397,15 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
             // its artifacts gone this fixture has no proof of completion.
             // An unregistered cached terminal identity retains its verdict.
             let known_terminal = terminal && !registered;
-            let expected_state = if known_terminal { TestRunState::Passed } else { TestRunState::Unknown };
-            assert_eq!(retained.state, expected_state, "registered={registered}, terminal={terminal}");
+            let expected_state = if known_terminal {
+                TestRunState::Passed
+            } else {
+                TestRunState::Unknown
+            };
+            assert_eq!(
+                retained.state, expected_state,
+                "registered={registered}, terminal={terminal}"
+            );
             let mut revisions = Vec::new();
             while let Ok(event) = stream.try_recv() {
                 let SseStreamEvent::State(payload) = event else {
@@ -363,16 +416,38 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
                 let counts = &cut.test_run_overview.get().counts;
                 assert_eq!(counts.total, 1, "retained identity is still counted");
                 assert_eq!(counts.running, 0);
-                assert_eq!(counts.unknown, usize::from(!known_terminal), "registered={registered}, terminal={terminal}, cut={}", cut.revision);
-                assert_eq!(counts.passed, usize::from(known_terminal), "registered={registered}, terminal={terminal}, cut={}", cut.revision);
-                assert_eq!(counts.evidence_unknown, 1, "artifact loss cannot fabricate settled proof");
+                assert_eq!(
+                    counts.unknown,
+                    usize::from(!known_terminal),
+                    "registered={registered}, terminal={terminal}, cut={}",
+                    cut.revision
+                );
+                assert_eq!(
+                    counts.passed,
+                    usize::from(known_terminal),
+                    "registered={registered}, terminal={terminal}, cut={}",
+                    cut.revision
+                );
+                assert_eq!(
+                    counts.evidence_unknown, 1,
+                    "artifact loss cannot fabricate settled proof"
+                );
             }
-            assert!(!revisions.is_empty(), "the live client must receive the counter change");
+            assert!(
+                !revisions.is_empty(),
+                "the live client must receive the counter change"
+            );
             assert!(revisions.iter().all(|value| *value == revision + 1));
-            let mut diagnostics = TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
-            let Json(detail) = get_test_run_observed(fixture.state.clone(), run_id, &mut diagnostics).unwrap();
+            let mut diagnostics =
+                TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
+            let Json(detail) =
+                get_test_run_observed(fixture.state.clone(), run_id, &mut diagnostics).unwrap();
             assert_eq!(detail.run.registration.restart_would_void_evidence, None);
-            assert_eq!(vec![detail.run], fixture.summaries(), "the invalidated identity remains reachable by exact read");
+            assert_eq!(
+                vec![detail.run],
+                fixture.summaries(),
+                "the invalidated identity remains reachable by exact read"
+            );
             fixture.refresh(&[]);
             assert!(matches!(
                 stream.try_recv(),
@@ -392,13 +467,24 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
                 assert_eq!(retained.registration.artifact_unavailable, Some(true));
                 assert_eq!(retained.registration.history_compacted, Some(false));
                 assert!(retained.registration.verification_record_ids.is_empty());
-                assert_eq!(retained.registration.restart_evidence_reason,
-                    "Retained artifact identity does not establish verification settlement or work completion.");
+                assert_eq!(
+                    retained.registration.restart_evidence_reason,
+                    "Retained artifact identity does not establish verification settlement or work completion."
+                );
                 let inner = fixture.state.inner.lock().unwrap();
                 let cached = &inner.test_run_compacted[run_id];
-                assert_eq!(Some((cached.request_identity.clone(), cached.summary.detail_version.clone())),
-                    retained_identity);
-                assert!(!cached.compacted && cached.registration.is_none() && cached.observations.is_empty());
+                assert_eq!(
+                    Some((
+                        cached.request_identity.clone(),
+                        cached.summary.detail_version.clone()
+                    )),
+                    retained_identity
+                );
+                assert!(
+                    !cached.compacted
+                        && cached.registration.is_none()
+                        && cached.observations.is_empty()
+                );
             }
             if !terminal {
                 assert_eq!(fixture.summary(run_id).state, TestRunState::Unknown);
@@ -487,7 +573,8 @@ fn an_unsafe_alias_preserves_the_original_registration_and_every_association() {
     let (id, alias, _) = registered_alias(&fixture, &session, "unsafe-registered");
     let (evidence, _, _, _, native) = native_evidence_fixture("compaction-unsafe-source");
     record_native_evidence(&evidence, &native);
-    let association = evidence.state.inner.lock().unwrap().test_run_observations[&native.execution_id]
+    let association = evidence.state.inner.lock().unwrap().test_run_observations
+        [&native.execution_id]
         .evidence[0]
         .clone();
     {
@@ -523,14 +610,27 @@ fn an_unsafe_alias_preserves_the_original_registration_and_every_association() {
 
 #[test]
 fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
-    let (fixture, id, store, binding, native) = native_evidence_fixture("compaction-bound-revalidation");
+    let (fixture, id, store, binding, native) =
+        native_evidence_fixture("compaction-bound-revalidation");
     let execution_id = native.execution_id.clone();
     assert_eq!(id, native.registration.run_id);
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, None,
-        "registration and artifact facts alone create no pending native verification");
+    assert_eq!(
+        fixture
+            .summary(&id)
+            .registration
+            .restart_would_void_evidence,
+        None,
+        "registration and artifact facts alone create no pending native verification"
+    );
     record_native_evidence(&fixture, &native);
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(true),
-        "a real native receipt remains at risk before canonical lifecycle completion");
+    assert_eq!(
+        fixture
+            .summary(&id)
+            .registration
+            .restart_would_void_evidence,
+        Some(true),
+        "a real native receipt remains at risk before canonical lifecycle completion"
+    );
     let canonical = completed_lifecycle(&fixture, &store, &binding);
     // A native receipt is durable, but another store/claim/source generation
     // or an unfinished lifecycle cannot make this exact work completion safe.
@@ -541,24 +641,58 @@ fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
     for (candidate_store, candidate_binding, pointer, replacement) in [
         (wrong_store, binding.clone(), None, Value::Null),
         (store.clone(), wrong_binding, None, Value::Null),
-        (store.clone(), binding.clone(), Some("/project_id"), json!("other-project")),
-        (store.clone(), binding.clone(), Some("/work_id"), json!("other-work")),
-        (store.clone(), binding.clone(), Some("/latest_event/generation"), json!(2)),
-        (store.clone(), binding.clone(), Some("/run/state"), json!("open")),
+        (
+            store.clone(),
+            binding.clone(),
+            Some("/project_id"),
+            json!("other-project"),
+        ),
+        (
+            store.clone(),
+            binding.clone(),
+            Some("/work_id"),
+            json!("other-work"),
+        ),
+        (
+            store.clone(),
+            binding.clone(),
+            Some("/latest_event/generation"),
+            json!(2),
+        ),
+        (
+            store.clone(),
+            binding.clone(),
+            Some("/run/state"),
+            json!("open"),
+        ),
     ] {
         let mut candidate = canonical.clone();
         if let Some(pointer) = pointer {
             *candidate.pointer_mut(pointer).unwrap() = replacement;
         }
         let read = serde_json::from_value(candidate).unwrap();
-        fixture.state.revalidate_test_run_lifecycle(&candidate_store, &candidate_binding, &read);
-        assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(true));
+        fixture
+            .state
+            .revalidate_test_run_lifecycle(&candidate_store, &candidate_binding, &read);
+        assert_eq!(
+            fixture
+                .summary(&id)
+                .registration
+                .restart_would_void_evidence,
+            Some(true)
+        );
     }
     let read = serde_json::from_value(canonical).unwrap();
     fixture
         .state
         .revalidate_test_run_lifecycle(&store, &binding, &read);
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(false));
+    assert_eq!(
+        fixture
+            .summary(&id)
+            .registration
+            .restart_would_void_evidence,
+        Some(false)
+    );
     fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
     {
         let inner = fixture.state.inner.lock().unwrap();
@@ -573,7 +707,10 @@ fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
         assert_eq!(proof.reported_outcome, producer.outcome);
         assert_eq!(Some(&proof.source_basis), producer.source_basis.as_ref());
         assert!(proof.checkpoint_id.is_none() && proof.confirmed_cursor.is_none());
-        assert_eq!(inner.test_run_compacted[&id].observations[0].execution_id, execution_id);
+        assert_eq!(
+            inner.test_run_compacted[&id].observations[0].execution_id,
+            execution_id
+        );
         assert!(inner.test_run_compacted[&id].compacted);
     }
     reload(&fixture);
@@ -602,17 +739,37 @@ fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
 /// own hold; the existing idle compaction step compacts it at the new cut.
 #[test]
 fn revalidated_eligible_run_is_compacted_by_the_idle_step_not_inline() {
-    let (fixture, id, store, binding, native) = native_evidence_fixture("compaction-revalidation-deferred");
+    let (fixture, id, store, binding, native) =
+        native_evidence_fixture("compaction-revalidation-deferred");
     let execution_id = native.execution_id.clone();
     assert_eq!(id, native.registration.run_id);
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, None,
-        "registration and artifact facts alone create no pending native verification");
+    assert_eq!(
+        fixture
+            .summary(&id)
+            .registration
+            .restart_would_void_evidence,
+        None,
+        "registration and artifact facts alone create no pending native verification"
+    );
     record_native_evidence(&fixture, &native);
-    assert_eq!(fixture.summary(&id).registration.restart_would_void_evidence, Some(true),
-        "native recording alone does not complete the bound work");
+    assert_eq!(
+        fixture
+            .summary(&id)
+            .registration
+            .restart_would_void_evidence,
+        Some(true),
+        "native recording alone does not complete the bound work"
+    );
     fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
     let compacted = |fixture: &RunFixture| {
-        fixture.state.inner.lock().unwrap().test_run_compacted.get(&id).is_some_and(|row| row.compacted)
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_compacted
+            .get(&id)
+            .is_some_and(|row| row.compacted)
     };
     // Its lifecycle is not yet completed, so the run keeps its detail.
     fixture.state.step_test_run_compaction();
@@ -623,18 +780,30 @@ fn revalidated_eligible_run_is_compacted_by_the_idle_step_not_inline() {
         .revalidate_test_run_lifecycle(&store, &binding, &read);
     {
         let inner = fixture.state.inner.lock().unwrap();
-        assert!(inner.test_run_observations.contains_key(&execution_id), "the revalidating hold selects nothing");
-        assert_eq!(inner.test_runs.compaction_examined_revision, None, "the next idle step must select");
+        assert!(
+            inner.test_run_observations.contains_key(&execution_id),
+            "the revalidating hold selects nothing"
+        );
+        assert_eq!(
+            inner.test_runs.compaction_examined_revision, None,
+            "the next idle step must select"
+        );
     }
     assert!(!compacted(&fixture));
     fixture.state.step_test_run_compaction();
-    assert!(compacted(&fixture), "the idle step compacts the now-eligible run");
+    assert!(
+        compacted(&fixture),
+        "the idle step compacts the now-eligible run"
+    );
     let inner = fixture.state.inner.lock().unwrap();
     let proof = &inner.test_run_compacted[&id].observations[0].evidence[0];
     assert_eq!(proof.binding, binding);
     assert_eq!(proof.verification_record_id, Some("e".repeat(64)));
     assert!(proof.checkpoint_id.is_none() && proof.confirmed_cursor.is_none());
-    assert_eq!(inner.test_run_compacted[&id].observations[0].execution_id, execution_id);
+    assert_eq!(
+        inner.test_run_compacted[&id].observations[0].execution_id,
+        execution_id
+    );
 }
 
 #[test]
@@ -675,8 +844,7 @@ fn failed_compaction_persistence_retains_all_preexisting_detail_and_identity() {
     fixture.state.step_test_run_compaction();
     let inner = fixture.state.inner.lock().unwrap();
     assert_eq!(
-        inner.test_runs.compaction_examined_revision,
-        None,
+        inner.test_runs.compaction_examined_revision, None,
         "failed persistence must leave compaction eligible to retry"
     );
     assert_eq!(

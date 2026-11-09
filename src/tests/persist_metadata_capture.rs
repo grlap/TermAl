@@ -1,7 +1,11 @@
 use super::*;
 
 const EAGER_ROOTS: &[&str] = &[
-    "federation", "codex", "preferences", "testRunCardsEpoch", "engramSessionObligations",
+    "federation",
+    "codex",
+    "preferences",
+    "testRunCardsEpoch",
+    "engramSessionObligations",
 ];
 
 fn observed_collect(fixture: &FenceFixture) -> (PersistDelta, Vec<&'static str>) {

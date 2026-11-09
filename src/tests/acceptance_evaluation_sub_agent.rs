@@ -117,7 +117,9 @@ fn assert_sub_agent_child(
 ) {
     let response = match response {
         Ok(response) => response,
-        Err(error) => panic!("an eligible or unknown sub-agent parent must produce a child: {error:?}"),
+        Err(error) => {
+            panic!("an eligible or unknown sub-agent parent must produce a child: {error:?}")
+        }
     };
     let wire = serde_json::to_value(&response).unwrap();
     assert_eq!(wire["mode"], "sub_agent", "never fall back to same_session");
@@ -162,10 +164,7 @@ fn sub_agent_only_policy_does_not_use_an_unadmitted_preference() {
 
 #[test]
 fn sub_agent_and_same_policy_produces_a_child_without_a_pin() {
-    for admitted in [
-        ["sub_agent", "same_session"],
-        ["same_session", "sub_agent"],
-    ] {
+    for admitted in [["sub_agent", "same_session"], ["same_session", "sub_agent"]] {
         assert_sub_agent_selected(&admitted, None, None);
     }
 }
@@ -207,10 +206,7 @@ fn sub_agent_request_with_neither_holder_nor_executor_refuses_before_spawning() 
     for (admitted, pin) in [
         (vec!["sub_agent"], None),
         (vec!["sub_agent", "same_session"], None),
-        (
-            vec!["independent_session", "sub_agent"],
-            Some("sub_agent"),
-        ),
+        (vec!["independent_session", "sub_agent"], Some("sub_agent")),
     ] {
         let (state, _, response) = request_case_with_executor(
             &admitted,
@@ -219,10 +215,15 @@ fn sub_agent_request_with_neither_holder_nor_executor_refuses_before_spawning() 
             false,
             (ExecutorRead::Other, ExecutorRead::Other),
         );
-        let error = response.err().expect("a proven ineligible parent cannot spawn a child");
+        let error = response
+            .err()
+            .expect("a proven ineligible parent cannot spawn a child");
         assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
         assert!(error.message.contains("sub_agent"), "{error:?}");
-        assert!(error.message.contains("holder") && error.message.contains("executor"), "{error:?}");
+        assert!(
+            error.message.contains("holder") && error.message.contains("executor"),
+            "{error:?}"
+        );
         assert!(state.inner.lock().unwrap().delegations.is_empty());
     }
 }
@@ -254,13 +255,8 @@ fn sub_agent_holder_does_not_need_to_be_the_run_executor() {
 #[test]
 fn sub_agent_missing_or_null_executor_is_unknown_not_proven_ineligible() {
     for executor in [ExecutorRead::Absent, ExecutorRead::Null] {
-        let (state, parent, response) = request_case_with_executor(
-            &["sub_agent"],
-            None,
-            None,
-            false,
-            (executor, executor),
-        );
+        let (state, parent, response) =
+            request_case_with_executor(&["sub_agent"], None, None, false, (executor, executor));
         assert_sub_agent_child(state, parent, response);
     }
 }
@@ -274,16 +270,24 @@ fn sub_agent_preflight_reads_executor_from_the_validated_closing_core() {
         false,
         (ExecutorRead::Requester, ExecutorRead::Other),
     );
-    let error = response.err().expect("opening executor is not a closing eligibility proof");
+    let error = response
+        .err()
+        .expect("opening executor is not a closing eligibility proof");
     assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
-    assert!(error.message.contains("holder") && error.message.contains("executor"), "{error:?}");
+    assert!(
+        error.message.contains("holder") && error.message.contains("executor"),
+        "{error:?}"
+    );
     assert!(state.inner.lock().unwrap().delegations.is_empty());
 }
 
 #[test]
 fn sub_agent_no_fallback_guard_preserves_other_preferences_and_task_pins() {
     for (admitted, pin) in [
-        (vec!["independent_session", "sub_agent", "same_session"], None),
+        (
+            vec!["independent_session", "sub_agent", "same_session"],
+            None,
+        ),
         (vec!["sub_agent", "same_session"], Some("same_session")),
         (vec!["same_session"], None),
     ] {
@@ -294,7 +298,10 @@ fn sub_agent_no_fallback_guard_preserves_other_preferences_and_task_pins() {
             false,
         );
         let response = response.unwrap();
-        assert_eq!(serde_json::to_value(response).unwrap()["mode"], "same_session");
+        assert_eq!(
+            serde_json::to_value(response).unwrap()["mode"],
+            "same_session"
+        );
         assert!(state.inner.lock().unwrap().delegations.is_empty());
     }
 }
@@ -313,17 +320,38 @@ fn sub_agent_auto_selection_covers_every_admitted_list() {
     // All eight subsets, including the explicit self-asserted/off policy.
     for (admitted, expected) in [
         (vec![], None),
-        (vec!["same_session"], Some(AcceptanceEvaluationMode::SameSession)),
+        (
+            vec!["same_session"],
+            Some(AcceptanceEvaluationMode::SameSession),
+        ),
         (vec!["sub_agent"], Some(AcceptanceEvaluationMode::SubAgent)),
-        (vec!["independent_session"], Some(AcceptanceEvaluationMode::IndependentSession)),
-        (vec!["same_session", "sub_agent"], Some(AcceptanceEvaluationMode::SubAgent)),
-        (vec!["same_session", "independent_session"], Some(AcceptanceEvaluationMode::IndependentSession)),
-        (vec!["sub_agent", "independent_session"], Some(AcceptanceEvaluationMode::IndependentSession)),
-        (vec!["same_session", "sub_agent", "independent_session"], Some(AcceptanceEvaluationMode::IndependentSession)),
+        (
+            vec!["independent_session"],
+            Some(AcceptanceEvaluationMode::IndependentSession),
+        ),
+        (
+            vec!["same_session", "sub_agent"],
+            Some(AcceptanceEvaluationMode::SubAgent),
+        ),
+        (
+            vec!["same_session", "independent_session"],
+            Some(AcceptanceEvaluationMode::IndependentSession),
+        ),
+        (
+            vec!["sub_agent", "independent_session"],
+            Some(AcceptanceEvaluationMode::IndependentSession),
+        ),
+        (
+            vec!["same_session", "sub_agent", "independent_session"],
+            Some(AcceptanceEvaluationMode::IndependentSession),
+        ),
     ] {
         let (state, _, response) = request_case(&admitted, None, None, true);
         if let Some(mode) = expected {
-            assert_eq!(serde_json::to_value(response.unwrap()).unwrap()["mode"], mode.word());
+            assert_eq!(
+                serde_json::to_value(response.unwrap()).unwrap()["mode"],
+                mode.word()
+            );
         } else {
             assert_eq!(response.err().unwrap().status, StatusCode::CONFLICT);
             assert!(state.inner.lock().unwrap().delegations.is_empty());
@@ -334,7 +362,10 @@ fn sub_agent_auto_selection_covers_every_admitted_list() {
 #[test]
 fn sub_agent_malformed_closing_executor_does_not_bypass_preflight() {
     let (state, _, response) = request_case_with_executor(
-        &["sub_agent"], None, None, false,
+        &["sub_agent"],
+        None,
+        None,
+        false,
         (ExecutorRead::Requester, ExecutorRead::Malformed),
     );
     let error = response.err().unwrap();
@@ -346,9 +377,8 @@ fn sub_agent_malformed_closing_executor_does_not_bypass_preflight() {
 fn submission_fixture() -> (AppState, String, String, String) {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
-    let (delegation, child) = install_evaluator_delegation(
-        &state, &parent, Some(&project), &root.to_string_lossy(), 2,
-    );
+    let (delegation, child) =
+        install_evaluator_delegation(&state, &parent, Some(&project), &root.to_string_lossy(), 2);
     update_evaluation_target(&state, &delegation, |target| {
         target.mode = AcceptanceEvaluationMode::SubAgent;
         target.parent_session = Some(parent.clone());
@@ -368,12 +398,14 @@ fn sub_agent_submit_uses_child_identity_and_host_attested_parent_pair() {
     let (state, parent, delegation, child) = submission_fixture();
     let calls: RecordedEngramCalls = Arc::default();
     let seen = calls.clone();
-    let response = state.submit_acceptance_evaluation_with_runner(
-        &child, two_verdicts(), |connection, args, _| {
-            seen.lock().unwrap().push((connection.clone(), args.to_vec()));
+    let response = state
+        .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), |connection, args, _| {
+            seen.lock()
+                .unwrap()
+                .push((connection.clone(), args.to_vec()));
             Ok(cli_output(true, &sub_agent_fixture_receipt(false), ""))
-        },
-    ).unwrap();
+        })
+        .unwrap();
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     let (connection, args) = &calls[0];
@@ -386,7 +418,10 @@ fn sub_agent_submit_uses_child_identity_and_host_attested_parent_pair() {
     assert_eq!(flag("--execution-identity"), delegation);
     assert_eq!(flag("--attempt"), delegation);
     assert_eq!(response.mode, AcceptanceEvaluationMode::SubAgent);
-    assert_eq!(outcome_of(&state, &delegation).unwrap().0.mode.as_deref(), Some("sub_agent"));
+    assert_eq!(
+        outcome_of(&state, &delegation).unwrap().0.mode.as_deref(),
+        Some("sub_agent")
+    );
 }
 
 #[test]
@@ -400,61 +435,104 @@ fn sub_agent_missing_or_mismatched_attestation_never_reconstructed_or_sent() {
             3 => target.execution_identity = Some("another-execution".to_owned()),
             _ => target.mode = AcceptanceEvaluationMode::IndependentSession,
         });
-        let error = state.submit_acceptance_evaluation_with_runner(
-            &child, two_verdicts(), |_, _, _| panic!("invalid attestation must send nothing"),
-        ).unwrap_err();
+        let error = state
+            .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), |_, _, _| {
+                panic!("invalid attestation must send nothing")
+            })
+            .unwrap_err();
         assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
         assert!(error.message.contains("identity"));
-        assert!(matches!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None));
+        assert!(matches!(
+            submission_of(&state, &delegation),
+            AcceptanceEvaluationSubmission::None
+        ));
     }
 }
 
 #[test]
 fn sub_agent_attestation_survives_persistence_and_legacy_load_is_unattested() {
     let (state, parent, delegation, child) = submission_fixture();
-    let target = state.inner.lock().unwrap().delegations.iter()
-        .find(|record| record.id == delegation).unwrap().acceptance_evaluation.clone().unwrap();
+    let target = state
+        .inner
+        .lock()
+        .unwrap()
+        .delegations
+        .iter()
+        .find(|record| record.id == delegation)
+        .unwrap()
+        .acceptance_evaluation
+        .clone()
+        .unwrap();
     let value = serde_json::to_value(&target).unwrap();
     let restored: DelegationAcceptanceEvaluation = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(restored, target);
     assert_eq!(restored.parent_session.as_deref(), Some(parent.as_str()));
-    assert_eq!(restored.execution_identity.as_deref(), Some(delegation.as_str()));
+    assert_eq!(
+        restored.execution_identity.as_deref(),
+        Some(delegation.as_str())
+    );
     let mut legacy = value;
     legacy.as_object_mut().unwrap().remove("parentSession");
     legacy.as_object_mut().unwrap().remove("executionIdentity");
     let legacy: DelegationAcceptanceEvaluation = serde_json::from_value(legacy).unwrap();
     assert!(legacy.parent_session.is_none() && legacy.execution_identity.is_none());
     update_evaluation_target(&state, &delegation, |target| *target = legacy);
-    let error = state.submit_acceptance_evaluation_with_runner(
-        &child, two_verdicts(), |_, _, _| panic!("legacy target must send nothing"),
-    ).unwrap_err();
+    let error = state
+        .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), |_, _, _| {
+            panic!("legacy target must send nothing")
+        })
+        .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
 }
 
 #[test]
 fn sub_agent_definitive_producer_refusal_is_final_not_retried() {
     let (state, _, delegation, child) = submission_fixture();
-    let (calls, run) = scripted_runner(vec![Ok(cli_output(false, "", &refusal_envelope(
-        "SubAgentParentNotExecuting", "sub-agent parent is neither holder nor executor",
-    )))]);
-    let error = state.submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run).unwrap_err();
+    let (calls, run) = scripted_runner(vec![Ok(cli_output(
+        false,
+        "",
+        &refusal_envelope(
+            "SubAgentParentNotExecuting",
+            "sub-agent parent is neither holder nor executor",
+        ),
+    ))]);
+    let error = state
+        .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
+        .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("Engram refused") && error.message.contains("neither holder nor executor"));
+    assert!(
+        error.message.contains("Engram refused")
+            && error.message.contains("neither holder nor executor")
+    );
     assert!(!error.message.contains("unknown"));
     assert_eq!(calls.lock().unwrap().len(), 1);
-    assert!(matches!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None));
+    assert!(matches!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    ));
 }
 
 #[test]
 fn sub_agent_uncertain_submission_replays_the_exact_identity_pair() {
     let (state, parent, delegation, child) = submission_fixture();
     let (calls, run) = scripted_runner(vec![
-        response_lost(), Ok(cli_output(true, &sub_agent_fixture_receipt(true), "")),
+        response_lost(),
+        Ok(cli_output(true, &sub_agent_fixture_receipt(true), "")),
     ]);
-    state.submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run).unwrap();
+    state
+        .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
+        .unwrap();
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0], calls[1]);
-    assert!(calls[0].windows(2).any(|pair| pair == ["--parent-session", parent.as_str()]));
-    assert!(calls[0].windows(2).any(|pair| pair == ["--execution-identity", delegation.as_str()]));
+    assert!(
+        calls[0]
+            .windows(2)
+            .any(|pair| pair == ["--parent-session", parent.as_str()])
+    );
+    assert!(
+        calls[0]
+            .windows(2)
+            .any(|pair| pair == ["--execution-identity", delegation.as_str()])
+    );
 }

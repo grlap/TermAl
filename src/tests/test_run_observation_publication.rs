@@ -55,16 +55,18 @@ impl ObservationPublicationFixture {
         let (barrier_tx, barrier_rx) = mpsc::channel();
         let broadcaster = std::thread::Builder::new()
             .name("test-observation-state-broadcast".to_owned())
-            .spawn(move || loop {
-                let work = worker_mailbox.recv_next();
-                if worker_stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                let barrier = matches!(&work, StateBroadcastWork::Delta(event)
+            .spawn(move || {
+                loop {
+                    let work = worker_mailbox.recv_next();
+                    if worker_stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let barrier = matches!(&work, StateBroadcastWork::Delta(event)
                     if event.revision() == BROADCAST_BARRIER_REVISION);
-                forward_state_broadcast_work(work, &senders);
-                if barrier {
-                    barrier_tx.send(()).unwrap();
+                    forward_state_broadcast_work(work, &senders);
+                    if barrier {
+                        barrier_tx.send(()).unwrap();
+                    }
                 }
             })
             .unwrap();
@@ -139,7 +141,10 @@ impl ObservationPublicationFixture {
     }
 
     fn collect_pending(&mut self) -> PersistDelta {
-        assert_eq!(self.writer.receive(false), PersistWorkerWaitOutcome::Process);
+        assert_eq!(
+            self.writer.receive(false),
+            PersistWorkerWaitOutcome::Process
+        );
         assert!(!self.writer.batch.drain(&self.writer.rx, false));
         let delta = collect_persist_delta_from_shared_state(&self.state.inner, self.watermark);
         assert_eq!(self.writer.batch.pending.len(), 1);
@@ -158,12 +163,7 @@ impl ObservationPublicationFixture {
     }
 
     fn stored_observation(&self, id: &str) -> TestRunCommandObservation {
-        let connection = self
-            .writer
-            .cache
-            .connection
-            .as_ref()
-            .unwrap();
+        let connection = self.writer.cache.connection.as_ref().unwrap();
         let encoded = read_persisted_metadata_json(connection).unwrap().unwrap();
         let persisted: PersistedState = serde_json::from_str(&encoded).unwrap();
         persisted.test_run_observations[id].clone()
@@ -183,18 +183,35 @@ impl Drop for ObservationPublicationFixture {
     }
 }
 
-fn observation_delta(fixture: &ObservationPublicationFixture, events: &[SseStreamEvent], id: &str, expected: TestRunState, durability: &str) {
+fn observation_delta(
+    fixture: &ObservationPublicationFixture,
+    events: &[SseStreamEvent],
+    id: &str,
+    expected: TestRunState,
+    durability: &str,
+) {
     let [SseStreamEvent::Delta(payload)] = events else {
         panic!("one bounded invalidation per observation transition: {events:?}");
     };
-    let DeltaEvent::TestRunsInvalidated { overview, activity, server_instance_id, .. } =
-        serde_json::from_str::<DeltaEvent>(payload).unwrap() else {
-            panic!("unexpected observation delta: {payload}");
-        };
+    let DeltaEvent::TestRunsInvalidated {
+        overview,
+        activity,
+        server_instance_id,
+        ..
+    } = serde_json::from_str::<DeltaEvent>(payload).unwrap()
+    else {
+        panic!("unexpected observation delta: {payload}");
+    };
     assert_eq!(server_instance_id, fixture.state.server_instance_id);
     let running = usize::from(expected == TestRunState::Running);
     assert_eq!(overview.get().counts.running, running);
-    assert_eq!(activity.wire.get(&fixture.session).map_or(0, |row| row.owned_running), running);
+    assert_eq!(
+        activity
+            .wire
+            .get(&fixture.session)
+            .map_or(0, |row| row.owned_running),
+        running
+    );
     if expected == TestRunState::Passed {
         assert!(overview.get().counts.passed > 0);
     }
@@ -223,9 +240,11 @@ fn assert_no_observation_snapshots(events: &[SseStreamEvent]) {
         snapshots, 0,
         "observation updates must not rebuild/broadcast global state"
     );
-    assert!(!events
-        .iter()
-        .any(|event| matches!(event, SseStreamEvent::Lagged)));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, SseStreamEvent::Lagged))
+    );
     let revisions: Vec<_> = events
         .iter()
         .map(|event| match event {
@@ -260,14 +279,16 @@ fn observation_publication_repeated_start_end_preserves_pending_durable_and_stor
         let events = fixture.flush();
         observation_delta(&fixture, &events, &id, TestRunState::Running, "pending");
         all.extend(events);
-        assert!(!fixture
-            .state
-            .inner
-            .lock()
-            .unwrap()
-            .test_runs
-            .observations_durable
-            .contains(&id));
+        assert!(
+            !fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_runs
+                .observations_durable
+                .contains(&id)
+        );
         fixture.write_pending();
         let stored = fixture.stored_observation(&id);
         assert_eq!(stored.summary.state, TestRunState::Running);
@@ -381,14 +402,16 @@ fn observation_publication_late_start_ack_cannot_ack_the_new_terminal_image() {
         fixture.flush().is_empty(),
         "obsolete ACK must not publish terminal durability"
     );
-    assert!(!fixture
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .test_runs
-        .observations_durable
-        .contains(&id));
+    assert!(
+        !fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_runs
+            .observations_durable
+            .contains(&id)
+    );
     fixture.write_pending();
     assert_eq!(
         fixture.stored_observation(&id).summary.state,
@@ -408,7 +431,13 @@ fn observation_publication_disconnected_writer_keeps_synchronous_durability() {
     // fence rather than replacing a sender that could leave a worker running.
     let (_, stopped_rx) = mpsc::channel();
     drop(std::mem::replace(&mut fixture.writer.rx, stopped_rx));
-    assert!(fixture.state.persist_tx.send(PersistRequest::Delta).is_err());
+    assert!(
+        fixture
+            .state
+            .persist_tx
+            .send(PersistRequest::Delta)
+            .is_err()
+    );
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         inner.settings_persist_dirty = true;
@@ -447,7 +476,13 @@ fn observation_publication_synchronous_write_failure_uses_the_commits_revision()
     fixture.state.shutdown_persist_blocking();
     let (_, stopped_rx) = mpsc::channel();
     drop(std::mem::replace(&mut fixture.writer.rx, stopped_rx));
-    assert!(fixture.state.persist_tx.send(PersistRequest::Delta).is_err());
+    assert!(
+        fixture
+            .state
+            .persist_tx
+            .send(PersistRequest::Delta)
+            .is_err()
+    );
     let revision = fixture.state.inner.lock().unwrap().revision;
     let id = fixture.start("synchronous-write-failure");
     let events = fixture.flush();
@@ -456,7 +491,9 @@ fn observation_publication_synchronous_write_failure_uses_the_commits_revision()
         panic!("failed persistence must leave one narrow factual update");
     };
     assert_eq!(
-        serde_json::from_str::<DeltaEvent>(payload).unwrap().revision(),
+        serde_json::from_str::<DeltaEvent>(payload)
+            .unwrap()
+            .revision(),
         revision + 1,
         "failed persistence must not leave an unpublished revision"
     );

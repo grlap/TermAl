@@ -66,7 +66,12 @@ fn citing(cited: &str) -> SubmitAcceptanceEvaluationRequest {
     let mut bound = verdict(2, "pass", "The fail-first test passed.", &[cited]);
     bound.basis = Some("observed".to_owned());
     submission(vec![
-        verdict(1, "pass", "Read the diff; the route exists.", &["aaaaaaaa1111"]),
+        verdict(
+            1,
+            "pass",
+            "Read the diff; the route exists.",
+            &["aaaaaaaa1111"],
+        ),
         bound,
     ])
 }
@@ -96,18 +101,26 @@ fn an_off_source_refusal_naming_alternatives_allows_one_resubmission_citing_only
     assert_eq!(offer.status, StatusCode::CONFLICT, "{}", offer.message);
     assert!(
         offer.message.contains(OFF_SOURCE)
+            && offer.message.contains(&format!(
+                "It names records it admits instead (criterion 2: {CURRENT})"
+            ))
             && offer
                 .message
-                .contains(&format!("It names records it admits instead (criterion 2: {CURRENT})"))
-            && offer.message.contains("You may submit once more under the same attemptKey"),
+                .contains("You may submit once more under the same attemptKey"),
         "{}",
         offer.message
     );
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
     let history = history_of(&state, &delegation);
     assert_eq!(history.refusal, None, "the refusal is not definitive");
     assert_eq!(
-        history.citation_retry.as_ref().map(|retry| retry.alternatives.clone()),
+        history
+            .citation_retry
+            .as_ref()
+            .map(|retry| retry.alternatives.clone()),
         Some(vec![AcceptanceCitableAlternatives {
             criterion: 2,
             records: vec![CURRENT.to_owned()],
@@ -119,7 +132,12 @@ fn an_off_source_refusal_naming_alternatives_allows_one_resubmission_citing_only
     let refused = state
         .submit_acceptance_evaluation_with_runner(&child, citing(PEER), runner_must_not_run)
         .unwrap_err();
-    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.message);
+    assert_eq!(
+        refused.status,
+        StatusCode::BAD_REQUEST,
+        "{}",
+        refused.message
+    );
     assert!(
         refused.message.contains(&format!(
             "criterion 2: this re-submission may cite for it only the records Engram named ({CURRENT}); {PEER} is not one of them"
@@ -135,8 +153,16 @@ fn an_off_source_refusal_naming_alternatives_allows_one_resubmission_citing_only
         .unwrap();
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    assert!(calls[0].iter().any(|arg| arg.contains(CURRENT)), "{:?}", calls[0]);
-    assert!(!calls[0].iter().any(|arg| arg.contains(PEER)), "{:?}", calls[0]);
+    assert!(
+        calls[0].iter().any(|arg| arg.contains(CURRENT)),
+        "{:?}",
+        calls[0]
+    );
+    assert!(
+        !calls[0].iter().any(|arg| arg.contains(PEER)),
+        "{:?}",
+        calls[0]
+    );
     assert!(outcome_of(&state, &delegation).is_some());
 }
 
@@ -164,7 +190,9 @@ fn a_refusal_of_the_resubmission_is_final() {
         final_refusal
             .message
             .starts_with("Engram refused the evaluation; nothing was recorded:")
-            && final_refusal.message.contains("Finish and report the refusal")
+            && final_refusal
+                .message
+                .contains("Finish and report the refusal")
             && !final_refusal.message.contains("submit once more"),
         "{}",
         final_refusal.message
@@ -174,7 +202,9 @@ fn a_refusal_of_the_resubmission_is_final() {
         .submit_acceptance_evaluation_with_runner(&child, citing(CURRENT), runner_must_not_run)
         .unwrap_err();
     assert!(
-        again.message.contains("this attempt was definitively refused"),
+        again
+            .message
+            .contains("this attempt was definitively refused"),
         "{}",
         again.message
     );
@@ -186,10 +216,16 @@ fn any_other_refusal_still_ends_the_attempt() {
         // The refusal as Engram gives it today, without a cause.
         ("acceptance_evaluation_refused", None),
         // A cause without citable records: none exists, so it stays final.
-        ("acceptance_evaluation_refused", Some(json!({"criterion": 2}))),
+        (
+            "acceptance_evaluation_refused",
+            Some(json!({"criterion": 2})),
+        ),
         // An empty or unusable list names none.
         ("acceptance_evaluation_refused", cause_naming(json!([]))),
-        ("acceptance_evaluation_refused", cause_naming(json!(["NOT-HEX"]))),
+        (
+            "acceptance_evaluation_refused",
+            cause_naming(json!(["NOT-HEX"])),
+        ),
         // Alternatives on any other refusal are not read.
         ("work_revision_conflict", current_named()),
     ] {
@@ -205,12 +241,17 @@ fn any_other_refusal_still_ends_the_attempt() {
             refused.message
         );
         let history = history_of(&state, &delegation);
-        assert!(history.refusal.is_some() && history.citation_retry.is_none(), "{code}");
+        assert!(
+            history.refusal.is_some() && history.citation_retry.is_none(),
+            "{code}"
+        );
         let again = state
             .submit_acceptance_evaluation_with_runner(&child, citing(CURRENT), runner_must_not_run)
             .unwrap_err();
         assert!(
-            again.message.contains("this attempt was definitively refused"),
+            again
+                .message
+                .contains("this attempt was definitively refused"),
             "{code}: {}",
             again.message
         );
@@ -221,7 +262,8 @@ fn any_other_refusal_still_ends_the_attempt() {
 fn citable_alternatives_keep_citable_records_once_for_the_cause_criterion() {
     let parse = |cause: Value| {
         let envelope: Value =
-            serde_json::from_str(&refusal_with("acceptance_evaluation_refused", Some(cause))).unwrap();
+            serde_json::from_str(&refusal_with("acceptance_evaluation_refused", Some(cause)))
+                .unwrap();
         acceptance_citable_alternatives(&envelope)
     };
     assert_eq!(

@@ -1063,7 +1063,11 @@ fn a_one_call_test_with_an_argument_outside_the_worktree_gets_a_refusal_line() {
                 "{line}"
             );
             assert!(line.contains("no Test record will follow"), "{line}");
-            assert_eq!(take_pending_line(&turn), None, "one refusal line is emitted");
+            assert_eq!(
+                take_pending_line(&turn),
+                None,
+                "one refusal line is emitted"
+            );
         } else {
             let line = line.expect("the agent is told why the test gets no credit");
             assert!(
@@ -1132,12 +1136,8 @@ fn without_a_named_root_the_remedy_names_a_directory_in_the_sessions_worktree() 
     // The measured worktree is the session's; its tests run from the workdir
     // inside it (`ui`), which the agent names.
     for kind in PATH_KINDS {
-        let turn = EOCheckedTurn::start_in(
-            &format!("workdir-remedy{kind}"),
-            true,
-            Some("ui"),
-            false,
-        );
+        let turn =
+            EOCheckedTurn::start_in(&format!("workdir-remedy{kind}"), true, Some("ui"), false);
         let workdir = turn.record(|record| record.session.workdir.clone());
         let (worktree, readable) = root_as_named(&turn.root);
         // The line's own `cd` moves the shell only if it succeeds: split into
@@ -1191,12 +1191,7 @@ fn a_session_whose_workdir_is_in_the_root_brings_its_shell_back_with_a_cd() {
         .into_iter()
         .flat_map(|kind| [(kind, false), (kind, true)])
     {
-        let turn = EOCheckedTurn::start_in(
-            &format!("shell-back{kind}"),
-            true,
-            Some("ui"),
-            false,
-        );
+        let turn = EOCheckedTurn::start_in(&format!("shell-back{kind}"), true, Some("ui"), false);
         let worktree_path = if named {
             // A session working in its named root.
             let root = name_turn_source_root(&turn);
@@ -1450,7 +1445,14 @@ fn a_one_call_check_is_credited_to_its_own_directory_on_any_path() {
         let turn = EOCheckedTurn::start(&format!("one-call-any-path{kind}"), true);
         let worktree = name_turn_source_root(&turn);
         let named = turn
-            .record(|record| record.engram.unadmitted_active_turn.as_ref().and_then(|trace| trace.opening_root.as_ref()).and_then(|opening| opening.source_root.clone()))
+            .record(|record| {
+                record
+                    .engram
+                    .unadmitted_active_turn
+                    .as_ref()
+                    .and_then(|trace| trace.opening_root.as_ref())
+                    .and_then(|opening| opening.source_root.clone())
+            })
             .expect("the turn has a named root");
         let credit_root = Some((FsPath::new(&named.root), named.common_dir_key.as_str()));
         let check = |directory: &FsPath| EngramCheckCommand {
@@ -1503,8 +1505,10 @@ fn a_one_call_test_whose_runner_stated_no_result_is_reported_as_unknown() {
                 "`{command}` exited 1, which does not say whether its `pushd` or its test failed"
             ),
         );
-        assert_eq!(engram_check_refs(&check.command, end.exit, &end.result_lines),
-            ["command:cargo test"]);
+        assert_eq!(
+            engram_check_refs(&check.command, end.exit, &end.result_lines),
+            ["command:cargo test"]
+        );
         let request = turn.finish();
         let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
         assert_eq!(checks.len(), 1, "{request:#}");
@@ -1578,38 +1582,67 @@ fn a_one_call_lines_result_lines_reach_its_ordinary_fact_and_diagnostic_on_any_h
         let command = engram_check_command(&line).expect("the one-call form");
         let result_lines = engram_check_result_lines(&command.program, output);
         let mut trace = EngramRuntimeObservedTurn::started("one-call-unit".to_owned(), 1);
-        trace.observe_recognized(&EngramRecorderObservation::CommandStarted {
-            key: "one-call", ran: Some(&line), cwd: None,
-        }, Some(&command), None, true);
+        trace.observe_recognized(
+            &EngramRecorderObservation::CommandStarted {
+                key: "one-call",
+                ran: Some(&line),
+                cwd: None,
+            },
+            Some(&command),
+            None,
+            true,
+        );
         let original = serde_json::to_value(&trace).unwrap();
-        let mut trace: EngramRuntimeObservedTurn = serde_json::from_value(original.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&trace).unwrap(), original,
-            "a persisted trace retains the start's interpretation");
+        let mut trace: EngramRuntimeObservedTurn =
+            serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&trace).unwrap(),
+            original,
+            "a persisted trace retains the start's interpretation"
+        );
         trace.observe(&EngramRecorderObservation::CommandFinished {
-            key: "one-call", command: "provider tool title", reported_command: None,
-            output, exit: Some(EngramCommandExit::Code(101)), runtime_output_cut: false,
+            key: "one-call",
+            command: "provider tool title",
+            reported_command: None,
+            output,
+            exit: Some(EngramCommandExit::Code(101)),
+            runtime_output_cut: false,
         });
         assert_eq!(trace.commands.len(), 1);
         assert_eq!(trace.commands[0].check.observed_result, outcome);
         assert!(trace.commands[0].check.finished_at.is_some());
         let wire = serde_json::to_value(&trace.commands[0].check).unwrap();
         assert!(wire.get("verification_evidence").is_none());
-        assert_eq!(engram_check_summary(&command, EngramCommandExit::Code(101), &result_lines),
-            summary);
-        assert_eq!(engram_check_refs(&command, EngramCommandExit::Code(101), &result_lines), refs);
+        assert_eq!(
+            engram_check_summary(&command, EngramCommandExit::Code(101), &result_lines),
+            summary
+        );
+        assert_eq!(
+            engram_check_refs(&command, EngramCommandExit::Code(101), &result_lines),
+            refs
+        );
 
         // A pre-descriptor trace cannot turn a later title/exit into proof
         // of the original test's result, even when the output names a runner.
         let mut legacy_wire = original;
-        legacy_wire["commands"][0].as_object_mut().unwrap().remove("recognized_command");
+        legacy_wire["commands"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("recognized_command");
         let mut legacy: EngramRuntimeObservedTurn = serde_json::from_value(legacy_wire).unwrap();
         legacy.observe(&EngramRecorderObservation::CommandFinished {
-            key: "one-call", command: "cargo test", reported_command: Some("cargo test"),
-            output, exit: Some(EngramCommandExit::Code(101)), runtime_output_cut: false,
+            key: "one-call",
+            command: "cargo test",
+            reported_command: Some("cargo test"),
+            output,
+            exit: Some(EngramCommandExit::Code(101)),
+            runtime_output_cut: false,
         });
-        assert_eq!(legacy.commands[0].check.observed_result,
+        assert_eq!(
+            legacy.commands[0].check.observed_result,
             EngramObservedCheckResult::Indeterminate,
-            "a completion must not invent the missing original descriptor");
+            "a completion must not invent the missing original descriptor"
+        );
     }
 }
 

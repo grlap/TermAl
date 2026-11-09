@@ -1309,17 +1309,33 @@ fn idle_history_unchanged_review_recovery_probe_does_not_commit_again() {
     let (tx, rx) = mpsc::channel();
     state.persist_tx = tx;
     state.state_broadcast_mailbox = Some(Arc::new(StateBroadcastMailbox::default()));
-    state.record_delegation_review_recovery_probe(&child, &delegation, &parent, 1, None).unwrap();
+    state
+        .record_delegation_review_recovery_probe(&child, &delegation, &parent, 1, None)
+        .unwrap();
     let revision = state.inner.lock().unwrap().revision;
-    assert!(rx.try_recv().is_ok(), "changed probe must enqueue persistence");
+    assert!(
+        rx.try_recv().is_ok(),
+        "changed probe must enqueue persistence"
+    );
     for _ in 0..3 {
-        state.record_delegation_review_recovery_probe(&child, &delegation, &parent, 1, None).unwrap();
+        state
+            .record_delegation_review_recovery_probe(&child, &delegation, &parent, 1, None)
+            .unwrap();
     }
     assert_eq!(state.inner.lock().unwrap().revision, revision);
-    assert!(rx.try_recv().is_err(), "unchanged probes must return before persistence");
-    state.record_delegation_review_recovery_probe(
-        &child, &delegation, &parent, 1, Some("quarantined envelope".to_owned()),
-    ).unwrap();
+    assert!(
+        rx.try_recv().is_err(),
+        "unchanged probes must return before persistence"
+    );
+    state
+        .record_delegation_review_recovery_probe(
+            &child,
+            &delegation,
+            &parent,
+            1,
+            Some("quarantined envelope".to_owned()),
+        )
+        .unwrap();
     assert_eq!(state.inner.lock().unwrap().revision, revision + 1);
     assert!(rx.try_recv().is_ok(), "a changed diagnostic still persists");
 }
@@ -1566,7 +1582,9 @@ fn structured_no_input_review_stays_failed_in_result_and_parent_fan_in() {
         request.files_inspected.clear();
         request.notes.clear();
         request.suggested_tracker_updates.clear();
-        state.submit_delegation_review_result(&child, request).unwrap();
+        state
+            .submit_delegation_review_result(&child, request)
+            .unwrap();
         finish_delegation_child_with_assistant_text(
             &state,
             &child,
@@ -1586,18 +1604,22 @@ fn structured_no_input_review_stays_failed_in_result_and_parent_fan_in() {
             let index = inner.find_session_index(&parent).unwrap();
             inner.sessions[index].session.status = SessionStatus::Active;
         }
-        let wait = state.create_delegation_wait(
-            &parent,
-            CreateDelegationWaitRequest {
-                delegation_ids: vec![id.clone()],
-                mode: DelegationWaitMode::All,
-                title: None,
-            },
-        ).unwrap();
+        let wait = state
+            .create_delegation_wait(
+                &parent,
+                CreateDelegationWaitRequest {
+                    delegation_ids: vec![id.clone()],
+                    mode: DelegationWaitMode::All,
+                    title: None,
+                },
+            )
+            .unwrap();
         assert!(wait.resume_prompt_queued);
         let inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&parent).unwrap();
-        let resume = inner.sessions[index].queued_prompts.iter()
+        let resume = inner.sessions[index]
+            .queued_prompts
+            .iter()
             .find(|queued| queued.pending_prompt.text.contains(&id))
             .expect("parent receives its terminal review result");
         assert!(resume.pending_prompt.text.contains("Status: failed"));
@@ -1606,10 +1628,19 @@ fn structured_no_input_review_stays_failed_in_result_and_parent_fan_in() {
         assert!(!resume.pending_prompt.text.contains("Clean review."));
         drop(inner);
 
-        let stored = load_state(state.persistence_path.as_path()).unwrap().unwrap();
-        let saved = stored.delegations.iter().find(|record| record.id == id).unwrap();
+        let stored = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        let saved = stored
+            .delegations
+            .iter()
+            .find(|record| record.id == id)
+            .unwrap();
         assert_eq!(saved.status, DelegationStatus::Failed);
-        assert_eq!(saved.result.as_ref().unwrap().status, DelegationStatus::Failed);
+        assert_eq!(
+            saved.result.as_ref().unwrap().status,
+            DelegationStatus::Failed
+        );
         assert_eq!(saved.result.as_ref().unwrap().summary, reason);
     }
 }

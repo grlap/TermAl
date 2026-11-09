@@ -199,8 +199,7 @@ async fn federation_prompt_policy_mirror_rechecks_expiry_inside_real_mutation() 
             .capture_remote_prompt_for_caller(&grant.scope.source.session_id, &request(&grant))
             .await
             .unwrap();
-        let mut reverse = DomainServer::start(policy_router(fixture.channel.clone()))
-        .await;
+        let mut reverse = DomainServer::start(policy_router(fixture.channel.clone())).await;
         let mut channel = fixture.satellite_channel.clone();
         let phases = instrument(
             &mut channel,

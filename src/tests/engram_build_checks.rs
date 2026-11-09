@@ -42,11 +42,21 @@ fn complete_command(
 // matching sighting is not proof that the build ran against that revision.
 fn one_build(request: &Value, revision: &str, outcome: &str) {
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
-    assert_eq!(checks.len(), 1, "one build fact, never dual recording: {request:#}");
+    assert_eq!(
+        checks.len(),
+        1,
+        "one build fact, never dual recording: {request:#}"
+    );
     assert_eq!(checks[0]["check_kind"], "build", "{request:#}");
     assert_eq!(checks[0]["observed_result"], outcome, "{request:#}");
-    assert!(checks[0].get("source_basis").is_none(), "no automatic source verification");
-    assert_eq!(request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"], revision);
+    assert!(
+        checks[0].get("source_basis").is_none(),
+        "no automatic source verification"
+    );
+    assert_eq!(
+        request["occurrence"]["source_change"]["sighting"]["source_basis"]["source_revision"],
+        revision
+    );
     assert!(request.get("verification_evidence").is_none());
     assert!(request.get("environment_evidence").is_none());
 }
@@ -66,7 +76,8 @@ fn diagnostic_summary(turn: &EOCheckedTurn) -> String {
     let end = check.end.as_ref().unwrap();
     end.build_diagnostic.as_ref().map_or_else(
         || engram_check_summary(&check.command, end.exit, &end.result_lines),
-        |diagnostic| diagnostic.summary(&check.command))
+        |diagnostic| diagnostic.summary(&check.command),
+    )
 }
 
 fn finish_observation(turn: &EOCheckedTurn) -> Value {
@@ -79,13 +90,21 @@ fn assert_native_capture(turn: &EOCheckedTurn, revision: &str) {
     let check = diagnostic(turn);
     let (root, _) = content_revision(&turn.root).unwrap();
     for capture in [&check.start_basis, &check.end.as_ref().unwrap().end_basis] {
-        let basis = capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
-            .expect("the real diagnostic capture settles").expect("the source was measured");
+        let basis = capture
+            .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+            .expect("the real diagnostic capture settles")
+            .expect("the source was measured");
         assert_eq!(basis.workspace_id, root.to_string_lossy());
         assert_eq!(basis.source_revision, revision);
     }
-    assert_eq!(check.toolchain.wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
-        .flatten().as_deref(), Some(FIXTURE_TOOLCHAIN));
+    assert_eq!(
+        check
+            .toolchain
+            .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+            .flatten()
+            .as_deref(),
+        Some(FIXTURE_TOOLCHAIN)
+    );
 }
 
 #[test]
@@ -116,15 +135,10 @@ fn engram_build_native_pass_records_source_and_environment_without_test_output()
     assert_native_capture(&turn, &revision);
     let request = finish_observation(&turn);
     one_build(&request, &revision, "passed");
-    assert_eq!(
-        diagnostic_refs(&turn),
-        ["command:cargo build", "exit:0"]
-    );
+    assert_eq!(diagnostic_refs(&turn), ["command:cargo build", "exit:0"]);
     let check = diagnostic(&turn);
     let end = check.end.as_ref().unwrap();
-    assert!(
-        engram_check_summary(&check.command, end.exit, &end.result_lines).contains("exited 0")
-    );
+    assert!(engram_check_summary(&check.command, end.exit, &end.result_lines).contains("exited 0"));
 }
 
 #[test]
@@ -140,9 +154,7 @@ fn engram_build_native_failure_records_failed_producer_without_test_output() {
     );
     let request = finish_observation(&turn);
     one_build(&request, &revision, "failed");
-    assert!(
-        diagnostic_refs(&turn).contains(&"exit:101".to_owned())
-    );
+    assert!(diagnostic_refs(&turn).contains(&"exit:101".to_owned()));
 }
 
 #[test]
@@ -171,10 +183,7 @@ fn engram_build_and_test_commands_each_emit_only_their_own_kind() {
     );
     assert_eq!(rows[0]["check_kind"], "build");
     assert_eq!(rows[1]["check_kind"], "test");
-    assert_ne!(
-        rows[0]["host_check_id"],
-        rows[1]["host_check_id"]
-    );
+    assert_ne!(rows[0]["host_check_id"], rows[1]["host_check_id"]);
 }
 
 #[test]
@@ -211,9 +220,7 @@ fn engram_build_one_call_failure_is_not_rescued_by_test_output() {
     );
     let request = finish_observation(&turn);
     one_build(&request, &revision, "indeterminate");
-    assert!(
-        !diagnostic_refs(&turn).contains(&"exit:1".to_owned())
-    );
+    assert!(!diagnostic_refs(&turn).contains(&"exit:1".to_owned()));
 }
 
 #[test]
@@ -258,7 +265,10 @@ fn engram_build_preserves_test_kind_and_its_positive_count_requirement() {
             .len(),
         1
     );
-    assert_eq!(request["occurrence"]["observed_checks"][0]["check_kind"], "test");
+    assert_eq!(
+        request["occurrence"]["observed_checks"][0]["check_kind"],
+        "test"
+    );
     assert!(diagnostic(&turn).end.as_ref().unwrap().showed_passing_tests);
     let empty = EOCheckedTurn::start("build-empty-test-control", true);
     complete_command(
@@ -268,10 +278,19 @@ fn engram_build_preserves_test_kind_and_its_positive_count_requirement() {
         EngramCommandExit::Code(0),
         "test result: ok. 0 passed; 0 failed",
     );
-    assert!(!diagnostic(&empty).end.as_ref().unwrap().showed_passing_tests,
-        "zero-test output never supplies positive diagnostic test counts");
+    assert!(
+        !diagnostic(&empty)
+            .end
+            .as_ref()
+            .unwrap()
+            .showed_passing_tests,
+        "zero-test output never supplies positive diagnostic test counts"
+    );
     let empty_request = finish_observation(&empty);
-    assert_eq!(empty_request["occurrence"]["observed_checks"][0]["check_kind"], "test");
+    assert_eq!(
+        empty_request["occurrence"]["observed_checks"][0]["check_kind"],
+        "test"
+    );
     assert!(empty_request.get("verification_evidence").is_none());
 }
 
@@ -298,14 +317,28 @@ fn engram_build_changed_source_cannot_acquire_passing_credit() {
         .unwrap();
     turn.wait_for_snapshots();
     let check = diagnostic(&turn);
-    let start = check.start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
-    let end = check.end.as_ref().unwrap().end_basis
-        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD).unwrap().unwrap();
+    let start = check
+        .start_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .unwrap()
+        .unwrap();
+    let end = check
+        .end
+        .as_ref()
+        .unwrap()
+        .end_basis
+        .wait_until(std::time::Instant::now() + DEADLOCK_GUARD)
+        .unwrap()
+        .unwrap();
     assert_ne!(start.source_revision, end.source_revision);
     let request = finish_observation(&turn);
     assert!(request.get("verification_evidence").is_none());
-    assert!(request["occurrence"]["observed_checks"][0].get("source_basis").is_none(),
-        "an observed successful exit cannot verify source that changed during the build");
+    assert!(
+        request["occurrence"]["observed_checks"][0]
+            .get("source_basis")
+            .is_none(),
+        "an observed successful exit cannot verify source that changed during the build"
+    );
 }
 
 #[test]
@@ -421,9 +454,7 @@ fn engram_build_focused_native_stage_records_pass_and_failure_without_test_count
             &revision,
             if code == 0 { "passed" } else { "failed" },
         );
-        assert!(
-            diagnostic_refs(&fixture.turn).contains(&format!("exit:{code}"))
-        );
+        assert!(diagnostic_refs(&fixture.turn).contains(&format!("exit:{code}")));
         assert!(!request.to_string().contains("results.json"));
     }
 }
@@ -452,9 +483,7 @@ fn engram_build_focused_summary_alone_does_not_supply_native_evidence() {
     );
     let request = finish_observation(&turn);
     one_build(&request, &revision, "indeterminate");
-    assert!(
-        !diagnostic_refs(&turn).contains(&"exit:0".to_owned())
-    );
+    assert!(!diagnostic_refs(&turn).contains(&"exit:0".to_owned()));
 }
 
 #[test]
@@ -522,11 +551,13 @@ fn engram_build_focused_rejects_stale_foreign_and_mismatched_artifacts() {
             f.results["stages"][0]["code"] = json!(101)
         }),
         ("outer-code", |f| f.results["exitCode"] = json!(1)),
-        ("input", |f| f.request["sourceId"]["tree"] = json!("c".repeat(40))),
-        ("drift", |f| f.results["sourceIdAfter"]["commit"] = json!("c".repeat(40))),
-        ("malformed-source", |f| {
-            f.request["sourceId"] = json!("bad")
+        ("input", |f| {
+            f.request["sourceId"]["tree"] = json!("c".repeat(40))
         }),
+        ("drift", |f| {
+            f.results["sourceIdAfter"]["commit"] = json!("c".repeat(40))
+        }),
+        ("malformed-source", |f| f.request["sourceId"] = json!("bad")),
         ("summary-run", |f| {
             f.output = f.output.replacen("PASS test-", "PASS test-other-", 1)
         }),

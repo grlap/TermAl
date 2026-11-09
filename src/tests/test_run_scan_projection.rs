@@ -329,11 +329,13 @@ fn unrelated_history_mutation_does_not_force_locked_scan_recomputation() {
 #[test]
 fn newly_relevant_observation_invalidates_an_absent_candidate_at_commit() {
     let (fixture, seed) = populated_unrelated_history("projection-new-candidate");
-    assert!(!fixture
-        .summary("test-projection")
-        .registration
-        .superseded_run_ids
-        .contains(&seed));
+    assert!(
+        !fixture
+            .summary("test-projection")
+            .registration
+            .superseded_run_ids
+            .contains(&seed)
+    );
     let state = fixture.state.clone();
     let expected = seed.clone();
     TEST_RUN_PROJECTION_FALLBACKS.with(|count| count.set(0));
@@ -344,11 +346,13 @@ fn newly_relevant_observation_invalidates_an_absent_candidate_at_commit() {
     });
     fixture.refresh(&[]);
     TEST_RUN_PROJECTION_FALLBACKS.with(|count| assert_eq!(count.get(), 1));
-    assert!(fixture
-        .summary("test-projection")
-        .registration
-        .superseded_run_ids
-        .contains(&expected));
+    assert!(
+        fixture
+            .summary("test-projection")
+            .registration
+            .superseded_run_ids
+            .contains(&expected)
+    );
 }
 
 #[test]

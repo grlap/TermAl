@@ -107,8 +107,7 @@ fn a_declared_completion_persists_its_observation_without_minting_verification()
     assert_eq!(runs[0].state, TestRunState::Passed);
     assert!(runs[0].registration.verification_record_ids.is_empty());
     assert_eq!(
-        runs[0].registration.restart_would_void_evidence,
-        None,
+        runs[0].registration.restart_would_void_evidence, None,
         "an ordinary fact is not a correlated native-verification receipt"
     );
     let loaded = load_state(turn.state.persistence_path.as_path())
@@ -117,7 +116,10 @@ fn a_declared_completion_persists_its_observation_without_minting_verification()
     let row = loaded.test_run_observations.values().next().unwrap();
     assert_eq!(row.execution_id, runs[0].run_id);
     assert_eq!(row.summary.state, TestRunState::Passed);
-    assert!(row.evidence.is_empty(), "reload cannot turn ordinary telemetry into verification");
+    assert!(
+        row.evidence.is_empty(),
+        "reload cannot turn ordinary telemetry into verification"
+    );
 }
 
 #[test]
@@ -155,17 +157,32 @@ fn a_real_declared_failure_overrides_native_exit_zero_without_losing_the_native_
 fn a_declared_verdict_never_reaches_an_older_ended_run_of_a_reused_key() {
     let turn = EOCheckedTurn::start("registration-reused-key", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
-    turn.run("reused-dotnet-tool", DECLARED_TEST, EngramCommandExit::Code(0),
-        || write_artifact(&turn, PASSING_TRX));
+    turn.run(
+        "reused-dotnet-tool",
+        DECLARED_TEST,
+        EngramCommandExit::Code(0),
+        || write_artifact(&turn, PASSING_TRX),
+    );
     let first = turn.state.test_run_summaries(None);
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].state, TestRunState::Passed);
     let (first_id, first_ended) = (first[0].run_id.clone(), first[0].ended_at.clone());
-    turn.run("reused-dotnet-tool", DECLARED_TEST, EngramCommandExit::Code(0),
-        || write_artifact(&turn, FAILING_TRX));
+    turn.run(
+        "reused-dotnet-tool",
+        DECLARED_TEST,
+        EngramCommandExit::Code(0),
+        || write_artifact(&turn, FAILING_TRX),
+    );
     let runs = turn.state.test_run_summaries(None);
-    let older = runs.iter().find(|run| run.run_id == first_id).expect("the first run is kept");
-    assert_eq!(older.state, TestRunState::Passed, "an older ended run is never reselected");
+    let older = runs
+        .iter()
+        .find(|run| run.run_id == first_id)
+        .expect("the first run is kept");
+    assert_eq!(
+        older.state,
+        TestRunState::Passed,
+        "an older ended run is never reselected"
+    );
     assert_eq!(older.ended_at, first_ended);
     assert_eq!(older.exit_code, Some(0));
 }
@@ -176,11 +193,26 @@ fn a_declared_verdict_never_reaches_an_older_ended_run_of_a_reused_key() {
 fn a_declared_verdict_never_ends_a_background_launch() {
     let turn = EOCheckedTurn::start("registration-background-launch", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
-    turn.run("background-dotnet-tool", DECLARED_TEST, EngramCommandExit::NotFinished,
-        || write_artifact(&turn, FAILING_TRX));
-    let run = turn.state.test_run_summaries(None).pop().expect("the launch is visible");
-    assert_ne!(run.state, TestRunState::Failed, "no verdict for a run that has not ended");
-    assert!(run.ended_at.is_none(), "a background launch is not ended by its tool result");
+    turn.run(
+        "background-dotnet-tool",
+        DECLARED_TEST,
+        EngramCommandExit::NotFinished,
+        || write_artifact(&turn, FAILING_TRX),
+    );
+    let run = turn
+        .state
+        .test_run_summaries(None)
+        .pop()
+        .expect("the launch is visible");
+    assert_ne!(
+        run.state,
+        TestRunState::Failed,
+        "no verdict for a run that has not ended"
+    );
+    assert!(
+        run.ended_at.is_none(),
+        "a background launch is not ended by its tool result"
+    );
 }
 
 /// A duplicate end of an already ended run ends nothing, so a later artifact
@@ -190,20 +222,44 @@ fn a_duplicate_declared_end_changes_nothing() {
     let turn = EOCheckedTurn::start("registration-duplicate-end", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let mut recorder = turn.recorder();
-    recorder.command_started("duplicate-dotnet-tool", DECLARED_TEST).unwrap();
+    recorder
+        .command_started("duplicate-dotnet-tool", DECLARED_TEST)
+        .unwrap();
     turn.wait_for_snapshots();
     write_artifact(&turn, FAILING_TRX);
-    recorder.command_completed_with_exit("duplicate-dotnet-tool", DECLARED_TEST,
-        "dotnet completed", CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    recorder
+        .command_completed_with_exit(
+            "duplicate-dotnet-tool",
+            DECLARED_TEST,
+            "dotnet completed",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
     turn.wait_for_snapshots();
     let ended = turn.state.test_run_summaries(None).pop().unwrap();
-    assert_eq!(ended.state, TestRunState::Failed, "its own end applied the artifact verdict");
+    assert_eq!(
+        ended.state,
+        TestRunState::Failed,
+        "its own end applied the artifact verdict"
+    );
     write_artifact(&turn, PASSING_TRX);
-    recorder.command_completed_with_exit("duplicate-dotnet-tool", DECLARED_TEST,
-        "dotnet completed", CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    recorder
+        .command_completed_with_exit(
+            "duplicate-dotnet-tool",
+            DECLARED_TEST,
+            "dotnet completed",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
     turn.wait_for_snapshots();
     let after = turn.state.test_run_summaries(None).pop().unwrap();
     assert_eq!(after.run_id, ended.run_id);
-    assert_eq!(after.state, TestRunState::Failed, "a duplicate end applies no verdict");
+    assert_eq!(
+        after.state,
+        TestRunState::Failed,
+        "a duplicate end applies no verdict"
+    );
     assert_eq!(after.ended_at, ended.ended_at);
 }

@@ -23,7 +23,11 @@ const FIXTURE_RUN_GENERATION: i64 = 1;
 /// The fixture work's naming history: its work id and current revision.
 fn fixture_history(state: &AppState) -> (String, u64) {
     let inner = state.inner.lock().unwrap();
-    assert_eq!(inner.engram_work_naming_history.len(), 1, "one fixture work");
+    assert_eq!(
+        inner.engram_work_naming_history.len(),
+        1,
+        "one fixture work"
+    );
     let history = &inner.engram_work_naming_history[0];
     (history.work_id.clone(), history.revision)
 }
@@ -157,10 +161,14 @@ fn paused_evaluation_after(
         (ENGRAM_NAMING_HISTORY_EPOCH, revision),
         "the fixture's history is acknowledged"
     );
-    token.named_binding = named.as_ref().map(|named| bound_in_run(named, FIXTURE_RUN_ID));
+    token.named_binding = named
+        .as_ref()
+        .map(|named| bound_in_run(named, FIXTURE_RUN_ID));
     update_evaluation_target(&state, &delegation, |target| {
         target.naming_history = Some(token.clone());
-        target.source_root = named.as_ref().map(AcceptanceEvaluationSourceRoot::from_entry);
+        target.source_root = named
+            .as_ref()
+            .map(AcceptanceEvaluationSourceRoot::from_entry);
     });
     let request = two_verdicts();
     let (authority, _target, _model, _in_flight) = state
@@ -174,13 +182,24 @@ fn paused_evaluation_after(
     {
         let inner = state.inner.lock().unwrap();
         let index = inner.find_delegation_index(&delegation).unwrap();
-        let target = inner.delegations[index].acceptance_evaluation.as_ref().unwrap();
+        let target = inner.delegations[index]
+            .acceptance_evaluation
+            .as_ref()
+            .unwrap();
         assert!(
             !acceptance_evaluation_root_changed_locked(&inner, target),
             "the paused evaluation starts current"
         );
     }
-    Paused { state, delegation, authority, request, work_id, named, child }
+    Paused {
+        state,
+        delegation,
+        authority,
+        request,
+        work_id,
+        named,
+        child,
+    }
 }
 
 /// A paused evaluation whose history had learned no frontier at capture.
@@ -208,14 +227,23 @@ fn nothing_written(paused: &Paused) -> bool {
     let inner = paused.state.inner.lock().unwrap();
     let index = inner.find_delegation_index(&paused.delegation).unwrap();
     matches!(
-        inner.delegations[index].acceptance_evaluation.as_ref().unwrap().submission,
+        inner.delegations[index]
+            .acceptance_evaluation
+            .as_ref()
+            .unwrap()
+            .submission,
         AcceptanceEvaluationSubmission::None
     )
 }
 
 fn refused(paused: &Paused, why: &str) -> ApiError {
     let error = first_write(paused).expect_err(why);
-    assert_eq!(error.status, StatusCode::CONFLICT, "{why}: {}", error.message);
+    assert_eq!(
+        error.status,
+        StatusCode::CONFLICT,
+        "{why}: {}",
+        error.message
+    );
     assert!(nothing_written(paused), "{why}: nothing was written");
     error
 }
@@ -269,7 +297,10 @@ fn an_unchanged_paused_evaluation_writes() {
     for named_root in [false, true] {
         let paused = paused_evaluation(named_root);
         first_write(&paused).unwrap_or_else(|error| {
-            panic!("an unchanged evaluation is admitted (named root {named_root}): {}", error.message)
+            panic!(
+                "an unchanged evaluation is admitted (named root {named_root}): {}",
+                error.message
+            )
         });
     }
 }
@@ -283,7 +314,11 @@ fn a_first_frontier_of_the_same_binding_does_not_refuse_a_named_root_evaluation(
     // admission, typically) moved the history revision by learning it.
     let paused = paused_evaluation(true);
     let named = paused.named.clone().unwrap();
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+    );
     assert!(
         paused.state.inner.lock().unwrap().engram_work_source_roots == vec![named],
         "the binding is unchanged"
@@ -296,10 +331,18 @@ fn the_same_bindings_bound_event_after_another_claims_frontier_does_not_refuse()
     // The history had learned an earlier binding of the work under another
     // claim; the evaluation's own read then learns the evaluated binding.
     let paused = paused_evaluation_after(true, |named| {
-        Some(naming_event(&earlier_binding(named, "earlier-claim"), EngramNamedRootKind::Bound, "run-earlier"))
+        Some(naming_event(
+            &earlier_binding(named, "earlier-claim"),
+            EngramNamedRootKind::Bound,
+            "run-earlier",
+        ))
     });
     let named = paused.named.clone().unwrap();
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+    );
     first_write(&paused).expect("learning the evaluated binding is no change");
 }
 
@@ -309,10 +352,18 @@ fn a_single_read_past_the_older_bindings_end_to_the_same_binding_does_not_refuse
     // Bound event; one read passes its Ended event and reports the evaluated
     // binding's Bound event as the latest, so the revision moves once.
     let paused = paused_evaluation_after(true, |named| {
-        Some(naming_event(&earlier_binding(named, &named.claim_id), EngramNamedRootKind::Bound, FIXTURE_RUN_ID))
+        Some(naming_event(
+            &earlier_binding(named, &named.claim_id),
+            EngramNamedRootKind::Bound,
+            FIXTURE_RUN_ID,
+        ))
     });
     let named = paused.named.clone().unwrap();
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+    );
     first_write(&paused).expect("the evaluated binding is the latest naming");
 }
 
@@ -336,10 +387,18 @@ fn a_history_advance_without_a_named_binding_refuses_a_workdir_evaluation() {
 #[test]
 fn the_end_of_the_evaluated_binding_refuses_after_its_bound_event_was_known() {
     let paused = paused_evaluation_after(true, |named| {
-        Some(naming_event(named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID))
+        Some(naming_event(
+            named,
+            EngramNamedRootKind::Bound,
+            FIXTURE_RUN_ID,
+        ))
     });
     let named = paused.named.clone().unwrap();
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Ended, FIXTURE_RUN_ID));
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Ended, FIXTURE_RUN_ID),
+    );
     refused(&paused, "the evaluated binding ended");
 }
 
@@ -352,7 +411,11 @@ fn a_rename_under_the_same_claim_during_the_evaluation_refuses() {
     renamed.root = format!("{}-renamed", renamed.root);
     renamed.generation = 4;
     renamed.named_at = "2026-09-28T00:00:00.000Z".to_owned();
-    learn(&paused.state, &paused.work_id, naming_event(&renamed, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&renamed, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+    );
     let error = refused(&paused, "a re-name is a real change");
     assert!(
         error.message.contains("naming history has since moved"),
@@ -366,7 +429,11 @@ fn a_first_frontier_of_another_binding_refuses_a_named_root_evaluation() {
     let paused = paused_evaluation(true);
     let mut other = paused.named.clone().unwrap();
     other.named_at = "2026-09-28T00:00:00.000Z".to_owned();
-    learn(&paused.state, &paused.work_id, naming_event(&other, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&other, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+    );
     refused(&paused, "another binding's naming is a real change");
 }
 
@@ -374,8 +441,15 @@ fn a_first_frontier_of_another_binding_refuses_a_named_root_evaluation() {
 fn the_same_bindings_bound_event_in_another_run_refuses() {
     let paused = paused_evaluation(true);
     let named = paused.named.clone().unwrap();
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Bound, "run-other"));
-    refused(&paused, "a naming in another canonical run is not proved to be the same");
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Bound, "run-other"),
+    );
+    refused(
+        &paused,
+        "a naming in another canonical run is not proved to be the same",
+    );
 }
 
 #[test]
@@ -383,7 +457,11 @@ fn a_further_step_after_the_same_bindings_bound_event_refuses() {
     // The exemption covers exactly one step.
     let paused = paused_evaluation(true);
     let named = paused.named.clone().unwrap();
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+    );
     advance_history_unproved(&paused.state, &paused.work_id);
     refused(&paused, "a second step is not proved benign");
 }
@@ -394,7 +472,11 @@ fn an_ended_first_frontier_of_the_same_binding_refuses_a_named_root_evaluation()
     // the name the evaluation was requested on is gone.
     let paused = paused_evaluation(true);
     let named = paused.named.clone().unwrap();
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Ended, FIXTURE_RUN_ID));
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Ended, FIXTURE_RUN_ID),
+    );
     refused(&paused, "an Ended event is a real change");
 }
 
@@ -419,8 +501,18 @@ fn a_legacy_epoch_token_gets_no_exemption() {
     };
     assert!(token.named_binding.is_some(), "the token names its binding");
     token.epoch = 0;
-    paused.state.inner.lock().unwrap().engram_work_naming_history[0].epoch = 0;
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+    paused
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_naming_history[0]
+        .epoch = 0;
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+    );
     assert_eq!(
         engram_work_naming_change(&paused.state.inner.lock().unwrap(), &store, &token),
         Some(EngramWorkNamingChange::Moved),
@@ -475,21 +567,23 @@ fn a_conflicting_naming_intent_refuses_and_names_itself() {
         foreign.claim_id = "claim-of-another-session".to_owned();
         foreign.root = format!("{}-other", foreign.root);
         foreign.generation = 5;
-        inner.engram_named_root_journal.push(EngramNamedRootJournal {
-            store: foreign.store.clone(),
-            claim_id: foreign.claim_id.clone(),
-            read_binding: None,
-            confirmed: None,
-            pending: Some(EngramNamedRootEvent {
-                root: foreign,
-                reporter: "session-other".to_owned(),
-                kind: EngramNamedRootKind::Bound,
-                end_reason: None,
-            }),
-            obsolete: false,
-            retirement: None,
-            reconciliation: None,
-        });
+        inner
+            .engram_named_root_journal
+            .push(EngramNamedRootJournal {
+                store: foreign.store.clone(),
+                claim_id: foreign.claim_id.clone(),
+                read_binding: None,
+                confirmed: None,
+                pending: Some(EngramNamedRootEvent {
+                    root: foreign,
+                    reporter: "session-other".to_owned(),
+                    kind: EngramNamedRootKind::Bound,
+                    end_reason: None,
+                }),
+                obsolete: false,
+                retirement: None,
+                reconciliation: None,
+            });
     }
     let error = refused(&paused, "a conflicting naming intent is a real change");
     // The refusal must say what conflicts and whether retrying can help,
@@ -522,7 +616,10 @@ fn put_transition_in_flight(state: &AppState) {
 fn put_transition_in_flight_by(state: &AppState, claim_id: &str, run_id: &str) {
     let mut inner = state.inner.lock().unwrap();
     let history = &mut inner.engram_work_naming_history[0];
-    let transition = history.transition.as_mut().expect("the fixture's authority owner");
+    let transition = history
+        .transition
+        .as_mut()
+        .expect("the fixture's authority owner");
     transition.phase = EngramAuthorityPhase::Prepared;
     transition.binding.claim_id = claim_id.to_owned();
     transition.binding.run_id = run_id.to_owned();
@@ -555,10 +652,20 @@ fn submit(
 /// The refusal an authority transition in flight gives: retryable, with
 /// the hint the evaluator waits, never the final wording.
 fn assert_retryable_in_flight(error: &ApiError) {
-    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE, "{}", error.message);
-    let hint = format!("wait {} seconds", ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER.as_secs());
+    assert_eq!(
+        error.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        error.message
+    );
+    let hint = format!(
+        "wait {} seconds",
+        ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER.as_secs()
+    );
     assert!(
-        error.message.starts_with(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT)
+        error
+            .message
+            .starts_with(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT)
             && error.message.contains("still open")
             && error.message.contains(&hint)
             && !error.message.contains("do not submit again"),
@@ -578,13 +685,24 @@ fn assert_attempt_open(paused: &Paused) {
 #[test]
 fn the_in_flight_retry_hint_is_derived_from_the_passs_read_budget() {
     assert_eq!(ENGRAM_ROOT_RECLAMATION_BUDGET, Duration::from_secs(2));
-    assert_eq!(ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER, Duration::from_secs(3));
+    assert_eq!(
+        ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRY_AFTER,
+        Duration::from_secs(3)
+    );
     assert_eq!(ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRIES, 3);
     // The request side answers a transition in flight the same way.
-    let error = acceptance_evaluation_naming_refusal("lead", EngramWorkNamingChange::InFlight, None);
-    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE, "{}", error.message);
+    let error =
+        acceptance_evaluation_naming_refusal("lead", EngramWorkNamingChange::InFlight, None);
+    assert_eq!(
+        error.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        error.message
+    );
     assert!(
-        error.message.starts_with(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT)
+        error
+            .message
+            .starts_with(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT)
             && error.message.contains("again in 3 seconds"),
         "{}",
         error.message
@@ -603,7 +721,10 @@ fn a_submit_during_a_pass_is_retryable_and_the_same_attempt_writes_once_it_publi
     let (calls, run) = scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(false), ""))]);
     submit(&paused, run).expect("the same attempt writes once the pass has published");
     assert_eq!(calls.lock().unwrap().len(), 1, "one tracker write");
-    assert!(outcome_of(&paused.state, &paused.delegation).is_some(), "recorded");
+    assert!(
+        outcome_of(&paused.state, &paused.delegation).is_some(),
+        "recorded"
+    );
 
     // The same verdicts once more are answered as already recorded, never as
     // a second write.
@@ -620,21 +741,51 @@ fn a_submit_in_flight_names_the_roots_last_pass_attempt_with_its_wait_unchanged(
     let status = {
         let mut inner = paused.state.inner.lock().unwrap();
         let now = inner.engram_budget_clock_snapshot().now();
-        engram_record_root_pass_attempt_locked(&mut inner, &named, now,
-            &Err(ApiError::conflict("fixture pass refusal")));
-        inner.engram_root_reclamation.cooldowns.push((named.clone(), now + ENGRAM_ROOT_RECLAMATION_COOLDOWN));
+        engram_record_root_pass_attempt_locked(
+            &mut inner,
+            &named,
+            now,
+            &Err(ApiError::conflict("fixture pass refusal")),
+        );
+        inner
+            .engram_root_reclamation
+            .cooldowns
+            .push((named.clone(), now + ENGRAM_ROOT_RECLAMATION_COOLDOWN));
         engram_named_root_reclamation_text(&inner, &named, now)
     };
-    assert!(status.contains("refused: fixture pass refusal (HTTP 409)"), "{status}");
+    assert!(
+        status.contains("refused: fixture pass refusal (HTTP 409)"),
+        "{status}"
+    );
     let error = submit(&paused, runner_must_not_run).expect_err("still in flight");
     assert_retryable_in_flight(&error);
-    let (lead, rest) = plain.message.split_once(" Nothing was recorded").expect("the plain refusal's shape");
-    assert_eq!(error.message, format!("{lead} Its named root's reclamation status now: {status}. Nothing was recorded{rest}"),
-        "the same refusal with the root's status added; the wait and the retry contract unchanged");
+    let (lead, rest) = plain
+        .message
+        .split_once(" Nothing was recorded")
+        .expect("the plain refusal's shape");
+    assert_eq!(
+        error.message,
+        format!(
+            "{lead} Its named root's reclamation status now: {status}. Nothing was recorded{rest}"
+        ),
+        "the same refusal with the root's status added; the wait and the retry contract unchanged"
+    );
     assert_attempt_open(&paused);
     // Without a recorded attempt the text is the plain one again.
-    paused.state.inner.lock().unwrap().engram_root_reclamation.attempts.clear();
-    assert_eq!(submit(&paused, runner_must_not_run).expect_err("still in flight").message, plain.message);
+    paused
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_root_reclamation
+        .attempts
+        .clear();
+    assert_eq!(
+        submit(&paused, runner_must_not_run)
+            .expect_err("still in flight")
+            .message,
+        plain.message
+    );
 }
 
 #[test]
@@ -651,7 +802,10 @@ fn in_flight_refusals_up_to_the_retry_limit_leave_the_attempt_open_for_a_later_s
     publish_transition(&paused.state);
     let (_, run) = scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(false), ""))]);
     submit(&paused, run).expect("the open attempt writes once the pass has published");
-    assert!(outcome_of(&paused.state, &paused.delegation).is_some(), "recorded");
+    assert!(
+        outcome_of(&paused.state, &paused.delegation).is_some(),
+        "recorded"
+    );
 }
 
 #[test]
@@ -660,12 +814,20 @@ fn a_submit_after_a_pass_retired_the_root_is_refused_on_the_retirement() {
     put_transition_in_flight(&paused.state);
     assert_retryable_in_flight(&first_write(&paused).expect_err("the pass has not published"));
     // The pass publishes a retirement: the retry meets a real change.
-    paused.state.inner.lock().unwrap().engram_work_source_roots.clear();
+    paused
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .clear();
     publish_transition(&paused.state);
     let error = refused(&paused, "a retired root is a real change");
     assert!(
         error.message.contains("no longer names")
-            && !error.message.contains(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT),
+            && !error
+                .message
+                .contains(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT),
         "the refusal names the retirement, final: {}",
         error.message
     );
@@ -682,10 +844,15 @@ fn another_claims_prepared_naming_is_refused_finally_not_as_in_flight() {
     ] {
         let paused = paused_evaluation(true);
         put_transition_in_flight_by(&paused.state, claim_id, run_id);
-        let error = refused(&paused, "another owner's prepared naming is a real pending naming");
+        let error = refused(
+            &paused,
+            "another owner's prepared naming is a real pending naming",
+        );
         assert!(
             error.message.contains("pending")
-                && !error.message.contains(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT),
+                && !error
+                    .message
+                    .contains(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT),
             "{claim_id}/{run_id}: {}",
             error.message
         );
@@ -707,7 +874,9 @@ fn an_unresolved_run_beside_a_pass_is_refused_finally() {
     let error = refused(&paused, "an unresolved run is a real pending naming");
     assert!(
         error.message.contains("pending")
-            && !error.message.contains(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT),
+            && !error
+                .message
+                .contains(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT),
         "{}",
         error.message
     );
@@ -725,26 +894,30 @@ fn a_pending_naming_intent_beside_a_pass_is_refused_finally() {
         foreign.claim_id = "claim-of-another-session".to_owned();
         foreign.root = format!("{}-other", foreign.root);
         foreign.generation = 5;
-        inner.engram_named_root_journal.push(EngramNamedRootJournal {
-            store: foreign.store.clone(),
-            claim_id: foreign.claim_id.clone(),
-            read_binding: None,
-            confirmed: None,
-            pending: Some(EngramNamedRootEvent {
-                root: foreign,
-                reporter: "session-other".to_owned(),
-                kind: EngramNamedRootKind::Bound,
-                end_reason: None,
-            }),
-            obsolete: false,
-            retirement: None,
-            reconciliation: None,
-        });
+        inner
+            .engram_named_root_journal
+            .push(EngramNamedRootJournal {
+                store: foreign.store.clone(),
+                claim_id: foreign.claim_id.clone(),
+                read_binding: None,
+                confirmed: None,
+                pending: Some(EngramNamedRootEvent {
+                    root: foreign,
+                    reporter: "session-other".to_owned(),
+                    kind: EngramNamedRootKind::Bound,
+                    end_reason: None,
+                }),
+                obsolete: false,
+                retirement: None,
+                reconciliation: None,
+            });
     }
     let error = refused(&paused, "a pending naming intent is a real pending naming");
     assert!(
         error.message.contains("pending")
-            && !error.message.contains(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT),
+            && !error
+                .message
+                .contains(ACCEPTANCE_EVALUATION_AUTHORITY_IN_FLIGHT),
         "{}",
         error.message
     );
@@ -755,9 +928,14 @@ fn a_capture_after_the_binding_was_already_learned_writes_unchanged() {
     // An earlier evaluation's read learned the binding before this capture:
     // the revision does not move again, so no exemption is needed.
     let paused = paused_evaluation_after(true, |named| {
-        Some(naming_event(named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID))
+        Some(naming_event(
+            named,
+            EngramNamedRootKind::Bound,
+            FIXTURE_RUN_ID,
+        ))
     });
-    first_write(&paused).expect("an unchanged, already learned binding is still the evaluated tree");
+    first_write(&paused)
+        .expect("an unchanged, already learned binding is still the evaluated tree");
 }
 
 // C4: a request for a work never named on this host says what to do.
@@ -767,7 +945,12 @@ fn a_request_for_a_never_named_work_says_to_name_a_source_root_first() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     // No naming of the work was ever acknowledged here.
-    state.inner.lock().unwrap().engram_work_naming_history.clear();
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_naming_history
+        .clear();
     let error = state
         .request_acceptance_evaluation_with_runner(
             &parent,
@@ -786,7 +969,10 @@ fn a_request_for_a_never_named_work_says_to_name_a_source_root_first() {
         "the refusal says how to proceed: {}",
         error.message
     );
-    assert!(state.inner.lock().unwrap().delegations.is_empty(), "nothing was spawned");
+    assert!(
+        state.inner.lock().unwrap().delegations.is_empty(),
+        "nothing was spawned"
+    );
 }
 
 // C3: a claim changed or released, or a naming away and back again, while
@@ -816,11 +1002,25 @@ fn a_claim_released_during_the_evaluation_refuses_it() {
     // The release ended the binding: its entry is gone and the history
     // learned its Ended event.
     let paused = paused_evaluation_after(true, |named| {
-        Some(naming_event(named, EngramNamedRootKind::Bound, FIXTURE_RUN_ID))
+        Some(naming_event(
+            named,
+            EngramNamedRootKind::Bound,
+            FIXTURE_RUN_ID,
+        ))
     });
     let named = paused.named.clone().unwrap();
-    paused.state.inner.lock().unwrap().engram_work_source_roots.clear();
-    learn(&paused.state, &paused.work_id, naming_event(&named, EngramNamedRootKind::Ended, FIXTURE_RUN_ID));
+    paused
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .clear();
+    learn(
+        &paused.state,
+        &paused.work_id,
+        naming_event(&named, EngramNamedRootKind::Ended, FIXTURE_RUN_ID),
+    );
     let error = refused(&paused, "a released claim is a real change");
     assert!(
         error.message.contains("no longer names"),
@@ -843,7 +1043,11 @@ fn a_naming_away_and_back_cannot_revive_the_paused_evaluation() {
         away.generation = 4;
         away.named_at = "2026-09-28T00:00:00.000Z".to_owned();
         *paused.state.inner.lock().unwrap().engram_work_source_roots = vec![away.clone()];
-        learn(&paused.state, &paused.work_id, naming_event(&away, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+        learn(
+            &paused.state,
+            &paused.work_id,
+            naming_event(&away, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+        );
         let back = if back_exactly {
             named.clone()
         } else {
@@ -853,7 +1057,11 @@ fn a_naming_away_and_back_cannot_revive_the_paused_evaluation() {
             back
         };
         *paused.state.inner.lock().unwrap().engram_work_source_roots = vec![back.clone()];
-        learn(&paused.state, &paused.work_id, naming_event(&back, EngramNamedRootKind::Bound, FIXTURE_RUN_ID));
+        learn(
+            &paused.state,
+            &paused.work_id,
+            naming_event(&back, EngramNamedRootKind::Bound, FIXTURE_RUN_ID),
+        );
         if back_exactly {
             assert!(
                 paused.state.inner.lock().unwrap().engram_work_source_roots == vec![named.clone()],

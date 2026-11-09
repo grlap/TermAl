@@ -270,20 +270,21 @@ fn tracker_acp_retains_stop_and_runtime_fences() {
         let mut observations = KimiReadOnlyObservations::default();
         observations.observe(&tool_call("tracker", title));
         observations.observe(&streamed("tracker", "{}"));
-        assert!(kimi
-            .state
-            .answer_kimi_read_only_permission(
-                &permission_message(request_params(
-                    "tracker",
-                    title,
-                    &format!("{KIMI_MCP_SUMMARY_PREFIX}{title}")
-                )),
-                &kimi.id,
-                &RuntimeToken::Acp(token.to_owned()),
-                &kimi.runtime.input_tx,
-                &mut observations,
-            )
-            .unwrap());
+        assert!(
+            kimi.state
+                .answer_kimi_read_only_permission(
+                    &permission_message(request_params(
+                        "tracker",
+                        title,
+                        &format!("{KIMI_MCP_SUMMARY_PREFIX}{title}")
+                    )),
+                    &kimi.id,
+                    &RuntimeToken::Acp(token.to_owned()),
+                    &kimi.runtime.input_tx,
+                    &mut observations,
+                )
+                .unwrap()
+        );
         assert_eq!(
             next_permission_outcome(&kimi.rx),
             json!({ "outcome": "cancelled" })

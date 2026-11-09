@@ -6,20 +6,40 @@ use super::*;
 fn historical_refusal_preserves_every_earlier_unknown_and_certificate_through_reload() {
     let (_root, path, mut inner, session, mut operation) = passive_state("checkpoint-lineage-data");
     for code in ["validation_failed", "invalid_routing_token"] {
-        append_historical_result(&mut operation, EngramCheckpointAttemptResult::Unknown { code: Some(code.into()) });
+        append_historical_result(
+            &mut operation,
+            EngramCheckpointAttemptResult::Unknown {
+                code: Some(code.into()),
+            },
+        );
     }
-    append_historical_result(&mut operation, EngramCheckpointAttemptResult::CertifiedNotApplied { code: "control_request_expired".into() });
+    append_historical_result(
+        &mut operation,
+        EngramCheckpointAttemptResult::CertifiedNotApplied {
+            code: "control_request_expired".into(),
+        },
+    );
     let prefix = serde_json::to_value(&operation.attempts).unwrap();
     let original = serde_json::to_value(&operation.original).unwrap();
-    append_historical_result(&mut operation, EngramCheckpointAttemptResult::Refused {
-        response: json!({"decision":"refuse","code":"evidence_rejected"}) });
+    append_historical_result(
+        &mut operation,
+        EngramCheckpointAttemptResult::Refused {
+            response: json!({"decision":"refuse","code":"evidence_rejected"}),
+        },
+    );
     install_historical_checkpoint(&mut inner, &session, &operation);
     persist_state(&path, &inner).unwrap();
     let loaded = load_state(&path).unwrap().unwrap();
     assert_historical_operation(&loaded, &operation);
     assert_eq!(serde_json::to_value(&operation.original).unwrap(), original);
-    assert_eq!(serde_json::to_value(&operation.attempts[..4]).unwrap(), prefix);
-    assert_ne!(operation.protection.phase, EngramSessionObligationPhase::Confirmed);
+    assert_eq!(
+        serde_json::to_value(&operation.attempts[..4]).unwrap(),
+        prefix
+    );
+    assert_ne!(
+        operation.protection.phase,
+        EngramSessionObligationPhase::Confirmed
+    );
     assert!(operation.protection.settlement_evidence.is_null());
 }
 
@@ -31,11 +51,18 @@ fn historical_attempt_inventory_rejects_missing_over_capacity_and_broken_lineage
     missing.attempts.clear();
     assert!(missing.validate().is_err());
     let mut oversized = operation.clone();
-    oversized.attempts = vec![operation.attempts[0].clone(); ENGRAM_SESSION_OBLIGATION_MAX_ENTRIES + 1];
-    assert!(oversized.validate().is_err(), "capacity is checked before lineage traversal");
+    oversized.attempts =
+        vec![operation.attempts[0].clone(); ENGRAM_SESSION_OBLIGATION_MAX_ENTRIES + 1];
+    assert!(
+        oversized.validate().is_err(),
+        "capacity is checked before lineage traversal"
+    );
     for changed in ["predecessor", "identity", "runtime", "paired-head"] {
         let mut invalid = operation.clone();
-        append_historical_result(&mut invalid, EngramCheckpointAttemptResult::Unknown { code: None });
+        append_historical_result(
+            &mut invalid,
+            EngramCheckpointAttemptResult::Unknown { code: None },
+        );
         match changed {
             "predecessor" => invalid.attempts[1].predecessor = None,
             "identity" => invalid.attempts[1].id = invalid.attempts[0].id.clone(),
@@ -58,7 +85,12 @@ fn repeated_passive_load_does_not_append_attempts_or_advance_metadata_generation
     for _ in 0..3 {
         let loaded = load_state(&path).unwrap().unwrap();
         assert_historical_operation(&loaded, &operation);
-        assert_eq!(loaded.engram_session_obligations.checkpoint_operations[0].attempts.len(), 1);
+        assert_eq!(
+            loaded.engram_session_obligations.checkpoint_operations[0]
+                .attempts
+                .len(),
+            1
+        );
     }
     let connection = rusqlite::Connection::open(&path).unwrap();
     assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), units);
@@ -76,14 +108,36 @@ fn ordinary_root_progresses_beside_historical_unknown_without_control_replay() {
         install_historical_checkpoint(&mut inner, &turn.session_id, &operation);
         turn.state.commit_locked(&mut inner).unwrap();
     }
-    turn.run("ordinary-check", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    turn.run(
+        "ordinary-check",
+        SIZE_TEST,
+        EngramCommandExit::Code(0),
+        || {},
+    );
     let report = turn.finish();
-    assert_eq!(report["occurrence"]["observed_checks"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        report["occurrence"]["observed_checks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_ordinary_observation_has_no_native_credit(&turn, &report);
     turn.record(|record| {
-        assert_eq!(record.engram.historical_control["engramCheckpointOperation"], original);
-        assert!(!record.engram.historical_control.contains_key("engramOwedBinds"));
+        assert_eq!(
+            record.engram.historical_control["engramCheckpointOperation"],
+            original
+        );
+        assert!(
+            !record
+                .engram
+                .historical_control
+                .contains_key("engramOwedBinds")
+        );
     });
     let inner = turn.state.inner.lock().unwrap();
-    assert_eq!(serde_json::to_value(&inner.engram_session_obligations.checkpoint_operations[0]).unwrap(), original);
+    assert_eq!(
+        serde_json::to_value(&inner.engram_session_obligations.checkpoint_operations[0]).unwrap(),
+        original
+    );
 }

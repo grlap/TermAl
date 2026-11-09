@@ -7,8 +7,8 @@
 // the receipt's other paths (src/tests/prompt_delivery.rs) or the Codex
 // protocol itself (src/tests/shared_codex*.rs). New module beside
 // src/tests/prompt_delivery.rs, whose delivery writer it uses.
-use super::*;
 use super::prompt_delivery::{DeliveryWriter, HeldFence};
+use super::*;
 
 /// A receipted prompt promoted through the real queue on an idle Codex
 /// session whose shared runtime is a test channel: the promotion's prompt
@@ -29,7 +29,8 @@ impl PromotedCodexReceipt {
         let mut state = test_app_state();
         let writer = DeliveryWriter::attach(&mut state);
         let session = test_session_id(&state, Agent::Codex);
-        let (runtime, input_rx, process) = test_shared_codex_runtime(&format!("receipted-codex-{label}"));
+        let (runtime, input_rx, process) =
+            test_shared_codex_runtime(&format!("receipted-codex-{label}"));
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -78,7 +79,11 @@ impl PromotedCodexReceipt {
         };
         let delivery = Self::receipt_of(&state, &session, &id);
         assert_eq!(delivery.disposition, PromptDeliveryDisposition::HandingOff);
-        assert_eq!(delivery.turn_generation, Some(command.active_turn_generation), "promoted");
+        assert_eq!(
+            delivery.turn_generation,
+            Some(command.active_turn_generation),
+            "promoted"
+        );
         Self {
             state,
             session,
@@ -106,9 +111,11 @@ impl PromotedCodexReceipt {
     /// path to restore.
     fn fail_saves(&mut self, label: &str) -> (PathBuf, Arc<PathBuf>) {
         drop(self.writer.take());
-        let failing = test_temp_dir().join(format!("termal-receipted-codex-{label}-{}", Uuid::new_v4()));
+        let failing =
+            test_temp_dir().join(format!("termal-receipted-codex-{label}-{}", Uuid::new_v4()));
         fs::create_dir_all(&failing).expect("the failing persistence directory exists");
-        let original = std::mem::replace(&mut self.state.persistence_path, Arc::new(failing.clone()));
+        let original =
+            std::mem::replace(&mut self.state.persistence_path, Arc::new(failing.clone()));
         (failing, original)
     }
 
@@ -133,7 +140,14 @@ impl PromotedCodexReceipt {
     /// Ends the test only after every thread it started (a reply waiter, a
     /// fence's settlement thread) has released the state.
     fn finish(self) {
-        let Self { state, writer, _write_ahead, runtime, _process, .. } = self;
+        let Self {
+            state,
+            writer,
+            _write_ahead,
+            runtime,
+            _process,
+            ..
+        } = self;
         drop(writer);
         drop(_write_ahead);
         drop(runtime);
@@ -159,7 +173,9 @@ fn release_state(state: AppState) {
 fn refuse_turn_start(pending_requests: &CodexPendingRequestMap) {
     let (_request_id, reply) = take_pending_codex_request(pending_requests);
     reply
-        .send(Err(CodexResponseError::JsonRpc("refused at the end of the test".to_owned())))
+        .send(Err(CodexResponseError::JsonRpc(
+            "refused at the end of the test".to_owned(),
+        )))
         .unwrap();
 }
 
@@ -194,7 +210,10 @@ fn a_codex_runtime_config_save_failure_before_turn_start_rejects_the_receipted_p
         promoted.command.clone(),
     )
     .expect("a failed save fails the turn, not the runtime");
-    assert!(!String::from_utf8_lossy(&wire).contains("turn/start"), "turn/start was never written");
+    assert!(
+        !String::from_utf8_lossy(&wire).contains("turn/start"),
+        "turn/start was never written"
+    );
     assert_rejected_with_retry_entry(&promoted.receipt(), "runtime-config save");
     promoted.assert_requeues(failing, original);
 }
@@ -225,11 +244,20 @@ fn a_codex_thread_registration_save_failure_rejects_the_receipted_prompt() {
         promoted.command.clone(),
     )
     .expect("thread/start is written");
-    assert!(String::from_utf8_lossy(&wire).contains("thread/start"), "the setup request is written");
-    assert_eq!(pending_requests.lock().unwrap().len(), 1, "only the setup request is pending");
+    assert!(
+        String::from_utf8_lossy(&wire).contains("thread/start"),
+        "the setup request is written"
+    );
+    assert_eq!(
+        pending_requests.lock().unwrap().len(),
+        1,
+        "only the setup request is pending"
+    );
     let (_request_id, reply) = take_pending_codex_request(&pending_requests);
     reply
-        .send(Ok(json!({ "thread": { "id": "conversation-registration-save" } })))
+        .send(Ok(
+            json!({ "thread": { "id": "conversation-registration-save" } }),
+        ))
         .unwrap();
     // The setup's waiter takes the reply and ends the setup, whichever way.
     let setup_ended = phase_sync::PollGuard::new();
@@ -248,10 +276,16 @@ fn a_codex_thread_registration_save_failure_rejects_the_receipted_prompt() {
         settled.wait("the failed registration settles the receipt");
     }
     assert!(
-        !matches!(input_rx.try_recv(), Ok(CodexRuntimeCommand::StartTurnAfterSetup { .. })),
+        !matches!(
+            input_rx.try_recv(),
+            Ok(CodexRuntimeCommand::StartTurnAfterSetup { .. })
+        ),
         "a failed registration starts no turn"
     );
-    assert!(!String::from_utf8_lossy(&wire).contains("turn/start"), "turn/start was never written");
+    assert!(
+        !String::from_utf8_lossy(&wire).contains("turn/start"),
+        "turn/start was never written"
+    );
     assert_rejected_with_retry_entry(&promoted.receipt(), "thread registration save");
     promoted.assert_requeues(failing, original);
 }
@@ -285,7 +319,10 @@ fn a_receipt_settled_before_the_write_keeps_codex_from_writing_turn_start() {
         !String::from_utf8_lossy(&wire).contains("turn/start"),
         "a rejected attempt is never written"
     );
-    assert_eq!(promoted.receipt().disposition, PromptDeliveryDisposition::Rejected);
+    assert_eq!(
+        promoted.receipt().disposition,
+        PromptDeliveryDisposition::Rejected
+    );
     promoted.finish();
 }
 
@@ -300,7 +337,11 @@ fn a_failure_before_the_write_rejects_and_denies_the_writer_and_one_after_it_is_
     let token = RuntimeToken::Codex(promoted.runtime.runtime_id.clone());
     promoted
         .state
-        .fail_turn_if_runtime_matches(&promoted.session, &token, "the turn failed before the write")
+        .fail_turn_if_runtime_matches(
+            &promoted.session,
+            &token,
+            "the turn failed before the write",
+        )
         .expect("the failure settles");
     assert_rejected_with_retry_entry(&promoted.receipt(), "failure before the write");
     let mut wire = Vec::new();
@@ -317,8 +358,14 @@ fn a_failure_before_the_write_rejects_and_denies_the_writer_and_one_after_it_is_
         None,
         promoted.command.clone(),
     );
-    assert!(!String::from_utf8_lossy(&wire).contains("turn/start"), "the writer is denied");
-    assert_eq!(promoted.receipt().disposition, PromptDeliveryDisposition::Rejected);
+    assert!(
+        !String::from_utf8_lossy(&wire).contains("turn/start"),
+        "the writer is denied"
+    );
+    assert_eq!(
+        promoted.receipt().disposition,
+        PromptDeliveryDisposition::Rejected
+    );
     promoted.finish();
 
     // Writer wins.
@@ -345,7 +392,10 @@ fn a_failure_before_the_write_rejects_and_denies_the_writer_and_one_after_it_is_
         .state
         .fail_turn_if_runtime_matches(&promoted.session, &token, "the turn failed after the write")
         .expect("the failure settles");
-    assert_eq!(promoted.receipt().disposition, PromptDeliveryDisposition::Ambiguous);
+    assert_eq!(
+        promoted.receipt().disposition,
+        PromptDeliveryDisposition::Ambiguous
+    );
     refuse_turn_start(&pending_requests);
     promoted.finish();
 }
@@ -360,7 +410,11 @@ fn a_receipted_command_whose_receipt_is_gone_is_denied_and_an_ordinary_prompt_is
     {
         let mut inner = promoted.state.inner.lock().unwrap();
         let index = inner.find_session_index(&promoted.session).unwrap();
-        inner.session_mut_by_index(index).unwrap().prompt_deliveries.remove(&promoted.id);
+        inner
+            .session_mut_by_index(index)
+            .unwrap()
+            .prompt_deliveries
+            .remove(&promoted.id);
     }
     let mut wire = Vec::new();
     let _ = handle_shared_codex_start_turn(
@@ -422,7 +476,10 @@ fn a_receipted_command_whose_receipt_is_gone_is_denied_and_an_ordinary_prompt_is
         command,
     )
     .expect("an ordinary prompt is written");
-    assert!(String::from_utf8_lossy(&wire).contains("turn/start"), "written as before");
+    assert!(
+        String::from_utf8_lossy(&wire).contains("turn/start"),
+        "written as before"
+    );
     refuse_turn_start(&pending_requests);
     drop((runtime, input_rx));
     release_state(state);
@@ -451,13 +508,18 @@ fn a_turn_start_reply_timeout_after_the_write_leaves_the_receipted_prompt_ambigu
     .expect("turn/start is written");
     let (_request_id, reply) = take_pending_codex_request(&pending_requests);
     reply
-        .send(Err(CodexResponseError::Timeout("no turn/start reply".to_owned())))
+        .send(Err(CodexResponseError::Timeout(
+            "no turn/start reply".to_owned(),
+        )))
         .unwrap();
     let settled = phase_sync::PollGuard::new();
     while promoted.receipt().disposition == PromptDeliveryDisposition::HandingOff {
         settled.wait("the timed-out reply settles the receipt");
     }
-    assert_eq!(promoted.receipt().disposition, PromptDeliveryDisposition::Ambiguous);
+    assert_eq!(
+        promoted.receipt().disposition,
+        PromptDeliveryDisposition::Ambiguous
+    );
     promoted.finish();
 }
 
@@ -468,7 +530,10 @@ fn a_failed_turn_start_write_leaves_the_receipted_prompt_ambiguous() {
     struct FailingWriter;
     impl std::io::Write for FailingWriter {
         fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "codex stdin closed"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "codex stdin closed",
+            ))
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
@@ -489,6 +554,9 @@ fn a_failed_turn_start_write_leaves_the_receipted_prompt_ambiguous() {
         promoted.command.clone(),
     );
     assert!(result.is_err(), "the failed write reaches the writer loop");
-    assert_eq!(promoted.receipt().disposition, PromptDeliveryDisposition::Ambiguous);
+    assert_eq!(
+        promoted.receipt().disposition,
+        PromptDeliveryDisposition::Ambiguous
+    );
     promoted.finish();
 }

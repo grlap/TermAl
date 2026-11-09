@@ -1099,14 +1099,14 @@ fn delegation_records_persist_and_reload_with_child_link() {
     let delegation_id;
     let child_session_id;
     {
-        let state = boot_on_delegation_root(&temp_root, ||
+        let state = boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        );
+        });
         install_delegation_codex_runtime(&state, "delegation-persist-runtime");
         let parent_session_id = test_session_id(&state, Agent::Codex);
         let created = state
@@ -1145,14 +1145,14 @@ fn delegation_records_persist_and_reload_with_child_link() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = boot_on_delegation_root(&temp_root, ||
+    let restarted = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path.clone(),
             templates_path.clone(),
         )
         .expect("state should reload")
-    );
+    });
     let inner = restarted.inner.lock().expect("state mutex poisoned");
     let delegation = inner
         .delegations
@@ -1194,14 +1194,14 @@ fn delegation_full_output_pages_survive_restart_via_child_transcript() {
         "durable-result-🙂".repeat(900)
     );
     {
-        let state = boot_on_delegation_root(&temp_root, ||
+        let state = boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        );
+        });
         install_delegation_codex_runtime(&state, "delegation-output-persist-runtime");
         parent_session_id = test_session_id(&state, Agent::Codex);
         let created = state
@@ -1230,14 +1230,14 @@ fn delegation_full_output_pages_survive_restart_via_child_transcript() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = boot_on_delegation_root(&temp_root, ||
+    let restarted = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path.clone(),
             templates_path.clone(),
         )
         .expect("state should reload")
-    );
+    });
     let mut reconstructed = String::new();
     let mut offset = 0;
     loop {
@@ -1267,14 +1267,14 @@ fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
     let delegation_id;
     let child_session_id;
     {
-        let state = boot_on_delegation_root(&temp_root, ||
+        let state = boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        );
+        });
         install_delegation_codex_runtime(&state, "delegation-persist-runtime");
         let parent_session_id = test_session_id(&state, Agent::Codex);
         let created = state
@@ -1305,14 +1305,14 @@ fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
         state.shutdown_persist_blocking();
     }
 
-    let restarted = boot_on_delegation_root(&temp_root, ||
+    let restarted = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path.clone(),
             templates_path.clone(),
         )
         .expect("state should reload")
-    );
+    });
     let inner = restarted.inner.lock().expect("state mutex poisoned");
     let child = inner
         .sessions

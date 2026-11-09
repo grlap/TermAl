@@ -111,15 +111,22 @@ impl EngramControlTransport for BoundaryFaultTransport {
         let started_at = std::time::Instant::now();
         {
             let mut entered = self.request_entered.lock().unwrap();
-            if entered.as_ref().is_some_and(|(expected, _)| expected == &operation) {
+            if entered
+                .as_ref()
+                .is_some_and(|(expected, _)| expected == &operation)
+            {
                 entered.take().unwrap().1.send(()).unwrap();
             }
         }
         {
-            let mut faults = self.faults.lock().expect("live boundary fault mutex poisoned");
-            if faults.front().is_some_and(|fault| matches!(fault, BoundaryFault::LoseBeforeSend { .. })
-                && fault.operation() == operation)
-            {
+            let mut faults = self
+                .faults
+                .lock()
+                .expect("live boundary fault mutex poisoned");
+            if faults.front().is_some_and(|fault| {
+                matches!(fault, BoundaryFault::LoseBeforeSend { .. })
+                    && fault.operation() == operation
+            }) {
                 faults.pop_front();
                 return Err(EngramTransportError::transport(format!(
                     "live test lost {operation} before sending it"
@@ -148,13 +155,21 @@ impl EngramControlTransport for BoundaryFaultTransport {
         );
         let pause = {
             let mut pause = self.reply_pause.lock().unwrap();
-            if result.is_ok() && pause.as_ref().is_some_and(|(expected, _, _)| expected == &operation) {
+            if result.is_ok()
+                && pause
+                    .as_ref()
+                    .is_some_and(|(expected, _, _)| expected == &operation)
+            {
                 pause.take()
-            } else { None }
+            } else {
+                None
+            }
         };
         if let Some((_, entered, release)) = pause {
             entered.send(()).unwrap();
-            release.recv_timeout(DEADLOCK_GUARD).expect("the witness releases the actual producer reply");
+            release
+                .recv_timeout(DEADLOCK_GUARD)
+                .expect("the witness releases the actual producer reply");
         }
         let fault = result
             .as_ref()
@@ -226,7 +241,8 @@ impl EngramControlTransport for BoundaryFaultTransport {
         clock: &EngramBudgetClock,
         deadline: std::time::Instant,
     ) -> Result<(), EngramTransportError> {
-        self.inner.shutdown_session_until(session_id, clock, deadline)
+        self.inner
+            .shutdown_session_until(session_id, clock, deadline)
     }
 
     fn read_work_binding(
@@ -342,8 +358,13 @@ fn live_root_fixture_with_repository(
     let home = base.join(format!("live-root-home-{suffix}"));
     fs::create_dir_all(&root).expect("live project root should exist");
     fs::create_dir_all(&home).expect("live Engram home should exist");
-    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| initialize(&root))) {
-        state.test_temp_root.as_ref().unwrap().retain_for_diagnosis();
+    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| initialize(&root)))
+    {
+        state
+            .test_temp_root
+            .as_ref()
+            .unwrap()
+            .retain_for_diagnosis();
         std::panic::resume_unwind(panic);
     }
     let project_file = root.join(".engram-project");
@@ -521,7 +542,11 @@ fn restart_live_root_fixture(fixture: LiveRootFixture) -> LiveRootFixture {
             .clone()
     };
     let persistence_path = fixture.state.persistence_path.as_path().to_path_buf();
-    let templates_path = fixture.state.orchestrator_templates_path.as_path().to_path_buf();
+    let templates_path = fixture
+        .state
+        .orchestrator_templates_path
+        .as_path()
+        .to_path_buf();
     let session_id = fixture.session_id;
     fixture.state.shutdown_persist_blocking();
     drop(fixture.cleanup);
@@ -529,7 +554,8 @@ fn restart_live_root_fixture(fixture: LiveRootFixture) -> LiveRootFixture {
     drop(fixture.state);
     drop(fixture.transport);
 
-    let transport = BoundaryFaultTransport::new(engram_host_workdir(&persistence_path).unwrap(), []);
+    let transport =
+        BoundaryFaultTransport::new(engram_host_workdir(&persistence_path).unwrap(), []);
     let mut state = AppState::new_with_paths_and_engram_transport_for_test(
         default_workdir,
         persistence_path,
@@ -540,7 +566,8 @@ fn restart_live_root_fixture(fixture: LiveRootFixture) -> LiveRootFixture {
     // Keep only the disposable directory alive; no old runtime or host state
     // is installed in the restarted AppState.
     state.test_temp_root = Some(root_guard);
-    let (runtime, receiver, _process) = test_shared_codex_runtime("engram-live-root-restart-provider");
+    let (runtime, receiver, _process) =
+        test_shared_codex_runtime("engram-live-root-restart-provider");
     install_single_wire_codex_fixture(&state, Some(runtime));
     LiveRootFixture {
         cleanup: LiveRootCleanup {
@@ -554,35 +581,70 @@ fn restart_live_root_fixture(fixture: LiveRootFixture) -> LiveRootFixture {
     }
 }
 
-
 fn assert_no_live_turn_gate(transport: &BoundaryFaultTransport) {
-    for operation in ["session_bind", "session_status", "turn_evaluate", "turn_begin", "turn_checkpoint"] {
-        assert!(transport.requests_for(operation).is_empty(), "{operation} is retired");
+    for operation in [
+        "session_bind",
+        "session_status",
+        "turn_evaluate",
+        "turn_begin",
+        "turn_checkpoint",
+    ] {
+        assert!(
+            transport.requests_for(operation).is_empty(),
+            "{operation} is retired"
+        );
     }
 }
 
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn ordinary_live_prompt_does_not_wait_for_a_work_service_deadline() {
-    for source in [None, Some(QueuedPromptSource::Orchestrator), Some(QueuedPromptSource::Mailbox)] {
-        let fixture = live_root_fixture("ordinary-service-deadline", [
-            BoundaryFault::DelayAfterReply { operation: "work_session_read", delay: DEADLOCK_GUARD },
-        ]);
+    for source in [
+        None,
+        Some(QueuedPromptSource::Orchestrator),
+        Some(QueuedPromptSource::Mailbox),
+    ] {
+        let fixture = live_root_fixture(
+            "ordinary-service-deadline",
+            [BoundaryFault::DelayAfterReply {
+                operation: "work_session_read",
+                delay: DEADLOCK_GUARD,
+            }],
+        );
         let prompt = "Preserve the ordinary prompt while optional work reporting is unavailable.";
         let dispatch = dispatch_live_root(&fixture.state, &fixture.session_id, prompt, source);
         deliver_turn_dispatch(&fixture.state, dispatch).unwrap();
         assert_one_provider_prompt(&fixture.receiver, &fixture.session_id, prompt);
-        assert!(fixture.transport.observations().is_empty(), "handoff makes no work RPC");
+        assert!(
+            fixture.transport.observations().is_empty(),
+            "handoff makes no work RPC"
+        );
         if source == Some(QueuedPromptSource::Orchestrator) {
-            queue_test_engram_prompt(&fixture.state, &fixture.session_id,
-                "A separate queued orchestrator intent remains cancelable.", QueuedPromptSource::Orchestrator, None);
+            queue_test_engram_prompt(
+                &fixture.state,
+                &fixture.session_id,
+                "A separate queued orchestrator intent remains cancelable.",
+                QueuedPromptSource::Orchestrator,
+                None,
+            );
             let id = {
                 let inner = fixture.state.inner.lock().unwrap();
                 inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()]
-                    .queued_prompts.back().unwrap().pending_prompt.id.clone()
+                    .queued_prompts
+                    .back()
+                    .unwrap()
+                    .pending_prompt
+                    .id
+                    .clone()
             };
-            fixture.state.cancel_queued_prompt(&fixture.session_id, &id).unwrap();
-            assert!(fixture.receiver.try_recv().is_err(), "Cancel never sends a second prompt");
+            fixture
+                .state
+                .cancel_queued_prompt(&fixture.session_id, &id)
+                .unwrap();
+            assert!(
+                fixture.receiver.try_recv().is_err(),
+                "Cancel never sends a second prompt"
+            );
         }
         assert_no_live_turn_gate(&fixture.transport);
     }
@@ -592,10 +654,19 @@ fn ordinary_live_prompt_does_not_wait_for_a_work_service_deadline() {
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn ordinary_live_policy_is_not_a_provider_admission_authority() {
     let fixture = named_root_completion_live::completion_fixture();
-    fixture.command(&fixture.live.session_id, &[
-        "control-policy", "set-required-assurance", "action_gated", "--authorized-by",
-        "termal-live-test", "--idempotency-key", "ordinary-policy",
-    ], false);
+    fixture.command(
+        &fixture.live.session_id,
+        &[
+            "control-policy",
+            "set-required-assurance",
+            "action_gated",
+            "--authorized-by",
+            "termal-live-test",
+            "--idempotency-key",
+            "ordinary-policy",
+        ],
+        false,
+    );
     let prompt = "An ordinary prompt needs no tracker grant.";
     let dispatch = dispatch_live_root(&fixture.live.state, &fixture.live.session_id, prompt, None);
     deliver_turn_dispatch(&fixture.live.state, dispatch).unwrap();
@@ -608,20 +679,36 @@ fn ordinary_live_policy_is_not_a_provider_admission_authority() {
 fn ordinary_live_writer_contention_and_retired_sidecar_do_not_block_handoff() {
     let fixture = named_root_completion_live::completion_fixture();
     let session = &fixture.live.session_id;
-    let added = fixture.work(session, &["add", "Retain the actual claim during writer contention", "--json"]);
-    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    let added = fixture.work(
+        session,
+        &[
+            "add",
+            "Retain the actual claim during writer contention",
+            "--json",
+        ],
+    );
+    let work = added["work"]["short_ref"]
+        .as_str()
+        .or_else(|| added["short_ref"].as_str())
+        .unwrap();
     fixture.work(session, &["claim", work, "--json"]);
     let binding = fixture.claim_binding(session);
     let database = fixture.store().database_path;
     fixture.live.transport.shutdown_session(session);
     let mut connection = rusqlite::Connection::open(&database).unwrap();
-    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
     let prompt = "Deliver once while the disposable tracker writer is held.";
     let dispatch = dispatch_live_root(&fixture.live.state, session, prompt, None);
     deliver_turn_dispatch(&fixture.live.state, dispatch).unwrap();
     assert_one_provider_prompt(&fixture.live.receiver, session, prompt);
     transaction.commit().unwrap();
-    assert_eq!(fixture.claim_binding(session), binding, "the real held claim is unchanged");
+    assert_eq!(
+        fixture.claim_binding(session),
+        binding,
+        "the real held claim is unchanged"
+    );
     assert_no_live_turn_gate(&fixture.live.transport);
 }
 
@@ -629,14 +716,31 @@ fn ordinary_live_writer_contention_and_retired_sidecar_do_not_block_handoff() {
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn ordinary_live_slow_read_keeps_its_real_budget_without_authorizing_a_turn() {
     let fixture = named_root_completion_live::completion_fixture();
-    fixture.live.transport.faults.lock().unwrap().push_back(BoundaryFault::DelayAfterReply {
-        operation: "work_session_read", delay: LIVE_RESPONSE_DELAY,
-    });
+    fixture
+        .live
+        .transport
+        .faults
+        .lock()
+        .unwrap()
+        .push_back(BoundaryFault::DelayAfterReply {
+            operation: "work_session_read",
+            delay: LIVE_RESPONSE_DELAY,
+        });
     let target = fixture.target(&fixture.live.session_id);
-    let session = target.adapter.read_work_session(&target.connection, &fixture.store(), target.settings.call_timeout()).unwrap();
+    let session = target
+        .adapter
+        .read_work_session(
+            &target.connection,
+            &fixture.store(),
+            target.settings.call_timeout(),
+        )
+        .unwrap();
     assert_eq!(session, fixture.live.session_id);
     let observations = fixture.live.transport.observations();
-    let delayed = observations.iter().find(|row| row.disposition == "delayed_after_reply").unwrap();
+    let delayed = observations
+        .iter()
+        .find(|row| row.disposition == "delayed_after_reply")
+        .unwrap();
     assert!(delayed.elapsed >= LIVE_RESPONSE_DELAY);
     assert!(delayed.timeout > LIVE_RESPONSE_DELAY);
     let prompt = "A read is evidence of service identity, never a grant.";
@@ -658,7 +762,10 @@ fn ordinary_live_restart_does_not_redeliver_a_persisted_provider_handoff() {
     assert!(saved.contains(prompt));
     let restarted = restart_live_root_fixture(fixture);
     let loaded = persisted_session_json(&restarted.state, &restarted.session_id);
-    assert!(loaded.contains(prompt), "private original history survives restart");
+    assert!(
+        loaded.contains(prompt),
+        "private original history survives restart"
+    );
     restarted.state.run_post_listen_boot().unwrap();
     for _ in 0..3 {
         let _resume = restarted.state.resume_session_queue(&restarted.session_id);

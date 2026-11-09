@@ -18,37 +18,60 @@ fn ordinary_resume_after_failed_write_ahead_requires_a_fresh_ack_and_sends_once(
     turn.edit(|record| record.set_auto_dispatch_blocked(true));
     let id = turn.enqueue_durable("original unsent Resume content", true);
     let original = turn.record(|record| serde_json::to_value(&record.queued_prompts[0]).unwrap());
-    assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+    assert!(
+        turn.state
+            .request_queued_prompt_durability(&turn.session, &id)
+    );
     writer.take(HeldFence::Durability).finish(Ok(()));
     wait_for_content_ack(&turn, &id);
-    assert!(matches!(turn.state.resume_local_session_queue(&turn.session, None).unwrap(),
-        Some(TurnDispatchDeliveryOutcome::Scheduled)));
+    assert!(matches!(
+        turn.state
+            .resume_local_session_queue(&turn.session, None)
+            .unwrap(),
+        Some(TurnDispatchDeliveryOutcome::Scheduled)
+    ));
     let first = writer.take(HeldFence::WriteAhead);
     let failed_nonce = turn.record(|record| record.prompt_deliveries[&id].write_ahead.clone());
     let generation = turn.record(|record| record.active_turn_generation);
     first.finish(Err(PersistFenceError::WorkerStopped));
     let guard = crate::tests::phase_sync::PollGuard::new();
-    while !turn.record(|record| record.prompt_deliveries[&id].disposition == PromptDeliveryDisposition::Pending) {
+    while !turn.record(|record| {
+        record.prompt_deliveries[&id].disposition == PromptDeliveryDisposition::Pending
+    }) {
         guard.wait("the actual failed write-ahead returns this prompt to Pending");
     }
     turn.record(|record| {
-        assert_eq!(serde_json::to_value(&record.queued_prompts[0]).unwrap(), original);
+        assert_eq!(
+            serde_json::to_value(&record.queued_prompts[0]).unwrap(),
+            original
+        );
         let delivery = &record.prompt_deliveries[&id];
         assert_ne!(delivery.write_ahead, failed_nonce);
         assert!(!delivery.write_ahead_acknowledged && delivery.turn_generation.is_none());
-        assert!(delivery.reason.as_deref().unwrap().contains("WorkerStopped"));
+        assert!(
+            delivery
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("WorkerStopped")
+        );
         assert_eq!(record.active_turn_generation, generation);
         assert!(record.orchestrator_auto_dispatch_blocked);
     });
     turn.assert_no_prompt();
-    assert!(matches!(turn.state.resume_local_session_queue(&turn.session, None).unwrap(),
-        Some(TurnDispatchDeliveryOutcome::Scheduled)));
+    assert!(matches!(
+        turn.state
+            .resume_local_session_queue(&turn.session, None)
+            .unwrap(),
+        Some(TurnDispatchDeliveryOutcome::Scheduled)
+    ));
     let fresh = writer.take(HeldFence::WriteAhead);
     let fresh_nonce = turn.record(|record| record.prompt_deliveries[&id].write_ahead.clone());
     assert_ne!(fresh_nonce, failed_nonce);
     // Apply a late old success synchronously: it cannot settle the new attempt.
     let before = turn.saved();
-    turn.state.settle_prompt_delivery_write_ahead(&turn.session, &id, &failed_nonce, Ok(()));
+    turn.state
+        .settle_prompt_delivery_write_ahead(&turn.session, &id, &failed_nonce, Ok(()));
     assert_eq!(turn.saved(), before);
     turn.assert_no_prompt();
     fresh.finish(Ok(()));
@@ -58,11 +81,15 @@ fn ordinary_resume_after_failed_write_ahead_requires_a_fresh_ack_and_sends_once(
     turn.record(|record| {
         let delivery = &record.prompt_deliveries[&id];
         assert_eq!(delivery.write_ahead, fresh_nonce);
-        assert_eq!(delivery.turn_generation, Some(command.active_turn_generation));
+        assert_eq!(
+            delivery.turn_generation,
+            Some(command.active_turn_generation)
+        );
         assert!(command.active_turn_generation > generation);
     });
     let handed_off = turn.saved();
-    turn.state.settle_prompt_delivery_write_ahead(&turn.session, &id, &fresh_nonce, Ok(()));
+    turn.state
+        .settle_prompt_delivery_write_ahead(&turn.session, &id, &fresh_nonce, Ok(()));
     assert_eq!(turn.saved(), handed_off);
     turn.assert_no_prompt();
     turn.assert_no_control();
@@ -71,7 +98,13 @@ fn ordinary_resume_after_failed_write_ahead_requires_a_fresh_ack_and_sends_once(
 
 #[test]
 fn ordinary_resume_refuses_busy_stopping_or_unresolved_runtime_without_consuming_the_head() {
-    for fault in ["active", "approval", "stopping", "stop_claim", "runtime_identity"] {
+    for fault in [
+        "active",
+        "approval",
+        "stopping",
+        "stop_claim",
+        "runtime_identity",
+    ] {
         let turn = OrdinaryRoot::new("ordinary-resume-local-refusal");
         turn.edit(|record| record.set_auto_dispatch_blocked(true));
         let id = turn.enqueue("held ordinary user input", QueuedPromptSource::User);
@@ -84,11 +117,20 @@ fn ordinary_resume_refuses_busy_stopping_or_unresolved_runtime_without_consuming
             _ => unreachable!(),
         });
         let before = turn.saved();
-        let error = turn.state.resume_local_session_queue(&turn.session, None).unwrap_err();
+        let error = turn
+            .state
+            .resume_local_session_queue(&turn.session, None)
+            .unwrap_err();
         assert_eq!(error.status, StatusCode::CONFLICT, "{fault}");
-        assert!(error.message.contains(if fault == "runtime_identity" {
-            "runtime identity is unavailable"
-        } else { "busy, resetting or stopping" }), "{fault}: {}", error.message);
+        assert!(
+            error.message.contains(if fault == "runtime_identity" {
+                "runtime identity is unavailable"
+            } else {
+                "busy, resetting or stopping"
+            }),
+            "{fault}: {}",
+            error.message
+        );
         assert_eq!(turn.saved(), before, "{fault}: no head or pause mutation");
         turn.record(|record| {
             assert_eq!(record.queued_prompts[0].pending_prompt.id, id);
@@ -108,10 +150,15 @@ fn ordinary_resume_owner_cannot_cross_content_pause_stop_turn_or_head_replacemen
         let next = turn.enqueue("independent successor", QueuedPromptSource::User);
         let owner = turn.record(|record| QueuedTurnOwner::capture(record).unwrap());
         if change == "replacement" {
-            turn.state.cancel_queued_prompt(&turn.session, &first).unwrap();
+            turn.state
+                .cancel_queued_prompt(&turn.session, &first)
+                .unwrap();
         } else {
             turn.edit(|record| match change {
-                "content" => record.queued_prompts[0].pending_prompt.text.push_str(" changed"),
+                "content" => record.queued_prompts[0]
+                    .pending_prompt
+                    .text
+                    .push_str(" changed"),
                 "pause" => record.set_auto_dispatch_blocked(true),
                 "stop" => record.runtime_stop_generation += 1,
                 "turn" => record.active_turn_generation += 1,
@@ -119,12 +166,26 @@ fn ordinary_resume_owner_cannot_cross_content_pause_stop_turn_or_head_replacemen
             });
         }
         let before = turn.saved();
-        let result = turn.state.resume_local_session_queue(&turn.session, Some(owner)).unwrap();
-        assert!(matches!(result, None | Some(TurnDispatchDeliveryOutcome::Superseded)));
-        assert_eq!(turn.saved(), before, "{change}: stale Resume cannot release a new owner");
+        let result = turn
+            .state
+            .resume_local_session_queue(&turn.session, Some(owner))
+            .unwrap();
+        assert!(matches!(
+            result,
+            None | Some(TurnDispatchDeliveryOutcome::Superseded)
+        ));
+        assert_eq!(
+            turn.saved(),
+            before,
+            "{change}: stale Resume cannot release a new owner"
+        );
         turn.record(|record| {
             assert!(record.orchestrator_auto_dispatch_blocked);
-            let expected = if change == "replacement" { &next } else { &first };
+            let expected = if change == "replacement" {
+                &next
+            } else {
+                &first
+            };
             assert_eq!(&record.queued_prompts[0].pending_prompt.id, expected);
         });
         turn.assert_no_prompt();

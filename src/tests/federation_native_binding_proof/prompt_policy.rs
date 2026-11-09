@@ -1,12 +1,10 @@
 // Owns prompt permission/native proof over the existing real MAC fixture.
 // Native roots, peers and links are disposable fixture setup, not live grants.
 use super::*;
-#[path = "prompt_policy_cuts.rs"]
-mod cuts;
-#[path = "prompt_policy_timeout.rs"]
-mod timeout;
 #[path = "prompt_policy_contention.rs"]
 mod contention;
+#[path = "prompt_policy_cuts.rs"]
+mod cuts;
 #[path = "prompt_policy_freshness.rs"]
 mod freshness;
 #[path = "prompt_policy_freshness_cuts.rs"]
@@ -15,6 +13,8 @@ mod freshness_cuts;
 mod operator;
 #[path = "prompt_policy_replay.rs"]
 mod replay;
+#[path = "prompt_policy_timeout.rs"]
+mod timeout;
 
 struct WriterOwners(Vec<AppState>);
 
@@ -37,7 +37,9 @@ impl Drop for PolicyFixture {
             // Registered channels retain an AppState clone, including this map.
             // Break that fixture cycle before dropping its states and writers.
             let handles = std::mem::take(
-                &mut *app.federation_peer_handles.lock()
+                &mut *app
+                    .federation_peer_handles
+                    .lock()
                     .unwrap_or_else(|error| error.into_inner()),
             );
             // Release the registry lock before destroying channels and clients.
@@ -61,13 +63,25 @@ impl std::ops::DerefMut for PolicyFixture {
 
 fn policy_router(channel: FederationChannel) -> Router {
     let checked = channel.clone();
-    policy_router_with_check(channel, Arc::new(move || checked.current_authority().map(|_| ())))
+    policy_router_with_check(
+        channel,
+        Arc::new(move || checked.current_authority().map(|_| ())),
+    )
 }
 
-fn policy_router_with_check(channel: FederationChannel, ensure_current: FederationAuthorityCheck) -> Router {
-    let listener = FederationListenerState { channel: channel.clone(), ensure_current: ensure_current.clone() };
+fn policy_router_with_check(
+    channel: FederationChannel,
+    ensure_current: FederationAuthorityCheck,
+) -> Router {
+    let listener = FederationListenerState {
+        channel: channel.clone(),
+        ensure_current: ensure_current.clone(),
+    };
     let policy = federation_prompt_policy_routes()
-        .layer(axum::middleware::from_fn_with_state(listener.clone(), federation_authenticate))
+        .layer(axum::middleware::from_fn_with_state(
+            listener.clone(),
+            federation_authenticate,
+        ))
         .with_state(listener);
     federation_router(channel, ensure_current).merge(policy)
 }
@@ -76,8 +90,12 @@ async fn install_policy_transport(fixture: &mut Fixture) {
     fixture.server.finish().await;
     fixture.server = DomainServer::start(policy_router(fixture.satellite_channel.clone())).await;
     let checked = fixture.channel.clone();
-    fixture.rpc = FederationRpcClient::new(fixture.server.port, fixture.channel.clone(),
-        Arc::new(move || checked.current_authority().map(|_| ()))).unwrap();
+    fixture.rpc = FederationRpcClient::new(
+        fixture.server.port,
+        fixture.channel.clone(),
+        Arc::new(move || checked.current_authority().map(|_| ())),
+    )
+    .unwrap();
 }
 
 async fn unpersisted_policy_fixture(placed: bool) -> Fixture {
@@ -98,7 +116,10 @@ async fn policy_fixture(placed: bool) -> PolicyFixture {
     fixture.channel.app = Some(fixture.central.clone());
     fixture.satellite_channel.app = Some(fixture.satellite.clone());
     install_policy_transport(&mut fixture).await;
-    PolicyFixture { fixture, _writers: writers }
+    PolicyFixture {
+        fixture,
+        _writers: writers,
+    }
 }
 
 fn scope(fixture: &Fixture, placed: bool) -> FederationPromptScope {
@@ -164,40 +185,44 @@ async fn federation_prompt_policy_rpc_standalone_proof_is_read_only_and_consent_
     assert!(before["binding"].is_null());
     let mut wrong = scope.clone();
     wrong.target.creation_id = Uuid::new_v4().to_string();
-    assert!(fixture
-        .central
-        .read_federation_prompt_policy(
-            &fixture.rpc,
-            &lease,
-            FederationPromptPolicyOperation::DestinationProof {
-                scope: wrong,
-                consent: consent.identity.clone()
-            }
-        )
-        .await
-        .is_err());
+    assert!(
+        fixture
+            .central
+            .read_federation_prompt_policy(
+                &fixture.rpc,
+                &lease,
+                FederationPromptPolicyOperation::DestinationProof {
+                    scope: wrong,
+                    consent: consent.identity.clone()
+                }
+            )
+            .await
+            .is_err()
+    );
     fixture
         .satellite
         .revoke_federation_prompt_permission(version(&fixture.satellite), &consent.identity.id)
         .unwrap();
-    assert!(fixture
-        .central
-        .read_federation_prompt_policy(
-            &fixture.rpc,
-            &lease,
-            FederationPromptPolicyOperation::DestinationProof {
-                scope,
-                consent: consent.identity
-            }
-        )
-        .await
-        .is_err());
+    assert!(
+        fixture
+            .central
+            .read_federation_prompt_policy(
+                &fixture.rpc,
+                &lease,
+                FederationPromptPolicyOperation::DestinationProof {
+                    scope,
+                    consent: consent.identity
+                }
+            )
+            .await
+            .is_err()
+    );
     fixture.server.finish().await;
 }
 
 #[tokio::test]
-async fn federation_prompt_policy_rpc_grant_requires_actual_native_proof_and_keeps_independent_consent(
-) {
+async fn federation_prompt_policy_rpc_grant_requires_actual_native_proof_and_keeps_independent_consent()
+ {
     let mut fixture = policy_fixture(true).await;
     let scope = scope(&fixture, true);
     let consent = consent(&fixture, &scope);
@@ -232,45 +257,69 @@ async fn federation_prompt_policy_rpc_grant_requires_actual_native_proof_and_kee
     assert_eq!(fixture.native_snapshot(), before);
     let mut wrong = consent.identity.clone();
     wrong.generation += 1;
-    assert!(fixture
-        .central
-        .issue_federation_prompt_grant_on_link(
-            version(&fixture.central),
-            "wrong".into(),
-            scope,
-            wrong,
-            &lease,
-            &fixture.rpc
-        )
-        .await
-        .is_err());
+    assert!(
+        fixture
+            .central
+            .issue_federation_prompt_grant_on_link(
+                version(&fixture.central),
+                "wrong".into(),
+                scope,
+                wrong,
+                &lease,
+                &fixture.rpc
+            )
+            .await
+            .is_err()
+    );
     fixture.server.finish().await;
 }
 
 #[tokio::test]
 async fn federation_prompt_policy_automatic_mailbox_participation_is_not_execution_placement() {
     let mut fixture = policy_fixture(false).await;
-    let prior = fixture.central.inner.lock().unwrap().federation.placements
-        .get("native-proof").unwrap().clone();
-    fixture.central.reconcile_federation_placement(&prior, true).unwrap();
+    let prior = fixture
+        .central
+        .inner
+        .lock()
+        .unwrap()
+        .federation
+        .placements
+        .get("native-proof")
+        .unwrap()
+        .clone();
+    fixture
+        .central
+        .reconcile_federation_placement(&prior, true)
+        .unwrap();
     let handle = Arc::new(FederationPeerHandle {
         channel: fixture.channel.clone(),
         rpc: fixture.rpc.clone(),
     });
     let lease = fixture.channel.current_lease().unwrap();
-    let participant = fixture.central.admit_automatic_mailbox_root(&handle, &lease,
-        FederationParticipationRoot {
-            session_id: fixture.native.clone(),
-            native_creation_id: fixture.native_creation.clone(),
-            binding: None,
-            name: "Automatic prompt target".into(),
-            automatic: true,
-            catalog_after: None,
-        }).await.unwrap();
+    let participant = fixture
+        .central
+        .admit_automatic_mailbox_root(
+            &handle,
+            &lease,
+            FederationParticipationRoot {
+                session_id: fixture.native.clone(),
+                native_creation_id: fixture.native_creation.clone(),
+                binding: None,
+                name: "Automatic prompt target".into(),
+                automatic: true,
+                catalog_after: None,
+            },
+        )
+        .await
+        .unwrap();
     {
         let inner = fixture.central.inner.lock().unwrap();
-        let placement = inner.federation.placements.values()
-            .find(|row| row.identity == participant.binding.identity).unwrap();
+        let placement = inner
+            .federation
+            .placements
+            .values()
+            .find(|row| row.identity == participant.binding.identity)
+            .unwrap();
         assert!(placement.mailbox_only);
         assert_ne!(placement.state, FederationPlacementState::Completed);
     }
@@ -282,21 +331,51 @@ async fn federation_prompt_policy_automatic_mailbox_participation_is_not_executi
     }
     let scope = scope(&fixture, false);
     let consent = consent(&fixture, &scope);
-    let grant = fixture.central.issue_federation_prompt_grant_on_link(
-        version(&fixture.central), "mailbox-member-grant".into(), scope.clone(),
-        consent.identity, &lease, &fixture.rpc).await.unwrap();
-    fixture.central.federation_peer_handles.lock().unwrap()
+    let grant = fixture
+        .central
+        .issue_federation_prompt_grant_on_link(
+            version(&fixture.central),
+            "mailbox-member-grant".into(),
+            scope.clone(),
+            consent.identity,
+            &lease,
+            &fixture.rpc,
+        )
+        .await
+        .unwrap();
+    fixture
+        .central
+        .federation_peer_handles
+        .lock()
+        .unwrap()
         .insert(scope.target_host.host_id.clone(), handle);
-    let (intent, _, _, _, _) = fixture.central.capture_remote_prompt_for_caller(
-        &scope.source.session_id, &remote_prompt_protocol::OwnPrompt {
-            reference: Uuid::parse_str(&grant.identity.id).unwrap(),
-            idempotency_key: "mailbox-member-prompt".into(),
-            text: "exact body".into(),
-        }).await.unwrap();
+    let (intent, _, _, _, _) = fixture
+        .central
+        .capture_remote_prompt_for_caller(
+            &scope.source.session_id,
+            &remote_prompt_protocol::OwnPrompt {
+                reference: Uuid::parse_str(&grant.identity.id).unwrap(),
+                idempotency_key: "mailbox-member-prompt".into(),
+                text: "exact body".into(),
+            },
+        )
+        .await
+        .unwrap();
     assert_eq!(intent.components().0.placement_generation, None);
-    assert_eq!(intent.components().0.target.components().3.to_string(), fixture.native_creation);
-    assert!(fixture.satellite.inner.lock().unwrap().sessions.iter()
-        .all(|record| record.queued_prompts.is_empty()));
+    assert_eq!(
+        intent.components().0.target.components().3.to_string(),
+        fixture.native_creation
+    );
+    assert!(
+        fixture
+            .satellite
+            .inner
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .all(|record| record.queued_prompts.is_empty())
+    );
     fixture.server.finish().await;
 }
 
@@ -369,8 +448,8 @@ async fn federation_prompt_policy_rpc_local_revoke_is_not_receiver_observed_unti
 }
 
 #[tokio::test]
-async fn federation_prompt_policy_rpc_own_caller_capture_and_receiver_observation_share_existing_owner(
-) {
+async fn federation_prompt_policy_rpc_own_caller_capture_and_receiver_observation_share_existing_owner()
+ {
     let mut fixture = policy_fixture(true).await;
     let scope = scope(&fixture, true);
     let consent = consent(&fixture, &scope);
@@ -399,8 +478,7 @@ async fn federation_prompt_policy_rpc_own_caller_capture_and_receiver_observatio
                 rpc: fixture.rpc.clone(),
             }),
         );
-    let mut reverse = DomainServer::start(policy_router(fixture.channel.clone()))
-    .await;
+    let mut reverse = DomainServer::start(policy_router(fixture.channel.clone())).await;
     let check = fixture.satellite_channel.clone();
     let reverse_rpc = FederationRpcClient::new(
         reverse.port,
@@ -413,29 +491,35 @@ async fn federation_prompt_policy_rpc_own_caller_capture_and_receiver_observatio
         idempotency_key: "same exact key".into(),
         text: "  /not-a-command\r\n exact UTF-8 ą\n".into(),
     };
-    assert!(fixture
-        .central
-        .capture_remote_prompt_for_caller("someone-else", &request)
-        .await
-        .is_err());
+    assert!(
+        fixture
+            .central
+            .capture_remote_prompt_for_caller("someone-else", &request)
+            .await
+            .is_err()
+    );
     let (intent, proof, handle, _, freshness) = fixture
         .central
         .capture_remote_prompt_for_caller(&scope.source.session_id, &request)
         .await
         .unwrap();
-    freshness.ensure_fresh_at(handle.channel.control.clock.now()).unwrap();
+    freshness
+        .ensure_fresh_at(handle.channel.control.clock.now())
+        .unwrap();
     assert_eq!(intent.components().3, request.text);
-    assert!(fixture
-        .satellite
-        .inner
-        .lock()
-        .unwrap()
-        .federation
-        .prompt_permissions
-        .as_ref()
-        .unwrap()
-        .find(&grant.identity.id)
-        .is_none());
+    assert!(
+        fixture
+            .satellite
+            .inner
+            .lock()
+            .unwrap()
+            .federation
+            .prompt_permissions
+            .as_ref()
+            .unwrap()
+            .find(&grant.identity.id)
+            .is_none()
+    );
     let receiver_lease = fixture.satellite_channel.current_lease().unwrap();
     fixture
         .satellite
@@ -466,20 +550,23 @@ async fn federation_prompt_policy_rpc_own_caller_capture_and_receiver_observatio
         &fixture.satellite.inner.lock().unwrap(),
         &intent
     ));
-    assert!(fixture
-        .central
-        .capture_remote_prompt_for_caller(&scope.source.session_id, &request)
-        .await
-        .is_err());
+    assert!(
+        fixture
+            .central
+            .capture_remote_prompt_for_caller(&scope.source.session_id, &request)
+            .await
+            .is_err()
+    );
     // Both existing native queues remain untouched by permission/proof work.
     for app in [&fixture.central, &fixture.satellite] {
-        assert!(app
-            .inner
-            .lock()
-            .unwrap()
-            .sessions
-            .iter()
-            .all(|record| record.queued_prompts.is_empty()));
+        assert!(
+            app.inner
+                .lock()
+                .unwrap()
+                .sessions
+                .iter()
+                .all(|record| record.queued_prompts.is_empty())
+        );
     }
     reverse.finish().await;
     fixture.server.finish().await;

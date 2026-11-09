@@ -119,7 +119,8 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_custody() {
     // order (src/tests/engram_watcher_change_time.rs).
     let observation = WorkspaceWatchObservation::capture(&event);
     ordinary_launch_gate(&turn, &worktree, false);
-    let host_turn_ref = turn.record(|record| record.engram.carried_checks[0].check.host_turn_ref.clone());
+    let host_turn_ref =
+        turn.record(|record| record.engram.carried_checks[0].check.host_turn_ref.clone());
     let changes = turn.state.process_workspace_watch_event(
         &event,
         &observation,
@@ -137,10 +138,14 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_custody() {
     // The converted event carries the file's modification time and the
     // notification's arrival, both named in the cause.
     assert!(
-        source_refusal_path_forms(&delivered_path).iter().any(|shown| {
-            legacy_fence
-                .starts_with(&format!("a file in its worktree changed: {shown}; modified at "))
-        }) && legacy_fence.contains(", seen at "),
+        source_refusal_path_forms(&delivered_path)
+            .iter()
+            .any(|shown| {
+                legacy_fence.starts_with(&format!(
+                    "a file in its worktree changed: {shown}; modified at "
+                ))
+            })
+            && legacy_fence.contains(", seen at "),
         "{legacy_fence}"
     );
     let fence = turn
@@ -162,7 +167,10 @@ fn watcher_provenance_raw_metadata_survives_queueing_conversion_and_custody() {
             sha256_hex(engram_path_key(&root).as_bytes())
         ),
         format!("check_key_sha256={}", sha256_hex(b"gate")),
-        format!("host_turn_ref_sha256={}", sha256_hex(host_turn_ref.as_bytes())),
+        format!(
+            "host_turn_ref_sha256={}",
+            sha256_hex(host_turn_ref.as_bytes())
+        ),
     ] {
         assert!(fence.contains(&fact), "missing {fact}: {fence}");
     }

@@ -18,14 +18,14 @@ fn a_persisted_queued_prompt_state_keeps_its_root_until_the_last_continuation() 
         super::delegation_support::temp_delegation_state_paths();
     let root_path = temp_root.path().to_owned();
     let cleaned = temp_root.observe_cleanup();
-    let state = boot_on_delegation_root(&temp_root, ||
+    let state = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path,
             templates_path,
         )
         .expect("state should boot")
-    );
+    });
     state.shutdown_persist_blocking();
 
     // Hold a real state owner until after the test-local owner is gone.
@@ -51,7 +51,10 @@ fn a_persisted_queued_prompt_state_keeps_its_root_until_the_last_continuation() 
     release.send(()).expect("release the continuation");
     let (root_survived_continuation, result) = worker.join().expect("continuation should join");
     result.expect("the retained state's write should succeed");
-    assert!(!cleaned_before_continuation, "a cloned state must retain the fixture root");
+    assert!(
+        !cleaned_before_continuation,
+        "a cloned state must retain the fixture root"
+    );
     match early_cleanup {
         Ok(outcome) => outcome,
         Err(mpsc::TryRecvError::Empty) => {
@@ -60,9 +63,18 @@ fn a_persisted_queued_prompt_state_keeps_its_root_until_the_last_continuation() 
         Err(mpsc::TryRecvError::Disconnected) => panic!("fixture cleanup receipt disconnected"),
     }
     .expect("fixture root should be removed");
-    assert!(root_survived_local_owner, "a cloned state must retain the fixture root");
-    assert!(root_survived_continuation, "the late write must use the existing root");
-    assert!(!root_path.exists(), "the last owner must remove the late writer's files");
+    assert!(
+        root_survived_local_owner,
+        "a cloned state must retain the fixture root"
+    );
+    assert!(
+        root_survived_continuation,
+        "the late write must use the existing root"
+    );
+    assert!(
+        !root_path.exists(),
+        "the last owner must remove the late writer's files"
+    );
     assert!(!TestTempRoot::owner_marker(&root_path).exists());
 }
 
@@ -100,7 +112,12 @@ impl HoldingWriter {
                 }
             }
         });
-        Self { tx, held, stop, thread: Mutex::new(Some(thread)) }
+        Self {
+            tx,
+            held,
+            stop,
+            thread: Mutex::new(Some(thread)),
+        }
     }
 
     fn take(&self, what: &str) -> (String, Box<PersistFence>) {
@@ -147,7 +164,12 @@ impl Fixture {
             state.commit_locked(&mut inner).unwrap();
             (session, prompts)
         };
-        Self { state, session, prompts, _root: root }
+        Self {
+            state,
+            session,
+            prompts,
+            _root: root,
+        }
     }
 
     fn pending_prompt(&self, inner: &mut StateInner, text: &str) -> PendingPrompt {
@@ -211,8 +233,9 @@ impl Fixture {
     fn drive_every_entry_point(&self) -> usize {
         let mut promoted = 0;
         for allow_blocked in [false, true] {
-            if let Ok(Some(dispatch)) =
-                self.state.dispatch_next_queued_turn(&self.session, allow_blocked)
+            if let Ok(Some(dispatch)) = self
+                .state
+                .dispatch_next_queued_turn(&self.session, allow_blocked)
             {
                 promoted += 1;
                 let _ = deliver_turn_dispatch(&self.state, dispatch);
@@ -240,12 +263,24 @@ fn a_held_prompt_is_promoted_by_no_entry_point_until_its_exact_acknowledgement()
     let fixture = Fixture::new(state, "barrier");
     let held = fixture.enqueue_held("resume after the gate");
     let behind = fixture.enqueue_user("a user prompt behind the held head");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (fenced, fence) = writer.take("the held prompt's durability fence");
     assert_eq!(fenced, held);
 
-    assert_eq!(fixture.drive_every_entry_point(), 0, "nothing promotes a held head");
-    assert_eq!(fixture.delivered_prompts(), 0, "nothing reached the runtime");
+    assert_eq!(
+        fixture.drive_every_entry_point(),
+        0,
+        "nothing promotes a held head"
+    );
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "nothing reached the runtime"
+    );
     assert_eq!(
         fixture.queue_ids(),
         vec![held.clone(), behind.clone()],
@@ -262,7 +297,11 @@ fn a_held_prompt_is_promoted_by_no_entry_point_until_its_exact_acknowledgement()
         Err(error) => panic!("expected the released prompt, got {error:?}"),
     }
     assert_eq!(fixture.hold(&held), None);
-    assert_eq!(fixture.queue_ids(), vec![behind], "one promotion, the rest still queued");
+    assert_eq!(
+        fixture.queue_ids(),
+        vec![behind],
+        "one promotion, the rest still queued"
+    );
 }
 
 #[test]
@@ -271,20 +310,28 @@ fn a_failed_acknowledgement_leaves_the_prompt_held_with_its_reason() {
     let writer = HoldingWriter::attach(&mut state);
     let fixture = Fixture::new(state, "failed-ack");
     let held = fixture.enqueue_held("resume after a failed write");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (_, fence) = writer.take("the durability fence");
     fence.finish(Err(PersistFenceError::Deadline));
     // The settlement runs off the writer thread and publishes only to state.
     let settled = phase_sync::PollGuard::new();
     let hold = loop {
-        let hold = fixture.hold(&held).expect("a failed acknowledgement keeps the hold");
+        let hold = fixture
+            .hold(&held)
+            .expect("a failed acknowledgement keeps the hold");
         if hold.failure.is_some() {
             break hold;
         }
         settled.wait("the failed acknowledgement's settlement");
     };
     assert!(
-        hold.failure.as_deref().is_some_and(|reason| reason.contains("Deadline")),
+        hold.failure
+            .as_deref()
+            .is_some_and(|reason| reason.contains("Deadline")),
         "the reason is recorded: {hold:?}"
     );
     assert_eq!(fixture.drive_every_entry_point(), 0);
@@ -300,7 +347,11 @@ fn a_late_acknowledgement_after_removal_or_for_a_replaced_entry_releases_nothing
 
     // Removed (as Stop clears workflow prompts) before its acknowledgement.
     let removed = fixture.enqueue_held("removed before its acknowledgement");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &removed));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &removed)
+    );
     let (_, removed_fence) = writer.take("the removed prompt's fence");
     let removed_nonce = fixture.hold(&removed).unwrap().nonce;
     {
@@ -313,14 +364,23 @@ fn a_late_acknowledgement_after_removal_or_for_a_replaced_entry_releases_nothing
 
     // Replaced: the same prompt id held again for new content.
     let replaced = fixture.enqueue_held("first content");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &replaced));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &replaced)
+    );
     let (_, old_fence) = writer.take("the first content's fence");
     let old_nonce = fixture.hold(&replaced).unwrap().nonce;
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        let mut prompt = record.queued_prompts.front().unwrap().pending_prompt.clone();
+        let mut prompt = record
+            .queued_prompts
+            .front()
+            .unwrap()
+            .pending_prompt
+            .clone();
         prompt.text = "replacement content".to_owned();
         clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
         queue_durable_orchestrator_prompt_on_record(record, prompt, Vec::new());
@@ -339,10 +399,20 @@ fn a_late_acknowledgement_after_removal_or_for_a_replaced_entry_releases_nothing
     fixture
         .state
         .settle_queued_prompt_durability(&fixture.session, &replaced, &old_nonce, Ok(()));
-    assert_eq!(fixture.hold(&removed), None, "the removed entry's hold is dropped");
-    assert_eq!(fixture.delivered_prompts(), 0, "a stale acknowledgement releases nothing");
+    assert_eq!(
+        fixture.hold(&removed),
+        None,
+        "the removed entry's hold is dropped"
+    );
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "a stale acknowledgement releases nothing"
+    );
     assert_eq!(fixture.queue_ids(), vec![replaced.clone()]);
-    let replacement = fixture.hold(&replaced).expect("the replacement still waits for its own");
+    let replacement = fixture
+        .hold(&replaced)
+        .expect("the replacement still waits for its own");
     assert_ne!(replacement.nonce, old_nonce);
     assert_eq!(fixture.drive_every_entry_point(), 0);
     // Resolved only now, the old fences' own settlements are stale too.
@@ -391,12 +461,18 @@ fn boot_orphan_dispatch_skips_a_held_workflow_prompt_until_its_acknowledgement()
     let (_, fence) = writer.take("the workflow prompt's durability fence");
 
     state.dispatch_orphaned_workflow_prompts();
-    assert!(prompts.try_recv().is_err(), "boot recovery promotes no held prompt");
+    assert!(
+        prompts.try_recv().is_err(),
+        "boot recovery promotes no held prompt"
+    );
     {
         let inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
         assert_eq!(inner.sessions[index].queued_prompts.len(), 1);
-        assert!(matches!(inner.sessions[index].runtime, SessionRuntime::None));
+        assert!(matches!(
+            inner.sessions[index].runtime,
+            SessionRuntime::None
+        ));
     }
 
     fence.finish(Ok(()));
@@ -425,35 +501,41 @@ fn a_held_entry_read_back_after_a_restart_is_eligible() {
     let session;
     let held;
     {
-        let state = boot_on_delegation_root(&temp_root, ||
+        let state = boot_on_delegation_root(&temp_root, || {
             AppState::new_with_paths(
                 project_root.to_string_lossy().into_owned(),
                 persistence_path.clone(),
                 templates_path.clone(),
             )
             .expect("state should boot")
-        );
+        });
         let fixture = Fixture::new(state, "restart");
         held = fixture.enqueue_held("held across a restart");
         session = fixture.session.clone();
         // Durable, never acknowledged in this process.
         fixture.state.shutdown_persist_blocking();
     }
-    let restarted = boot_on_delegation_root(&temp_root, ||
+    let restarted = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path,
             templates_path,
         )
         .expect("state should reload")
-    );
+    });
     let prompts = {
         let mut inner = restarted.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        assert_eq!(record.queued_prompts.front().unwrap().pending_prompt.id, held);
+        assert_eq!(
+            record.queued_prompts.front().unwrap().pending_prompt.id,
+            held
+        );
         let head = record.queued_prompts.front().unwrap();
-        assert!(!queued_prompt_held_for_durability(record, head), "read back, it is durable");
+        assert!(
+            !queued_prompt_held_for_durability(record, head),
+            "read back, it is durable"
+        );
         assert!(
             queued_prompt_kept_standalone(record, head),
             "it stays standalone after the restart"
@@ -481,18 +563,25 @@ fn a_held_entry_read_back_after_a_restart_is_eligible() {
 fn the_production_writer_acknowledges_the_exact_held_entry_from_the_durable_row() {
     let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
-    let state = boot_on_delegation_root(&temp_root, ||
+    let state = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path,
             templates_path,
         )
         .expect("state should boot")
-    );
+    });
     let fixture = Fixture::new(state, "production");
     let held = fixture.enqueue_held("released by the real writer");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
-    match recv_within_guard(&fixture.prompts, "the real writer's acknowledgement releases it") {
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
+    match recv_within_guard(
+        &fixture.prompts,
+        "the real writer's acknowledgement releases it",
+    ) {
         Ok(ClaudeRuntimeCommand::Prompt(command)) => {
             assert_eq!(command.text, "released by the real writer")
         }
@@ -509,14 +598,14 @@ fn the_production_writer_acknowledges_the_exact_held_entry_from_the_durable_row(
 fn the_durable_row_read_back_matches_only_the_exact_hold_and_entry() {
     let (temp_root, project_root, persistence_path, templates_path) =
         super::delegation_support::temp_delegation_state_paths();
-    let state = boot_on_delegation_root(&temp_root, ||
+    let state = boot_on_delegation_root(&temp_root, || {
         AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
             persistence_path.clone(),
             templates_path,
         )
         .expect("state should boot")
-    );
+    });
     let fixture = Fixture::new(state, "read-back");
     let held = fixture.enqueue_held("only this exact entry");
     let hold = fixture.hold(&held).unwrap();
@@ -529,20 +618,30 @@ fn the_durable_row_read_back_matches_only_the_exact_hold_and_entry() {
             content: queued_prompt_durability_fence_content(nonce, content),
         }
     };
-    assert!(target(&held, &hold.nonce, &hold.content).is_already_durable(&connection).unwrap());
     assert!(
-        !target(&held, "another-nonce", &hold.content).is_already_durable(&connection).unwrap(),
+        target(&held, &hold.nonce, &hold.content)
+            .is_already_durable(&connection)
+            .unwrap()
+    );
+    assert!(
+        !target(&held, "another-nonce", &hold.content)
+            .is_already_durable(&connection)
+            .unwrap(),
         "a stale hold's nonce never matches"
     );
     let mut changed = hold.content.clone();
     changed["pending_prompt"]["text"] = json!("other content");
     assert_ne!(changed, hold.content, "the entry carries its text");
     assert!(
-        !target(&held, &hold.nonce, &changed).is_already_durable(&connection).unwrap(),
+        !target(&held, &hold.nonce, &changed)
+            .is_already_durable(&connection)
+            .unwrap(),
         "other content never matches"
     );
     assert!(
-        !target("another-prompt", &hold.nonce, &hold.content).is_already_durable(&connection).unwrap(),
+        !target("another-prompt", &hold.nonce, &hold.content)
+            .is_already_durable(&connection)
+            .unwrap(),
         "no entry, no acknowledgement"
     );
 }
@@ -556,7 +655,11 @@ fn a_direct_send_behind_a_held_head_is_queued_not_an_error() {
     let writer = HoldingWriter::attach(&mut state);
     let fixture = Fixture::new(state, "direct-send");
     let held = fixture.enqueue_held("the held head");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (_, fence) = writer.take("the held head's fence");
     let result = fixture.state.dispatch_turn(
         &fixture.session,
@@ -578,7 +681,10 @@ fn a_direct_send_behind_a_held_head_is_queued_not_an_error() {
     assert_eq!(queue[0], held, "FIFO: the held head stays first");
 
     fence.finish(Ok(()));
-    match recv_within_guard(&fixture.prompts, "the acknowledged head is dispatched first") {
+    match recv_within_guard(
+        &fixture.prompts,
+        "the acknowledged head is dispatched first",
+    ) {
         Ok(ClaudeRuntimeCommand::Prompt(command)) => assert_eq!(command.text, "the held head"),
         Ok(_) => panic!("expected the held head, got another runtime command"),
         Err(error) => panic!("expected the held head, got {error:?}"),
@@ -595,15 +701,23 @@ fn an_entry_changed_in_place_is_held_again_for_its_new_content() {
     let writer = HoldingWriter::attach(&mut state);
     let fixture = Fixture::new(state, "changed-in-place");
     let held = fixture.enqueue_held("content as first held");
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (_, first) = writer.take("the first content's fence");
     let first_nonce = fixture.hold(&held).unwrap().nonce;
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
-        record.queued_prompts.front_mut().unwrap().pending_prompt.text =
-            "content changed in place".to_owned();
+        record
+            .queued_prompts
+            .front_mut()
+            .unwrap()
+            .pending_prompt
+            .text = "content changed in place".to_owned();
         fixture.state.commit_locked(&mut inner).unwrap();
     }
 
@@ -614,12 +728,18 @@ fn an_entry_changed_in_place_is_held_again_for_its_new_content() {
     assert_eq!(refenced, held);
     let hold = fixture.hold(&held).expect("the changed entry stays held");
     assert_ne!(hold.nonce, first_nonce);
-    assert_eq!(hold.content["pending_prompt"]["text"], json!("content changed in place"));
+    assert_eq!(
+        hold.content["pending_prompt"]["text"],
+        json!("content changed in place")
+    );
     assert_eq!(fixture.drive_every_entry_point(), 0);
     assert_eq!(fixture.delivered_prompts(), 0);
 
     second.finish(Ok(()));
-    match recv_within_guard(&fixture.prompts, "the current content's acknowledgement releases it") {
+    match recv_within_guard(
+        &fixture.prompts,
+        "the current content's acknowledgement releases it",
+    ) {
         Ok(ClaudeRuntimeCommand::Prompt(command)) => {
             assert_eq!(command.text, "content changed in place")
         }
@@ -634,7 +754,10 @@ fn an_entry_changed_in_place_is_held_again_for_its_new_content() {
 fn a_held_prompt_is_never_part_of_a_peer_message_batch() {
     let fixture = Fixture::new(test_app_state(), "peer-batch");
     let peer = |inner: &mut StateInner, text: &str| PendingPrompt {
-        source: Some(MessageSource::peer("session-peer".to_owned(), "Peer".to_owned())),
+        source: Some(MessageSource::peer(
+            "session-peer".to_owned(),
+            "Peer".to_owned(),
+        )),
         ..fixture.pending_prompt(inner, text)
     };
     let mut inner = fixture.state.inner.lock().unwrap();
@@ -684,17 +807,30 @@ fn an_acknowledged_entry_still_queued_stays_out_of_peer_batches() {
     fixture
         .state
         .settle_queued_prompt_durability(&fixture.session, &held_id, &nonce, Ok(()));
-    let hold = fixture.hold(&held_id).expect("the acknowledged hold stays as a marker");
+    let hold = fixture
+        .hold(&held_id)
+        .expect("the acknowledged hold stays as a marker");
     assert!(hold.acknowledged);
-    assert_eq!(fixture.delivered_prompts(), 0, "the paused queue dispatched nothing");
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the paused queue dispatched nothing"
+    );
 
     let mut inner = fixture.state.inner.lock().unwrap();
     let index = inner.find_session_index(&fixture.session).unwrap();
     let record = inner.session_mut_by_index(index).unwrap();
     let head = record.queued_prompts.front().unwrap();
-    assert!(!queued_prompt_held_for_durability(record, head), "acknowledged, it is eligible");
+    assert!(
+        !queued_prompt_held_for_durability(record, head),
+        "acknowledged, it is eligible"
+    );
     queue_orchestrator_prompt_on_record(record, later, Vec::new());
-    assert_eq!(record.queued_prompts.len(), 2, "the later peer prompt is its own entry");
+    assert_eq!(
+        record.queued_prompts.len(),
+        2,
+        "the later peer prompt is its own entry"
+    );
     assert_eq!(
         record.queued_prompts[0].pending_prompt.text,
         "acknowledged while the queue is paused"
@@ -712,10 +848,17 @@ fn a_paused_queue_with_a_held_head_is_not_overtaken_by_a_manual_send() {
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
-        inner.session_mut_by_index(index).unwrap().set_auto_dispatch_blocked(true);
+        inner
+            .session_mut_by_index(index)
+            .unwrap()
+            .set_auto_dispatch_blocked(true);
         fixture.state.commit_locked(&mut inner).unwrap();
     }
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (_, fence) = writer.take("the held head's fence");
 
     let result = fixture.state.dispatch_turn(
@@ -728,7 +871,10 @@ fn a_paused_queue_with_a_held_head_is_not_overtaken_by_a_manual_send() {
             source_mailbox: None,
         },
     );
-    assert!(matches!(result, Ok(DispatchTurnResult::Queued)), "it queues behind the held head");
+    assert!(
+        matches!(result, Ok(DispatchTurnResult::Queued)),
+        "it queues behind the held head"
+    );
     assert_eq!(fixture.delivered_prompts(), 0);
     let queue = fixture.queue_ids();
     assert_eq!(queue.len(), 2);
@@ -738,7 +884,11 @@ fn a_paused_queue_with_a_held_head_is_not_overtaken_by_a_manual_send() {
         let index = inner.find_session_index(&fixture.session).unwrap();
         prioritize_user_queued_prompts(inner.session_mut_by_index(index).unwrap());
     }
-    assert_eq!(fixture.queue_ids(), queue, "user prioritization keeps the held head first");
+    assert_eq!(
+        fixture.queue_ids(),
+        queue,
+        "user prioritization keeps the held head first"
+    );
     drop(fence);
 }
 
@@ -751,7 +901,11 @@ fn a_failed_hold_is_dropped_with_its_removed_entry() {
     let fixture = Fixture::new(state, "failed-then-removed");
     let held = fixture.enqueue_held("failed, then stopped");
     let nonce = fixture.hold(&held).unwrap().nonce;
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (_, fence) = writer.take("the fence");
     fixture.state.settle_queued_prompt_durability(
         &fixture.session,
@@ -785,7 +939,11 @@ fn an_acknowledgement_during_a_busy_turn_starts_no_second_turn() {
         inner.session_mut_by_index(index).unwrap().session.status = SessionStatus::Active;
         fixture.state.commit_locked(&mut inner).unwrap();
     }
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (_, fence) = writer.take("the fence");
     let nonce = fixture.hold(&held).unwrap().nonce;
     // The fence's own settlement would run on a spawned thread, and its
@@ -796,8 +954,16 @@ fn an_acknowledgement_during_a_busy_turn_starts_no_second_turn() {
         .state
         .settle_queued_prompt_durability(&fixture.session, &held, &nonce, Ok(()));
     assert!(fixture.hold(&held).is_some_and(|hold| hold.acknowledged));
-    assert_eq!(fixture.delivered_prompts(), 0, "the release attempt started no second turn");
-    assert_eq!(fixture.drive_every_entry_point(), 0, "no drain starts a second turn");
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the release attempt started no second turn"
+    );
+    assert_eq!(
+        fixture.drive_every_entry_point(),
+        0,
+        "no drain starts a second turn"
+    );
     assert_eq!(fixture.delivered_prompts(), 0);
     assert_eq!(fixture.queue_ids(), vec![held.clone()]);
 
@@ -850,8 +1016,15 @@ fn a_rolled_back_promotion_keeps_the_acknowledged_marker() {
     let hold = &record.queued_prompt_durability_holds[&held_id];
     assert!(hold.acknowledged, "the marker comes back with its entry");
     queue_orchestrator_prompt_on_record(record, later, Vec::new());
-    assert_eq!(record.queued_prompts.len(), 2, "still standalone after the rollback");
-    assert_eq!(record.queued_prompts[0].pending_prompt.text, "promoted, then rolled back");
+    assert_eq!(
+        record.queued_prompts.len(),
+        2,
+        "still standalone after the rollback"
+    );
+    assert_eq!(
+        record.queued_prompts[0].pending_prompt.text,
+        "promoted, then rolled back"
+    );
 }
 
 /// Mailbox revalidation before dispatch, and the refresh after a mailbox
@@ -891,7 +1064,8 @@ fn mailbox_revalidation_leaves_an_acknowledged_entry_untouched() {
 
     fixture
         .state
-        .revalidate_queued_mailbox_wakeups_before_dispatch(&fixture.session).unwrap();
+        .revalidate_queued_mailbox_wakeups_before_dispatch(&fixture.session)
+        .unwrap();
     let _ = fixture.state.refresh_acknowledged_mailbox_wakeups(
         &fixture.session,
         "mailbox-durability",
@@ -928,13 +1102,23 @@ fn resume_while_the_held_head_is_being_saved_is_refused_and_the_pause_kept() {
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
-        inner.session_mut_by_index(index).unwrap().set_auto_dispatch_blocked(true);
+        inner
+            .session_mut_by_index(index)
+            .unwrap()
+            .set_auto_dispatch_blocked(true);
         fixture.state.commit_locked(&mut inner).unwrap();
     }
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (_, fence) = writer.take("the held head's durability fence");
 
-    let refused = match fixture.state.resume_local_session_queue(&fixture.session, None) {
+    let refused = match fixture
+        .state
+        .resume_local_session_queue(&fixture.session, None)
+    {
         Err(error) => error,
         Ok(_) => panic!("a Resume of a held head must be refused"),
     };
@@ -953,12 +1137,18 @@ fn resume_while_the_held_head_is_being_saved_is_refused_and_the_pause_kept() {
         .state
         .settle_queued_prompt_durability(&fixture.session, &held, &nonce, Ok(()));
     assert!(fixture.hold(&held).is_some_and(|hold| hold.acknowledged));
-    assert_eq!(fixture.delivered_prompts(), 0, "nothing is sent past the pause");
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "nothing is sent past the pause"
+    );
     assert!(queue_paused(&fixture));
     assert_eq!(fixture.queue_ids(), vec![held.clone()]);
 
     assert!(matches!(
-        fixture.state.resume_local_session_queue(&fixture.session, None),
+        fixture
+            .state
+            .resume_local_session_queue(&fixture.session, None),
         Ok(Some(_))
     ));
     match recv_within_guard(&fixture.prompts, "the second Resume sends the saved head") {
@@ -984,10 +1174,17 @@ fn a_resume_refused_for_a_failed_acknowledgement_names_the_failure() {
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.session).unwrap();
-        inner.session_mut_by_index(index).unwrap().set_auto_dispatch_blocked(true);
+        inner
+            .session_mut_by_index(index)
+            .unwrap()
+            .set_auto_dispatch_blocked(true);
         fixture.state.commit_locked(&mut inner).unwrap();
     }
-    assert!(fixture.state.request_queued_prompt_durability(&fixture.session, &held));
+    assert!(
+        fixture
+            .state
+            .request_queued_prompt_durability(&fixture.session, &held)
+    );
     let (_, fence) = writer.take("the held head's durability fence");
     let nonce = fixture.hold(&held).unwrap().nonce;
     fixture.state.settle_queued_prompt_durability(
@@ -997,7 +1194,10 @@ fn a_resume_refused_for_a_failed_acknowledgement_names_the_failure() {
         Err(PersistFenceError::Deadline),
     );
 
-    let refused = match fixture.state.resume_local_session_queue(&fixture.session, None) {
+    let refused = match fixture
+        .state
+        .resume_local_session_queue(&fixture.session, None)
+    {
         Err(error) => error,
         Ok(_) => panic!("a Resume of a held head must be refused"),
     };
@@ -1044,7 +1244,11 @@ fn resume_raced_by_cancel_and_acknowledgement(fixture: &Fixture) -> (String, Str
         .state
         .settle_queued_prompt_durability(&fixture.session, &held, &nonce, Ok(()));
     assert!(fixture.hold(&held).is_some_and(|hold| hold.acknowledged));
-    assert_eq!(fixture.delivered_prompts(), 0, "the acknowledgement keeps the pause");
+    assert_eq!(
+        fixture.delivered_prompts(),
+        0,
+        "the acknowledgement keeps the pause"
+    );
     (earlier, held)
 }
 
@@ -1094,13 +1298,14 @@ fn a_retry_that_starts_nothing_refuses_because_the_queue_changed() {
             .finish_resume_drain(&fixture.session, None, Some(&held), None),
         Ok(None)
     ));
-    let refused = match fixture
-        .state
-        .finish_resume_drain(&fixture.session, None, Some(&earlier), None)
-    {
-        Err(error) => error,
-        Ok(_) => panic!("a retry that starts nothing must be refused"),
-    };
+    let refused =
+        match fixture
+            .state
+            .finish_resume_drain(&fixture.session, None, Some(&earlier), None)
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a retry that starts nothing must be refused"),
+        };
     assert_eq!(refused.status, StatusCode::CONFLICT);
     assert_eq!(refused.message, RESUME_QUEUE_CHANGED_REFUSAL);
     assert!(queue_paused(&fixture), "the pause stays");
@@ -1126,7 +1331,9 @@ fn a_bound_resume_whose_head_is_gone_is_not_refused_for_a_held_successor() {
         owner
     };
     assert!(matches!(
-        fixture.state.resume_local_session_queue(&fixture.session, Some(owner)),
+        fixture
+            .state
+            .resume_local_session_queue(&fixture.session, Some(owner)),
         Ok(None)
     ));
     assert!(queue_paused(&fixture));

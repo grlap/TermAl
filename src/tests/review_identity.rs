@@ -371,10 +371,16 @@ fn kimi_identity_decision(title: &str, args: Value, allowed: bool) -> KimiReadOn
     let params = json!({"toolCall":{"title":title,"content":[{
         "type":"content","content":{"type":"text","text":format!("{KIMI_MCP_SUMMARY_PREFIX}{title}")}
     }]}});
-    kimi_read_only_permission_decision(&params, Some(&observation), "/work/repo", false, &|capability| {
-        assert_eq!(capability, DelegationControlPlaneCapability::ReviewIdentity);
-        allowed
-    })
+    kimi_read_only_permission_decision(
+        &params,
+        Some(&observation),
+        "/work/repo",
+        false,
+        &|capability| {
+            assert_eq!(capability, DelegationControlPlaneCapability::ReviewIdentity);
+            allowed
+        },
+    )
 }
 
 #[test]

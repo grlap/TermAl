@@ -167,7 +167,11 @@ fn observation_replica_measurement() {
             .into_iter()
             .filter_map(|record| match record {
                 StateMutexDiagnostic::Held {
-                    held, waited, file, line, ..
+                    held,
+                    waited,
+                    file,
+                    line,
+                    ..
                 } => Some(json!({
                     "file": file, "line": line,
                     "heldNs": held.as_nanos(), "waitedNs": waited.as_nanos()
@@ -176,16 +180,19 @@ fn observation_replica_measurement() {
             })
             .collect()
     };
-    println!("{}", json!({
-        "measurement": "DISPOSABLE METADATA REPLICA, NOT LIVE HOST LOCK TIMING",
-        "provenance": "Aggregate-only live read 2026-10-17T03:15:41.946Z, host8cfe02d2 revision21569291",
-        "sessions": REPLICA_SESSIONS, "delegations": REPLICA_DELEGATIONS,
-        "testRunsBefore": REPLICA_RUNS, "commands": 3, "observationCommits": 6,
-        "snapshotBytes": snapshot_bytes, "serializationOffLockNs": serialization_ns,
-        "observationStateEvents": state_count, "observationStateBytes": state_bytes,
-        "observationDeltaEvents": delta_count,
-        "snapshotLockSamples": timings(snapshot_timings),
-        "observationAndWriterLockSamples": timings(observation_timings),
-        "limits": "Synthetic catalog values match option counts and encoded bytes, not real labels/capabilities. Preview aggregate matches, distribution differs. Historical run/delegation counts match but synthetic content and statuses differ. No transcripts, live store, subprocess or machine-load claim. Zero-threshold reporter adds instrumentation overhead. Writer steps driven explicitly. Compare actual baseline and repaired product builds in granted slots."
-    }));
+    println!(
+        "{}",
+        json!({
+            "measurement": "DISPOSABLE METADATA REPLICA, NOT LIVE HOST LOCK TIMING",
+            "provenance": "Aggregate-only live read 2026-10-17T03:15:41.946Z, host8cfe02d2 revision21569291",
+            "sessions": REPLICA_SESSIONS, "delegations": REPLICA_DELEGATIONS,
+            "testRunsBefore": REPLICA_RUNS, "commands": 3, "observationCommits": 6,
+            "snapshotBytes": snapshot_bytes, "serializationOffLockNs": serialization_ns,
+            "observationStateEvents": state_count, "observationStateBytes": state_bytes,
+            "observationDeltaEvents": delta_count,
+            "snapshotLockSamples": timings(snapshot_timings),
+            "observationAndWriterLockSamples": timings(observation_timings),
+            "limits": "Synthetic catalog values match option counts and encoded bytes, not real labels/capabilities. Preview aggregate matches, distribution differs. Historical run/delegation counts match but synthetic content and statuses differ. No transcripts, live store, subprocess or machine-load claim. Zero-threshold reporter adds instrumentation overhead. Writer steps driven explicitly. Compare actual baseline and repaired product builds in granted slots."
+        })
+    );
 }

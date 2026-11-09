@@ -557,7 +557,9 @@ struct ContextReadRelease(Option<mpsc::Sender<()>>);
 
 impl Drop for ContextReadRelease {
     fn drop(&mut self) {
-        if let Some(release) = self.0.take() { let _ = release.send(()); }
+        if let Some(release) = self.0.take() {
+            let _ = release.send(());
+        }
     }
 }
 
@@ -618,7 +620,9 @@ fn context_nudge_completed_claim_cannot_release_a_same_generation_retry() {
     let (state, id, root) = fixture(false);
     let _registration = ContextReadRegistration(root.clone());
     let claim = EngramContextNudgeReadClaim {
-        state: state.clone(), session_id: id.clone(), generation: 1,
+        state: state.clone(),
+        session_id: id.clone(),
+        generation: 1,
         armed: std::sync::atomic::AtomicBool::new(true),
     };
     {
@@ -630,20 +634,27 @@ fn context_nudge_completed_claim_cannot_release_a_same_generation_retry() {
         cache.context_nudge_in_progress_generation = Some(1);
         cache.context_refresh_needed = false;
     }
-    engram_test_context_reads().lock().unwrap().insert(root.clone(),
-        Box::new(|| Err("first read failed".into())));
-    assert_eq!(state.prepare_engram_context_nudge_claiming_off_lock(&id, None, Some(&claim)),
-        EngramContextNudgePreparation::Failed);
+    engram_test_context_reads()
+        .lock()
+        .unwrap()
+        .insert(root.clone(), Box::new(|| Err("first read failed".into())));
+    assert_eq!(
+        state.prepare_engram_context_nudge_claiming_off_lock(&id, None, Some(&claim)),
+        EngramContextNudgePreparation::Failed
+    );
     // Keep the old claim alive after its helper released the reservation.
     // A retry now owns the SAME generation before that old claim drops.
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let mut release = ContextReadRelease(Some(release_tx));
-    engram_test_context_reads().lock().unwrap().insert(root.clone(), Box::new(move || {
-        entered_tx.send(()).unwrap();
-        release_rx.recv().unwrap();
-        Ok("retry context".into())
-    }));
+    engram_test_context_reads().lock().unwrap().insert(
+        root.clone(),
+        Box::new(move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok("retry context".into())
+        }),
+    );
     state.schedule_engram_context_nudge(&id);
     recv_within_guard(&entered_rx, "same-generation retry enters transport").unwrap();
     drop(claim);
@@ -651,14 +662,20 @@ fn context_nudge_completed_claim_cannot_release_a_same_generation_retry() {
         let inner = state.inner.lock().unwrap();
         let cache = &inner.sessions[inner.find_session_index(&id).unwrap()].engram;
         assert_eq!(cache.context_nudge_generation, 1);
-        assert!(cache.context_nudge_in_progress, "old cleanup cannot release the live retry");
+        assert!(
+            cache.context_nudge_in_progress,
+            "old cleanup cannot release the live retry"
+        );
         assert_eq!(cache.context_nudge_in_progress_generation, Some(1));
     }
     release.0.take().unwrap().send(()).unwrap();
     wait_for_context_observers(&state);
     let inner = state.inner.lock().unwrap();
     let cache = &inner.sessions[inner.find_session_index(&id).unwrap()].engram;
-    assert_eq!(cache.pending_context_nudge.as_deref(), Some("retry context"));
+    assert_eq!(
+        cache.pending_context_nudge.as_deref(),
+        Some("retry context")
+    );
     assert!(!cache.context_nudge_in_progress);
 }
 
@@ -677,8 +694,11 @@ fn context_nudge_dispatch_refreshes_acp_declaration_before_runtime_creation() {
             inner.sessions[index].engram.context_nudge_pending = false;
         }
         for (phase, declared) in [true, false, true].into_iter().enumerate() {
-            if declared { fs::write(root.join(".engram-project"), "fixture-ready\n").unwrap(); }
-            else { fs::remove_file(root.join(".engram-project")).unwrap(); }
+            if declared {
+                fs::write(root.join(".engram-project"), "fixture-ready\n").unwrap();
+            } else {
+                fs::remove_file(root.join(".engram-project")).unwrap();
+            }
             let runtime_id = format!("declaration-{queued}-{phase}");
             let (runtime, input) = test_acp_runtime_handle(AcpAgent::Cursor, &runtime_id);
             state.install_test_acp_runtime_override(AcpAgent::Cursor, runtime);
@@ -686,19 +706,32 @@ fn context_nudge_dispatch_refreshes_acp_declaration_before_runtime_creation() {
             {
                 let inner = state.inner.lock().unwrap();
                 let record = &inner.sessions[inner.find_session_index(&id).unwrap()];
-                assert_eq!(record.engram_mcp_installed.is_some(), declared,
-                    "cold spawn and declaration changes must use the current caller-owned descriptor");
-                assert!(matches!(&record.runtime, SessionRuntime::Acp(handle)
-                    if handle.runtime_id == runtime_id), "a marker change replaces the old runtime");
+                assert_eq!(
+                    record.engram_mcp_installed.is_some(),
+                    declared,
+                    "cold spawn and declaration changes must use the current caller-owned descriptor"
+                );
+                assert!(
+                    matches!(&record.runtime, SessionRuntime::Acp(handle)
+                    if handle.runtime_id == runtime_id),
+                    "a marker change replaces the old runtime"
+                );
             }
             deliver_turn_dispatch(&state, dispatch).unwrap();
-            assert!(matches!(recv_within_guard(&input, "ACP receives prompt").unwrap(),
-                AcpRuntimeCommand::Prompt(_)));
+            assert!(matches!(
+                recv_within_guard(&input, "ACP receives prompt").unwrap(),
+                AcpRuntimeCommand::Prompt(_)
+            ));
             let token = {
                 let inner = state.inner.lock().unwrap();
-                inner.sessions[inner.find_session_index(&id).unwrap()].runtime.runtime_token().unwrap()
+                inner.sessions[inner.find_session_index(&id).unwrap()]
+                    .runtime
+                    .runtime_token()
+                    .unwrap()
             };
-            state.finish_turn_ok_if_runtime_matches(&id, &token).unwrap();
+            state
+                .finish_turn_ok_if_runtime_matches(&id, &token)
+                .unwrap();
         }
     }
 }
@@ -707,13 +740,19 @@ fn context_nudge_dispatch_refreshes_acp_declaration_before_runtime_creation() {
 fn context_nudge_read_claim_unwinding_over_a_poisoned_state_mutex_does_not_panic_again() {
     let (state, id, _) = fixture(false);
     let poisoner = state.clone();
-    assert!(std::thread::spawn(move || {
-        let _inner = poisoner.inner.lock().unwrap();
-        panic!("injected panic holding the state mutex");
-    }).join().is_err());
+    assert!(
+        std::thread::spawn(move || {
+            let _inner = poisoner.inner.lock().unwrap();
+            panic!("injected panic holding the state mutex");
+        })
+        .join()
+        .is_err()
+    );
     assert!(state.inner.inner.is_poisoned());
     let claim = EngramContextNudgeReadClaim {
-        state: state.clone(), session_id: id, generation: 1,
+        state: state.clone(),
+        session_id: id,
+        generation: 1,
         armed: std::sync::atomic::AtomicBool::new(true),
     };
     // A second panic from the claim's Drop would abort this whole test process.
@@ -730,7 +769,9 @@ fn context_nudge_superseded_entry_and_panicking_read_release_only_their_reservat
         let (state, id, root) = fixture(false);
         let _registration = ContextReadRegistration(root.clone());
         let claim = EngramContextNudgeReadClaim {
-            state: state.clone(), session_id: id.clone(), generation: 1,
+            state: state.clone(),
+            session_id: id.clone(),
+            generation: 1,
             armed: std::sync::atomic::AtomicBool::new(true),
         };
         {
@@ -748,45 +789,84 @@ fn context_nudge_superseded_entry_and_panicking_read_release_only_their_reservat
                 cache.context_nudge_in_progress_generation = Some(cache.context_nudge_generation);
             }
         }
-        engram_test_context_reads().lock().unwrap().insert(root,
-            Box::new(|| panic!("injected transport panic")));
+        engram_test_context_reads()
+            .lock()
+            .unwrap()
+            .insert(root, Box::new(|| panic!("injected transport panic")));
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-            claim.state.prepare_engram_context_nudge_claiming_off_lock(&claim.session_id, None, Some(&claim))
+            claim.state.prepare_engram_context_nudge_claiming_off_lock(
+                &claim.session_id,
+                None,
+                Some(&claim),
+            )
         }));
-        if panic_read { assert!(outcome.is_err()); }
-        else { assert_eq!(outcome.unwrap(), EngramContextNudgePreparation::Failed); }
+        if panic_read {
+            assert!(outcome.is_err());
+        } else {
+            assert_eq!(outcome.unwrap(), EngramContextNudgePreparation::Failed);
+        }
         let inner = state.inner.lock().unwrap();
         let cache = &inner.sessions[inner.find_session_index(&id).unwrap()].engram;
         assert!(cache.context_nudge_pending);
         assert_eq!(cache.context_nudge_in_progress, !panic_read);
-        assert_eq!(cache.context_nudge_in_progress_generation,
-            if panic_read { None } else { Some(cache.context_nudge_generation) });
+        assert_eq!(
+            cache.context_nudge_in_progress_generation,
+            if panic_read {
+                None
+            } else {
+                Some(cache.context_nudge_generation)
+            }
+        );
         assert!(cache.pending_context_nudge.is_none());
     }
 }
 
 #[test]
 fn context_nudge_background_read_does_not_answer_an_explicit_compact_hook_ticket() {
-    for queued in [false, true] { parked_context_send_case(queued, false, "hook"); }
+    for queued in [false, true] {
+        parked_context_send_case(queued, false, "hook");
+    }
 }
 
 fn dispatch_context_prompt(state: &AppState, id: &str, queued: bool) -> TurnDispatch {
     if queued {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(id).unwrap();
-        queue_prompt_on_record(&mut inner.sessions[index], PendingPrompt {
-            engram_interrupted: false, is_engram_retained: false, attachments: Vec::new(),
-            id: Uuid::new_v4().to_string(), timestamp: stamp_now(), text: "Advisory context prompt.".into(),
-            expanded_text: None, source: None,
-        }, Vec::new());
+        queue_prompt_on_record(
+            &mut inner.sessions[index],
+            PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
+                attachments: Vec::new(),
+                id: Uuid::new_v4().to_string(),
+                timestamp: stamp_now(),
+                text: "Advisory context prompt.".into(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
         drop(inner);
-        state.dispatch_next_queued_turn(id, false).unwrap().expect("queue stages")
+        state
+            .dispatch_next_queued_turn(id, false)
+            .unwrap()
+            .expect("queue stages")
     } else {
-        match state.dispatch_turn(id, SendMessageRequest {
-            text: "Advisory context prompt.".into(), expanded_text: None, attachments: Vec::new(),
-            source_session_id: None, source_mailbox: None,
-        }).unwrap() {
-            DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        match state
+            .dispatch_turn(
+                id,
+                SendMessageRequest {
+                    text: "Advisory context prompt.".into(),
+                    expanded_text: None,
+                    attachments: Vec::new(),
+                    source_session_id: None,
+                    source_mailbox: None,
+                },
+            )
+            .unwrap()
+        {
+            DispatchTurnResult::Dispatched(dispatch)
+            | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
             DispatchTurnResult::Queued => panic!("idle prompt stages"),
         }
     }
@@ -807,7 +887,10 @@ fn parked_context_send_case(queued: bool, after_compaction: bool, case: &str) {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("parked-context-send");
     let (state, id, root) = fixture_with_state(state, false);
     if after_compaction {
-        assert_eq!(state.prepare_engram_context_nudge_off_lock(&id), EngramContextNudgePreparation::Ready);
+        assert_eq!(
+            state.prepare_engram_context_nudge_off_lock(&id),
+            EngramContextNudgePreparation::Ready
+        );
         delivered(&state, &id);
         state.mark_engram_context_nudge_pending(&id);
     }
@@ -815,11 +898,20 @@ fn parked_context_send_case(queued: bool, after_compaction: bool, case: &str) {
     if queued {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&id).unwrap();
-        queue_prompt_on_record(&mut inner.sessions[index], PendingPrompt {
-            engram_interrupted: false, is_engram_retained: false, attachments: Vec::new(),
-            id: "parked-context-head".into(), timestamp: stamp_now(), text: text.clone(),
-            expanded_text: None, source: None,
-        }, Vec::new());
+        queue_prompt_on_record(
+            &mut inner.sessions[index],
+            PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
+                attachments: Vec::new(),
+                id: "parked-context-head".into(),
+                timestamp: stamp_now(),
+                text: text.clone(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
     }
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
@@ -827,15 +919,24 @@ fn parked_context_send_case(queued: bool, after_compaction: bool, case: &str) {
     let send_thread = Arc::new(Mutex::new(None));
     let reading_thread = send_thread.clone();
     let failed = case == "failed";
-    engram_test_context_reads().lock().unwrap().insert(root.clone(), Box::new(move || {
-        let on_send_thread = Some(std::thread::current().id()) == *reading_thread.lock().unwrap();
-        entered_tx.send(on_send_thread).unwrap();
-        // The unchanged synchronous path reports its thread directly,
-        // without a timing assertion or leaving the sender blocked on RED.
-        if !on_send_thread { release_rx.recv().unwrap(); }
-        if failed { Err("fixture context unavailable".into()) }
-        else { Ok("fixture context from the parked read".into()) }
-    }));
+    engram_test_context_reads().lock().unwrap().insert(
+        root.clone(),
+        Box::new(move || {
+            let on_send_thread =
+                Some(std::thread::current().id()) == *reading_thread.lock().unwrap();
+            entered_tx.send(on_send_thread).unwrap();
+            // The unchanged synchronous path reports its thread directly,
+            // without a timing assertion or leaving the sender blocked on RED.
+            if !on_send_thread {
+                release_rx.recv().unwrap();
+            }
+            if failed {
+                Err("fixture context unavailable".into())
+            } else {
+                Ok("fixture context from the parked read".into())
+            }
+        }),
+    );
     let _registration = ContextReadRegistration(root.clone());
     let worker_state = state.clone();
     let worker_id = id.clone();
@@ -843,13 +944,26 @@ fn parked_context_send_case(queued: bool, after_compaction: bool, case: &str) {
     let worker = std::thread::spawn(move || {
         *send_thread.lock().unwrap() = Some(std::thread::current().id());
         let dispatch = if queued {
-            worker_state.dispatch_next_queued_turn(&worker_id, false).unwrap().expect("queued prompt stages")
+            worker_state
+                .dispatch_next_queued_turn(&worker_id, false)
+                .unwrap()
+                .expect("queued prompt stages")
         } else {
-            match worker_state.dispatch_turn(&worker_id, SendMessageRequest {
-                text: worker_text, expanded_text: None, attachments: Vec::new(),
-                source_session_id: None, source_mailbox: None,
-            }).unwrap() {
-                DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+            match worker_state
+                .dispatch_turn(
+                    &worker_id,
+                    SendMessageRequest {
+                        text: worker_text,
+                        expanded_text: None,
+                        attachments: Vec::new(),
+                        source_session_id: None,
+                        source_mailbox: None,
+                    },
+                )
+                .unwrap()
+            {
+                DispatchTurnResult::Dispatched(dispatch)
+                | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
                 DispatchTurnResult::Queued => panic!("idle prompt must stage"),
             }
         };
@@ -858,17 +972,28 @@ fn parked_context_send_case(queued: bool, after_compaction: bool, case: &str) {
     let on_send_thread = entered_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap();
     if on_send_thread {
         worker.join().unwrap();
-        panic!("context read ran synchronously on the {} thread", if queued { "queue-drain" } else { "direct-send" });
+        panic!(
+            "context read ran synchronously on the {} thread",
+            if queued { "queue-drain" } else { "direct-send" }
+        );
     }
-    let prompt = recv_within_guard(&runtime_rx, "provider receives prompt before parked context is released").unwrap();
-    assert!(matches!(prompt, CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains(&text)));
+    let prompt = recv_within_guard(
+        &runtime_rx,
+        "provider receives prompt before parked context is released",
+    )
+    .unwrap();
+    assert!(
+        matches!(prompt, CodexRuntimeCommand::Prompt { command, .. } if command.prompt.contains(&text))
+    );
     worker.join().unwrap();
     {
         let inner = state.inner.lock().unwrap();
         let cache = &inner.sessions[inner.find_session_index(&id).unwrap()].engram;
         assert!(cache.pending_context_nudge.is_none());
-        assert!(cache.context_nudge_pending || cache.context_nudge_in_progress,
-            "the undelivered nudge is retained while its read is parked");
+        assert!(
+            cache.context_nudge_pending || cache.context_nudge_in_progress,
+            "the undelivered nudge is retained while its read is parked"
+        );
     }
     if case == "superseded" {
         let mut inner = state.inner.lock().unwrap();
@@ -880,33 +1005,58 @@ fn parked_context_send_case(queued: bool, after_compaction: bool, case: &str) {
         let generation = inner.sessions[index].engram.context_nudge_generation;
         assert!(inner.sessions[index].engram_mcp_installed.is_none());
         inner.sessions[index].session.model = "changed-during-background-read".into();
-        assert_eq!(inner.sessions[index].engram.context_nudge_generation, generation,
-            "identity-only staleness must exercise the unchanged-generation fence");
+        assert_eq!(
+            inner.sessions[index].engram.context_nudge_generation, generation,
+            "identity-only staleness must exercise the unchanged-generation fence"
+        );
     } else if case == "hook" {
-        let ticket = state.begin_engram_compact_hook_read(&id).expect("compact ticket");
+        let ticket = state
+            .begin_engram_compact_hook_read(&id)
+            .expect("compact ticket");
         let token = {
             let inner = state.inner.lock().unwrap();
-            inner.sessions[inner.find_session_index(&id).unwrap()].runtime.runtime_token().unwrap()
+            inner.sessions[inner.find_session_index(&id).unwrap()]
+                .runtime
+                .runtime_token()
+                .unwrap()
         };
-        assert!(state.prepare_engram_compact_hook_context_off_lock(&id, &token, &ticket).is_none(),
-            "an explicit hook cannot claim or reuse the background reader's page");
+        assert!(
+            state
+                .prepare_engram_compact_hook_context_off_lock(&id, &token, &ticket)
+                .is_none(),
+            "an explicit hook cannot claim or reuse the background reader's page"
+        );
     } else if case == "compacted" {
         state.mark_engram_context_nudge_pending(&id);
     }
     release.0.take().unwrap().send(()).unwrap();
     wait_for_context_observers(&state);
-    let expected = if matches!(case, "current" | "compacted" | "hook") { "fixture context from the parked read" }
-        else { "fresh context after the failed or superseded read" };
+    let expected = if matches!(case, "current" | "compacted" | "hook") {
+        "fixture context from the parked read"
+    } else {
+        "fresh context after the failed or superseded read"
+    };
     if matches!(case, "failed" | "superseded" | "identity") {
         {
             let inner = state.inner.lock().unwrap();
             let cache = &inner.sessions[inner.find_session_index(&id).unwrap()].engram;
-            assert!(cache.pending_context_nudge.is_none(), "a failed or stale page is not cached");
-            assert!(cache.context_nudge_pending, "the nudge remains pending for retry");
-            assert!(!cache.context_nudge_in_progress, "the failed reservation is released");
+            assert!(
+                cache.pending_context_nudge.is_none(),
+                "a failed or stale page is not cached"
+            );
+            assert!(
+                cache.context_nudge_pending,
+                "the nudge remains pending for retry"
+            );
+            assert!(
+                !cache.context_nudge_in_progress,
+                "the failed reservation is released"
+            );
         }
-        engram_test_context_reads().lock().unwrap().insert(root.clone(),
-            Box::new(move || Ok(expected.into())));
+        engram_test_context_reads()
+            .lock()
+            .unwrap()
+            .insert(root.clone(), Box::new(move || Ok(expected.into())));
         state.schedule_engram_context_nudge(&id);
         wait_for_context_observers(&state);
     }
@@ -917,24 +1067,50 @@ fn parked_context_send_case(queued: bool, after_compaction: bool, case: &str) {
     }
     let token = {
         let inner = state.inner.lock().unwrap();
-        inner.sessions[inner.find_session_index(&id).unwrap()].runtime.runtime_token().unwrap()
+        inner.sessions[inner.find_session_index(&id).unwrap()]
+            .runtime
+            .runtime_token()
+            .unwrap()
     };
-    state.finish_turn_ok_if_runtime_matches(&id, &token).unwrap();
-    let dispatch = match state.dispatch_turn(&id, SendMessageRequest {
-        text: "Receive the retained advisory context.".into(), expanded_text: None,
-        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
-    }).unwrap() {
+    state
+        .finish_turn_ok_if_runtime_matches(&id, &token)
+        .unwrap();
+    let dispatch = match state
+        .dispatch_turn(
+            &id,
+            SendMessageRequest {
+                text: "Receive the retained advisory context.".into(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .unwrap()
+    {
         DispatchTurnResult::Dispatched(dispatch) => dispatch,
         _ => panic!("the next idle prompt stages with cached context"),
     };
     deliver_turn_dispatch(&state, dispatch).expect("cached context reaches provider");
-    assert!(matches!(recv_within_guard(&runtime_rx, "cached context delivery").unwrap(),
+    assert!(
+        matches!(recv_within_guard(&runtime_rx, "cached context delivery").unwrap(),
         CodexRuntimeCommand::Prompt { command, .. }
-        if command.prompt.contains(expected) && command.prompt.contains("Receive the retained advisory context.")));
+        if command.prompt.contains(expected) && command.prompt.contains("Receive the retained advisory context."))
+    );
     let inner = state.inner.lock().unwrap();
     let cache = &inner.sessions[inner.find_session_index(&id).unwrap()].engram;
-    assert!(cache.pending_context_nudge.is_none(), "only runtime acceptance consumes the page");
-    assert_eq!(cache.context_nudge_pending, matches!(case, "compacted" | "hook"),
-        "a compaction requested during the read survives delivery of that page");
-    assert_eq!(delivery_cursor(&root), 0, "local runtime acknowledgement never advances Engram delivery");
+    assert!(
+        cache.pending_context_nudge.is_none(),
+        "only runtime acceptance consumes the page"
+    );
+    assert_eq!(
+        cache.context_nudge_pending,
+        matches!(case, "compacted" | "hook"),
+        "a compaction requested during the read survives delivery of that page"
+    );
+    assert_eq!(
+        delivery_cursor(&root),
+        0,
+        "local runtime acknowledgement never advances Engram delivery"
+    );
 }

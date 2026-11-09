@@ -37,7 +37,12 @@ fn runtime_handle_fixtures_retain_success_without_unreaped_children() {
     let (claude, _claude_commands) = test_claude_runtime_handle("reaped-claude");
     let (acp, _acp_commands) = test_acp_runtime_handle(AcpAgent::Cursor, "reaped-acp");
     let (_shared, _shared_commands, shared_process) = test_shared_codex_runtime("reaped-shared");
-    for process in [&codex.process, &claude.process, &acp.process, &shared_process] {
+    for process in [
+        &codex.process,
+        &claude.process,
+        &acp.process,
+        &shared_process,
+    ] {
         #[cfg(unix)]
         {
             let (observed, error) = observe_child_slot(process.id());

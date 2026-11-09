@@ -112,10 +112,17 @@ fn medium_repair_batch_success_report_cannot_forge_passing_credit() {
     assert!(node_refs(&turn).contains(&format!("command:{command}")));
     assert!(node_summary(&turn).contains("pipe containment validation rejected"));
     let check = node_diagnostic(&turn);
-    let facts = observation["occurrence"]["observed_checks"].as_array().unwrap();
-    assert_eq!(facts[0]["host_check_id"], unadmitted_host_check_id(
-        observation["occurrence"]["host_turn_ref"].as_str().unwrap(), &check.key),
-        "the ordinary fact must name its exact recorded check");
+    let facts = observation["occurrence"]["observed_checks"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        facts[0]["host_check_id"],
+        unadmitted_host_check_id(
+            observation["occurrence"]["host_turn_ref"].as_str().unwrap(),
+            &check.key
+        ),
+        "the ordinary fact must name its exact recorded check"
+    );
 }
 
 #[test]

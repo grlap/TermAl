@@ -78,7 +78,8 @@ fn rejected_followup_admission_does_not_unarchive_terminal_child() {
                                 let index = inner.find_session_index(&worker_child).unwrap();
                                 match rejection {
                                     "observation-delete" => {
-                                        inner.sessions[index].engram.observation_delete_requested = true
+                                        inner.sessions[index].engram.observation_delete_requested =
+                                            true
                                     }
                                     "stopping" => {
                                         inner.sessions[index].session.status =
@@ -188,7 +189,9 @@ fn rejected_followup_after_restore_rearchives_without_admitting_a_prompt() {
                 let mut inner = worker_state.inner.lock().unwrap();
                 let index = inner.find_session_index(&worker_child).unwrap();
                 match rejection {
-                    "observation-delete" => inner.sessions[index].engram.observation_delete_requested = true,
+                    "observation-delete" => {
+                        inner.sessions[index].engram.observation_delete_requested = true
+                    }
                     "stopping" | "compensation" => {
                         inner.sessions[index].session.status = SessionStatus::Stopping
                     }

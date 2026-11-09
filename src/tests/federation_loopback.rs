@@ -1,8 +1,8 @@
 // Owns the two-process loopback proof of federation HTTP in both directions.
 // Does not launch real SSH, use live enrollment or open a live store. New tests.
 
-use super::federation_link::{allowed, peer_snapshot};
 use super::federation_control_fixture::heartbeat_round_trip;
+use super::federation_link::{allowed, peer_snapshot};
 use super::*;
 
 const CHILD_ROLE: &str = "TERMAL_TEST_FEDERATION_SATELLITE";

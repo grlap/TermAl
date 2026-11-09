@@ -14,19 +14,31 @@ fn take_real_ordinary_write_ahead(
     loop {
         let request = phase_sync::receive(rx, "ordinary content or WAL persistence request");
         match request {
-            PersistRequest::Fence(fence) if matches!(&fence.target,
-                PersistFenceTarget::PromptDeliveryWriteAhead { .. }) =>
+            PersistRequest::Fence(fence)
+                if matches!(
+                    &fence.target,
+                    PersistFenceTarget::PromptDeliveryWriteAhead { .. }
+                ) =>
             {
                 let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
-                persist_delta_via_cache(cache, turn.state.persistence_path.as_path(), &delta).unwrap();
-                let connection = cache.connection_for(turn.state.persistence_path.as_path()).unwrap();
+                persist_delta_via_cache(cache, turn.state.persistence_path.as_path(), &delta)
+                    .unwrap();
+                let connection = cache
+                    .connection_for(turn.state.persistence_path.as_path())
+                    .unwrap();
                 let durable = fence.target.is_already_durable(connection).unwrap();
                 return (fence, durable);
             }
             request => batch.accept(request),
         };
         let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
-        persist_delta_with_fences(cache, turn.state.persistence_path.as_path(), &delta, &mut batch).unwrap();
+        persist_delta_with_fences(
+            cache,
+            turn.state.persistence_path.as_path(),
+            &delta,
+            &mut batch,
+        )
+        .unwrap();
     }
 }
 
@@ -37,24 +49,40 @@ fn cancel_during_real_write_ahead_ack_cannot_send_or_block_the_replacement() {
     let (tx, rx) = mpsc::channel();
     turn.state.persist_tx = tx;
     let id = turn.enqueue_durable("cancel this exact ordinary content", true);
-    assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+    assert!(
+        turn.state
+            .request_queued_prompt_durability(&turn.session, &id)
+    );
     let mut cache = SqlitePersistConnectionCache::new();
     let (fence, durable) = take_real_ordinary_write_ahead(&turn, &rx, &mut cache);
     let nonce = turn.record(|record| record.prompt_deliveries[&id].write_ahead.clone());
-    let empty_before_ack = !turn.receiver.try_iter().any(|command|
-        matches!(command, CodexRuntimeCommand::Prompt { .. }));
+    let empty_before_ack = !turn
+        .receiver
+        .try_iter()
+        .any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. }));
     let canceled = turn.state.cancel_queued_prompt(&turn.session, &id);
     // Always release the real boundary before asserting either outcome.
-    fence.finish(if durable { Ok(()) } else {
-        Err(PersistFenceError::WriteFailed("exact WAL read-back was absent".into()))
+    fence.finish(if durable {
+        Ok(())
+    } else {
+        Err(PersistFenceError::WriteFailed(
+            "exact WAL read-back was absent".into(),
+        ))
     });
     canceled.unwrap();
-    turn.state.settle_prompt_delivery_write_ahead(&turn.session, &id, &nonce, Ok(()));
+    turn.state
+        .settle_prompt_delivery_write_ahead(&turn.session, &id, &nonce, Ok(()));
     assert!(durable && empty_before_ack);
     turn.assert_no_prompt();
     let dispatch = turn.prepare("replacement after cancellation");
-    deliver_turn_dispatch(&turn.state, dispatch).into_public_result().unwrap();
-    assert!(turn.prompt().prompt.contains("replacement after cancellation"));
+    deliver_turn_dispatch(&turn.state, dispatch)
+        .into_public_result()
+        .unwrap();
+    assert!(
+        turn.prompt()
+            .prompt
+            .contains("replacement after cancellation")
+    );
     turn.record(|record| assert!(record.queued_prompts.is_empty()));
     turn.assert_no_prompt();
     turn.assert_no_control();
@@ -68,11 +96,26 @@ fn a_canceled_ordinary_owner_never_mutates_or_delivers_its_replacement() {
     turn.state.cancel_queued_prompt(&turn.session, &id).unwrap();
     let replacement = turn.enqueue("new ordinary prompt", QueuedPromptSource::Mailbox);
     let before = turn.saved();
-    assert!(turn.state.dispatch_next_queued_turn_for_activation(&turn.session, owner).unwrap().is_none());
-    assert_eq!(turn.saved(), before, "an old continuation cannot change the successor");
+    assert!(
+        turn.state
+            .dispatch_next_queued_turn_for_activation(&turn.session, owner)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        turn.saved(),
+        before,
+        "an old continuation cannot change the successor"
+    );
     turn.assert_no_prompt();
-    let started = turn.state.start_next_queued_turn_off_lock(&turn.session, false, false).unwrap().unwrap();
-    deliver_turn_dispatch(&turn.state, started.dispatch).into_public_result().unwrap();
+    let started = turn
+        .state
+        .start_next_queued_turn_off_lock(&turn.session, false, false)
+        .unwrap()
+        .unwrap();
+    deliver_turn_dispatch(&turn.state, started.dispatch)
+        .into_public_result()
+        .unwrap();
     assert!(turn.prompt().prompt.contains("new ordinary prompt"));
     turn.record(|record| {
         assert!(record.queued_prompts.is_empty());
@@ -84,37 +127,61 @@ fn a_canceled_ordinary_owner_never_mutates_or_delivers_its_replacement() {
 
 #[test]
 fn ordinary_write_ahead_failures_keep_exact_pending_content_without_a_handoff() {
-    for fault in [PersistFenceError::Deadline, PersistFenceError::WorkerStopped,
-        PersistFenceError::WriteFailed("controlled ordinary WAL failure".into())] {
+    for fault in [
+        PersistFenceError::Deadline,
+        PersistFenceError::WorkerStopped,
+        PersistFenceError::WriteFailed("controlled ordinary WAL failure".into()),
+    ] {
         let mut turn = OrdinaryRoot::new("strict-ordinary-wal-failure");
         turn.state.shutdown_persist_blocking();
         let (tx, rx) = mpsc::channel();
         turn.state.persist_tx = tx;
         let id = turn.enqueue_durable("exact ordinary content — źródło 🦀", true);
-        assert!(turn.state.request_queued_prompt_durability(&turn.session, &id));
+        assert!(
+            turn.state
+                .request_queued_prompt_durability(&turn.session, &id)
+        );
         let mut cache = SqlitePersistConnectionCache::new();
         let (fence, durable) = take_real_ordinary_write_ahead(&turn, &rx, &mut cache);
         let nonce = turn.record(|record| record.prompt_deliveries[&id].write_ahead.clone());
-        let empty_before_ack = !turn.receiver.try_iter().any(|command|
-            matches!(command, CodexRuntimeCommand::Prompt { .. }));
+        let empty_before_ack = !turn
+            .receiver
+            .try_iter()
+            .any(|command| matches!(command, CodexRuntimeCommand::Prompt { .. }));
         fence.finish(Err(fault));
         let settled = phase_sync::PollGuard::new();
-        while !turn.record(|record| record.prompt_deliveries[&id].disposition == PromptDeliveryDisposition::Pending) {
+        while !turn.record(|record| {
+            record.prompt_deliveries[&id].disposition == PromptDeliveryDisposition::Pending
+        }) {
             settled.wait("ordinary WAL failure returns to pending");
         }
         // The superseded successful callback must not rescue this failed nonce.
-        turn.state.settle_prompt_delivery_write_ahead(&turn.session, &id, &nonce, Ok(()));
+        turn.state
+            .settle_prompt_delivery_write_ahead(&turn.session, &id, &nonce, Ok(()));
         let delta = collect_persist_delta_from_shared_state(&turn.state.inner, 0);
-        persist_delta_with_fences(&mut cache, turn.state.persistence_path.as_path(), &delta,
-            &mut PersistFenceBatch::default()).unwrap();
+        persist_delta_with_fences(
+            &mut cache,
+            turn.state.persistence_path.as_path(),
+            &delta,
+            &mut PersistFenceBatch::default(),
+        )
+        .unwrap();
         assert!(durable && empty_before_ack);
-        let loaded = load_state(turn.state.persistence_path.as_path()).unwrap().unwrap();
+        let loaded = load_state(turn.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
         let record = &loaded.sessions[loaded.find_session_index(&turn.session).unwrap()];
-        assert_eq!(record.prompt_deliveries[&id].disposition, PromptDeliveryDisposition::Pending);
+        assert_eq!(
+            record.prompt_deliveries[&id].disposition,
+            PromptDeliveryDisposition::Pending
+        );
         assert_ne!(record.prompt_deliveries[&id].write_ahead, nonce);
         assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(record.queued_prompts[0].pending_prompt.id, id);
-        assert_eq!(record.queued_prompts[0].pending_prompt.text, "exact ordinary content — źródło 🦀");
+        assert_eq!(
+            record.queued_prompts[0].pending_prompt.text,
+            "exact ordinary content — źródło 🦀"
+        );
         assert!(record.queued_prompts[0].promoted_message_index.is_none());
         assert!(record.session.prompt_history.is_empty());
         turn.assert_no_prompt();

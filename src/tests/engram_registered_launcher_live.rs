@@ -4,7 +4,7 @@ use super::*;
 
 #[path = "engram_registered_launcher_environment.rs"]
 mod environment;
-use environment::{isolated_launcher, LAUNCH};
+use environment::{LAUNCH, isolated_launcher};
 
 #[path = "engram_evaluation_matrix_live.rs"]
 mod evaluation_matrix;
@@ -46,8 +46,12 @@ impl LoopbackRegistration {
             server: Some(server),
             stop: Some(stop),
             url,
-            temporary: state.test_temp_root.as_ref().expect("the disposable host owns its scratch")
-                .path().join("launcher-tmp"),
+            temporary: state
+                .test_temp_root
+                .as_ref()
+                .expect("the disposable host owns its scratch")
+                .path()
+                .join("launcher-tmp"),
         }
     }
 }
@@ -76,15 +80,26 @@ pub(super) fn run_check(
     run_check_in_lane(fixture, session, root, false)
 }
 
-pub(super) fn run_historical_check(fixture: &CompletionFixture, session: &str, root: &FsPath)
-    -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
-{
+pub(super) fn run_historical_check(
+    fixture: &CompletionFixture,
+    session: &str,
+    root: &FsPath,
+) -> (
+    EngramVerificationRecordBody,
+    EngramVerificationRecordReceipt,
+) {
     run_check_in_lane(fixture, session, root, true)
 }
 
-fn run_check_in_lane(fixture: &CompletionFixture, session: &str, root: &FsPath, historical: bool)
-    -> (EngramVerificationRecordBody, EngramVerificationRecordReceipt)
-{
+fn run_check_in_lane(
+    fixture: &CompletionFixture,
+    session: &str,
+    root: &FsPath,
+    historical: bool,
+) -> (
+    EngramVerificationRecordBody,
+    EngramVerificationRecordReceipt,
+) {
     assert!(run_git_test_command_output(root, &["status", "--porcelain"]).is_empty());
     let before = run_git_test_command_output(root, &["rev-parse", "HEAD"])
         .trim()
@@ -130,13 +145,20 @@ fn run_check_in_lane(fixture: &CompletionFixture, session: &str, root: &FsPath, 
         test_run_path_key(request["root"].as_str().unwrap()),
         test_run_path_key(&test_run_display_path(root))
     );
-    assert_eq!(results["state"], "passed", "the actual registered check passed");
+    assert_eq!(
+        results["state"], "passed",
+        "the actual registered check passed"
+    );
     assert_eq!(results["input"]["commit"], before);
     assert_eq!(results["input"]["outcome"], "clean");
     assert_eq!(results["input"]["eligible"], true);
     assert_eq!(
         results["stages"][0]["tests"]["runner"],
-        if cfg!(windows) { "node-test" } else { "cargo-libtest" }
+        if cfg!(windows) {
+            "node-test"
+        } else {
+            "cargo-libtest"
+        }
     );
     assert_eq!(results["stages"][0]["tests"]["passed"], 1);
     assert_eq!(results["stages"][0]["tests"]["failed"], 0);
@@ -191,10 +213,12 @@ fn run_check_in_lane(fixture: &CompletionFixture, session: &str, root: &FsPath, 
         1,
         "original provider locator owns one row"
     );
-    let prepared = if historical { CompletionFixture::prepare_historical_record(&registration) }
-        else { engram_verification_record_prepare(&registration) };
-    let EngramVerificationRecordPrepared::Ready(frozen) = prepared
-    else {
+    let prepared = if historical {
+        CompletionFixture::prepare_historical_record(&registration)
+    } else {
+        engram_verification_record_prepare(&registration)
+    };
+    let EngramVerificationRecordPrepared::Ready(frozen) = prepared else {
         panic!("actual committed-input run must prepare native evidence");
     };
     let (body, receipt) = fixture.record_registered_check(registration.clone(), frozen);
@@ -249,22 +273,51 @@ fn current_source_id_launcher_record_is_received_and_settled_without_evaluation(
     let fixture = completion_fixture();
     install_launcher(&fixture);
     let session = &fixture.live.session_id;
-    let added = fixture.work(session, &["add", "Receive the full owner identity", "--accept",
-        "The registered producer is received", "--bind", "1=test", "--json"]);
-    let work = added["work"]["short_ref"].as_str().or_else(|| added["short_ref"].as_str()).unwrap();
+    let added = fixture.work(
+        session,
+        &[
+            "add",
+            "Receive the full owner identity",
+            "--accept",
+            "The registered producer is received",
+            "--bind",
+            "1=test",
+            "--json",
+        ],
+    );
+    let work = added["work"]["short_ref"]
+        .as_str()
+        .or_else(|| added["short_ref"].as_str())
+        .unwrap();
     fixture.work(session, &["claim", work, "--json"]);
-    fixture.live.state.name_engram_source_root(session, EngramSourceRootRequest {
-        work:work.to_owned(), path:Some(Some(fixture.root.to_string_lossy().into_owned())),
-    }).unwrap();
-    fixture.begin(session, "Produce a current owner-backed verification record.");
+    fixture
+        .live
+        .state
+        .name_engram_source_root(
+            session,
+            EngramSourceRootRequest {
+                work: work.to_owned(),
+                path: Some(Some(fixture.root.to_string_lossy().into_owned())),
+            },
+        )
+        .unwrap();
+    fixture.begin(
+        session,
+        "Produce a current owner-backed verification record.",
+    );
     let (body, receipt) = run_check(&fixture, session, &fixture.root);
     let EngramVerificationRecordInput::SourceId { source_id } = &body.input else {
         panic!("the fresh launcher must produce a complete owner identity");
     };
-    assert!(matches!(&body.post_run, EngramVerificationRecordPostRun::SourceId(post_run)
-        if post_run.source_id == *source_id));
+    assert!(
+        matches!(&body.post_run, EngramVerificationRecordPostRun::SourceId(post_run)
+        if post_run.source_id == *source_id)
+    );
     let stored = fixture.object(&receipt.verifications[0].record_id);
-    assert!(stored["source_basis"] == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap());
+    assert!(
+        stored["source_basis"]
+            == serde_json::to_value(engram_verification_record_basis(&body).unwrap()).unwrap()
+    );
     finish_live_root(&fixture.live.state, session);
     fixture.wait_for_reports(session);
     assert_no_live_turn_gate(&fixture.live.transport);

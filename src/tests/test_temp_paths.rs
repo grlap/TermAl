@@ -9,7 +9,10 @@ fn fixture_git_discovery_stops_before_the_enclosing_checkout() {
     assert_eq!(resolve_git_repo_root(&root).unwrap(), None);
     // A non-repository sentinel also contains the host's filesystem walk.
     fs::create_dir(root.join(".git")).unwrap();
-    assert_eq!(engram_worktree_root_path(&root), fs::canonicalize(root.path()).unwrap());
+    assert_eq!(
+        engram_worktree_root_path(&root),
+        fs::canonicalize(root.path()).unwrap()
+    );
     assert!(content_revision(&root).is_err());
     run_git_test_command(&root, &["init", "--quiet"]);
     let nested = root.join("nested");
@@ -24,9 +27,10 @@ fn fixture_git_discovery_stops_before_the_enclosing_checkout() {
 // from construction: otherwise the test's own guard removes it while a clone,
 // one that boot handed to a worker included, can still commit, and that late
 // commit recreates the store under the removed root. Every such boot runs as
-// `boot_on_delegation_root(root, || <boot>)`, which also asserts at run time
-// that the booted state holds that very root. So each `AppState::new_with_paths*`
-// call in a file that takes such a root must be the closure's body.
+// `boot_on_delegation_root(root, || <boot>)`, or `|| { <boot> }` as rustfmt
+// writes it, which also asserts at run time that the booted state holds that
+// very root. So each `AppState::new_with_paths*` call in a file that takes such
+// a root must be the closure's body.
 //
 // The lock is textual and scoped: it reads only test files that call the
 // root helper, and only the `new_with_paths*` constructors. A boot helper in
@@ -54,11 +58,13 @@ fn every_state_booted_on_a_delegation_root_holds_that_root() {
             }
             for (offset, _) in source.match_indices(&boot) {
                 // Between the wrapper's parenthesis and the constructor stands
-                // only the root argument and the closure's `||`.
+                // only the root argument, the closure's `||` and, when the
+                // closure body is a block, its opening brace.
                 let before = &source[..offset];
                 let wrapped = before.rfind(&wrapper).is_some_and(|start| {
-                    let between = &before[start + wrapper.len()..];
-                    between.trim_end().ends_with("||")
+                    let between = before[start + wrapper.len()..].trim_end();
+                    let between = between.strip_suffix('{').map_or(between, str::trim_end);
+                    between.ends_with("||")
                         && !between.contains(|c| matches!(c, '(' | ')' | '{' | '}' | ';'))
                 });
                 if !wrapped {
@@ -70,7 +76,10 @@ fn every_state_booted_on_a_delegation_root_holds_that_root() {
     }
 
     let mut found = Vec::new();
-    unattached_boots(&FsPath::new(env!("CARGO_MANIFEST_DIR")).join("src/tests"), &mut found);
+    unattached_boots(
+        &FsPath::new(env!("CARGO_MANIFEST_DIR")).join("src/tests"),
+        &mut found,
+    );
     assert!(
         found.is_empty(),
         "these boots on a delegation root do not hold it; run each in boot_on_delegation_root: {found:#?}"

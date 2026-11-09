@@ -460,7 +460,10 @@ fn delegation_process_cleanup_resolution_control_is_never_started() {
             phase_sync::DEADLOCK_GUARD,
         )
         .unwrap_err();
-    assert!(error.process_never_started, "missing control executable cannot have sent anything: {error}");
+    assert!(
+        error.process_never_started,
+        "missing control executable cannot have sent anything: {error}"
+    );
 }
 
 #[test]
@@ -468,10 +471,17 @@ fn delegation_process_cleanup_resolution_read_is_never_started() {
     let temp = TestTempRoot::create("read-resolution-not-sent");
     let connection = resolution_failure_connection(&temp);
     let error = run_engram_json_command(
-        &connection, &["work", "show", "fixture", "--json"],
-        phase_sync::DEADLOCK_GUARD, "fixture read", temp.path(),
-    ).unwrap_err();
-    assert!(error.process_never_started, "missing read executable cannot have sent anything: {error}");
+        &connection,
+        &["work", "show", "fixture", "--json"],
+        phase_sync::DEADLOCK_GUARD,
+        "fixture read",
+        temp.path(),
+    )
+    .unwrap_err();
+    assert!(
+        error.process_never_started,
+        "missing read executable cannot have sent anything: {error}"
+    );
 }
 
 #[test]
@@ -479,11 +489,19 @@ fn delegation_process_cleanup_resolution_write_is_never_started() {
     let temp = TestTempRoot::create("write-resolution-not-sent");
     let connection = resolution_failure_connection(&temp);
     let result = run_engram_cli_command(
-        &connection, &["work", "evaluate", "fixture"],
-        phase_sync::DEADLOCK_GUARD, "fixture acceptance write", temp.path(),
+        &connection,
+        &["work", "evaluate", "fixture"],
+        phase_sync::DEADLOCK_GUARD,
+        "fixture acceptance write",
+        temp.path(),
     );
-    assert!(matches!(classify_acceptance_evaluation_run(result), AcceptanceEvaluationRunOutcome::NeverStarted(_)),
-        "a missing evaluator executable must not trigger an identical resend or an unconfirmed write");
+    assert!(
+        matches!(
+            classify_acceptance_evaluation_run(result),
+            AcceptanceEvaluationRunOutcome::NeverStarted(_)
+        ),
+        "a missing evaluator executable must not trigger an identical resend or an unconfirmed write"
+    );
 }
 
 #[test]
@@ -491,8 +509,11 @@ fn delegation_process_cleanup_resolution_post_spawn_transport_stays_unknown() {
     let temp = TestTempRoot::create("control-resolution-started-unknown");
     let mut connection = resolution_failure_connection(&temp);
     connection.binary_path = temp.path().join("close-control.ps1");
-    fs::write(&connection.binary_path,
-        "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'started'), 'started'); exit 0").unwrap();
+    fs::write(
+        &connection.binary_path,
+        "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'started'), 'started'); exit 0",
+    )
+    .unwrap();
     let error = EngramHostAdapter::new(temp.path().to_path_buf())
         .request(
             &connection,
@@ -500,9 +521,18 @@ fn delegation_process_cleanup_resolution_post_spawn_transport_stays_unknown() {
             phase_sync::DEADLOCK_GUARD,
         )
         .unwrap_err();
-    assert!(temp.path().join("started").is_file(), "real control process reached its script before losing transport");
-    assert!(!error.process_never_started, "post-spawn transport loss retains uncertainty: {error}");
-    assert!(matches!(classify_acceptance_evaluation_run(Err(error)), AcceptanceEvaluationRunOutcome::Unknown(_)));
+    assert!(
+        temp.path().join("started").is_file(),
+        "real control process reached its script before losing transport"
+    );
+    assert!(
+        !error.process_never_started,
+        "post-spawn transport loss retains uncertainty: {error}"
+    );
+    assert!(matches!(
+        classify_acceptance_evaluation_run(Err(error)),
+        AcceptanceEvaluationRunOutcome::Unknown(_)
+    ));
 }
 
 fn resolver_search_child(case: &str, name: &str) -> bool {
@@ -511,9 +541,14 @@ fn resolver_search_child(case: &str, name: &str) -> bool {
     }
     let temp = TestTempRoot::create("engram-native-search-shadow");
     let witness = temp.path().join("shim-started");
-    fs::write(temp.path().join("cmd.cmd"), format!(
-        "@echo off\r\n> \"{}\" echo shim\r\nexit /b 0\r\n", witness.display()
-    )).unwrap();
+    fs::write(
+        temp.path().join("cmd.cmd"),
+        format!(
+            "@echo off\r\n> \"{}\" echo shim\r\nexit /b 0\r\n",
+            witness.display()
+        ),
+    )
+    .unwrap();
     let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
     let child_path = std::env::join_paths([temp.path(), system.as_path()]).unwrap();
     let output = Command::new(std::env::current_exe().unwrap())
@@ -522,34 +557,51 @@ fn resolver_search_child(case: &str, name: &str) -> bool {
         .env("TERMAL_RESOLUTION_CASE", case)
         .env("TERMAL_RESOLUTION_ROOT", temp.path())
         .current_dir(temp.path())
-        .output().unwrap();
-    assert!(output.status.success(), "isolated search witness failed: {}\n{}\n{}",
-        output.status, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "isolated search witness failed: {}\n{}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     false
 }
 
 #[test]
 fn delegation_process_cleanup_native_search_exe_precedes_batch_shadow() {
-    if !resolver_search_child("shadow", "tests::delegation_process_cleanup::delegation_process_cleanup_native_search_exe_precedes_batch_shadow") {
+    if !resolver_search_child(
+        "shadow",
+        "tests::delegation_process_cleanup::delegation_process_cleanup_native_search_exe_precedes_batch_shadow",
+    ) {
         return;
     }
     let root = PathBuf::from(std::env::var_os("TERMAL_RESOLUTION_ROOT").unwrap());
     let resolved = resolve_engram_host_program(FsPath::new("cmd"), &root).unwrap();
     let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
-    assert_eq!(fs::canonicalize(resolved).unwrap(), fs::canonicalize(expected).unwrap(),
-        "a bare command must preserve native Windows resolution despite an earlier PATH batch shim");
+    assert_eq!(
+        fs::canonicalize(resolved).unwrap(),
+        fs::canonicalize(expected).unwrap(),
+        "a bare command must preserve native Windows resolution despite an earlier PATH batch shim"
+    );
 }
 
 #[test]
 fn delegation_process_cleanup_native_search_preserves_work_shim_guard() {
-    if !resolver_search_child("guard", "tests::delegation_process_cleanup::delegation_process_cleanup_native_search_preserves_work_shim_guard") {
+    if !resolver_search_child(
+        "guard",
+        "tests::delegation_process_cleanup::delegation_process_cleanup_native_search_preserves_work_shim_guard",
+    ) {
         return;
     }
     let root = PathBuf::from(std::env::var_os("TERMAL_RESOLUTION_ROOT").unwrap());
     let binary = FsPath::new("cmd");
     validate_work_read_program(binary, false).unwrap();
-    assert!(validate_work_read_program(&root.join("cmd.cmd"), false).is_err(),
-        "an explicit batch shim stays forbidden for Work arguments");
+    assert!(
+        validate_work_read_program(&root.join("cmd.cmd"), false).is_err(),
+        "an explicit batch shim stays forbidden for Work arguments"
+    );
     let project_file = root.join(".engram-project");
     fs::write(&project_file, "fixture\n").unwrap();
     let connection = EngramConnectionConfig {
@@ -569,7 +621,11 @@ fn delegation_process_cleanup_native_search_preserves_work_shim_guard() {
     );
     let _ = run_work_read_command(
         &connection,
-        &["show".to_owned(), "fixture-session".to_owned(), "--json".to_owned()],
+        &[
+            "show".to_owned(),
+            "fixture-session".to_owned(),
+            "--json".to_owned(),
+        ],
         &root,
     );
     assert!(
@@ -580,29 +636,48 @@ fn delegation_process_cleanup_native_search_preserves_work_shim_guard() {
 
 #[test]
 fn delegation_process_cleanup_native_search_keeps_application_directory() {
-    if !resolver_search_child("application", "tests::delegation_process_cleanup::delegation_process_cleanup_native_search_keeps_application_directory") {
+    if !resolver_search_child(
+        "application",
+        "tests::delegation_process_cleanup::delegation_process_cleanup_native_search_keeps_application_directory",
+    ) {
         return;
     }
     let root = PathBuf::from(std::env::var_os("TERMAL_RESOLUTION_ROOT").unwrap());
     let executable = std::env::current_exe().unwrap();
     let name = FsPath::new(executable.file_name().unwrap());
-    assert_eq!(fs::canonicalize(resolve_engram_host_program(name, &root).unwrap()).unwrap(),
-        fs::canonicalize(executable).unwrap(), "a native executable beside TermAl is found without PATH");
+    assert_eq!(
+        fs::canonicalize(resolve_engram_host_program(name, &root).unwrap()).unwrap(),
+        fs::canonicalize(executable).unwrap(),
+        "a native executable beside TermAl is found without PATH"
+    );
 }
 
 #[test]
 fn delegation_process_cleanup_resolution_missing_interpreter_is_never_started() {
-    if !resolver_search_child("interpreter", "tests::delegation_process_cleanup::delegation_process_cleanup_resolution_missing_interpreter_is_never_started") {
+    if !resolver_search_child(
+        "interpreter",
+        "tests::delegation_process_cleanup::delegation_process_cleanup_resolution_missing_interpreter_is_never_started",
+    ) {
         return;
     }
     let root = PathBuf::from(std::env::var_os("TERMAL_RESOLUTION_ROOT").unwrap());
     let script = root.join("unstarted.ps1");
     let marker = root.join(".engram-project");
-    fs::write(&script, "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'script-started'), 'started')").unwrap();
+    fs::write(
+        &script,
+        "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'script-started'), 'started')",
+    )
+    .unwrap();
     fs::write(&marker, "fixture\n").unwrap();
     let error = engram_host_command(&script, &root, &marker, &root, &root).unwrap_err();
-    assert!(error.process_never_started, "missing interpreter is positively not sent: {error}");
-    assert!(matches!(classify_acceptance_evaluation_run(Err(error)), AcceptanceEvaluationRunOutcome::NeverStarted(_)));
+    assert!(
+        error.process_never_started,
+        "missing interpreter is positively not sent: {error}"
+    );
+    assert!(matches!(
+        classify_acceptance_evaluation_run(Err(error)),
+        AcceptanceEvaluationRunOutcome::NeverStarted(_)
+    ));
     assert!(!root.join("script-started").exists());
 }
 
@@ -611,14 +686,29 @@ fn delegation_process_cleanup_invalid_host_cwd_rejected_before_spawn() {
     let temp = TestTempRoot::create("invalid-host-directory-not-sent");
     let mut connection = resolution_failure_connection(&temp);
     connection.binary_path = temp.path().join("must-not-start.ps1");
-    fs::write(&connection.binary_path,
-        "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'started'), 'started')").unwrap();
-    for directory in [PathBuf::from("relative-host-directory"), temp.path().join("nonexistent-host-directory")] {
-        let error = run_engram_cli_command(&connection, &["work", "evaluate", "fixture"],
-            phase_sync::DEADLOCK_GUARD, "invalid cwd fixture", &directory).unwrap_err();
+    fs::write(
+        &connection.binary_path,
+        "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'started'), 'started')",
+    )
+    .unwrap();
+    for directory in [
+        PathBuf::from("relative-host-directory"),
+        temp.path().join("nonexistent-host-directory"),
+    ] {
+        let error = run_engram_cli_command(
+            &connection,
+            &["work", "evaluate", "fixture"],
+            phase_sync::DEADLOCK_GUARD,
+            "invalid cwd fixture",
+            &directory,
+        )
+        .unwrap_err();
         assert!(error.process_never_started);
         assert_eq!(error.kind, EngramTransportErrorKind::LocalState);
-        assert!(!temp.path().join("started").exists(), "invalid cwd cannot fall back to a project worktree");
+        assert!(
+            !temp.path().join("started").exists(),
+            "invalid cwd cannot fall back to a project worktree"
+        );
     }
 }
 
@@ -627,7 +717,10 @@ fn resolved_alias_connection(temp: &TestTempRoot, extension: &str) -> EngramConn
     let script = temp.path().join(format!("target.{extension}"));
     let marker = temp.path().join("alias-started");
     let contents = if extension == "cmd" {
-        format!("@echo off\r\n> \"{}\" echo started\r\necho {{}}\r\nexit /b 0\r\n", marker.display())
+        format!(
+            "@echo off\r\n> \"{}\" echo started\r\necho {{}}\r\nexit /b 0\r\n",
+            marker.display()
+        )
     } else {
         "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'alias-started'), 'started'); [Console]::Out.WriteLine('{}')".to_owned()
     };
@@ -635,7 +728,10 @@ fn resolved_alias_connection(temp: &TestTempRoot, extension: &str) -> EngramConn
     connection.binary_path = temp.path().join("engram.exe");
     std::os::windows::fs::symlink_file(&script, &connection.binary_path)
         .unwrap_or_else(|error| panic!("alias witness unavailable: cannot create owned executable symlink: {error}; this is not a passing or skipped witness"));
-    assert_eq!(fs::canonicalize(&connection.binary_path).unwrap(), fs::canonicalize(script).unwrap());
+    assert_eq!(
+        fs::canonicalize(&connection.binary_path).unwrap(),
+        fs::canonicalize(script).unwrap()
+    );
     connection
 }
 
@@ -646,14 +742,21 @@ fn delegation_process_cleanup_resolved_alias_batch_work_is_rejected() {
     validate_work_read_binary(&connection).unwrap();
     let result = run_work_read_command(
         &connection,
-        &["show".to_owned(), "fixture-session".to_owned(), "--json".to_owned()],
+        &[
+            "show".to_owned(),
+            "fixture-session".to_owned(),
+            "--json".to_owned(),
+        ],
         temp.path(),
     );
     assert!(
         !temp.path().join("alias-started").exists(),
         "raw .exe Work validation passed, but its resolved batch target must never receive arguments"
     );
-    assert!(result.is_err(), "resolved batch alias must be refused before launch");
+    assert!(
+        result.is_err(),
+        "resolved batch alias must be refused before launch"
+    );
 }
 
 #[test]
@@ -661,10 +764,19 @@ fn delegation_process_cleanup_resolved_alias_powershell_work_is_rejected() {
     let temp = TestTempRoot::create("resolved-alias-powershell-work");
     let connection = resolved_alias_connection(&temp, "ps1");
     validate_work_read_binary(&connection).unwrap();
-    let result = run_work_read_command(&connection, &["ls".to_owned(), "--json".to_owned()], temp.path());
-    assert!(!temp.path().join("alias-started").exists(),
-        "raw native Work guard passed, but its resolved PowerShell target must never launch");
-    assert!(result.is_err(), "native-spelled script alias is not a permitted PowerShell test fixture");
+    let result = run_work_read_command(
+        &connection,
+        &["ls".to_owned(), "--json".to_owned()],
+        temp.path(),
+    );
+    assert!(
+        !temp.path().join("alias-started").exists(),
+        "raw native Work guard passed, but its resolved PowerShell target must never launch"
+    );
+    assert!(
+        result.is_err(),
+        "native-spelled script alias is not a permitted PowerShell test fixture"
+    );
 }
 
 #[test]
@@ -675,7 +787,11 @@ fn delegation_process_cleanup_resolved_alias_powershell_work_keeps_exact_argumen
     connection.binary_path = temp.path().join("alias.ps1");
     std::os::windows::fs::symlink_file(&script, &connection.binary_path)
         .expect("same-kind PowerShell alias witness must be available, never skipped");
-    fs::write(script, "[Console]::Out.WriteLine((ConvertTo-Json -InputObject @($args) -Compress))").unwrap();
+    fs::write(
+        script,
+        "[Console]::Out.WriteLine((ConvertTo-Json -InputObject @($args) -Compress))",
+    )
+    .unwrap();
     let selectors = ["fixture trailing  ", "quote\";& value  "];
     let expected = vec![
         "--home".to_owned(),
@@ -695,7 +811,10 @@ fn delegation_process_cleanup_resolved_alias_powershell_work_keeps_exact_argumen
     ];
     // Both explicit PowerShell paths are genuine test-fixture exemptions;
     // the sibling native-spelled alias witness above remains forbidden.
-    for binary in [temp.path().join("alias.ps1"), temp.path().join("target.ps1")] {
+    for binary in [
+        temp.path().join("alias.ps1"),
+        temp.path().join("target.ps1"),
+    ] {
         connection.binary_path = binary;
         validate_work_read_binary(&connection).unwrap();
         let output = run_work_read_command(
@@ -708,9 +827,13 @@ fn delegation_process_cleanup_resolved_alias_powershell_work_keeps_exact_argumen
                 "--json".to_owned(),
             ],
             temp.path(),
-        ).unwrap();
+        )
+        .unwrap();
         let actual: Vec<String> = serde_json::from_value(output).unwrap();
-        assert_eq!(actual, expected, "resolved PS and explicit PS must preserve arguments as data");
+        assert_eq!(
+            actual, expected,
+            "resolved PS and explicit PS must preserve arguments as data"
+        );
     }
 }
 
@@ -718,12 +841,24 @@ fn delegation_process_cleanup_resolved_alias_powershell_work_keeps_exact_argumen
 fn delegation_process_cleanup_resolved_alias_native_launch_stays_native() {
     let temp = TestTempRoot::create("resolved-alias-native-control");
     let mut connection = resolution_failure_connection(&temp);
-    connection.binary_path = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
-    let resolved = resolve_engram_host_program(&connection.binary_path, &connection.project_root).unwrap();
-    let command = engram_host_command(&connection.binary_path, &connection.project_root,
-        &connection.project_file, &connection.home, temp.path()).unwrap();
+    connection.binary_path =
+        PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
+    let resolved =
+        resolve_engram_host_program(&connection.binary_path, &connection.project_root).unwrap();
+    let command = engram_host_command(
+        &connection.binary_path,
+        &connection.project_root,
+        &connection.project_file,
+        &connection.home,
+        temp.path(),
+    )
+    .unwrap();
     assert_eq!(FsPath::new(command.get_program()), resolved);
-    assert_eq!(command.get_args().count(), 0, "native launch must not acquire an interpreter prefix");
+    assert_eq!(
+        command.get_args().count(),
+        0,
+        "native launch must not acquire an interpreter prefix"
+    );
     let work = work_read_launch_command(&connection, temp.path()).unwrap();
     assert_eq!(FsPath::new(work.get_program()), resolved);
     validate_work_read_program(&resolved, false).unwrap();
@@ -733,21 +868,42 @@ fn resolved_alias_write_is_never_started(extension: &str) {
     let temp = TestTempRoot::create("resolved-alias-write-not-sent");
     let connection = resolved_alias_connection(&temp, extension);
     let resolved = fs::canonicalize(&connection.binary_path).unwrap();
-    let result = run_engram_cli_command(&connection, &["work", "evaluate", "fixture"],
-        phase_sync::DEADLOCK_GUARD, "alias acceptance write", temp.path());
-    assert!(!temp.path().join("alias-started").exists(),
-        "an alias that changes native to {extension} must not execute even on an unrestricted host write");
+    let result = run_engram_cli_command(
+        &connection,
+        &["work", "evaluate", "fixture"],
+        phase_sync::DEADLOCK_GUARD,
+        "alias acceptance write",
+        temp.path(),
+    );
+    assert!(
+        !temp.path().join("alias-started").exists(),
+        "an alias that changes native to {extension} must not execute even on an unrestricted host write"
+    );
     let control_error = EngramHostAdapter::new(temp.path().to_path_buf())
-        .request(&connection, &EngramControlRequest::WorkSessionRead {},
-            phase_sync::DEADLOCK_GUARD).unwrap_err();
-    assert!(control_error.process_never_started, "control launch uses the same definite refusal: {control_error}");
+        .request(
+            &connection,
+            &EngramControlRequest::WorkSessionRead {},
+            phase_sync::DEADLOCK_GUARD,
+        )
+        .unwrap_err();
+    assert!(
+        control_error.process_never_started,
+        "control launch uses the same definite refusal: {control_error}"
+    );
     match classify_acceptance_evaluation_run(result) {
         AcceptanceEvaluationRunOutcome::NeverStarted(message) => {
             assert!(message.contains(&connection.binary_path.display().to_string()));
             assert!(message.contains("target."));
-            assert!(resolved.extension().unwrap().eq_ignore_ascii_case(extension));
+            assert!(
+                resolved
+                    .extension()
+                    .unwrap()
+                    .eq_ignore_ascii_case(extension)
+            );
         }
-        _ => panic!("launch-kind refusal must be definite NeverStarted, not an uncertain or confirmed write"),
+        _ => panic!(
+            "launch-kind refusal must be definite NeverStarted, not an uncertain or confirmed write"
+        ),
     }
 }
 
@@ -768,21 +924,39 @@ const FIXTURE_ROLE: &str = "TERMAL_TEST_DELEGATION_PROCESS_ROLE";
 const FIXTURE_ENDPOINT: &str = "TERMAL_TEST_DELEGATION_PROCESS_ENDPOINT";
 
 fn runtime_fixture_identity(role: &str) -> Value {
-    use windows_sys::Win32::{Foundation::FILETIME, System::Threading::{GetCurrentProcess, GetProcessTimes}};
+    use windows_sys::Win32::{
+        Foundation::FILETIME,
+        System::Threading::{GetCurrentProcess, GetProcessTimes},
+    };
     #[link(name = "kernel32")]
-    unsafe extern "system" { fn GetCommandLineW() -> *const u16; }
+    unsafe extern "system" {
+        fn GetCommandLineW() -> *const u16;
+    }
     let mut created: FILETIME = unsafe { std::mem::zeroed() };
     let mut exited: FILETIME = unsafe { std::mem::zeroed() };
     let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
     let mut user: FILETIME = unsafe { std::mem::zeroed() };
-    assert_ne!(unsafe { GetProcessTimes(GetCurrentProcess(), &mut created, &mut exited, &mut kernel, &mut user) }, 0);
+    assert_ne!(
+        unsafe {
+            GetProcessTimes(
+                GetCurrentProcess(),
+                &mut created,
+                &mut exited,
+                &mut kernel,
+                &mut user,
+            )
+        },
+        0
+    );
     let ticks = ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64;
     let millis = ((ticks - 116_444_736_000_000_000) / 10_000) as i64;
     let command_line = unsafe {
         let pointer = GetCommandLineW();
         assert!(!pointer.is_null());
         let mut length = 0;
-        while *pointer.add(length) != 0 { length += 1; }
+        while *pointer.add(length) != 0 {
+            length += 1;
+        }
         String::from_utf16_lossy(std::slice::from_raw_parts(pointer, length))
     };
     json!({"role":role, "pid":std::process::id(),
@@ -863,7 +1037,8 @@ impl ProcessPeer {
             };
             assert_eq!(
                 result, WAIT_OBJECT_0,
-                "owned fixture survived cleanup: {}", self.description
+                "owned fixture survived cleanup: {}",
+                self.description
             );
         }
         #[cfg(not(windows))]
@@ -917,8 +1092,16 @@ impl RuntimeTree {
             .stderr(Stdio::piped());
         let (process, input, process_tree, output_pipes) = {
             let mut child = spawn_dedicated_runtime(&mut command, "Claude").unwrap();
-            child.launch_guard.resume(&child.process, &child.tree).unwrap();
-            (child.process, child.stdin, child.tree, Some((child.stdout, child.stderr)))
+            child
+                .launch_guard
+                .resume(&child.process, &child.tree)
+                .unwrap();
+            (
+                child.process,
+                child.stdin,
+                child.tree,
+                Some((child.stdout, child.stderr)),
+            )
         };
         let mut owner = Self {
             process,
@@ -956,7 +1139,10 @@ impl RuntimeTree {
             use std::os::windows::io::AsRawHandle;
             use windows_sys::Win32::System::Threading::WaitForSingleObject;
             let wait_result = unsafe { WaitForSingleObject(peer.process.as_raw_handle(), 0) };
-            eprintln!("owned process at cleanup assertion: {}", json!({"identity": &peer.description, "wait_result": wait_result}));
+            eprintln!(
+                "owned process at cleanup assertion: {}",
+                json!({"identity": &peer.description, "wait_result": wait_result})
+            );
         }
         for peer in &self.peers {
             peer.assert_exited();
@@ -1023,12 +1209,7 @@ fn runtime_tree_fixture() {
         )
     };
     let mut socket = TcpStream::connect(endpoint).unwrap();
-    writeln!(
-        socket,
-        "{}",
-        runtime_fixture_identity(&role)
-    )
-    .unwrap();
+    writeln!(socket, "{}", runtime_fixture_identity(&role)).unwrap();
     if role == "runtime" {
         let _ = std::io::stdin().read(&mut [0]);
     } else {
@@ -1143,7 +1324,6 @@ async fn delegation_process_cleanup_cancel_mid_turn() {
     cancel_tree_case(true).await;
 }
 
-
 #[tokio::test]
 async fn delegation_process_cleanup_completed_runtime_tree() {
     runtime_tree_case(true, Some("completed")).await;
@@ -1217,7 +1397,10 @@ impl Drop for LaunchFailureScope {
         // Unwind cleanup uses the retained production owner after assertions.
         let _ = retry_failed_runtime_launch_cleanup();
         await_launch_cleanup_attempts(&registry);
-        assert!(registry.lock().unwrap().is_empty(), "unwind cleanup retains no unresolved fixture owner");
+        assert!(
+            registry.lock().unwrap().is_empty(),
+            "unwind cleanup retains no unresolved fixture owner"
+        );
         TEST_RUNTIME_LAUNCH_OWNERS.with(|owners| owners.borrow_mut().take());
     }
 }
@@ -1227,7 +1410,14 @@ fn await_launch_cleanup_attempts(registry: &FailedRuntimeLaunchRegistry) {
     let guard = phase_sync::PollGuard::new();
     loop {
         let entries = registry.lock().unwrap().clone();
-        if !entries.iter().any(|entry| matches!(*entry.phase.lock().unwrap(), FailedLaunchPhase::InProgress(_))) { return; }
+        if !entries.iter().any(|entry| {
+            matches!(
+                *entry.phase.lock().unwrap(),
+                FailedLaunchPhase::InProgress(_)
+            )
+        }) {
+            return;
+        }
         guard.wait("bounded retained launch cleanup attempt");
     }
 }
@@ -1411,9 +1601,13 @@ fn delegation_process_cleanup_launch_failure_retains_owner_before_retry() {
         WAIT_TIMEOUT
     );
     assert_eq!(failed_runtime_launches().lock().unwrap().len(), 1);
-    assert!(retry_failed_runtime_launch_cleanup().is_err(), "scheduled cleanup remains visible to admission");
+    assert!(
+        retry_failed_runtime_launch_cleanup().is_err(),
+        "scheduled cleanup remains visible to admission"
+    );
     await_launch_cleanup_attempts(&failed_runtime_launches());
-    let replacement = spawn_dedicated_runtime(&mut launch_fixture_command(temp.path()), "Claude").unwrap();
+    let replacement =
+        spawn_dedicated_runtime(&mut launch_fixture_command(temp.path()), "Claude").unwrap();
     assert_launch_handle_exited(&observed);
     await_launch_cleanup_attempts(&failed_runtime_launches());
     assert!(failed_runtime_launches().lock().unwrap().is_empty());
@@ -1545,34 +1739,76 @@ impl ProductionWorkerTree {
         listener.set_nonblocking(true).unwrap();
         let script = cwd.join("worker.ps1");
         fs::write(&script, WORKER_TREE_SCRIPT).unwrap();
-        let mut command = Command::new(PathBuf::from(std::env::var_os("SystemRoot").unwrap())
-            .join("System32/WindowsPowerShell/v1.0/powershell.exe"));
-        command.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
-            .arg(&script).args(["-Role", "runtime", "-Endpoint"])
-            .arg(listener.local_addr().unwrap().to_string()).current_dir(cwd);
+        let mut command = Command::new(
+            PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+        );
+        command
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&script)
+            .args(["-Role", "runtime", "-Endpoint"])
+            .arg(listener.local_addr().unwrap().to_string())
+            .current_dir(cwd);
         TEST_DEDICATED_COMMAND.with(|slot| *slot.borrow_mut() = Some(command));
         let (waiter_tx, waiter) = mpsc::channel();
         TEST_DEDICATED_WAITER.with(|slot| *slot.borrow_mut() = Some(waiter_tx));
         let (writer_tx, writer_rx) = mpsc::channel();
-        if acp { TEST_DEDICATED_WRITER.with(|slot| *slot.borrow_mut() = Some(writer_tx)); }
+        if acp {
+            TEST_DEDICATED_WRITER.with(|slot| *slot.borrow_mut() = Some(writer_tx));
+        }
         let (pending_tx, pending_rx) = mpsc::channel();
-        if acp { TEST_DEDICATED_ACP_PENDING.with(|slot| *slot.borrow_mut() = Some(pending_tx)); }
+        if acp {
+            TEST_DEDICATED_ACP_PENDING.with(|slot| *slot.borrow_mut() = Some(pending_tx));
+        }
         // The root never answers initialize; each test ends it explicitly, so
         // no wall-clock handshake deadline can kill the tree first.
-        if acp { TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.set(true)); }
+        if acp {
+            TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.set(true));
+        }
         let mut inner = state.inner.lock().unwrap();
         let runtime = if acp {
-            SessionRuntime::Acp(spawn_acp_runtime(state.clone(), session_id.to_owned(),
-                cwd.to_string_lossy().into_owned(), AcpAgent::Kimi, None, None).unwrap())
+            SessionRuntime::Acp(
+                spawn_acp_runtime(
+                    state.clone(),
+                    session_id.to_owned(),
+                    cwd.to_string_lossy().into_owned(),
+                    AcpAgent::Kimi,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            )
         } else {
-            SessionRuntime::Claude(spawn_claude_runtime(state.clone(), session_id.to_owned(),
-                cwd.to_string_lossy().into_owned(), Agent::Claude.default_model().to_owned(),
-                ClaudeApprovalMode::Ask, ClaudeEffortLevel::Default, None,
-                "{\"mcpServers\":{}}".to_owned(), None, false, None).unwrap())
+            SessionRuntime::Claude(
+                spawn_claude_runtime(
+                    state.clone(),
+                    session_id.to_owned(),
+                    cwd.to_string_lossy().into_owned(),
+                    Agent::Claude.default_model().to_owned(),
+                    ClaudeApprovalMode::Ask,
+                    ClaudeEffortLevel::Default,
+                    None,
+                    "{\"mcpServers\":{}}".to_owned(),
+                    None,
+                    false,
+                    None,
+                )
+                .unwrap(),
+            )
         };
         let (process, tree) = match &runtime {
-            SessionRuntime::Claude(handle) => (handle.process.clone(), handle.process_tree.clone().unwrap()),
-            SessionRuntime::Acp(handle) => (handle.process.clone(), handle.process_tree.clone().unwrap()),
+            SessionRuntime::Claude(handle) => {
+                (handle.process.clone(), handle.process_tree.clone().unwrap())
+            }
+            SessionRuntime::Acp(handle) => {
+                (handle.process.clone(), handle.process_tree.clone().unwrap())
+            }
             _ => unreachable!(),
         };
         let index = inner.find_session_index(session_id).unwrap();
@@ -1581,15 +1817,39 @@ impl ProductionWorkerTree {
         inner.sessions[index].session.status = SessionStatus::Active;
         state.commit_locked(&mut inner).unwrap();
         drop(inner);
-        let mut owner = Self { process, tree, peers: Vec::new(), waiter,
+        let mut owner = Self {
+            process,
+            tree,
+            peers: Vec::new(),
+            waiter,
             writer: if acp { Some(writer_rx) } else { None },
             writer_finished: std::cell::Cell::new(false),
-            pending: if acp { Some(phase_sync::receive(&pending_rx, "production ACP pending map")) } else { None } };
-        for _ in 0..3 { owner.peers.push(ProcessPeer::accept(&listener)); }
-        let root = owner.peers.iter().find(|peer| peer.description["role"] == "runtime").unwrap();
-        assert_eq!(root.description["method"], "initialize", "actual provider writer request");
+            pending: if acp {
+                Some(phase_sync::receive(
+                    &pending_rx,
+                    "production ACP pending map",
+                ))
+            } else {
+                None
+            },
+        };
+        for _ in 0..3 {
+            owner.peers.push(ProcessPeer::accept(&listener));
+        }
+        let root = owner
+            .peers
+            .iter()
+            .find(|peer| peer.description["role"] == "runtime")
+            .unwrap();
+        assert_eq!(
+            root.description["method"], "initialize",
+            "actual provider writer request"
+        );
         for peer in &owner.peers {
-            assert_eq!(fs::canonicalize(peer.description["cwd"].as_str().unwrap()).unwrap(), fs::canonicalize(cwd).unwrap());
+            assert_eq!(
+                fs::canonicalize(peer.description["cwd"].as_str().unwrap()).unwrap(),
+                fs::canonicalize(cwd).unwrap()
+            );
         }
         owner
     }
@@ -1600,7 +1860,11 @@ impl ProductionWorkerTree {
     }
 
     pub(super) fn release_root(&self) {
-        let root = self.peers.iter().find(|peer| peer.description["role"] == "runtime").unwrap();
+        let root = self
+            .peers
+            .iter()
+            .find(|peer| peer.description["role"] == "runtime")
+            .unwrap();
         (&root.socket).write_all(&[1]).unwrap();
     }
 
@@ -1611,13 +1875,22 @@ impl ProductionWorkerTree {
     }
 
     pub(super) fn wait_for_writer(&self) {
-        if let Some(writer) = &self.writer && !self.writer_finished.replace(true) {
-            phase_sync::receive(writer, "ACP writer applies its normal initialization-error callback");
+        if let Some(writer) = &self.writer
+            && !self.writer_finished.replace(true)
+        {
+            phase_sync::receive(
+                writer,
+                "ACP writer applies its normal initialization-error callback",
+            );
         }
     }
 
     pub(super) fn fail_initialize(&self) {
-        let root = self.peers.iter().find(|peer| peer.description["role"] == "runtime").unwrap();
+        let root = self
+            .peers
+            .iter()
+            .find(|peer| peer.description["role"] == "runtime")
+            .unwrap();
         (&root.socket).write_all(&[2]).unwrap();
         self.wait_for_writer();
     }
@@ -1629,13 +1902,19 @@ impl ProductionWorkerTree {
     pub(super) fn expire_initialize(&self) {
         let pending = self.pending.as_ref().expect("an ACP worker tree");
         let expired = std::mem::take(&mut *pending.lock().unwrap());
-        assert_eq!(expired.len(), 1, "only the provider's initialize is pending");
+        assert_eq!(
+            expired.len(),
+            1,
+            "only the provider's initialize is pending"
+        );
         drop(expired);
         self.wait_for_writer();
     }
 
     pub(super) fn assert_peers_exited(&self) {
-        for peer in &self.peers { peer.assert_exited(); }
+        for peer in &self.peers {
+            peer.assert_exited();
+        }
     }
 }
 
@@ -1645,18 +1924,34 @@ impl ProductionWorkerTree {
 #[test]
 fn delegation_process_cleanup_refused_acp_spawn_consumes_untimed_initialize() {
     let state = test_app_state();
-    assert!(!state.agent_runtime_spawning_enabled, "the refusal is the early return under test");
+    assert!(
+        !state.agent_runtime_spawning_enabled,
+        "the refusal is the early return under test"
+    );
     TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.set(true));
-    let refused = spawn_acp_runtime(state, "refused-acp".to_owned(), ".".to_owned(), AcpAgent::Kimi, None, None);
+    let refused = spawn_acp_runtime(
+        state,
+        "refused-acp".to_owned(),
+        ".".to_owned(),
+        AcpAgent::Kimi,
+        None,
+        None,
+    );
     assert!(refused.is_err(), "spawning is disabled for this state");
-    assert!(!TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.get()),
-        "an early return must not leave the seam armed");
+    assert!(
+        !TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.get()),
+        "an early return must not leave the seam armed"
+    );
 }
 
 impl Drop for ProductionWorkerTree {
     fn drop(&mut self) {
-        for peer in &self.peers { let _ = peer.socket.shutdown(std::net::Shutdown::Both); }
-        for peer in &self.peers { peer.assert_exited(); }
+        for peer in &self.peers {
+            let _ = peer.socket.shutdown(std::net::Shutdown::Both);
+        }
+        for peer in &self.peers {
+            peer.assert_exited();
+        }
     }
 }
 
@@ -1666,42 +1961,84 @@ fn production_waiter_failure_case(acp: bool) {
     state.agent_runtime_spawning_enabled = true;
     let session_id = test_session_id(&state, if acp { Agent::Kimi } else { Agent::Claude });
     let owner = ProductionWorkerTree::spawn(&state, &session_id, temp.path(), acp);
-    if let Some(pending) = &owner.pending { assert_eq!(pending.lock().unwrap().len(), 1); }
-    owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+    if let Some(pending) = &owner.pending {
+        assert_eq!(pending.lock().unwrap().len(), 1);
+    }
+    owner
+        .tree
+        .termination_failures
+        .store(1, std::sync::atomic::Ordering::SeqCst);
     owner.exit_root();
-    assert!(!owner.tree.has_exited().unwrap(), "descendants still own the stdout pipe at failure reporting");
+    assert!(
+        !owner.tree.has_exited().unwrap(),
+        "descendants still own the stdout pipe at failure reporting"
+    );
     let inner = state.inner.lock().unwrap();
     let record = inner.sessions[inner.find_session_index(&session_id).unwrap()].clone();
     drop(inner);
-    assert_eq!(record.session.status, SessionStatus::Error,
-        "the actual waiter must publish cleanup failure without waiting for descendant pipe EOF");
-    assert!(record.orchestrator_auto_dispatch_blocked, "cleanup uncertainty reserves automatic dispatch");
-    assert!(record.session.preview.contains("process tree cleanup failed"));
+    assert_eq!(
+        record.session.status,
+        SessionStatus::Error,
+        "the actual waiter must publish cleanup failure without waiting for descendant pipe EOF"
+    );
+    assert!(
+        record.orchestrator_auto_dispatch_blocked,
+        "cleanup uncertainty reserves automatic dispatch"
+    );
+    assert!(
+        record
+            .session
+            .preview
+            .contains("process tree cleanup failed")
+    );
     match &record.runtime {
-        SessionRuntime::Claude(handle) => assert!(Arc::ptr_eq(handle.process_tree.as_ref().unwrap(), &owner.tree)),
-        SessionRuntime::Acp(handle) => assert!(Arc::ptr_eq(handle.process_tree.as_ref().unwrap(), &owner.tree)),
+        SessionRuntime::Claude(handle) => assert!(Arc::ptr_eq(
+            handle.process_tree.as_ref().unwrap(),
+            &owner.tree
+        )),
+        SessionRuntime::Acp(handle) => assert!(Arc::ptr_eq(
+            handle.process_tree.as_ref().unwrap(),
+            &owner.tree
+        )),
         _ => panic!("failed waiter must retain its exact tree for retry"),
     }
-    if let Some(pending) = &owner.pending { assert!(pending.lock().unwrap().is_empty(), "ACP pending calls fail before EOF"); }
-    state.request_stop_session(&session_id).expect("public Stop can retry the retained cleanup owner");
+    if let Some(pending) = &owner.pending {
+        assert!(
+            pending.lock().unwrap().is_empty(),
+            "ACP pending calls fail before EOF"
+        );
+    }
+    state
+        .request_stop_session(&session_id)
+        .expect("public Stop can retry the retained cleanup owner");
     let guard = phase_sync::PollGuard::new();
-    while !owner.tree.has_exited().unwrap() { guard.wait("public Stop cleanup retry"); }
-    for peer in &owner.peers { peer.assert_exited(); }
+    while !owner.tree.has_exited().unwrap() {
+        guard.wait("public Stop cleanup retry");
+    }
+    for peer in &owner.peers {
+        peer.assert_exited();
+    }
     let guard = phase_sync::PollGuard::new();
     loop {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-        if matches!(record.runtime, SessionRuntime::None) { break; }
+        if matches!(record.runtime, SessionRuntime::None) {
+            break;
+        }
         drop(inner);
         guard.wait("Stop commits exact owner disposal");
     }
 }
 
 #[test]
-fn delegation_process_cleanup_production_claude_waiter_failure() { production_waiter_failure_case(false); }
+fn delegation_process_cleanup_production_claude_waiter_failure() {
+    production_waiter_failure_case(false);
+}
 
 #[test]
-fn delegation_process_cleanup_production_acp_waiter_failure() { production_waiter_failure_case(true); }
+fn delegation_process_cleanup_production_acp_waiter_failure() {
+    production_waiter_failure_case(true);
+}
 
 fn production_waiter_success_case(acp: bool) {
     let temp = TestTempRoot::create("production-waiter-tree-success");
@@ -1711,18 +2048,32 @@ fn production_waiter_success_case(acp: bool) {
     let owner = ProductionWorkerTree::spawn(&state, &session_id, temp.path(), acp);
     owner.exit_root();
     assert!(owner.tree.has_exited().unwrap());
-    for peer in &owner.peers { peer.assert_exited(); }
+    for peer in &owner.peers {
+        peer.assert_exited();
+    }
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
     assert!(matches!(record.runtime, SessionRuntime::None));
-    assert!(!record.orchestrator_auto_dispatch_blocked, "confirmed natural-exit cleanup releases its transient hold");
-    assert!(!record.session.preview.contains("cleanup remains in progress"));
+    assert!(
+        !record.orchestrator_auto_dispatch_blocked,
+        "confirmed natural-exit cleanup releases its transient hold"
+    );
+    assert!(
+        !record
+            .session
+            .preview
+            .contains("cleanup remains in progress")
+    );
 }
 
 #[test]
-fn delegation_process_cleanup_production_claude_natural_exit() { production_waiter_success_case(false); }
+fn delegation_process_cleanup_production_claude_natural_exit() {
+    production_waiter_success_case(false);
+}
 #[test]
-fn delegation_process_cleanup_production_acp_natural_exit() { production_waiter_success_case(true); }
+fn delegation_process_cleanup_production_acp_natural_exit() {
+    production_waiter_success_case(true);
+}
 
 fn production_waiter_stop_race_case(acp: bool, fail_stop: bool) {
     let temp = TestTempRoot::create("production-waiter-stop-race");
@@ -1730,7 +2081,10 @@ fn production_waiter_stop_race_case(acp: bool, fail_stop: bool) {
     state.agent_runtime_spawning_enabled = true;
     let session_id = test_session_id(&state, if acp { Agent::Kimi } else { Agent::Claude });
     let owner = ProductionWorkerTree::spawn(&state, &session_id, temp.path(), acp);
-    owner.tree.termination_failures.store(if fail_stop { 2 } else { 1 }, std::sync::atomic::Ordering::SeqCst);
+    owner.tree.termination_failures.store(
+        if fail_stop { 2 } else { 1 },
+        std::sync::atomic::Ordering::SeqCst,
+    );
     let gate = install_test_stop_fence_gate(&state, &session_id);
     state.request_stop_session(&session_id).unwrap();
     gate.wait_until_claimed();
@@ -1739,9 +2093,16 @@ fn production_waiter_stop_race_case(acp: bool, fail_stop: bool) {
         let inner = state.inner.lock().unwrap();
         inner.sessions[inner.find_session_index(&session_id).unwrap()].clone()
     };
-    assert_eq!(record.session.status, SessionStatus::Stopping, "waiter cannot overwrite the Stop owner's projection");
+    assert_eq!(
+        record.session.status,
+        SessionStatus::Stopping,
+        "waiter cannot overwrite the Stop owner's projection"
+    );
     assert!(record.runtime_stop_in_progress);
-    assert!(!record.deferred_stop_callbacks.is_empty(), "cleanup reporting retains its Stop-fenced callback duty");
+    assert!(
+        !record.deferred_stop_callbacks.is_empty(),
+        "cleanup reporting retains its Stop-fenced callback duty"
+    );
     gate.release();
     let guard = phase_sync::PollGuard::new();
     loop {
@@ -1755,24 +2116,38 @@ fn production_waiter_stop_race_case(acp: bool, fail_stop: bool) {
                 assert_eq!(record.session.status, SessionStatus::Error);
                 assert!(record.orchestrator_auto_dispatch_blocked);
                 state.request_stop_session(&session_id).unwrap();
-            } else { assert!(matches!(record.runtime, SessionRuntime::None)); }
+            } else {
+                assert!(matches!(record.runtime, SessionRuntime::None));
+            }
             break;
         }
         guard.wait("claimed Stop settles its worker");
     }
     let guard = phase_sync::PollGuard::new();
-    while !owner.tree.has_exited().unwrap() { guard.wait("retry cleans the same retained tree"); }
-    for peer in &owner.peers { peer.assert_exited(); }
+    while !owner.tree.has_exited().unwrap() {
+        guard.wait("retry cleans the same retained tree");
+    }
+    for peer in &owner.peers {
+        peer.assert_exited();
+    }
 }
 
 #[test]
-fn delegation_process_cleanup_production_claude_stop_race() { production_waiter_stop_race_case(false, false); }
+fn delegation_process_cleanup_production_claude_stop_race() {
+    production_waiter_stop_race_case(false, false);
+}
 #[test]
-fn delegation_process_cleanup_production_acp_stop_race() { production_waiter_stop_race_case(true, false); }
+fn delegation_process_cleanup_production_acp_stop_race() {
+    production_waiter_stop_race_case(true, false);
+}
 #[test]
-fn delegation_process_cleanup_production_claude_failed_stop_retry() { production_waiter_stop_race_case(false, true); }
+fn delegation_process_cleanup_production_claude_failed_stop_retry() {
+    production_waiter_stop_race_case(false, true);
+}
 #[test]
-fn delegation_process_cleanup_production_acp_failed_stop_retry() { production_waiter_stop_race_case(true, true); }
+fn delegation_process_cleanup_production_acp_failed_stop_retry() {
+    production_waiter_stop_race_case(true, true);
+}
 
 #[test]
 fn delegation_process_cleanup_production_acp_writer_precedes_waiter() {
@@ -1782,9 +2157,15 @@ fn delegation_process_cleanup_production_acp_writer_precedes_waiter() {
     let session_id = test_session_id(&state, Agent::Kimi);
     let owner = ProductionWorkerTree::spawn(&state, &session_id, temp.path(), true);
     assert!(owner.tree.is_live());
-    owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+    owner
+        .tree
+        .termination_failures
+        .store(1, std::sync::atomic::Ordering::SeqCst);
     owner.fail_initialize();
-    assert!(owner.process.try_wait().unwrap().is_none(), "provider root is still alive when its real writer exits");
+    assert!(
+        owner.process.try_wait().unwrap().is_none(),
+        "provider root is still alive when its real writer exits"
+    );
     let record = {
         let inner = state.inner.lock().unwrap();
         inner.sessions[inner.find_session_index(&session_id).unwrap()].clone()
@@ -1792,8 +2173,13 @@ fn delegation_process_cleanup_production_acp_writer_precedes_waiter() {
     assert_eq!(record.session.status, SessionStatus::Error);
     assert!(record.orchestrator_auto_dispatch_blocked);
     assert!(record.runtime.dedicated_cleanup_failure().is_some());
-    let SessionRuntime::Acp(handle) = &record.runtime else { panic!("writer must retain its live lease"); };
-    assert!(Arc::ptr_eq(handle.process_tree.as_ref().unwrap(), &owner.tree));
+    let SessionRuntime::Acp(handle) = &record.runtime else {
+        panic!("writer must retain its live lease");
+    };
+    assert!(Arc::ptr_eq(
+        handle.process_tree.as_ref().unwrap(),
+        &owner.tree
+    ));
     owner.exit_root();
     assert!(owner.tree.is_confirmed());
     assert!(owner.tree.has_exited().unwrap());
@@ -1807,26 +2193,51 @@ fn production_stale_owner_case(acp: bool) {
     let session_id = test_session_id(&state, if acp { Agent::Kimi } else { Agent::Claude });
     let (claimed_tx, claimed_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
-    TEST_DEDICATED_EXIT_GATE.with(|slot| *slot.borrow_mut() = Some(TestStopFenceGate { claimed_tx, release_rx }));
+    TEST_DEDICATED_EXIT_GATE.with(|slot| {
+        *slot.borrow_mut() = Some(TestStopFenceGate {
+            claimed_tx,
+            release_rx,
+        })
+    });
     let owner = ProductionWorkerTree::spawn(&state, &session_id, temp.path(), acp);
-    owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
-    let root = owner.peers.iter().find(|peer| peer.description["role"] == "runtime").unwrap();
+    owner
+        .tree
+        .termination_failures
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+    let root = owner
+        .peers
+        .iter()
+        .find(|peer| peer.description["role"] == "runtime")
+        .unwrap();
     (&root.socket).write_all(&[1]).unwrap();
-    phase_sync::process_exit(&owner.process, "root exits before its waiter can claim cleanup");
-    phase_sync::receive(&claimed_rx, "actual waiter paused before first cleanup claim");
+    phase_sync::process_exit(
+        &owner.process,
+        "root exits before its waiter can claim cleanup",
+    );
+    phase_sync::receive(
+        &claimed_rx,
+        "actual waiter paused before first cleanup claim",
+    );
     assert!(owner.tree.is_live());
     assert!(state.inner.inner.try_lock().is_ok());
     // Deliberately bypass public predecessor admission to test stale callback
     // isolation. The public route refuses this unconfirmed predecessor.
-    let replacement = ProductionWorkerTree::spawn(&state, &session_id, replacement_temp.path(), acp);
+    let replacement =
+        ProductionWorkerTree::spawn(&state, &session_id, replacement_temp.path(), acp);
     let before = {
         let mut inner = state.inner.lock().unwrap();
         let record = inner.session_mut(&session_id).unwrap();
-        record.engram.historical_control.insert("cleanupWitness".to_owned(),
-            json!({"successor":"exact ordinary history","unknown":[null,{"kept":true}]}));
+        record.engram.historical_control.insert(
+            "cleanupWitness".to_owned(),
+            json!({"successor":"exact ordinary history","unknown":[null,{"kept":true}]}),
+        );
         record.clone()
     };
-    assert_eq!(before.retained_dedicated_owners.len(), 2, "Live registration predates the first worker claim");
+    assert_eq!(
+        before.retained_dedicated_owners.len(),
+        2,
+        "Live registration predates the first worker claim"
+    );
     assert!(before.dedicated_predecessor_pending());
     release_tx.send(()).unwrap();
     owner.await_exit();
@@ -1836,22 +2247,42 @@ fn production_stale_owner_case(acp: bool) {
         let inner = state.inner.lock().unwrap();
         inner.sessions[inner.find_session_index(&session_id).unwrap()].clone()
     };
-    assert_eq!(after_failure.runtime.runtime_token(), before.runtime.runtime_token());
+    assert_eq!(
+        after_failure.runtime.runtime_token(),
+        before.runtime.runtime_token()
+    );
     assert_eq!(after_failure.session.status, before.session.status);
-    assert_eq!(after_failure.engram.historical_control, before.engram.historical_control);
-    assert_eq!(after_failure.active_turn_generation, before.active_turn_generation);
+    assert_eq!(
+        after_failure.engram.historical_control,
+        before.engram.historical_control
+    );
+    assert_eq!(
+        after_failure.active_turn_generation,
+        before.active_turn_generation
+    );
     assert_eq!(after_failure.retained_dedicated_owners.len(), 2);
     state.retry_retained_dedicated_cleanup(&session_id).unwrap();
     assert!(owner.tree.is_confirmed());
-    for peer in &owner.peers { peer.assert_exited(); }
+    for peer in &owner.peers {
+        peer.assert_exited();
+    }
     let after_retry = {
         let inner = state.inner.lock().unwrap();
         inner.sessions[inner.find_session_index(&session_id).unwrap()].clone()
     };
-    assert_eq!(after_retry.runtime.runtime_token(), before.runtime.runtime_token());
+    assert_eq!(
+        after_retry.runtime.runtime_token(),
+        before.runtime.runtime_token()
+    );
     assert_eq!(after_retry.session.status, before.session.status);
-    assert_eq!(after_retry.active_turn_generation, before.active_turn_generation);
-    assert_eq!(after_retry.engram.historical_control, before.engram.historical_control);
+    assert_eq!(
+        after_retry.active_turn_generation,
+        before.active_turn_generation
+    );
+    assert_eq!(
+        after_retry.engram.historical_control,
+        before.engram.historical_control
+    );
     assert_eq!(after_retry.retained_dedicated_owners.len(), 1);
     assert!(!after_retry.dedicated_predecessor_pending());
     replacement.exit_root();
@@ -1859,9 +2290,13 @@ fn production_stale_owner_case(acp: bool) {
 }
 
 #[test]
-fn delegation_process_cleanup_production_claude_stale_waiter_owner() { production_stale_owner_case(false); }
+fn delegation_process_cleanup_production_claude_stale_waiter_owner() {
+    production_stale_owner_case(false);
+}
 #[test]
-fn delegation_process_cleanup_production_acp_stale_waiter_owner() { production_stale_owner_case(true); }
+fn delegation_process_cleanup_production_acp_stale_waiter_owner() {
+    production_stale_owner_case(true);
+}
 
 #[test]
 fn delegation_process_cleanup_round2_in_progress_callback_releases_hold() {
@@ -1872,26 +2307,44 @@ fn delegation_process_cleanup_round2_in_progress_callback_releases_hold() {
     let owner = ProductionWorkerTree::spawn(&state, &session_id, temp.path(), false);
     let token = {
         let inner = state.inner.lock().unwrap();
-        inner.sessions[inner.find_session_index(&session_id).unwrap()].runtime.runtime_token().unwrap()
+        inner.sessions[inner.find_session_index(&session_id).unwrap()]
+            .runtime
+            .runtime_token()
+            .unwrap()
     };
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let tree = owner.tree.clone();
-    let attempt = std::thread::spawn(move || tree.terminate_with("Claude", |_| {
-        entered_tx.send(()).unwrap();
-        phase_sync::receive(&release_rx, "off-lock cleanup release");
-        Ok(())
-    }));
-    phase_sync::receive(&entered_rx, "claimed attempt enters OS cleanup outside locks");
-    assert!(owner.tree.cleanup.try_lock().is_ok(), "lease state cannot be locked across OS work");
-    assert!(state.inner.inner.try_lock().is_ok(), "unrelated state remains usable during cleanup");
+    let attempt = std::thread::spawn(move || {
+        tree.terminate_with("Claude", |_| {
+            entered_tx.send(()).unwrap();
+            phase_sync::receive(&release_rx, "off-lock cleanup release");
+            Ok(())
+        })
+    });
+    phase_sync::receive(
+        &entered_rx,
+        "claimed attempt enters OS cleanup outside locks",
+    );
+    assert!(
+        owner.tree.cleanup.try_lock().is_ok(),
+        "lease state cannot be locked across OS work"
+    );
+    assert!(
+        state.inner.inner.try_lock().is_ok(),
+        "unrelated state remains usable during cleanup"
+    );
     let (joined_tx, joined_rx) = mpsc::channel();
     let callback_state = state.clone();
     let callback_id = session_id.clone();
     let callback_token = token.clone();
     let callback = std::thread::spawn(move || {
         TEST_DEDICATED_CLEANUP_JOIN.with(|slot| *slot.borrow_mut() = Some(joined_tx));
-        callback_state.handle_runtime_exit_if_matches(&callback_id, &callback_token, Some("cleanup notification"))
+        callback_state.handle_runtime_exit_if_matches(
+            &callback_id,
+            &callback_token,
+            Some("cleanup notification"),
+        )
     });
     phase_sync::receive(&joined_rx, "callback joins the pinned in-progress attempt");
     let record = {
@@ -1899,7 +2352,11 @@ fn delegation_process_cleanup_round2_in_progress_callback_releases_hold() {
         inner.sessions[inner.find_session_index(&session_id).unwrap()].clone()
     };
     assert_eq!(record.runtime.runtime_token().as_ref(), Some(&token));
-    assert_eq!(record.session.status, SessionStatus::Active, "joining cleanup is not a provider failure");
+    assert_eq!(
+        record.session.status,
+        SessionStatus::Active,
+        "joining cleanup is not a provider failure"
+    );
     assert!(!record.orchestrator_auto_dispatch_blocked);
     release_tx.send(()).unwrap();
     attempt.join().unwrap().unwrap();
@@ -1908,10 +2365,17 @@ fn delegation_process_cleanup_round2_in_progress_callback_releases_hold() {
     assert!(owner.tree.is_confirmed());
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
-    assert!(!record.orchestrator_auto_dispatch_blocked,
-        "confirmed production waiter cleanup must release the transient cleanup hold");
-    assert!(!record.session.preview.contains("cleanup remains in progress"),
-        "an intermediate cleanup projection cannot survive confirmation");
+    assert!(
+        !record.orchestrator_auto_dispatch_blocked,
+        "confirmed production waiter cleanup must release the transient cleanup hold"
+    );
+    assert!(
+        !record
+            .session
+            .preview
+            .contains("cleanup remains in progress"),
+        "an intermediate cleanup projection cannot survive confirmation"
+    );
 }
 
 fn production_revocation_failure_case(acp: bool, confirm_before_finalization: bool) {
@@ -1925,22 +2389,35 @@ fn production_revocation_failure_case(acp: bool, confirm_before_finalization: bo
         let mut inner = state.inner.lock().unwrap();
         claim_engram_mcp_runtime_revocations_locked(&mut inner, std::slice::from_ref(&session_id))
     };
-    owner.tree.termination_failures.store(3, std::sync::atomic::Ordering::SeqCst);
+    owner
+        .tree
+        .termination_failures
+        .store(3, std::sync::atomic::Ordering::SeqCst);
     owner.exit_root();
     {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
         assert!(record.runtime_stop_in_progress);
-        assert!(record.deferred_stop_callbacks.iter().any(|callback|
-            matches!(callback, DeferredStopCallback::RuntimeExited { .. })));
+        assert!(
+            record
+                .deferred_stop_callbacks
+                .iter()
+                .any(|callback| matches!(callback, DeferredStopCallback::RuntimeExited { .. }))
+        );
         assert!(record.runtime.dedicated_cleanup_failure().is_some());
     }
     let shutdown = state.shutdown_revoked_engram_mcp_runtimes(batch, "owned revocation witness");
     assert!(shutdown.shutdowns[0].retain_runtime_for_retry);
     assert!(shutdown.shutdowns[0].shutdown_error.is_some());
-    assert!(!owner.tree.has_exited().unwrap(), "both descendants still own pipes before finalization");
+    assert!(
+        !owner.tree.has_exited().unwrap(),
+        "both descendants still own pipes before finalization"
+    );
     if confirm_before_finalization {
-        owner.tree.terminate(&owner.process, if acp { "Kimi" } else { "Claude" }).unwrap();
+        owner
+            .tree
+            .terminate(&owner.process, if acp { "Kimi" } else { "Claude" })
+            .unwrap();
         assert!(owner.tree.is_confirmed());
     }
     let outcome = state.finalize_revoked_engram_mcp_runtimes(shutdown);
@@ -1950,19 +2427,35 @@ fn production_revocation_failure_case(acp: bool, confirm_before_finalization: bo
     };
     // Finish the owned hierarchy before assertions so a RED cannot strand it.
     if confirm_before_finalization {
-        owner.tree.terminate(&owner.process, if acp { "Kimi" } else { "Claude" }).unwrap();
+        owner
+            .tree
+            .terminate(&owner.process, if acp { "Kimi" } else { "Claude" })
+            .unwrap();
     } else {
-        state.stop_session_with_options(&session_id, StopSessionOptions::default()).unwrap();
+        state
+            .stop_session_with_options(&session_id, StopSessionOptions::default())
+            .unwrap();
     }
-    for peer in &owner.peers { peer.assert_exited(); }
+    for peer in &owner.peers {
+        peer.assert_exited();
+    }
     if confirm_before_finalization {
-        assert!(outcome.failures.is_empty(), "the exact job-zero proof permits buffered revocation success");
+        assert!(
+            outcome.failures.is_empty(),
+            "the exact job-zero proof permits buffered revocation success"
+        );
         assert!(matches!(record.runtime, SessionRuntime::None));
         assert!(!record.runtime_reset_required && !record.engram_mcp_runtime_quarantined);
         assert_eq!(record.session.status, SessionStatus::Idle);
     } else {
-        assert!(!outcome.failures.is_empty(), "buffered root exit cannot suppress unconfirmed job cleanup");
-        assert!(record.runtime.runtime_token().is_some(), "revocation keeps its current exact retry owner");
+        assert!(
+            !outcome.failures.is_empty(),
+            "buffered root exit cannot suppress unconfirmed job cleanup"
+        );
+        assert!(
+            record.runtime.runtime_token().is_some(),
+            "revocation keeps its current exact retry owner"
+        );
         assert!(record.runtime_reset_required && record.engram_mcp_runtime_quarantined);
         assert_eq!(record.session.status, SessionStatus::Error);
         assert!(record.orchestrator_auto_dispatch_blocked);
@@ -1971,25 +2464,36 @@ fn production_revocation_failure_case(acp: bool, confirm_before_finalization: bo
     drop(record);
     {
         let inner = state.inner.lock().unwrap();
-        assert!(matches!(inner.sessions[inner.find_session_index(&session_id).unwrap()].runtime,
-            SessionRuntime::None));
+        assert!(matches!(
+            inner.sessions[inner.find_session_index(&session_id).unwrap()].runtime,
+            SessionRuntime::None
+        ));
     }
     drop(owner);
     drop(state);
-    state_cleaned.recv_timeout(phase_sync::DEADLOCK_GUARD)
+    state_cleaned
+        .recv_timeout(phase_sync::DEADLOCK_GUARD)
         .expect("all production worker state owners must release the fixture root")
         .expect("production worker fixture root must be removed");
 }
 
 #[test]
-fn delegation_process_cleanup_round2_claude_revocation_requires_job_zero() { production_revocation_failure_case(false, false); }
+fn delegation_process_cleanup_round2_claude_revocation_requires_job_zero() {
+    production_revocation_failure_case(false, false);
+}
 #[test]
-fn delegation_process_cleanup_round2_acp_revocation_requires_job_zero() { production_revocation_failure_case(true, false); }
+fn delegation_process_cleanup_round2_acp_revocation_requires_job_zero() {
+    production_revocation_failure_case(true, false);
+}
 
 #[test]
-fn delegation_process_cleanup_round2_claude_revocation_accepts_exact_confirmed_job() { production_revocation_failure_case(false, true); }
+fn delegation_process_cleanup_round2_claude_revocation_accepts_exact_confirmed_job() {
+    production_revocation_failure_case(false, true);
+}
 #[test]
-fn delegation_process_cleanup_round2_acp_revocation_accepts_exact_confirmed_job() { production_revocation_failure_case(true, true); }
+fn delegation_process_cleanup_round2_acp_revocation_accepts_exact_confirmed_job() {
+    production_revocation_failure_case(true, true);
+}
 
 fn production_post_revocation_exit_case(acp: bool, fail_waiter_retry: bool) {
     let temp = TestTempRoot::create("production-post-revocation-exit");
@@ -2004,9 +2508,12 @@ fn production_post_revocation_exit_case(acp: bool, fail_waiter_retry: bool) {
     };
     // Both revocation attempts fail while the root and its pipe-owning
     // descendants are live. Only the negative case also fails the later waiter.
-    owner.tree.termination_failures.store(if fail_waiter_retry { 3 } else { 2 },
-        std::sync::atomic::Ordering::SeqCst);
-    let shutdown = state.shutdown_revoked_engram_mcp_runtimes(batch, "post-finalization exit witness");
+    owner.tree.termination_failures.store(
+        if fail_waiter_retry { 3 } else { 2 },
+        std::sync::atomic::Ordering::SeqCst,
+    );
+    let shutdown =
+        state.shutdown_revoked_engram_mcp_runtimes(batch, "post-finalization exit witness");
     assert!(shutdown.shutdowns[0].retain_runtime_for_retry);
     let outcome = state.finalize_revoked_engram_mcp_runtimes(shutdown);
     assert!(!outcome.failures.is_empty());
@@ -2029,24 +2536,37 @@ fn production_post_revocation_exit_case(acp: bool, fail_waiter_retry: bool) {
     let tree_was_confirmed = owner.tree.is_confirmed();
     let stop_result = if fail_waiter_retry {
         Some(state.request_stop_session(&session_id))
-    } else { None };
+    } else {
+        None
+    };
     // RED cleanup is explicit and separate from the evidence above. If the
     // public Stop was refused, confirm this fixture's exact lease and replay
     // its root callback so the retained writer/state cycle cannot outlive it.
     if stop_result.as_ref().is_some_and(|result| result.is_err()) {
-        owner.tree.terminate(&owner.process, if acp { "Kimi" } else { "Claude" }).unwrap();
-        state.handle_runtime_root_exit_if_matches(&session_id, &token, None).unwrap();
+        owner
+            .tree
+            .terminate(&owner.process, if acp { "Kimi" } else { "Claude" })
+            .unwrap();
+        state
+            .handle_runtime_root_exit_if_matches(&session_id, &token, None)
+            .unwrap();
     }
     let guard = phase_sync::PollGuard::new();
     loop {
         let inner = state.inner.lock().unwrap();
-        let cleared = matches!(inner.sessions[inner.find_session_index(&session_id).unwrap()].runtime,
-            SessionRuntime::None);
+        let cleared = matches!(
+            inner.sessions[inner.find_session_index(&session_id).unwrap()].runtime,
+            SessionRuntime::None
+        );
         drop(inner);
-        if cleared { break; }
+        if cleared {
+            break;
+        }
         guard.wait("post-revocation public Stop commits cleanup");
     }
-    for peer in &owner.peers { peer.assert_exited(); }
+    for peer in &owner.peers {
+        peer.assert_exited();
+    }
     // Snapshot and Stop outcome precede all RED fallback cleanup.
     let observed_status = record.session.status.clone();
     let observed_preview = record.session.preview.clone();
@@ -2054,32 +2574,56 @@ fn production_post_revocation_exit_case(acp: bool, fail_waiter_retry: bool) {
     let observed_hold = record.orchestrator_auto_dispatch_blocked;
     let observed_quarantine = record.engram_mcp_runtime_quarantined;
     let observed_reset = record.runtime_reset_required;
-    let observed_exact_owner = record.runtime.dedicated_tree_owner()
+    let observed_exact_owner = record
+        .runtime
+        .dedicated_tree_owner()
         .is_some_and(|(tree, _, _)| Arc::ptr_eq(&tree, &owner.tree));
     drop(record);
     drop(owner);
     drop(state);
-    state_cleaned.recv_timeout(phase_sync::DEADLOCK_GUARD)
+    state_cleaned
+        .recv_timeout(phase_sync::DEADLOCK_GUARD)
         .expect("post-revocation workers must release their state owners")
         .expect("post-revocation worker fixture root must be removed");
     if fail_waiter_retry {
-        let stop_error = stop_result.as_ref().and_then(|result| result.as_ref().err())
+        let stop_error = stop_result
+            .as_ref()
+            .and_then(|result| result.as_ref().err())
             .map(|error| error.message.as_str());
-        eprintln!("post-revocation witness acp={acp}: status={observed_status:?}, preview={observed_preview:?}, Stop error={stop_error:?}");
+        eprintln!(
+            "post-revocation witness acp={acp}: status={observed_status:?}, preview={observed_preview:?}, Stop error={stop_error:?}"
+        );
         assert!(!tree_was_confirmed);
         assert_eq!(observed_token.as_ref(), Some(&token));
         assert!(observed_exact_owner && observed_hold && observed_quarantine && observed_reset);
-        assert_eq!(observed_status, SessionStatus::Error,
-            "failed cleanup after revocation must stay visibly retryable");
-        assert!(observed_preview.contains("process tree cleanup failed"),
-            "the failed waiter retry must expose its cleanup detail");
-        assert!(stop_result.unwrap().is_ok(), "public Stop must admit the current uncertain owner");
+        assert_eq!(
+            observed_status,
+            SessionStatus::Error,
+            "failed cleanup after revocation must stay visibly retryable"
+        );
+        assert!(
+            observed_preview.contains("process tree cleanup failed"),
+            "the failed waiter retry must expose its cleanup detail"
+        );
+        assert!(
+            stop_result.unwrap().is_ok(),
+            "public Stop must admit the current uncertain owner"
+        );
     } else {
-        assert!(tree_was_confirmed, "successful waiter proves exact job-zero cleanup");
+        assert!(
+            tree_was_confirmed,
+            "successful waiter proves exact job-zero cleanup"
+        );
         assert!(observed_token.is_none());
-        assert_eq!(observed_status, SessionStatus::Idle,
-            "confirmed delayed revocation cleanup may settle to Idle");
-        assert!(observed_hold, "revocation retains its explicit automatic-resume hold");
+        assert_eq!(
+            observed_status,
+            SessionStatus::Idle,
+            "confirmed delayed revocation cleanup may settle to Idle"
+        );
+        assert!(
+            observed_hold,
+            "revocation retains its explicit automatic-resume hold"
+        );
         // Confirmation releases the exact runtime owner, while the retained
         // reset/hold disposition still governs rebinding the revoked descriptor.
         assert!(observed_quarantine && observed_reset);
@@ -2120,28 +2664,48 @@ fn production_late_reader_case(fail_before_adoption: Option<bool>) {
     };
     let token = snapshot().runtime.runtime_token().unwrap();
     let generation = snapshot().active_turn_generation;
-    state.finish_turn_ok_if_runtime_matches(&session_id, &token).unwrap();
+    state
+        .finish_turn_ok_if_runtime_matches(&session_id, &token)
+        .unwrap();
     let fail_cleanup = || {
-        owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+        owner
+            .tree
+            .termination_failures
+            .store(1, std::sync::atomic::Ordering::SeqCst);
         owner.exit_root();
         let record = snapshot();
         assert_eq!(record.session.status, SessionStatus::Error);
-        assert!(record.session.preview.contains("process tree cleanup failed"));
+        assert!(
+            record
+                .session
+                .preview
+                .contains("process tree cleanup failed")
+        );
         assert!(!owner.tree.is_confirmed() && !owner.tree.has_exited().unwrap());
         record.session.preview.clone()
     };
     let mut cleanup_preview = if fail_before_adoption == Some(true) {
         Some(fail_cleanup())
-    } else { None };
-    let producer = owner.peers.iter()
-        .find(|peer| peer.description["role"] == "engram-mcp").unwrap();
+    } else {
+        None
+    };
+    let producer = owner
+        .peers
+        .iter()
+        .find(|peer| peer.description["role"] == "engram-mcp")
+        .unwrap();
     (&producer.socket).write_all(&[3]).unwrap();
     phase_sync::receive(&frame_rx, "actual reader applies delayed task notice");
     phase_sync::receive(&frame_rx, "actual reader records delayed assistant output");
     let after_output = snapshot();
-    if fail_before_adoption == Some(false) { cleanup_preview = Some(fail_cleanup()); }
+    if fail_before_adoption == Some(false) {
+        cleanup_preview = Some(fail_cleanup());
+    }
     (&producer.socket).write_all(&[4]).unwrap();
-    phase_sync::receive(&frame_rx, "actual reader finishes the delayed success result");
+    phase_sync::receive(
+        &frame_rx,
+        "actual reader finishes the delayed success result",
+    );
     let after_result = snapshot();
     let uncertain_at_result = !owner.tree.is_confirmed();
     let stop_result = fail_before_adoption.map(|_| state.request_stop_session(&session_id));
@@ -2150,53 +2714,92 @@ fn production_late_reader_case(fail_before_adoption: Option<bool>) {
     if stop_result.as_ref().is_none_or(|result| result.is_err()) {
         owner.tree.terminate(&owner.process, "Claude").unwrap();
         if fail_before_adoption.is_some() {
-            state.handle_runtime_root_exit_if_matches(&session_id, &token, None).unwrap();
-        } else { owner.await_exit(); }
+            state
+                .handle_runtime_root_exit_if_matches(&session_id, &token, None)
+                .unwrap();
+        } else {
+            owner.await_exit();
+        }
     }
     let guard = phase_sync::PollGuard::new();
     while snapshot().runtime.runtime_token().is_some() {
         guard.wait("late reader cleanup commits exact owner disposal");
     }
-    for peer in &owner.peers { peer.assert_exited(); }
-    let exact_owner = after_result.runtime.dedicated_tree_owner()
+    for peer in &owner.peers {
+        peer.assert_exited();
+    }
+    let exact_owner = after_result
+        .runtime
+        .dedicated_tree_owner()
         .is_some_and(|(tree, _, _)| Arc::ptr_eq(&tree, &owner.tree));
     let statuses = (after_output.session.status, after_result.session.status);
-    let previews = (after_output.session.preview.clone(), after_result.session.preview.clone());
+    let previews = (
+        after_output.session.preview.clone(),
+        after_result.session.preview.clone(),
+    );
     let held = after_result.orchestrator_auto_dispatch_blocked;
     let retained_token = after_result.runtime.runtime_token();
-    let adopted = after_output.unmediated_claude_turn.as_ref()
+    let adopted = after_output
+        .unmediated_claude_turn
+        .as_ref()
         .and_then(|turn| turn.adopted_generation);
     let finished = after_result.unmediated_claude_turn.is_none();
-    let notice = after_result.session.messages.iter().any(|message|
-        matches!(message, Message::Text { text, .. } if text.contains("TermAl did not")));
+    let notice = after_result.session.messages.iter().any(
+        |message| matches!(message, Message::Text { text, .. } if text.contains("TermAl did not")),
+    );
     let output = after_result.session.messages.iter().any(|message|
         matches!(message, Message::Text { text, .. } if text.contains("owned delayed reader output")));
     drop(after_output);
     drop(after_result);
     drop(owner);
     drop(state);
-    state_cleaned.recv_timeout(phase_sync::DEADLOCK_GUARD)
+    state_cleaned
+        .recv_timeout(phase_sync::DEADLOCK_GUARD)
         .expect("late reader workers release their state owners")
         .expect("late reader fixture state root removed");
-    assert!(notice && output && finished, "actual delayed frames retain transcript and ownership observation");
+    assert!(
+        notice && output && finished,
+        "actual delayed frames retain transcript and ownership observation"
+    );
     if let Some(before_adoption) = fail_before_adoption {
-        eprintln!("late reader before_adoption={before_adoption}: status={statuses:?}, previews={previews:?}, Stop={:?}",
-            stop_result.as_ref().and_then(|result| result.as_ref().err()).map(|error| &error.message));
+        eprintln!(
+            "late reader before_adoption={before_adoption}: status={statuses:?}, previews={previews:?}, Stop={:?}",
+            stop_result
+                .as_ref()
+                .and_then(|result| result.as_ref().err())
+                .map(|error| &error.message)
+        );
         assert!(uncertain_at_result && exact_owner && held);
         assert_eq!(retained_token.as_ref(), Some(&token));
-        assert_eq!(statuses.1, SessionStatus::Error, "success cannot hide unresolved exact cleanup");
+        assert_eq!(
+            statuses.1,
+            SessionStatus::Error,
+            "success cannot hide unresolved exact cleanup"
+        );
         assert_eq!(previews.1, cleanup_preview.clone().unwrap());
         if before_adoption {
-            assert_eq!(statuses.0, SessionStatus::Error, "late adoption cannot hide unresolved exact cleanup");
+            assert_eq!(
+                statuses.0,
+                SessionStatus::Error,
+                "late adoption cannot hide unresolved exact cleanup"
+            );
             assert_eq!(previews.0, cleanup_preview.unwrap());
             assert!(adopted.is_none());
-        } else { assert_eq!(adopted, Some(generation.wrapping_add(1).max(1))); }
-        assert!(stop_result.unwrap().is_ok(), "public Stop keeps its uncertain-owner retry route");
+        } else {
+            assert_eq!(adopted, Some(generation.wrapping_add(1).max(1)));
+        }
+        assert!(
+            stop_result.unwrap().is_ok(),
+            "public Stop keeps its uncertain-owner retry route"
+        );
     } else {
         assert_eq!(statuses, (SessionStatus::Active, SessionStatus::Idle));
         assert_eq!(adopted, Some(generation.wrapping_add(1).max(1)));
         assert_eq!(retained_token.as_ref(), Some(&token));
-        assert!(!held && exact_owner, "healthy reader remains live and dispatchable");
+        assert!(
+            !held && exact_owner,
+            "healthy reader remains live and dispatchable"
+        );
     }
 }
 
@@ -2227,14 +2830,23 @@ fn production_in_progress_reader_case(failed_retry: bool) {
         inner.sessions[inner.find_session_index(&session_id).unwrap()].clone()
     };
     let token = snapshot().runtime.runtime_token().unwrap();
-    state.finish_turn_ok_if_runtime_matches(&session_id, &token).unwrap();
+    state
+        .finish_turn_ok_if_runtime_matches(&session_id, &token)
+        .unwrap();
     if failed_retry {
-        owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+        owner
+            .tree
+            .termination_failures
+            .store(1, std::sync::atomic::Ordering::SeqCst);
         owner.exit_root();
         assert_eq!(snapshot().session.status, SessionStatus::Error);
         assert!(!owner.tree.has_exited().unwrap());
     }
-    let producer = owner.peers.iter().find(|peer| peer.description["role"] == "engram-mcp").unwrap();
+    let producer = owner
+        .peers
+        .iter()
+        .find(|peer| peer.description["role"] == "engram-mcp")
+        .unwrap();
     if !failed_retry {
         (&producer.socket).write_all(&[3]).unwrap();
         phase_sync::receive(&frame_rx, "healthy actual reader applies task notice");
@@ -2243,31 +2855,47 @@ fn production_in_progress_reader_case(failed_retry: bool) {
     }
     let (claimed_tx, claimed_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
-    *owner.tree.cleanup_gate.lock().unwrap() = Some(TestStopFenceGate { claimed_tx, release_rx });
+    *owner.tree.cleanup_gate.lock().unwrap() = Some(TestStopFenceGate {
+        claimed_tx,
+        release_rx,
+    });
     // This receipt and the post-frame receipt share a channel. Either the
     // original dropped finish or a corrected off-lock join releases the test
     // barrier; the test never requires a blocked reader to finish first.
     *owner.tree.cleanup_join_receipt.lock().unwrap() = Some(frame_tx);
     let retry = if failed_retry {
-        owner.tree.termination_failures.store(1, std::sync::atomic::Ordering::SeqCst);
+        owner
+            .tree
+            .termination_failures
+            .store(1, std::sync::atomic::Ordering::SeqCst);
         let tree = owner.tree.clone();
         let process = owner.process.clone();
-        Some(std::thread::spawn(move || tree.terminate(&process, "Claude")))
+        Some(std::thread::spawn(move || {
+            tree.terminate(&process, "Claude")
+        }))
     } else {
         owner.release_root();
         None
     };
     phase_sync::receive(&claimed_rx, "actual cleanup attempt is gated InProgress");
     assert!(owner.tree.is_in_progress());
-    assert!(state.inner.inner.try_lock().is_ok(), "cleanup and result waits stay off Inner");
+    assert!(
+        state.inner.inner.try_lock().is_ok(),
+        "cleanup and result waits stay off Inner"
+    );
     let after_output = if failed_retry {
         (&producer.socket).write_all(&[3]).unwrap();
         phase_sync::receive(&frame_rx, "retry reader observes task notice");
         phase_sync::receive(&frame_rx, "retry reader observes assistant output");
         Some(snapshot())
-    } else { None };
+    } else {
+        None
+    };
     (&producer.socket).write_all(&[4]).unwrap();
-    phase_sync::receive(&frame_rx, "success is either applied or joins the exact cleanup attempt");
+    phase_sync::receive(
+        &frame_rx,
+        "success is either applied or joins the exact cleanup attempt",
+    );
     release_tx.send(()).unwrap();
     let retry_failed = retry.map(|worker| worker.join().unwrap().is_err());
     let stop_result = if failed_retry {
@@ -2281,33 +2909,60 @@ fn production_in_progress_reader_case(failed_retry: bool) {
         guard.wait("InProgress reader fixture disposes its exact runtime");
     }
     let final_record = snapshot();
-    for peer in &owner.peers { peer.assert_exited(); }
+    for peer in &owner.peers {
+        peer.assert_exited();
+    }
     let final_status = final_record.session.status;
     let final_preview = final_record.session.preview.clone();
     let spurious_failure = final_record.session.messages.iter().any(|message|
         matches!(message, Message::Text { text, .. } if text.contains("exited before the active turn completed")));
-    let retry_observation = after_output.as_ref().map(|record| (
-        record.session.status, record.session.preview.clone(),
-        record.unmediated_claude_turn.as_ref().and_then(|turn| turn.adopted_generation),
-        record.runtime.matches_runtime_token(&token), record.orchestrator_auto_dispatch_blocked));
+    let retry_observation = after_output.as_ref().map(|record| {
+        (
+            record.session.status,
+            record.session.preview.clone(),
+            record
+                .unmediated_claude_turn
+                .as_ref()
+                .and_then(|turn| turn.adopted_generation),
+            record.runtime.matches_runtime_token(&token),
+            record.orchestrator_auto_dispatch_blocked,
+        )
+    });
     drop(after_output);
     drop(final_record);
     drop(owner);
     drop(state);
-    state_cleaned.recv_timeout(phase_sync::DEADLOCK_GUARD)
+    state_cleaned
+        .recv_timeout(phase_sync::DEADLOCK_GUARD)
         .expect("InProgress reader workers release state owners")
         .expect("InProgress reader fixture state root removed");
-    eprintln!("InProgress reader failed_retry={failed_retry}: final={final_status:?}, preview={final_preview:?}, spurious_failure={spurious_failure}");
+    eprintln!(
+        "InProgress reader failed_retry={failed_retry}: final={final_status:?}, preview={final_preview:?}, spurious_failure={spurious_failure}"
+    );
     if failed_retry {
         let (status, preview, adopted, exact_token, held) = retry_observation.unwrap();
-        assert_eq!(status, SessionStatus::Error, "a failed-owner retry cannot admit late adoption");
+        assert_eq!(
+            status,
+            SessionStatus::Error,
+            "a failed-owner retry cannot admit late adoption"
+        );
         assert!(preview.contains("process tree cleanup failed"));
         assert!(adopted.is_none() && exact_token && held);
         assert_eq!(retry_failed, Some(true));
-        assert!(stop_result.unwrap().is_ok(), "public Stop retries failed exact ownership");
+        assert!(
+            stop_result.unwrap().is_ok(),
+            "public Stop retries failed exact ownership"
+        );
     } else {
-        assert_eq!(final_status, SessionStatus::Idle, "a success result inside normal cleanup must finish normally");
-        assert!(!spurious_failure, "confirmed cleanup cannot replace a completed result with failure");
+        assert_eq!(
+            final_status,
+            SessionStatus::Idle,
+            "a success result inside normal cleanup must finish normally"
+        );
+        assert!(
+            !spurious_failure,
+            "confirmed cleanup cannot replace a completed result with failure"
+        );
     }
 }
 
@@ -2339,47 +2994,92 @@ fn dedicated_reset_off_lock_case(change_context: bool) {
         record.set_auto_dispatch_blocked(true);
         record.queued_prompts.push_back(QueuedPromptRecord {
             engram_ordinary_handoff: false,
-            engram_waiting: false, promoted_message_index: None, promotion_disposition_known: true,
-            engram_bind: None, engram_evaluate: None, engram_interrupted: false,
-            source: QueuedPromptSource::User, attachments: Vec::new(),
-            pending_prompt: PendingPrompt { engram_interrupted: false, is_engram_retained: false,
-                attachments: Vec::new(), id: "reset-queued-head".to_owned(), timestamp: stamp_now(),
-                text: "preserve exact head".to_owned(), expanded_text: None, source: None },
+            engram_waiting: false,
+            promoted_message_index: None,
+            promotion_disposition_known: true,
+            engram_bind: None,
+            engram_evaluate: None,
+            engram_interrupted: false,
+            source: QueuedPromptSource::User,
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
+                attachments: Vec::new(),
+                id: "reset-queued-head".to_owned(),
+                timestamp: stamp_now(),
+                text: "preserve exact head".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
         });
     }
     let (claimed_tx, claimed_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
-    *owner.tree.cleanup_gate.lock().unwrap() = Some(TestStopFenceGate { claimed_tx, release_rx });
+    *owner.tree.cleanup_gate.lock().unwrap() = Some(TestStopFenceGate {
+        claimed_tx,
+        release_rx,
+    });
     let reset_state = state.clone();
     let reset_id = session_id.clone();
-    let reset = std::thread::spawn(move || reset_state.prepare_dedicated_runtime_reset_off_lock(&reset_id, false));
-    phase_sync::receive(&claimed_rx, "reset owns its fence and reaches off-lock OS attempt");
+    let reset = std::thread::spawn(move || {
+        reset_state.prepare_dedicated_runtime_reset_off_lock(&reset_id, false)
+    });
+    phase_sync::receive(
+        &claimed_rx,
+        "reset owns its fence and reaches off-lock OS attempt",
+    );
     assert!(owner.tree.cleanup.try_lock().is_ok());
-    let mut inner = state.inner.inner.try_lock().expect("reset cannot wait under the global state mutex");
+    let mut inner = state
+        .inner
+        .inner
+        .try_lock()
+        .expect("reset cannot wait under the global state mutex");
     let index = inner.find_session_index(&session_id).unwrap();
     let record = &mut inner.sessions[index];
     assert!(record.runtime_stop_in_progress);
     assert!(record.runtime_reset_required);
-    assert_eq!(record.queued_prompts.front().unwrap().pending_prompt.id, "reset-queued-head");
-    if change_context { record.session.model = "replacement configuration".to_owned(); }
+    assert_eq!(
+        record.queued_prompts.front().unwrap().pending_prompt.id,
+        "reset-queued-head"
+    );
+    if change_context {
+        record.session.model = "replacement configuration".to_owned();
+    }
     drop(inner);
     release_tx.send(()).unwrap();
     let result = reset.join().unwrap();
-    if change_context { assert!(result.is_err()); } else { result.unwrap(); }
+    if change_context {
+        assert!(result.is_err());
+    } else {
+        result.unwrap();
+    }
     owner.await_exit();
     let record = {
         let inner = state.inner.lock().unwrap();
         inner.sessions[inner.find_session_index(&session_id).unwrap()].clone()
     };
-    assert_eq!(record.queued_prompts.len(), 1, "cleanup does not consume an admission or queue head");
-    assert_eq!(record.queued_prompts.front().unwrap().pending_prompt.id, "reset-queued-head");
+    assert_eq!(
+        record.queued_prompts.len(),
+        1,
+        "cleanup does not consume an admission or queue head"
+    );
+    assert_eq!(
+        record.queued_prompts.front().unwrap().pending_prompt.id,
+        "reset-queued-head"
+    );
     assert!(!record.runtime_stop_in_progress);
     assert!(owner.tree.is_confirmed());
     if change_context {
         assert_eq!(record.session.model, "replacement configuration");
-        assert!(record.runtime_reset_required, "stale cleanup cannot clear a new reset request");
+        assert!(
+            record.runtime_reset_required,
+            "stale cleanup cannot clear a new reset request"
+        );
         assert!(record.orchestrator_auto_dispatch_blocked);
-        state.prepare_dedicated_runtime_reset_off_lock(&session_id, false).unwrap();
+        state
+            .prepare_dedicated_runtime_reset_off_lock(&session_id, false)
+            .unwrap();
     } else {
         assert!(matches!(record.runtime, SessionRuntime::None));
         assert!(!record.runtime_reset_required);
@@ -2387,9 +3087,13 @@ fn dedicated_reset_off_lock_case(change_context: bool) {
 }
 
 #[test]
-fn delegation_process_cleanup_reset_wait_is_off_lock() { dedicated_reset_off_lock_case(false); }
+fn delegation_process_cleanup_reset_wait_is_off_lock() {
+    dedicated_reset_off_lock_case(false);
+}
 #[test]
-fn delegation_process_cleanup_reset_stale_context_keeps_queue_and_reset() { dedicated_reset_off_lock_case(true); }
+fn delegation_process_cleanup_reset_stale_context_keeps_queue_and_reset() {
+    dedicated_reset_off_lock_case(true);
+}
 
 #[test]
 fn delegation_process_cleanup_raw_launch_entry_stays_visible_off_lock() {
@@ -2397,10 +3101,21 @@ fn delegation_process_cleanup_raw_launch_entry_stays_visible_off_lock() {
     let temp = TestTempRoot::create("raw-launch-visible-owner");
     let _scope = LaunchFailureScope::new();
     let state = test_app_state();
-    let mut command = Command::new(PathBuf::from(std::env::var_os("SystemRoot").unwrap())
-        .join("System32/WindowsPowerShell/v1.0/powershell.exe"));
-    command.args(["-NoProfile", "-NonInteractive", "-Command", "[Console]::In.ReadLine() | Out-Null"])
-        .current_dir(temp.path()).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null())
+    let mut command = Command::new(
+        PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+    );
+    command
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::In.ReadLine() | Out-Null",
+        ])
+        .current_dir(temp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     let mut child = command.spawn().unwrap();
     let handle = child.as_handle().try_clone_to_owned().unwrap();
@@ -2413,10 +3128,20 @@ fn delegation_process_cleanup_raw_launch_entry_stays_visible_off_lock() {
     registry.lock().unwrap().push(entry.clone());
     let held_owner = entry.owner.lock().unwrap();
     schedule_runtime_launch_cleanup(&registry, &entry);
-    assert!(matches!(*entry.phase.lock().unwrap(), FailedLaunchPhase::InProgress(_)));
-    assert_eq!(registry.lock().unwrap().len(), 1, "in-flight ownership cannot masquerade as an empty registry");
+    assert!(matches!(
+        *entry.phase.lock().unwrap(),
+        FailedLaunchPhase::InProgress(_)
+    ));
+    assert_eq!(
+        registry.lock().unwrap().len(),
+        1,
+        "in-flight ownership cannot masquerade as an empty registry"
+    );
     assert!(state.inner.inner.try_lock().is_ok());
-    assert!(retry_failed_runtime_launch_cleanup().is_err(), "admission refuses while the exact owner is in flight");
+    assert!(
+        retry_failed_runtime_launch_cleanup().is_err(),
+        "admission refuses while the exact owner is in flight"
+    );
     assert_eq!(registry.lock().unwrap().len(), 1);
     drop(held_owner);
     await_launch_cleanup_attempts(&registry);

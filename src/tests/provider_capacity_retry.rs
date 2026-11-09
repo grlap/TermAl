@@ -265,15 +265,31 @@ fn a_live_connection_reset_defers_execution_but_not_capacity_failure_finalizatio
     let fixture = CapacityFixture::started_mailbox_turn();
     let (project, reset_generation) = {
         let mut inner = fixture.state.inner.lock().unwrap();
-        let project = inner.create_project(
-            Some("Capacity during connection cleanup".to_owned()),
-            fixture.state.test_temp_root.as_ref().unwrap().path().to_string_lossy().into_owned(),
-            default_local_remote_id(),
-        ).id;
-        inner.session_mut(&fixture.session_id).unwrap().session.project_id = Some(project.clone());
+        let project = inner
+            .create_project(
+                Some("Capacity during connection cleanup".to_owned()),
+                fixture
+                    .state
+                    .test_temp_root
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .to_string_lossy()
+                    .into_owned(),
+                default_local_remote_id(),
+            )
+            .id;
+        inner
+            .session_mut(&fixture.session_id)
+            .unwrap()
+            .session
+            .project_id = Some(project.clone());
         let generation = inner.engram_project_resets.claim(&project).unwrap();
         let index = inner.find_session_index(&fixture.session_id).unwrap();
-        assert!(session_resource_reset_in_progress(&inner, &inner.sessions[index]));
+        assert!(session_resource_reset_in_progress(
+            &inner,
+            &inner.sessions[index]
+        ));
         fixture.state.commit_locked(&mut inner).unwrap();
         (project, generation)
     };
@@ -283,72 +299,130 @@ fn a_live_connection_reset_defers_execution_but_not_capacity_failure_finalizatio
     fixture.capacity_failure();
     let (retry, waiting_preview, queued_prompt) = {
         let inner = fixture.state.inner.lock().unwrap();
-        assert!(inner.engram_project_resets.is_owned_by(&project, reset_generation));
+        assert!(
+            inner
+                .engram_project_resets
+                .is_owned_by(&project, reset_generation)
+        );
         let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
-        let retry = record.provider_capacity_retry.as_ref()
+        let retry = record
+            .provider_capacity_retry
+            .as_ref()
             .expect("a live reset must not prevent arming a typed capacity failure");
-        assert!(retry.due_at.is_some(), "a live reset must not strand a half-armed retry");
+        assert!(
+            retry.due_at.is_some(),
+            "a live reset must not strand a half-armed retry"
+        );
         assert_eq!(retry.generation, fixture.failed_generation);
         assert_eq!(retry.attempts, 0);
         assert!(!retry.recovering && !retry.dispatched);
         assert_eq!(record.session.status, SessionStatus::Idle);
-        assert!(record.orchestrator_auto_dispatch_blocked && record.session.provider_capacity_waiting);
-        assert!(record.session.preview.starts_with("Waiting: provider at capacity, retry 1/8 at "));
+        assert!(
+            record.orchestrator_auto_dispatch_blocked && record.session.provider_capacity_waiting
+        );
+        assert!(
+            record
+                .session
+                .preview
+                .starts_with("Waiting: provider at capacity, retry 1/8 at ")
+        );
         // This fixture has no persist worker: the production row-specific
         // synchronous fallback must acknowledge the actual committed image.
-        assert!(retry.saved, "finalization must obtain the capacity durability ACK");
+        assert!(
+            retry.saved,
+            "finalization must obtain the capacity durability ACK"
+        );
         assert!(retry.fence.is_none());
         assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::Mailbox);
-        (retry.clone(), record.session.preview.clone(), record.queued_prompts[0].pending_prompt.text.clone())
+        (
+            retry.clone(),
+            record.session.preview.clone(),
+            record.queued_prompts[0].pending_prompt.text.clone(),
+        )
     };
     {
-        let connection = rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
+        let connection =
+            rusqlite::Connection::open(fixture.state.persistence_path.as_path()).unwrap();
         let target = PersistFenceTarget::ProviderCapacityRecovery {
             session_id: fixture.session_id.clone(),
             content: serde_json::to_value(Some(&retry)).unwrap(),
         };
-        assert!(target.is_already_durable(&connection).unwrap(),
-            "the exact finalized retry must be visible to a separate SQLite reader");
-        let stored: String = connection.query_row(
-            "SELECT value_json FROM sessions WHERE id = ?1",
-            [&fixture.session_id], |row| row.get(0),
-        ).unwrap();
+        assert!(
+            target.is_already_durable(&connection).unwrap(),
+            "the exact finalized retry must be visible to a separate SQLite reader"
+        );
+        let stored: String = connection
+            .query_row(
+                "SELECT value_json FROM sessions WHERE id = ?1",
+                [&fixture.session_id],
+                |row| row.get(0),
+            )
+            .unwrap();
         let persisted: PersistedSessionRecord = serde_json::from_str(&stored).unwrap();
         assert_eq!(persisted.session.status, SessionStatus::Idle);
         assert_eq!(persisted.session.preview, waiting_preview);
-        assert!(persisted.provider_capacity_retry.as_ref().unwrap().due_at.is_some());
+        assert!(
+            persisted
+                .provider_capacity_retry
+                .as_ref()
+                .unwrap()
+                .due_at
+                .is_some()
+        );
     }
 
     // Even at its due time, repeated real ticks cannot charge or dispatch
     // this acknowledged retry through the live connection-reset owner.
     let due = fixture.due();
     fixture.fire();
-    assert!(matches!(fixture.input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        fixture.input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     {
         let mut inner = fixture.state.inner.lock().unwrap();
-        assert!(inner.engram_project_resets.is_owned_by(&project, reset_generation));
+        assert!(
+            inner
+                .engram_project_resets
+                .is_owned_by(&project, reset_generation)
+        );
         let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
         assert_eq!(record.session.status, SessionStatus::Idle);
         assert_eq!(record.active_turn_generation, fixture.failed_generation);
         assert_eq!(record.session.preview, waiting_preview);
-        assert_eq!(serde_json::to_value(&record.provider_capacity_retry).unwrap(),
-            serde_json::to_value(Some(&retry)).unwrap());
+        assert_eq!(
+            serde_json::to_value(&record.provider_capacity_retry).unwrap(),
+            serde_json::to_value(Some(&retry)).unwrap()
+        );
         assert!(record.provider_capacity_retry.as_ref().unwrap().saved);
         assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(record.queued_prompts[0].pending_prompt.text, queued_prompt);
-        assert!(inner.engram_project_resets.release(&project, reset_generation));
+        assert!(
+            inner
+                .engram_project_resets
+                .release(&project, reset_generation)
+        );
         let index = inner.find_session_index(&fixture.session_id).unwrap();
-        assert!(!session_resource_reset_in_progress(&inner, &inner.sessions[index]));
+        assert!(!session_resource_reset_in_progress(
+            &inner,
+            &inner.sessions[index]
+        ));
     }
     fixture.fire();
     let command = fixture.start_recovery();
     assert_eq!(command.prompt, queued_prompt);
-    assert_eq!(command.active_turn_generation, fixture.failed_generation.wrapping_add(1).max(1));
+    assert_eq!(
+        command.active_turn_generation,
+        fixture.failed_generation.wrapping_add(1).max(1)
+    );
     for _ in 0..3 {
         fixture.state.provider_capacity_retry_tick(due);
     }
-    assert!(matches!(fixture.input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        fixture.input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     let inner = fixture.state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&fixture.session_id).unwrap()];
     assert_eq!(record.session.status, SessionStatus::Active);
@@ -643,7 +717,10 @@ fn minute_schedule_and_eight_attempt_budget_never_allow_a_ninth() {
         assert!((base * 80 / 100..=base * 120 / 100).contains(&delay));
         assert!(delay >= 60_000);
     }
-    assert_eq!(PROVIDER_CAPACITY_DELAYS_SECONDS, [120, 300, 600, 600, 600, 600, 600, 600]);
+    assert_eq!(
+        PROVIDER_CAPACITY_DELAYS_SECONDS,
+        [120, 300, 600, 600, 600, 600, 600, 600]
+    );
     let fixture = CapacityFixture::started_mailbox_turn();
     fixture.capacity_failure();
     for expected_attempt in 1..=8 {
@@ -906,7 +983,10 @@ fn capacity_mailbox_disposition_shared_cap_and_pending_ack_hold() {
     let slots = (0..4)
         .map(|_| fixture.state.runtime_retry_slots.try_acquire().unwrap())
         .collect::<Vec<_>>();
-    assert!(fixture.state.runtime_retry_slots.try_acquire().is_none(), "the shared runtime retry cap is four");
+    assert!(
+        fixture.state.runtime_retry_slots.try_acquire().is_none(),
+        "the shared runtime retry cap is four"
+    );
     let due = fixture.due();
     fixture.state.provider_capacity_retry_tick(due);
     {

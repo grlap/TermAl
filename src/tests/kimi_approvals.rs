@@ -39,7 +39,14 @@ fn session(state: &AppState, id: &str) -> Session {
 }
 
 /// A Kimi session with a live runtime, Active, with the given TermAl policy.
-fn running_kimi(policy: &str) -> (AppState, String, mpsc::Receiver<AcpRuntimeCommand>, AcpRuntimeHandle) {
+fn running_kimi(
+    policy: &str,
+) -> (
+    AppState,
+    String,
+    mpsc::Receiver<AcpRuntimeCommand>,
+    AcpRuntimeHandle,
+) {
     let state = test_app_state();
     let id = create_kimi(&state, json!({ "kimiApprovalMode": policy }));
     let (runtime, rx) = test_acp_runtime_handle(AcpAgent::Kimi, RUNTIME);
@@ -118,9 +125,15 @@ fn exactly_one_allow_once_option_is_required() {
         "two answers are a choice, never approved"
     );
     let only_always = json!([{ "optionId": "a", "kind": "allow_always" }]);
-    assert_eq!(kimi_single_allow_once_option(only_always.as_array().unwrap()), None);
+    assert_eq!(
+        kimi_single_allow_once_option(only_always.as_array().unwrap()),
+        None
+    );
     let empty_id = json!([{ "optionId": "", "kind": "allow_once" }]);
-    assert_eq!(kimi_single_allow_once_option(empty_id.as_array().unwrap()), None);
+    assert_eq!(
+        kimi_single_allow_once_option(empty_id.as_array().unwrap()),
+        None
+    );
 }
 
 #[test]
@@ -129,10 +142,30 @@ fn only_allowlisted_tool_titles_are_auto_approvable() {
         KIMI_AUTO_APPROVABLE_TOOL_TITLES,
         &["Bash", "Write", "Edit", "CronCreate", "CronDelete"]
     );
-    for title in ["Bash", "Write", "Edit", "CronCreate", "CronDelete", "mcp__termal-delegation__termal_send_to_session", "mcp__a_b__c-d"] {
+    for title in [
+        "Bash",
+        "Write",
+        "Edit",
+        "CronCreate",
+        "CronDelete",
+        "mcp__termal-delegation__termal_send_to_session",
+        "mcp__a_b__c-d",
+    ] {
         assert!(kimi_auto_approvable_title(title), "{title}");
     }
-    for title in ["AskUserQuestion", "ExitPlanMode", "CronList", "CronUpdate", "Agent", "mcp__", "mcp__server", "mcp____tool", "mcp__a b__c", "bash", "crondelete"] {
+    for title in [
+        "AskUserQuestion",
+        "ExitPlanMode",
+        "CronList",
+        "CronUpdate",
+        "Agent",
+        "mcp__",
+        "mcp__server",
+        "mcp____tool",
+        "mcp__a b__c",
+        "bash",
+        "crondelete",
+    ] {
         assert!(!kimi_auto_approvable_title(title), "{title}");
     }
 }
@@ -140,7 +173,13 @@ fn only_allowlisted_tool_titles_are_auto_approvable() {
 #[test]
 fn auto_approve_answers_an_allowlisted_tool_once() {
     let (state, id, rx, runtime) = running_kimi("auto-approve");
-    deliver(&state, &id, &runtime, permission("Bash", tool_options()), RUNTIME);
+    deliver(
+        &state,
+        &id,
+        &runtime,
+        permission("Bash", tool_options()),
+        RUNTIME,
+    );
     assert_eq!(
         answered(&rx),
         Some(json!({ "outcome": "selected", "optionId": "approve_once" })),
@@ -170,15 +209,23 @@ fn questions_plans_and_ask_policy_stay_manual() {
     for (policy, title, options) in [
         ("auto-approve", "AskUserQuestion", question_options()),
         // One answer plus Skip passes the count rule; the title keeps it manual.
-        ("auto-approve", "AskUserQuestion", json!([
-            { "optionId": "q0_opt_0", "name": "Yes", "kind": "allow_once" },
-            { "optionId": "q0_skip", "name": "Skip", "kind": "reject_once" }
-        ])),
-        ("auto-approve", "ExitPlanMode", json!([
-            { "optionId": "plan_approve", "kind": "allow_once" },
-            { "optionId": "plan_revise", "kind": "reject_once" },
-            { "optionId": "plan_reject_and_exit", "kind": "reject_once" }
-        ])),
+        (
+            "auto-approve",
+            "AskUserQuestion",
+            json!([
+                { "optionId": "q0_opt_0", "name": "Yes", "kind": "allow_once" },
+                { "optionId": "q0_skip", "name": "Skip", "kind": "reject_once" }
+            ]),
+        ),
+        (
+            "auto-approve",
+            "ExitPlanMode",
+            json!([
+                { "optionId": "plan_approve", "kind": "allow_once" },
+                { "optionId": "plan_revise", "kind": "reject_once" },
+                { "optionId": "plan_reject_and_exit", "kind": "reject_once" }
+            ]),
+        ),
         ("auto-approve", "SomeFutureTool", tool_options()),
         ("auto-approve", "CronList", tool_options()),
         ("auto-approve", "CronDelete", question_options()),
@@ -188,8 +235,16 @@ fn questions_plans_and_ask_policy_stay_manual() {
     ] {
         let (state, id, rx, runtime) = running_kimi(policy);
         deliver(&state, &id, &runtime, permission(title, options), RUNTIME);
-        assert_eq!(answered(&rx), None, "{policy} {title}: TermAl answers nothing");
-        assert_eq!(manual_cards(&state, &id), 1, "{policy} {title}: a manual card");
+        assert_eq!(
+            answered(&rx),
+            None,
+            "{policy} {title}: TermAl answers nothing"
+        );
+        assert_eq!(
+            manual_cards(&state, &id),
+            1,
+            "{policy} {title}: a manual card"
+        );
     }
 }
 
@@ -197,7 +252,13 @@ fn questions_plans_and_ask_policy_stay_manual() {
 fn a_pending_card_suspends_auto_approve() {
     let (state, id, rx, runtime) = running_kimi("auto-approve");
     set_status(&state, &id, SessionStatus::Approval);
-    deliver(&state, &id, &runtime, permission("Bash", tool_options()), RUNTIME);
+    deliver(
+        &state,
+        &id,
+        &runtime,
+        permission("Bash", tool_options()),
+        RUNTIME,
+    );
     assert_eq!(answered(&rx), None);
     assert_eq!(manual_cards(&state, &id), 1);
 }
@@ -210,11 +271,23 @@ fn a_stopping_or_stale_runtime_is_cancelled_never_approved() {
         let index = inner.find_session_index(&id).unwrap();
         inner.sessions[index].runtime_stop_in_progress = true;
     }
-    deliver(&state, &id, &runtime, permission("Bash", tool_options()), RUNTIME);
+    deliver(
+        &state,
+        &id,
+        &runtime,
+        permission("Bash", tool_options()),
+        RUNTIME,
+    );
     assert_eq!(answered(&rx), Some(json!({ "outcome": "cancelled" })));
 
     let (state, id, rx, runtime) = running_kimi("auto-approve");
-    deliver(&state, &id, &runtime, permission("Bash", tool_options()), "another-runtime");
+    deliver(
+        &state,
+        &id,
+        &runtime,
+        permission("Bash", tool_options()),
+        "another-runtime",
+    );
     assert_eq!(answered(&rx), Some(json!({ "outcome": "cancelled" })));
 }
 
@@ -262,7 +335,13 @@ fn the_read_only_gate_wins_over_the_session_policy() {
     }
     // The read-only gate refuses writes and cron requests before auto-approve.
     for title in ["Write", "CronCreate", "CronDelete", "CronList"] {
-        deliver(&state, &id, &runtime, permission(title, tool_options()), RUNTIME);
+        deliver(
+            &state,
+            &id,
+            &runtime,
+            permission(title, tool_options()),
+            RUNTIME,
+        );
         assert_eq!(
             answered(&rx),
             Some(json!({ "outcome": "selected", "optionId": "reject" })),
@@ -302,22 +381,34 @@ fn creation_starts_from_the_app_defaults_and_a_request_overrides_them() {
         .unwrap();
     let id = create_kimi(&state, json!({}));
     let created = session(&state, &id);
-    assert_eq!(created.kimi_approval_mode, Some(KimiApprovalMode::AutoApprove));
+    assert_eq!(
+        created.kimi_approval_mode,
+        Some(KimiApprovalMode::AutoApprove)
+    );
     assert_eq!(created.kimi_mode, Some(KimiMode::Default));
     assert_eq!(created.kimi_effort.as_deref(), Some("high"));
 
-    let id = create_kimi(&state, json!({ "kimiApprovalMode": "ask", "kimiMode": "plan" }));
+    let id = create_kimi(
+        &state,
+        json!({ "kimiApprovalMode": "ask", "kimiMode": "plan" }),
+    );
     let created = session(&state, &id);
     assert_eq!(created.kimi_approval_mode, Some(KimiApprovalMode::Ask));
     assert_eq!(created.kimi_mode, Some(KimiMode::Plan));
 
     // A later Settings change never alters an existing session.
     state
-        .update_app_settings(serde_json::from_value(json!({ "defaultKimiEffort": "auto" })).unwrap())
+        .update_app_settings(
+            serde_json::from_value(json!({ "defaultKimiEffort": "auto" })).unwrap(),
+        )
         .unwrap();
     assert_eq!(session(&state, &id).kimi_effort.as_deref(), Some("high"));
     let id = create_kimi(&state, json!({}));
-    assert_eq!(session(&state, &id).kimi_effort, None, "auto leaves the CLI's choice");
+    assert_eq!(
+        session(&state, &id).kimi_effort,
+        None,
+        "auto leaves the CLI's choice"
+    );
 }
 
 #[test]
@@ -354,7 +445,10 @@ fn a_rejected_default_effort_changes_no_preference() {
         assert_eq!(inner.revision, revision);
     }
     let id = create_kimi(&state, json!({}));
-    assert_eq!(session(&state, &id).kimi_approval_mode, Some(KimiApprovalMode::Ask));
+    assert_eq!(
+        session(&state, &id).kimi_approval_mode,
+        Some(KimiApprovalMode::Ask)
+    );
 }
 
 #[test]
@@ -367,7 +461,10 @@ fn a_model_change_clears_the_observed_mode() {
         inner.sessions[index].session.kimi_current_mode = Some("yolo".to_owned());
     }
     state
-        .update_session_settings(&id, serde_json::from_value(json!({ "model": "model-b" })).unwrap())
+        .update_session_settings(
+            &id,
+            serde_json::from_value(json!({ "model": "model-b" })).unwrap(),
+        )
         .unwrap();
     assert_eq!(session(&state, &id).kimi_current_mode, None);
 }
@@ -427,25 +524,32 @@ fn a_remote_kimi_session_keeps_its_policy_and_modes() {
         "remote-project-kimi",
     );
     insert_test_remote_connection(&state, &remote, port, TestRemoteBridgeOwnership::Claimed);
-    let server = std::thread::spawn(move || loop {
-        let mut stream = accept_test_connection(&listener, "remote Kimi create listener");
-        let request = read_test_http_request(&mut stream);
-        if request.request_line.starts_with("GET /api/health ") {
-            write_test_http_response(
-                &mut stream,
-                StatusCode::OK,
-                "application/json",
-                r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
-            );
-            continue;
+    let server = std::thread::spawn(move || {
+        loop {
+            let mut stream = accept_test_connection(&listener, "remote Kimi create listener");
+            let request = read_test_http_request(&mut stream);
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
+                );
+                continue;
+            }
+            if request.request_line.starts_with("POST /api/sessions ") {
+                *captured_body_for_server.lock().unwrap() =
+                    Some(serde_json::from_str(&request.body).expect("create body should decode"));
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    &remote_response,
+                );
+                break;
+            }
+            panic!("unexpected request: {}", request.request_line);
         }
-        if request.request_line.starts_with("POST /api/sessions ") {
-            *captured_body_for_server.lock().unwrap() =
-                Some(serde_json::from_str(&request.body).expect("create body should decode"));
-            write_test_http_response(&mut stream, StatusCode::OK, "application/json", &remote_response);
-            break;
-        }
-        panic!("unexpected request: {}", request.request_line);
     });
 
     let created = state
@@ -467,7 +571,10 @@ fn a_remote_kimi_session_keeps_its_policy_and_modes() {
         .expect("the remote create request should be captured");
     assert_eq!(body["kimiApprovalMode"], "auto-approve");
     assert_eq!(body["kimiMode"], "yolo");
-    assert_eq!(created.session.kimi_approval_mode, Some(KimiApprovalMode::AutoApprove));
+    assert_eq!(
+        created.session.kimi_approval_mode,
+        Some(KimiApprovalMode::AutoApprove)
+    );
     assert_eq!(created.session.kimi_mode, Some(KimiMode::Yolo));
     assert_eq!(created.session.kimi_current_mode.as_deref(), Some("yolo"));
 
@@ -480,7 +587,11 @@ fn kimi_fields_belong_to_kimi_sessions_only() {
     let state = test_app_state();
     for field in ["kimiApprovalMode", "kimiMode"] {
         let mut request = json!({ "agent": "Claude", "workdir": state.default_workdir });
-        request[field] = json!(if field == "kimiMode" { "yolo" } else { "auto-approve" });
+        request[field] = json!(if field == "kimiMode" {
+            "yolo"
+        } else {
+            "auto-approve"
+        });
         let error = state
             .create_session_with_agent_setup_validator(
                 serde_json::from_value(request).unwrap(),
@@ -516,11 +627,21 @@ fn the_policy_is_changed_alone_and_never_while_busy() {
             .expect("mixed payload rejected");
         assert_eq!(error.status, StatusCode::BAD_REQUEST, "{mixed}");
     }
-    assert_eq!(session(&state, &id).kimi_approval_mode, Some(KimiApprovalMode::Ask));
+    assert_eq!(
+        session(&state, &id).kimi_approval_mode,
+        Some(KimiApprovalMode::Ask)
+    );
 
-    for status in [SessionStatus::Active, SessionStatus::Approval, SessionStatus::Stopping] {
+    for status in [
+        SessionStatus::Active,
+        SessionStatus::Approval,
+        SessionStatus::Stopping,
+    ] {
         set_status(&state, &id, status);
-        for payload in [json!({ "kimiApprovalMode": "auto-approve" }), json!({ "kimiMode": "yolo" })] {
+        for payload in [
+            json!({ "kimiApprovalMode": "auto-approve" }),
+            json!({ "kimiMode": "yolo" }),
+        ] {
             let error = state
                 .update_session_settings(&id, serde_json::from_value(payload.clone()).unwrap())
                 .err()
@@ -530,17 +651,31 @@ fn the_policy_is_changed_alone_and_never_while_busy() {
     }
     set_status(&state, &id, SessionStatus::Idle);
     state
-        .update_session_settings(&id, serde_json::from_value(json!({ "kimiApprovalMode": "auto-approve" })).unwrap())
+        .update_session_settings(
+            &id,
+            serde_json::from_value(json!({ "kimiApprovalMode": "auto-approve" })).unwrap(),
+        )
         .unwrap();
     state
-        .update_session_settings(&id, serde_json::from_value(json!({ "kimiMode": "auto" })).unwrap())
+        .update_session_settings(
+            &id,
+            serde_json::from_value(json!({ "kimiMode": "auto" })).unwrap(),
+        )
         .unwrap();
     let updated = session(&state, &id);
-    assert_eq!(updated.kimi_approval_mode, Some(KimiApprovalMode::AutoApprove));
+    assert_eq!(
+        updated.kimi_approval_mode,
+        Some(KimiApprovalMode::AutoApprove)
+    );
     assert_eq!(updated.kimi_mode, Some(KimiMode::Auto));
-    let persisted = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let persisted = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
     let stored = &persisted.sessions[persisted.find_session_index(&id).unwrap()].session;
-    assert_eq!(stored.kimi_approval_mode, Some(KimiApprovalMode::AutoApprove));
+    assert_eq!(
+        stored.kimi_approval_mode,
+        Some(KimiApprovalMode::AutoApprove)
+    );
     assert_eq!(stored.kimi_mode, Some(KimiMode::Auto));
 }
 
@@ -548,13 +683,18 @@ fn the_policy_is_changed_alone_and_never_while_busy() {
 fn a_delegation_child_never_inherits_auto_approve_or_a_non_default_mode() {
     let state = test_app_state();
     state
-        .update_app_settings(serde_json::from_value(json!({ "defaultKimiApprovalMode": "auto-approve" })).unwrap())
+        .update_app_settings(
+            serde_json::from_value(json!({ "defaultKimiApprovalMode": "auto-approve" })).unwrap(),
+        )
         .unwrap();
     let mut record = {
         let mut inner = state.inner.lock().unwrap();
         inner.create_session(Agent::Kimi, None, "/tmp".to_owned(), None, None)
     };
-    assert_eq!(record.session.kimi_approval_mode, Some(KimiApprovalMode::AutoApprove));
+    assert_eq!(
+        record.session.kimi_approval_mode,
+        Some(KimiApprovalMode::AutoApprove)
+    );
     record.session.kimi_mode = Some(KimiMode::Yolo);
     configure_delegation_child_prompt_settings(
         &mut record,
@@ -565,7 +705,10 @@ fn a_delegation_child_never_inherits_auto_approve_or_a_non_default_mode() {
             worktree_path: None,
         },
     );
-    assert_eq!(record.session.kimi_approval_mode, Some(KimiApprovalMode::Ask));
+    assert_eq!(
+        record.session.kimi_approval_mode,
+        Some(KimiApprovalMode::Ask)
+    );
     assert_eq!(record.session.kimi_mode, Some(KimiMode::Default));
 }
 
@@ -601,6 +744,9 @@ fn only_kimi_sessions_may_persist_kimi_fields() {
     legacy.kimi_mode = None;
     let external = legacy.external_session_id.clone();
     assert!(validate_persisted_session_fields(&legacy, external.as_deref()).is_ok());
-    assert_eq!(legacy.kimi_approval_mode.unwrap_or_default(), KimiApprovalMode::Ask);
+    assert_eq!(
+        legacy.kimi_approval_mode.unwrap_or_default(),
+        KimiApprovalMode::Ask
+    );
     assert_eq!(legacy.kimi_mode.unwrap_or_default(), KimiMode::Default);
 }

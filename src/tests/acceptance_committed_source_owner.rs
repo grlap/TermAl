@@ -15,27 +15,58 @@ fn acceptance_uses_the_owner_verdict_without_a_local_git_predicate() {
     acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
     // Deliberately leave the scripted owner's verdict clean. This is a
     // consumer test: independent local Git judgment would contradict it.
-    fs::write(worktree(&named_root).join("judged.txt"), "local input changed\n").unwrap();
-    assert_eq!(state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()), Some(head));
+    fs::write(
+        worktree(&named_root).join("judged.txt"),
+        "local input changed\n",
+    )
+    .unwrap();
+    assert_eq!(
+        state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()),
+        Some(head)
+    );
     run_git_test_command(&worktree(&named_root), &["checkout", "--", "judged.txt"]);
     // Conversely a clean local checkout cannot override the owner's dirt.
     acceptance_owner_reports_dirty(&state, &parent, &named_root, "judged.txt");
-    assert_eq!(state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()), None);
+    assert_eq!(
+        state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()),
+        None
+    );
 }
 
 #[test]
 fn acceptance_owner_failures_never_fall_back_to_a_clean_local_checkout() {
-    for case in ["unavailable", "wrong root", "malformed", "stderr", "process failure", "missing identity", "binary replaced"] {
+    for case in [
+        "unavailable",
+        "wrong root",
+        "malformed",
+        "stderr",
+        "process failure",
+        "missing identity",
+        "binary replaced",
+    ] {
         let (state, parent, _store, named_root) = named_root_parent();
         commit_named_root(&named_root);
         acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
-        let original = state.inner.lock().unwrap().test_acceptance_source_owner_capture.clone().unwrap();
+        let original = state
+            .inner
+            .lock()
+            .unwrap()
+            .test_acceptance_source_owner_capture
+            .clone()
+            .unwrap();
         let wrong_root = {
             let inner = state.inner.lock().unwrap();
-            engram_project_for_session_locked(&inner, &parent).unwrap().root_path.clone()
+            engram_project_for_session_locked(&inner, &parent)
+                .unwrap()
+                .root_path
+                .clone()
         };
-        state.inner.lock().unwrap().test_acceptance_source_owner_capture = Some(Arc::new(
-            move |binary, cwd, args, until, limit| {
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .test_acceptance_source_owner_capture =
+            Some(Arc::new(move |binary, cwd, args, until, limit| {
                 let mut reply = original(binary, cwd, args, until, limit)?;
                 match case {
                     "unavailable" => return Ok(source_owner_reply(args)),
@@ -45,14 +76,21 @@ fn acceptance_owner_failures_never_fall_back_to_a_clean_local_checkout() {
                     "binary replaced" => fs::write(binary, b"replacement executable").unwrap(),
                     _ => {
                         let mut value: Value = serde_json::from_slice(&reply.stdout).unwrap();
-                        if case == "wrong root" { value["root"] = json!(engram_exact_path_key(FsPath::new(&wrong_root))); }
-                        else { value["source_id"] = Value::Null; }
+                        if case == "wrong root" {
+                            value["root"] = json!(engram_exact_path_key(FsPath::new(&wrong_root)));
+                        } else {
+                            value["source_id"] = Value::Null;
+                        }
                         reply.stdout = serde_json::to_vec(&value).unwrap();
                     }
                 }
                 Ok(reply)
             }));
-        assert_eq!(state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()), None, "{case}");
+        assert_eq!(
+            state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()),
+            None,
+            "{case}"
+        );
     }
 }
 
@@ -61,24 +99,62 @@ fn acceptance_owner_configuration_and_deadline_are_revalidated() {
     let (state, parent, _store, named_root) = named_root_parent();
     commit_named_root(&named_root);
     acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
-    let original = state.inner.lock().unwrap().test_acceptance_source_owner_capture.clone().unwrap();
+    let original = state
+        .inner
+        .lock()
+        .unwrap()
+        .test_acceptance_source_owner_capture
+        .clone()
+        .unwrap();
     let changed = state.clone();
     let owner = parent.clone();
-    state.inner.lock().unwrap().test_acceptance_source_owner_capture = Some(Arc::new(
-        move |binary, cwd, args, until, limit| {
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .test_acceptance_source_owner_capture =
+        Some(Arc::new(move |binary, cwd, args, until, limit| {
             let reply = original(binary, cwd, args, until, limit)?;
             let mut inner = changed.inner.lock().unwrap();
-            let project = engram_project_for_session_locked(&inner, &owner).unwrap().id.clone();
-            inner.projects.iter_mut().find(|row| row.id == project).unwrap()
-                .engram.as_mut().unwrap().binary_path = None;
+            let project = engram_project_for_session_locked(&inner, &owner)
+                .unwrap()
+                .id
+                .clone();
+            inner
+                .projects
+                .iter_mut()
+                .find(|row| row.id == project)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap()
+                .binary_path = None;
             Ok(reply)
         }));
-    assert_eq!(state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()), None);
+    assert_eq!(
+        state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()),
+        None
+    );
     // Neither a missing configured owner nor an expired aggregate deadline
     // may cause a local clean check or an alternative executable lookup.
-    assert_eq!(state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()), None);
+    assert_eq!(
+        state.acceptance_judged_commit(&parent, FsPath::new(&named_root), owner_deadline()),
+        None
+    );
     acceptance_owner_reports(&state, &parent, &named_root, Vec::new(), Vec::new());
-    state.inner.lock().unwrap().test_acceptance_source_owner_capture = Some(Arc::new(
-        |_, _, _, _, _| panic!("expired request must not reach capture")));
-    assert_eq!(state.acceptance_judged_commit(&parent, FsPath::new(&named_root), std::time::Instant::now()), None);
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .test_acceptance_source_owner_capture = Some(Arc::new(|_, _, _, _, _| {
+        panic!("expired request must not reach capture")
+    }));
+    assert_eq!(
+        state.acceptance_judged_commit(
+            &parent,
+            FsPath::new(&named_root),
+            std::time::Instant::now()
+        ),
+        None
+    );
 }

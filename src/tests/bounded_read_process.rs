@@ -5,9 +5,21 @@ use super::*;
 #[test]
 fn bounded_read_diagnostics_preserve_identity_failure_categories() {
     for (kind, detail, expected) in [
-        (io::ErrorKind::Other, "bounded read output limit exceeded", "input_limit_exceeded"),
-        (io::ErrorKind::NotFound, "executable unavailable", "input_unavailable"),
-        (io::ErrorKind::TimedOut, "bounded read deadline exceeded", "deadline_exceeded"),
+        (
+            io::ErrorKind::Other,
+            "bounded read output limit exceeded",
+            "input_limit_exceeded",
+        ),
+        (
+            io::ErrorKind::NotFound,
+            "executable unavailable",
+            "input_unavailable",
+        ),
+        (
+            io::ErrorKind::TimedOut,
+            "bounded read deadline exceeded",
+            "deadline_exceeded",
+        ),
     ] {
         let error = BoundedReadObservation::new().failure(io::Error::new(kind, detail).into());
         assert_eq!(identity_error_code(&error), expected, "{error:#}");
@@ -22,10 +34,19 @@ fn bounded_read_cleanup_has_independent_nonrenewing_allowance() {
     let deadline = cleanup.deadline(expired, entered);
     assert_eq!(deadline, entered + Duration::from_secs(1));
     // Even a later error cleanup cannot move the first cleanup deadline.
-    assert_eq!(cleanup.deadline(expired, entered + Duration::from_secs(5)), deadline);
+    assert_eq!(
+        cleanup.deadline(expired, entered + Duration::from_secs(5)),
+        deadline
+    );
     let later_read = entered + Duration::from_secs(10);
-    assert_eq!(BoundedReadCleanup::default().deadline(later_read, entered), later_read);
-    assert!(expired < entered, "the read remains expired despite cleanup's allowance");
+    assert_eq!(
+        BoundedReadCleanup::default().deadline(later_read, entered),
+        later_read
+    );
+    assert!(
+        expired < entered,
+        "the read remains expired despite cleanup's allowance"
+    );
 }
 
 #[cfg(unix)]

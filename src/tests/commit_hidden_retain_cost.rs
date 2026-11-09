@@ -48,20 +48,34 @@ fn hidden_population(parents: usize, children_per_parent: usize) -> (AppState, V
         let mut inner = state.inner.lock().unwrap();
         for _ in 0..parents {
             let parent = inner
-                .create_session(Agent::Codex, Some("Parent".into()), workdir.clone(), None, None)
+                .create_session(
+                    Agent::Codex,
+                    Some("Parent".into()),
+                    workdir.clone(),
+                    None,
+                    None,
+                )
                 .session
                 .id
                 .clone();
             for _ in 0..children_per_parent {
                 let child = inner
-                    .create_session(Agent::Codex, Some("Child".into()), workdir.clone(), None, None)
+                    .create_session(
+                        Agent::Codex,
+                        Some("Child".into()),
+                        workdir.clone(),
+                        None,
+                        None,
+                    )
                     .session
                     .id
                     .clone();
                 let index = inner.find_session_index(&child).unwrap();
                 inner.sessions[index].hidden = true;
                 let id = inner.next_delegation_id();
-                inner.delegations.push(delegation_for(&parent, &child, id, &workdir));
+                inner
+                    .delegations
+                    .push(delegation_for(&parent, &child, id, &workdir));
             }
             parent_ids.push(parent);
         }
@@ -97,14 +111,26 @@ fn duty_population() -> AppState {
     let mut inner = state.inner.lock().unwrap();
     for parent_index in 0..12 {
         let parent = inner
-            .create_session(Agent::Codex, Some("Parent".into()), workdir.clone(), None, None)
+            .create_session(
+                Agent::Codex,
+                Some("Parent".into()),
+                workdir.clone(),
+                None,
+                None,
+            )
             .session
             .id
             .clone();
         let mut above = parent.clone();
         for depth in 0..2 {
             let child = inner
-                .create_session(Agent::Codex, Some("Child".into()), workdir.clone(), None, None)
+                .create_session(
+                    Agent::Codex,
+                    Some("Child".into()),
+                    workdir.clone(),
+                    None,
+                    None,
+                )
                 .session
                 .id
                 .clone();
@@ -115,7 +141,9 @@ fn duty_population() -> AppState {
                 inner.sessions[index].engram.source_root_bind_owner = Some(Uuid::new_v4());
             }
             let id = inner.next_delegation_id();
-            inner.delegations.push(delegation_for(&above, &child, id, &workdir));
+            inner
+                .delegations
+                .push(delegation_for(&above, &child, id, &workdir));
             above = child;
         }
         if parent_index % 7 == 0 {
@@ -156,15 +184,26 @@ fn hidden_retention_pass_matches_the_per_session_reference_exactly() {
     let reference = duty_population();
     let mut indexed_inner = indexed.inner.lock().unwrap();
     let mut reference_inner = reference.inner.lock().unwrap();
-    assert_eq!(retention_image(&indexed_inner), retention_image(&reference_inner));
+    assert_eq!(
+        retention_image(&indexed_inner),
+        retention_image(&reference_inner)
+    );
     indexed_inner.retain_hidden_source_observation_sessions();
     reference_hidden_retention(&mut reference_inner);
     let after = retention_image(&indexed_inner);
     assert_eq!(after, retention_image(&reference_inner));
     // The fixture must exercise both outcomes: some hidden sessions retained
     // (made visible and marked), and some left hidden and untouched.
-    assert!(after.iter().any(|(_, hidden, requested, _, _)| !hidden && *requested));
-    assert!(after.iter().any(|(_, hidden, requested, _, _)| *hidden && !requested));
+    assert!(
+        after
+            .iter()
+            .any(|(_, hidden, requested, _, _)| !hidden && *requested)
+    );
+    assert!(
+        after
+            .iter()
+            .any(|(_, hidden, requested, _, _)| *hidden && !requested)
+    );
 }
 
 #[test]
@@ -175,11 +214,13 @@ fn hidden_retention_keeps_a_hidden_ancestor_of_a_deep_duty_and_leaves_clean_tree
     let inner = &*inner;
     let record = |id: &str| &inner.sessions[inner.find_session_index(id).unwrap()];
     let subtree_has_duty = |root: &str| {
-        source_observation_removal_set(inner, root).iter().any(|id| {
-            let member = record(id);
-            runtime_observation_has_removal_duty(member)
-                || member.engram.source_root_bind_owner.is_some()
-        })
+        source_observation_removal_set(inner, root)
+            .iter()
+            .any(|id| {
+                let member = record(id);
+                runtime_observation_has_removal_duty(member)
+                    || member.engram.source_root_bind_owner.is_some()
+            })
     };
     // Every hidden session in this fixture is a delegation child; the
     // visible parents never are.

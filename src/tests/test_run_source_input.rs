@@ -11,7 +11,10 @@ fn dirty_source() -> Value {
 }
 
 fn records(source: &Value) -> (Value, Value) {
-    (json!({"sourceId":source}), json!({"sourceIdBefore":source,"sourceIdAfter":source}))
+    (
+        json!({"sourceId":source}),
+        json!({"sourceIdBefore":source,"sourceIdAfter":source}),
+    )
 }
 
 #[test]
@@ -27,8 +30,10 @@ fn full_owner_values_accept_equal_dirty_inputs_and_refuse_every_changed_componen
         |value| value["tree"] = json!("f".repeat(40)),
         |value| value["changes"][0]["blob"] = json!("f".repeat(40)),
         |value| value["changes"][0]["mode"] = json!("100755"),
-        |value| value["changes"].as_array_mut().unwrap().push(json!({
-            "path":"new.txt","status":"??","origin":null,"blob":"f".repeat(40),"mode":"100644"})),
+        |value| {
+            value["changes"].as_array_mut().unwrap().push(json!({
+            "path":"new.txt","status":"??","origin":null,"blob":"f".repeat(40),"mode":"100644"}))
+        },
         |value| value["submodules"][0]["commit"] = json!("f".repeat(40)),
         |value| value["submodules"][0]["changes"][0]["blob"] = json!("f".repeat(40)),
         |value| value["submodules"][0]["changes"][0]["mode"] = json!("120000"),
@@ -43,7 +48,10 @@ fn full_owner_values_accept_equal_dirty_inputs_and_refuse_every_changed_componen
 #[test]
 fn partial_unavailable_or_oversized_source_is_not_equality_and_digests_cannot_replace_it() {
     let mut missing_nullable = dirty_source();
-    missing_nullable["changes"][0].as_object_mut().unwrap().remove("origin");
+    missing_nullable["changes"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("origin");
     let mut unknown = launcher_source_id_fixture();
     unknown["extra"] = json!(true);
     let mut oversized = dirty_source();
@@ -51,10 +59,15 @@ fn partial_unavailable_or_oversized_source_is_not_equality_and_digests_cannot_re
     for source in [Value::Null, json!({}), missing_nullable, unknown, oversized] {
         let (request, results) = records(&source);
         assert!(!test_run_source_input_matches(&request, &results));
-        assert_eq!(TestRunWaitEvidence::from_results(&results).source_comparison, "unknown");
+        assert_eq!(
+            TestRunWaitEvidence::from_results(&results).source_comparison,
+            "unknown"
+        );
     }
-    assert!(!test_run_source_input_matches(&json!({"expectedFingerprint":"a".repeat(64)}),
-        &json!({"expectedFingerprint":"a".repeat(64),"before":"a".repeat(64),"after":"a".repeat(64)})));
+    assert!(!test_run_source_input_matches(
+        &json!({"expectedFingerprint":"a".repeat(64)}),
+        &json!({"expectedFingerprint":"a".repeat(64),"before":"a".repeat(64),"after":"a".repeat(64)})
+    ));
 }
 
 #[test]
@@ -94,14 +107,21 @@ fn remote_completion_bounds_each_source_endpoint_without_rejecting_null() {
             "input":{"kind":"source_id","source_id_before":before,"source_id_after":after},
             "finished_at":"2026-11-07T00:00:00Z"})).unwrap()
     };
-    assert!(completion(source.clone(), source.clone()).validate().is_ok());
+    assert!(
+        completion(source.clone(), source.clone())
+            .validate()
+            .is_ok()
+    );
     assert!(completion(Value::Null, Value::Null).validate().is_ok());
     for (before, after) in [
         (oversized.clone(), source.clone()),
         (source, oversized.clone()),
         (oversized.clone(), oversized),
     ] {
-        assert!(completion(before, after).validate().is_err(), "neither endpoint can exceed the owner bound");
+        assert!(
+            completion(before, after).validate().is_err(),
+            "neither endpoint can exceed the owner bound"
+        );
     }
 }
 
@@ -112,7 +132,10 @@ fn remote_sender_keeps_actual_nullable_source_endpoints_without_a_third_copy() {
         let results = json!({"sourceIdBefore":source,"sourceIdAfter":after,
             "before":"f".repeat(64),"after":"f".repeat(64)});
         let sent = serde_json::to_value(test_run_native_input(&results)).unwrap();
-        assert_eq!(sent, json!({"kind":"source_id","source_id_before":source,"source_id_after":after}));
+        assert_eq!(
+            sent,
+            json!({"kind":"source_id","source_id_before":source,"source_id_after":after})
+        );
     }
 }
 
@@ -123,15 +146,36 @@ fn details_and_waits_report_current_actual_objects_without_using_a_parent_fence(
     let (mut request, mut results) = records(&source);
     request["root"] = json!(fixture.root);
     results["stages"] = json!([]);
-    let directory = write_run(&fixture.runs_dir(), "test-source-detail", request.clone(), Some(results.clone()));
+    let directory = write_run(
+        &fixture.runs_dir(),
+        "test-source-detail",
+        request.clone(),
+        Some(results.clone()),
+    );
     let detail = test_run_detail(&directory).unwrap();
     assert_eq!(detail.source_comparison.as_deref(), Some("matched"));
-    assert_eq!(serde_json::to_value(detail.source_id.unwrap()).unwrap(), source);
+    assert_eq!(
+        serde_json::to_value(detail.source_id.unwrap()).unwrap(),
+        source
+    );
     request["sourceId"]["tree"] = json!("f".repeat(40));
-    fs::write(directory.join("request.json"), serde_json::to_vec(&request).unwrap()).unwrap();
-    assert_eq!(test_run_detail(&directory).unwrap().source_comparison.as_deref(), Some("mismatched"));
+    fs::write(
+        directory.join("request.json"),
+        serde_json::to_vec(&request).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        test_run_detail(&directory)
+            .unwrap()
+            .source_comparison
+            .as_deref(),
+        Some("mismatched")
+    );
     results["sourceIdAfter"]["tree"] = json!("f".repeat(40));
-    assert_eq!(TestRunWaitEvidence::from_results(&results).source_comparison, "mismatched");
+    assert_eq!(
+        TestRunWaitEvidence::from_results(&results).source_comparison,
+        "mismatched"
+    );
 }
 
 #[test]
@@ -143,17 +187,28 @@ fn compact_source_records_remain_readable_at_the_host_byte_limit() {
     results["stages"] = json!([]);
     results["padding"] = json!("é😀");
     let overhead = serde_json::to_vec(&results).unwrap().len() + 1;
-    results["padding"] = json!(format!("é😀{}", "x".repeat(TEST_RUN_JSON_MAX_BYTES - overhead)));
+    results["padding"] = json!(format!(
+        "é😀{}",
+        "x".repeat(TEST_RUN_JSON_MAX_BYTES - overhead)
+    ));
     let mut bytes = serde_json::to_vec(&results).unwrap();
     bytes.push(b'\n');
     assert_eq!(bytes.len(), TEST_RUN_JSON_MAX_BYTES);
-    let directory = write_run(&fixture.runs_dir(), "test-source-byte-limit", request, Some(results));
+    let directory = write_run(
+        &fixture.runs_dir(),
+        "test-source-byte-limit",
+        request,
+        Some(results),
+    );
     fs::write(directory.join("results.json"), &bytes).unwrap();
     let detail = test_run_detail(&directory).unwrap();
     assert_eq!(detail.source_comparison.as_deref(), Some("matched"));
     bytes.push(b' ');
     fs::write(directory.join("results.json"), bytes).unwrap();
-    assert!(test_run_detail(&directory).is_err(), "the producer cap includes its newline");
+    assert!(
+        test_run_detail(&directory).is_err(),
+        "the producer cap includes its newline"
+    );
 }
 
 #[test]
@@ -163,6 +218,9 @@ fn newly_untracked_input_changes_remain_readable_without_the_historical_debris_e
         "after":{"commit":commit,"clean":false,"paths":[{"status":"??","path":"new.txt"}]},
         "outcome":"input_changed","eligible":false}});
     let input = TestRunCommittedInput::read(&results).unwrap();
-    assert_eq!(input.outcome, Some(TestRunCommittedInputOutcome::InputChanged));
+    assert_eq!(
+        input.outcome,
+        Some(TestRunCommittedInputOutcome::InputChanged)
+    );
     assert_eq!(input.eligible, Some(false));
 }

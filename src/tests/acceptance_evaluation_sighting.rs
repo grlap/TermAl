@@ -115,18 +115,25 @@ fn script_named_parent_claim(transport: &ScriptedEngramControlTransport) {
     let binding = named_parent_binding();
     transport.replace_held_claims([Ok(EngramHeldClaims {
         items: vec![EngramHeldClaim {
-            work_id: binding.work_id.clone(), short_ref: "w-task".to_owned(),
-            claim_id: binding.claim_id.clone(), claim_fence: binding.claim_fence,
-            focused: false, control_binding: Some(binding),
-        }], omitted: 0,
+            work_id: binding.work_id.clone(),
+            short_ref: "w-task".to_owned(),
+            claim_id: binding.claim_id.clone(),
+            claim_fence: binding.claim_fence,
+            focused: false,
+            control_binding: Some(binding),
+        }],
+        omitted: 0,
     })]);
 }
 
 fn named_parent_binding() -> EngramControlWorkBinding {
     EngramControlWorkBinding {
-        root_execution_id: "root".to_owned(), work_id: SIGHTED_WORK_ID.to_owned(),
-        run_id: "run".to_owned(), work_revision: 1,
-        claim_id: "claim-task".to_owned(), claim_fence: 1,
+        root_execution_id: "root".to_owned(),
+        work_id: SIGHTED_WORK_ID.to_owned(),
+        run_id: "run".to_owned(),
+        work_revision: 1,
+        claim_id: "claim-task".to_owned(),
+        claim_fence: 1,
     }
 }
 
@@ -566,7 +573,11 @@ fn acceptance_request_refuses_when_the_local_root_is_renamed_during_the_read() {
         state.install_test_engram_transport(Arc::new(RenamingSightingTransport {
             inner: Arc::downgrade(&state.inner),
             named_root,
-            sighting: if present { present_sighting() } else { json!({"state":"absent"}) },
+            sighting: if present {
+                present_sighting()
+            } else {
+                json!({"state":"absent"})
+            },
         }));
 
         let response = state.request_acceptance_evaluation_with_runner(
@@ -577,17 +588,26 @@ fn acceptance_request_refuses_when_the_local_root_is_renamed_during_the_read() {
 
         let error = refusal(&state, response, "renamed during the read");
         assert!(
-            error.message.contains("changed while its sighting was read"),
+            error
+                .message
+                .contains("changed while its sighting was read"),
             "{}",
             error.message
         );
-        assert!(!error.message.contains("Then request a new evaluation from a later turn"),
-            "{}", error.message);
+        assert!(
+            !error
+                .message
+                .contains("Then request a new evaluation from a later turn"),
+            "{}",
+            error.message
+        );
     }
 }
 
 fn sighting_reads(transport: &ScriptedEngramControlTransport) -> usize {
-    transport.requests().iter()
+    transport
+        .requests()
+        .iter()
         .filter(|recorded| recorded.request["operation"] == "named_root_sighting_read")
         .count()
 }
@@ -603,7 +623,8 @@ fn ordinary_naming_trace(
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(parent).unwrap()];
     let mut trace = EngramRuntimeObservedTurn::started(
-        "fixture-ordinary-prompt".to_owned(), record.active_turn_generation,
+        "fixture-ordinary-prompt".to_owned(),
+        record.active_turn_generation,
     );
     if opened_in_root {
         let entry = &inner.engram_work_source_roots[0];
@@ -623,15 +644,14 @@ fn ordinary_naming_event(
     kind: EngramNamedRootKind,
 ) -> EngramNamedRootEvent {
     EngramNamedRootEvent {
-        root: root.clone(), reporter: reporter.to_owned(), kind, end_reason: None,
+        root: root.clone(),
+        reporter: reporter.to_owned(),
+        kind,
+        end_reason: None,
     }
 }
 
-fn install_ordinary_naming_turn(
-    state: &AppState,
-    parent: &str,
-    trace: EngramRuntimeObservedTurn,
-) {
+fn install_ordinary_naming_turn(state: &AppState, parent: &str, trace: EngramRuntimeObservedTurn) {
     let mut inner = state.inner.lock().unwrap();
     let entry = inner.engram_work_source_roots[0].clone();
     let index = inner.find_session_index(parent).unwrap();
@@ -641,7 +661,8 @@ fn install_ordinary_naming_turn(
     // turn identity when it installs the selection, under the same state lock.
     let naming_turn = engram.observed_turn_ref().map(str::to_owned);
     record_engram_root_named_in_turn(
-        engram, &entry.store,
+        engram,
+        &entry.store,
         &ordinary_naming_event(&entry, parent, EngramNamedRootKind::Bound),
         naming_turn,
     );
@@ -654,15 +675,34 @@ fn acceptance_request_in_the_turn_that_named_the_root_is_refused_before_the_read
     let trace = ordinary_naming_trace(&state, &parent, false);
     install_ordinary_naming_turn(&state, &parent, trace);
     let response = state.request_acceptance_evaluation_with_runner(
-        &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
+        &parent,
+        evaluation_request(Some(Agent::Codex)),
+        independent_reader(),
     );
-    let error = refusal(&state, response, "ordinary naming turn before the root opens");
-    assert_eq!(error.kind, Some(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending));
+    let error = refusal(
+        &state,
+        response,
+        "ordinary naming turn before the root opens",
+    );
+    assert_eq!(
+        error.kind,
+        Some(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending)
+    );
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("no turn has opened in it since")
-        && error.message.contains("(named_root_turn_pending)")
-        && error.message.contains("not from the turn the root was named in"), "{}", error.message);
-    assert_eq!(sighting_reads(&transport), 0, "the local ordinary boundary precedes the producer read");
+    assert!(
+        error.message.contains("no turn has opened in it since")
+            && error.message.contains("(named_root_turn_pending)")
+            && error
+                .message
+                .contains("not from the turn the root was named in"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        sighting_reads(&transport),
+        0,
+        "the local ordinary boundary precedes the producer read"
+    );
 }
 
 #[test]
@@ -687,12 +727,22 @@ fn acceptance_request_after_the_next_turn_opens_in_the_named_root_proceeds_past_
             inner.sessions[index].active_turn_generation = opening_trace.generation;
             inner.sessions[index].engram.unadmitted_active_turn = Some(opening_trace);
         }
-        let response = state.request_acceptance_evaluation_with_runner(
-            &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
-        ).unwrap();
-        assert!(matches!(response, AcceptanceEvaluationRequestResponse::Spawned { .. }));
-        assert_eq!(sighting_reads(&transport), 1,
-            "an opening permits the real producer receipt check; it does not replace it");
+        let response = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                evaluation_request(Some(Agent::Codex)),
+                independent_reader(),
+            )
+            .unwrap();
+        assert!(matches!(
+            response,
+            AcceptanceEvaluationRequestResponse::Spawned { .. }
+        ));
+        assert_eq!(
+            sighting_reads(&transport),
+            1,
+            "an opening permits the real producer receipt check; it does not replace it"
+        );
     }
 }
 
@@ -706,22 +756,34 @@ fn acceptance_request_keeps_the_refusal_after_another_claim_is_named_in_the_same
         let mut inner = state.inner.lock().unwrap();
         let other = EngramWorkSourceRoot {
             work_id: "01a0b6c5-4b4f-7b41-9e32-0000000000b2".to_owned(),
-            claim_id: "claim-other".to_owned(), generation: 2,
+            claim_id: "claim-other".to_owned(),
+            generation: 2,
             ..inner.engram_work_source_roots[0].clone()
         };
         let index = inner.find_session_index(&parent).unwrap();
         let engram = &mut inner.sessions[index].engram;
         let naming_turn = engram.observed_turn_ref().map(str::to_owned);
         record_engram_root_named_in_turn(
-            engram, &store,
-            &ordinary_naming_event(&other, &parent, EngramNamedRootKind::Bound), naming_turn,
+            engram,
+            &store,
+            &ordinary_naming_event(&other, &parent, EngramNamedRootKind::Bound),
+            naming_turn,
         );
     }
     let response = state.request_acceptance_evaluation_with_runner(
-        &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
+        &parent,
+        evaluation_request(Some(Agent::Codex)),
+        independent_reader(),
     );
-    let error = refusal(&state, response, "another claim named during the ordinary turn");
-    assert_eq!(error.kind, Some(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending));
+    let error = refusal(
+        &state,
+        response,
+        "another claim named during the ordinary turn",
+    );
+    assert_eq!(
+        error.kind,
+        Some(ApiErrorKind::AcceptanceEvaluationNamedRootTurnPending)
+    );
     assert_eq!(sighting_reads(&transport), 0);
 }
 
@@ -731,54 +793,116 @@ fn naming_marks_are_kept_per_claim_and_only_for_the_running_turn() {
     let first = state.inner.lock().unwrap().engram_work_source_roots[0].clone();
     let second = EngramWorkSourceRoot {
         work_id: "01a0b6c5-4b4f-7b41-9e32-0000000000b2".to_owned(),
-        claim_id: "claim-other".to_owned(), generation: 2, ..first.clone()
+        claim_id: "claim-other".to_owned(),
+        generation: 2,
+        ..first.clone()
     };
     let mut engram = EngramSessionState::default();
     let trace = ordinary_naming_trace(&state, &parent, false);
     let naming_turn = trace.host_turn_ref.clone();
     engram.unadmitted_active_turn = Some(trace);
-    let marks = |engram: &EngramSessionState| engram.roots_named_in_turn.iter()
-        .map(|mark| (mark.claim_id.clone(), mark.generation, mark.host_turn_ref.clone()))
-        .collect::<Vec<_>>();
-    let mark = |claim: &str, generation: u64, turn: &str| (claim.to_owned(), generation, turn.to_owned());
-    let record = |engram: &mut EngramSessionState, root: &EngramWorkSourceRoot,
-                  kind: EngramNamedRootKind, turn: &str| {
-        record_engram_root_named_in_turn(engram, &store,
-            &ordinary_naming_event(root, &parent, kind), Some(turn.to_owned()))
+    let marks = |engram: &EngramSessionState| {
+        engram
+            .roots_named_in_turn
+            .iter()
+            .map(|mark| {
+                (
+                    mark.claim_id.clone(),
+                    mark.generation,
+                    mark.host_turn_ref.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
     };
-    record(&mut engram, &first, EngramNamedRootKind::Bound, &naming_turn);
-    record(&mut engram, &second, EngramNamedRootKind::Bound, &naming_turn);
-    assert_eq!(marks(&engram), [mark("claim-task", 1, &naming_turn), mark("claim-other", 2, &naming_turn)]);
-    record(&mut engram, &second, EngramNamedRootKind::Ended, &naming_turn);
+    let mark =
+        |claim: &str, generation: u64, turn: &str| (claim.to_owned(), generation, turn.to_owned());
+    let record = |engram: &mut EngramSessionState,
+                  root: &EngramWorkSourceRoot,
+                  kind: EngramNamedRootKind,
+                  turn: &str| {
+        record_engram_root_named_in_turn(
+            engram,
+            &store,
+            &ordinary_naming_event(root, &parent, kind),
+            Some(turn.to_owned()),
+        )
+    };
+    record(
+        &mut engram,
+        &first,
+        EngramNamedRootKind::Bound,
+        &naming_turn,
+    );
+    record(
+        &mut engram,
+        &second,
+        EngramNamedRootKind::Bound,
+        &naming_turn,
+    );
+    assert_eq!(
+        marks(&engram),
+        [
+            mark("claim-task", 1, &naming_turn),
+            mark("claim-other", 2, &naming_turn)
+        ]
+    );
+    record(
+        &mut engram,
+        &second,
+        EngramNamedRootKind::Ended,
+        &naming_turn,
+    );
     assert_eq!(marks(&engram), [mark("claim-task", 1, &naming_turn)]);
-    record(&mut engram, &second, EngramNamedRootKind::Bound, "ended-ordinary-turn");
-    assert_eq!(marks(&engram), [mark("claim-task", 1, &naming_turn)],
-        "a transition from an ended turn cannot mark the current one");
+    record(
+        &mut engram,
+        &second,
+        EngramNamedRootKind::Bound,
+        "ended-ordinary-turn",
+    );
+    assert_eq!(
+        marks(&engram),
+        [mark("claim-task", 1, &naming_turn)],
+        "a transition from an ended turn cannot mark the current one"
+    );
     let next_trace = ordinary_naming_trace(&state, &parent, false);
     let next_turn = next_trace.host_turn_ref.clone();
     engram.unadmitted_active_turn = Some(next_trace);
     record(&mut engram, &second, EngramNamedRootKind::Bound, &next_turn);
-    assert_eq!(marks(&engram), [mark("claim-other", 2, &next_turn)],
-        "old-turn marks are pruned by the existing ordinary owner");
+    assert_eq!(
+        marks(&engram),
+        [mark("claim-other", 2, &next_turn)],
+        "old-turn marks are pruned by the existing ordinary owner"
+    );
 }
 
 #[test]
 fn acceptance_request_reads_engram_without_a_local_capture() {
     let (state, parent, _store, named_root) = named_root_parent();
-    let transport = install_sighting_transport(
-        &state, &named_root, 1, json!({"state":"absent"}),
-    );
+    let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
     let response = state.request_acceptance_evaluation_with_runner(
-        &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
+        &parent,
+        evaluation_request(Some(Agent::Codex)),
+        independent_reader(),
     );
     let error = refusal(&state, response, "ordinary named root without a capture");
-    assert_eq!(error.kind,
-        Some(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable));
-    assert!(error.message.contains("has no sighting")
-        && error.message.contains("acknowledged matching named-root sighting")
-        && error.message.contains("supported measured capture"), "{}", error.message);
-    assert_eq!(sighting_reads(&transport), 1,
-        "naming alone never substitutes for Engram's read");
+    assert_eq!(
+        error.kind,
+        Some(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable)
+    );
+    assert!(
+        error.message.contains("has no sighting")
+            && error
+                .message
+                .contains("acknowledged matching named-root sighting")
+            && error.message.contains("supported measured capture"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        sighting_reads(&transport),
+        1,
+        "naming alone never substitutes for Engram's read"
+    );
 }
 
 #[test]
@@ -786,32 +910,58 @@ fn acceptance_request_uses_the_ordinary_sighting_receipt_without_manufacturing_e
     for present in [false, true] {
         let (state, parent, _store, named_root) = named_root_parent();
         let transport = install_sighting_transport(
-            &state, &named_root, 1,
-            if present { present_sighting() } else { json!({"state":"absent"}) },
+            &state,
+            &named_root,
+            1,
+            if present {
+                present_sighting()
+            } else {
+                json!({"state":"absent"})
+            },
         );
         let response = state.request_acceptance_evaluation_with_runner(
-            &parent, evaluation_request(Some(Agent::Codex)), independent_reader(),
+            &parent,
+            evaluation_request(Some(Agent::Codex)),
+            independent_reader(),
         );
         assert_eq!(sighting_reads(&transport), 1);
         if present {
-            assert!(matches!(response.unwrap(), AcceptanceEvaluationRequestResponse::Spawned { .. }),
-                "an existing matching producer sighting passes the source preflight");
+            assert!(
+                matches!(
+                    response.unwrap(),
+                    AcceptanceEvaluationRequestResponse::Spawned { .. }
+                ),
+                "an existing matching producer sighting passes the source preflight"
+            );
         } else {
             let error = refusal(&state, response, "no producer sighting");
             assert_eq!(error.status, StatusCode::CONFLICT);
-            assert_eq!(error.kind, Some(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable));
-            assert!(error.message.contains("has no sighting")
-                && error.message.contains("cut 42")
-                && error.message.contains("eligible measured execution observation")
-                && error.message.contains("source_root_generation")
-                && error.message.contains("supported measured capture")
-                && error.message.contains("(named_root_sighting_unavailable)")
-                && !error.message.contains("Then request a new evaluation from a later turn"),
-                "the refusal describes the evidence actually required: {}", error.message);
+            assert_eq!(
+                error.kind,
+                Some(ApiErrorKind::AcceptanceEvaluationNamedRootSightingUnavailable)
+            );
+            assert!(
+                error.message.contains("has no sighting")
+                    && error.message.contains("cut 42")
+                    && error
+                        .message
+                        .contains("eligible measured execution observation")
+                    && error.message.contains("source_root_generation")
+                    && error.message.contains("supported measured capture")
+                    && error.message.contains("(named_root_sighting_unavailable)")
+                    && !error
+                        .message
+                        .contains("Then request a new evaluation from a later turn"),
+                "the refusal describes the evidence actually required: {}",
+                error.message
+            );
         }
-        assert!(transport.requests().iter().all(|request| matches!(
-            request.request["operation"].as_str(),
-            Some("work_session_read" | "named_root_sighting_read")
-        )), "a sighting read cannot create a measurement or verification");
+        assert!(
+            transport.requests().iter().all(|request| matches!(
+                request.request["operation"].as_str(),
+                Some("work_session_read" | "named_root_sighting_read")
+            )),
+            "a sighting read cannot create a measurement or verification"
+        );
     }
 }

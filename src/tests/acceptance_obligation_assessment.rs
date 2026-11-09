@@ -72,7 +72,9 @@ fn assessment_reply(
                 .expect("a continuation token the tracker issued")
                 + 1;
             if fail_from.is_some_and(|fail| index >= fail) {
-                Err(EngramTransportError::transport("the tracker process exited"))
+                Err(EngramTransportError::transport(
+                    "the tracker process exited",
+                ))
             } else {
                 Ok(json!({"work_ref": "w-task", "locator": RECORD, "assessment": pages[index]}))
             }
@@ -151,7 +153,8 @@ fn full_history_command(locator: &str) -> String {
 }
 
 #[test]
-fn a_cited_verification_record_brings_its_assessment_grouped_by_status_with_the_rows_that_matter_in_full() {
+fn a_cited_verification_record_brings_its_assessment_grouped_by_status_with_the_rows_that_matter_in_full()
+ {
     let (wire, prompt) = evaluate_with_assessment(captured_assessment_pages(), None);
 
     let header = format!(
@@ -162,7 +165,10 @@ fn a_cited_verification_record_brings_its_assessment_grouped_by_status_with_the_
         prompt.contains("47 left_out (already_closed; satisfied_by_another_record)"),
         "{prompt}"
     );
-    assert!(prompt.contains("2 matches (satisfied_by_this_record)"), "{prompt}");
+    assert!(
+        prompt.contains("2 matches (satisfied_by_this_record)"),
+        "{prompt}"
+    );
     assert_eq!(
         rendered_rows(&prompt),
         vec![
@@ -251,7 +257,10 @@ fn the_summary_names_its_cut_and_the_full_history_command_and_inlines_no_closed_
     let first = pages[0]["continuation"].as_str().unwrap().to_owned();
     let (wire, prompt) = evaluate_with_assessment(pages, None);
 
-    assert!(prompt.contains("(record position 787, cut position 788)"), "{prompt}");
+    assert!(
+        prompt.contains("(record position 787, cut position 788)"),
+        "{prompt}"
+    );
     assert!(
         prompt.contains(&format!(
             "  Full history at this cut, oldest first: page 1 by `{}`, then `{first}`.",
@@ -261,14 +270,18 @@ fn the_summary_names_its_cut_and_the_full_history_command_and_inlines_no_closed_
     );
     assert!(!prompt.contains("Resume at the same cut"), "{prompt}");
     assert!(
-        !rendered_rows(&prompt).iter().any(|row| row.contains("left_out")),
+        !rendered_rows(&prompt)
+            .iter()
+            .any(|row| row.contains("left_out")),
         "{prompt}"
     );
     assert_eq!(
         wire["obligationAssessments"][0]["fullHistory"],
         json!(full_history_command(RECORD))
     );
-    let section = prompt.find("Obligation assessments of the cited verification records").unwrap();
+    let section = prompt
+        .find("Obligation assessments of the cited verification records")
+        .unwrap();
     assert!(
         prompt.find("Criterion evidence index").unwrap() < section
             && section < prompt.find("Evidence recorded on the task").unwrap(),
@@ -289,12 +302,18 @@ fn an_assessment_cut_by_a_failed_read_says_how_much_was_read_and_where_to_resume
         )),
         "{prompt}"
     );
-    assert!(prompt.contains("an unread row may be open or a mismatch"), "{prompt}");
+    assert!(
+        prompt.contains("an unread row may be open or a mismatch"),
+        "{prompt}"
+    );
     assert!(
         prompt.contains("16 left_out (already_closed; satisfied_by_another_record)"),
         "{prompt}"
     );
-    assert!(prompt.contains(&format!("  Resume at the same cut: `{resume}`")), "{prompt}");
+    assert!(
+        prompt.contains(&format!("  Resume at the same cut: `{resume}`")),
+        "{prompt}"
+    );
     assert!(rendered_rows(&prompt).is_empty(), "{prompt}");
     let summary = &wire["obligationAssessments"][0];
     assert_eq!(summary["complete"], json!(false));
@@ -341,7 +360,10 @@ fn an_assessment_whose_continuation_is_missing_is_incomplete_never_presented_who
 fn a_verification_record_without_an_assessment_leaves_the_brief_unchanged() {
     let (wire, prompt) = evaluate_with_assessment(Vec::new(), None);
 
-    assert!(prompt.contains(&format!("Criterion 1: {RECORD} (requester)")), "{prompt}");
+    assert!(
+        prompt.contains(&format!("Criterion 1: {RECORD} (requester)")),
+        "{prompt}"
+    );
     assert!(!prompt.contains("Obligation assessment"), "{prompt}");
     assert_eq!(wire["obligationAssessments"], json!([]));
     assert!(
@@ -362,21 +384,21 @@ fn an_original_closure_record_brings_its_assessment_into_the_same_session_brief(
     let _transport =
         super::evidence_selection::install_binding_evidence_transport(&state, &parent, vec![page]);
     let assessment = json!({"total": 3, "earlier": 0, "shown": 3, "omitted": 0,
-        "record_position": 33, "cut_position": 34, "label": "reconstructed at record position 33",
-        "rows": [
-            {"check_kind": "test", "criterion": 1, "left_out": "not_yet_defined", "pinned": false,
-                "recorded": "open",
-                "rule": "acceptance_criterion_requires_verification:1", "rule_version": 1,
-                "status": "left_out", "trigger_position": 3},
-            {"check_kind": "test", "criterion": 2, "pinned": false,
-                "recorded": "satisfied_by_this_record",
-                "rule": "acceptance_criterion_requires_verification:2", "rule_version": 1,
-                "status": "matches", "trigger_position": 3},
-            {"check_kind": "test", "left_out": "already_closed", "pinned": false,
-                "recorded": "satisfied_by_another_record",
-                "rule": "source_mutation_requires_test", "rule_version": 1,
-                "status": "left_out", "trigger_position": 20}
-        ]});
+    "record_position": 33, "cut_position": 34, "label": "reconstructed at record position 33",
+    "rows": [
+        {"check_kind": "test", "criterion": 1, "left_out": "not_yet_defined", "pinned": false,
+            "recorded": "open",
+            "rule": "acceptance_criterion_requires_verification:1", "rule_version": 1,
+            "status": "left_out", "trigger_position": 3},
+        {"check_kind": "test", "criterion": 2, "pinned": false,
+            "recorded": "satisfied_by_this_record",
+            "rule": "acceptance_criterion_requires_verification:2", "rule_version": 1,
+            "status": "matches", "trigger_position": 3},
+        {"check_kind": "test", "left_out": "already_closed", "pinned": false,
+            "recorded": "satisfied_by_another_record",
+            "rule": "source_mutation_requires_test", "rule_version": 1,
+            "status": "left_out", "trigger_position": 20}
+    ]});
     let response = state
         .request_acceptance_evaluation_with_runner(&parent, evaluation_request(None), |_, args, _| {
             if let Some(note) = args.iter().position(|arg| arg == "--note") {
@@ -399,7 +421,9 @@ fn an_original_closure_record_brings_its_assessment_into_the_same_session_brief(
     let brief = wire["brief"].as_str().unwrap();
 
     assert!(
-        brief.contains(&format!("Criterion 2: {CLOSURE} (original obligation closure)")),
+        brief.contains(&format!(
+            "Criterion 2: {CLOSURE} (original obligation closure)"
+        )),
         "{brief}"
     );
     assert!(
@@ -417,7 +441,9 @@ fn an_original_closure_record_brings_its_assessment_into_the_same_session_brief(
         "{brief}"
     );
     assert!(
-        brief.find("Obligation assessments of the cited verification records").unwrap()
+        brief
+            .find("Obligation assessments of the cited verification records")
+            .unwrap()
             < brief.find("Evidence not shown in this brief:").unwrap(),
         "{brief}"
     );
@@ -454,7 +480,9 @@ fn reader_connection() -> EngramConnectionConfig {
 }
 
 fn reader_show_args() -> Vec<String> {
-    ["work", "show", "w-task", "--notes", "--gates", "--json"].map(str::to_owned).to_vec()
+    ["work", "show", "w-task", "--notes", "--gates", "--json"]
+        .map(str::to_owned)
+        .to_vec()
 }
 
 /// `count` one-row pages of left-out rows, chained by continuations.
@@ -502,7 +530,9 @@ fn read_with(
     let mut assessments = read_records(
         reader_task(),
         |args| match args.iter().position(|arg| arg == "--after") {
-            None => Ok(json!({"work_ref": "w-task", "note": verification_note(RECORD, pages.first())})),
+            None => {
+                Ok(json!({"work_ref": "w-task", "note": verification_note(RECORD, pages.first())}))
+            }
             Some(after) => {
                 let index = args[after + 1]
                     .trim_start_matches("token-")
@@ -557,11 +587,17 @@ fn a_frame_bound_or_spent_budget_is_named_as_the_reason_the_read_stopped() {
     assert_eq!(framed.rows_read, 1);
     assert_eq!(framed.resume.as_deref(), pages[0]["continuation"].as_str());
 
-    let spent = read_with(&pages, |_| unreachable!("no budget is left"), std::time::Instant::now());
+    let spent = read_with(
+        &pages,
+        |_| unreachable!("no budget is left"),
+        std::time::Instant::now(),
+    );
     assert_eq!(spent.incomplete_reason.as_deref(), Some("time_budget"));
     assert_eq!(spent.total, None);
-    assert!(render_acceptance_obligation_assessment(&spent)
-        .contains("INCOMPLETE: 0 of an unknown number of rows read (time_budget)."));
+    assert!(
+        render_acceptance_obligation_assessment(&spent)
+            .contains("INCOMPLETE: 0 of an unknown number of rows read (time_budget).")
+    );
 }
 
 #[test]
@@ -692,10 +728,16 @@ fn an_original_closure_already_whole_in_the_notes_window_still_brings_its_assess
     let brief = wire["brief"].as_str().unwrap();
 
     assert!(
-        brief.contains(&format!("Criterion 2: {CLOSURE} (original obligation closure)")),
+        brief.contains(&format!(
+            "Criterion 2: {CLOSURE} (original obligation closure)"
+        )),
         "{brief}"
     );
-    assert_eq!(wire["obligationAssessments"][0]["locator"], json!(CLOSURE), "{wire}");
+    assert_eq!(
+        wire["obligationAssessments"][0]["locator"],
+        json!(CLOSURE),
+        "{wire}"
+    );
     assert!(
         brief.contains(&format!(
             "Obligation assessment of {CLOSURE} (record position 33, cut position 34): 1 rows, read whole."
@@ -719,7 +761,10 @@ fn the_not_carried_line_of_an_incomplete_assessment_keeps_its_state_and_resume_p
     let line = acceptance_obligation_not_carried_line(&incomplete);
 
     assert!(line.contains("INCOMPLETE"), "{line}");
-    assert!(line.contains("16 of 49 rows read (transport_failure)"), "{line}");
+    assert!(
+        line.contains("16 of 49 rows read (transport_failure)"),
+        "{line}"
+    );
     assert!(line.contains(&resume), "{line}");
     assert!(!line.contains("49 rows, 0 listed in full"), "{line}");
 }
@@ -737,9 +782,15 @@ fn a_rejected_later_page_keeps_the_continuation_that_fetched_it() {
         later(),
     );
 
-    assert_eq!(assessment.incomplete_reason.as_deref(), Some("malformed_row"));
+    assert_eq!(
+        assessment.incomplete_reason.as_deref(),
+        Some("malformed_row")
+    );
     assert_eq!(assessment.rows_read, 1);
-    assert_eq!(assessment.resume.as_deref(), pages[0]["continuation"].as_str());
+    assert_eq!(
+        assessment.resume.as_deref(),
+        pages[0]["continuation"].as_str()
+    );
 }
 
 /// An exact read for a closure record must return that record, a holder
@@ -832,7 +883,9 @@ fn the_section_is_placed_at_the_anchor_line_not_inside_quoted_text() {
     let section = fitted.find("Obligation assessments of the cited").unwrap();
     assert!(quoted < section, "{fitted}");
     assert!(
-        fitted[section..].contains(&format!("\n{ACCEPTANCE_ASSESSMENT_ANCHOR} - cite by locator:")),
+        fitted[section..].contains(&format!(
+            "\n{ACCEPTANCE_ASSESSMENT_ANCHOR} - cite by locator:"
+        )),
         "{fitted}"
     );
 }
@@ -853,7 +906,10 @@ fn a_continuation_with_control_characters_is_never_quoted() {
     );
 
     assert!(!assessment.complete);
-    assert_eq!(assessment.incomplete_reason.as_deref(), Some("missing_continuation"));
+    assert_eq!(
+        assessment.incomplete_reason.as_deref(),
+        Some("missing_continuation")
+    );
     assert_eq!(assessment.resume, None);
 }
 
@@ -862,7 +918,11 @@ fn a_continuation_with_control_characters_is_never_quoted() {
 #[test]
 fn a_page_that_does_not_continue_the_rows_read_stops_as_a_changed_assessment() {
     let pages = one_row_pages(3);
-    for (field, value) in [("earlier", json!(5)), ("cut_position", json!(99)), ("total", json!(7))] {
+    for (field, value) in [
+        ("earlier", json!(5)),
+        ("cut_position", json!(99)),
+        ("total", json!(7)),
+    ] {
         let mut changed = pages[1].clone();
         changed[field] = value;
         let assessment = read_with(
@@ -870,9 +930,17 @@ fn a_page_that_does_not_continue_the_rows_read_stops_as_a_changed_assessment() {
             |_| Ok(json!({"work_ref": "w-task", "locator": RECORD, "assessment": changed})),
             later(),
         );
-        assert_eq!(assessment.incomplete_reason.as_deref(), Some("assessment_changed"), "{field}");
+        assert_eq!(
+            assessment.incomplete_reason.as_deref(),
+            Some("assessment_changed"),
+            "{field}"
+        );
         assert_eq!(assessment.rows_read, 1, "{field}");
-        assert_eq!(assessment.resume.as_deref(), pages[0]["continuation"].as_str(), "{field}");
+        assert_eq!(
+            assessment.resume.as_deref(),
+            pages[0]["continuation"].as_str(),
+            "{field}"
+        );
     }
 }
 
@@ -885,18 +953,30 @@ fn a_continuation_for_another_record_is_not_followed() {
     let foreign = read_with(
         &pages,
         |index| {
-            Ok(json!({"work_ref": "w-task", "locator": "dddddddddddddddddddddddddddddddd",
-                "assessment": served[index]}))
+            Ok(
+                json!({"work_ref": "w-task", "locator": "dddddddddddddddddddddddddddddddd",
+                "assessment": served[index]}),
+            )
         },
         later(),
     );
-    assert_eq!(foreign.incomplete_reason.as_deref(), Some("invalid_receipt"));
+    assert_eq!(
+        foreign.incomplete_reason.as_deref(),
+        Some("invalid_receipt")
+    );
 
     let mut naming = one_row_pages(2);
     naming[0]["continuation"] =
         json!("engram work show w-task --note dddddddddddddddddddddddddddddddd --after token-0");
-    let named = read_with(&naming, |_| unreachable!("a foreign continuation is not followed"), later());
-    assert_eq!(named.incomplete_reason.as_deref(), Some("missing_continuation"));
+    let named = read_with(
+        &naming,
+        |_| unreachable!("a foreign continuation is not followed"),
+        later(),
+    );
+    assert_eq!(
+        named.incomplete_reason.as_deref(),
+        Some("missing_continuation")
+    );
     assert_eq!(named.resume, None);
 }
 
@@ -906,7 +986,10 @@ fn a_continuation_for_another_record_is_not_followed() {
 fn the_request_page_budget_is_shared_across_records() {
     let locators = ["a", "b", "c", "d"].map(|letter| letter.repeat(32));
     let mut task = reader_task();
-    task.indexed_evidence = locators.iter().map(|locator| verification_entry(locator)).collect();
+    task.indexed_evidence = locators
+        .iter()
+        .map(|locator| verification_entry(locator))
+        .collect();
     let page_of = |locator: &str, index: u64| {
         json!({"total": 40, "earlier": index, "shown": 1, "omitted": 39,
             "record_position": 10, "cut_position": 11,
@@ -925,7 +1008,12 @@ fn the_request_page_budget_is_shared_across_records() {
                 None => Ok(json!({"work_ref": "w-task",
                     "note": verification_note(&locator, Some(&page_of(&locator, 0)))})),
                 Some(after) => {
-                    let index = args[after + 1].rsplit('-').next().unwrap().parse::<u64>().unwrap();
+                    let index = args[after + 1]
+                        .rsplit('-')
+                        .next()
+                        .unwrap()
+                        .parse::<u64>()
+                        .unwrap();
                     Ok(json!({"work_ref": "w-task", "locator": locator,
                         "assessment": page_of(&locator, index + 1)}))
                 }
@@ -936,9 +1024,11 @@ fn the_request_page_budget_is_shared_across_records() {
 
     let read = assessments.iter().map(|a| a.rows_read).collect::<Vec<_>>();
     assert_eq!(read, vec![32, 32, 32, 0]);
-    assert!(assessments
-        .iter()
-        .all(|a| a.incomplete_reason.as_deref() == Some("page_limit")));
+    assert!(
+        assessments
+            .iter()
+            .all(|a| a.incomplete_reason.as_deref() == Some("page_limit"))
+    );
 }
 
 /// Two summaries fit in index order: the first whole, the second as its
@@ -962,7 +1052,10 @@ fn two_summaries_fit_in_index_order_whole_then_named() {
     );
 
     assert!(assessments[0].carried && !assessments[1].carried);
-    assert!(fitted.find(&whole).unwrap() < fitted.find(&short).unwrap(), "{fitted}");
+    assert!(
+        fitted.find(&whole).unwrap() < fitted.find(&short).unwrap(),
+        "{fitted}"
+    );
 }
 
 // Round 3: the assessment deadline, a malformed selected assessment and the
@@ -1047,7 +1140,10 @@ fn assessment_reads_stop_at_the_discovery_deadline_and_leave_the_closing_reserve
     let (wire, after_reads) = evaluate_on_clock(25, Some(41));
 
     let summary = &wire["obligationAssessments"][0];
-    assert_eq!(after_reads, 1, "no assessment read after the discovery deadline: {wire}");
+    assert_eq!(
+        after_reads, 1,
+        "no assessment read after the discovery deadline: {wire}"
+    );
     assert_eq!(summary["complete"], json!(false), "{wire}");
     assert_eq!(summary["incompleteReason"], json!("time_budget"), "{wire}");
     assert_eq!(summary["rowsRead"], json!(16), "{wire}");
@@ -1062,7 +1158,11 @@ fn a_selected_record_with_a_malformed_assessment_is_incomplete_not_absent() {
     let summary = &wire["obligationAssessments"][0];
     assert_eq!(summary["locator"], json!(RECORD), "{wire}");
     assert_eq!(summary["complete"], json!(false), "{wire}");
-    assert_eq!(summary["incompleteReason"], json!("malformed_page"), "{wire}");
+    assert_eq!(
+        summary["incompleteReason"],
+        json!("malformed_page"),
+        "{wire}"
+    );
     assert!(
         prompt.contains("INCOMPLETE: 0 of an unknown number of rows read (malformed_page)."),
         "{prompt}"
@@ -1087,7 +1187,10 @@ fn the_section_header_names_the_mismatch_exception() {
         .lines()
         .find(|line| line.starts_with("Obligation assessments of the cited"))
         .expect("the section header");
-    assert!(header.contains("except mismatches, which are always listed"), "{header}");
+    assert!(
+        header.contains("except mismatches, which are always listed"),
+        "{header}"
+    );
 }
 
 // Round 5: page metadata and a continuation after the last row.
@@ -1117,7 +1220,13 @@ fn page_metadata_that_is_not_a_non_negative_integer_is_a_malformed_page() {
             failures.push(format!("{field} = {value}"));
         }
     }
-    for field in ["total", "earlier", "record_position", "cut_position", "rows"] {
+    for field in [
+        "total",
+        "earlier",
+        "record_position",
+        "cut_position",
+        "rows",
+    ] {
         let mut missing = page.clone();
         missing.as_object_mut().unwrap().remove(field);
         let mut pages = AcceptanceAssessmentPages::new(RECORD, "w-task");
@@ -1141,9 +1250,15 @@ fn a_continuation_page_with_malformed_metadata_is_a_malformed_page() {
         later(),
     );
 
-    assert_eq!(assessment.incomplete_reason.as_deref(), Some("malformed_page"));
+    assert_eq!(
+        assessment.incomplete_reason.as_deref(),
+        Some("malformed_page")
+    );
     assert_eq!(assessment.rows_read, 1);
-    assert_eq!(assessment.resume.as_deref(), pages[0]["continuation"].as_str());
+    assert_eq!(
+        assessment.resume.as_deref(),
+        pages[0]["continuation"].as_str()
+    );
 }
 
 /// Once every row is read, the read is whole: a continuation the last page
@@ -1151,14 +1266,17 @@ fn a_continuation_page_with_malformed_metadata_is_a_malformed_page() {
 #[test]
 fn a_whole_read_is_complete_even_when_its_last_page_carries_a_continuation() {
     let mut pages = one_row_pages(3);
-    pages[2]["continuation"] =
-        json!(format!("engram work show w-task --note {RECORD} --after token-2"));
+    pages[2]["continuation"] = json!(format!(
+        "engram work show w-task --note {RECORD} --after token-2"
+    ));
     let served = pages.clone();
     let assessment = read_with(
         &pages,
         |index| match served.get(index) {
             Some(page) => Ok(json!({"work_ref": "w-task", "locator": RECORD, "assessment": page})),
-            None => Err(EngramTransportError::transport("the tracker process exited")),
+            None => Err(EngramTransportError::transport(
+                "the tracker process exited",
+            )),
         },
         later(),
     );
@@ -1219,7 +1337,11 @@ fn a_missing_continuation_mid_read_resumes_at_the_cursor_that_fetched_the_last_p
     let (wire, prompt) = evaluate_with_assessment(pages, None);
 
     let summary = &wire["obligationAssessments"][0];
-    assert_eq!(summary["incompleteReason"], json!("missing_continuation"), "{wire}");
+    assert_eq!(
+        summary["incompleteReason"],
+        json!("missing_continuation"),
+        "{wire}"
+    );
     assert_eq!(summary["resume"], json!(fetched_third), "{wire}");
     assert_eq!(
         summary["resumeRereads"],
@@ -1247,9 +1369,17 @@ fn an_unquotable_continuation_mid_read_resumes_at_the_cursor_that_fetched_the_la
     );
     let wire = serde_json::to_value(&assessment).unwrap();
 
-    assert_eq!(wire["incompleteReason"], json!("missing_continuation"), "{wire}");
+    assert_eq!(
+        wire["incompleteReason"],
+        json!("missing_continuation"),
+        "{wire}"
+    );
     assert_eq!(wire["resume"], pages[0]["continuation"], "{wire}");
-    assert_eq!(wire["resumeRereads"], json!({"page": 2, "firstRow": 2, "lastRow": 2}), "{wire}");
+    assert_eq!(
+        wire["resumeRereads"],
+        json!({"page": 2, "firstRow": 2, "lastRow": 2}),
+        "{wire}"
+    );
 }
 
 /// A read that stops on its first page has no same-cut cursor at all: the
@@ -1262,13 +1392,23 @@ fn a_first_page_stop_says_no_same_cut_continuation_exists() {
     let (wire, prompt) = evaluate_with_assessment(pages, None);
 
     let summary = &wire["obligationAssessments"][0];
-    assert_eq!(summary["incompleteReason"], json!("missing_continuation"), "{wire}");
+    assert_eq!(
+        summary["incompleteReason"],
+        json!("missing_continuation"),
+        "{wire}"
+    );
     assert!(summary.get("historyContinuation").is_none(), "{wire}");
     assert!(summary.get("resume").is_none(), "{wire}");
-    assert!(prompt.contains("No same-cut continuation exists"), "{prompt}");
+    assert!(
+        prompt.contains("No same-cut continuation exists"),
+        "{prompt}"
+    );
     assert!(!prompt.contains("Resume at the same cut"), "{prompt}");
     let notice = wire["notice"].as_str().unwrap();
-    assert!(notice.contains("No same-cut continuation exists"), "{notice}");
+    assert!(
+        notice.contains("No same-cut continuation exists"),
+        "{notice}"
+    );
 }
 
 // Evaluation 2: a brief with no room even for the one-line note. The brief
@@ -1302,7 +1442,11 @@ fn evaluate_filled_in(
     let request = serde_json::from_value(json!({"workRef": "w-task", "agent": "Codex",
         "criterionEvidence": [{"criterion": 1, "locators": [RECORD]}]}))
     .unwrap();
-    let mode = if same_session { "same_session" } else { "independent_session" };
+    let mode = if same_session {
+        "same_session"
+    } else {
+        "independent_session"
+    };
     let criterion = format!("The route exists {}", "x".repeat(criterion_fill));
     let mut show = show_receipt(None);
     show["notes"] = window;
@@ -1328,7 +1472,10 @@ fn evaluate_filled_in(
         .expect("the evaluation request is admitted");
     let wire = serde_json::to_value(response).unwrap();
     if same_session {
-        let brief = wire["brief"].as_str().expect("the same-session brief").to_owned();
+        let brief = wire["brief"]
+            .as_str()
+            .expect("the same-session brief")
+            .to_owned();
         return (wire, brief);
     }
     let inner = state.inner.lock().unwrap();
@@ -1399,8 +1546,14 @@ fn a_saturated_brief_names_the_record_on_the_names_line_when_its_note_does_not_f
         prompt.len(),
         wire["evidenceOmissions"]
     );
-    assert!(prompt.contains("Criterion evidence index"), "the index keeps its detail");
-    assert!(prompt.contains("full gate passed: 5 stages"), "the cited body stays whole");
+    assert!(
+        prompt.contains("Criterion evidence index"),
+        "the index keeps its detail"
+    );
+    assert!(
+        prompt.contains("full gate passed: 5 stages"),
+        "the cited body stays whole"
+    );
 }
 
 /// The brief names `RECORD` as not carried in neither form.
@@ -1420,11 +1573,26 @@ fn an_uncited_holder_note_never_gives_way_and_the_notice_alone_names_the_record(
     let (wire, prompt) = evaluate_saturated(json!([holder_note]));
 
     assert!(prompt.contains(&body), "the holder note is carried whole");
-    assert!(names_record_nowhere(&prompt), "{}", &prompt[prompt.len().saturating_sub(1500)..]);
-    assert_eq!(wire["evidenceOmissions"]["clipped"]["count"], json!(0), "{wire}");
-    assert_eq!(wire["evidenceOmissions"]["leftOut"]["count"], json!(0), "{wire}");
+    assert!(
+        names_record_nowhere(&prompt),
+        "{}",
+        &prompt[prompt.len().saturating_sub(1500)..]
+    );
+    assert_eq!(
+        wire["evidenceOmissions"]["clipped"]["count"],
+        json!(0),
+        "{wire}"
+    );
+    assert_eq!(
+        wire["evidenceOmissions"]["leftOut"]["count"],
+        json!(0),
+        "{wire}"
+    );
     let notice = wire["notice"].as_str().unwrap();
-    assert!(notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")), "{notice}");
+    assert!(
+        notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")),
+        "{notice}"
+    );
 }
 
 /// A holder note the brief already had to clip is still protected: a rebuild
@@ -1444,10 +1612,14 @@ fn an_already_clipped_holder_note_is_never_left_out_to_name_the_record() {
     let (_, unclipped) = evaluate_filled(Vec::new(), window.clone(), 0);
     let probe_fill = MAX_ACCEPTANCE_BRIEF_BYTES - unclipped.len() + 1000;
     let (probe_wire, probe) = evaluate_filled(Vec::new(), window.clone(), probe_fill);
-    assert_eq!(probe_wire["evidenceOmissions"]["clipped"]["locators"], json!([HOLDER]), "{probe_wire}");
+    assert_eq!(
+        probe_wire["evidenceOmissions"]["clipped"]["locators"],
+        json!([HOLDER]),
+        "{probe_wire}"
+    );
     let clipped_line = probe
         .lines()
-        .find(|line| line.contains("[clipped by the host:") &&line.contains(HOLDER))
+        .find(|line| line.contains("[clipped by the host:") && line.contains(HOLDER))
         .expect("the probe lists the holder note clipped")
         .to_owned();
     let fill = probe_fill + (MAX_ACCEPTANCE_BRIEF_BYTES - SATURATED_SLACK) - probe.len();
@@ -1465,9 +1637,16 @@ fn an_already_clipped_holder_note_is_never_left_out_to_name_the_record() {
         wire["evidenceOmissions"], probe_wire["evidenceOmissions"],
         "the brief gives way on nothing more than the probe did"
     );
-    assert_eq!(wire["obligationAssessments"][0]["carried"], json!(false), "{wire}");
+    assert_eq!(
+        wire["obligationAssessments"][0]["carried"],
+        json!(false),
+        "{wire}"
+    );
     let notice = wire["notice"].as_str().unwrap();
-    assert!(notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")), "{notice}");
+    assert!(
+        notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")),
+        "{notice}"
+    );
 }
 
 fn window_holder_note(index: usize) -> Value {
@@ -1497,8 +1676,15 @@ fn a_saturated_same_session_brief_names_a_not_carried_record_by_dropping_omitted
     assert!(brief.len() <= MAX_ACCEPTANCE_BRIEF_BYTES);
     assert!(names_record_as_not_carried(&brief), "len={}", brief.len());
     assert!(brief.contains(&format!("Criterion 1: {RECORD} (requester)")));
-    assert!(brief.contains("full gate passed: 5 stages"), "the cited body stays whole");
-    assert_eq!(wire["obligationAssessments"][0]["carried"], json!(false), "{wire}");
+    assert!(
+        brief.contains("full gate passed: 5 stages"),
+        "the cited body stays whole"
+    );
+    assert_eq!(
+        wire["obligationAssessments"][0]["carried"],
+        json!(false),
+        "{wire}"
+    );
 }
 
 /// The same-session brief's omission detail also selects how many earlier
@@ -1510,13 +1696,23 @@ fn a_saturated_same_session_brief_keeps_its_listed_checks_and_the_notice_alone_n
 
     let (wire, brief) = evaluate_saturated_in(window, true);
 
-    assert!(names_record_nowhere(&brief), "{}", &brief[brief.len().saturating_sub(1500)..]);
+    assert!(
+        names_record_nowhere(&brief),
+        "{}",
+        &brief[brief.len().saturating_sub(1500)..]
+    );
     for index in 0..10 {
-        let line = format!("  - {:032x} (verification test passed at git:older)", 0xabc0 + index);
+        let line = format!(
+            "  - {:032x} (verification test passed at git:older)",
+            0xabc0 + index
+        );
         assert!(brief.contains(&line), "every listed check stays: {line}");
     }
     let notice = wire["notice"].as_str().unwrap();
-    assert!(notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")), "{notice}");
+    assert!(
+        notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")),
+        "{notice}"
+    );
 }
 
 /// A brief saturated by content that is not protected (uncited notes in the
@@ -1544,15 +1740,28 @@ fn a_saturated_brief_names_a_not_carried_record_when_only_unprotected_content_gi
         json!(["aaaaaaaa1111"]),
         "only the oldest uncited window note gave way"
     );
-    assert!(prompt.contains("Criterion evidence index"), "the index keeps its detail");
-    assert!(prompt.contains(&format!("Criterion 1: {RECORD} (requester)")), "the citation stays");
+    assert!(
+        prompt.contains("Criterion evidence index"),
+        "the index keeps its detail"
+    );
+    assert!(
+        prompt.contains(&format!("Criterion 1: {RECORD} (requester)")),
+        "the citation stays"
+    );
     assert!(
         prompt.contains("full gate passed: 5 stages"),
         "the cited record's body stays whole"
     );
-    assert_eq!(wire["obligationAssessments"][0]["carried"], json!(false), "{wire}");
+    assert_eq!(
+        wire["obligationAssessments"][0]["carried"],
+        json!(false),
+        "{wire}"
+    );
     let notice = wire["notice"].as_str().unwrap();
-    assert!(notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")), "{notice}");
+    assert!(
+        notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")),
+        "{notice}"
+    );
 }
 
 /// A brief saturated by protected content alone (the criteria and the
@@ -1567,11 +1776,26 @@ fn a_brief_saturated_by_protected_content_is_unchanged_and_the_notice_alone_name
 
     let (wire, prompt) = evaluate_saturated(json!([]));
 
-    assert_eq!(prompt.len(), measured.len(), "the brief is not changed by the assessment");
-    assert!(!prompt.contains("Obligation assessment"), "{}", &prompt[prompt.len().saturating_sub(2000)..]);
+    assert_eq!(
+        prompt.len(),
+        measured.len(),
+        "the brief is not changed by the assessment"
+    );
+    assert!(
+        !prompt.contains("Obligation assessment"),
+        "{}",
+        &prompt[prompt.len().saturating_sub(2000)..]
+    );
     assert!(prompt.contains(&format!("Criterion 1: {RECORD} (requester)")));
     assert!(prompt.contains("full gate passed: 5 stages"));
-    assert_eq!(wire["obligationAssessments"][0]["carried"], json!(false), "{wire}");
+    assert_eq!(
+        wire["obligationAssessments"][0]["carried"],
+        json!(false),
+        "{wire}"
+    );
     let notice = wire["notice"].as_str().unwrap();
-    assert!(notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")), "{notice}");
+    assert!(
+        notice.contains(&format!("{RECORD}: read whole (49 rows) but not carried")),
+        "{notice}"
+    );
 }

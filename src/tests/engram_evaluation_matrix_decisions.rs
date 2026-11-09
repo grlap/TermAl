@@ -36,10 +36,14 @@ fn changed_after_evaluation(commit_change: bool) {
             .fixture
             .live
             .transport
-            .requests_for("execution_observe") == reports,
+            .requests_for("execution_observe")
+            == reports,
         "source reports are unchanged by a refused completion"
     );
-    assert!(matrix.fixture.object(&evaluation_id) == original_evaluation, "the complete evaluation remains unchanged");
+    assert!(
+        matrix.fixture.object(&evaluation_id) == original_evaluation,
+        "the complete evaluation remains unchanged"
+    );
     matrix.assert_objects_unchanged(originals);
 }
 
@@ -76,8 +80,10 @@ live_row!(
         assert!(current.changes.is_empty(), "the root has been restored");
         let output = matrix.done_output_source(&current);
         matrix.assert_completion_refusal(&output, false);
-        assert!(fs::read(dirty.directory.join("results.json")).unwrap() == original_result,
-            "restoring source does not rewrite the earlier result");
+        assert!(
+            fs::read(dirty.directory.join("results.json")).unwrap() == original_result,
+            "restoring source does not rewrite the earlier result"
+        );
         assert!(
             matrix
                 .fixture
@@ -196,8 +202,10 @@ live_row!(
                 panic!("early selection must not skip the newer failure and reuse an old PASS")
             }
         }
-        assert!(fs::read(passed.directory.join("results.json")).unwrap() == old_result,
-            "a later failed check does not rewrite the earlier result");
+        assert!(
+            fs::read(passed.directory.join("results.json")).unwrap() == old_result,
+            "a later failed check does not rewrite the earlier result"
+        );
         matrix.assert_objects_unchanged(originals);
         matrix.close();
         matrix.settle();
@@ -448,8 +456,10 @@ live_row!(
         );
         assert_ne!(check.records, fresh.records);
         matrix.close();
-        assert!(settle_claim_transition(&matrix, &original) == retained_jobs,
-            "the complete retained closing jobs are unchanged");
+        assert!(
+            settle_claim_transition(&matrix, &original) == retained_jobs,
+            "the complete retained closing jobs are unchanged"
+        );
         matrix.accept(&fresh, || {});
         matrix.assert_objects_unchanged(originals);
     }
@@ -517,7 +527,8 @@ live_row!(
             matrix.fixture.record(&matrix.holder, |record| record
                 .engram
                 .unadmitted_closing_jobs
-                .clone()) == retained_jobs,
+                .clone())
+                == retained_jobs,
             "the complete retained closing jobs are unchanged"
         );
         matrix.assert_objects_unchanged(originals);
@@ -597,6 +608,9 @@ live_row!(
         let stored = matrix.fixture.object(&receipt.observation);
         fs::write(matrix.fixture.root.join("README.md"), original).unwrap();
         matrix.accept(&check, || {});
-        assert!(matrix.fixture.object(&receipt.observation) == stored, "the complete observation remains unchanged");
+        assert!(
+            matrix.fixture.object(&receipt.observation) == stored,
+            "the complete observation remains unchanged"
+        );
     }
 );

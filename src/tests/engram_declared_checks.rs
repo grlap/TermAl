@@ -71,9 +71,19 @@ fn declare_disabled(turn: &EOCheckedTurn, content_marker: &str) {
     declare(turn, DECLARED_TEST, DECLARED_ARTIFACT);
     let path = turn.root.join("termal-tests.toml");
     let declaration = fs::read_to_string(&path).unwrap();
-    fs::write(&path, format!("{declaration}unsupported = {}\n", toml_string(content_marker))).unwrap();
+    fs::write(
+        &path,
+        format!(
+            "{declaration}unsupported = {}\n",
+            toml_string(content_marker)
+        ),
+    )
+    .unwrap();
     run_git_test_command(&turn.root, &["add", "--", "termal-tests.toml"]);
-    run_git_test_command(&turn.root, &["commit", "--quiet", "-m", "invalid declaration fixture"]);
+    run_git_test_command(
+        &turn.root,
+        &["commit", "--quiet", "-m", "invalid declaration fixture"],
+    );
 }
 
 /// Writes the result file the declared command produces, as the command
@@ -109,8 +119,12 @@ fn declared_diagnostic(turn: &EOCheckedTurn) -> (EngramTurnCheck, EngramDeclared
 
 fn diagnostic_refs(turn: &EOCheckedTurn) -> Vec<String> {
     let (check, result) = declared_diagnostic(turn);
-    engram_declared_refs(&check.command, check.declared.as_deref(),
-        check.end.as_ref().unwrap().exit, &result)
+    engram_declared_refs(
+        &check.command,
+        check.declared.as_deref(),
+        check.end.as_ref().unwrap().exit,
+        &result,
+    )
 }
 
 #[test]
@@ -120,7 +134,11 @@ fn a_declared_command_with_a_passing_trx_is_reported_as_test_evidence() {
     turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {
         write_artifact(&turn, PASSING_TRX);
     });
-    assert!(diagnostic_refs(&turn).iter().any(|reference| reference == "kind:declared"));
+    assert!(
+        diagnostic_refs(&turn)
+            .iter()
+            .any(|reference| reference == "kind:declared")
+    );
     let request = finish_observation(&turn);
     assert_eq!(observed_result(&request), "passed", "{request:#}");
 }
@@ -128,27 +146,58 @@ fn a_declared_command_with_a_passing_trx_is_reported_as_test_evidence() {
 #[test]
 fn project_environment_record_selection_reaches_real_checks_without_affecting_a_mixed_entry() {
     for configured in [false, true] {
-        let turn = EOCheckedTurn::start(if configured { "env-configured" } else { "env-missing" }, true);
+        let turn = EOCheckedTurn::start(
+            if configured {
+                "env-configured"
+            } else {
+                "env-missing"
+            },
+            true,
+        );
         declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
         let path = turn.root.join(ENGRAM_DECLARATION_FILE);
-        let required = format!("{}env = [\"SUPABASE_TEST_URL\"]\n", fs::read_to_string(&path).unwrap());
+        let required = format!(
+            "{}env = [\"SUPABASE_TEST_URL\"]\n",
+            fs::read_to_string(&path).unwrap()
+        );
         let other = entry("fixture-tests --plain", None, DECLARED_ARTIFACT);
         fs::write(&path, format!("{required}\n{other}")).unwrap();
         run_git_test_command(&turn.root, &["add", ENGRAM_DECLARATION_FILE]);
         run_git_test_command(&turn.root, &["commit", "--quiet", "-m", "env fixture"]);
         if configured {
-            turn.record_mut(|record| record.project_environment = AppliedProjectEnvironment {
-                values: ProjectEnvironment(BTreeMap::from([("SUPABASE_TEST_URL".to_owned(), "fixture-selected".to_owned())])),
+            turn.record_mut(|record| {
+                record.project_environment = AppliedProjectEnvironment {
+                    values: ProjectEnvironment(BTreeMap::from([(
+                        "SUPABASE_TEST_URL".to_owned(),
+                        "fixture-selected".to_owned(),
+                    )])),
+                }
             });
         }
-        turn.run("env-required", DECLARED_TEST, EngramCommandExit::Code(0), || write_artifact(&turn, PASSING_TRX));
+        turn.run(
+            "env-required",
+            DECLARED_TEST,
+            EngramCommandExit::Code(0),
+            || write_artifact(&turn, PASSING_TRX),
+        );
         let (_, result) = declared_diagnostic(&turn);
-        if configured { assert_eq!(result.verdict, EngramTrxVerdict::Pass); }
-        else { assert_eq!(result.verdict, EngramTrxVerdict::Unknown("environment_missing:SUPABASE_TEST_URL".to_owned())); }
+        if configured {
+            assert_eq!(result.verdict, EngramTrxVerdict::Pass);
+        } else {
+            assert_eq!(
+                result.verdict,
+                EngramTrxVerdict::Unknown("environment_missing:SUPABASE_TEST_URL".to_owned())
+            );
+        }
         // Same declaration and same runtime: the env-free entry remains a
         // normal declared check even while another entry needs configuration.
         fs::remove_file(turn.root.join(DECLARED_ARTIFACT)).unwrap();
-        turn.run("env-plain", "fixture-tests --plain", EngramCommandExit::Code(0), || write_artifact(&turn, PASSING_TRX));
+        turn.run(
+            "env-plain",
+            "fixture-tests --plain",
+            EngramCommandExit::Code(0),
+            || write_artifact(&turn, PASSING_TRX),
+        );
         assert_eq!(declared_diagnostic(&turn).1.verdict, EngramTrxVerdict::Pass);
     }
 }
@@ -193,7 +242,9 @@ fn a_declared_check_is_marked_by_an_own_command_that_runs_in_another_worktree() 
     let digest = &sha256_hex("copy".as_bytes())[..12];
     assert_eq!(
         declared_overlap_cause(&turn),
-        Some(format!("another command of this session (key {digest}) started"))
+        Some(format!(
+            "another command of this session (key {digest}) started"
+        ))
     );
 }
 
@@ -239,8 +290,10 @@ fn a_declared_run_that_writes_no_artifact_is_withheld_as_unknown_with_its_reason
     turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {});
     let (check, result) = declared_diagnostic(&turn);
     assert!(unknown_reason(&result).contains("missing"));
-    assert!(engram_declared_unknown_reason(check.end.as_ref().unwrap())
-        .is_some_and(|reason| reason.contains("missing")));
+    assert!(
+        engram_declared_unknown_reason(check.end.as_ref().unwrap())
+            .is_some_and(|reason| reason.contains("missing"))
+    );
     let request = finish_observation(&turn);
     assert_eq!(observed_result(&request), "indeterminate", "{request:#}");
 }
@@ -275,30 +328,31 @@ fn a_command_that_differs_from_its_declaration_is_not_a_check() {
         request.get("verification_evidence").is_none(),
         "{request:#}"
     );
-    assert_eq!(request["occurrence"]["observed_checks"], json!([]),
-        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}");
+    assert_eq!(
+        request["occurrence"]["observed_checks"],
+        json!([]),
+        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}"
+    );
 }
 
 #[test]
 fn a_disabled_declaration_is_told_in_a_host_line_and_recognises_nothing() {
     let turn = EOCheckedTurn::start("declared-disabled", true);
     declare_disabled(&turn, "first");
-    turn.run(
-        "check-1",
-        DECLARED_TEST,
-        EngramCommandExit::Code(0),
-        || {
-            write_artifact(&turn, PASSING_TRX);
-        },
-    );
+    turn.run("check-1", DECLARED_TEST, EngramCommandExit::Code(0), || {
+        write_artifact(&turn, PASSING_TRX);
+    });
     let request = finish_observation(&turn);
 
     assert!(
         request.get("verification_evidence").is_none(),
         "{request:#}"
     );
-    assert_eq!(request["occurrence"]["observed_checks"], json!([]),
-        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}");
+    assert_eq!(
+        request["occurrence"]["observed_checks"],
+        json!([]),
+        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}"
+    );
     let line = turn
         .record(|record| record.engram.pending_source_root_line.clone())
         .expect("the holder should be told");
@@ -344,10 +398,15 @@ fn a_passing_declared_record_carries_the_declaration_artifact_and_counters() {
     ] {
         assert!(has(prefix), "{prefix} missing: {refs:#?}");
     }
-    let summary = engram_declared_summary(&check.command, check.declared.as_deref(),
-        check.end.as_ref().unwrap().exit, &result);
+    let summary = engram_declared_summary(
+        &check.command,
+        check.declared.as_deref(),
+        check.end.as_ref().unwrap().exit,
+        &result,
+    );
     assert!(
-        summary.contains("PASS") && summary.contains("passed=3"), "{summary}"
+        summary.contains("PASS") && summary.contains("passed=3"),
+        "{summary}"
     );
     let request = finish_observation(&turn);
     assert_eq!(observed_result(&request), "passed", "{request:#}");
@@ -1074,49 +1133,114 @@ fn a_declared_check_survives_a_description_that_repeats_its_command() {
 fn a_declared_result_for_an_earlier_same_key_occurrence_cannot_finish_its_successor() {
     let turn = EOCheckedTurn::start("declared-reused-key-owner", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
-    turn.run("same-key", DECLARED_TEST, EngramCommandExit::Code(0), || {
-        write_artifact(&turn, PASSING_TRX);
-    });
+    turn.run(
+        "same-key",
+        DECLARED_TEST,
+        EngramCommandExit::Code(0),
+        || {
+            write_artifact(&turn, PASSING_TRX);
+        },
+    );
     let (turn_ref, first) = turn.record(|record| {
         let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
         (trace.host_turn_ref.clone(), trace.commands[0].clone())
     });
-    assert_eq!(first.check.observed_result, EngramObservedCheckResult::Passed);
-    let first_binding = first.declared.clone().expect("the original declared start owns its binding");
+    assert_eq!(
+        first.check.observed_result,
+        EngramObservedCheckResult::Passed
+    );
+    let first_binding = first
+        .declared
+        .clone()
+        .expect("the original declared start owns its binding");
     let mut recorder = turn.recorder();
     recorder.command_started("same-key", DECLARED_TEST).unwrap();
     turn.wait_for_snapshots();
-    let before = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone());
+    let before = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()
+    });
     assert_eq!(before.len(), 2);
     assert_eq!(before[0], first);
     assert_ne!(before[1].check.host_check_id, first.check.host_check_id);
     assert!(before[1].check.finished_at.is_none());
-    let apply_stale = || turn.record_mut(|record| {
-        // Model an artifact result read off lock for the first occurrence,
-        // arriving only after a new start reused the runtime's tool key.
-        observe_runtime_unadmitted_declared_end(record, &EngramObservationProvenance::Ambient,
-            &EngramRecorderObservation::CommandFinished {
-                key: "same-key", command: DECLARED_TEST, reported_command: Some(DECLARED_TEST),
-                output: "", exit: Some(EngramCommandExit::Code(0)), runtime_output_cut: false,
-            }, &turn_ref, &first.check.host_check_id, &first_binding,
-            Some(EngramExecutionOutcome::Succeeded));
-    });
+    let apply_stale = || {
+        turn.record_mut(|record| {
+            // Model an artifact result read off lock for the first occurrence,
+            // arriving only after a new start reused the runtime's tool key.
+            observe_runtime_unadmitted_declared_end(
+                record,
+                &EngramObservationProvenance::Ambient,
+                &EngramRecorderObservation::CommandFinished {
+                    key: "same-key",
+                    command: DECLARED_TEST,
+                    reported_command: Some(DECLARED_TEST),
+                    output: "",
+                    exit: Some(EngramCommandExit::Code(0)),
+                    runtime_output_cut: false,
+                },
+                &turn_ref,
+                &first.check.host_check_id,
+                &first_binding,
+                Some(EngramExecutionOutcome::Succeeded),
+            );
+        })
+    };
     apply_stale();
-    assert_eq!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone()), before, "a stale result cannot close the new occurrence");
+    assert_eq!(
+        turn.record(|record| record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()),
+        before,
+        "a stale result cannot close the new occurrence"
+    );
     write_artifact(&turn, FAILING_TRX);
-    recorder.command_completed_with_exit("same-key", DECLARED_TEST, "",
-        CommandStatus::Success, EngramCommandExit::Code(0)).unwrap();
+    recorder
+        .command_completed_with_exit(
+            "same-key",
+            DECLARED_TEST,
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
     turn.wait_for_snapshots();
-    let ended = turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone());
+    let ended = turn.record(|record| {
+        record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()
+    });
     assert_eq!(ended[0], first, "the earlier fact remains immutable");
-    assert_eq!(ended[1].check.observed_result, EngramObservedCheckResult::Failed,
-        "the latest invocation uses its own failing artifact despite exit0");
+    assert_eq!(
+        ended[1].check.observed_result,
+        EngramObservedCheckResult::Failed,
+        "the latest invocation uses its own failing artifact despite exit0"
+    );
     apply_stale();
-    assert_eq!(turn.record(|record| record.engram.unadmitted_active_turn.as_ref()
-        .unwrap().commands.clone()), ended, "a duplicate old result cannot revise the failed successor");
+    assert_eq!(
+        turn.record(|record| record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone()),
+        ended,
+        "a duplicate old result cannot revise the failed successor"
+    );
     let request = finish_observation(&turn);
     let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
     assert_eq!(checks.len(), 2, "{request:#}");
@@ -1239,8 +1363,11 @@ fn a_declared_command_wrapped_in_cmd_is_no_check_end_to_end() {
         request.get("verification_evidence").is_none(),
         "{request:#}"
     );
-    assert_eq!(request["occurrence"]["observed_checks"], json!([]),
-        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}");
+    assert_eq!(
+        request["occurrence"]["observed_checks"],
+        json!([]),
+        "an undeclared, disabled or cmd-wrapped line creates no check fact: {request:#}"
+    );
 }
 
 #[test]
@@ -1276,31 +1403,16 @@ fn a_disabled_declaration_is_told_once_per_content() {
     let pending = || turn.record(|record| record.engram.pending_source_root_line.clone());
     let clear = || turn.record_mut(|record| record.engram.pending_source_root_line = None);
 
-    turn.run(
-        "first",
-        DECLARED_TEST,
-        EngramCommandExit::Code(0),
-        || {},
-    );
+    turn.run("first", DECLARED_TEST, EngramCommandExit::Code(0), || {});
     assert!(pending().is_some_and(|line| line.contains("is disabled")));
     clear();
-    turn.run(
-        "second",
-        DECLARED_TEST,
-        EngramCommandExit::Code(0),
-        || {},
-    );
+    turn.run("second", DECLARED_TEST, EngramCommandExit::Code(0), || {});
     assert!(
         !pending().is_some_and(|line| line.contains("is disabled")),
         "the same content is told once"
     );
     declare_disabled(&turn, "different content");
-    turn.run(
-        "third",
-        DECLARED_TEST,
-        EngramCommandExit::Code(0),
-        || {},
-    );
+    turn.run("third", DECLARED_TEST, EngramCommandExit::Code(0), || {});
     assert!(
         pending().is_some_and(|line| line.contains("is disabled")),
         "new content is told again"
@@ -1331,8 +1443,10 @@ fn a_declared_run_whose_declaration_changed_is_withheld_even_at_a_non_zero_exit(
     });
     let (check, result) = declared_diagnostic(&turn);
     assert!(unknown_reason(&result).contains("declaration changed"));
-    assert!(engram_declared_unknown_reason(check.end.as_ref().unwrap())
-        .is_some_and(|reason| reason.contains("declaration changed")));
+    assert!(
+        engram_declared_unknown_reason(check.end.as_ref().unwrap())
+            .is_some_and(|reason| reason.contains("declaration changed"))
+    );
     let request = finish_observation(&turn);
     assert_eq!(observed_result(&request), "indeterminate", "{request:#}");
 }
@@ -1604,8 +1718,17 @@ fn declared_runner_options_do_not_override_artifact_validation() {
         "dotnet test bin/Orders.Tests.dll.",
     ] {
         let root = declared_root("declared-runner-options");
-        assert!(matches!(load(&root, &entry(command, None, artifact)), EngramDeclaration::Loaded { .. }), "{command}");
-        assert!(bind(&root, command).is_some(), "{command}: the artifact decides the result");
+        assert!(
+            matches!(
+                load(&root, &entry(command, None, artifact)),
+                EngramDeclaration::Loaded { .. }
+            ),
+            "{command}"
+        );
+        assert!(
+            bind(&root, command).is_some(),
+            "{command}: the artifact decides the result"
+        );
     }
     // `-t` belongs to dotnet test: another program may use it freely.
     let root = declared_root("declared-other-t");
@@ -1944,20 +2067,30 @@ fn one_program_word_rule_reads_the_bare_and_the_wrapped_route_alike() {
 fn a_declared_unknown_reason_survives_output_cut_without_verification() {
     let turn = EOCheckedTurn::start("declared-cut-missing", true);
     declare(&turn, DECLARED_TEST, DECLARED_ARTIFACT);
-    turn.recorder().command_started("cut", DECLARED_TEST).unwrap();
+    turn.recorder()
+        .command_started("cut", DECLARED_TEST)
+        .unwrap();
     turn.wait_for_snapshots();
-    turn.state.engram_host().observe(&turn.session_id, &EngramObservationProvenance::Ambient,
+    turn.state.engram_host().observe(
+        &turn.session_id,
+        &EngramObservationProvenance::Ambient,
         EngramRecorderObservation::CommandFinished {
-            key: "cut", command: DECLARED_TEST, reported_command: Some(DECLARED_TEST),
-            output: "truncated output", exit: Some(EngramCommandExit::Code(0)),
+            key: "cut",
+            command: DECLARED_TEST,
+            reported_command: Some(DECLARED_TEST),
+            output: "truncated output",
+            exit: Some(EngramCommandExit::Code(0)),
             runtime_output_cut: true,
-        });
+        },
+    );
     turn.wait_for_snapshots();
     let (check, result) = declared_diagnostic(&turn);
     assert!(check.runtime_output_cut);
     assert!(unknown_reason(&result).contains("missing"));
-    assert!(engram_declared_unknown_reason(check.end.as_ref().unwrap())
-        .is_some_and(|reason| reason.contains("missing")));
+    assert!(
+        engram_declared_unknown_reason(check.end.as_ref().unwrap())
+            .is_some_and(|reason| reason.contains("missing"))
+    );
     let request = finish_observation(&turn);
     assert_eq!(observed_result(&request), "indeterminate", "{request:#}");
 }

@@ -436,8 +436,8 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
             .expect("thread row should insert");
     }
 
-    let threads = discover_codex_threads_from_home(&codex_home, &[scope])
-        .expect("threads should load");
+    let threads =
+        discover_codex_threads_from_home(&codex_home, &[scope]).expect("threads should load");
     let last_expected_id = format!(
         "thread-in-scope-{}",
         MAX_DISCOVERED_CODEX_THREADS_PER_HOME - 1
@@ -1638,9 +1638,14 @@ fn import_discovered_codex_threads_stamps_only_actual_existing_metadata_changes(
     let cwd = normalize_local_user_facing_path(root.path().to_string_lossy().as_ref());
     let mut inner = StateInner::new();
     let mut thread = DiscoveredCodexThread {
-        id: "metadata-stamp-thread".into(), cwd: cwd.clone(), archived: false,
-        title: "Original title".into(), model: None, reasoning_effort: None,
-        sandbox_mode: None, approval_policy: None,
+        id: "metadata-stamp-thread".into(),
+        cwd: cwd.clone(),
+        archived: false,
+        title: "Original title".into(),
+        model: None,
+        reasoning_effort: None,
+        sandbox_mode: None,
+        approval_policy: None,
     };
     inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
     let id = inner.sessions[0].session.id.clone();
@@ -1648,18 +1653,34 @@ fn import_discovered_codex_threads_stamps_only_actual_existing_metadata_changes(
     thread.title = "A new discovery title must preserve the selected name".into();
     thread.model = Some("ignored-discovery-model".into());
     inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
-    assert!(inner.collect_persist_delta(watermark).changed_sessions.is_empty());
+    assert!(
+        inner
+            .collect_persist_delta(watermark)
+            .changed_sessions
+            .is_empty()
+    );
 
     thread.archived = true;
     inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
     let delta = inner.collect_persist_delta(watermark);
     assert_eq!(delta.changed_sessions.len(), 1);
     assert_eq!(delta.changed_sessions[0].session.id, id);
-    assert_eq!(delta.changed_sessions[0].session.codex_thread_state, Some(CodexThreadState::Archived));
-    assert_eq!(delta.changed_sessions[0].session.preview, "Archived Codex thread ready to reopen.");
+    assert_eq!(
+        delta.changed_sessions[0].session.codex_thread_state,
+        Some(CodexThreadState::Archived)
+    );
+    assert_eq!(
+        delta.changed_sessions[0].session.preview,
+        "Archived Codex thread ready to reopen."
+    );
     watermark = delta.watermark;
     inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
-    assert!(inner.collect_persist_delta(watermark).changed_sessions.is_empty());
+    assert!(
+        inner
+            .collect_persist_delta(watermark)
+            .changed_sessions
+            .is_empty()
+    );
 
     let nested = root.path().join("nested");
     fs::create_dir_all(&nested).unwrap();
@@ -1667,7 +1688,10 @@ fn import_discovered_codex_threads_stamps_only_actual_existing_metadata_changes(
     inner.import_discovered_codex_threads(&cwd, vec![thread.clone()]);
     let delta = inner.collect_persist_delta(watermark);
     assert_eq!(delta.changed_sessions.len(), 1);
-    assert_eq!(delta.changed_sessions[0].session.workdir, normalize_local_user_facing_path(&thread.cwd));
+    assert_eq!(
+        delta.changed_sessions[0].session.workdir,
+        normalize_local_user_facing_path(&thread.cwd)
+    );
     watermark = delta.watermark;
     // Missing project attribution is a real refresh even when the thread's
     // cwd and archived state already match.
@@ -1682,5 +1706,8 @@ fn import_discovered_codex_threads_stamps_only_actual_existing_metadata_changes(
     inner.import_discovered_codex_threads(&cwd, vec![thread]);
     let delta = inner.collect_persist_delta(watermark);
     assert_eq!(delta.changed_sessions.len(), 1);
-    assert_eq!(delta.changed_sessions[0].session.preview, "Archived Codex thread ready to reopen.");
+    assert_eq!(
+        delta.changed_sessions[0].session.preview,
+        "Archived Codex thread ready to reopen."
+    );
 }

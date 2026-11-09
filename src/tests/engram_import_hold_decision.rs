@@ -474,9 +474,7 @@ fn a_fence_whose_owner_is_not_provably_another_does_not_admit() {
     ] {
         assert_eq!(
             decide(&state, &candidate(STORE, PROJECT, exact(1))),
-            EngramImportHoldDisposition::Unknown(
-                EngramImportHoldUnknownReason::FenceOwnerUnproven
-            ),
+            EngramImportHoldDisposition::Unknown(EngramImportHoldUnknownReason::FenceOwnerUnproven),
             "{label}",
         );
     }
@@ -561,13 +559,18 @@ fn a_journal_that_cannot_be_established_is_unknown() {
 fn a_live_entry_of_the_fence_owner_naming_the_candidate_holds_it() {
     let held_by_fence = held(&[("fence-1", EngramImportFencePhase::Installing, true)]);
     assert_eq!(
-        decide(&owner_two_fence_with(Vec::new()), &candidate(STORE, PROJECT, exact(1))),
+        decide(
+            &owner_two_fence_with(Vec::new()),
+            &candidate(STORE, PROJECT, exact(1))
+        ),
         EngramImportHoldDisposition::Admitted,
         "without the entry, owner-1's candidate passes owner-2's fence",
     );
-    for state in [EngramImportEntryState::Outstanding, EngramImportEntryState::Unknown] {
-        let journal =
-            owner_two_fence_with(vec![entry("entry-1", "owner-2", exact(1), state)]);
+    for state in [
+        EngramImportEntryState::Outstanding,
+        EngramImportEntryState::Unknown,
+    ] {
+        let journal = owner_two_fence_with(vec![entry("entry-1", "owner-2", exact(1), state)]);
         assert_eq!(
             decide(&journal, &candidate(STORE, PROJECT, exact(1))),
             held_by_fence,
@@ -594,13 +597,12 @@ fn a_live_unbound_entry_of_the_fence_owner_leaves_the_candidate_unknown() {
         EngramImportOriginalBinding::Unknown,
         EngramImportOriginalBinding::Legacy,
     ] {
-        for state in [EngramImportEntryState::Outstanding, EngramImportEntryState::Unknown] {
-            let journal = owner_two_fence_with(vec![entry(
-                "entry-1",
-                "owner-2",
-                binding.clone(),
-                state,
-            )]);
+        for state in [
+            EngramImportEntryState::Outstanding,
+            EngramImportEntryState::Unknown,
+        ] {
+            let journal =
+                owner_two_fence_with(vec![entry("entry-1", "owner-2", binding.clone(), state)]);
             assert_eq!(
                 decide(&journal, &candidate(STORE, PROJECT, exact(1))),
                 EngramImportHoldDisposition::Unknown(
@@ -617,7 +619,12 @@ fn terminal_other_owner_and_other_binding_entries_change_nothing() {
     let cases = vec![
         (
             "terminal entry naming the candidate",
-            entry("entry-1", "owner-2", exact(1), EngramImportEntryState::Terminal),
+            entry(
+                "entry-1",
+                "owner-2",
+                exact(1),
+                EngramImportEntryState::Terminal,
+            ),
         ),
         (
             "terminal unbound entry",
@@ -630,7 +637,12 @@ fn terminal_other_owner_and_other_binding_entries_change_nothing() {
         ),
         (
             "another owner's entry naming the candidate",
-            entry("entry-1", "owner-3", exact(1), EngramImportEntryState::Outstanding),
+            entry(
+                "entry-1",
+                "owner-3",
+                exact(1),
+                EngramImportEntryState::Outstanding,
+            ),
         ),
         (
             "another owner's unbound entry",
@@ -643,7 +655,12 @@ fn terminal_other_owner_and_other_binding_entries_change_nothing() {
         ),
         (
             "the fence owner's entry with another exact binding",
-            entry("entry-1", "owner-2", exact(4), EngramImportEntryState::Outstanding),
+            entry(
+                "entry-1",
+                "owner-2",
+                exact(4),
+                EngramImportEntryState::Outstanding,
+            ),
         ),
         (
             "the fence owner's entry naming the candidate in another store association",
@@ -670,7 +687,10 @@ fn terminal_other_owner_and_other_binding_entries_change_nothing() {
     ];
     for (label, record) in cases {
         assert_eq!(
-            decide(&owner_two_fence_with(vec![record]), &candidate(STORE, PROJECT, exact(1))),
+            decide(
+                &owner_two_fence_with(vec![record]),
+                &candidate(STORE, PROJECT, exact(1))
+            ),
             EngramImportHoldDisposition::Admitted,
             "{label}",
         );
@@ -681,9 +701,8 @@ fn terminal_other_owner_and_other_binding_entries_change_nothing() {
 fn the_fence_owners_coverage_and_association_are_not_consulted() {
     use EngramImportAssociationState::*;
     let held_by_fence = held(&[("fence-1", EngramImportFencePhase::Installing, true)]);
-    let unproven = EngramImportHoldDisposition::Unknown(
-        EngramImportHoldUnknownReason::FenceOwnerUnproven,
-    );
+    let unproven =
+        EngramImportHoldDisposition::Unknown(EngramImportHoldUnknownReason::FenceOwnerUnproven);
     let enrolled = |association| {
         Some(owner(
             "owner-record-2",
@@ -697,10 +716,26 @@ fn the_fence_owners_coverage_and_association_are_not_consulted() {
     // owner-1's candidate through whatever its coverage and association; an
     // unenrolled owner-2 does not.
     let fence_owners = [
-        ("admitted, coverage unknown", enrolled(Admitted), EngramImportHoldDisposition::Admitted),
-        ("pending", enrolled(Pending), EngramImportHoldDisposition::Admitted),
-        ("legacy association", enrolled(Legacy), EngramImportHoldDisposition::Admitted),
-        ("foreign", enrolled(Foreign), EngramImportHoldDisposition::Admitted),
+        (
+            "admitted, coverage unknown",
+            enrolled(Admitted),
+            EngramImportHoldDisposition::Admitted,
+        ),
+        (
+            "pending",
+            enrolled(Pending),
+            EngramImportHoldDisposition::Admitted,
+        ),
+        (
+            "legacy association",
+            enrolled(Legacy),
+            EngramImportHoldDisposition::Admitted,
+        ),
+        (
+            "foreign",
+            enrolled(Foreign),
+            EngramImportHoldDisposition::Admitted,
+        ),
         ("not enrolled", None, unproven.clone()),
     ];
     for (label, owner_two, without_entries) in fence_owners {

@@ -6,7 +6,9 @@ use super::*;
 
 struct DiscoveryHandleCleanup(AppState);
 impl Drop for DiscoveryHandleCleanup {
-    fn drop(&mut self) { self.0.federation_peer_handles.lock().unwrap().clear(); }
+    fn drop(&mut self) {
+        self.0.federation_peer_handles.lock().unwrap().clear();
+    }
 }
 
 async fn api(
@@ -50,12 +52,18 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
     );
     let _handles = DiscoveryHandleCleanup(central.clone());
     let rpc_check = channel.clone();
-    central.federation_peer_handles.lock().unwrap().insert(native.host.host_id.clone(),
+    central.federation_peer_handles.lock().unwrap().insert(
+        native.host.host_id.clone(),
         Arc::new(FederationPeerHandle {
             channel: channel.clone(),
-            rpc: FederationRpcClient::new(native.control_port, channel.clone(),
-                Arc::new(move || rpc_check.current_authority().map(|_| ()))).unwrap(),
-        }));
+            rpc: FederationRpcClient::new(
+                native.control_port,
+                channel.clone(),
+                Arc::new(move || rpc_check.current_authority().map(|_| ())),
+            )
+            .unwrap(),
+        }),
+    );
     let check = channel.clone();
     let router = federation_router(
         channel.clone(),
@@ -257,10 +265,16 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(exact["notificationCause"], "remote wake pending; awaiting matching durable receiver receipt");
+    assert_eq!(
+        exact["notificationCause"],
+        "remote wake pending; awaiting matching durable receiver receipt"
+    );
     // The supported remote exact read carries the mailbox home's current
     // projection: not yet acknowledged by its recipient, the reader here.
-    assert_eq!(exact["currentStatus"]["notificationState"], exact["notificationState"]);
+    assert_eq!(
+        exact["currentStatus"]["notificationState"],
+        exact["notificationState"]
+    );
     assert_eq!(exact["currentStatus"]["recipientAcknowledged"], false);
     assert!(exact["currentStatus"]["observedAt"].is_string());
     assert!(exact["currentStatus"]["summary"].is_string());
@@ -296,7 +310,10 @@ async fn two_process_all_operations_use_c_and_outage_never_creates_satellite_mai
         )),
         "{summary}"
     );
-    assert!(summary.ends_with(" The recipient has acknowledged it."), "{summary}");
+    assert!(
+        summary.ends_with(" The recipient has acknowledged it."),
+        "{summary}"
+    );
     assert!(exact["notificationSummary"].is_string(), "{exact}");
     let (status, _) = api(
         &client,

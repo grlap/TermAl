@@ -191,7 +191,12 @@ fn first_close_while_native_test_is_running_accepts_its_later_result() {
     matrix.receive_check(events, &mut check, false);
     eprintln!(
         "MATRIX_INFLIGHT_CLOSING_REQUEST_COUNT {}",
-        matrix.fixture.live.transport.requests_for("execution_observe").len()
+        matrix
+            .fixture
+            .live
+            .transport
+            .requests_for("execution_observe")
+            .len()
     );
     matrix.accept(&check, || {});
 }

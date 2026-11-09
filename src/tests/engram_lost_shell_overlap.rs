@@ -955,8 +955,7 @@ fn a_relative_change_of_a_lost_shell_counts_where_its_session_works_as_it_starts
         .expect("the start should record");
     let worktrees = running_worktrees(&turn, &session, "up-again");
     assert!(
-        !worktrees.contains(&None)
-            && worktrees.contains(&Some(engram_worktree_root(&turn.root))),
+        !worktrees.contains(&None) && worktrees.contains(&Some(engram_worktree_root(&turn.root))),
         "{worktrees:?}"
     );
     assert!(overlapped(&turn), "marked as the command starts");
@@ -1074,7 +1073,10 @@ fn a_claude_sessions_read_only_command_in_the_checked_worktree_leaves_the_check_
             .expect("the root belongs to a project")
     });
     let line = format!("pushd \"{}\" && git status", line_path(&turn.root));
-    for (label, agent, marks) in [("claude", Agent::Claude, false), ("codex", Agent::Codex, true)] {
+    for (label, agent, marks) in [
+        ("claude", Agent::Claude, false),
+        ("codex", Agent::Codex, true),
+    ] {
         let pending = open_check(&turn);
         let session = create_test_project_session(&turn.state, agent, &project_id, &other);
         SessionRecorder::new(turn.state.clone(), session.clone())

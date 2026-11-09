@@ -527,7 +527,15 @@ fn kimi_effort_can_be_cleared_after_model_catalog_removal() {
     };
     assert!(
         state
-            .admit_kimi_thinking(&mut writer, &pending, &id, "external", KimiMode::Default, &config, None)
+            .admit_kimi_thinking(
+                &mut writer,
+                &pending,
+                &id,
+                "external",
+                KimiMode::Default,
+                &config,
+                None
+            )
             .is_err()
     );
     state
@@ -537,7 +545,15 @@ fn kimi_effort_can_be_cleared_after_model_catalog_removal() {
         )
         .unwrap();
     state
-        .admit_kimi_thinking(&mut writer, &pending, &id, "external", KimiMode::Default, &config, None)
+        .admit_kimi_thinking(
+            &mut writer,
+            &pending,
+            &id,
+            "external",
+            KimiMode::Default,
+            &config,
+            None,
+        )
         .unwrap();
     assert!(
         writer.frames.is_empty(),
@@ -1141,8 +1157,7 @@ fn kimi_manual_mode_requires_explicit_acknowledgment() {
     for value in [json!(null), json!("auto"), json!("yolo"), json!("plan")] {
         writer.reply = json!({"configOptions":[{"id":"mode", "currentValue":value}]});
         assert!(
-            configure_kimi_mode(&mut writer, &pending, "saved-session", KimiMode::Default)
-                .is_err()
+            configure_kimi_mode(&mut writer, &pending, "saved-session", KimiMode::Default).is_err()
         );
     }
     writer.reply = json!({"configOptions":[{"id":"mode", "currentValue":"default"}]});
@@ -1205,7 +1220,11 @@ fn kimi_read_only_explorers_and_reviewers_are_admitted_and_evaluators_are_not() 
     )
     .err()
     .expect("a Kimi evaluator is refused");
-    assert!(evaluator.message.contains("Claude or Codex"), "{}", evaluator.message);
+    assert!(
+        evaluator.message.contains("Claude or Codex"),
+        "{}",
+        evaluator.message
+    );
     for agent in [Agent::Cursor, Agent::Gemini, Agent::OpenCode] {
         assert!(
             validate_delegation_agent_admission(
@@ -1217,12 +1236,14 @@ fn kimi_read_only_explorers_and_reviewers_are_admitted_and_evaluators_are_not() 
             "{agent:?}"
         );
     }
-    assert!(validate_delegation_agent_admission(
-        Agent::OpenCode,
-        DelegationMode::Explorer,
-        &DelegationWritePolicy::ReadOnly
-    )
-    .is_err());
+    assert!(
+        validate_delegation_agent_admission(
+            Agent::OpenCode,
+            DelegationMode::Explorer,
+            &DelegationWritePolicy::ReadOnly
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1529,7 +1550,8 @@ fn kimi_prompt_rechecks_manual_mode_and_deactivates_on_refusal() {
         )
         .unwrap_err();
         assert!(
-            err.to_string().contains("did not acknowledge mode `default`"),
+            err.to_string()
+                .contains("did not acknowledge mode `default`"),
             "{err}"
         );
         assert!(!*lifecycle.0.lock().unwrap());

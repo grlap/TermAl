@@ -19,18 +19,32 @@ fn unpublished(beat: Option<Value>) -> Value {
 }
 
 fn summary(fixture: &WaitFixture, run: &str) -> TestRunSummary {
-    fixture.state.test_run_summaries(None).into_iter()
-        .find(|summary| summary.run_id == run).expect("run should be indexed")
+    fixture
+        .state
+        .test_run_summaries(None)
+        .into_iter()
+        .find(|summary| summary.run_id == run)
+        .expect("run should be indexed")
 }
 
 fn assert_pending(fixture: &WaitFixture, response: &TestRunWaitResponse) {
-    assert!(!response.resume_prompt_queued,
-        "uncertain liveness must not queue UNKNOWN/recover: {:?}", fixture.queued_prompts());
+    assert!(
+        !response.resume_prompt_queued,
+        "uncertain liveness must not queue UNKNOWN/recover: {:?}",
+        fixture.queued_prompts()
+    );
     assert_eq!(fixture.pending_waits().len(), 1);
     assert!(fixture.queued_prompts().is_empty());
     fixture.scan(&[]);
-    assert_eq!(fixture.pending_waits().len(), 1, "another scan is not death evidence");
-    assert!(fixture.queued_prompts().is_empty(), "no recover on absence alone");
+    assert_eq!(
+        fixture.pending_waits().len(),
+        1,
+        "another scan is not death evidence"
+    );
+    assert!(
+        fixture.queued_prompts().is_empty(),
+        "no recover on absence alone"
+    );
 }
 
 fn fresh_then_terminal(success: bool) {
@@ -41,8 +55,11 @@ fn fresh_then_terminal(success: bool) {
     fixture.busy();
     let response = fixture.register(&[run], "all").unwrap();
     assert_pending(&fixture, &response);
-    assert_eq!(summary(&fixture, run).state, TestRunState::Running,
-        "the index and wait must share fresh-heartbeat evidence");
+    assert_eq!(
+        summary(&fixture, run).state,
+        TestRunState::Running,
+        "the index and wait must share fresh-heartbeat evidence"
+    );
 
     // A real published executor is indexed before its authoritative terminal result.
     let mut results = running(4242);
@@ -50,17 +67,29 @@ fn fresh_then_terminal(success: bool) {
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
     fixture.scan(&[4242]);
     assert_eq!(fixture.pending_waits().len(), 1);
-    results = if success { passed() } else { failed("authoritative failure") };
+    results = if success {
+        passed()
+    } else {
+        failed("authoritative failure")
+    };
     results["runId"] = json!(run);
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
     fixture.scan(&[]);
     let prompts = fixture.queued_prompts();
     assert_eq!(prompts.len(), 1);
-    assert!(prompts[0].contains(if success { "- Verdict: PASS" } else { "- Verdict: FAIL" }));
+    assert!(prompts[0].contains(if success {
+        "- Verdict: PASS"
+    } else {
+        "- Verdict: FAIL"
+    }));
     assert!(!prompts[0].contains("recover"));
     assert!(fixture.pending_waits().is_empty());
     fixture.scan(&[]);
-    assert_eq!(fixture.queued_prompts(), prompts, "settlement is consumed once");
+    assert_eq!(
+        fixture.queued_prompts(),
+        prompts,
+        "settlement is consumed once"
+    );
 }
 
 #[test]
@@ -82,13 +111,18 @@ fn uncertain_without_executor(label: &str, beat: Option<Value>) {
     assert_pending(&fixture, &response);
     let observed = summary(&fixture, "test-uncertain");
     assert_eq!(observed.state, TestRunState::Unknown);
-    assert!(observed.unknown_reason.is_some(), "uncertain liveness must remain visible");
+    assert!(
+        observed.unknown_reason.is_some(),
+        "uncertain liveness must remain visible"
+    );
 }
 
 #[test]
 fn stale_heartbeat_without_executor_is_pending_not_dead() {
-    uncertain_without_executor("stale-unpublished",
-        Some(heartbeat(chrono::Utc::now() - chrono::Duration::days(1))));
+    uncertain_without_executor(
+        "stale-unpublished",
+        Some(heartbeat(chrono::Utc::now() - chrono::Duration::days(1))),
+    );
 }
 
 #[test]
@@ -98,14 +132,18 @@ fn missing_heartbeat_without_executor_is_pending_not_dead() {
 
 #[test]
 fn malformed_heartbeat_without_executor_is_pending_not_dead() {
-    uncertain_without_executor("malformed-unpublished",
-        Some(json!({ "at": "not an instant", "everyMs": 600_000 })));
+    uncertain_without_executor(
+        "malformed-unpublished",
+        Some(json!({ "at": "not an instant", "everyMs": 600_000 })),
+    );
 }
 
 #[test]
 fn far_future_heartbeat_without_executor_is_pending_not_dead() {
-    uncertain_without_executor("future-unpublished",
-        Some(heartbeat(chrono::Utc::now() + chrono::Duration::days(1))));
+    uncertain_without_executor(
+        "future-unpublished",
+        Some(heartbeat(chrono::Utc::now() + chrono::Duration::days(1))),
+    );
 }
 
 #[test]
@@ -151,8 +189,13 @@ fn runtime(fixture: &WaitFixture) -> mpsc::Receiver<ClaudeRuntimeCommand> {
 }
 
 fn complete(fixture: &WaitFixture) {
-    fixture.state.finish_turn_ok_if_runtime_matches(&fixture.session,
-        &RuntimeToken::Claude(DELIVERY_RUNTIME.to_owned())).unwrap();
+    fixture
+        .state
+        .finish_turn_ok_if_runtime_matches(
+            &fixture.session,
+            &RuntimeToken::Claude(DELIVERY_RUNTIME.to_owned()),
+        )
+        .unwrap();
 }
 
 fn receive(input: &mpsc::Receiver<ClaudeRuntimeCommand>) -> String {
@@ -164,8 +207,10 @@ fn receive(input: &mpsc::Receiver<ClaudeRuntimeCommand>) -> String {
 }
 
 fn no_delivery(input: &mpsc::Receiver<ClaudeRuntimeCommand>) {
-    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "no unrelated or duplicate provider turn");
+    assert!(
+        matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "no unrelated or duplicate provider turn"
+    );
 }
 
 fn settled_delivery_fixture(label: &str) -> WaitFixture {
@@ -212,10 +257,19 @@ fn settled_result_respects_older_prompt_fifo_and_then_delivers() {
     let fixture = settled_delivery_fixture("fifo-delivery");
     let input = runtime(&fixture);
     fixture.busy();
-    let queued = fixture.state.dispatch_turn(&fixture.session, SendMessageRequest {
-        text: "older user prompt".to_owned(), expanded_text: None,
-        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
-    }).unwrap();
+    let queued = fixture
+        .state
+        .dispatch_turn(
+            &fixture.session,
+            SendMessageRequest {
+                text: "older user prompt".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .unwrap();
     assert!(matches!(queued, DispatchTurnResult::Queued));
     fixture.register(&["test-done"], "all").unwrap();
     no_delivery(&input);
@@ -241,7 +295,10 @@ fn settled_result_respects_stop_latch_until_explicit_resume() {
     no_delivery(&input);
     fixture.state.refresh_test_run_waits();
     no_delivery(&input);
-    fixture.state.resume_session_queue(&fixture.session).unwrap();
+    fixture
+        .state
+        .resume_session_queue(&fixture.session)
+        .unwrap();
     assert!(receive(&input).contains("`test-done`: PASS"));
     complete(&fixture);
     no_delivery(&input);

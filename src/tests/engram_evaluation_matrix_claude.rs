@@ -20,8 +20,10 @@ fn claude_frame_check_a_edit_commit_check_b_same_turn_accepts_last_input() {
     );
     frames.end(&matrix);
     matrix.accept(&last, || {});
-    assert!(fs::read(first.directory.join("results.json")).unwrap() == original_results,
-        "the complete earlier result is unchanged");
+    assert!(
+        fs::read(first.directory.join("results.json")).unwrap() == original_results,
+        "the complete earlier result is unchanged"
+    );
 }
 
 struct ClaudeFrames {

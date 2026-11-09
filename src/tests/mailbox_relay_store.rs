@@ -383,9 +383,12 @@ fn mailbox_relay_store_authority_failure_rolls_back_message_membership_wake_and_
     let (relay, peer) = envelope(&store);
     assert!(
         store
-            .append_mailbox_relay(&relay, &peer, || Err::<(), _>(relay_store_error(
-                "owner changed"
-            )), |_| Ok(()))
+            .append_mailbox_relay(
+                &relay,
+                &peer,
+                || Err::<(), _>(relay_store_error("owner changed")),
+                |_| Ok(())
+            )
             .is_err()
     );
     for table in [

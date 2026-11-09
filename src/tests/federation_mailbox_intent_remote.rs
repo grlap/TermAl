@@ -160,9 +160,12 @@ fn federation_delivery_equal_remote_local_ids_have_distinct_durable_sender_dedup
 #[tokio::test]
 async fn federation_delivery_remote_rename_changes_discovery_without_changing_digest() {
     let pair = federation_onboarding_fixture::Pair::with_enrolled_profile(
-        federation_mailboxes::central_store(), federation_onboarding_fixture::io(),
-        federation_onboarding_fixture::io(), federation_onboarding_fixture::profile(),
-    ).await;
+        federation_mailboxes::central_store(),
+        federation_onboarding_fixture::io(),
+        federation_onboarding_fixture::io(),
+        federation_onboarding_fixture::profile(),
+    )
+    .await;
     assert!(pair.verify().await.unwrap().termal_complete());
     let state = &pair.central;
     let (sender, actor) = federation_mailboxes::local_participant(state, "Sender");
@@ -187,8 +190,11 @@ async fn federation_delivery_remote_rename_changes_discovery_without_changing_di
         let index = inner.find_session_index(&remote).unwrap();
         inner.session_mut_by_index(index).unwrap().session.name = "After".into();
     }
-    let _: Value = pair.satellite.federation_mailbox_operation(
-        &remote, FederationMailboxOperation::Register).await.unwrap();
+    let _: Value = pair
+        .satellite
+        .federation_mailbox_operation(&remote, FederationMailboxOperation::Register)
+        .await
+        .unwrap();
     let retry: MailboxAppendReceipt = state
         .federation_mailbox_operation(&sender, send("After", "rename"))
         .await

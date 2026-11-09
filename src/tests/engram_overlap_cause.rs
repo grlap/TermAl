@@ -16,16 +16,31 @@ use super::*;
 fn record_overlapping_launch(turn: &EOCheckedTurn, worktree: &FsPath) {
     let cwd = reported_directory(worktree);
     let mut recorder = turn.recorder();
-    recorder.command_started_in("gate", GATE, Some(GATE), Some(&cwd)).unwrap();
+    recorder
+        .command_started_in("gate", GATE, Some(GATE), Some(&cwd))
+        .unwrap();
     turn.wait_for_snapshots();
-    recorder.command_completed_with_exit(
-        "gate", GATE, "STARTED", CommandStatus::Success, EngramCommandExit::NotFinished,
-    ).unwrap();
+    recorder
+        .command_completed_with_exit(
+            "gate",
+            GATE,
+            "STARTED",
+            CommandStatus::Success,
+            EngramCommandExit::NotFinished,
+        )
+        .unwrap();
     turn.wait_for_snapshots();
     turn.record(|record| {
         assert!(record.engram.carried_checks.is_empty());
-        let line = record.engram.pending_source_root_line.as_deref().expect("the drop is disclosed");
-        assert!(line.contains("another command or another writable session"), "{line}");
+        let line = record
+            .engram
+            .pending_source_root_line
+            .as_deref()
+            .expect("the drop is disclosed");
+        assert!(
+            line.contains("another command or another writable session"),
+            "{line}"
+        );
     });
     assert_ordinary_turn_has_no_native_requests(turn);
 }
@@ -71,7 +86,10 @@ fn a_lone_launch_beside_a_reading_read_only_child_is_carried() {
     let (turn, worktree) = ordinary_carried_turn("overlap-read-only-child");
     read_only_child_reading_in(&turn, &worktree);
     ordinary_launch_gate(&turn, &worktree, false);
-    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None);
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+        None
+    );
     let canonical = fs::canonicalize(&worktree).expect("the worktree canonicalizes");
     let change = |path: PathBuf| WorkspaceFileChangeEvent {
         path: path.to_string_lossy().into_owned(),
@@ -89,7 +107,10 @@ fn a_lone_launch_beside_a_reading_read_only_child_is_carried() {
     // The worktree's own scratch directory reaches it and fences nothing.
     turn.state
         .note_engram_workspace_file_changes(&[change(canonical.join(".tmp").join("reviewer.log"))]);
-    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None);
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+        None
+    );
 }
 
 #[test]
@@ -105,7 +126,10 @@ fn a_writable_session_in_a_turn_elsewhere_not_yet_resolved_leaves_a_lone_launch_
     set_status(&turn, &other, SessionStatus::Active);
     read_only_child_reading_in(&turn, &worktree);
     ordinary_launch_gate(&turn, &worktree, false);
-    assert_eq!(turn.record(|record| record.engram.carried_checks[0].fence.clone()), None);
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+        None
+    );
 }
 
 #[test]
@@ -191,7 +215,10 @@ fn a_writer_is_told_by_the_place_it_matched() {
     // This is a selector fixture for an actual ordinary opening-root capture,
     // not a public naming request or an admission/grant.
     name_other_session_source_root(&turn, &other, &worktree);
-    told(reason(&turn), "works in it as its claim's named source root");
+    told(
+        reason(&turn),
+        "works in it as its claim's named source root",
+    );
     edit(&turn, &|record| record.engram.unadmitted_active_turn = None);
     // A command it runs here, or one TermAl could not place.
     edit(&turn, &|record| {
@@ -299,7 +326,10 @@ fn a_dropped_launch_line_names_what_overlapped_it_without_exposing_the_command()
     let line = engram_dropped_launch_line(&check, cause);
     assert!(line.contains(cause), "{line}");
     assert!(line.contains(&engram_check_fingerprint(&check)), "{line}");
-    assert!(!line.contains(GATE), "the raw command is not diagnostic text: {line}");
+    assert!(
+        !line.contains(GATE),
+        "the raw command is not diagnostic text: {line}"
+    );
     let unnamed = engram_dropped_launch_line(&check, "another writable session");
     assert!(unnamed.contains("another writable session"), "{unnamed}");
     assert!(!unnamed.contains(cause), "{unnamed}");
@@ -333,8 +363,7 @@ fn a_launch_beside_a_command_of_its_own_still_running_names_that_command() {
     assert!(
         line.contains(&format!(
             "another command of this session (key {digest}) was still running"
-        ))
-            && !line.contains("sentinel-secret-7731"),
+        )) && !line.contains("sentinel-secret-7731"),
         "{line}"
     );
 }
@@ -374,7 +403,6 @@ fn an_own_command_starting_under_an_open_check_is_named_by_digest_only() {
     );
 }
 
-
 #[test]
 fn a_launch_beside_an_own_command_running_in_another_worktree_is_carried() {
     // The opposite of the refused launches above: the holder's command runs
@@ -411,14 +439,21 @@ fn a_repeated_start_that_first_places_an_own_command_in_the_checks_root_marks_it
     assert_eq!(check_overlap(&turn), (false, None));
     let here = reported_directory(&worktree);
     recorder
-        .command_started_in("edit", "touch notes.txt", Some("touch notes.txt"), Some(&here))
+        .command_started_in(
+            "edit",
+            "touch notes.txt",
+            Some("touch notes.txt"),
+            Some(&here),
+        )
         .expect("the repeated start should record");
     let digest = &sha256_hex("edit".as_bytes())[..12];
     assert_eq!(
         check_overlap(&turn),
         (
             true,
-            Some(format!("another command of this session (key {digest}) started"))
+            Some(format!(
+                "another command of this session (key {digest}) started"
+            ))
         )
     );
 }
@@ -502,14 +537,21 @@ fn an_own_command_placed_in_another_worktree_leaves_an_open_check_unmarked() {
     // named as another command of the session.
     let here = reported_directory(&worktree);
     turn.recorder()
-        .command_started_in("write-here", "touch notes.txt", Some("touch notes.txt"), Some(&here))
+        .command_started_in(
+            "write-here",
+            "touch notes.txt",
+            Some("touch notes.txt"),
+            Some(&here),
+        )
         .expect("the command here should record");
     let digest = &sha256_hex("write-here".as_bytes())[..12];
     assert_eq!(
         check_overlap(&turn),
         (
             true,
-            Some(format!("another command of this session (key {digest}) started"))
+            Some(format!(
+                "another command of this session (key {digest}) started"
+            ))
         )
     );
 }
@@ -523,7 +565,12 @@ fn an_own_command_said_later_to_run_in_the_checks_root_marks_it() {
     let elsewhere = reported_directory(&turn.root);
     let mut recorder = turn.recorder();
     recorder
-        .command_started_in("watch", "npm run watch", Some("npm run watch"), Some(&elsewhere))
+        .command_started_in(
+            "watch",
+            "npm run watch",
+            Some("npm run watch"),
+            Some(&elsewhere),
+        )
         .expect("the command should record");
     assert_eq!(check_overlap(&turn), (false, None));
     let here = reported_directory(&worktree);
@@ -535,7 +582,9 @@ fn an_own_command_said_later_to_run_in_the_checks_root_marks_it() {
         check_overlap(&turn),
         (
             true,
-            Some(format!("another command of this session (key {digest}) runs there"))
+            Some(format!(
+                "another command of this session (key {digest}) runs there"
+            ))
         )
     );
 }
@@ -577,7 +626,9 @@ fn an_own_read_only_command_leaves_an_open_check_unmarked() {
         check_overlap(&turn),
         (
             true,
-            Some(format!("another command of this session (key {digest}) started"))
+            Some(format!(
+                "another command of this session (key {digest}) started"
+            ))
         )
     );
 }
@@ -589,7 +640,12 @@ fn a_check_started_beside_an_own_command_that_cannot_write_there_is_unmarked() {
     let (turn, worktree) = ordinary_carried_turn("own-running-elsewhere");
     let elsewhere = reported_directory(&turn.root);
     turn.recorder()
-        .command_started_in("watch", "npm run watch", Some("npm run watch"), Some(&elsewhere))
+        .command_started_in(
+            "watch",
+            "npm run watch",
+            Some("npm run watch"),
+            Some(&elsewhere),
+        )
         .expect("the earlier command should record");
     start_check_in(&turn, &worktree);
     assert_eq!(check_overlap(&turn), (false, None));

@@ -104,34 +104,58 @@ async fn native_mailbox_prefix_refreshes_after_a_human_barrier_is_handed_off() {
         root.queued_prompts.swap(0, 1);
         sync_pending_prompts(root);
     }
-    fixture.central.mailbox_store.connection().unwrap().execute(
-        "DELETE FROM mailbox_relay_notifications", []
-    ).unwrap();
+    fixture
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM mailbox_relay_notifications", [])
+        .unwrap();
     let input = claude_input(&fixture);
     let b = append_from_new_sender(&fixture, "valid-after-human");
-    let raw: String = fixture.central.mailbox_store.connection().unwrap().query_row(
-        "SELECT wake_json FROM mailbox_relay_wakes WHERE message_id=?1",
-        [&b.message_id], |row| row.get(0)
-    ).unwrap();
+    let raw: String = fixture
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT wake_json FROM mailbox_relay_wakes WHERE message_id=?1",
+            [&b.message_id],
+            |row| row.get(0),
+        )
+        .unwrap();
     let wake: MailboxRelayWake = serde_json::from_str(&raw).unwrap();
     let app = fixture.central.clone();
     let session = fixture.native.clone();
     TEST_MAILBOX_AFTER_PREFIX_OBSERVATION.with(|hook| {
         *hook.borrow_mut() = Some(Box::new(move || {
             // Actual human handoff removes U after B observed [U,A].
-            let dispatch = app.dispatch_next_queued_turn(&session, false).unwrap().unwrap();
+            let dispatch = app
+                .dispatch_next_queued_turn(&session, false)
+                .unwrap()
+                .unwrap();
             deliver_turn_dispatch(&app, dispatch).unwrap();
-            app.finish_turn_ok_if_runtime_matches(&session,
-                &RuntimeToken::Claude("relay-review-authority".into())).unwrap();
+            app.finish_turn_ok_if_runtime_matches(
+                &session,
+                &RuntimeToken::Claude("relay-review-authority".into()),
+            )
+            .unwrap();
         }));
     });
-    assert!(fixture.central.queue_native_mailbox_relay_wake(&wake, None).unwrap());
+    assert!(
+        fixture
+            .central
+            .queue_native_mailbox_relay_wake(&wake, None)
+            .unwrap()
+    );
     match input.try_recv() {
         Ok(ClaudeRuntimeCommand::Prompt(prompt)) => assert_eq!(prompt.text, "user barrier"),
         _ => panic!("the human barrier must be handed off first"),
     }
     match input.try_recv() {
-        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => assert!(prompt.text.contains(&public_mailbox(&fixture, &b))),
+        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => {
+            assert!(prompt.text.contains(&public_mailbox(&fixture, &b)))
+        }
         _ => panic!("valid B must run after the newly exposed fenced A is observed"),
     }
     assert_eq!(queued_order(&fixture), vec![public_mailbox(&fixture, &a)]);
@@ -144,24 +168,42 @@ async fn native_mailbox_arrival_drains_a_dormant_local_head_in_fifo_order() {
     let fixture = Fixture::new(false).await;
     let _handles = central_handle(&fixture);
     let sender = test_session_id(&fixture.central, Agent::Codex);
-    let local = fixture.central.append_native_mailbox_message_and_notify(&sender,
-        SendMailboxMessageRequest {
-            target_session_id: fixture.native.clone(),
-            message: "local durable body".into(), idempotency_key: "dormant-local".into(),
-            topic: None, state_stamp: None, class: Some("routine".into()),
-        }, NativeMailboxNamespace::Local).unwrap();
+    let local = fixture
+        .central
+        .append_native_mailbox_message_and_notify(
+            &sender,
+            SendMailboxMessageRequest {
+                target_session_id: fixture.native.clone(),
+                message: "local durable body".into(),
+                idempotency_key: "dormant-local".into(),
+                topic: None,
+                state_stamp: None,
+                class: Some("routine".into()),
+            },
+            NativeMailboxNamespace::Local,
+        )
+        .unwrap();
     assert_eq!(queued_order(&fixture), vec![local.mailbox_id.clone()]);
     let input = claude_input(&fixture);
     let b = append_from_new_sender(&fixture, "relay-after-local");
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
     match input.try_recv() {
-        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => assert!(prompt.text.contains(&local.mailbox_id)),
+        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => {
+            assert!(prompt.text.contains(&local.mailbox_id))
+        }
         _ => panic!("relay arrival must drive the dormant local head first"),
     }
-    fixture.central.finish_turn_ok_if_runtime_matches(&fixture.native,
-        &RuntimeToken::Claude("relay-review-authority".into())).unwrap();
+    fixture
+        .central
+        .finish_turn_ok_if_runtime_matches(
+            &fixture.native,
+            &RuntimeToken::Claude("relay-review-authority".into()),
+        )
+        .unwrap();
     match recv_within_guard(&input, "relay following dormant local head") {
-        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => assert!(prompt.text.contains(&public_mailbox(&fixture, &b))),
+        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => {
+            assert!(prompt.text.contains(&public_mailbox(&fixture, &b)))
+        }
         _ => panic!("relay B must follow local L without another arrival"),
     }
     fixture.finish().await;
@@ -174,12 +216,21 @@ async fn native_mailbox_dormant_local_head_keeps_session_dispatch_holds() {
         let fixture = Fixture::new(false).await;
         let _handles = central_handle(&fixture);
         let sender = test_session_id(&fixture.central, Agent::Codex);
-        let local = fixture.central.append_native_mailbox_message_and_notify(&sender,
-            SendMailboxMessageRequest {
-                target_session_id: fixture.native.clone(),
-                message: "held local body".into(), idempotency_key: format!("local-{hold}"),
-                topic: None, state_stamp: None, class: Some("routine".into()),
-            }, NativeMailboxNamespace::Local).unwrap();
+        let local = fixture
+            .central
+            .append_native_mailbox_message_and_notify(
+                &sender,
+                SendMailboxMessageRequest {
+                    target_session_id: fixture.native.clone(),
+                    message: "held local body".into(),
+                    idempotency_key: format!("local-{hold}"),
+                    topic: None,
+                    state_stamp: None,
+                    class: Some("routine".into()),
+                },
+                NativeMailboxNamespace::Local,
+            )
+            .unwrap();
         let input = claude_input(&fixture);
         {
             let mut inner = fixture.central.inner.lock().unwrap();
@@ -202,8 +253,15 @@ async fn native_mailbox_dormant_local_head_keeps_session_dispatch_holds() {
         }
         let b = append_from_new_sender(&fixture, &format!("relay-held-{hold}"));
         fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
-        assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)), "{hold}");
-        assert_eq!(queued_order(&fixture), vec![local.mailbox_id, public_mailbox(&fixture, &b)], "{hold}");
+        assert!(
+            matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "{hold}"
+        );
+        assert_eq!(
+            queued_order(&fixture),
+            vec![local.mailbox_id, public_mailbox(&fixture, &b)],
+            "{hold}"
+        );
         fixture.finish().await;
     }
 }
@@ -213,20 +271,38 @@ async fn assert_queued_redrive_drains_local_head(status: SessionStatus) {
     let fixture = Fixture::new(false).await;
     let _handles = central_handle(&fixture);
     let sender = test_session_id(&fixture.central, Agent::Codex);
-    let local = fixture.central.append_native_mailbox_message_and_notify(&sender,
-        SendMailboxMessageRequest {
-            target_session_id: fixture.native.clone(),
-            message: "retained local body".into(), idempotency_key: "retained-local".into(),
-            topic: None, state_stamp: None, class: Some("routine".into()),
-        }, NativeMailboxNamespace::Local).unwrap();
+    let local = fixture
+        .central
+        .append_native_mailbox_message_and_notify(
+            &sender,
+            SendMailboxMessageRequest {
+                target_session_id: fixture.native.clone(),
+                message: "retained local body".into(),
+                idempotency_key: "retained-local".into(),
+                topic: None,
+                state_stamp: None,
+                class: Some("routine".into()),
+            },
+            NativeMailboxNamespace::Local,
+        )
+        .unwrap();
     let b = append_from_new_sender(&fixture, "retained-relay-after-local");
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
-    let target = fixture.central.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
-    let retained = fixture.central.mailbox_store.mailbox_relay_notification(
-        &target, &b.mailbox_id, b.sequence,
-    ).unwrap().unwrap();
-    assert!(retained.queued && !retained.handed_off,
-        "the retry must exercise an already admitted, unhanded relay wake");
+    let target = fixture
+        .central
+        .native_mailbox_relay_descriptor(&fixture.native)
+        .unwrap()
+        .principal;
+    let retained = fixture
+        .central
+        .mailbox_store
+        .mailbox_relay_notification(&target, &b.mailbox_id, b.sequence)
+        .unwrap()
+        .unwrap();
+    assert!(
+        retained.queued && !retained.handed_off,
+        "the retry must exercise an already admitted, unhanded relay wake"
+    );
     let expected = vec![local.mailbox_id.clone(), public_mailbox(&fixture, &b)];
     assert_eq!(queued_order(&fixture), expected);
     let input = claude_input(&fixture);
@@ -241,13 +317,22 @@ async fn assert_queued_redrive_drains_local_head(status: SessionStatus) {
     assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
     match input.try_recv() {
-        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => assert!(prompt.text.contains(&local.mailbox_id)),
+        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => {
+            assert!(prompt.text.contains(&local.mailbox_id))
+        }
         _ => panic!("queued relay redrive must hand off retained local L without a new arrival"),
     }
-    fixture.central.finish_turn_ok_if_runtime_matches(&fixture.native,
-        &RuntimeToken::Claude("relay-review-authority".into())).unwrap();
+    fixture
+        .central
+        .finish_turn_ok_if_runtime_matches(
+            &fixture.native,
+            &RuntimeToken::Claude("relay-review-authority".into()),
+        )
+        .unwrap();
     match recv_within_guard(&input, "retained relay following local redrive") {
-        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => assert!(prompt.text.contains(&public_mailbox(&fixture, &b))),
+        Ok(ClaudeRuntimeCommand::Prompt(prompt)) => {
+            assert!(prompt.text.contains(&public_mailbox(&fixture, &b)))
+        }
         _ => panic!("retained relay B must follow L without another arrival"),
     }
     assert!(queued_order(&fixture).is_empty());
@@ -271,18 +356,34 @@ async fn native_mailbox_queued_local_head_redrive_keeps_cancel_pause_and_stop_fe
         let fixture = Fixture::new(false).await;
         let _handles = central_handle(&fixture);
         let sender = test_session_id(&fixture.central, Agent::Codex);
-        let local = fixture.central.append_native_mailbox_message_and_notify(&sender,
-            SendMailboxMessageRequest {
-                target_session_id: fixture.native.clone(),
-                message: "local head kept owed".into(), idempotency_key: format!("local-{fence}"),
-                topic: None, state_stamp: None, class: Some("routine".into()),
-            }, NativeMailboxNamespace::Local).unwrap();
+        let local = fixture
+            .central
+            .append_native_mailbox_message_and_notify(
+                &sender,
+                SendMailboxMessageRequest {
+                    target_session_id: fixture.native.clone(),
+                    message: "local head kept owed".into(),
+                    idempotency_key: format!("local-{fence}"),
+                    topic: None,
+                    state_stamp: None,
+                    class: Some("routine".into()),
+                },
+                NativeMailboxNamespace::Local,
+            )
+            .unwrap();
         let b = append_from_new_sender(&fixture, &format!("queued-relay-{fence}"));
         fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
-        let target = fixture.central.native_mailbox_relay_descriptor(&fixture.native).unwrap().principal;
-        let retained = fixture.central.mailbox_store.mailbox_relay_notification(
-            &target, &b.mailbox_id, b.sequence,
-        ).unwrap().unwrap();
+        let target = fixture
+            .central
+            .native_mailbox_relay_descriptor(&fixture.native)
+            .unwrap()
+            .principal;
+        let retained = fixture
+            .central
+            .mailbox_store
+            .mailbox_relay_notification(&target, &b.mailbox_id, b.sequence)
+            .unwrap()
+            .unwrap();
         assert!(retained.queued && !retained.handed_off);
         let input = claude_input(&fixture);
         let carrier = {
@@ -293,10 +394,18 @@ async fn native_mailbox_queued_local_head_redrive_keeps_cancel_pause_and_stop_fe
                 root.set_auto_dispatch_blocked(true);
                 root.engram.operator_paused = fence == "pause";
             }
-            root.queued_prompts.back().unwrap().pending_prompt.id.clone()
+            root.queued_prompts
+                .back()
+                .unwrap()
+                .pending_prompt
+                .id
+                .clone()
         };
         if fence == "cancel-before" {
-            fixture.central.cancel_queued_prompt(&fixture.native, &carrier).unwrap();
+            fixture
+                .central
+                .cancel_queued_prompt(&fixture.native, &carrier)
+                .unwrap();
         } else if fence == "cancel-after" {
             let app = fixture.central.clone();
             let session = fixture.native.clone();
@@ -306,8 +415,14 @@ async fn native_mailbox_queued_local_head_redrive_keeps_cancel_pause_and_stop_fe
                 }));
             });
         }
-        fixture.central.queue_native_mailbox_relay_wake(&retained.wake, None).unwrap();
-        assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)), "{fence}");
+        fixture
+            .central
+            .queue_native_mailbox_relay_wake(&retained.wake, None)
+            .unwrap();
+        assert!(
+            matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "{fence}"
+        );
         let expected = if fence.starts_with("cancel") {
             vec![local.mailbox_id]
         } else {
@@ -315,8 +430,10 @@ async fn native_mailbox_queued_local_head_redrive_keeps_cancel_pause_and_stop_fe
         };
         assert_eq!(queued_order(&fixture), expected, "{fence}");
         if fence == "cancel-after" {
-            assert!(TEST_MAILBOX_RELAY_BEFORE_REDRIVE.with(|hook| hook.borrow().is_none()),
-                "the cancellation must run after owner capture");
+            assert!(
+                TEST_MAILBOX_RELAY_BEFORE_REDRIVE.with(|hook| hook.borrow().is_none()),
+                "the cancellation must run after owner capture"
+            );
         }
         fixture.finish().await;
     }
@@ -332,9 +449,13 @@ async fn native_mailbox_valid_arrival_runs_ahead_of_an_unrelated_fenced_carrier(
     let a_mailbox = public_mailbox(&fixture, &a);
     assert_eq!(queued_order(&fixture), vec![a_mailbox.clone()]);
     // Remove only A's authority witness; B will retain its own valid witness.
-    fixture.central.mailbox_store.connection().unwrap().execute(
-        "DELETE FROM mailbox_relay_notifications", []
-    ).unwrap();
+    fixture
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM mailbox_relay_notifications", [])
+        .unwrap();
     let input = claude_input(&fixture);
     let b = append_from_new_sender(&fixture, "valid-unrelated-arrival");
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
@@ -345,8 +466,11 @@ async fn native_mailbox_valid_arrival_runs_ahead_of_an_unrelated_fenced_carrier(
         }
         _ => panic!("valid B must be handed off despite unrelated fenced A"),
     }
-    assert_eq!(queued_order(&fixture), vec![a_mailbox],
-        "fenced A remains owed and must never be handed off or canceled");
+    assert_eq!(
+        queued_order(&fixture),
+        vec![a_mailbox],
+        "fenced A remains owed and must never be handed off or canceled"
+    );
     assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
     fixture.finish().await;
 }

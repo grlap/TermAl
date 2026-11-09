@@ -188,7 +188,10 @@ async fn delegation_worker_route_starts_once_at_default_ref_and_commit_bases() {
                 body["childSession"]["id"].as_str(),
                 "worker workspace write",
             );
-        assert!(writable.is_ok(), "a worker must not inherit a read-only guard");
+        assert!(
+            writable.is_ok(),
+            "a worker must not inherit a read-only guard"
+        );
         fs::write(fixture.worktree.join("worker-output.txt"), "worker edit\n")
             .expect("dedicated workspace is writable");
         assert!(!fixture.source.join("worker-output.txt").exists());
@@ -334,8 +337,11 @@ fn delegation_worker_failed_create_preserves_existing_worktree_owner() {
     let fixture = WorkerFixture::new();
     create_detached_git_worktree(&fixture.source, &fixture.worktree, &fixture.tip)
         .expect("another request already owns this worktree");
-    fs::write(fixture.worktree.join("owner-output.txt"), "keep owner output\n")
-        .expect("existing owner's output");
+    fs::write(
+        fixture.worktree.join("owner-output.txt"),
+        "keep owner output\n",
+    )
+    .expect("existing owner's output");
     // Simulate losing the race after the earlier target-availability check.
     let result = prepare_committed_worker_worktree(
         &fixture.source,
@@ -343,7 +349,10 @@ fn delegation_worker_failed_create_preserves_existing_worktree_owner() {
         FsPath::new(""),
         "worker-base",
     );
-    assert!(result.is_err(), "a second create must refuse the owned target");
+    assert!(
+        result.is_err(),
+        "a second create must refuse the owned target"
+    );
     assert_eq!(
         fs::read_to_string(fixture.worktree.join("owner-output.txt")).expect("owner retained"),
         "keep owner output\n",
@@ -364,7 +373,9 @@ fn delegation_worker_missing_cwd_in_base_cleans_up_its_created_worktree() {
         FsPath::new("missing-directory"),
         "worker-base",
     );
-    let error = result.err().expect("cwd is absent from the selected commit");
+    let error = result
+        .err()
+        .expect("cwd is absent from the selected commit");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("cwd"));
     assert!(!fixture.worktree.exists());
