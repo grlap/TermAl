@@ -103,6 +103,11 @@ async fn federation_authenticate_message(
             .expect("replay window poisoned")
             .reserve(counter)
     };
+    let mut relay_failure_stage = if reserved.is_err() {
+        MailboxRelayHomeRpcStage::ReplayCounter
+    } else {
+        MailboxRelayHomeRpcStage::RequestAdmission
+    };
     let authority = || -> Result<FederationLinkLease, ApiError> {
         if let Err(error) = reserved {
             // An earlier delivery of this authenticated counter may have
@@ -140,7 +145,10 @@ async fn federation_authenticate_message(
     let response = match authority() {
         Err(error) => error.into_response(),
         Ok(lease) => match state.channel.bound.try_acquire() {
-            Err(error) => error.into_response(),
+            Err(error) => {
+                relay_failure_stage = MailboxRelayHomeRpcStage::RpcCapacity;
+                error.into_response()
+            }
             Ok(permit) => {
                 let permit = Arc::new(permit);
                 parts.extensions.insert(FederationAuthenticatedPeer {
@@ -149,13 +157,17 @@ async fn federation_authenticate_message(
                 });
                 let request =
                     axum::extract::Request::from_parts(parts, axum::body::Body::from(body));
+                relay_failure_stage = MailboxRelayHomeRpcStage::HandlerResponse;
                 let response = match state.channel.control.clock.timeout_at(deadline, next.run(request)).await {
                     Ok(response) => response,
                     Err(_) if binding_request => {
                         federation_binding_unknown_outcome().into_response()
                     }
-                    Err(_) if relay_request => federation_mailbox_unknown_outcome(
-                        StatusCode::SERVICE_UNAVAILABLE,"native mailbox relay handler deadline").into_response(),
+                    Err(_) if relay_request => {
+                        relay_failure_stage = MailboxRelayHomeRpcStage::HandlerDeadline;
+                        federation_mailbox_unknown_outcome(
+                            StatusCode::SERVICE_UNAVAILABLE,"native mailbox relay handler deadline").into_response()
+                    }
                     Err(_) if mailbox_request => federation_mailbox_unknown_response(
                         mailbox_intent.as_ref(), "handler_deadline"),
                     Err(_) if outcome_request => ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
@@ -174,8 +186,11 @@ async fn federation_authenticate_message(
                     Err(_) if binding_request => {
                         federation_binding_unknown_outcome().into_response()
                     }
-                    Err(_) if relay_request => federation_mailbox_unknown_outcome(
-                        StatusCode::SERVICE_UNAVAILABLE,"native mailbox relay authority changed").into_response(),
+                    Err(_) if relay_request => {
+                        relay_failure_stage = MailboxRelayHomeRpcStage::PostHandlerAuthority;
+                        federation_mailbox_unknown_outcome(
+                            StatusCode::SERVICE_UNAVAILABLE,"native mailbox relay authority changed").into_response()
+                    }
                     Err(_) if mailbox_request => federation_mailbox_unknown_response(
                         mailbox_intent.as_ref(), "authority_changed"),
                     Err(error) => error.into_response(),
@@ -197,6 +212,12 @@ async fn federation_authenticate_message(
             Ok(Err(_)) => return Err(federation_transport_unavailable()),
             Err(_) => return Ok(federation_request_timeout()),
         };
+    if parts.status.is_server_error()
+        && let Some(request) = relay_body.as_ref()
+        && let Some(app) = state.channel.app.as_ref()
+    {
+        app.mailbox_store.relay_home_rpc_failures.note(request, parts.status, relay_failure_stage);
+    }
     // Keep both legacy 404 capability/resource branches and all 5xx
     // uncertainty handling unchanged. Only explicit non-404 client refusals
     // acquire the bounded diagnostic envelope, before signing it.

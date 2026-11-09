@@ -10,6 +10,9 @@ mod ack_association;
 #[path = "relay_home_reasons.rs"]
 mod home_reasons;
 
+#[path = "relay_home_rpc_failures.rs"]
+mod home_rpc_failures;
+
 pub(super) struct ProxySend {
     caller: String,
     _proxy: String,

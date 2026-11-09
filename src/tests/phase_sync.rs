@@ -14,6 +14,93 @@ pub(super) fn set_gate(gate: &(Mutex<bool>, Condvar), value: bool) {
     gate.1.notify_all();
 }
 
+/// Opens a fixture's one-shot start gate on normal release or assertion unwind.
+/// Keep this owner inside the driving `thread::scope` closure so it drops
+/// before the scope joins workers waiting on the cloned gate.
+pub(super) struct ReleaseGateOnDrop(Arc<(Mutex<bool>, Condvar)>);
+
+impl ReleaseGateOnDrop {
+    pub(super) fn new() -> Self {
+        Self(Arc::new((Mutex::new(false), Condvar::new())))
+    }
+
+    pub(super) fn gate(&self) -> Arc<(Mutex<bool>, Condvar)> {
+        self.0.clone()
+    }
+
+    pub(super) fn release(&self) {
+        set_gate(&self.0, true);
+    }
+}
+
+impl Drop for ReleaseGateOnDrop {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+#[test]
+fn release_owner_keeps_workers_parked_until_the_explicit_start() {
+    std::thread::scope(|scope| {
+        let release = ReleaseGateOnDrop::new();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        for _ in 0..2 {
+            let gate = release.gate();
+            let entered = entered_tx.clone();
+            let finished = finished_tx.clone();
+            scope.spawn(move || {
+                entered.send(()).unwrap();
+                wait_for_gate(&gate, true);
+                finished.send(()).unwrap();
+            });
+        }
+        for _ in 0..2 {
+            receive(&entered_rx, "worker ready for the owned start gate");
+        }
+        assert!(matches!(
+            finished_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        release.release();
+        for _ in 0..2 {
+            receive(&finished_rx, "worker released by the explicit start");
+        }
+    });
+}
+
+#[test]
+fn release_owner_opens_before_scoped_join_and_preserves_the_original_panic() {
+    for poison in [false, true] {
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            std::thread::scope(|scope| {
+                let release = ReleaseGateOnDrop::new();
+                let gate = release.gate();
+                let (entered_tx, entered_rx) = mpsc::channel();
+                scope.spawn(move || {
+                    entered_tx.send(()).unwrap();
+                    wait_for_gate(&gate, true);
+                    finished_tx.send(()).unwrap();
+                });
+                receive(&entered_rx, "worker ready before driver assertion unwind");
+                let gate = release.gate();
+                let _poison = poison.then(|| gate.0.lock().unwrap());
+                panic!("original driver assertion");
+            });
+        }));
+        let payload = result.expect_err("the driver assertion must survive cleanup");
+        assert_eq!(
+            payload.downcast_ref::<&str>(),
+            Some(&"original driver assertion")
+        );
+        receive(
+            &finished_rx,
+            "worker completed before the scope returned its panic",
+        );
+    }
+}
+
 /// How long a gate may stay closed. A test can legitimately hold a worker across
 /// a slow host's boot, so this only detects a hang: well above the phase waits,
 /// because a regression can park the test thread itself on a gate, or park a

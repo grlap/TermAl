@@ -485,22 +485,35 @@ fn federation_revoked_placement_is_retained_but_not_reserved_across_reload() {
 fn federation_last_slot_is_atomic_and_identical_admission_recovers_its_reservation() {
     let state = Arc::new(central());
     let snapshot = active(&state, peer(48001));
-    let barrier = Arc::new(std::sync::Barrier::new(3));
-    let mut workers = Vec::new();
-    for key in ["one", "two"] {
-        let state = Arc::clone(&state);
-        let snapshot = snapshot.clone();
-        let barrier = Arc::clone(&barrier);
-        workers.push(std::thread::spawn(move || {
-            barrier.wait();
-            reserve(&state, &snapshot, key, key)
-        }));
-    }
-    barrier.wait();
-    let results: Vec<_> = workers
-        .into_iter()
-        .map(|worker| worker.join().unwrap())
-        .collect();
+    let results: Vec<_> = std::thread::scope(|scope| {
+        let release = phase_sync::ReleaseGateOnDrop::new();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let workers: Vec<_> = ["one", "two"]
+            .into_iter()
+            .map(|key| {
+                let state = Arc::clone(&state);
+                let snapshot = snapshot.clone();
+                let gate = release.gate();
+                let entered = entered_tx.clone();
+                scope.spawn(move || {
+                    entered.send(()).unwrap();
+                    phase_sync::wait_for_gate(&gate, true);
+                    reserve(&state, &snapshot, key, key)
+                })
+            })
+            .collect();
+        for _ in 0..2 {
+            phase_sync::receive(
+                &entered_rx,
+                "placement contender ready before simultaneous release",
+            );
+        }
+        release.release();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect()
+    });
     assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
     let winner = results.into_iter().find_map(|result| result.ok()).unwrap();
     let duplicate = reserve(

@@ -1458,22 +1458,33 @@ fn delegation_process_cleanup_tree_failure_after_root_exit_is_retryable() {
 fn delegation_process_cleanup_concurrent_terminators_share_tree_lease() {
     let temp = TestTempRoot::create("delegation-tree-race");
     let owner = RuntimeTree::spawn(temp.path());
-    let start = Arc::new(std::sync::Barrier::new(3));
-    let workers: Vec<_> = (0..2)
-        .map(|_| {
-            let start = start.clone();
-            let tree = owner.process_tree.clone();
-            let process = owner.process.clone();
-            std::thread::spawn(move || {
-                start.wait();
-                tree.terminate(&process, "Claude")
+    std::thread::scope(|scope| {
+        let release = phase_sync::ReleaseGateOnDrop::new();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let gate = release.gate();
+                let entered = entered_tx.clone();
+                let tree = owner.process_tree.clone();
+                let process = owner.process.clone();
+                scope.spawn(move || {
+                    entered.send(()).unwrap();
+                    phase_sync::wait_for_gate(&gate, true);
+                    tree.terminate(&process, "Claude")
+                })
             })
-        })
-        .collect();
-    start.wait();
-    for worker in workers {
-        worker.join().unwrap().unwrap();
-    }
+            .collect();
+        for _ in 0..2 {
+            phase_sync::receive(
+                &entered_rx,
+                "tree terminator ready before simultaneous release",
+            );
+        }
+        release.release();
+        for worker in workers {
+            worker.join().unwrap().unwrap();
+        }
+    });
     owner.assert_reaped();
     assert!(owner.process_tree.is_confirmed());
 }

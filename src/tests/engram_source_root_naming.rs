@@ -47,6 +47,9 @@ mod retained_runs;
 #[path = "engram_naming_source.rs"]
 mod source_id;
 
+#[path = "engram_named_root_failure_diagnostics.rs"]
+mod failure_diagnostics;
+
 impl EOCheckedTurn {
     /// These reconciliation fixtures script BOTH producer operations. A
     /// status tuple alone cannot invent the canonical run/event carrier.

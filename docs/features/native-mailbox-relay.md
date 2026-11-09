@@ -202,6 +202,15 @@ replaced, first and last refusal times) and `untrackedRefusals`, the refused
 attempts not kept once the list is full. These records are process-local and
 metadata only, at most 256 entries, and a delivered wake clears its own.
 
+The same endpoint exposes `homeRpcFailures`: the latest 64 authenticated
+native relay responses that ended with 5xx on this home. Each record has UTC
+`at`, allowlisted `operation`, original HTTP `status`, fixed `stage` and a
+validated `requestId` (or `unavailable`). `homeRpcFailuresEvicted` counts
+older records removed by the bound. This history clears on host restart,
+as `homeRpcFailuresResetOnRestart` states. It contains no message bodies or
+private error text. These observations do not change the reply to the peer,
+prove whether an operation committed, or authorize a retry or a new identity.
+
 New sends, wake admission and handoffs recheck current native identity and
 authority. Store contention or transport loss is not success, nor proof that
 an already admitted write did not commit. Retry the original send/key, read

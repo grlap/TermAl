@@ -488,9 +488,10 @@ fn real_process_eof_kills_the_entire_control_process_tree() {
         prepare_engram_control_process_tree_fixture(&temp_root, "fixture-tree-eof");
     let connection = engram_control_process_tree_connection(&temp_root, project_file, "eof");
     let transport = Arc::new(real_process_fixture_transport(temp_root.path()));
-    transport
+    let original = transport
         .process_for(&connection)
         .expect("tree startup should complete before EOF");
+    let original_pid = original.process.id();
     let descendant = ready.wait();
     let request_transport = transport.clone();
     let request_connection = connection.clone();
@@ -507,6 +508,11 @@ fn real_process_eof_kills_the_entire_control_process_tree() {
         .expect("request thread should not panic")
         .expect_err("fixture EOF should fail the request");
     assert_eq!(error.kind, EngramTransportErrorKind::Transport);
+    let observed = error.control_process.as_ref().expect("EOF retains its observed child");
+    assert_eq!(observed.pid, original_pid, "the failed child, not a replacement or descendant");
+    let cause = EngramCausalFailure::request(&error, &engram_control_process_tree_request("eof"));
+    assert_eq!(cause.control_process.identity, format!("pid {original_pid}"));
+    assert_eq!(cause.control_process.exit_state, observed.exit_state);
     assert_engram_control_descendant_was_terminated(&descendant, "control EOF");
 }
 

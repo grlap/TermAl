@@ -5,6 +5,97 @@
 const MAILBOX_RELAY_ERROR_BYTES: usize = 512;
 const MAILBOX_RELAY_RAW_ERROR_BYTES: usize = 4096;
 
+// Process-local home observations, separate from the peer's refusal envelope.
+// No response body is inspected or retained by this diagnostic.
+const MAILBOX_RELAY_HOME_RPC_FAILURES: usize = 64;
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum MailboxRelayHomeRpcStage {
+    ReplayCounter,
+    RequestAdmission,
+    RpcCapacity,
+    HandlerResponse,
+    HandlerDeadline,
+    PostHandlerAuthority,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MailboxRelayHomeRpcFailure {
+    at: String,
+    operation: &'static str,
+    status: u16,
+    stage: MailboxRelayHomeRpcStage,
+    request_id: String,
+}
+
+#[derive(Default)]
+struct MailboxRelayHomeRpcFailureHistory {
+    records: VecDeque<MailboxRelayHomeRpcFailure>,
+    evicted: u64,
+}
+
+#[derive(Default)]
+struct MailboxRelayHomeRpcFailures {
+    history: Mutex<MailboxRelayHomeRpcFailureHistory>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MailboxRelayDiagnosticRequest<'a> {
+    #[serde(borrow)]
+    request_id: &'a str,
+    #[serde(borrow)]
+    operation: MailboxRelayDiagnosticOperation<'a>,
+}
+
+#[derive(Deserialize)]
+struct MailboxRelayDiagnosticOperation<'a> {
+    #[serde(borrow)]
+    operation: &'a str,
+}
+
+impl MailboxRelayHomeRpcFailures {
+    fn note(&self, request: &[u8], status: StatusCode, stage: MailboxRelayHomeRpcStage) {
+        if !status.is_server_error() { return; }
+        // Borrow only the correlation fields; serde skips all other payloads.
+        let metadata = serde_json::from_slice::<MailboxRelayDiagnosticRequest<'_>>(request).ok();
+        let request_id = metadata.as_ref().map(|value| value.request_id)
+            .filter(|id| mailbox_relay_uuid(id)).unwrap_or("unavailable");
+        let operation = match metadata.as_ref().map(|value| value.operation.operation) {
+            Some("observeTestRun") => "observeTestRun",
+            Some("describe") => "describe",
+            Some("send") => "send",
+            Some("list") => "list",
+            Some("read") => "read",
+            Some("readMessage") => "readMessage",
+            Some("acknowledge") => "acknowledge",
+            Some("wake") => "wake",
+            Some("inspectWake") => "inspectWake",
+            _ => "unavailable",
+        };
+        let record = MailboxRelayHomeRpcFailure {
+            at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            operation,
+            status: status.as_u16(),
+            stage,
+            request_id: request_id.to_owned(),
+        };
+        let mut history = self.history.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if history.records.len() == MAILBOX_RELAY_HOME_RPC_FAILURES {
+            history.records.pop_front();
+            history.evicted = history.evicted.saturating_add(1);
+        }
+        history.records.push_back(record);
+    }
+
+    fn snapshot(&self) -> (Vec<MailboxRelayHomeRpcFailure>, u64) {
+        let history = self.history.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        (history.records.iter().cloned().collect(), history.evicted)
+    }
+}
+
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum MailboxRelayRefusalReason {

@@ -1795,9 +1795,13 @@ impl AppState {
                     };
                     return Err(ApiError::conflict(format!("{code}: {error}. {next}")));
                 }
+                let process = error.control_process.as_ref()
+                    .map(EngramControlProcessObservation::from)
+                    .unwrap_or_default();
                 return Err(ApiError::bad_gateway(format!(
-                    "named_root_bind did not confirm the transition ({}): {error}. The exact intent is retained; retry the same naming request.",
-                    error.code.as_deref().unwrap_or("unknown")
+                    "named_root_bind did not confirm the transition ({}): {error}. Control process observed at failure: identity={}; exit={}. The exact intent is retained; retry the same naming request.",
+                    error.code.as_deref().unwrap_or("unknown"),
+                    process.identity, process.exit_state,
                 )));
             }
         };

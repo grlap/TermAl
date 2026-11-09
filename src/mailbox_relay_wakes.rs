@@ -1107,9 +1107,13 @@ async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Re
     })
     .await?;
     let (refused, untracked) = state.mailbox_store.relay_home_wake_refusals.snapshot();
+    let (rpc_failures, rpc_evicted) = state.mailbox_store.relay_home_rpc_failures.snapshot();
     Ok(Json(json!({
         "pendingHomeWakes": pending,
         "refusedHomeWakes": refused,
         "untrackedRefusals": untracked,
+        "homeRpcFailures": rpc_failures,
+        "homeRpcFailuresEvicted": rpc_evicted,
+        "homeRpcFailuresResetOnRestart": true,
     })))
 }
