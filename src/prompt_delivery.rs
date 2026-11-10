@@ -1088,6 +1088,15 @@ impl AppState {
             return ReceiptedResume::Refused(RESUME_QUEUE_CHANGED_REFUSAL.to_owned());
         }
         let prompt_id = accepted.prompt_id.clone();
+        if record
+            .prompt_deliveries
+            .get(&prompt_id)
+            .is_some_and(|delivery| delivery.remote_prompt.is_some())
+        {
+            return ReceiptedResume::Refused(
+                "This remote prompt is held and cannot be resumed".to_owned(),
+            );
+        }
         // On a busy or stopping session no turn could start: the Resume goes
         // on as for any head and begins no attempt it cannot use.
         if record.runtime_stop_in_progress

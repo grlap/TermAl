@@ -1694,7 +1694,8 @@ fn live_durability_invalidation_has_a_revision_after_the_preceding_persistence_s
     assert!(saw_invalidation);
     let id = fixture.summaries()[0].run_id.clone();
     let mut diagnostics = TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
-    let Json(detail) = get_test_run_observed(fixture.state.clone(), &id, &mut diagnostics).unwrap();
+    let Json(detail) =
+        get_test_run_observed(fixture.state.clone(), &id, &mut diagnostics, true).unwrap();
     assert_eq!(
         detail.run.registration.tracking_durability.as_deref(),
         Some("durable")

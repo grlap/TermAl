@@ -4,6 +4,61 @@
 use super::*;
 
 #[tokio::test]
+async fn registration_view_keeps_exact_identity_before_and_after_indexing() {
+    let fixture = RunFixture::new("registration-view-exact");
+    let session = owner(&fixture);
+    let id = "test-registration-view-exact";
+    let directory = registered_run(&fixture, &session, id);
+    fixture
+        .state
+        .register_test_run(&session, registration_request(id, &directory))
+        .unwrap();
+    let app = app_router(fixture.state.clone());
+    for indexed in [false, true] {
+        if indexed {
+            fixture.refresh(&[std::process::id()]);
+        }
+        let (status, response): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .uri(format!("/api/test-runs/{id}?view=registration"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(
+            response["source"],
+            if indexed { "index" } else { "registration" }
+        );
+        assert_eq!(response["run"]["runId"], id);
+        assert_eq!(response["run"]["ownerSessionId"], session);
+        assert_eq!(response["run"]["initiatingSessionId"], session);
+        assert_eq!(response["run"]["runDir"], test_run_display_path(&directory));
+        assert_eq!(response["run"]["registrationState"], "registered");
+        assert_eq!(response["run"]["trackingDurability"], "durable");
+        assert!(response.get("detail").is_none());
+    }
+    for (target, expected) in [
+        (
+            format!("/api/test-runs/{id}?view=unsupported"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "/api/test-runs/test-unknown?view=registration".to_owned(),
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        let (status, _): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder().uri(target).body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(status, expected);
+    }
+}
+
+#[tokio::test]
 async fn an_older_index_request_at_the_same_locator_cannot_replace_the_registered_identity() {
     let fixture = RunFixture::new("registration-stale-request");
     let session = owner(&fixture);

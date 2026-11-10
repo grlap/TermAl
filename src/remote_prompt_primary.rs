@@ -51,11 +51,7 @@ impl RemotePromptPrimaryAssociation {
     }
 
     fn prompt_id(&self) -> String {
-        remote_prompt_stable_id(
-            b"termal.direct-prompt.queue.v1",
-            &[self.operation_id().as_bytes()],
-        )
-        .to_string()
+        remote_prompt_queue_id(self.operation_id()).to_string()
     }
 }
 

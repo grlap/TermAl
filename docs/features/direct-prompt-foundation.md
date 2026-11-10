@@ -84,6 +84,16 @@ raw metadata, advances the header and metadata generation in one transaction,
 and does not backfill permission or activate imports. Presence of a policy key,
 even null, under a predecessor floor is refused before typed normalization.
 
+The primary-receipt checkpoint then appends `direct-prompt-delivery-1`.
+Both ordinary and already activated `direct-prompt-1` predecessors advance
+atomically to their corresponding successor, preserving raw metadata and the
+import activation. A `remotePrompt` receipt key under an older floor is refused
+before typed loading. The existing primary receipt retains a body-free exact
+identity through pruning and reload; its queue-content fence also checks that
+identity and the write-ahead nonce. This association alone cannot schedule or
+resume delivery. Production handoff remains held until current authority and
+provider correlation are integrated, and compact retirement is still owed.
+
 Coordination step `8-direct-prompt-1` extends the frozen
 `7-review-custody-index-1` inventory with intent and receive tables. Inventory,
 marker and retained rows are validated before use. Unsupported combinations

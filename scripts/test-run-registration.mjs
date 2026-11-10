@@ -306,6 +306,7 @@ async function queryRegisteredRun(request, runDirectory, configuration, deadline
   const timeout = setTimeout(() => controller.abort(), remaining);
   try {
     const url = new URL(`/api/test-runs/${encodeURIComponent(request.runId)}`, configuration.base);
+    url.searchParams.set("view", "registration");
     const options = {
       signal: controller.signal, redirect: "error",
       headers: { "x-termal-registration-operation": diagnostics.operationId, "x-termal-registration-attempt": String(diagnostics.attempt) },

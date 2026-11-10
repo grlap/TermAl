@@ -80,6 +80,19 @@ index catches up; indexed detail has `source: "index"`. This fallback confirms
 launch identity and durability, not execution results. Cards and SSE continue
 through the background scanner, normally on its next two-second tick.
 
+Registration adapters use `GET /api/test-runs/{id}?view=registration`. This
+view uses the same exact identity fence and returns only `source` and `run`.
+The latter contains `runId`, `ownerSessionId`, `initiatingSessionId`,
+`registrationState`, `trackingDurability`, `trackingProvenances`, `creatorPid`,
+`startedAt`, `detached`, `runDir` and `worktree`. It reads no stage/log detail
+and includes no source identities, commands or per-path data. Its encoded JSON
+is limited to 64 KiB; metadata that exceeds that bound is refused with HTTP 413
+rather than truncated. The size is independent of the changed-path count.
+The shipped adapter keeps its own 64 KiB response limit and all identity checks.
+Omitting `view` (or using `view=detail`) still returns full detail, including
+complete source identities. Neither projection changes the durable record or
+the run's artifacts; an unknown view is HTTP 400.
+
 Indexed detail is selected only when its native canonical locator and immutable
 request identity (run, digest, owner and start) match the captured registration.
 A copied or older indexed request uses the registration fallback. If that

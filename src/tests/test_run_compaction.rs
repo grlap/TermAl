@@ -441,7 +441,8 @@ fn artifact_loss_retains_unresolved_identity_and_does_not_clear_risk() {
             let mut diagnostics =
                 TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
             let Json(detail) =
-                get_test_run_observed(fixture.state.clone(), run_id, &mut diagnostics).unwrap();
+                get_test_run_observed(fixture.state.clone(), run_id, &mut diagnostics, true)
+                    .unwrap();
             assert_eq!(detail.run.registration.restart_would_void_evidence, None);
             assert_eq!(
                 vec![detail.run],

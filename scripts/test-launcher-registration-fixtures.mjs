@@ -106,7 +106,8 @@ export async function registrationHost(callback, {
       }
       if (request.method === "GET") {
         queries.push(request.url);
-        const runId = decodeURIComponent(request.url.slice("/api/test-runs/".length));
+        const query = new URL(request.url, "http://fixture.local");
+        const runId = decodeURIComponent(query.pathname.slice("/api/test-runs/".length));
         const saved = registrations.get(runId);
         response.writeHead(saved ? queryStatus : 404, { "content-type": "application/json" });
         const run = saved ? {

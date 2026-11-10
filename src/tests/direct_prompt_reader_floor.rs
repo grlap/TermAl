@@ -3,6 +3,56 @@
 use super::*;
 
 #[test]
+fn direct_prompt_delivery_floor_keeps_unreadable_session_rows_quarantined() {
+    for activated in [false, true] {
+        for for_load in [false, true] {
+            for payload in ["x'7b7d'", "CAST(x'80' AS TEXT)", "'{not json'"] {
+                let connection = predecessor(activated);
+                let old = if activated {
+                    SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
+                } else {
+                    SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR
+                };
+                connection
+                    .execute("UPDATE meta SET value=?1 WHERE key='schema_version'", [old])
+                    .unwrap();
+                connection
+                    .execute(
+                        &format!("INSERT INTO sessions VALUES('unreadable',{payload})"),
+                        [],
+                    )
+                    .unwrap();
+                let raw = || {
+                    connection.query_row(
+                    "SELECT typeof(value_json),CAST(value_json AS BLOB) FROM sessions WHERE id='unreadable'",
+                    [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))).unwrap()
+                };
+                let before = raw();
+                let path = FsPath::new("fixture.sqlite");
+                let (records, _, skipped) =
+                    load_session_records_from_sqlite_with_skipped(&connection, path).unwrap();
+                assert!(records.is_empty());
+                assert_eq!(skipped, 1);
+                prepare_existing_sqlite_state_reader_floor(&connection, for_load).unwrap();
+                assert_eq!(raw(), before);
+                let (records, _, skipped) =
+                    load_session_records_from_sqlite_with_skipped(&connection, path).unwrap();
+                assert!(records.is_empty());
+                assert_eq!(skipped, 1);
+                assert_eq!(
+                    required_state_meta_value(&connection, "schema_version").unwrap(),
+                    if activated {
+                        SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+                    } else {
+                        SQLITE_SCHEMA_VERSION
+                    }
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn direct_prompt_delivery_floor_preserves_both_predecessors_and_existing_policy() {
     for activated in [false, true] {
         for for_load in [false, true] {

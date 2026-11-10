@@ -151,13 +151,14 @@ fn remote_prompt_intent_digest(intent: &remote_prompt_authority::Intent) -> Stri
         .collect()
 }
 
+fn remote_prompt_queue_id(operation: Uuid) -> Uuid {
+    remote_prompt_stable_id(b"termal.direct-prompt.queue.v1", &[operation.as_bytes()])
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 impl RemotePromptJournalRecord {
     fn prompt_id(&self) -> Uuid {
-        remote_prompt_stable_id(
-            b"termal.direct-prompt.queue.v1",
-            &[self.operation_id.as_bytes()],
-        )
+        remote_prompt_queue_id(self.operation_id)
     }
 
     fn evidence_json(&self) -> Result<String> {

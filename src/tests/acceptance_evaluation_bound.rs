@@ -19,7 +19,7 @@ const ORIGINAL: &str = "9999aaaa9999aaaa9999aaaa9999aaaa";
 
 /// The canonical binding receipts with criterion 2 closed by a bound record:
 /// its producer and original lie on the original's run, past this run's cut.
-fn bound_receipts() -> (Value, Value, Value) {
+pub(super) fn bound_receipts() -> (Value, Value, Value) {
     let (show, full, mut page) = super::evidence_selection::canonical_binding_receipts();
     let verification =
         &mut page["rows"][1]["binding"]["obligation"]["resolution"]["satisfaction"]["verification"];
@@ -41,7 +41,7 @@ fn bound_receipts() -> (Value, Value, Value) {
     (show, full, page)
 }
 
-fn apply(
+pub(super) fn apply(
     show: Value,
     full: Value,
     page: Value,

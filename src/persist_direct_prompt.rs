@@ -1,4 +1,4 @@
-// Owns the direct-prompt permission minimum-reader extension inside the existing
+// Owns the direct-prompt permission and primary-receipt reader extensions in the existing
 // MAIN schema transaction. Does not issue permission, activate an import,
 // schedule work or manage the coordination store. New extension of persist.rs.
 
@@ -53,11 +53,18 @@ fn reject_unversioned_direct_prompt_delivery(
         )
     };
     let mut rows = connection.prepare("SELECT value_json FROM sessions")?;
-    let encoded = rows.query_map([], |row| row.get::<_, String>(0))?;
+    let encoded = rows.query_map([], |row| {
+        // Unreadable value payloads are skipped by the session loader too.
+        // Keep SQL stepping/access failures fatal; preserve raw rows untouched.
+        Ok(row.get_ref(0)?.as_str().ok().map(str::to_owned))
+    })?;
     for row in encoded {
         // Malformed unrelated rows retain the existing loader quarantine
         // behavior. They cannot be normalized into valid association data.
-        if let Ok(value) = serde_json::from_str::<Value>(&row?) {
+        let Some(encoded) = row? else {
+            continue;
+        };
+        if let Ok(value) = serde_json::from_str::<Value>(&encoded) {
             if has_association(&value) {
                 return Err(refuse());
             }

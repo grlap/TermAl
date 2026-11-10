@@ -44,6 +44,9 @@ mod evaluation_ids;
 #[path = "acceptance_evaluation_evidence.rs"]
 mod evidence_selection;
 
+#[path = "acceptance_evidence_ids.rs"]
+mod evidence_ids;
+
 #[path = "acceptance_verification_evidence.rs"]
 mod private_verification;
 

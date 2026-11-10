@@ -392,7 +392,7 @@ fn long_history_with_private_producer(
                     let rows = (0..8).map(|row| {
                         let position = (page * 8 + row + 1) * 2;
                         json!({"record":format!("{:032x}", 1000 + position),
-                            "position":position,"check_kind":"test","check_fingerprint":"e".repeat(32),
+                            "position":position,"check_kind":"test","check_fingerprint":"e".repeat(64),
                             "result":"passed","source_basis":{"workspace_id":"fixture-workspace","source_revision":"git:older"},
                             "producer":{"record":format!("{:032x}", 1000 + position - 1),
                                 "position":position - 1,"outcome":"succeeded"}})

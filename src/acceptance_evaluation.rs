@@ -543,7 +543,7 @@ fn acceptance_criterion_bindings(
             fingerprint: binding
                 .requirement
                 .check_fingerprint
-                .filter(|fingerprint| is_citable_acceptance_locator(fingerprint)),
+                .filter(|fingerprint| is_lowercase_sha256(fingerprint)),
         })
         .collect();
     kept.sort_by_key(|binding| binding.criterion);

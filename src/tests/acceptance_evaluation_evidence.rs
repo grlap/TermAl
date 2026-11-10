@@ -1125,7 +1125,7 @@ pub(super) fn canonical_binding_receipts() -> (Value, Value, Value) {
                 "state": "satisfied", "resolution": {"record": "dddddddddddddddddddddddddddddddd", "position": 35, "kind": "satisfied",
                     "satisfaction": {"evaluated_cut": 34, "verification": {
                         "record": "cccccccccccccccccccccccccccccccc", "position": 33, "check_kind": "test",
-                        "check_fingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "result": "passed",
+                        "check_fingerprint": "e".repeat(64), "result": "passed",
                         "source_basis": {"workspace_id": "fixture-workspace", "source_revision": "git:older"},
                         "producer": {"record": "abababababababababababababababab", "position": 32, "outcome": "succeeded"}}}}}}}]});
     (show, full, page)

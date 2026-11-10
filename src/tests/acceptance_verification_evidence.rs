@@ -61,7 +61,7 @@ impl EngramControlTransport for VerificationPages {
 fn row(position: i64, source: &EngramSourceId) -> Value {
     json!({
         "record":format!("{:032x}", position), "position":position, "check_kind":"test",
-        "check_fingerprint":"e".repeat(32), "result":"passed",
+        "check_fingerprint":"e".repeat(64), "result":"passed",
         "source_basis":{"workspace_id":"fixture-workspace", "source_id":source},
         "producer":{"record":format!("{:032x}", position - 1), "position":position - 1,
             "outcome":"succeeded"},
@@ -243,7 +243,7 @@ fn private_verification_pages_refuse_changed_bases_and_never_admit_partial_metad
         match case {
             "cut" => second["basis"]["run_cut"] = json!(43),
             "criterion" => second["criterion"] = json!(1),
-            "requirement" => second["requirement"]["check_fingerprint"] = json!("f".repeat(32)),
+            "requirement" => second["requirement"]["check_fingerprint"] = json!("f".repeat(64)),
             "total" => {
                 second["total"] = json!(3);
                 second["omitted"] = json!(1);
@@ -283,4 +283,117 @@ fn unsupported_private_verification_read_keeps_window_summaries_as_context() {
             .filter_map(|entry| entry.verification.as_ref())
             .all(|metadata| metadata.source_basis.is_none())
     );
+}
+
+fn identified_private_row(bound: bool, legacy: Option<bool>) -> Value {
+    let source = shared_source::identity();
+    let mut value = row(4, &source);
+    if bound {
+        let (_, _, closure) = super::bound::bound_receipts();
+        value["bound"] = closure["rows"][1]["binding"]["obligation"]["resolution"]["satisfaction"]
+            ["verification"]["bound"]
+            .clone();
+        value["bound"]["original_position"] = json!(4);
+        value["bound"]["original_basis"] = value["source_basis"].clone();
+    }
+    for (index, pointer) in [
+        "/record",
+        "/producer/record",
+        "/bound/verification",
+        "/bound/sighting",
+    ]
+    .iter()
+    .enumerate()
+    {
+        if !bound && pointer.starts_with("/bound/") {
+            continue;
+        }
+        *value.pointer_mut(pointer).expect("fixture record field") = json!(
+            super::evidence_ids::record_id(legacy.unwrap_or(index % 2 == 0))
+        );
+    }
+    value["check_fingerprint"] = json!(super::evidence_ids::fingerprint());
+    value
+}
+
+#[test]
+fn private_reads_accept_complete_current_legacy_and_mixed_identities() {
+    for bound in [false, true] {
+        for legacy in [Some(false), Some(true), None] {
+            let value = identified_private_row(bound, legacy);
+            let record = value["record"].as_str().unwrap().to_owned();
+            let (result, task, _) = read(vec![page(vec![value], 0, 0, None)]);
+            result.expect("complete private verification identities are accepted");
+            assert_eq!(task.indexed_evidence.len(), 1);
+            assert!(task.indexed_evidence[0].locator == record);
+            assert!(
+                task.criterion_evidence.iter().any(|association| {
+                    association.criterion == 2 && association.locators.contains(&record)
+                }),
+                "the accepted private record remains associated with the criterion"
+            );
+        }
+    }
+}
+
+#[test]
+fn private_reads_refuse_partial_record_ids_before_projecting_metadata() {
+    let id = super::evidence_ids::record_id(false);
+    for bound in [false, true] {
+        for pointer in [
+            "/record",
+            "/producer/record",
+            "/bound/verification",
+            "/bound/sighting",
+        ] {
+            if !bound && pointer.starts_with("/bound/") {
+                continue;
+            }
+            for invalid in [
+                String::new(),
+                id[..12].to_owned(),
+                format!("{id}12345678"),
+                format!("A{}", &id[1..]),
+                Uuid::new_v4().to_string(),
+            ] {
+                let mut value = identified_private_row(bound, None);
+                *value.pointer_mut(pointer).expect("fixture record field") = json!(invalid);
+                let (result, task, _) = read(vec![page(vec![value], 0, 0, None)]);
+                assert!(result.is_err(), "malformed private record field: {pointer}");
+                assert!(
+                    task.indexed_evidence.is_empty(),
+                    "no malformed record is projected"
+                );
+                assert!(
+                    task.criterion_evidence.is_empty(),
+                    "no malformed record is associated"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn private_reads_refuse_record_ids_and_prefixes_as_check_fingerprints() {
+    let digest = super::evidence_ids::fingerprint();
+    for bound in [false, true] {
+        for invalid in [
+            digest[..12].to_owned(),
+            super::evidence_ids::record_id(false),
+            digest[..40].to_owned(),
+            digest[..63].to_owned(),
+            format!("{digest}0"),
+            format!("G{}", &digest[1..]),
+        ] {
+            let mut value = identified_private_row(bound, None);
+            value["check_fingerprint"] = json!(invalid);
+            let (result, task, _) = read(vec![page(vec![value], 0, 0, None)]);
+            assert!(
+                result.is_err(),
+                "a private check needs its full SHA-256 fingerprint"
+            );
+            assert!(task.indexed_evidence.is_empty());
+            assert!(task.criterion_evidence.is_empty());
+        }
+    }
 }

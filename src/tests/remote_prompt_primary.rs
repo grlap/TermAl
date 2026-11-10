@@ -190,3 +190,24 @@ fn remote_prompt_primary_association_alone_cannot_start_handoff() {
     state.begin_prompt_delivery_write_ahead_locked(&mut inner, 0, &id, true, None);
     assert_eq!(inner.sessions[0].prompt_deliveries[&id].attempt, 0);
 }
+
+#[test]
+fn remote_prompt_primary_resume_refuses_without_beginning_an_attempt() {
+    let state = test_app_state();
+    let (mut inner, session, intent) = queued_fixture();
+    let record = inner.session_mut_by_index(0).unwrap();
+    associate_remote_prompt_receipt(record, &intent).unwrap();
+    record.orchestrator_auto_dispatch_blocked = true;
+    let accepted = receipted_resume_identity(record, None).unwrap();
+    let before = serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap();
+    *state.inner.lock().unwrap() = inner;
+    assert!(matches!(
+        state.resume_receipted_head(&session, None, &accepted),
+        ReceiptedResume::Refused(_)
+    ));
+    let inner = state.inner.lock().unwrap();
+    assert_eq!(
+        serde_json::to_value(PersistedSessionRecord::from_record(&inner.sessions[0])).unwrap(),
+        before
+    );
+}

@@ -193,15 +193,15 @@ fn apply_acceptance_verification_metadata(
     let producer_valid = if let Some(bound) = &row.bound {
         row.producer.position > 0
             && row.producer.position < bound.original_position
-            && is_citable_acceptance_locator(&bound.verification)
-            && is_citable_acceptance_locator(&bound.sighting)
+            && is_engram_record_id(&bound.verification)
+            && is_engram_record_id(&bound.sighting)
             && acceptance_verification_basis_agrees(&bound.original_basis, &row.source_basis)
     } else {
         row.producer.position > 0 && row.producer.position < row.position
     };
-    if !is_citable_acceptance_locator(&row.record)
-        || !is_citable_acceptance_locator(&row.check_fingerprint)
-        || !is_citable_acceptance_locator(&row.producer.record)
+    if !is_engram_record_id(&row.record)
+        || !is_lowercase_sha256(&row.check_fingerprint)
+        || !is_engram_record_id(&row.producer.record)
         || !producer_valid
         || row.check_kind != binding.check_kind
         || !is_acceptance_tracker_word(&row.result)

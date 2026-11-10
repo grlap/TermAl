@@ -7,6 +7,7 @@ use super::*;
 include!("test_run_registration_history_seed.rs");
 include!("test_run_registration_history_service.rs");
 include!("test_run_registration_history_clock.rs");
+include!("test_run_registration_view.rs");
 
 #[derive(Default)]
 struct HistoryReads {

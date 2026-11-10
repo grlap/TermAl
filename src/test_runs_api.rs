@@ -195,7 +195,10 @@ async fn get_test_run(
     State(state): State<AppState>,
     AxumPath(run_id): AxumPath<String>,
     headers: axum::http::HeaderMap,
-) -> Result<Json<TestRunDetailResponse>, ApiError> {
+    query: Result<Query<TestRunDetailQuery>, QueryRejection>,
+) -> Result<Response, ApiError> {
+    let Query(query) = query.map_err(|err| api_query_rejection("test run detail", err))?;
+    let registration = query.view == Some(TestRunDetailView::Registration);
     let mut diagnostics = TestRunRegistrationDiagnostics::new(&state.server_instance_id);
     diagnostics.method = "GET";
     diagnostics.correlate(&headers);
@@ -206,7 +209,12 @@ async fn get_test_run(
     // Exact lookup canonicalizes two locators, and detail reads files. Keep
     // both on the blocking pool; neither operation holds StateInner.
     run_blocking_api(move || {
-        let result = get_test_run_observed(state, &run_id, &mut diagnostics);
+        let result = get_test_run_observed(state, &run_id, &mut diagnostics, !registration)
+            .and_then(|response| if registration {
+                test_run_registration_confirmation(response.0)
+            } else {
+                Ok(response.into_response())
+            });
         match result {
             Err(mut error) => {
                 if diagnostics.enabled {
@@ -226,10 +234,13 @@ async fn get_test_run(
     .await
 }
 
+include!("test_run_registration_query.rs");
+
 fn get_test_run_observed(
     state: AppState,
     run_id: &str,
     diagnostics: &mut TestRunRegistrationDiagnostics,
+    include_detail: bool,
 ) -> Result<Json<TestRunDetailResponse>, ApiError> {
     diagnostics.enter("get_retained_lookup");
     {
@@ -272,6 +283,11 @@ fn get_test_run_observed(
     if let Some(exact) = test_run_exact_query(&state, run_id, diagnostics)? {
         diagnostics.request_digest = exact.request_identity;
         return if let Some(directory) = exact.directory {
+            if !include_detail {
+                return Ok(Json(TestRunDetailResponse {
+                    source: "index", run: exact.run, detail: TestRunDetail::default(),
+                }));
+            }
             diagnostics.enter("get_detail_dispatch");
             let started = std::time::Instant::now();
             let detail = test_run_detail(&directory);

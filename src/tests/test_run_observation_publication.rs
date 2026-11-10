@@ -218,7 +218,8 @@ fn observation_delta(
     // The public event contains counters, not the exact row. Read it through
     // the production exact-ID owner and retain the durability/credit oracles.
     let mut diagnostics = TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id);
-    let Json(detail) = get_test_run_observed(fixture.state.clone(), id, &mut diagnostics).unwrap();
+    let Json(detail) =
+        get_test_run_observed(fixture.state.clone(), id, &mut diagnostics, true).unwrap();
     assert_eq!(detail.run.run_id, id);
     assert_eq!(detail.run.state, expected);
     assert_eq!(

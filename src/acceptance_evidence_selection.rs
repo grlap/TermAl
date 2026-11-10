@@ -1353,8 +1353,8 @@ fn apply_acceptance_binding_evidence(
             continue;
         };
         if obligation.obligation_id.is_empty()
-            || !is_citable_acceptance_locator(&obligation.definition)
-            || !is_citable_acceptance_locator(&obligation.triggering_observation)
+            || !is_engram_record_id(&obligation.definition)
+            || !is_engram_record_id(&obligation.triggering_observation)
             || obligation.work_revision > task.acceptance_basis
             || obligation.work_revision < 1
             || !position_valid(obligation.trigger_position)
@@ -1378,7 +1378,7 @@ fn apply_acceptance_binding_evidence(
             }
             continue;
         };
-        if !is_citable_acceptance_locator(&resolution.record)
+        if !is_engram_record_id(&resolution.record)
             || !position_valid(resolution.position)
             || obligation.definition_position >= resolution.position
             || resolution.kind != obligation.state
@@ -1408,8 +1408,8 @@ fn apply_acceptance_binding_evidence(
                 verification.producer.position > 0
                     && bound.original_position > 0
                     && verification.producer.position < bound.original_position
-                    && is_citable_acceptance_locator(&bound.verification)
-                    && is_citable_acceptance_locator(&bound.sighting)
+                    && is_engram_record_id(&bound.verification)
+                    && is_engram_record_id(&bound.sighting)
                     // It is named in the brief: a short item reference only.
                     && !bound.work_ref.is_empty()
                     && bound.work_ref.len() <= 64
@@ -1423,9 +1423,9 @@ fn apply_acceptance_binding_evidence(
         if !position_valid(satisfaction.evaluated_cut)
             || !position_valid(verification.position)
             || !producer_valid
-            || !is_citable_acceptance_locator(&verification.record)
-            || !is_citable_acceptance_locator(&verification.check_fingerprint)
-            || !is_citable_acceptance_locator(&verification.producer.record)
+            || !is_engram_record_id(&verification.record)
+            || !is_lowercase_sha256(&verification.check_fingerprint)
+            || !is_engram_record_id(&verification.producer.record)
             || verification.check_kind != expected.check_kind
             || verification.result != "passed"
             || expected
