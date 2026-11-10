@@ -556,6 +556,7 @@ fn an_acknowledged_committed_run_at_head_is_admitted_without_a_sighting_read() {
             decide(&state, &parent),
             Ok(AcceptanceCommittedInputDecision::Admitted(
                 AcceptanceCommittedInputAdmission {
+                    native_source: None,
                     run_id: COMMITTED_RUN_ID.to_owned(),
                     commit: head.clone(),
                 }
@@ -668,6 +669,7 @@ fn a_pinned_child_uses_the_existing_record_and_acceptance_but_child_dirt_refuses
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
+                native_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head
             },
@@ -1693,6 +1695,7 @@ fn a_received_record_settled_for_the_same_body_during_the_check_is_still_admitte
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
+                native_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head,
             }
@@ -1759,6 +1762,7 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         decide_task(&state, &parent, &task_under(live), deadline()),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
+                native_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head.clone(),
             }
@@ -1827,6 +1831,7 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         ),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
+                native_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head.clone(),
             }
@@ -1891,6 +1896,7 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         ),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
+                native_source: None,
                 run_id: renamed_id.to_owned(),
                 commit: head,
             }

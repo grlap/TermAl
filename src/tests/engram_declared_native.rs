@@ -6,6 +6,9 @@ use crate::tests::engram_declared_source_fixture::NativeSourceOwner;
 #[path = "engram_declared_task_artifacts.rs"]
 mod task_artifacts;
 
+#[path = "acceptance_native_registration.rs"]
+mod acceptance_admission;
+
 struct NativeFixture {
     source_owner: NativeSourceOwner,
     fixture: RunFixture,

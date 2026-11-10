@@ -660,7 +660,7 @@ impl AppState {
         &self,
         owner: &str,
         place: &EngramBasisPlace,
-        admitted_commit: Option<&str>,
+        admission: Option<&AcceptanceCommittedInputAdmission>,
     ) -> Result<
         (
             Option<AcceptanceSourceBasis>,
@@ -670,9 +670,20 @@ impl AppState {
         ApiError,
     > {
         let Some(source_id) = self.acceptance_shared_source_capture(owner, place) else {
+            if admission.is_some_and(|admission| admission.native_source.is_some()) {
+                return Err(ApiError::conflict(
+                    "the admitted native source could not be captured; no evaluator was started",
+                ));
+            }
             return Ok((None, None, None));
         };
-        if admitted_commit.is_some_and(|commit| commit != source_id.commit) {
+        if admission.is_some_and(|admission| {
+            admission.commit != source_id.commit
+                || admission
+                    .native_source
+                    .as_ref()
+                    .is_some_and(|expected| expected != &source_id)
+        }) {
             return Err(ApiError::conflict(
                 "the named source changed after committed-input admission; request a fresh evaluation",
             ));

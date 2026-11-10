@@ -70,6 +70,7 @@ fn new_source_record_passes_the_termal_acceptance_acknowledgement_boundary() {
             decide(&state, &parent),
             Ok(AcceptanceCommittedInputDecision::Admitted(
                 AcceptanceCommittedInputAdmission {
+                    native_source: None,
                     run_id: COMMITTED_RUN_ID.into(),
                     commit: head
                 }
@@ -95,6 +96,7 @@ fn historical_commit_record_keeps_its_acceptance_acknowledgement() {
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
+                native_source: None,
                 run_id: COMMITTED_RUN_ID.into(),
                 commit: head
             }

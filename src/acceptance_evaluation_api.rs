@@ -1611,7 +1611,7 @@ impl AppState {
         // whatever the launcher's committed-input default: admitted on
         // a clean root, its newest applicable terminal result passing eligibly
         // at HEAD and an acknowledged verification record, refused otherwise,
-        // and never sighted
+        // with an additional sighting check for an unheld retained-root requester
         // (`acceptance_committed_input.rs`).
         let committed_admission = self.require_acceptance_source_preflight(
             parent_session_id,
@@ -1659,7 +1659,7 @@ impl AppState {
                 )));
             }
             Some(self.acceptance_owner_judged_source(
-                parent_session_id, &place, committed_admission.as_ref().map(|admission| admission.commit.as_str()))?)
+                parent_session_id, &place, committed_admission.as_ref())?)
         } else {
             None
         };
@@ -1701,7 +1701,7 @@ impl AppState {
                 let (source_basis, source_fingerprint, judged_workspace) = match same_session_source {
                     Some(source) => source,
                     None => self.acceptance_owner_judged_source(parent_session_id, &place,
-                        committed_admission.as_ref().map(|admission| admission.commit.as_str()))?,
+                        committed_admission.as_ref())?,
                 };
                 // A coordinator has no claim-local workdir basis to substitute
                 // for the retained task root. Admit this new path only when
@@ -1828,7 +1828,7 @@ impl AppState {
                 let (source_basis, source_fingerprint, judged_workspace) = match same_session_source {
                     Some(source) => source,
                     None => self.acceptance_owner_judged_source(parent_session_id, &place,
-                        committed_admission.as_ref().map(|admission| admission.commit.as_str()))?,
+                        committed_admission.as_ref())?,
                 };
                 if matches!(source_basis, Some(AcceptanceSourceBasis::Shared(_))) {
                     let remedy = if task.pinned_mode.is_some() {

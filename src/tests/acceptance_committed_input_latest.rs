@@ -48,6 +48,7 @@ fn the_newest_terminal_result_at_the_checked_commit_decides() {
             decide(&state, &parent),
             Ok(AcceptanceCommittedInputDecision::Admitted(
                 AcceptanceCommittedInputAdmission {
+                    native_source: None,
                     run_id: COMMITTED_RUN_ID.to_owned(),
                     commit: head.clone(),
                 }
@@ -190,6 +191,7 @@ fn the_newest_terminal_result_at_the_checked_commit_decides() {
                 decision,
                 Ok(AcceptanceCommittedInputDecision::Admitted(
                     AcceptanceCommittedInputAdmission {
+                        native_source: None,
                         run_id: if matches!(case, "newer pass" | "older missing results") {
                             newer_id
                         } else {
@@ -222,6 +224,7 @@ fn recovery_on_the_same_work_run_keeps_the_original_registered_evidence() {
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
+                native_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head.clone(),
             }
@@ -245,6 +248,7 @@ fn recovery_on_the_same_work_run_keeps_the_original_registered_evidence() {
         ),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
+                native_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head.clone(),
             }
@@ -354,6 +358,7 @@ fn a_new_naming_generation_does_not_reuse_the_original_evidence() {
     ));
     let expected = Ok(AcceptanceCommittedInputDecision::Admitted(
         AcceptanceCommittedInputAdmission {
+            native_source: None,
             run_id: COMMITTED_RUN_ID.to_owned(),
             commit: head,
         },

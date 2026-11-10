@@ -10,8 +10,12 @@
 // passed eligibly on exactly that commit, and Engram acknowledged that run's
 // verification record (received or settled) for that commit, as the host
 // observed it and keeps it on the run's registration; otherwise it is
-// refused with a typed reason, and Engram's named-root sighting is never read
-// in this flow. A task with no such run is in the legacy flow, where the
+// refused with a typed reason. A holder's committed flow does not read the
+// sighting; an unheld retained-root requester additionally needs it. Native
+// declared runs use their authenticated terminal and complete SourceId, never
+// launcher commit decoding. Only unchanged clean native source is admitted;
+// local changes require committing and running the declared test again.
+// A task with no such run is in the legacy flow, where the
 // sighting preflight decides as before. Unknown results ahead of a selected
 // terminal result refuse; coherent unfinished runs are skipped. A scan that
 // exhausts its bound without selecting a result, or reaches its deadline,
@@ -20,8 +24,8 @@
 // clean), finding the claim's
 // committed-input runs among the registrations, reading whether Engram
 // acknowledged a run's record, the decision itself, and the committed source
-// revision (`git-commit:<commit>`) an admitted evaluation judges, declares and
-// is judged on again at its first submission. Does not own the
+// pin. Native admission also retains the complete SourceId through owner
+// capture; evaluation submission rechecks that full identity. Does not own the
 // sighting preflight (src/acceptance_named_root_sighting.rs); the rest of the
 // evaluation request (src/acceptance_evaluation_api.rs); the registration and
 // its pinned binding (src/test_run_registration.rs,
@@ -57,6 +61,9 @@ thread_local! {
 struct AcceptanceCommittedInputAdmission {
     run_id: String,
     commit: String,
+    // Native evidence retains its complete identity through the request's
+    // independent owner capture; commit equality alone never admits it.
+    native_source: Option<EngramSourceId>,
 }
 
 /// Which flow an evaluation request is in, when it is not refused.
@@ -65,8 +72,8 @@ enum AcceptanceCommittedInputDecision {
     /// The task's claim has no registered committed-input run pinned to its
     /// named root: the sighting preflight decides, exactly as before.
     Legacy,
-    /// The committed flow admitted the request on this run and commit; no
-    /// sighting is read.
+    /// The clean committed flow admitted the request on this run. An unheld
+    /// retained-root requester additionally needs the canonical sighting.
     Admitted(AcceptanceCommittedInputAdmission),
 }
 
@@ -77,9 +84,14 @@ enum AcceptanceCommittedInputRefusal {
     /// The owner cannot establish the named root as clean at a commit.
     /// Dirty or unavailable input and unavailable ownership all refuse.
     NotClean,
+    NativeLocalChanges {
+        run_id: String,
+    },
     /// The newest applicable terminal result did not pass eligibly and
     /// cleanly on HEAD `commit`, or no terminal result matches that commit.
-    NoEligibleRun { commit: String },
+    NoEligibleRun {
+        commit: String,
+    },
     /// A run passed eligibly on `commit`, but Engram has not acknowledged its
     /// verification record for that commit; `state` says where it stands.
     RecordNotAcknowledged {
@@ -88,7 +100,10 @@ enum AcceptanceCommittedInputRefusal {
         state: String,
     },
     /// The producer cannot build a record for these unsupported check stages.
-    UnclassifiedStages { run_id: String, commit: String },
+    UnclassifiedStages {
+        run_id: String,
+        commit: String,
+    },
     /// The tracker, the named root or the admitting run changed while it was
     /// checked.
     Changed,
@@ -104,6 +119,7 @@ impl AcceptanceCommittedInputRefusal {
     fn code(&self) -> &'static str {
         match self {
             Self::NotClean => "committed_input_not_clean",
+            Self::NativeLocalChanges { .. } => "native_input_local_changes",
             Self::NoEligibleRun { .. } => "committed_input_no_eligible_run",
             Self::RecordNotAcknowledged { .. } => "verification_record_not_acknowledged",
             Self::UnclassifiedStages { .. } => "verification_record_unclassified_stages",
@@ -117,6 +133,11 @@ impl AcceptanceCommittedInputRefusal {
             Self::NotClean => format!(
                 "`{work_ref}`'s named source root is not clean at a commit; commit or remove \
                  its changes, run the gate on that commit, and request again"
+            ),
+            Self::NativeLocalChanges { run_id } => format!(
+                "native run {run_id} carries local source changes; acceptance admission \
+                 requires a clean committed source. Commit the intended changes and \
+                 re-run the declared test on that commit, then request evaluation again"
             ),
             Self::NoEligibleRun { commit } => format!(
                 "the newest applicable terminal result of `{work_ref}`'s claim did not pass \
@@ -159,40 +180,74 @@ impl AppState {
     /// Acceptance retains its clean-commit policy; the initiating project's
     /// pinned owner supplies that verdict. Unavailable ownership or input
     /// supplies no judged commit, without a local Git fallback.
-    fn acceptance_judged_commit(&self, session: &str, root: &FsPath,
-        deadline: std::time::Instant) -> Option<String>
-    {
+    fn acceptance_judged_commit(
+        &self,
+        session: &str,
+        root: &FsPath,
+        deadline: std::time::Instant,
+    ) -> Option<String> {
+        self.acceptance_judged_clean_source(session, root, deadline)
+            .map(|source| source.commit)
+    }
+
+    fn acceptance_judged_clean_source(
+        &self,
+        session: &str,
+        root: &FsPath,
+        deadline: std::time::Instant,
+    ) -> Option<EngramSourceId> {
         let deadline = deadline.min(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
         #[cfg(test)]
-        let metadata = self.inner.lock().expect("state mutex poisoned")
-            .test_native_source_owner_metadata.clone();
+        let metadata = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_native_source_owner_metadata
+            .clone();
         #[cfg(test)]
         let measured = match metadata {
             Some(measure) => measure(self, session, deadline),
-            None => self.source_owner_metadata_snapshot_with(session, deadline, engram_source_owner_run),
+            None => {
+                self.source_owner_metadata_snapshot_with(session, deadline, engram_source_owner_run)
+            }
         };
         #[cfg(not(test))]
-        let measured = self.source_owner_metadata_snapshot_with(session, deadline, engram_source_owner_run);
+        let measured =
+            self.source_owner_metadata_snapshot_with(session, deadline, engram_source_owner_run);
         let (pin, authority) = measured.ok()?;
         #[cfg(test)]
-        let capture = self.inner.lock().expect("state mutex poisoned")
-            .test_acceptance_source_owner_capture.clone();
+        let capture = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_acceptance_source_owner_capture
+            .clone();
         #[cfg(test)]
-        let observed = engram_source_observation_with(&pin, root, deadline,
+        let observed = engram_source_observation_with(
+            &pin,
+            root,
+            deadline,
             |binary, cwd, args, until, limit| match &capture {
                 Some(capture) => capture(binary, cwd, args, until, limit),
                 None => engram_source_owner_run(binary, cwd, args, until, limit),
-            }).ok()?;
+            },
+        )
+        .ok()?;
         #[cfg(not(test))]
-        let observed = engram_source_observation_with(&pin, root, deadline, engram_source_owner_run).ok()?;
+        let observed =
+            engram_source_observation_with(&pin, root, deadline, engram_source_owner_run).ok()?;
         if engram_source_owner_authority_locked(
-            &self.inner.lock().expect("state mutex poisoned"), session).ok()? != authority
+            &self.inner.lock().expect("state mutex poisoned"),
+            session,
+        )
+        .ok()?
+            != authority
             || observed.status != EngramSourceStatus::Clean
         {
             return None;
         }
         let source = observed.into_source_id(deadline).ok()?;
-        test_run_commit_id_valid(&source.commit).then_some(source.commit)
+        test_run_commit_id_valid(&source.commit).then_some(source)
     }
 }
 
@@ -219,7 +274,7 @@ fn acceptance_committed_input_run_outcome(
     };
     match acceptance_committed_input_result_start(run_id, &results) {
         AcceptanceCommittedInputRunStart::Unknown => {
-            return Err(AcceptanceCommittedInputRefusal::ScanIncomplete)
+            return Err(AcceptanceCommittedInputRefusal::ScanIncomplete);
         }
         AcceptanceCommittedInputRunStart::Pending
         | AcceptanceCommittedInputRunStart::NotStarted => return Ok(None),
@@ -263,8 +318,8 @@ enum AcceptanceCommittedInputRunStart {
     Pending,
     /// Neither shown: the results are missing, unreadable or incoherent, or
     /// their committed-input record is missing or incoherent although the
-    /// run was registered as one (only an `input: "commit"` run is pinned to
-    /// a named root). Never taken as `NotStarted`.
+    /// run was registered as one. Native registrations are classified from
+    /// their own host reservation and terminal instead. Never `NotStarted`.
     Unknown,
 }
 
@@ -352,12 +407,20 @@ fn acceptance_committed_input_record_acknowledged(
     let run_id = registration.run_id.as_str();
     let run_dir = FsPath::new(&registration.run_directory);
     let unacknowledged = |state: String| AcceptanceCommittedInputRefusal::RecordNotAcknowledged {
-        run_id: run_id.to_owned(), commit: commit.to_owned(), state,
+        run_id: run_id.to_owned(),
+        commit: commit.to_owned(),
+        state,
     };
     let (receipt, body_digest) = match &registration.verification_record {
         Some(
-            TestRunVerificationAck::Received { receipt, body_digest }
-            | TestRunVerificationAck::Settled { receipt, body_digest },
+            TestRunVerificationAck::Received {
+                receipt,
+                body_digest,
+            }
+            | TestRunVerificationAck::Settled {
+                receipt,
+                body_digest,
+            },
         ) => (receipt.clone(), body_digest.clone()),
         Some(TestRunVerificationAck::Rejected { detail }) => {
             return Err(unacknowledged(format!("rejected: {detail}")));
@@ -371,17 +434,24 @@ fn acceptance_committed_input_record_acknowledged(
                     == Some(&registration.request_identity)
                 && engram_verification_record_results_are_terminal(registration, &results)
                 && !engram_verification_record_registration_unclassified_stages(
-                    registration, &request, &results).is_empty()
+                    registration,
+                    &request,
+                    &results,
+                )
+                .is_empty()
             {
                 return Err(AcceptanceCommittedInputRefusal::UnclassifiedStages {
-                    run_id: run_id.to_owned(), commit: commit.to_owned(),
+                    run_id: run_id.to_owned(),
+                    commit: commit.to_owned(),
                 });
             }
             let state = match engram_verification_record_progress(run_dir) {
                 Some(EngramVerificationRecordProgress::Pending { reason }) => {
                     let kind = serde_json::to_value(&reason)
                         .ok()
-                        .and_then(|value| value.get("kind").and_then(Value::as_str).map(str::to_owned))
+                        .and_then(|value| {
+                            value.get("kind").and_then(Value::as_str).map(str::to_owned)
+                        })
                         .unwrap_or_else(|| "unknown".to_owned());
                     format!("pending: {kind}")
                 }
@@ -391,23 +461,35 @@ fn acceptance_committed_input_record_acknowledged(
         }
     };
     let Some(frozen) = engram_verification_record_frozen(run_dir, run_id) else {
-        return Err(unacknowledged("acknowledged, but its frozen body cannot be read back".to_owned()));
+        return Err(unacknowledged(
+            "acknowledged, but its frozen body cannot be read back".to_owned(),
+        ));
     };
     if !engram_verification_record_is_host_body(registration, &frozen.body) {
-        return Err(unacknowledged("acknowledged, but its frozen body is not the host's own record of the run".to_owned()));
+        return Err(unacknowledged(
+            "acknowledged, but its frozen body is not the host's own record of the run".to_owned(),
+        ));
     }
     // The run's files and its body may have been rewritten together after
     // Engram's answer: only the very body the receipt answered is admitted.
     if !engram_verification_record_digest_answers(&body_digest, &frozen.body) {
-        return Err(unacknowledged("acknowledged for another body: the frozen body changed after Engram's answer".to_owned()));
+        return Err(unacknowledged(
+            "acknowledged for another body: the frozen body changed after Engram's answer"
+                .to_owned(),
+        ));
     }
     if frozen.body.registration.host_run_id != run_id
         || frozen.body.input.clean_commit() != Some(commit)
     {
-        return Err(unacknowledged("acknowledged for another run or input".to_owned()));
+        return Err(unacknowledged(
+            "acknowledged for another run or input".to_owned(),
+        ));
     }
-    engram_verification_record_receipt_check(&frozen.body, &receipt)
-        .map_err(|error| unacknowledged(format!("acknowledged with a receipt that does not answer it: {error}")))
+    engram_verification_record_receipt_check(&frozen.body, &receipt).map_err(|error| {
+        unacknowledged(format!(
+            "acknowledged with a receipt that does not answer it: {error}"
+        ))
+    })
 }
 
 /// The evaluated work's claim as the requester's live held-claims read
@@ -450,7 +532,13 @@ fn acceptance_committed_input_registration_matches(
     entry: &EngramWorkSourceRoot,
     current: &AcceptanceCurrentClaim,
 ) -> bool {
-    acceptance_committed_input_registration_matches_requester(registration, store, work_id, entry, Some(current))
+    acceptance_committed_input_registration_matches_requester(
+        registration,
+        store,
+        work_id,
+        entry,
+        Some(current),
+    )
 }
 
 // An unheld requester can inspect retained evidence without claiming its
@@ -471,15 +559,17 @@ fn acceptance_committed_input_registration_matches_requester(
             binding.work_id == work_id
                 && binding.claim_id == entry.claim_id
                 && binding.claim_fence == entry.claim_fence
-                && current.is_none_or(|current| current.binding.as_ref().map_or(
-                    current.claim_fence == binding.claim_fence,
-                    |live| {
-                        engram_same_recovery_run(live, binding)
-                            && live.claim_fence == current.claim_fence
-                            && live.claim_fence >= binding.claim_fence
-                            && live.work_revision >= binding.work_revision
-                    },
-                ))
+                && current.is_none_or(|current| {
+                    current.binding.as_ref().map_or(
+                        current.claim_fence == binding.claim_fence,
+                        |live| {
+                            engram_same_recovery_run(live, binding)
+                                && live.claim_fence == current.claim_fence
+                                && live.claim_fence >= binding.claim_fence
+                                && live.work_revision >= binding.work_revision
+                        },
+                    )
+                })
         })
 }
 
@@ -506,6 +596,9 @@ fn acceptance_committed_input_registration_unchanged(
         && row.authority_store == admitted.authority_store
         && row.work_binding == admitted.work_binding
         && row.named_root == admitted.named_root
+        && row.declared_native == admitted.declared_native
+        && row.declared_terminal == admitted.declared_terminal
+        && row.source_owner == admitted.source_owner
         && digest(row).is_some()
         && digest(row) == digest(admitted)
 }
@@ -528,8 +621,8 @@ fn acceptance_committed_revision_commit(revision: &str) -> Option<&str> {
 
 impl AppState {
     /// The source preflight of an evaluation of `task` in its named source
-    /// root `root`: the committed flow's decision, and in the legacy flow
-    /// alone the sighting preflight. `Some` with the admission when the
+    /// root `root`: the committed flow's decision, and for a legacy or unheld
+    /// retained-root request the sighting preflight. `Some` with the admission when the
     /// committed flow admitted the request, whose commit the evaluation then
     /// judges; `None` in the legacy flow.
     fn require_acceptance_source_preflight(
@@ -560,7 +653,14 @@ impl AppState {
                 // that path/generation check for this newly admitted route.
                 if task.current_claim.is_none() {
                     self.require_acceptance_named_root_sighting(
-                        parent_session_id, reader, store, task, root, deadline, now)?;
+                        parent_session_id,
+                        reader,
+                        store,
+                        task,
+                        root,
+                        deadline,
+                        now,
+                    )?;
                 }
                 Ok(Some(admission))
             }
@@ -709,10 +809,7 @@ impl AppState {
                 break;
             }
             scanned += 1;
-            let start = acceptance_committed_input_run_start(
-                &registration.run_id,
-                &registration.run_directory,
-            );
+            let start = acceptance_registered_input_start(&registration);
             if start != AcceptanceCommittedInputRunStart::NotStarted {
                 any_started |= start == AcceptanceCommittedInputRunStart::Started;
                 observed.push((registration, start));
@@ -728,11 +825,21 @@ impl AppState {
                 Err(Refusal::ScanIncomplete)
             };
         }
-        let commit = match self.acceptance_judged_commit(parent_session_id, FsPath::new(&root.root), deadline) {
-            Some(commit) => commit,
+        let source = match self.acceptance_judged_clean_source(
+            parent_session_id,
+            FsPath::new(&root.root),
+            deadline,
+        ) {
+            Some(source) => source,
             None if now() >= deadline => return Err(Refusal::ScanIncomplete),
-            None => return Err(Refusal::NotClean),
+            None => {
+                return Err(observed
+                    .iter()
+                    .find_map(|(registration, _)| acceptance_native_local_changes(registration))
+                    .unwrap_or(Refusal::NotClean));
+            }
         };
+        let commit = source.commit.clone();
         let mut admitting: Option<TestRunRegistration> = None;
         #[cfg(test)]
         TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_SELECTION.with(|slot| {
@@ -747,12 +854,7 @@ impl AppState {
             if start == AcceptanceCommittedInputRunStart::Unknown {
                 return Err(Refusal::ScanIncomplete);
             }
-            let Some(admits) = acceptance_committed_input_run_outcome(
-                &registration.run_id,
-                &registration.run_directory,
-                &commit,
-            )?
-            else {
+            let Some(admits) = acceptance_registered_input_outcome(&registration, &source)? else {
                 continue;
             };
             if !admits {
@@ -777,8 +879,19 @@ impl AppState {
                 step();
             }
         });
-        if self.acceptance_judged_commit(parent_session_id, FsPath::new(&root.root), deadline).as_deref()
-            != Some(commit.as_str())
+        let native_source = admitting
+            .declared_native
+            .as_ref()
+            .map(|start| start.source.source_id.clone());
+        if self
+            .acceptance_judged_clean_source(parent_session_id, FsPath::new(&root.root), deadline)
+            .is_none_or(|current| {
+                if let Some(expected) = &native_source {
+                    &current != expected
+                } else {
+                    current.commit != commit
+                }
+            })
         {
             return Err(if now() >= deadline {
                 Refusal::ScanIncomplete
@@ -809,10 +922,11 @@ impl AppState {
         let admission = AcceptanceCommittedInputAdmission {
             run_id: admitting.run_id,
             commit,
+            native_source,
         };
         eprintln!(
             "acceptance evaluation> `{}` admitted on committed-input run {} at {}, its \
-             verification record acknowledged by Engram; the named-root sighting is not read",
+             verification record acknowledged by Engram",
             task.work_ref, admission.run_id, admission.commit
         );
         Ok(Decision::Admitted(admission))

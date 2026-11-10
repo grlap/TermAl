@@ -1211,6 +1211,7 @@ include!("acceptance_evaluation_brief_delivery.rs");
 include!("acceptance_evaluation_api.rs");
 include!("acceptance_named_root_sighting.rs");
 include!("acceptance_committed_input.rs");
+include!("acceptance_native_input.rs");
 include!("acceptance_evidence_selection.rs");
 include!("acceptance_verification_evidence.rs");
 include!("acceptance_settings.rs");

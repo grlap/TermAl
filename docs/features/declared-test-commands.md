@@ -76,6 +76,17 @@ Why git-ignored: TermAl measures a turn's source by the content of every tracked
 
 For registered native verification, the declared command must be the turn's first tool action. Its frozen result artifact supplies the verdict, including for commands that also have built-in console recognition. Full source identity before the prompt and after the run must match; identical local changes are allowed. Existing execution identity, claim, root, store and artifact checks still apply. Workspace watcher events do not decide native verification.
 
+Acceptance admission keeps the host's clean committed-source policy. A native
+run can admit evaluation only when its authenticated terminal passed, Engram
+acknowledged the exact frozen verification body, and the complete SourceId
+matches the owner's current clean source. The complete identity stays pinned
+through evaluator capture and submission; a matching commit alone is insufficient.
+A native record with local changes can still be recorded, but it refuses
+acceptance admission: commit the intended changes and run the declared test again
+on that commit. It does not fall back to an older passing result or legacy
+admission. This policy does not change Engram's SourceId requirements or create
+test/build evidence from other checks.
+
 Provider output persistence or truncation, a background launch or move, a missing exit code, and a task-completion notice without a verdict do not override a valid artifact. The host does not read provider console spill files for native verification. A background launch waits for its original task's completion before freezing the artifact and capturing after-run source, even when the artifact is already complete; a process killed before its artifact END is frozen cannot earn PASS. The original task keeps its reservation and any identity refusal when a later prompt begins.
 
 The following exit-based rules describe the legacy observed-check route. Native verification uses the artifact's PASS, FAIL or UNKNOWN directly and preserves the exit only as an observation.
