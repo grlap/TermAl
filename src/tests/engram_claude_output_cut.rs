@@ -85,6 +85,41 @@ fn finish_observed(turn: &EOCheckedTurn, expected: &str) {
 }
 
 #[test]
+fn claude_short_unicode_persisted_output_uses_byte_boundaries_without_native_credit() {
+    let stdout = "running tests: zażółć 🦀";
+    for (omitted_bytes, expected_cut, expected_result) in
+        [(0, false, "passed"), (1, true, "indeterminate")]
+    {
+        let turn = EOCheckedTurn::start(&format!("claude-unicode-cut-{omitted_bytes}"), true);
+        let (mut parser, mut recorder) = start(&turn, false);
+        let mut result = persisted(stdout);
+        result["persistedOutputSize"] = json!(stdout.len() + omitted_bytes);
+        complete(&turn, &mut parser, &mut recorder, result, false);
+
+        let check = diagnostic(&turn);
+        assert_eq!(check.runtime_output_cut, expected_cut);
+        let end = check.end.as_ref().unwrap();
+        assert!(!end.showed_passing_tests);
+        assert!(!end.result_lines.join("\n").contains("private-output"));
+
+        let request = turn.finish();
+        let checks = request["occurrence"]["observed_checks"].as_array().unwrap();
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0]["observed_result"], expected_result);
+        assert!(!request.to_string().contains("private-output"));
+        assert_ordinary_observation_has_no_native_credit(&turn, &request);
+        turn.record(|record| {
+            assert!(
+                record.session.messages.iter().any(|message| matches!(
+                    message, Message::Command { output, .. } if output == stdout
+                )),
+                "Unicode command output stays unchanged"
+            );
+        });
+    }
+}
+
+#[test]
 fn claude_persisted_output_without_summary_keeps_the_cut_and_raw_output() {
     let turn = EOCheckedTurn::start("claude-cut", true);
     let (mut parser, mut recorder) = start(&turn, false);

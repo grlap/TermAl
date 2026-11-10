@@ -43,6 +43,122 @@ fn engram_control_fixture_accepts_a_canonical_test_home() {
     assert_eq!(receipt["scope"], "readiness");
 }
 
+#[cfg(windows)]
+struct FixtureDirectoryLink<'a> {
+    path: PathBuf,
+    root: &'a TestTempRoot,
+}
+
+#[cfg(windows)]
+impl Drop for FixtureDirectoryLink<'_> {
+    fn drop(&mut self) {
+        // Remove only the junction itself, before the outer root can recurse.
+        if let Err(error) = fs::remove_dir(&self.path)
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            self.root.retain_for_diagnosis();
+            if std::thread::panicking() {
+                eprintln!(
+                    "fixture junction not removed: {}: {error}",
+                    self.path.display()
+                );
+            } else {
+                panic!(
+                    "fixture junction not removed: {}: {error}",
+                    self.path.display()
+                );
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn engram_control_fixture_accepts_a_canonical_home_under_a_junction_temp() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let root = TestTempRoot::create("engram-fixture-junction-temp");
+    let repository =
+        normalize_user_facing_path(&fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap());
+    assert!(root.path().starts_with(&repository));
+    let physical = root.path().join("physical");
+    fs::create_dir_all(physical.join("termal/tests")).unwrap();
+    // The guard exists before link creation, including its failure path.
+    let alias = FixtureDirectoryLink {
+        path: root.path().join("alias"),
+        root: &root,
+    };
+    crate::tests::engram_child_temp::link_directory(&alias.path, &physical);
+    let home = {
+        let _placement = TestTempRootDirectoryScope::within(alias.path.join("termal/tests"));
+        TestTempRoot::create("canonical-home")
+    };
+    assert!(home.path().starts_with(&physical));
+    let alias_home = alias
+        .path
+        .join("termal/tests")
+        .join(home.path().file_name().unwrap());
+    assert_ne!(alias_home, home.path());
+    assert_eq!(
+        normalize_user_facing_path(&fs::canonicalize(&alias_home).unwrap()),
+        home.path()
+    );
+    let project_file = home.path().join(".engram-project");
+    fs::write(&project_file, "fixture-ready\n").unwrap();
+    let run = |path: &FsPath| {
+        engram_command(&real_engram_control_fixture_path())
+            .env("TERMAL_TEST_USER_TEMP", &alias.path)
+            .arg("--project-file")
+            .arg(&project_file)
+            .arg("--home")
+            .arg(path)
+            .args(["readiness", "--json"])
+            .output()
+            .expect("fixture should run")
+    };
+    for spelling in [home.path(), alias_home.as_path()] {
+        let output = run(spelling);
+        assert!(
+            output.status.success(),
+            "{}: {}",
+            spelling.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipt: Value = serde_json::from_slice(&output.stdout).expect("readiness JSON");
+        assert_eq!(receipt["ready"], true);
+    }
+
+    let commands = fs::read(home.path().join("diagnostic-commands")).unwrap();
+    let outside = root.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    let sibling = physical.join("termal/tests-sibling");
+    let traversal = alias
+        .path
+        .join("termal/tests/../tests")
+        .join(home.path().file_name().unwrap());
+    let verbatim = PathBuf::from(format!(r"\\?\{}", home.path().display()));
+    for refused in [&outside, &sibling, &traversal, &verbatim] {
+        let output = run(refused);
+        assert_eq!(
+            output.status.code(),
+            Some(4),
+            "{}: {}",
+            refused.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("refusing --home outside a TermAl test temp root")
+        );
+        assert!(fs::read_dir(&outside).unwrap().next().is_none());
+        assert!(!sibling.exists());
+        assert_eq!(
+            fs::read(home.path().join("diagnostic-commands")).unwrap(),
+            commands,
+            "a refused alias must not reach the fixture's writing branch"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn engram_control_fixture_accepts_both_spellings_of_a_linked_user_temp() {

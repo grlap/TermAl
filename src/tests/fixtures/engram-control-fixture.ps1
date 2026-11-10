@@ -45,7 +45,60 @@ $homeContained = (
     $resolvedHome.Equals($testRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
     $resolvedHome.StartsWith($testRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)
 )
-if ((($engramHome -split '[\\/]') -contains '..') -or -not $homeContained) {
+$rawHomeRefused = (($engramHome -split '[\\/]') -contains '..') -or $engramHome.StartsWith('\\?\')
+if (-not $homeContained -and -not $rawHomeRefused) {
+    # TestTempRoot returns the final directory spelling. GetFullPath cannot
+    # resolve a junction or an 8.3 ancestor in the user-temp spelling. Keep the
+    # ordinary lexical path fast; only this alias comparison opens metadata
+    # handles, never creates a directory or changes production path policy.
+    try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+public static class TermAlFixtureDirectoryPath {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(string path, uint access,
+        uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle,
+        StringBuilder path, uint capacity, uint flags);
+    public static string Resolve(string path) {
+        string extended = path.StartsWith(@"\\")
+            ? @"\\?\UNC\" + path.Substring(2) : @"\\?\" + path;
+        // Metadata-only, shared read/write/delete, existing directory only.
+        using (var handle = CreateFileW(extended, 0, 7, IntPtr.Zero, 3,
+                                      0x02000000, IntPtr.Zero)) {
+            if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            var result = new StringBuilder(512);
+            uint size = GetFinalPathNameByHandleW(handle, result, (uint)result.Capacity, 0);
+            if (size >= result.Capacity && size < 32768) {
+                result = new StringBuilder((int)size + 1);
+                size = GetFinalPathNameByHandleW(handle, result, (uint)result.Capacity, 0);
+            }
+            if (size == 0 || size >= result.Capacity)
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            string final = result.ToString();
+            return final.StartsWith(@"\\?\UNC\") ? @"\\" + final.Substring(8)
+                : final.StartsWith(@"\\?\") ? final.Substring(4) : final;
+        }
+    }
+}
+'@
+        $finalRoot = [TermAlFixtureDirectoryPath]::Resolve($testRoot)
+        $finalHome = [TermAlFixtureDirectoryPath]::Resolve($resolvedHome)
+        $homeContained = (
+            $finalHome.Equals($finalRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $finalHome.StartsWith($finalRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)
+        )
+    } catch {
+        # An unavailable final path supplies no permission to write.
+        $homeContained = $false
+    }
+}
+if ($rawHomeRefused -or -not $homeContained) {
     [Console]::Error.WriteLine("engram-control-fixture: refusing --home outside a TermAl test temp root ($testRoot): $engramHome")
     exit 4
 }

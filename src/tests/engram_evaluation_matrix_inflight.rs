@@ -59,8 +59,72 @@ impl Drop for NativePhaseGate {
             let _ = wake.write_all(b"cancel");
         }
         if let Some(worker) = self.worker.take() {
-            worker.join().expect("native phase gate joins");
+            if let Err(panic) = worker.join() {
+                // Joining must still finish during driver unwind, but a
+                // second panic here would abort instead of reporting it.
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(panic);
+                }
+            }
         }
+    }
+}
+
+#[test]
+fn native_phase_gate_cleanup_preserves_driver_and_worker_failures() {
+    let module = module_path!().split_once("::").unwrap().1;
+    for mode in ["cancel", "worker", "driver", "both"] {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                &format!("{module}::native_phase_gate_cleanup_child"),
+                "--nocapture",
+            ])
+            .env("TERMAL_TEST_NATIVE_PHASE_UNWIND", mode);
+        let (status, stderr) = phase_sync::CapturedStderrProcess::spawn(&mut command)
+            .wait_with_stderr("native phase gate cleanup preserves the original failure");
+        assert!(status.success(), "{mode}: {status}\n{stderr}");
+    }
+}
+
+#[test]
+fn native_phase_gate_cleanup_child() {
+    let Ok(mode) = std::env::var("TERMAL_TEST_NATIVE_PHASE_UNWIND") else {
+        return;
+    };
+    let worker_failure = matches!(mode.as_str(), "worker" | "both");
+    let driver_failure = matches!(mode.as_str(), "driver" | "both");
+    assert!(worker_failure || driver_failure || mode == "cancel");
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let gate = NativePhaseGate::new();
+        if worker_failure {
+            let mut stream = std::net::TcpStream::connect(gate.address).unwrap();
+            stream.write_all(b"n").unwrap();
+            stream.shutdown(std::net::Shutdown::Write).unwrap();
+            // EOF on the incomplete handshake fails the real worker. Its
+            // sender disconnects before it could announce a native body.
+            assert!(matches!(
+                gate.entered.recv_timeout(DEADLOCK_GUARD),
+                Err(mpsc::RecvTimeoutError::Disconnected)
+            ));
+        }
+        if driver_failure {
+            panic!("original native phase driver failure");
+        }
+        drop(gate);
+    }));
+    if driver_failure {
+        assert_eq!(
+            result.unwrap_err().downcast_ref::<&str>(),
+            Some(&"original native phase driver failure")
+        );
+    } else if worker_failure {
+        let panic = result.expect_err("the worker's handshake error must propagate");
+        let message = panic.downcast_ref::<String>().expect("worker IO panic");
+        assert!(message.contains("UnexpectedEof"), "{message}");
+    } else {
+        assert!(result.is_ok(), "cancelling an unentered gate must finish");
     }
 }
 

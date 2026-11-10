@@ -60,6 +60,10 @@ struct TestTempRootDirectoryScope {
 impl TestTempRootDirectoryScope {
     fn repository_local() -> Self {
         let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
+        Self::within(directory)
+    }
+
+    fn within(directory: PathBuf) -> Self {
         ensure_plain_test_directory(&directory).expect("plain repository test directory");
         let previous = TEST_TEMP_ROOT_DIRECTORY.with(|slot| slot.replace(Some(directory)));
         Self {
@@ -102,8 +106,9 @@ impl TestTempRoot {
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
             "test root prefix must be a simple name"
         );
-        let directory =
-            TEST_TEMP_ROOT_DIRECTORY.with(|slot| slot.borrow().clone()).unwrap_or_else(test_temp_dir);
+        let directory = TEST_TEMP_ROOT_DIRECTORY
+            .with(|slot| slot.borrow().clone())
+            .unwrap_or_else(test_temp_dir);
         let path = directory.join(format!("{prefix}-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("test temp root should be created");
         // The guard exists before canonicalization and the marker write, so
