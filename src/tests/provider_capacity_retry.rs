@@ -232,6 +232,145 @@ impl CapacityFixture {
     }
 }
 
+fn quota_selection_readiness(state: &AppState) {
+    state.agent_readiness_cache.write().unwrap().refresh_probe(
+        [Agent::Claude, Agent::Codex]
+            .into_iter()
+            .map(|agent| AgentReadiness {
+                agent,
+                status: AgentReadinessStatus::Ready,
+                blocking: false,
+                detail: String::new(),
+                warning_detail: None,
+                command_path: None,
+            })
+            .collect(),
+    );
+}
+
+#[test]
+fn evaluator_quota_codex_uses_only_current_typed_terminals() {
+    for (kind, retrying, expected) in [
+        ("usageLimitExceeded", false, Agent::Claude),
+        ("usageLimitExceeded", true, Agent::Codex),
+        ("serverOverloaded", false, Agent::Codex),
+        ("other", false, Agent::Codex),
+    ] {
+        let fixture = CapacityFixture::started_mailbox_turn();
+        quota_selection_readiness(&fixture.state);
+        let error = json!({"method":"error", "params":{
+            "threadId":"capacity-thread", "turnId":"capacity-turn", "willRetry":retrying,
+            "error":{"message":"You've hit your usage limit", "codexErrorInfo":kind}
+        }});
+        fixture.event(error.clone());
+        assert_eq!(
+            fixture
+                .state
+                .auto_acceptance_evaluator_selection(Agent::Claude)
+                .unwrap()
+                .0,
+            expected,
+            "{kind}"
+        );
+        if kind == "usageLimitExceeded" && !retrying {
+            fixture
+                .state
+                .agent_readiness_cache
+                .write()
+                .unwrap()
+                .evaluator_usage_limits[1] =
+                Some(std::time::Instant::now() - EVALUATOR_USAGE_LIMIT_WINDOW);
+            fixture.event(error);
+            assert_eq!(
+                fixture
+                    .state
+                    .auto_acceptance_evaluator_selection(Agent::Claude)
+                    .unwrap()
+                    .0,
+                Agent::Codex,
+                "a duplicate terminal cannot restart the window"
+            );
+        }
+    }
+}
+
+#[test]
+fn evaluator_quota_only_a_later_correlated_success_clears_the_vendor() {
+    let fixture = CapacityFixture::started_mailbox_turn();
+    quota_selection_readiness(&fixture.state);
+    fixture.event(json!({"method":"turn/completed", "params":{
+        "threadId":"capacity-thread", "turn":{"id":"capacity-turn", "error":{
+            "message":"quota exhausted", "codexErrorInfo":"usageLimitExceeded"}}
+    }}));
+    let runtime = RuntimeToken::Codex(fixture.runtime.runtime_id.clone());
+    let next = fixture.failed_generation + 1;
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&fixture.session_id).unwrap();
+        inner.sessions[index].active_turn_generation = next;
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    fixture
+        .state
+        .finish_turn_ok_if_runtime_and_generation_match(
+            &fixture.session_id,
+            &runtime,
+            fixture.failed_generation,
+        )
+        .unwrap();
+    assert_eq!(
+        fixture
+            .state
+            .auto_acceptance_evaluator_selection(Agent::Claude)
+            .unwrap()
+            .0,
+        Agent::Claude,
+        "stale success cannot clear the observation"
+    );
+    fixture
+        .state
+        .finish_turn_ok_if_runtime_and_generation_match(&fixture.session_id, &runtime, next)
+        .unwrap();
+    assert_eq!(
+        fixture
+            .state
+            .auto_acceptance_evaluator_selection(Agent::Claude)
+            .unwrap()
+            .0,
+        Agent::Codex
+    );
+}
+
+#[test]
+fn evaluator_quota_stale_generation_and_stop_cannot_block_auto() {
+    for stopping in [false, true] {
+        let fixture = CapacityFixture::started_mailbox_turn();
+        quota_selection_readiness(&fixture.state);
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.session_id).unwrap();
+            if stopping {
+                inner.sessions[index].runtime_stop_in_progress = true;
+            } else {
+                inner.sessions[index].active_turn_generation += 1;
+            }
+        }
+        fixture.event(json!({"method":"turn/completed", "params":{
+            "threadId":"capacity-thread", "turn":{"id":"capacity-turn", "error":{
+                "message":"quota exhausted", "codexErrorInfo":"usageLimitExceeded"}}
+        }}));
+        assert_eq!(
+            fixture
+                .state
+                .auto_acceptance_evaluator_selection(Agent::Claude)
+                .unwrap()
+                .0,
+            Agent::Codex,
+            "unsettled or stale callback is not an Auto veto"
+        );
+    }
+}
+
 #[test]
 fn typed_capacity_after_started_turn_waits_for_automatic_resume() {
     let fixture = CapacityFixture::started_mailbox_turn();
@@ -575,6 +714,7 @@ fn a_delayed_receipt_ack_cannot_outlive_capacity_cancellation_or_settings() {
             record.prompt_deliveries.insert(
                 id.clone(),
                 PromptDelivery {
+                    remote_prompt: None,
                     federation_operation: None,
                     federation_handoff_started: false,
                     disposition: PromptDeliveryDisposition::Pending,
@@ -849,6 +989,7 @@ fn unknown_delivery_and_remote_compaction_keep_manual_recovery() {
                 let index = inner.find_session_index(&fixture.session_id).unwrap();
                 let record = inner.session_mut_by_index(index).unwrap();
                 record.prompt_deliveries.insert("unknown-delivery".into(), PromptDelivery {
+                    remote_prompt: None,
                     federation_operation: None, federation_handoff_started: false,
                     disposition: PromptDeliveryDisposition::Ambiguous, attempt: 1,
                     write_ahead: "unresolved-runtime-write".into(), sequence: 1,

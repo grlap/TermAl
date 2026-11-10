@@ -60,6 +60,7 @@ enum SharedCodexTerminalOutcome {
     },
     Failed {
         error: Value,
+        usage_limit_refusal: bool,
         detail: String,
         confirmed_terminal: bool,
         accept_delivery: bool,
@@ -87,6 +88,16 @@ impl SharedCodexTerminalEffect {
             else {
                 return Ok(());
             };
+            // The provider's typed quota terminal is independent of the
+            // reviewer's later MCP settlement. A duplicate finish owns nothing.
+            if let SharedCodexTerminalOutcome::Failed { usage_limit_refusal, .. } = &outcome {
+                if *usage_limit_refusal
+                    && !session.reviewer_mcp_gate.as_deref()
+                        .is_some_and(|gate| gate.starts_with("finish:"))
+                {
+                    state.note_evaluator_usage_limit(&owner.session_id, &owner.runtime, owner.generation);
+                }
+            }
             let capacity = match &outcome {
                 SharedCodexTerminalOutcome::Completed { .. } => None,
                 SharedCodexTerminalOutcome::Failed {

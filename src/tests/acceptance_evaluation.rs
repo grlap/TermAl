@@ -81,7 +81,7 @@ type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>
 
 /// These request/submission fixtures begin after a canonical no-event read
 /// has settled. Enabling a store alone no longer establishes naming absence.
-fn install_store(state: &AppState, project: &str, root: &FsPath) {
+pub(super) fn install_store(state: &AppState, project: &str, root: &FsPath) {
     state.select_test_scripted_engram_budget_clock();
     install_store_on_chosen_clock(state, project, root);
 }
@@ -145,7 +145,10 @@ fn modes(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| (*word).to_owned()).collect()
 }
 
-fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAcceptanceEvaluation {
+pub(super) fn evaluation_target(
+    delegation_id: &str,
+    criteria_count: usize,
+) -> DelegationAcceptanceEvaluation {
     DelegationAcceptanceEvaluation {
         attempt_history: None,
         selected_evidence: Vec::new(),
@@ -2525,7 +2528,7 @@ fn acceptance_parent_card_uses_receipt_not_agent_prose_and_waits_for_acknowledge
         inner.delegations[index] = delegation.clone();
         inner
             .acceptance_evaluation_submissions_in_flight
-            .insert(id.clone());
+            .insert(id.clone(), false);
         let pending = acceptance_card_detail(&inner, &delegation, "all good", false);
         assert!(pending.contains("awaiting confirmation"));
         assert!(!pending.contains("criteria passed"));
@@ -2765,6 +2768,130 @@ fn acceptance_request_auto_from_unsupported_parent_uses_supported_vendor_without
             assert_eq!(
                 delegation.delegation.model.as_deref(),
                 Some(expected_model.as_str()),
+            );
+        }
+    }
+}
+
+#[test]
+fn acceptance_request_auto_uses_recent_quota_observations_without_overriding_preferences() {
+    for (case, limits, expired, explicit, default, expected) in [
+        (
+            "recent other",
+            [true, false],
+            false,
+            None,
+            None,
+            Some(Agent::Codex),
+        ),
+        (
+            "expired other",
+            [true, false],
+            true,
+            None,
+            None,
+            Some(Agent::Claude),
+        ),
+        ("both blocked", [true, true], false, None, None, None),
+        (
+            "explicit blocked",
+            [true, true],
+            false,
+            Some(Agent::Claude),
+            None,
+            Some(Agent::Claude),
+        ),
+        (
+            "project blocked",
+            [true, true],
+            false,
+            None,
+            Some(Agent::Codex),
+            Some(Agent::Codex),
+        ),
+    ] {
+        let (state, project, parent, root) = fixture();
+        install_store(&state, &project, &root);
+        super::delegation_support::install_delegation_codex_runtime(&state, "quota-evaluator");
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&parent).unwrap();
+            inner.sessions[index].session.agent = Agent::Codex;
+            inner
+                .projects
+                .iter_mut()
+                .find(|p| p.id == project)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap()
+                .acceptance_evaluation = Some(AcceptanceEvaluatorDefaults {
+                default_mode: Some(AcceptanceEvaluationMode::SubAgent),
+                evaluator_agent: default,
+                evaluator_model: None,
+            });
+        }
+        {
+            let mut cache = state.agent_readiness_cache.write().unwrap();
+            let now = std::time::Instant::now();
+            let observed = if expired {
+                now - EVALUATOR_USAGE_LIMIT_WINDOW
+            } else {
+                now
+            };
+            cache.evaluator_usage_limits = limits.map(|limited| limited.then_some(observed));
+            // The real probe refresh must retain the runtime observations.
+            cache.refresh_probe(collect_agent_readiness_with("fixture", |agent, _| {
+                AgentReadiness {
+                    agent,
+                    status: AgentReadinessStatus::Ready,
+                    blocking: false,
+                    detail: String::new(),
+                    warning_detail: None,
+                    command_path: None,
+                }
+            }));
+        }
+        let before = {
+            let inner = state.inner.lock().unwrap();
+            (inner.delegations.len(), inner.sessions.len())
+        };
+        let response = state.request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(explicit),
+            fixture_reader(
+                Arc::default(),
+                show_receipt(None),
+                Ok(policy_receipt(Some(&["independent_session", "sub_agent"]))),
+            ),
+        );
+        if let Some(expected) = expected {
+            let AcceptanceEvaluationRequestResponse::Spawned {
+                delegation, notice, ..
+            } = response.unwrap()
+            else {
+                panic!("{case}: expected evaluator");
+            };
+            assert_eq!(delegation.delegation.agent, expected, "{case}");
+            assert_eq!(
+                notice
+                    .as_deref()
+                    .is_some_and(|notice| notice.contains("evaluator_usage_limit")),
+                case == "recent other",
+                "{case}"
+            );
+        } else {
+            let error = match response {
+                Err(error) => error,
+                Ok(_) => panic!("{case}: blocked Auto must refuse"),
+            };
+            assert_eq!(error.status, StatusCode::CONFLICT);
+            assert!(error.message.contains("evaluator_usage_limit"));
+            let inner = state.inner.lock().unwrap();
+            assert_eq!(
+                (inner.delegations.len(), inner.sessions.len()),
+                before,
+                "refusal must not create an evaluator or child session"
             );
         }
     }
@@ -3826,6 +3953,24 @@ fn acceptance_submit_runs_the_tracker_only_after_pending_is_acknowledged_durable
             durable_submission(&writer.path, &delegation),
             Some(AcceptanceEvaluationSubmission::Pending { .. })
         ));
+        // A tool-call timeout may end the child before the final receipt ACK.
+        // The real submission guard must delay completion and resume it after
+        // the stepped persistence writer acknowledges the outcome.
+        super::delegation_support::finish_delegation_child_with_assistant_text(
+            &state,
+            &child,
+            "## Result\n\nStatus: completed\n\nSummary:\nfixture child claims success",
+        );
+        state.refresh_delegation_for_child_session(&child).unwrap();
+        {
+            let inner = state.inner.lock().unwrap();
+            let d = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
+            assert_eq!(d.status, DelegationStatus::Running);
+            assert!(
+                d.result.is_none(),
+                "no terminal result before the receipt ACK"
+            );
+        }
         writer.write();
         submit.join().unwrap().unwrap();
     });
@@ -3833,6 +3978,16 @@ fn acceptance_submit_runs_the_tracker_only_after_pending_is_acknowledged_durable
         durable_submission(&writer.path, &delegation),
         Some(AcceptanceEvaluationSubmission::Recorded { .. })
     ));
+    let inner = state.inner.lock().unwrap();
+    let d = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
+    assert_eq!(d.status, DelegationStatus::Completed);
+    assert!(
+        d.result
+            .as_ref()
+            .unwrap()
+            .summary
+            .contains("1 of 2 criteria passed")
+    );
 }
 
 #[test]
@@ -5508,7 +5663,7 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
 
 // ---- one active evaluation per task --------------------------------------
 
-fn spawn_request(
+pub(super) fn spawn_request(
     state: &AppState,
     parent: &str,
 ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
@@ -5705,7 +5860,16 @@ fn finished_evaluator_fixture(runtime: &str) -> (AppState, String, String, PathB
         "## Result\n\nStatus: completed\n\nSummary:\nI could not decide.",
     );
     let finished = state.get_delegation(&parent, &first).unwrap();
-    assert_eq!(finished.delegation.status, DelegationStatus::Completed);
+    assert_eq!(finished.delegation.status, DelegationStatus::Failed);
+    assert!(
+        finished
+            .delegation
+            .result
+            .as_ref()
+            .unwrap()
+            .summary
+            .contains("no submission recorded")
+    );
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&first_child).unwrap();
@@ -5759,7 +5923,7 @@ fn acceptance_followup_cannot_rearm_an_evaluator_while_another_judges_the_task()
     {
         let inner = state.inner.lock().unwrap();
         let record = &inner.delegations[inner.find_delegation_index(&first).unwrap()];
-        assert_eq!(record.status, DelegationStatus::Completed);
+        assert_eq!(record.status, DelegationStatus::Failed);
         assert!(
             record.result.is_some(),
             "the refused follow-up keeps the previous result"

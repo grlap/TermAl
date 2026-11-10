@@ -95,6 +95,13 @@ enum PersistFenceTarget {
         operation: Box<FederationExecutorOperation>,
         write_ahead: String,
     },
+    RemotePromptQueue {
+        session_id: String,
+        prompt_id: String,
+        content: Value,
+        association: Box<RemotePromptPrimaryAssociation>,
+        write_ahead: String,
+    },
     // The queue may already have been promoted, but its exact operation and
     // current handoff nonce must still be durable before journal repair/send.
     FederationExecutorHandoff {
@@ -143,6 +150,7 @@ impl PersistFenceTarget {
             | Self::EngramSourceSightingHistory(_)
             | Self::QueuedPromptDurability { .. }
             | Self::FederationExecutorQueue { .. }
+            | Self::RemotePromptQueue { .. }
             | Self::FederationExecutorHandoff { .. }
             | Self::PromptDeliveryWriteAhead { .. }
             | Self::ProviderCapacityRecovery { .. } => false,
@@ -160,10 +168,11 @@ impl PersistFenceTarget {
             Self::TestRunCardsEpoch(expected) => {
                 delta.metadata.test_run_cards_epoch.as_deref() == Some(expected.as_str())
             }
-            Self::TestRunRegistration(expected) => {
-                delta.metadata.test_run_registrations.get(&expected.run_id)
-                    .is_some_and(|actual| actual.matches_registration_snapshot(expected))
-            }
+            Self::TestRunRegistration(expected) => delta
+                .metadata
+                .test_run_registrations
+                .get(&expected.run_id)
+                .is_some_and(|actual| actual.matches_registration_snapshot(expected)),
             Self::TestRunObservation(expected) => {
                 delta
                     .metadata
@@ -171,7 +180,9 @@ impl PersistFenceTarget {
                     .get(&expected.execution_id)
                     == Some(expected.as_ref())
             }
-            Self::DeclaredRunReservation(expected) => delta.metadata.test_run_observations
+            Self::DeclaredRunReservation(expected) => delta
+                .metadata
+                .test_run_observations
                 .get(&expected.execution_id)
                 .is_some_and(|row| row.declared_native.as_ref() == Some(expected.as_ref())),
             Self::TestRunCompaction(expected) => {
@@ -232,22 +243,38 @@ impl PersistFenceTarget {
             Self::HumanPromptRow { .. } => Ok(false),
             Self::Federation(expected) => federation_committed_image_matches(connection, expected),
             Self::FederationBindings(expected) => expected.is_already_durable(connection),
-            Self::OrdinarySessionRow { session_id, content } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
-                    |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false) };
+            Self::OrdinarySessionRow {
+                session_id,
+                content,
+            } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(actual.session.id == *session_id
                     && ordinary_session_row_persisted_content(&actual) == *content)
             }
-            Self::EngramObservationRemoval { session_id, content } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id],
-                    |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false) };
+            Self::EngramObservationRemoval {
+                session_id,
+                content,
+            } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(actual.session.id == *session_id
                     && source_observation_removal_content(&actual) == *content)
@@ -372,7 +399,9 @@ impl PersistFenceTarget {
                 &["testRunRegistrations"],
             )?
             .is_some_and(|metadata| {
-                metadata.test_run_registrations.get(&expected.run_id)
+                metadata
+                    .test_run_registrations
+                    .get(&expected.run_id)
                     .is_some_and(|actual| actual.matches_registration_snapshot(expected))
             })),
             Self::TestRunObservation(expected) => Ok(read_metadata_for_fence(
@@ -384,10 +413,15 @@ impl PersistFenceTarget {
                     == Some(expected.as_ref())
             })),
             Self::DeclaredRunReservation(expected) => Ok(read_metadata_for_fence(
-                connection, &["testRunObservations"],
-            )?.is_some_and(|metadata| metadata.test_run_observations
-                .get(&expected.execution_id)
-                .is_some_and(|row| row.declared_native.as_ref() == Some(expected.as_ref())))),
+                connection,
+                &["testRunObservations"],
+            )?
+            .is_some_and(|metadata| {
+                metadata
+                    .test_run_observations
+                    .get(&expected.execution_id)
+                    .is_some_and(|row| row.declared_native.as_ref() == Some(expected.as_ref()))
+            })),
             Self::TestRunCompaction(expected) => Ok(read_metadata_for_fence(
                 connection,
                 &["testRunCompacted"],
@@ -417,6 +451,36 @@ impl PersistFenceTarget {
                     queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref()
                         == Some(content),
                 )
+            }
+            Self::RemotePromptQueue {
+                session_id,
+                prompt_id,
+                content,
+                association,
+                write_ahead,
+            } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id=?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
+                let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
+                Ok(association.prompt_id() == *prompt_id
+                    && queued_prompt_durability_persisted_content(&actual, prompt_id).as_ref()
+                        == Some(content)
+                    && actual
+                        .prompt_deliveries
+                        .get(prompt_id)
+                        .is_some_and(|delivery| {
+                            delivery.remote_prompt.as_ref() == Some(association.as_ref())
+                                && delivery.federation_operation.is_none()
+                                && delivery.write_ahead == *write_ahead
+                        }))
             }
             Self::FederationExecutorQueue {
                 session_id,
@@ -982,8 +1046,13 @@ impl PersistFenceBatch {
             {
                 return false;
             }
-            let proof = if let PersistFenceTarget::HumanPromptRow { session_id, minimum } = &fence.target {
-                Ok(committed_rows.and_then(|rows| rows.get(session_id))
+            let proof = if let PersistFenceTarget::HumanPromptRow {
+                session_id,
+                minimum,
+            } = &fence.target
+            {
+                Ok(committed_rows
+                    .and_then(|rows| rows.get(session_id))
                     .and_then(|row| row.row_stamp.as_ref())
                     .is_some_and(|written| written.covers(minimum)))
             } else if fence.target.is_in_delta(delta) {
@@ -1060,7 +1129,12 @@ fn persist_delta_with_fences_timed(
     // post-commit integrity checks. No StateInner guard is held here.
     persist_observe_phase("acknowledge");
     let acknowledge_started = std::time::Instant::now();
-    fences.finish_write_with_rows(delta, &result, cache.connection.as_ref(), Some(&cache.transcripts));
+    fences.finish_write_with_rows(
+        delta,
+        &result,
+        cache.connection.as_ref(),
+        Some(&cache.transcripts),
+    );
     timings.acknowledge = acknowledge_started.elapsed();
     fences.record_tick(timings);
     result

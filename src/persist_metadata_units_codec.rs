@@ -3,14 +3,33 @@
 // Frozen units-2/handoff inventory. Later safety fields are never accepted
 // merely because the current writer knows how to project them.
 const METADATA_UNIT_PREDECESSOR_FIELDS: &[&str] = &[
-    "federation", "preferences", "revision", "nextSessionNumber", "nextMessageNumber",
-    "projects", "engramRetiredWorkAuthorityGrants", "engramWorkSourceRoots",
-    "engramNamedRootJournal", "engramWorkNamingHistory", "engramNamedRootReleaseAudit",
-    "engramSourceSightings", "engramSourceRootGeneration", "pendingCoordinationScopeDeletions",
-    "pendingResponseBoardProjectDetachments", "ignoredDiscoveredCodexThreadIds",
-    "orchestratorInstances", "delegationWaits", "testRunCardsEpoch", "testRunCards",
-    "testRunRegistrations", "testRunObservations", "testRunCompacted", "testRunWaits",
-    "workspaceLayouts", "sessions", "codex",
+    "federation",
+    "preferences",
+    "revision",
+    "nextSessionNumber",
+    "nextMessageNumber",
+    "projects",
+    "engramRetiredWorkAuthorityGrants",
+    "engramWorkSourceRoots",
+    "engramNamedRootJournal",
+    "engramWorkNamingHistory",
+    "engramNamedRootReleaseAudit",
+    "engramSourceSightings",
+    "engramSourceRootGeneration",
+    "pendingCoordinationScopeDeletions",
+    "pendingResponseBoardProjectDetachments",
+    "ignoredDiscoveredCodexThreadIds",
+    "orchestratorInstances",
+    "delegationWaits",
+    "testRunCardsEpoch",
+    "testRunCards",
+    "testRunRegistrations",
+    "testRunObservations",
+    "testRunCompacted",
+    "testRunWaits",
+    "workspaceLayouts",
+    "sessions",
+    "codex",
 ];
 
 // Frozen checkpoint-result predecessor inventory. It never includes native
@@ -47,14 +66,35 @@ const METADATA_UNIT_CHECKPOINT_FIELDS: &[&str] = &[
 ];
 
 const METADATA_UNIT_FIELDS: &[&str] = &[
-    "federation", "preferences", "revision", "nextSessionNumber", "nextMessageNumber",
-    "projects", "engramRetiredWorkAuthorityGrants", "engramSessionObligations",
-    "engramWorkSourceRoots", "engramNamedRootJournal", "engramWorkNamingHistory",
-    "engramNamedRootReleaseAudit", "engramSourceSightings", "engramSourceRootGeneration",
-    "pendingCoordinationScopeDeletions", "pendingResponseBoardProjectDetachments",
-    "ignoredDiscoveredCodexThreadIds", "orchestratorInstances", "delegationWaits",
-    "testRunCardsEpoch", "testRunCards", "testRunRegistrations", "testRunObservations",
-    "testRunCompacted", "testRunWaits", "remoteTestRunFacts", "workspaceLayouts", "sessions", "codex",
+    "federation",
+    "preferences",
+    "revision",
+    "nextSessionNumber",
+    "nextMessageNumber",
+    "projects",
+    "engramRetiredWorkAuthorityGrants",
+    "engramSessionObligations",
+    "engramWorkSourceRoots",
+    "engramNamedRootJournal",
+    "engramWorkNamingHistory",
+    "engramNamedRootReleaseAudit",
+    "engramSourceSightings",
+    "engramSourceRootGeneration",
+    "pendingCoordinationScopeDeletions",
+    "pendingResponseBoardProjectDetachments",
+    "ignoredDiscoveredCodexThreadIds",
+    "orchestratorInstances",
+    "delegationWaits",
+    "testRunCardsEpoch",
+    "testRunCards",
+    "testRunRegistrations",
+    "testRunObservations",
+    "testRunCompacted",
+    "testRunWaits",
+    "remoteTestRunFacts",
+    "workspaceLayouts",
+    "sessions",
+    "codex",
 ];
 
 fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUnits> {
@@ -80,7 +120,10 @@ fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUn
         "engramRetiredWorkAuthorityGrants",
         &metadata.engram_retired_work_authority_grants
     );
-    field!("engramSessionObligations", &metadata.engram_session_obligations);
+    field!(
+        "engramSessionObligations",
+        &metadata.engram_session_obligations
+    );
     field!("engramWorkSourceRoots", &metadata.engram_work_source_roots);
     field!(
         "engramNamedRootJournal",
@@ -126,7 +169,8 @@ fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUn
     // Only an activated journal is projected, and only when the capture
     // carries it: an unchanged journal is omitted and serializes nothing.
     // The writer applies the store's floor (engram_import_reconciliation_writer_floor).
-    if let EngramImportReconciliationState::Activated(journal) = &*metadata.engram_import_reconciliation
+    if let EngramImportReconciliationState::Activated(journal) =
+        &*metadata.engram_import_reconciliation
         && !metadata.metadata_collection_is_omitted(ENGRAM_IMPORT_RECONCILIATION_FIELD)
     {
         units.extend(engram_import_reconciliation_units(journal)?);
@@ -194,11 +238,18 @@ fn validate_metadata_unit_inventory_for_floor(
     units: &PersistMetadataUnits,
     requires_obligations: bool,
 ) -> Result<()> {
-    let fields = if requires_obligations { METADATA_UNIT_CHECKPOINT_FIELDS } else { METADATA_UNIT_PREDECESSOR_FIELDS };
+    let fields = if requires_obligations {
+        METADATA_UNIT_CHECKPOINT_FIELDS
+    } else {
+        METADATA_UNIT_PREDECESSOR_FIELDS
+    };
     validate_metadata_unit_inventory_for_fields(units, fields)
 }
 
-fn validate_metadata_unit_inventory_for_fields(units: &PersistMetadataUnits, fields: &[&str]) -> Result<()> {
+fn validate_metadata_unit_inventory_for_fields(
+    units: &PersistMetadataUnits,
+    fields: &[&str],
+) -> Result<()> {
     for field in fields {
         let Some((kind, encoded)) = units.get(&(field.to_string(), String::new())) else {
             return Err(anyhow!("missing required metadata descriptor `{field}`"));
@@ -354,13 +405,20 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
         })?;
     match version.as_deref() {
         Some(
-            version
-            @ ("2" | "2-metadata-units-1" | SQLITE_METADATA_UNITS_VERSION
-                | SQLITE_OBSERVATION_PREDECESSOR | SQLITE_OBSERVATION_SCHEMA_VERSION
-                | SQLITE_CHECKPOINT_RESULT_PREDECESSOR | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
-                | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR | SQLITE_SCHEMA_VERSION
-                | SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
-                | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION),
+            version @ ("2"
+            | "2-metadata-units-1"
+            | SQLITE_METADATA_UNITS_VERSION
+            | SQLITE_OBSERVATION_PREDECESSOR
+            | SQLITE_OBSERVATION_SCHEMA_VERSION
+            | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+            | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
+            | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
+            | SQLITE_SCHEMA_VERSION
+            | SQLITE_DIRECT_PROMPT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
+            | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION),
         ) => Ok(version.to_owned()),
         Some(version) => Err(reject_unsupported_state_schema(format!(
             "unsupported metadata storage version `{version}`"
@@ -395,10 +453,18 @@ fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Opt
             .optional()
             .map_err(Into::into);
     }
-    let units = if matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
-        | SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
-        | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
-        | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
+    let units = if matches!(
+        version.as_str(),
+        SQLITE_SCHEMA_VERSION
+            | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
+            | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
+            | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
+            | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+    ) {
         read_metadata_units(connection)?
     } else {
         let units = read_metadata_units_unchecked(connection)?;
@@ -421,7 +487,10 @@ fn read_persisted_metadata_field(
     field: &str,
 ) -> Result<Option<Value>> {
     let version = persisted_metadata_storage_version(connection)?;
-    if !matches!(version.as_str(), SQLITE_SCHEMA_VERSION | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
+    if !matches!(
+        version.as_str(),
+        SQLITE_SCHEMA_VERSION | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+    ) {
         return read_persisted_metadata_json(connection)?
             .map(|encoded| -> Result<Option<Value>> {
                 let mut value: Value = serde_json::from_str(&encoded)?;

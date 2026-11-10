@@ -78,13 +78,18 @@ fn checkpoint_index_from_units(
     let field = "engramSessionObligations";
     // Reuse the ordinary object/count/entry codec. The ledger is a descriptor
     // plus member units, including the aggregate checkpointOperations array.
-    let selected = units.range((field.to_owned(), String::new())..)
+    let selected = units
+        .range((field.to_owned(), String::new())..)
         .take_while(|((name, _), _)| name == field)
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<PersistMetadataUnits>();
-    if selected.is_empty() { return Ok(None) }
+    if selected.is_empty() {
+        return Ok(None);
+    }
     let mut fields = metadata_units_to_value(&selected)?;
-    let value = fields.as_object_mut().and_then(|fields| fields.remove(field))
+    let value = fields
+        .as_object_mut()
+        .and_then(|fields| fields.remove(field))
         .ok_or_else(|| anyhow!("missing Engram obligation ledger descriptor"))?;
     if serde_json::to_vec(&value)?.len() > ENGRAM_SESSION_OBLIGATION_MAX_BYTES {
         bail!("Engram obligation ledger capacity exceeded");
@@ -94,15 +99,18 @@ fn checkpoint_index_from_units(
         let (builds, probes) = work.get();
         work.set((builds + 1, probes));
     });
-    let ledger: EngramSessionObligationLedger = serde_json::from_value(value)
-        .map_err(reject_invalid_persisted_state_metadata_shape)?;
+    let ledger: EngramSessionObligationLedger =
+        serde_json::from_value(value).map_err(reject_invalid_persisted_state_metadata_shape)?;
     let mut index = BTreeMap::new();
     for operation in ledger.checkpoint_operations {
         let raw = serde_json::to_value(&operation)?;
-        index.insert(operation.original.id, (
-            operation.protection.local_session_id,
-            sha256_hex(&serde_json::to_vec(&raw)?),
-        ));
+        index.insert(
+            operation.original.id,
+            (
+                operation.protection.local_session_id,
+                sha256_hex(&serde_json::to_vec(&raw)?),
+            ),
+        );
     }
     Ok(Some(Arc::new(index)))
 }
@@ -113,9 +121,11 @@ fn checkpoint_write_cut_index(
     cached: Option<&PersistMetadataUnitCache>,
 ) -> Result<(Option<Arc<PersistCheckpointMirrorIndex>>, BTreeSet<String>)> {
     let field = "engramSessionObligations";
-    let old_units = previous.range((field.to_owned(), String::new())..)
+    let old_units = previous
+        .range((field.to_owned(), String::new())..)
         .take_while(|((name, _), _)| name == field);
-    let new_units = desired.range((field.to_owned(), String::new())..)
+    let new_units = desired
+        .range((field.to_owned(), String::new())..)
         .take_while(|((name, _), _)| name == field);
     let previous_index = if let Some(cache) = cached {
         cache.checkpoint_index.clone()
@@ -153,7 +163,9 @@ fn validate_sqlite_checkpoint_write_cut(
     metadata: &PersistMetadataUnitCache,
     sessions: &[SerializedPersistedSession],
 ) -> Result<()> {
-    let index = metadata.checkpoint_index.as_ref()
+    let index = metadata
+        .checkpoint_index
+        .as_ref()
         .ok_or_else(|| anyhow!("missing mandatory Engram session obligation ledger"))?;
     let mut owners = metadata.changed_checkpoint_owners.clone();
     owners.extend(sessions.iter().map(|session| session.session_id.clone()));
@@ -167,8 +179,16 @@ fn validate_sqlite_checkpoint_write_cut(
         let encoded: Option<String> = statement.query_row([&owner], |row| row.get(0)).optional()?;
         // Missing rows can retain independent teardown duties; invalid rows
         // are quarantined by the existing startup reader.
-        let Some(raw) = encoded.and_then(|encoded| serde_json::from_str::<Value>(&encoded).ok()) else { continue };
-        let Some(mirror) = raw.get("engramCheckpointOperation").filter(|value| !value.is_null()) else { continue };
+        let Some(raw) = encoded.and_then(|encoded| serde_json::from_str::<Value>(&encoded).ok())
+        else {
+            continue;
+        };
+        let Some(mirror) = raw
+            .get("engramCheckpointOperation")
+            .filter(|value| !value.is_null())
+        else {
+            continue;
+        };
         let operation: EngramCheckpointOperation = serde_json::from_value(mirror.clone())
             .map_err(reject_invalid_persisted_state_metadata_shape)?;
         if operation.protection.local_session_id != owner
@@ -179,9 +199,9 @@ fn validate_sqlite_checkpoint_write_cut(
         // Owner-correct and canonical, yet not what this cut's ledger selects:
         // a relational race the next coherent collection repairs, typed so
         // its fences wait for that retry (`PersistCheckpointMirrorLedgerMismatch`).
-        if index.get(&operation.original.id) != Some(&(
-            owner, sha256_hex(&serde_json::to_vec(mirror)?),
-        )) {
+        if index.get(&operation.original.id)
+            != Some(&(owner, sha256_hex(&serde_json::to_vec(mirror)?)))
+        {
             return Err(PersistCheckpointMirrorLedgerMismatch.into());
         }
     }
@@ -191,8 +211,10 @@ fn validate_sqlite_checkpoint_write_cut(
 fn is_sqlite_obligation_predecessor(version: &str) -> bool {
     matches!(
         version,
-        "2" | "2-metadata-units-1" | SQLITE_METADATA_UNITS_VERSION
-            | SQLITE_OBSERVATION_PREDECESSOR | SQLITE_OBSERVATION_SCHEMA_VERSION
+        "2" | "2-metadata-units-1"
+            | SQLITE_METADATA_UNITS_VERSION
+            | SQLITE_OBSERVATION_PREDECESSOR
+            | SQLITE_OBSERVATION_SCHEMA_VERSION
     )
 }
 
@@ -201,9 +223,15 @@ fn prepare_sqlite_obligation_reader_floor(
     for_load: bool,
 ) -> Result<Option<PersistedState>> {
     let (_, version) = sqlite_state_schema_header(connection)?;
-    if matches!(version.as_str(), SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
-        | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
-        | SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR) {
+    if matches!(
+        version.as_str(),
+        SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
+            | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
+    ) {
         return prepare_sqlite_native_test_completion_reader_floor(connection, for_load);
     }
     if version == SQLITE_CHECKPOINT_RESULT_PREDECESSOR {
@@ -231,12 +259,18 @@ fn prepare_sqlite_obligation_reader_floor(
     let (actual_tables, mut version) = sqlite_state_schema_header(&transaction)?;
     if is_sqlite_obligation_predecessor(&version) {
         reject_unversioned_native_test_custody(&transaction, &version)?;
-        let known = CURRENT_SQLITE_STATE_TABLE_COLUMNS.iter()
-            .map(|(name, _)| (*name).to_owned()).collect::<BTreeSet<_>>();
+        let known = CURRENT_SQLITE_STATE_TABLE_COLUMNS
+            .iter()
+            .map(|(name, _)| (*name).to_owned())
+            .collect::<BTreeSet<_>>();
         // Keep the landed ignored coordination-table exception; other unknown
         // tables can carry authority that this reader cannot safely interpret.
-        if actual_tables.difference(&known).any(|table| !matches!(table.as_str(),
-            "mailboxes" | "mailbox_participants" | "mailbox_messages")) {
+        if actual_tables.difference(&known).any(|table| {
+            !matches!(
+                table.as_str(),
+                "mailboxes" | "mailbox_participants" | "mailbox_messages"
+            )
+        }) {
             return Err(reject_unsupported_state_schema(
                 "reader-floor predecessor has unknown state tables",
             ));
@@ -258,14 +292,17 @@ fn prepare_sqlite_obligation_reader_floor(
         if version != SQLITE_OBSERVATION_SCHEMA_VERSION {
             // Check the locked original source before any legacy normalization
             // can erase even null or empty observation-custody keys.
-            let unversioned: Option<String> = transaction.query_row(
-                "SELECT id FROM sessions WHERE json_valid(value_json) AND (
+            let unversioned: Option<String> = transaction
+                .query_row(
+                    "SELECT id FROM sessions WHERE json_valid(value_json) AND (
                     json_type(value_json,'$.engramRuntimeCheckpoint') IS NOT NULL OR
                     json_type(value_json,'$.engramUnadmittedActiveTurn') IS NOT NULL OR
                     json_type(value_json,'$.engramUnadmittedClosingJobs') IS NOT NULL OR
                     json_type(value_json,'$.engramUnadmittedReports') IS NOT NULL) LIMIT 1",
-                [], |row| row.get(0),
-            ).optional()?;
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()?;
             if unversioned.is_some() {
                 return Err(reject_unsupported_state_schema(
                     "observation custody is present under an unsupported predecessor floor",
@@ -284,7 +321,10 @@ fn prepare_sqlite_obligation_reader_floor(
             let typed =
                 previous.unwrap_or_else(|| PersistedState::metadata_from_inner(&StateInner::new()));
             let mut complete = metadata_units_to_value(&project_metadata_units(&typed)?)?;
-            complete.as_object_mut().unwrap().remove("remoteTestRunFacts");
+            complete
+                .as_object_mut()
+                .unwrap()
+                .remove("remoteTestRunFacts");
             complete
                 .as_object_mut()
                 .unwrap()
@@ -360,7 +400,11 @@ fn prepare_sqlite_obligation_reader_floor(
             "INSERT INTO meta(key,value) VALUES('metadata_units_generation',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             [generation.to_string()],
         )?;
-        advance_sqlite_reader_floor(&transaction, &version, SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR)?;
+        advance_sqlite_reader_floor(
+            &transaction,
+            &version,
+            SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR,
+        )?;
     } else {
         // A concurrent opener may have finished the whole ordered migration.
         validate_current_sqlite_state_schema(&transaction)?;
@@ -384,34 +428,66 @@ fn prepare_sqlite_obligation_reader_floor(
 // old ledger and safety mirrors are validated under the locked old header;
 // their raw units and session rows are never rewritten. The following native
 // completion extension advances the generation in the same transaction.
-fn prepare_sqlite_checkpoint_result_reader_floor(connection: &rusqlite::Connection,
-    for_load: bool) -> Result<Option<PersistedState>> {
-    let transaction = rusqlite::Transaction::new_unchecked(connection,
-        rusqlite::TransactionBehavior::Immediate)?;
+fn prepare_sqlite_checkpoint_result_reader_floor(
+    connection: &rusqlite::Connection,
+    for_load: bool,
+) -> Result<Option<PersistedState>> {
+    let transaction =
+        rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)?;
     let version = required_state_meta_value(&transaction, "schema_version")?;
     if version == SQLITE_CHECKPOINT_RESULT_PREDECESSOR {
         reject_unversioned_native_test_custody(&transaction, &version)?;
         validate_sqlite_state_schema_for_version(&transaction, &version)?;
-        let previous = validate_no_legacy_embedded_state(&transaction)?
-            .ok_or_else(|| reject_unsupported_state_schema("missing predecessor obligation metadata"))?;
-        let has_refused = |operation: &EngramCheckpointOperation| operation.attempts.iter()
-            .any(|attempt| matches!(attempt.result, Some(EngramCheckpointAttemptResult::Refused { .. })));
-        if previous.engram_session_obligations.checkpoint_operations.iter().any(has_refused)
-            || previous.engram_session_obligations.entries.iter().any(|entry| {
-                serde_json::from_value::<EngramUnsettledControlImage>(entry.frozen_request.clone())
-                    .ok().and_then(|image| image.existing_checkpoint)
-                    .as_ref().is_some_and(has_refused)
-            }) {
-            return Err(reject_unsupported_state_schema("checkpoint Refused result under predecessor floor"));
+        let previous = validate_no_legacy_embedded_state(&transaction)?.ok_or_else(|| {
+            reject_unsupported_state_schema("missing predecessor obligation metadata")
+        })?;
+        let has_refused = |operation: &EngramCheckpointOperation| {
+            operation.attempts.iter().any(|attempt| {
+                matches!(
+                    attempt.result,
+                    Some(EngramCheckpointAttemptResult::Refused { .. })
+                )
+            })
+        };
+        if previous
+            .engram_session_obligations
+            .checkpoint_operations
+            .iter()
+            .any(has_refused)
+            || previous
+                .engram_session_obligations
+                .entries
+                .iter()
+                .any(|entry| {
+                    serde_json::from_value::<EngramUnsettledControlImage>(
+                        entry.frozen_request.clone(),
+                    )
+                    .ok()
+                    .and_then(|image| image.existing_checkpoint)
+                    .as_ref()
+                    .is_some_and(has_refused)
+                })
+        {
+            return Err(reject_unsupported_state_schema(
+                "checkpoint Refused result under predecessor floor",
+            ));
         }
-        advance_sqlite_reader_floor(&transaction, &version, SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR)?;
+        advance_sqlite_reader_floor(
+            &transaction,
+            &version,
+            SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR,
+        )?;
     } else {
         validate_current_sqlite_state_schema(&transaction)?;
     }
     advance_sqlite_native_test_completion_reader_floor(&transaction)?;
     validate_current_sqlite_state_schema(&transaction)?;
-    let persisted = if for_load { validate_no_legacy_embedded_state(&transaction)? }
-        else { validate_sqlite_obligation_metadata(&transaction)?; None };
+    let persisted = if for_load {
+        validate_no_legacy_embedded_state(&transaction)?
+    } else {
+        validate_sqlite_obligation_metadata(&transaction)?;
+        None
+    };
     transaction.commit()?;
     persist_observe_metadata_commit();
     Ok(persisted)

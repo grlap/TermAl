@@ -190,7 +190,7 @@ fn acceptance_evaluation_request_tool_definition() -> Value {
                 "agent": {
                     "type": "string",
                     "enum": ["Codex", "Claude"],
-                    "description": "Evaluator agent. Overrides the project default. Omit for automatic selection: Claude/Codex parents prefer the other ready, nonblocking vendor, otherwise their own; other parents prefer ready, nonblocking Codex, then Claude, with Codex as the fallback."
+                    "description": "Evaluator agent. Overrides the project default. Auto prefers the other ready Claude/Codex vendor, otherwise the caller's supported vendor; other parents prefer ready Codex, then Claude. Auto skips vendors with an authoritative terminal usage-limit refusal observed in the last five minutes; a later correlated success clears that observation. Explicit, reuse and project choices are unchanged. Auto discloses a skipped vendor, or refuses without spawning when no alternative is ready, naming when the earliest observed window ends. Nothing retries automatically."
                 },
                 "model": { "type": "string", "description": "Evaluator model override. Requires an explicit agent so Auto cannot send a vendor-specific model to another vendor." },
                 "criterionEvidence": {
@@ -415,7 +415,7 @@ fn acceptance_evaluation_submit_authority_locked(
         AcceptanceEvaluationSubmission::Recorded { .. }
     ) && !inner
         .acceptance_evaluation_submissions_in_flight
-        .contains(&delegation.id)
+        .contains_key(&delegation.id)
     {
         return Err(ApiError::conflict(
             ACCEPTANCE_EVALUATION_ALREADY_RECORDED_ERROR,
@@ -446,27 +446,43 @@ impl AcceptanceEvaluationSubmissionInFlight {
     /// `inner` is the locked state of `state`. `None` when the delegation
     /// already has a submission in progress.
     fn admit_locked(state: &AppState, inner: &mut StateInner, delegation_id: &str) -> Option<Self> {
-        inner
-            .acceptance_evaluation_submissions_in_flight
-            .insert(delegation_id.to_owned())
-            .then(|| Self {
-                state: state.clone(),
-                delegation_id: delegation_id.to_owned(),
-            })
+        if inner.acceptance_evaluation_submissions_in_flight.contains_key(delegation_id) {
+            return None;
+        }
+        inner.acceptance_evaluation_submissions_in_flight.insert(delegation_id.to_owned(), false);
+        Some(Self {
+            state: state.clone(),
+            delegation_id: delegation_id.to_owned(),
+        })
     }
 }
 
 impl Drop for AcceptanceEvaluationSubmissionInFlight {
     fn drop(&mut self) {
         // A poisoned lock must not keep the evaluator locked out for good.
-        let mut inner = self
-            .state
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        inner
+        let (mut inner, poisoned) = match self.state.inner.lock() {
+            Ok(inner) => (inner, false),
+            Err(error) => (error.into_inner(), true),
+        };
+        let refresh_deferred = inner
             .acceptance_evaluation_submissions_in_flight
-            .remove(&self.delegation_id);
+            .remove(&self.delegation_id)
+            .unwrap_or(false);
+        let child = inner
+            .find_delegation_index(&self.delegation_id)
+            .map(|i| inner.delegations[i].child_session_id.clone());
+        drop(inner);
+        // Never hold the state lock across lifecycle settlement or provider
+        // cleanup. Preserve the poison-recovery guarantee of this guard.
+        if poisoned {
+            return;
+        }
+        if let Some(child) = child {
+            if refresh_deferred && self.state.refresh_delegation_for_child_session(&child).is_err() {
+                eprintln!("acceptance evaluator lifecycle refresh failed after submission settled");
+            }
+            self.state.refresh_acceptance_evaluation_card(&child);
+        }
     }
 }
 
@@ -1687,9 +1703,10 @@ impl AppState {
                 let default_agent = defaults
                     .evaluator_agent
                     .filter(|agent| matches!(agent, Agent::Claude | Agent::Codex));
-                let agent = request.agent.or(reuse_agent).or(default_agent).unwrap_or_else(|| {
-                    auto_acceptance_evaluator_agent(parent_agent, &self.agent_readiness_snapshot())
-                });
+                let (agent, auto_agent_notice) = match request.agent.or(reuse_agent).or(default_agent) {
+                    Some(agent) => (agent, None),
+                    None => self.auto_acceptance_evaluator_selection(parent_agent)?,
+                };
                 // Persisted legacy Auto/model pairs and explicit agent overrides
                 // must not carry a model to a different vendor.
                 let model = request.model.or_else(|| {
@@ -1767,6 +1784,7 @@ impl AppState {
                         let delegation = self.delegation_response_from_state(&reservation.previous.id)?;
                         let notice = acceptance_evaluation_notices([
                             Some(format!("The existing evaluator received a fresh host-authored attempt.\n{brief}")),
+                            auto_agent_notice,
                             acceptance_obligation_assessment_notice(&obligation_assessments),
                         ]);
                         return Ok(AcceptanceEvaluationRequestResponse::Spawned {
@@ -1802,6 +1820,7 @@ impl AppState {
                         Some(&delegation.delegation.id),
                     ),
                     root_notice,
+                    auto_agent_notice,
                     reuse_notice,
                     unmeasured,
                     // The requester learns which records its judge did not
@@ -1942,7 +1961,7 @@ impl AppState {
             .is_some_and(|index| {
                 inner
                     .acceptance_evaluation_submissions_in_flight
-                    .contains(&inner.delegations[index].id)
+                    .contains_key(&inner.delegations[index].id)
             })
         {
             return Err(in_progress());
@@ -2118,9 +2137,8 @@ impl AppState {
                 run_acceptance_evaluation_submit(connection, args, timeout, &host_workdir)
             },
         );
-        // The single-flight guard has been released and the acknowledged
-        // state (or conservative failure state) is now safe to show.
-        self.refresh_acceptance_evaluation_card(child);
+        // The submission guard refreshes lifecycle and card presentation once
+        // its acknowledged state (or conservative failure state) is settled.
         result
     }
 
@@ -2668,7 +2686,7 @@ impl AppState {
         if let Some(index) = index {
             let record = &inner.delegations[index];
             let untouched = record.acceptance_evaluation == spawned.acceptance_evaluation
-                && !inner.acceptance_evaluation_submissions_in_flight.contains(&spawned.id)
+                && !inner.acceptance_evaluation_submissions_in_flight.contains_key(&spawned.id)
                 && !inner.delegation_followup_admissions.contains_key(&spawned.id)
                 && inner
                     .find_session_index(&record.child_session_id)

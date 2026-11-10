@@ -1000,13 +1000,15 @@ fn acceptance_refresh_three_keys_then_explicit_request_spawns_a_fresh_evaluator(
         &child,
         "Status: completed\n\nSummary:\nThe third judgment was definitively refused; request a fresh evaluator.",
     );
-    assert_eq!(
-        state
-            .get_delegation(&parent, &id)
+    let finished = state.get_delegation(&parent, &id).unwrap().delegation;
+    assert_eq!(finished.status, DelegationStatus::Failed);
+    assert!(
+        finished
+            .result
+            .as_ref()
             .unwrap()
-            .delegation
-            .status,
-        DelegationStatus::Completed
+            .summary
+            .contains("no submission recorded")
     );
     let mut request = evaluation_request(Some(Agent::Codex));
     request.reuse_delegation_id = Some(id.clone());

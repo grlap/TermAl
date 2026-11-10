@@ -1424,6 +1424,9 @@ struct AgentReadinessCache {
     snapshot: Vec<AgentReadiness>,
     expires_at: std::time::Instant,
     invalidated: bool,
+    // Runtime observations, independent of the five-second installation probe.
+    // Claude then Codex; never persisted or reconstructed from transcript prose.
+    evaluator_usage_limits: [Option<std::time::Instant>; 2],
     #[cfg(test)]
     phase_sink: Option<mpsc::Sender<TestApiPhaseObservation>>,
 }
@@ -1434,6 +1437,7 @@ impl AgentReadinessCache {
             snapshot,
             expires_at: std::time::Instant::now() + AGENT_READINESS_CACHE_TTL,
             invalidated: false,
+            evaluator_usage_limits: [None; 2],
             #[cfg(test)]
             phase_sink: None,
         }
@@ -1441,6 +1445,12 @@ impl AgentReadinessCache {
 
     fn needs_refresh(&self, now: std::time::Instant) -> bool {
         self.invalidated || now >= self.expires_at
+    }
+
+    fn refresh_probe(&mut self, snapshot: Vec<AgentReadiness>) {
+        self.snapshot = snapshot;
+        self.expires_at = std::time::Instant::now() + AGENT_READINESS_CACHE_TTL;
+        self.invalidated = false;
     }
 }
 
@@ -1873,7 +1883,9 @@ struct StateInner {
     /// its admission to its last durability acknowledgement. Memory only: a
     /// restart has no request in flight, and the persisted `pending` already
     /// carries what such a request left open.
-    acceptance_evaluation_submissions_in_flight: HashSet<String>,
+    // The value coalesces a child completion observed before this submission
+    // owner's final durability acknowledgement; no separate refresh queue.
+    acceptance_evaluation_submissions_in_flight: HashMap<String, bool>,
     /// Threads taking an acceptance evaluation's source revision that are
     /// still alive, abandoned ones included (`bounded_source_capture`).
     /// Memory only, one count for the host.
@@ -2015,7 +2027,7 @@ impl StateInner {
             orchestrator_instances: PersistTracked::default(),
             delegations: Vec::new(),
             delegation_followup_admissions: HashMap::new(),
-            acceptance_evaluation_submissions_in_flight: HashSet::new(),
+            acceptance_evaluation_submissions_in_flight: HashMap::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
             #[cfg(test)]

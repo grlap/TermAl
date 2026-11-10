@@ -1,5 +1,5 @@
-// Owns exact reviewer scopes, typed observations and sanitized status parsing.
-// Reviewer readiness is thread-scoped; neither a profile catalog nor another
+// Owns exact reviewer/evaluator scopes, typed observations and status parsing.
+// Readiness is thread-scoped; neither a profile catalog nor another
 // thread's startup notification is evidence for this delegation.
 const CODEX_REVIEWER_MCP_BUDGET: Duration = Duration::from_secs(60);
 
@@ -33,12 +33,31 @@ struct CodexReviewerMcpScope {
     runtime_id: String,
     delegation_id: String,
     attempt: u32,
+    evaluation_attempt: Option<String>,
     generation: u64,
     stop_generation: u64,
     allow_reset: bool,
     gate: String,
     query_started: std::time::Instant,
     input_tx: Sender<CodexRuntimeCommand>,
+}
+
+impl CodexReviewerMcpScope {
+    fn required_tool(&self) -> &'static str {
+        if self.evaluation_attempt.is_some() {
+            TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME
+        } else {
+            TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        if self.evaluation_attempt.is_some() {
+            "Evaluator MCP"
+        } else {
+            "Reviewer MCP"
+        }
+    }
 }
 
 fn codex_reviewer_mcp_scope(
@@ -51,15 +70,31 @@ fn codex_reviewer_mcp_scope(
 }
 
 fn codex_reviewer_mcp_scope_with_stop(
-    state: &AppState, session: &str, thread: &str, runtime: &str, allow_stop: bool, allow_reset: bool,
+    state: &AppState,
+    session: &str,
+    thread: &str,
+    runtime: &str,
+    allow_stop: bool,
+    allow_reset: bool,
 ) -> Option<CodexReviewerMcpScope> {
     let inner = state.inner.lock().expect("state mutex poisoned");
     let record = &inner.sessions[inner.find_session_index(session)?];
     let delegation = inner.delegations.iter().find(|d| {
         d.child_session_id == session
-            && d.mode == DelegationMode::Reviewer
+            && matches!(d.mode, DelegationMode::Reviewer | DelegationMode::Evaluator)
             && d.status == DelegationStatus::Running
     })?;
+    let evaluation_attempt = if delegation.mode == DelegationMode::Evaluator {
+        Some(
+            delegation
+                .acceptance_evaluation
+                .as_ref()?
+                .attempt_key
+                .clone(),
+        )
+    } else {
+        None
+    };
     let SessionRuntime::Codex(handle) = &record.runtime else {
         return None;
     };
@@ -85,6 +120,7 @@ fn codex_reviewer_mcp_scope_with_stop(
         runtime_id: runtime.to_owned(),
         delegation_id: delegation.id.clone(),
         attempt: delegation.review_result_submission_attempt,
+        evaluation_attempt,
         generation: record.active_turn_generation,
         stop_generation: record.runtime_stop_generation,
         allow_reset,
@@ -105,10 +141,20 @@ fn codex_reviewer_mcp_identity(inner: &StateInner, scope: &CodexReviewerMcpScope
         && r.active_turn_generation == scope.generation
         && inner.delegations.iter().any(|d| {
             d.id == scope.delegation_id
-                && d.mode == DelegationMode::Reviewer
                 && d.child_session_id == scope.session_id
                 && d.status == DelegationStatus::Running
-                && d.review_result_submission_attempt == scope.attempt
+                && match &scope.evaluation_attempt {
+                    Some(key) => {
+                        d.mode == DelegationMode::Evaluator
+                            && d.acceptance_evaluation
+                                .as_ref()
+                                .is_some_and(|target| &target.attempt_key == key)
+                    }
+                    None => {
+                        d.mode == DelegationMode::Reviewer
+                            && d.review_result_submission_attempt == scope.attempt
+                    }
+                }
         })
 }
 
@@ -180,6 +226,7 @@ fn codex_reviewer_mcp_reason(raw: Option<&str>) -> String {
 // exact-server filtering still validates the response, rather than trusting it.
 fn codex_reviewer_mcp_page(
     value: &Value,
+    required_tool: &str,
 ) -> Result<(
     Option<CodexReviewerMcpOutcome>,
     Option<String>,
@@ -220,10 +267,10 @@ fn codex_reviewer_mcp_page(
             Some(CodexReviewerMcpOutcome::Failed)
         }
         Some("connected") => Some(
-            if tools.values().any(|tool| {
-                tool.get("name").and_then(Value::as_str)
-                    == Some(TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME)
-            }) {
+            if tools
+                .values()
+                .any(|tool| tool.get("name").and_then(Value::as_str) == Some(required_tool))
+            {
                 CodexReviewerMcpOutcome::Ready
             } else {
                 CodexReviewerMcpOutcome::MissingTool
@@ -243,26 +290,41 @@ fn record_codex_reviewer_mcp_observation(
     if !codex_reviewer_mcp_identity(&inner, scope) {
         return Ok(false);
     }
-    let i = inner.find_session_index(&scope.session_id).expect("current child");
+    let i = inner
+        .find_session_index(&scope.session_id)
+        .expect("current child");
     let r = &inner.sessions[i];
-    if !matches!(r.session.status, SessionStatus::Active | SessionStatus::Approval)
-        || (r.runtime_stop_in_progress && !r.runtime_stop_is_owned_by(
+    if !matches!(
+        r.session.status,
+        SessionStatus::Active | SessionStatus::Approval
+    ) || (r.runtime_stop_in_progress
+        && !r.runtime_stop_is_owned_by(
             RuntimeStopOwnerKind::EngramMcpRevocation,
-            &RuntimeToken::Codex(scope.runtime_id.clone()), r.runtime_stop_generation)) {
+            &RuntimeToken::Codex(scope.runtime_id.clone()),
+            r.runtime_stop_generation,
+        ))
+    {
         return Ok(false);
     }
-    let interrupted = r.runtime_stop_generation != scope.stop_generation || r.runtime_stop_in_progress || (!scope.allow_reset && r.runtime_reset_required);
+    let interrupted = r.runtime_stop_generation != scope.stop_generation
+        || r.runtime_stop_in_progress
+        || (!scope.allow_reset && r.runtime_reset_required);
     let deferred = r.runtime_stop_in_progress;
     let d = inner
         .find_delegation_index(&scope.delegation_id)
         .expect("current delegation");
     // A submission received while the query ran wins, unchanged.
-    if inner.delegations[d].submitted_review_result.is_some() {
+    if delegation_submission_recorded(&inner.delegations[d]) {
         return Ok(true);
     }
     if interrupted {
         observation.outcome = CodexReviewerMcpOutcome::Unavailable;
-        observation.reason = "Reviewer status wait interrupted by a runtime stop or reset fence.".to_owned();
+        observation.reason = if scope.evaluation_attempt.is_some() {
+            "Evaluator status wait interrupted by a runtime stop or reset fence."
+        } else {
+            "Reviewer status wait interrupted by a runtime stop or reset fence."
+        }
+        .to_owned();
     }
     let observations = &mut inner.delegations[d].attempt.reviewer_mcp_observations;
     observations.retain(|o| o.phase != observation.phase);
@@ -280,7 +342,8 @@ fn record_codex_reviewer_mcp_observation(
             timestamp: stamp_now(),
             author: Author::System,
             text: format!(
-                "Reviewer MCP observation: {}",
+                "{} observation: {}",
+                scope.label(),
                 serde_json::to_string(&observation)?
             ),
             attachments: Vec::new(),
@@ -295,7 +358,7 @@ fn record_codex_reviewer_mcp_observation(
             DeferredStopCallback::TurnFailed { active_turn_generation, .. } if *active_turn_generation == scope.generation)) {
             record.deferred_stop_callbacks.push(DeferredStopCallback::TurnFailed {
                 active_turn_generation: scope.generation,
-                message: "Reviewer MCP observation interrupted; see the typed observation.".to_owned(),
+                message: format!("{} observation interrupted; see the typed observation.", scope.label()),
             });
         }
     }

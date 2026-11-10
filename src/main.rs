@@ -1256,6 +1256,7 @@ include!("session_interaction.rs");
 include!("queued_prompt_durability.rs");
 include!("handoffs.rs");
 include!("prompt_delivery.rs");
+include!("remote_prompt_primary.rs");
 include!("prompt_delivery_shutdown.rs");
 include!("engram_queued_admission.rs");
 include!("engram_retry_schedule.rs");

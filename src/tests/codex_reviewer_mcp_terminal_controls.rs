@@ -148,7 +148,7 @@ pub(super) fn worker_at_status_wait(fixture: &ReviewerFixture, startup: bool) ->
     worker_with_scope(fixture, startup, scope)
 }
 
-fn worker_with_scope(fixture: &ReviewerFixture, startup: bool, scope: CodexReviewerMcpScope) -> std::thread::JoinHandle<()> {
+pub(super) fn worker_with_scope(fixture: &ReviewerFixture, startup: bool, scope: CodexReviewerMcpScope) -> std::thread::JoinHandle<()> {
     fixture.runtime.sessions.lock().unwrap().get_mut(&fixture.child).unwrap()
         .reviewer_mcp_gate = Some(scope.gate.clone());
     let start = startup.then(|| (CodexPromptCommand {

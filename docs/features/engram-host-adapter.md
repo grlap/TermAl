@@ -3164,6 +3164,19 @@ the task before requesting another evaluation", and `unconfirmed` adds what was
 last learned (a refused resend included), to be read, not acted on; `recorded`
 names the time and how many criteria passed.
 
+Before a Codex evaluator starts model work, the host checks its exact thread's
+`termal-delegation` server through `mcpServerStatus/list`. It uses the same
+60-second budget and bounded starting-state rechecks as reviewers, but requires
+`termal_submit_acceptance_evaluation`. A timeout or missing tool fails the attempt
+before judging and records a typed, sanitized MCP observation. These observations
+retain the historical `reviewerMcpObservations` field name in status and results.
+A fresh evaluation request is allowed after this host-side failure.
+
+Finishing without a recorded submission gives a host-assigned failure reason,
+`no submission recorded`; child prose remains diagnostic output, not a verdict.
+An open `pending` or `unconfirmed` write remains unknown and is preserved for
+reconciliation. A confirmed recorded receipt remains authoritative.
+
 ### Operator acceptance settings
 
 The project's Engram settings show the current store policy using
@@ -3180,8 +3193,22 @@ not turn an unconfigured project into an operator veto. Explicit request agent/m
 project defaults. With no agent preference, a Claude/Codex parent chooses the
 other vendor when it is ready and nonblocking, otherwise its own vendor. A Kimi,
 Cursor, Gemini or OpenCode parent chooses a ready, nonblocking Codex first, then
-Claude; when neither is ready, it falls back to Codex. Automatic selection never
-chooses an unsupported evaluator. A request-provided `model` requires an explicit
+Claude; when neither is ready, it falls back to Codex. Auto additionally skips a
+vendor for five minutes after a correlated typed terminal quota refusal: Codex
+`usageLimitExceeded` or a terminal Claude `api_error_status` of 429. Retried,
+stale, duplicate, uncorrelated or Stop-held results, generic error prose and
+server overload do not create that observation. A later correlated successful
+turn clears it. These two process-local observations survive CLI readiness
+refreshes and reset on host restart; they are not account configuration or an
+estimate of the provider's actual reset time. Explicit, reused and project
+agent preferences are unchanged. If the preferred vendor is blocked, Auto uses
+the other ready, nonblocking vendor and explains the choice with the stable
+`evaluator_usage_limit` reason. If no such alternative exists, it refuses with
+HTTP 409 before creating a child, names both vendors when both are blocked, and
+reports how many seconds remain until the earliest observed window ends. The
+caller decides whether and when to request again; nothing retries automatically.
+Automatic selection never chooses an unsupported evaluator.
+A request-provided `model` requires an explicit
 `agent` (otherwise HTTP 400), so Auto cannot choose a different model vendor.
 With no model override the selected agent uses its normal default. A saved model override
 requires a concrete evaluator agent and is applied only when that agent is
@@ -3278,6 +3305,9 @@ Parent evaluator cards show the task/mode and receipt-backed passed-criteria
 count independently of the child transcript. Completion without a submission
 is not a pass; pending/unconfirmed writes remain unknown. A recorded value still
 waiting on its persistence acknowledgement is shown as submission in progress.
+If the child finishes during that submission, its delegation remains running
+until the submission owner releases its durability guard. The host then reports
+the settled receipt or the still-unknown write outcome, without adopting child prose.
 
 Not delivered yet: supplying the evaluated source fingerprint at completion
 for `require_source_freshness`; observed build

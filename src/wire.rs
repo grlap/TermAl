@@ -1471,6 +1471,8 @@ fn is_zero_u32(value: &u32) -> bool {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationAttemptState {
+    // Historical field name retained on disk and wire; also records evaluator
+    // readiness, using the same exact-thread observation owner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     reviewer_mcp_observations: Vec<CodexReviewerMcpObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1607,6 +1609,7 @@ struct DelegationResult {
     /// attributable current-attempt transcript; absent on legacy results.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     worker_output_unavailable: Option<bool>,
+    // Same historical field name as DelegationAttemptState, for both modes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     reviewer_mcp_observations: Vec<CodexReviewerMcpObservation>,
     delegation_id: String,

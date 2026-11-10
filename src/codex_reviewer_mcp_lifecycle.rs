@@ -1,4 +1,4 @@
-// Owns bounded reviewer status workers and finish/start continuations.
+// Owns the shared reviewer/evaluator status worker and continuations.
 // Waits run off the JSON-RPC reader/writer and revalidate exact ownership.
 struct CodexReviewerMcpRequestCleanup(CodexPendingRequestMap, String);
 
@@ -121,8 +121,11 @@ fn spawn_codex_reviewer_mcp_observation(
     finish_error: Option<String>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        let _cleanup = initial.as_ref().and_then(|(pending, request)| request.as_ref().ok()
-            .map(|request| CodexReviewerMcpRequestCleanup(pending.clone(), request.request_id.clone())));
+        let _cleanup = initial.as_ref().and_then(|(pending, request)| {
+            request.as_ref().ok().map(|request| {
+                CodexReviewerMcpRequestCleanup(pending.clone(), request.request_id.clone())
+            })
+        });
         let query_started = scope.query_started;
         let (started, measurement) = {
             let sessions = sessions
@@ -210,10 +213,11 @@ fn spawn_codex_reviewer_mcp_observation(
                     };
                 }
             };
-            let (outcome, page_reason, next) = match codex_reviewer_mcp_page(&value) {
-                Ok(v) => v,
-                Err(_) => break CodexReviewerMcpOutcome::Invalid,
-            };
+            let (outcome, page_reason, next) =
+                match codex_reviewer_mcp_page(&value, scope.required_tool()) {
+                    Ok(v) => v,
+                    Err(_) => break CodexReviewerMcpOutcome::Invalid,
+                };
             if page_reason.is_some() {
                 reason = page_reason;
             }
@@ -260,13 +264,20 @@ fn spawn_codex_reviewer_mcp_observation(
             Ok(false) => return,
             Err(error) => {
                 eprintln!("reviewer MCP observation persistence failed: {error:#}");
-                fail_codex_reviewer_mcp(&state, &scope,
-                    "Failed to persist reviewer MCP observation; model work was not started or resumed.");
+                fail_codex_reviewer_mcp(
+                    &state,
+                    &scope,
+                    &format!(
+                        "Failed to persist {} observation; model work was not started or resumed.",
+                        scope.label()
+                    ),
+                );
                 return;
             }
             Ok(true) => {}
         }
-        let interrupted = !codex_reviewer_mcp_current(&state.inner.lock().expect("state mutex poisoned"), &scope);
+        let interrupted =
+            !codex_reviewer_mcp_current(&state.inner.lock().expect("state mutex poisoned"), &scope);
         if let Some((command, watchdog)) = start {
             if outcome == CodexReviewerMcpOutcome::Ready && !interrupted {
                 let _ = scope.input_tx.send(CodexRuntimeCommand::ReviewerMcpReady {
@@ -276,13 +287,23 @@ fn spawn_codex_reviewer_mcp_observation(
                 });
             } else {
                 fail_codex_reviewer_mcp(
-                    &state, &scope,
-                    "Reviewer MCP bridge is unavailable; see the persisted typed startup observation.",
+                    &state,
+                    &scope,
+                    &format!(
+                        "{} bridge is unavailable; see the persisted typed startup observation.",
+                        scope.label()
+                    ),
                 );
             }
         } else if finish_error.is_some() || interrupted {
-            fail_codex_reviewer_mcp(&state, &scope, finish_error.as_deref()
-                .unwrap_or("Reviewer MCP status wait interrupted; see the typed observation."));
+            fail_codex_reviewer_mcp(
+                &state,
+                &scope,
+                finish_error.as_deref().unwrap_or(&format!(
+                    "{} status wait interrupted; see the typed observation.",
+                    scope.label()
+                )),
+            );
         } else {
             settle_codex_reviewer_mcp(&state, &scope, None);
         }
@@ -313,7 +334,7 @@ fn defer_codex_reviewer_mcp_finish(
         if inner
             .delegations
             .iter()
-            .any(|d| d.id == scope.delegation_id && d.submitted_review_result.is_some())
+            .any(|d| d.id == scope.delegation_id && delegation_submission_recorded(d))
         {
             return false;
         }

@@ -15,6 +15,7 @@ pub(super) fn mark_pending_receipt(turn: &OrdinaryRoot, id: &str) {
         record.prompt_deliveries.insert(
             id.into(),
             PromptDelivery {
+                remote_prompt: None,
                 federation_operation: None,
                 federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::Pending,

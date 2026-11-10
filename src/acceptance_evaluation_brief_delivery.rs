@@ -125,7 +125,7 @@ impl AppState {
             }
             if inner
                 .acceptance_evaluation_submissions_in_flight
-                .contains(id)
+                .contains_key(id)
                 || inner.delegation_followup_admissions.contains_key(id)
                 || inner.delegations[index]
                     .acceptance_evaluation

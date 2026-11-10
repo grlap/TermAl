@@ -1,5 +1,6 @@
-// Owns project evaluator preferences and operator policy configuration.
-// Does not own task evaluations, enablement/doctor, or agent MCP tools.
+// Owns project evaluator preferences, quota-aware Auto choice and operator policy.
+// Runtime observations extend the existing readiness cache; provider retries,
+// task evaluations, enablement/doctor and agent MCP tools keep their owners.
 // New feature boundary alongside acceptance_evaluation_api.rs.
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -69,6 +70,89 @@ fn auto_acceptance_evaluator_agent(parent: Agent, readiness: &[AgentReadiness]) 
         .into_iter()
         .find(|agent| is_ready(*agent))
         .unwrap_or(Agent::Codex)
+}
+
+const EVALUATOR_USAGE_LIMIT_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+fn evaluator_usage_limit_slot(agent: Agent) -> Option<usize> {
+    match agent {
+        Agent::Claude => Some(0),
+        Agent::Codex => Some(1),
+        _ => None,
+    }
+}
+
+impl AgentReadinessCache {
+    fn evaluator_usage_limit_remaining(
+        &self,
+        agent: Agent,
+        now: std::time::Instant,
+    ) -> Option<Duration> {
+        let observed = self.evaluator_usage_limits[evaluator_usage_limit_slot(agent)?]?;
+        EVALUATOR_USAGE_LIMIT_WINDOW
+            .checked_sub(now.saturating_duration_since(observed))
+            .filter(|remaining| !remaining.is_zero())
+    }
+}
+
+impl AppState {
+    // Called only for a typed terminal refusal, not for a rendered error message.
+    // An unresolved Stop establishes no new quota observation.
+    fn note_evaluator_usage_limit(
+        &self,
+        session_id: &str,
+        runtime: &RuntimeToken,
+        generation: u64,
+    ) {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else { return; };
+        let record = &inner.sessions[index];
+        if !record.runtime.matches_runtime_token(runtime)
+            || record.active_turn_generation != generation
+            || record.runtime_stop_in_progress
+            || !matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval)
+        {
+            return;
+        }
+        if let Some(slot) = evaluator_usage_limit_slot(record.session.agent) {
+            self.agent_readiness_cache.write().expect("agent readiness cache poisoned")
+                .evaluator_usage_limits[slot] = Some(std::time::Instant::now());
+        }
+    }
+
+    fn auto_acceptance_evaluator_selection(
+        &self,
+        parent: Agent,
+    ) -> Result<(Agent, Option<String>), ApiError> {
+        let readiness = self.agent_readiness_snapshot();
+        let preferred = auto_acceptance_evaluator_agent(parent, &readiness);
+        let now = std::time::Instant::now();
+        let cache = self.agent_readiness_cache.read().expect("agent readiness cache poisoned");
+        if cache.evaluator_usage_limit_remaining(preferred, now).is_none() {
+            return Ok((preferred, None));
+        }
+        let alternative = if preferred == Agent::Claude { Agent::Codex } else { Agent::Claude };
+        if cache.evaluator_usage_limit_remaining(alternative, now).is_none()
+            && readiness.iter().any(|entry| entry.agent == alternative
+                && entry.status == AgentReadinessStatus::Ready && !entry.blocking)
+        {
+            return Ok((alternative, Some(format!(
+                "Auto selected {alternative:?}: {preferred:?} recently reported a usage limit (evaluator_usage_limit)."
+            ))));
+        }
+        let remaining = [Agent::Claude, Agent::Codex].into_iter()
+            .filter_map(|agent| cache.evaluator_usage_limit_remaining(agent, now)).min()
+            .expect("the preferred evaluator has an active window");
+        let seconds = remaining.as_secs() + u64::from(remaining.subsec_nanos() != 0);
+        let vendors = if cache.evaluator_usage_limit_remaining(alternative, now).is_some() {
+            "Claude and Codex recently reported usage limits"
+        } else {
+            "the preferred vendor recently reported a usage limit and no other vendor is ready"
+        };
+        Err(ApiError::conflict(format!(
+            "Auto evaluator unavailable: {vendors}; the earliest observed window ends in {seconds} seconds. Request again then or choose an explicit agent (evaluator_usage_limit)."
+        )))
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]

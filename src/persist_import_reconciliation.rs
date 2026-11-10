@@ -9,8 +9,7 @@
 
 /// The successor of the current MAIN reader floor: the predecessor's exact
 /// inventory plus the required import-reconciliation journal field.
-const SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION: &str =
-    "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-import-reconciliation-1";
+const SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-import-reconciliation-1";
 const ENGRAM_IMPORT_RECONCILIATION_FIELD: &str = "engramImportReconciliation";
 
 /// The authority to make the first activation. Only a real enrollment or
@@ -49,13 +48,26 @@ fn engram_import_activation_fault(phase: &'static str) -> Result<()> {
 
 /// Whether the store's floor is the import-reconciliation successor. A store
 /// still initializing, with no recorded floor yet, is not.
-fn engram_import_reconciliation_floor_is_successor(connection: &rusqlite::Connection) -> Result<bool> {
+fn engram_import_reconciliation_floor_is_successor(
+    connection: &rusqlite::Connection,
+) -> Result<bool> {
     let version: Option<String> = connection
-        .query_row("SELECT value FROM meta WHERE key='schema_version'", [], |row| row.get(0))
+        .query_row(
+            "SELECT value FROM meta WHERE key='schema_version'",
+            [],
+            |row| row.get(0),
+        )
         .optional()
         .context("failed to read the state reader floor")?;
-    Ok(matches!(version.as_deref(), Some(SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
-        | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR)))
+    Ok(matches!(
+        version.as_deref(),
+        Some(
+            SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+                | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
+                | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
+                | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
+        )
+    ))
 }
 
 /// The successor floor's inventory: the predecessor's exact fields plus the
@@ -63,8 +75,12 @@ fn engram_import_reconciliation_floor_is_successor(connection: &rusqlite::Connec
 fn validate_engram_import_successor_inventory(units: &PersistMetadataUnits) -> Result<()> {
     match units.get(&(ENGRAM_IMPORT_RECONCILIATION_FIELD.to_owned(), String::new())) {
         Some((kind, _)) if kind == "object" => {}
-        Some(_) => bail!("invalid metadata descriptor kind for `{ENGRAM_IMPORT_RECONCILIATION_FIELD}`"),
-        None => bail!("missing required metadata descriptor `{ENGRAM_IMPORT_RECONCILIATION_FIELD}`"),
+        Some(_) => {
+            bail!("invalid metadata descriptor kind for `{ENGRAM_IMPORT_RECONCILIATION_FIELD}`")
+        }
+        None => {
+            bail!("missing required metadata descriptor `{ENGRAM_IMPORT_RECONCILIATION_FIELD}`")
+        }
     }
     let predecessor = units
         .iter()
@@ -80,11 +96,17 @@ fn validate_metadata_unit_inventory_for_store(
     units: &PersistMetadataUnits,
 ) -> Result<()> {
     if engram_import_reconciliation_floor_is_successor(connection)? {
-        if persisted_metadata_storage_version(connection)? == SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR {
+        if persisted_metadata_storage_version(connection)?
+            == SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
+        {
             validate_native_test_predecessor_inventory(units, true)
-        } else { validate_engram_import_successor_inventory(units) }
-    } else if matches!(persisted_metadata_storage_version(connection)?.as_str(),
-        SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR | SQLITE_CHECKPOINT_RESULT_PREDECESSOR) {
+        } else {
+            validate_engram_import_successor_inventory(units)
+        }
+    } else if matches!(
+        persisted_metadata_storage_version(connection)?.as_str(),
+        SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+    ) {
         validate_metadata_unit_inventory_for_floor(units, true)
     } else {
         validate_metadata_unit_inventory(units)
@@ -101,10 +123,14 @@ fn engram_import_reconciliation_writer_floor(
     previous: &PersistMetadataUnits,
     desired: &mut PersistMetadataUnits,
 ) -> Result<()> {
-    let projected = desired.keys().any(|(field, _)| field == ENGRAM_IMPORT_RECONCILIATION_FIELD);
+    let projected = desired
+        .keys()
+        .any(|(field, _)| field == ENGRAM_IMPORT_RECONCILIATION_FIELD);
     if !engram_import_reconciliation_floor_is_successor(connection)? {
         if projected {
-            bail!("an import-reconciliation journal cannot be written under the predecessor reader floor");
+            bail!(
+                "an import-reconciliation journal cannot be written under the predecessor reader floor"
+            );
         }
         return Ok(());
     }
@@ -119,9 +145,14 @@ fn engram_import_reconciliation_writer_floor(
 }
 
 /// The journal's metadata units, one member per record.
-fn engram_import_reconciliation_units(journal: &EngramImportReconciliationJournal) -> Result<PersistMetadataUnits> {
+fn engram_import_reconciliation_units(
+    journal: &EngramImportReconciliationJournal,
+) -> Result<PersistMetadataUnits> {
     let mut field = serde_json::Map::new();
-    field.insert(ENGRAM_IMPORT_RECONCILIATION_FIELD.to_owned(), journal.to_value()?);
+    field.insert(
+        ENGRAM_IMPORT_RECONCILIATION_FIELD.to_owned(),
+        journal.to_value()?,
+    );
     metadata_value_to_units(Value::Object(field))
 }
 
@@ -130,7 +161,8 @@ fn deserialize_engram_import_reconciliation<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<PersistTracked<EngramImportReconciliationState>, D::Error> {
     let value = Value::deserialize(deserializer)?;
-    let journal = EngramImportReconciliationJournal::decode(&value).map_err(serde::de::Error::custom)?;
+    let journal =
+        EngramImportReconciliationJournal::decode(&value).map_err(serde::de::Error::custom)?;
     Ok(EngramImportReconciliationState::Activated(Arc::new(journal)).into())
 }
 
@@ -144,14 +176,18 @@ fn read_engram_import_reconciliation_state(
     if !engram_import_reconciliation_floor_is_successor(connection)? {
         let present: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM state_metadata_units WHERE field_name=?1)",
-            [ENGRAM_IMPORT_RECONCILIATION_FIELD], |row| row.get(0))?;
+            [ENGRAM_IMPORT_RECONCILIATION_FIELD],
+            |row| row.get(0),
+        )?;
         if present {
             bail!("an import-reconciliation journal is present under the predecessor reader floor");
         }
         return Ok(EngramImportReconciliationState::NotActivated);
     }
     let value = read_persisted_metadata_field(connection, ENGRAM_IMPORT_RECONCILIATION_FIELD)?
-        .ok_or_else(|| anyhow!("the successor floor is missing its import-reconciliation journal"))?;
+        .ok_or_else(|| {
+            anyhow!("the successor floor is missing its import-reconciliation journal")
+        })?;
     Ok(EngramImportReconciliationState::Activated(Arc::new(
         EngramImportReconciliationJournal::decode(&value)?,
     )))
@@ -179,7 +215,9 @@ fn adopt_engram_import_activation_locked(
             bail!("a different import-reconciliation journal is already adopted")
         }
     };
-    let adopted_generation = inner.metadata_predecessor.load(std::sync::atomic::Ordering::Acquire);
+    let adopted_generation = inner
+        .metadata_predecessor
+        .load(std::sync::atomic::Ordering::Acquire);
     if adopted_generation > committed_generation {
         bail!(
             "a late import-reconciliation acknowledgement for generation {committed_generation} \
@@ -187,9 +225,12 @@ fn adopt_engram_import_activation_locked(
         );
     }
     if !identical {
-        *inner.engram_import_reconciliation = EngramImportReconciliationState::Activated(Arc::new(journal));
+        *inner.engram_import_reconciliation =
+            EngramImportReconciliationState::Activated(Arc::new(journal));
     }
-    inner.metadata_predecessor.store(committed_generation, std::sync::atomic::Ordering::Release);
+    inner
+        .metadata_predecessor
+        .store(committed_generation, std::sync::atomic::Ordering::Release);
     Ok(())
 }
 
@@ -237,7 +278,11 @@ fn activate_engram_import_reconciliation_sqlite<R>(
     engram_import_activation_fault("after_records")?;
     validate_engram_import_successor_inventory(&prospective)?;
     engram_import_activation_fault("before_floor")?;
-    advance_sqlite_reader_floor(&transaction, SQLITE_SCHEMA_VERSION, SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION)?;
+    advance_sqlite_reader_floor(
+        &transaction,
+        SQLITE_SCHEMA_VERSION,
+        SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION,
+    )?;
     let generation = metadata_unit_generation(&transaction)?
         .checked_add(1)
         .ok_or_else(|| anyhow!("metadata generation exhausted"))?;
@@ -247,7 +292,9 @@ fn activate_engram_import_reconciliation_sqlite<R>(
         [generation.to_string()],
     )?;
     engram_import_activation_fault("before_commit")?;
-    transaction.commit().context("failed to commit import-reconciliation activation")?;
+    transaction
+        .commit()
+        .context("failed to commit import-reconciliation activation")?;
     persist_observe_metadata_commit();
     // The acknowledgement is the committed content itself, read back from
     // storage, never the write's own success.
@@ -259,7 +306,9 @@ fn activate_engram_import_reconciliation_sqlite<R>(
     // Still under the writer lock, so no later write can have moved it.
     let committed_generation = metadata_unit_generation(connection)?;
     if committed_generation != generation {
-        bail!("the committed metadata generation does not match the import-reconciliation activation");
+        bail!(
+            "the committed metadata generation does not match the import-reconciliation activation"
+        );
     }
     drop(writer);
     Ok(effect(&journal, committed_generation))

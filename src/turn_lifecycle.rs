@@ -1923,6 +1923,12 @@ impl AppState {
             if !record.runtime_projection_allowed() {
                 return Ok(());
             }
+            if matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval) {
+                if let Some(slot) = evaluator_usage_limit_slot(record.session.agent) {
+                    self.agent_readiness_cache.write().expect("agent readiness cache poisoned")
+                        .evaluator_usage_limits[slot] = None;
+                }
+            }
             let _ = record;
             self.queue_runtime_observation_close_with_notices_locked(
                 &mut inner, index, EngramObservedTurnOutcome::Succeeded, &registered_check_notices);

@@ -51,7 +51,10 @@ const CURRENT_SQLITE_STATE_TABLE_COLUMNS: &[(&str, &[&str])] = &[
     ),
     ("session_overviews", &["session_id", "value_blob"]),
     ("app_state", &["key", "value_json"]),
-    ("state_metadata_units", &["field_name", "item_key", "kind", "value_json"]),
+    (
+        "state_metadata_units",
+        &["field_name", "item_key", "kind", "value_json"],
+    ),
     ("session_prompt_histories", &["session_id", "value_json"]),
     ("delegations", &["id", "value_json"]),
     (
@@ -315,7 +318,9 @@ fn validate_no_legacy_embedded_state(
     connection: &rusqlite::Connection,
 ) -> Result<Option<PersistedState>> {
     let metadata = read_persisted_metadata_json(connection).map_err(|error| {
-        reject_unsupported_state_schema(format!("persisted state metadata units are invalid: {error:#}"))
+        reject_unsupported_state_schema(format!(
+            "persisted state metadata units are invalid: {error:#}"
+        ))
     })?;
     let persisted = if let Some(encoded) = metadata {
         let mut value: Value = serde_json::from_str(&encoded).map_err(|error| {
@@ -342,8 +347,10 @@ fn validate_no_legacy_embedded_state(
                     "experimental obligation metadata under a predecessor floor",
                 ));
             }
-            object.insert("engramSessionObligations".to_owned(),
-                serde_json::to_value(EngramSessionObligationLedger::empty())?);
+            object.insert(
+                "engramSessionObligations".to_owned(),
+                serde_json::to_value(EngramSessionObligationLedger::empty())?,
+            );
         }
         #[cfg(test)]
         PERSISTED_STATE_METADATA_DESERIALIZE_COUNT.with(|count| count.set(count.get() + 1));
@@ -362,11 +369,18 @@ fn validate_no_legacy_embedded_state(
             "missing app_state `{SQLITE_METADATA_KEY}` metadata while normalized table \
              `{table_name}` contains rows"
         )));
-    } else if matches!(required_state_meta_value(connection, "schema_version")?.as_str(),
-        SQLITE_SCHEMA_VERSION | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
-            | SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
-            | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
-            | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
+    } else if matches!(
+        required_state_meta_value(connection, "schema_version")?.as_str(),
+        SQLITE_SCHEMA_VERSION
+            | SQLITE_CHECKPOINT_RESULT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
+            | SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR
+            | SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR
+            | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+    ) {
         return Err(reject_unsupported_state_schema(
             "missing mandatory Engram session obligation metadata".to_owned(),
         ));
@@ -508,7 +522,14 @@ fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> 
     // Initialization changes metadata authority. Pre-seeding snapshots must
     // remain stale; live sources capture again after confirmed initialization.
     let metadata = PersistedState::metadata_from_inner(&StateInner::new());
-    write_metadata_units(&transaction, project_metadata_units(&metadata)?, None, &[], None, true)?;
+    write_metadata_units(
+        &transaction,
+        project_metadata_units(&metadata)?,
+        None,
+        &[],
+        None,
+        true,
+    )?;
     transaction
         .execute(
             "INSERT INTO meta(key, value) VALUES(?1, ?2)",
@@ -533,7 +554,9 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     ensure_sqlite_state_schema_with_initialization(connection).map(|_| ())
 }
 
-fn ensure_sqlite_state_schema_with_initialization(connection: &rusqlite::Connection) -> Result<bool> {
+fn ensure_sqlite_state_schema_with_initialization(
+    connection: &rusqlite::Connection,
+) -> Result<bool> {
     if sqlite_state_user_table_names(connection)?.is_empty()
         && initialize_current_sqlite_state_schema(connection)?
     {
@@ -590,8 +613,13 @@ fn ensure_sqlite_state_schema_for_load(
 
 #[cfg(test)]
 fn seed_current_state_auxiliary_tables(connection: &rusqlite::Connection) {
-    if !sqlite_state_user_table_names(connection).unwrap().contains("state_metadata_units") {
-        connection.execute_batch(SQLITE_METADATA_UNITS_SCHEMA).unwrap();
+    if !sqlite_state_user_table_names(connection)
+        .unwrap()
+        .contains("state_metadata_units")
+    {
+        connection
+            .execute_batch(SQLITE_METADATA_UNITS_SCHEMA)
+            .unwrap();
     }
     connection
         .execute_batch(SQLITE_STATE_AUXILIARY_SCHEMA_SQL)
@@ -605,7 +633,9 @@ fn seed_current_state_core_tables(connection: &rusqlite::Connection) {
     connection
         .execute_batch(SQLITE_STATE_CORE_SCHEMA_SQL)
         .expect("current core state tables should initialize");
-    connection.execute_batch(SQLITE_METADATA_UNITS_SCHEMA).unwrap();
+    connection
+        .execute_batch(SQLITE_METADATA_UNITS_SCHEMA)
+        .unwrap();
     connection
         .execute_batch("PRAGMA foreign_keys = ON;")
         .expect("fixture writes must enforce foreign keys");
@@ -640,11 +670,14 @@ fn replace_metadata_units_for_test(connection: &rusqlite::Connection, value: Val
     // projection, then overlay raw fixture values (including deliberate errors).
     let mut complete = metadata_units_to_value(
         &project_metadata_units(&PersistedState::metadata_from_inner(&StateInner::new())).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
     for (field, value) in value.as_object().unwrap() {
         complete[field] = value.clone();
     }
-    connection.execute("DELETE FROM state_metadata_units", []).unwrap();
+    connection
+        .execute("DELETE FROM state_metadata_units", [])
+        .unwrap();
     for ((field, key), (kind, encoded)) in metadata_value_to_units(complete).unwrap() {
         connection.execute("INSERT INTO state_metadata_units(field_name,item_key,kind,value_json) VALUES(?1,?2,?3,?4)",
             rusqlite::params![field,key,kind,encoded]).unwrap();
@@ -653,10 +686,19 @@ fn replace_metadata_units_for_test(connection: &rusqlite::Connection, value: Val
 
 #[cfg(test)]
 fn seed_primary2_state_schema_for_test(connection: &rusqlite::Connection) {
-    connection.execute_batch(include_str!("tests/fixtures/state_schema2.sql")).unwrap();
-    for (key,value) in [("schema_version", "2"),
-        (SQLITE_PROMPT_HISTORY_STORAGE_KEY, SQLITE_PROMPT_HISTORY_STORAGE_VERSION)] {
-        connection.execute("INSERT INTO meta(key,value) VALUES(?1,?2)", [key,value]).unwrap();
+    connection
+        .execute_batch(include_str!("tests/fixtures/state_schema2.sql"))
+        .unwrap();
+    for (key, value) in [
+        ("schema_version", "2"),
+        (
+            SQLITE_PROMPT_HISTORY_STORAGE_KEY,
+            SQLITE_PROMPT_HISTORY_STORAGE_VERSION,
+        ),
+    ] {
+        connection
+            .execute("INSERT INTO meta(key,value) VALUES(?1,?2)", [key, value])
+            .unwrap();
     }
     seed_federation_host_identity(connection).unwrap();
 }

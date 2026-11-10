@@ -240,6 +240,7 @@ mod remote_delta_replay;
 mod remote_hydration;
 mod remote_orchestrator;
 mod remote_prompt_journal;
+mod remote_prompt_primary;
 mod remote_prompt_projection;
 mod remote_proxy_rebase_collision;
 mod remote_session_workdir;

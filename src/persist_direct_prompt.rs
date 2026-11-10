@@ -18,21 +18,106 @@ fn direct_prompt_floor_fault(phase: &'static str) -> Result<()> {
     Ok(())
 }
 
+// New receipt custody must never be silently discarded by a predecessor's
+// typed session load. Inspect raw JSON before any migration/normalization.
+fn reject_unversioned_direct_prompt_delivery(
+    connection: &rusqlite::Connection,
+    version: &str,
+) -> Result<()> {
+    if matches!(
+        version,
+        SQLITE_SCHEMA_VERSION | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+    ) {
+        return Ok(());
+    }
+    fn has_association(value: &Value) -> bool {
+        ["promptDeliveries", "prompt_deliveries"]
+            .iter()
+            .any(|field| {
+                value
+                    .get(*field)
+                    .and_then(Value::as_object)
+                    .is_some_and(|deliveries| {
+                        deliveries.values().any(|receipt| {
+                            receipt.as_object().is_some_and(|fields| {
+                                fields.contains_key("remotePrompt")
+                                    || fields.contains_key("remote_prompt")
+                            })
+                        })
+                    })
+            })
+    }
+    let refuse = || {
+        reject_unsupported_state_schema(
+            "direct-prompt delivery association under an unsupported predecessor floor",
+        )
+    };
+    let mut rows = connection.prepare("SELECT value_json FROM sessions")?;
+    let encoded = rows.query_map([], |row| row.get::<_, String>(0))?;
+    for row in encoded {
+        // Malformed unrelated rows retain the existing loader quarantine
+        // behavior. They cannot be normalized into valid association data.
+        if let Ok(value) = serde_json::from_str::<Value>(&row?) {
+            if has_association(&value) {
+                return Err(refuse());
+            }
+        }
+    }
+    if version == "2" {
+        let encoded: Option<String> = connection
+            .query_row(
+                "SELECT value_json FROM app_state WHERE key=?1",
+                [SQLITE_METADATA_KEY],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(encoded) = encoded {
+            let value: Value = serde_json::from_str(&encoded).map_err(|error| {
+                reject_unsupported_state_schema(format!(
+                    "persisted state metadata is not valid JSON: {error}"
+                ))
+            })?;
+            if value
+                .get("sessions")
+                .and_then(Value::as_array)
+                .is_some_and(|sessions| sessions.iter().any(has_association))
+            {
+                return Err(refuse());
+            }
+        }
+    }
+    Ok(())
+}
+
 // The caller holds the old schema's migration transaction. Reject presence,
 // including null/empty values, before typed deserialization can discard data.
 fn reject_unversioned_direct_prompt_policy(
     connection: &rusqlite::Connection,
     version: &str,
 ) -> Result<()> {
-    if matches!(version, SQLITE_SCHEMA_VERSION | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION) {
+    reject_unversioned_direct_prompt_delivery(connection, version)?;
+    if matches!(
+        version,
+        SQLITE_SCHEMA_VERSION
+            | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+            | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR
+            | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR
+    ) {
         return Ok(());
     }
-    let has_policy = |value: &Value| value.as_object().is_some_and(|fields|
-        fields.contains_key("promptPermissions") || fields.contains_key("prompt_permissions"));
+    let has_policy = |value: &Value| {
+        value.as_object().is_some_and(|fields| {
+            fields.contains_key("promptPermissions") || fields.contains_key("prompt_permissions")
+        })
+    };
     if version == "2" {
-        let encoded: Option<String> = connection.query_row(
-            "SELECT value_json FROM app_state WHERE key=?1", [SQLITE_METADATA_KEY],
-            |row| row.get(0)).optional()?;
+        let encoded: Option<String> = connection
+            .query_row(
+                "SELECT value_json FROM app_state WHERE key=?1",
+                [SQLITE_METADATA_KEY],
+                |row| row.get(0),
+            )
+            .optional()?;
         if let Some(encoded) = encoded {
             let value: Value = serde_json::from_str(&encoded).map_err(|error| {
                 reject_unsupported_state_schema(format!(
@@ -52,15 +137,18 @@ fn reject_unversioned_direct_prompt_policy(
         let mut statement = connection.prepare(
             "SELECT item_key,value_json FROM state_metadata_units WHERE field_name='federation'")
             .map_err(|error| invalid_units(&error))?;
-        let rows = statement.query_map([], |row|
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|error| invalid_units(&error))?;
         for row in rows {
             let (key, encoded) = row.map_err(|error| invalid_units(&error))?;
             if matches!(key.as_str(), "/promptPermissions" | "/prompt_permissions")
-                || (key.is_empty() && has_policy(&serde_json::from_str(&encoded).map_err(|error| {
-                    invalid_units(&error)
-                })?))
+                || (key.is_empty()
+                    && has_policy(
+                        &serde_json::from_str(&encoded).map_err(|error| invalid_units(&error))?,
+                    ))
             {
                 bail!("direct-prompt policy under an unsupported predecessor floor");
             }
@@ -75,9 +163,18 @@ fn reject_unversioned_direct_prompt_policy(
 fn advance_sqlite_direct_prompt_reader_floor(connection: &rusqlite::Connection) -> Result<()> {
     let version = required_state_meta_value(connection, "schema_version")?;
     let successor = match version.as_str() {
-        SQLITE_DIRECT_PROMPT_PREDECESSOR => SQLITE_SCHEMA_VERSION,
-        SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR => SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION,
-        _ => return Err(reject_unsupported_state_schema("unsupported direct-prompt predecessor")),
+        SQLITE_DIRECT_PROMPT_PREDECESSOR | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR => {
+            SQLITE_SCHEMA_VERSION
+        }
+        SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
+        | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR => {
+            SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+        }
+        _ => {
+            return Err(reject_unsupported_state_schema(
+                "unsupported direct-prompt predecessor",
+            ));
+        }
     };
     validate_sqlite_state_schema_for_version(connection, &version)?;
     reject_unversioned_direct_prompt_policy(connection, &version)?;
@@ -87,7 +184,8 @@ fn advance_sqlite_direct_prompt_reader_floor(connection: &rusqlite::Connection) 
         ))
     })?;
     validate_no_legacy_embedded_state(connection)?;
-    let generation = metadata_unit_generation(connection)?.checked_add(1)
+    let generation = metadata_unit_generation(connection)?
+        .checked_add(1)
         .ok_or_else(|| anyhow!("metadata generation exhausted"))?;
     direct_prompt_floor_fault("validated")?;
     connection.execute(
@@ -96,7 +194,9 @@ fn advance_sqlite_direct_prompt_reader_floor(connection: &rusqlite::Connection) 
     advance_sqlite_reader_floor(connection, &version, successor)?;
     direct_prompt_floor_fault("header")?;
     validate_current_sqlite_state_schema(connection)?;
-    if read_metadata_units(connection)? != previous || metadata_unit_generation(connection)? != generation {
+    if read_metadata_units(connection)? != previous
+        || metadata_unit_generation(connection)? != generation
+    {
         bail!("direct-prompt migration changed predecessor metadata");
     }
     validate_no_legacy_embedded_state(connection)?;

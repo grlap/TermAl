@@ -37,6 +37,10 @@ struct ReviewerFixture {
 impl ReviewerFixture {
     fn new(label: &str) -> Self {
         let (state, _sender, parent) = mailbox_test_state();
+        Self::with_state(state, parent, label)
+    }
+
+    fn with_state(state: AppState, parent: String, label: &str) -> Self {
         let (delegation, child) = install_required_review_delegation(&state, &parent);
         let (runtime, input_rx, process) = test_shared_codex_runtime(label);
         install_single_wire_codex_fixture(&state, Some(runtime.clone()));
@@ -193,6 +197,10 @@ mod settlement_controls {
 
 mod send_controls {
     include!("codex_reviewer_mcp_send_controls.rs");
+}
+
+mod evaluator_readiness {
+    include!("codex_evaluator_mcp_readiness.rs");
 }
 
 pub(crate) fn run_settlement_gap_hook(gate: &str) {

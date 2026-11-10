@@ -83,6 +83,24 @@ pub(super) fn isolated_launcher_for(
     service: &LoopbackRegistration,
     native_command: &[&str],
 ) -> Command {
+    isolated_launcher_in_mode(root, session, service, "focused", native_command)
+}
+
+pub(super) fn isolated_full_launcher(
+    root: &FsPath,
+    session: &str,
+    service: &LoopbackRegistration,
+) -> Command {
+    isolated_launcher_in_mode(root, session, service, "full", &[])
+}
+
+fn isolated_launcher_in_mode(
+    root: &FsPath,
+    session: &str,
+    service: &LoopbackRegistration,
+    mode: &str,
+    native_command: &[&str],
+) -> Command {
     let mut command = Command::new(if cfg!(windows) { "node.exe" } else { "node" });
     // Construct a child environment, including only this fixture's identity.
     // Outer outputs, notifications, wrappers and failure injection stay out.
@@ -130,14 +148,10 @@ pub(super) fn isolated_launcher_for(
         .env("TERMAL_SESSION_ID", session)
         .env("TERMAL_BASE_URL", &service.url)
         .current_dir(root)
-        .args([
-            "scripts/test-launcher.mjs",
-            "focused",
-            "--input",
-            "commit",
-            "--",
-        ])
-        .args(native_command);
+        .args(["scripts/test-launcher.mjs", mode, "--input", "commit"]);
+    if mode == "focused" {
+        command.arg("--").args(native_command);
+    }
     let retained = command
         .get_envs()
         .filter_map(|(key, value)| {

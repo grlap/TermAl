@@ -1851,6 +1851,20 @@ fn handle_shared_codex_start_turn_inner(
         return Ok(());
     }
 
+    // Drop the state guard before scope construction/settlement locks it again.
+    let mcp_mode = if approved_scope.is_none() {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .delegations
+            .iter()
+            .find(|d| {
+                d.child_session_id == session_id
+                    && matches!(d.mode, DelegationMode::Reviewer | DelegationMode::Evaluator)
+            })
+            .map(|d| d.mode)
+    } else {
+        None
+    };
     if let Some(scope) = approved_scope {
         let gate_matches = sessions
             .lock()
@@ -1867,18 +1881,19 @@ fn handle_shared_codex_start_turn_inner(
             fail_codex_reviewer_mcp(
                 state,
                 scope,
-                "Reviewer MCP lost send eligibility before model work started.",
+                &format!(
+                    "{} lost send eligibility before model work started.",
+                    scope.label()
+                ),
             );
             return Ok(());
         }
-    } else if state
-        .inner
-        .lock()
-        .expect("state mutex poisoned")
-        .delegations
-        .iter()
-        .any(|d| d.child_session_id == session_id && d.mode == DelegationMode::Reviewer)
-    {
+    } else if let Some(mode) = mcp_mode {
+        let label = if mode == DelegationMode::Evaluator {
+            "Evaluator MCP"
+        } else {
+            "Reviewer MCP"
+        };
         let Some(scope) = codex_reviewer_mcp_scope(state, session_id, thread_id, runtime_id)
             .filter(|s| s.generation == command.active_turn_generation)
         else {
@@ -1890,7 +1905,10 @@ fn handle_shared_codex_start_turn_inner(
                 fail_codex_reviewer_mcp(
                     state,
                     &scope,
-                    "Reviewer MCP startup fenced by a runtime stop; model work was not started.",
+                    &format!(
+                        "{} startup fenced by a runtime stop; model work was not started.",
+                        scope.label()
+                    ),
                 );
             } else if state
                 .inner
@@ -1908,8 +1926,8 @@ fn handle_shared_codex_start_turn_inner(
                     session_id,
                     runtime_id,
                     command.active_turn_generation,
-                    "Reviewer MCP startup scope is unavailable; model work was not started.",
-                    "reviewer MCP startup scope",
+                    &format!("{label} startup scope is unavailable; model work was not started."),
+                    "delegation MCP startup scope",
                 );
             }
             return Ok(());
@@ -2041,7 +2059,10 @@ fn handle_shared_codex_start_turn_inner(
         fail_codex_reviewer_mcp(
             state,
             approved_scope.expect("approved reviewer"),
-            "Reviewer MCP lost send eligibility before model work started.",
+            &format!(
+                "{} lost send eligibility before model work started.",
+                approved_scope.expect("approved scope").label()
+            ),
         );
         return Ok(());
     }
@@ -2074,10 +2095,16 @@ fn handle_shared_codex_start_turn_inner(
             fail_codex_reviewer_mcp(
                 state,
                 scope,
-                if saved.is_err() {
-                    "Failed to persist reviewer MCP startup failure; model work was not started."
+                &if saved.is_err() {
+                    format!(
+                        "Failed to persist {} startup failure; model work was not started.",
+                        scope.label()
+                    )
                 } else {
-                    "Reviewer MCP startup failed before send; see the persisted typed observation."
+                    format!(
+                        "{} startup failed before send; see the persisted typed observation.",
+                        scope.label()
+                    )
                 },
             );
         }

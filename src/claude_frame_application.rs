@@ -467,6 +467,24 @@ fn apply_claude_frame_plan(
             let ownership = lock_claude_turn_ownership(&context.ownership);
             !ownership.reports_lifecycles() && ownership.prompt_is_waiting()
         };
+        // Only a terminal plan reaches here: retries and duplicate results
+        // have no terminal owner. Numeric 429 is a provider signal, not prose.
+        if is_error && message.get("api_error_status").and_then(Value::as_u64) == Some(429) {
+            let generation = match &owner {
+                ClaudeResultOwner::Host(owner) | ClaudeResultOwner::HostAfterUnowned(owner) => {
+                    Some(owner.turn_generation)
+                }
+                ClaudeResultOwner::Runtime(owner) => owner.adopted_generation,
+                ClaudeResultOwner::Unresolved { adopted_interval, .. } => adopted_interval.as_ref()
+                    .and_then(|owner| owner.adopted_generation)
+                    .filter(|generation| context.state.claude_adopted_generation_is_current(
+                        &context.session_id, &context.token, *generation)),
+                ClaudeResultOwner::Stale | ClaudeResultOwner::Uncorrelated { .. } => None,
+            };
+            if let Some(generation) = generation {
+                context.state.note_evaluator_usage_limit(&context.session_id, &context.token, generation);
+            }
+        }
         if let Err(err) = context.state.finish_claude_result(
             &context.session_id,
             &context.token,

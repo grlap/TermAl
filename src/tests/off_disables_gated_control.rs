@@ -1420,6 +1420,7 @@ fn off_review_reload_keeps_receipt_settlement_and_legacy_normalization() {
         record.prompt_deliveries.insert(
             head.pending_prompt.id.clone(),
             PromptDelivery {
+                remote_prompt: None,
                 federation_operation: None,
                 federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::HandingOff,

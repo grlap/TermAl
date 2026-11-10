@@ -745,6 +745,7 @@ async fn a_stop_retiring_a_promoted_receipted_head_rejects_its_receipt_durably()
         record.prompt_deliveries.insert(
             head.clone(),
             PromptDelivery {
+                remote_prompt: None,
                 federation_operation: None,
                 federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::HandingOff,
@@ -1439,6 +1440,7 @@ async fn a_stop_retirement_is_in_the_ordinary_post_shutdown_delta() {
         record.prompt_deliveries.insert(
             id.clone(),
             PromptDelivery {
+                remote_prompt: None,
                 federation_operation: None,
                 federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::HandingOff,

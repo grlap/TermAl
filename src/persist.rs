@@ -35,12 +35,16 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
 const SQLITE_METADATA_UNITS_VERSION: &str = "2-metadata-units-2";
 const SQLITE_OBSERVATION_PREDECESSOR: &str = "2-metadata-units-2-handoff-1";
 const SQLITE_OBSERVATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1";
-const SQLITE_CHECKPOINT_RESULT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1";
-const SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1";
+const SQLITE_CHECKPOINT_RESULT_PREDECESSOR: &str =
+    "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1";
+const SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR: &str =
+    "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1";
 const SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-import-reconciliation-1";
 const SQLITE_DIRECT_PROMPT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1";
 const SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-import-reconciliation-1";
-const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1";
+const SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1";
+const SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-import-reconciliation-1";
+const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
@@ -1165,7 +1169,8 @@ fn load_delegation_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<(Vec<DelegationRecord>, BTreeSet<String>)> {
-    let (records, quarantined, _) = load_delegation_records_with_fingerprint(connection, path, || false)?;
+    let (records, quarantined, _) =
+        load_delegation_records_with_fingerprint(connection, path, || false)?;
     Ok((records, quarantined))
 }
 
@@ -1228,7 +1233,8 @@ impl AppState {
             // consumes time from that budget.
             connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
             let transaction = rusqlite::Transaction::new_unchecked(
-                connection, rusqlite::TransactionBehavior::Immediate,
+                connection,
+                rusqlite::TransactionBehavior::Immediate,
             )?;
             let current_version: i64 =
                 transaction.query_row("PRAGMA data_version", [], |row| row.get(0))?;
@@ -1286,11 +1292,17 @@ fn load_delegation_records_with_fingerprint(
     let mut skipped = 0_usize;
     let mut fingerprint = sha2::Sha256::new();
     for row in rows {
-        anyhow::ensure!(!cancelled(), "delegation inventory load interrupted by shutdown");
+        anyhow::ensure!(
+            !cancelled(),
+            "delegation inventory load interrupted by shutdown"
+        );
         // A row conversion/iteration failure cannot identify a complete set of
         // records or quarantine IDs. Refuse rather than certify an omission.
         let (delegation_id, encoded) = row.with_context(|| {
-            format!("failed to read complete delegation inventory from `{}`", path.display())
+            format!(
+                "failed to read complete delegation inventory from `{}`",
+                path.display()
+            )
         })?;
         delegation_inventory_hash_row(&mut fingerprint, &delegation_id, &encoded);
         #[cfg(test)]
@@ -1324,7 +1336,11 @@ fn load_delegation_records_with_fingerprint(
             path.display()
         );
     }
-    Ok((records, quarantined_ids, format!("{:x}", fingerprint.finalize())))
+    Ok((
+        records,
+        quarantined_ids,
+        format!("{:x}", fingerprint.finalize()),
+    ))
 }
 
 include!("persist_sqlite_transcript_write.rs");
@@ -1366,10 +1382,16 @@ fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) 
         path,
         &metadata,
         &persisted.sessions,
-        matches!(persisted.delegation_inventory, DelegationInventoryState::Ready),
+        matches!(
+            persisted.delegation_inventory,
+            DelegationInventoryState::Ready
+        ),
         &persisted.quarantined_persisted_session_ids,
         &persisted.delegations,
-        matches!(persisted.delegation_inventory, DelegationInventoryState::Ready),
+        matches!(
+            persisted.delegation_inventory,
+            DelegationInventoryState::Ready
+        ),
         &persisted.quarantined_persisted_delegation_ids,
     )
 }
@@ -1401,14 +1423,21 @@ fn persist_locked_state_to_sqlite_report(
     let initialized = ensure_sqlite_state_schema_for_path_with_initialization(&connection, path)?;
     let writer = sqlite_state_write_lock(path);
     let guard = lock_sqlite_state_writer(&writer);
-    if initialized && inner.metadata_predecessor.load(std::sync::atomic::Ordering::Acquire) == 0 {
+    if initialized
+        && inner
+            .metadata_predecessor
+            .load(std::sync::atomic::Ordering::Acquire)
+            == 0
+    {
         let generation = metadata_unit_generation(&connection)?;
         if generation != 1 {
             bail!("fresh metadata predecessor changed before source capture");
         }
         // This source is still held, and no snapshot has been made here yet.
         // Never apply this adoption to an already captured delta.
-        inner.metadata_predecessor.store(generation, std::sync::atomic::Ordering::Release);
+        inner
+            .metadata_predecessor
+            .store(generation, std::sync::atomic::Ordering::Release);
     }
     let persisted = PersistedState::from_inner(inner);
     let metadata = persisted.metadata_only();
@@ -1458,7 +1487,8 @@ fn persist_state_parts_to_sqlite(
         quarantined_delegation_ids,
         guard,
         false,
-    ).map(|(generation, _)| generation)
+    )
+    .map(|(generation, _)| generation)
 }
 
 /// Applies one persist transaction to an already-open SQLite connection.
@@ -1482,7 +1512,8 @@ fn persist_state_parts_via_connection(
 ) -> Result<(u64, Vec<PersistSessionRejection>)> {
     let metadata_units = project_metadata_units(metadata)?;
     let mut rejected_sessions = Vec::new();
-    let serialized_sessions = serialize_persisted_sessions_with_isolation(sessions, &mut rejected_sessions);
+    let serialized_sessions =
+        serialize_persisted_sessions_with_isolation(sessions, &mut rejected_sessions);
     let serialized_delegations = delegations
         .iter()
         .map(|delegation| {
@@ -1518,9 +1549,10 @@ fn persist_state_parts_via_connection(
             .with_context(|| format!("failed to replace sessions in `{}`", path.display()))?;
     }
     for session in &serialized_sessions {
-        let rejected = write_serialized_persisted_session_isolated(&tx, session).with_context(|| {
-            format!("failed to write persisted session to `{}`", path.display())
-        })?;
+        let rejected =
+            write_serialized_persisted_session_isolated(&tx, session).with_context(|| {
+                format!("failed to write persisted session to `{}`", path.display())
+            })?;
         if let Some(rejected) = rejected {
             rejected_sessions.push(rejected);
         }
@@ -1860,12 +1892,14 @@ fn persist_delta_via_cache_inner(
             .changed_sessions
             .iter()
             .filter_map(|record| {
-                let previous = baseline.and_then(|rows| rows.get(&record.session.id))
+                let previous = baseline
+                    .and_then(|rows| rows.get(&record.session.id))
                     .filter(|row| row.transcript_valid);
                 match serialize_persisted_session_since(record, previous) {
                     Ok(row) => Some(row),
                     Err(error) => {
-                        rejected_sessions.push(PersistSessionRejection::new(&record.session.id, &error));
+                        rejected_sessions
+                            .push(PersistSessionRejection::new(&record.session.id, &error));
                         eprintln!(
                             "persist> preserving invalid session `{}`: {error:#}",
                             record.session.id
@@ -2030,19 +2064,33 @@ fn persist_delta_via_cache_inner(
     for id in &delta.removed_session_ids {
         cache.transcripts.remove(id);
     }
-    let committed_ids = persisted_session_ids.iter().map(String::as_str).collect::<HashSet<_>>();
-    let row_stamps = delta.changed_sessions.iter()
+    let committed_ids = persisted_session_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let row_stamps = delta
+        .changed_sessions
+        .iter()
         .map(|record| (record.session.id.as_str(), record.source_stamp.clone()))
         .collect::<HashMap<_, _>>();
     // A rejected row made no SQL changes, or its savepoint rolled them back.
     // Its prior baseline still describes the last verified durable bodies.
     // Only a successfully written row may replace that predecessor.
-    for row in serialized_sessions.iter().filter(|row| committed_ids.contains(row.session_id.as_str())) {
+    for row in serialized_sessions
+        .iter()
+        .filter(|row| committed_ids.contains(row.session_id.as_str()))
+    {
         let captured = row_stamps.get(row.session_id.as_str()).cloned().flatten();
-        let row_stamp = match (cache.transcripts.get(&row.session_id)
-            .and_then(|previous| previous.row_stamp.as_ref()), captured)
-        {
-            (Some(previous), Some(captured)) if previous.covers(&captured) => Some(previous.clone()),
+        let row_stamp = match (
+            cache
+                .transcripts
+                .get(&row.session_id)
+                .and_then(|previous| previous.row_stamp.as_ref()),
+            captured,
+        ) {
+            (Some(previous), Some(captured)) if previous.covers(&captured) => {
+                Some(previous.clone())
+            }
             (_, captured) => captured,
         };
         cache.transcripts.insert(
@@ -2082,13 +2130,14 @@ fn write_persist_delta_statements(
         })?;
     }
     for session in serialized_sessions {
-        let rejected = write_serialized_persisted_session_isolated(tx, session).with_context(|| {
-            format!(
-                "failed to write persisted session `{}` to `{}`",
-                session.session_id,
-                path.display()
-            )
-        })?;
+        let rejected =
+            write_serialized_persisted_session_isolated(tx, session).with_context(|| {
+                format!(
+                    "failed to write persisted session `{}` to `{}`",
+                    session.session_id,
+                    path.display()
+                )
+            })?;
         if let Some(rejected) = rejected {
             rejected_sessions.push(rejected);
         } else {

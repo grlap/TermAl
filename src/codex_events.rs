@@ -953,6 +953,8 @@ fn handle_shared_codex_app_server_notification(
                     // would otherwise leave it unknown (prompt_delivery.rs).
                     *terminal_effect = Some(SharedCodexTerminalOutcome::Failed {
                         error: error.clone(),
+                        usage_limit_refusal: error.get("codexErrorInfo").and_then(Value::as_str)
+                            == Some("usageLimitExceeded"),
                         detail: summarize_error(error),
                         confirmed_terminal: true,
                         accept_delivery: true,
@@ -1250,6 +1252,8 @@ fn handle_shared_codex_app_server_notification(
                 clear_codex_turn_state(turn_state);
                 recorder.reset_turn_state()?;
                 *terminal_effect = Some(SharedCodexTerminalOutcome::Failed {
+                    usage_limit_refusal: error.get("codexErrorInfo").and_then(Value::as_str)
+                        == Some("usageLimitExceeded") && !codex_error_will_retry(payload),
                     error: error.clone(), detail, confirmed_terminal,
                     accept_delivery: false, compacted,
                 });

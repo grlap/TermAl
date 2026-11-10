@@ -9,6 +9,9 @@ use environment::{LAUNCH, isolated_launcher};
 #[path = "engram_evaluation_matrix_live.rs"]
 mod evaluation_matrix;
 
+#[path = "engram_fmt_registered_launcher_live.rs"]
+mod fmt_live;
+
 pub(super) fn install_launcher(fixture: &CompletionFixture) {
     environment::install_launcher(fixture);
 }

@@ -290,6 +290,7 @@ fn snapshot_from_inner_uses_cached_agent_readiness_when_cache_is_stale() {
             snapshot: sentinel.clone(),
             expires_at: Instant::now() - AGENT_READINESS_CACHE_TTL,
             invalidated: false,
+            evaluator_usage_limits: [None; 2],
             phase_sink: None,
         };
     }
@@ -378,6 +379,7 @@ fn snapshot_refreshes_agent_readiness_when_ttl_expires() {
             snapshot: sentinel.clone(),
             expires_at: Instant::now() - AGENT_READINESS_CACHE_TTL,
             invalidated: false,
+            evaluator_usage_limits: [None; 2],
             phase_sink: None,
         };
     }
@@ -414,6 +416,7 @@ fn snapshot_from_inner_uses_cached_agent_readiness_when_cache_is_invalidated() {
             // TTL still valid, but explicitly invalidated.
             expires_at: Instant::now() + AGENT_READINESS_CACHE_TTL,
             invalidated: true,
+            evaluator_usage_limits: [None; 2],
             phase_sink: None,
         };
     }

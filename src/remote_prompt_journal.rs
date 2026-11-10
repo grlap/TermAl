@@ -122,7 +122,14 @@ fn remote_prompt_stable_id(domain: &[u8], fields: &[&[u8]]) -> Uuid {
 #[cfg_attr(not(test), allow(dead_code))]
 fn remote_prompt_operation_id(intent: &remote_prompt_authority::Intent) -> Uuid {
     let (basis, _, key, _) = intent.components();
-    let (host, epoch, session, creation) = basis.source.components();
+    remote_prompt_operation_id_for_source(&basis.source, key)
+}
+
+fn remote_prompt_operation_id_for_source(
+    source: &remote_prompt_authority::NativeRoot,
+    key: &str,
+) -> Uuid {
+    let (host, epoch, session, creation) = source.components();
     remote_prompt_stable_id(
         b"termal.direct-prompt.operation.v1",
         &[
@@ -242,26 +249,52 @@ fn remote_prompt_retained_usage(
 // a receive or reconstructing a primary queue. Read one bounded row at a time.
 #[cfg_attr(not(test), allow(dead_code))]
 fn validate_remote_prompt_journals(connection: &rusqlite::Connection) -> Result<()> {
-    for side in [RemotePromptJournalSide::Sender, RemotePromptJournalSide::Receiver] {
-        let invalid: bool = connection.query_row(&format!(
-            "SELECT EXISTS(SELECT 1 FROM {} WHERE length(CAST(intent_json AS BLOB))>?1
-             OR length(CAST(evidence_json AS BLOB))>?2)", side.table()),
-            rusqlite::params![remote_prompt_protocol::REQUEST_BYTES,
-                remote_prompt_protocol::RESPONSE_BYTES], |row| row.get(0))?;
-        if invalid { return Err(remote_prompt_invalid_record()); }
+    for side in [
+        RemotePromptJournalSide::Sender,
+        RemotePromptJournalSide::Receiver,
+    ] {
+        let invalid: bool = connection.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM {} WHERE length(CAST(intent_json AS BLOB))>?1
+             OR length(CAST(evidence_json AS BLOB))>?2)",
+                side.table()
+            ),
+            rusqlite::params![
+                remote_prompt_protocol::REQUEST_BYTES,
+                remote_prompt_protocol::RESPONSE_BYTES
+            ],
+            |row| row.get(0),
+        )?;
+        if invalid {
+            return Err(remote_prompt_invalid_record());
+        }
         let mut statement = connection.prepare(&format!(
             "SELECT source_host_id,source_epoch,source_session_id,source_creation_id,idempotency_key FROM {}",
             side.table()))?;
-        let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?,
-            row.get::<_, u64>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?)))?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
         for row in rows {
             let (host, epoch, session, creation, key) = row?;
-            let canonical = |value: &str| Uuid::parse_str(value).ok()
-                .filter(|id| !id.is_nil() && id.to_string() == value)
-                .ok_or_else(remote_prompt_invalid_record);
-            let source = remote_prompt_authority::NativeRoot::new(canonical(&host)?, epoch,
-                session, canonical(&creation)?).map_err(|_| remote_prompt_invalid_record())?;
+            let canonical = |value: &str| {
+                Uuid::parse_str(value)
+                    .ok()
+                    .filter(|id| !id.is_nil() && id.to_string() == value)
+                    .ok_or_else(remote_prompt_invalid_record)
+            };
+            let source = remote_prompt_authority::NativeRoot::new(
+                canonical(&host)?,
+                epoch,
+                session,
+                canonical(&creation)?,
+            )
+            .map_err(|_| remote_prompt_invalid_record())?;
             remote_prompt_read_row(connection, side, &source, &key)?
                 .ok_or_else(remote_prompt_invalid_record)?;
         }
@@ -326,7 +359,12 @@ impl MailboxStore {
         authorize: impl FnOnce(bool) -> Result<G>,
     ) -> Result<RemotePromptJournalAdmission> {
         self.admit_remote_prompt_journal_while_running(
-            mode, side, intent, || Ok(()), authorize, |_, _| {},
+            mode,
+            side,
+            intent,
+            || Ok(()),
+            authorize,
+            |_, _| {},
         )
     }
 
@@ -437,7 +475,9 @@ impl MailboxStore {
     }
 
     fn read_remote_prompt_source_operation<G>(
-        &self, source: &remote_prompt_authority::NativeRoot, operation: Uuid,
+        &self,
+        source: &remote_prompt_authority::NativeRoot,
+        operation: Uuid,
         authorize_read: impl FnOnce() -> Result<G>,
     ) -> Result<Option<RemotePromptJournalRecord>> {
         let (host, epoch, session, creation) = source.components();
@@ -447,9 +487,16 @@ impl MailboxStore {
              AND source_host_id=?2 AND source_epoch=?3 AND source_session_id=?4 AND source_creation_id=?5",
             rusqlite::params![operation.to_string(), host.to_string(), epoch, session, creation.to_string()],
             |row| row.get(0)).optional()?;
-        let record = key.map(|key| remote_prompt_read_row(&connection,
-            RemotePromptJournalSide::Sender, source, &key)).transpose()?.flatten();
-        if record.as_ref().is_some_and(|record| record.operation_id != operation) {
+        let record = key
+            .map(|key| {
+                remote_prompt_read_row(&connection, RemotePromptJournalSide::Sender, source, &key)
+            })
+            .transpose()?
+            .flatten();
+        if record
+            .as_ref()
+            .is_some_and(|record| record.operation_id != operation)
+        {
             return Err(remote_prompt_invalid_record());
         }
         let _owner = authorize_read()?;

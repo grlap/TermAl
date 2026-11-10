@@ -491,6 +491,7 @@ fn codex_handing_off(state: &AppState, generation: u64) -> (String, SharedCodexR
         record.prompt_deliveries.insert(
             prompt_id.clone(),
             PromptDelivery {
+                remote_prompt: None,
                 federation_operation: None,
                 federation_handoff_started: false,
                 disposition: PromptDeliveryDisposition::HandingOff,
@@ -709,6 +710,7 @@ fn acp_handing_off(state: &AppState, runtime_id: &str, generation: u64) -> (Stri
     record.prompt_deliveries.insert(
         prompt_id.clone(),
         PromptDelivery {
+            remote_prompt: None,
             federation_operation: None,
             federation_handoff_started: false,
             disposition: PromptDeliveryDisposition::HandingOff,

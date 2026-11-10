@@ -3572,6 +3572,26 @@ fn update_parent_delegation_card_locked(
     None
 }
 
+// Structured submission is authoritative; an open tracker write remains
+// uncertain and must never be presented as a recorded evaluation.
+fn delegation_submission_recorded(delegation: &DelegationRecord) -> bool {
+    match delegation.mode {
+        DelegationMode::Reviewer => delegation.submitted_review_result.is_some(),
+        DelegationMode::Evaluator => {
+            delegation
+                .acceptance_evaluation
+                .as_ref()
+                .is_some_and(|target| {
+                    matches!(
+                        target.submission,
+                        AcceptanceEvaluationSubmission::Recorded { .. }
+                    )
+                })
+        }
+        DelegationMode::Explorer | DelegationMode::Worker => false,
+    }
+}
+
 fn refresh_delegation_from_child_locked(
     inner: &mut StateInner,
     delegation_index: usize,
@@ -3600,6 +3620,7 @@ fn refresh_delegation_from_child_locked(
     let delegation = inner.delegations[delegation_index].clone();
 
     let child_outcome = delegation_child_outcome(inner, &delegation.child_session_id);
+    let child_outcome = acceptance_evaluator_terminal_outcome(inner, &delegation, child_outcome);
     if !matches!(&child_outcome, DelegationChildOutcome::Running) {
         if let Some(result) = delegation
             .submitted_review_result
@@ -3690,10 +3711,17 @@ fn refresh_delegation_from_child_locked(
             notes,
         } => {
             let completed_at = stamp_now();
-            if delegation.mode == DelegationMode::Reviewer {
-                let unavailable_summary = "Reviewer completed without the required structured result. Inspect the full child output; TermAl did not classify this review as clean.";
+            let unavailable = if delegation.mode == DelegationMode::Reviewer {
+                Some((
+                    "Reviewer completed without the required structured result. Inspect the full child output; TermAl did not classify this review as clean.",
+                    "Structured review result was not submitted; findings are unavailable, not empty.",
+                ))
+            } else {
+                acceptance_evaluator_unavailable_result(&delegation)
+            };
+            if let Some((unavailable_summary, unavailable_finding)) = unavailable {
                 let mut unavailable_notes = vec![
-                    "The reviewer's human-readable output remains available through paged full-output reads."
+                    "Human-readable child output remains available through paged full-output reads."
                         .to_owned(),
                 ];
                 if let Some(reason) = delegation.review_result_recovery_error.as_deref() {
@@ -3714,7 +3742,7 @@ fn refresh_delegation_from_child_locked(
                         severity: "Unavailable".to_owned(),
                         file: None,
                         line: None,
-                        message: "Structured review result was not submitted; findings are unavailable, not empty.".to_owned(),
+                        message: unavailable_finding.to_owned(),
                     }],
                     changed_files: Vec::new(),
                     observed_workspace_changes: Vec::new(),
@@ -3774,6 +3802,7 @@ fn refresh_delegation_from_child_locked(
             };
             record_delegation_workspace_observations(inner, &delegation, &mut result);
             let public_summary = compact_delegation_public_summary(&result.summary);
+            let parent_detail = delegation_result_card_detail(&delegation, &result);
             {
                 let record = inner.delegations.get_mut(delegation_index)?;
                 record.status = DelegationStatus::Completed;
@@ -3799,7 +3828,7 @@ fn refresh_delegation_from_child_locked(
                 inner,
                 &delegation,
                 ParallelAgentStatus::Completed,
-                public_summary,
+                parent_detail,
             );
             Some(DelegationLifecycleDelta::Completed {
                 delegation_id: delegation.id,
@@ -4881,7 +4910,7 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
             if !matches!(child.runtime, SessionRuntime::None) || !child.is_local_session() {
                 return DelegationChildOutcome::Running;
             }
-            delegation_child_result_outcome(child, false).unwrap_or_else(|| {
+            delegation_child_result_for_status(child).unwrap_or_else(|| {
                 DelegationChildOutcome::Failed {
                     summary: delegation_child_missing_runtime_summary(child),
                 }
@@ -4892,14 +4921,27 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
             // the reviewer already wrote a well-formed result packet. For this
             // error state, trust only the latest assistant candidate so an older
             // packet followed by newer error text cannot mask the real failure.
-            delegation_child_latest_result_outcome(child).unwrap_or_else(|| {
+            delegation_child_result_for_status(child).unwrap_or_else(|| {
                 DelegationChildOutcome::Failed {
                     summary: child.session.preview.clone(),
                 }
             })
         }
-        SessionStatus::Idle => delegation_child_result_outcome(child, true)
+        SessionStatus::Idle => delegation_child_result_for_status(child)
             .unwrap_or(DelegationChildOutcome::IdleWithoutResult),
+    }
+}
+
+// Keep result provenance consistent for lifecycle settlement and evaluator
+// presentation. Error trusts only the latest candidate; normal completion can
+// find a packet before trailing runtime text, within the current turn.
+fn delegation_child_result_for_status(child: &SessionRecord) -> Option<DelegationChildOutcome> {
+    match child.session.status {
+        SessionStatus::Error => delegation_child_latest_result_outcome(child),
+        SessionStatus::Idle => delegation_child_result_outcome(child, true),
+        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping => {
+            delegation_child_result_outcome(child, false)
+        }
     }
 }
 

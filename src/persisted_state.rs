@@ -551,7 +551,7 @@ impl PersistedState {
             delegations: self.delegations,
             delegation_inventory: self.delegation_inventory,
             delegation_followup_admissions: HashMap::new(),
-            acceptance_evaluation_submissions_in_flight: HashSet::new(),
+            acceptance_evaluation_submissions_in_flight: HashMap::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
             #[cfg(test)]

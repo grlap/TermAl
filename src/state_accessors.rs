@@ -973,13 +973,7 @@ impl AppState {
             .agent_readiness_cache
             .write()
             .expect("agent readiness cache poisoned");
-        #[cfg(test)]
-        let phase_sink = cache.phase_sink.take();
-        *cache = AgentReadinessCache::fresh(snapshot);
-        #[cfg(test)]
-        {
-            cache.phase_sink = phase_sink;
-        }
+        cache.refresh_probe(snapshot);
         cache.snapshot.clone()
     }
 

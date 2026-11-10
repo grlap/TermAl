@@ -225,6 +225,74 @@ fn overloaded_naming(uuids: &[&str]) -> Value {
     frame
 }
 
+#[test]
+fn evaluator_quota_claude_requires_a_correlated_typed_terminal() {
+    for status in [Some(429), Some(529), None] {
+        let mut reader = Reader::new();
+        reader
+            .state
+            .agent_readiness_cache
+            .write()
+            .unwrap()
+            .refresh_probe(
+                [Agent::Claude, Agent::Codex]
+                    .into_iter()
+                    .map(|agent| AgentReadiness {
+                        agent,
+                        status: AgentReadinessStatus::Ready,
+                        blocking: false,
+                        detail: String::new(),
+                        warning_detail: None,
+                        command_path: None,
+                    })
+                    .collect(),
+            );
+        reader.feed(capable_init());
+        let uuid = reader.write(&prompt("fixture work", 1, "quota-frame"));
+        reader.feed(lifecycle(&uuid, "started"));
+        // A real effect boundary makes the terminal ineligible for replay.
+        reader.feed(assistant_tool_use("quota-effect", "Bash"));
+        let mut terminal = result_naming(&[&uuid]);
+        terminal["is_error"] = json!(true);
+        terminal["result"] = json!("You've hit your usage limit");
+        if let Some(status) = status {
+            terminal["api_error_status"] = json!(status);
+        }
+        assert!(reader.feed(terminal.clone()).retry.is_none());
+        assert_eq!(
+            reader
+                .state
+                .auto_acceptance_evaluator_selection(Agent::Codex)
+                .unwrap()
+                .0,
+            if status == Some(429) {
+                Agent::Codex
+            } else {
+                Agent::Claude
+            }
+        );
+        if status == Some(429) {
+            reader
+                .state
+                .agent_readiness_cache
+                .write()
+                .unwrap()
+                .evaluator_usage_limits[0] =
+                Some(std::time::Instant::now() - EVALUATOR_USAGE_LIMIT_WINDOW);
+            reader.feed(terminal);
+            assert_eq!(
+                reader
+                    .state
+                    .auto_acceptance_evaluator_selection(Agent::Codex)
+                    .unwrap()
+                    .0,
+                Agent::Claude,
+                "late duplicate cannot renew an expired quota observation"
+            );
+        }
+    }
+}
+
 fn task_notice_echo() -> Value {
     json!({"type": "user", "message": {"role": "user", "content":
         "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>"},
