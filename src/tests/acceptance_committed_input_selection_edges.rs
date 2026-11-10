@@ -71,6 +71,96 @@ fn register_newer(
 }
 
 #[test]
+fn a_terminal_failure_before_input_capture_does_not_supersede_an_older_pass() {
+    for explicit_null_timestamps in [false, true] {
+        let (state, parent, root, head, older) = passed_baseline();
+        let transport = install_sighting_transport(&state, &root, 1, present_sighting());
+        let mut results = never_started_results("input capture failed", &head);
+        results["runId"] = json!("test-before-input-failed");
+        if explicit_null_timestamps {
+            results["stages"][0]["started"] = Value::Null;
+            results["stages"][0]["ended"] = Value::Null;
+        }
+        register_newer(&state, &parent, &root, results);
+        assert_eq!(
+            decide(&state, &parent),
+            Ok(AcceptanceCommittedInputDecision::Admitted(
+                AcceptanceCommittedInputAdmission {
+                    native_source: None,
+                    run_id: older.run_id,
+                    commit: head,
+                }
+            ))
+        );
+        assert!(matches!(
+            request(&state, &parent).unwrap_or_else(|error| panic!("{}", error.message)),
+            AcceptanceEvaluationRequestResponse::Spawned { .. }
+        ));
+        assert_eq!(sighting_reads(&transport), 0);
+    }
+}
+
+#[test]
+fn ambiguous_missing_input_results_do_not_expose_an_older_pass() {
+    for case in [
+        "null input",
+        "malformed input",
+        "started stage",
+        "finished stage",
+        "completed stage without timestamps",
+        "missing stages",
+        "empty stages",
+        "null stages",
+        "malformed stages",
+        "missing terminal time",
+        "null terminal time",
+        "empty terminal time",
+        "successful exit",
+        "missing exit",
+        "successful result",
+    ] {
+        let (state, parent, root, head, _) = passed_baseline();
+        let transport = install_sighting_transport(&state, &root, 1, present_sighting());
+        let mut results = never_started_results("input capture failed", &head);
+        results["runId"] = json!("test-ambiguous-before-input");
+        match case {
+            "null input" => results["input"] = Value::Null,
+            "malformed input" => results["input"] = json!({"kind":"commit"}),
+            "started stage" => results["stages"][0]["started"] = json!("2026-10-30T10:00:00Z"),
+            "finished stage" => results["stages"][0]["ended"] = json!("2026-10-30T10:00:01Z"),
+            "completed stage without timestamps" => results["stages"][0]["state"] = json!("failed"),
+            "missing stages" => {
+                results.as_object_mut().unwrap().remove("stages");
+            }
+            "empty stages" => results["stages"] = json!([]),
+            "null stages" => results["stages"] = Value::Null,
+            "malformed stages" => results["stages"] = json!([null]),
+            "missing terminal time" => {
+                results.as_object_mut().unwrap().remove("ended");
+            }
+            "null terminal time" => results["ended"] = Value::Null,
+            "empty terminal time" => results["ended"] = json!(""),
+            "successful exit" => results["exitCode"] = json!(0),
+            "missing exit" => {
+                results.as_object_mut().unwrap().remove("exitCode");
+            }
+            "successful result" => results["state"] = json!("passed"),
+            _ => unreachable!(),
+        }
+        register_newer(&state, &parent, &root, results);
+        assert_refused_without_a_sighting(
+            &transport,
+            decide(&state, &parent),
+            "committed_input_scan_incomplete",
+            case,
+        );
+        let error = refusal(&state, request(&state, &parent), case);
+        assert!(error.message.starts_with("committed_input_scan_incomplete"));
+        assert_eq!(sighting_reads(&transport), 0, "{case}");
+    }
+}
+
+#[test]
 fn pending_results_are_observed_again_before_an_older_pass_is_selected() {
     let mut outcomes = Vec::new();
     for case in ["failed", "ineligible", "unacknowledged", "missing"] {

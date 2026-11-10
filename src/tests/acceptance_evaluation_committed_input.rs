@@ -1405,7 +1405,7 @@ fn an_acknowledged_record_rewritten_with_its_results_to_another_commit_is_not_ad
 
 /// Terminal results of a committed-input run that ended before any stage:
 /// refused as not clean before it, or failed once HEAD moved while its input
-/// was captured.
+/// was captured, or failed before source capture produced an input record.
 fn never_started_results(case: &str, commit: &str) -> Value {
     let (input, error) = match case {
         "refused dirty before the run" => (
@@ -1420,17 +1420,24 @@ fn never_started_results(case: &str, commit: &str) -> Value {
             json!({ "kind": "commit", "commit": commit, "cleanBefore": true }),
             "committed-input run refused: HEAD moved while the input was captured; no stage ran",
         ),
+        "input capture failed" => (
+            Value::Null,
+            "committed input unavailable: source owner refused capture",
+        ),
         other => panic!("no such case {other}"),
     };
-    json!({
+    let mut results = json!({
         "runId": COMMITTED_RUN_ID,
         "state": "failed",
         "exitCode": 1,
         "ended": "2026-10-30T10:00:01.000Z",
         "stages": [{ "name": "rust-tests", "state": "unrun" }],
-        "input": input,
         "error": error,
-    })
+    });
+    if !input.is_null() {
+        results["input"] = input;
+    }
+    results
 }
 
 #[test]
@@ -1438,6 +1445,7 @@ fn a_committed_input_run_that_never_started_leaves_the_task_in_the_legacy_flow()
     for case in [
         "refused dirty before the run",
         "HEAD moved while the input was captured",
+        "input capture failed",
     ] {
         let (state, parent, _store, named_root) = named_root_parent();
         let head = commit_named_root(&named_root);

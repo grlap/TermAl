@@ -362,6 +362,33 @@ fn acceptance_committed_input_result_start(
     {
         return Start::Pending;
     }
+    // Source capture can fail after registration but before an input record
+    // or any stage exists. Only the launcher's coherent terminal shape proves
+    // that this run never started; absent or malformed evidence stays unknown.
+    if results.get("input").is_none()
+        && results.get("state").and_then(Value::as_str) == Some("failed")
+        && results
+            .get("exitCode")
+            .and_then(Value::as_i64)
+            .is_some_and(|code| code != 0)
+        && results
+            .get("ended")
+            .and_then(Value::as_str)
+            .is_some_and(|ended| !ended.is_empty())
+        && results
+            .get("stages")
+            .and_then(Value::as_array)
+            .is_some_and(|stages| {
+                !stages.is_empty()
+                    && stages.iter().all(|stage| {
+                        stage.get("state").and_then(Value::as_str) == Some("unrun")
+                            && stage.get("started").is_none_or(Value::is_null)
+                            && stage.get("ended").is_none_or(Value::is_null)
+                    })
+            })
+    {
+        return Start::NotStarted;
+    }
     let Some(input) = TestRunCommittedInput::read(&results) else {
         return Start::Unknown;
     };
