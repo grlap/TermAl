@@ -81,6 +81,7 @@ mod delegation_wait;
 mod delegation_worker;
 mod delegation_worker_handoff;
 mod delegations;
+mod session_restart_recovery;
 mod source_capture;
 // Also mounts initial_state_snapshot.rs and state_diff_broadcast.rs, sharing
 // the snapshot-cache fixtures.

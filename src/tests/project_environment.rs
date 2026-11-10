@@ -321,6 +321,7 @@ fn project_environment_codex_thread_overlay_refreshes_without_mutating_prior_sel
                 None,
                 false,
                 ProjectEnvironment::default(),
+                false,
             )
             .unwrap();
     }

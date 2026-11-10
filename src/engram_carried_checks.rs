@@ -591,14 +591,16 @@ fn engram_fence_carried_for_other_session(
 
 /// Whether the Bash line `ran`, started from `workdir`, only reads: the
 /// launcher's `summary` of a run, or what the read-only reviewer policy
-/// allows (`claude_bash_command_is_read_only`), which fails closed. The
+/// allows without the object-query families that need a guarded execution
+/// environment (`claude_bash_command_preserves_carried_checks`). The
 /// one-call form's `pushd "DIR" &&` is read as running the rest in `DIR`.
 fn engram_command_reads_only(ran: &str, workdir: &str) -> bool {
     let (cwd, line) = match engram_one_call_prefix(ran.trim()) {
         Some((directory, rest)) => (directory, rest.trim().to_owned()),
         None => (workdir.to_owned(), ran.trim().to_owned()),
     };
-    engram_is_launcher_summary(&line, &cwd) || claude_bash_command_is_read_only(&line, &cwd)
+    engram_is_launcher_summary(&line, &cwd)
+        || claude_bash_command_preserves_carried_checks(&line, &cwd)
 }
 
 /// Whether `line`, run from `cwd`, is `node scripts/test-launcher.mjs summary

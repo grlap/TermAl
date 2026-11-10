@@ -131,6 +131,7 @@ impl StateInner {
             active_codex_approval_policy: None,
             active_codex_reasoning_effort: None,
             active_codex_sandbox_mode: None,
+            restart_recovery: None,
             active_turn_generation: 0,
             human_prompt_turn: None,
             mailbox_continuations: MailboxContinuationCoverage::default(),

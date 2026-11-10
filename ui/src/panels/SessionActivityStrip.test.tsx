@@ -57,32 +57,6 @@ describe("SessionActivityStrip", () => {
     expect(screen.getByRole("status").parentElement).toHaveAttribute("data-animated", "false");
   });
 
-  it("allocates a constant three-pixel box and limits animation to paint-only properties", async () => {
-    const nodeFsModule = "node:fs";
-    const { readFileSync } = await import(nodeFsModule) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const runtimeProcess = (globalThis as typeof globalThis & {
-      process: { cwd: () => string };
-    }).process;
-    const styles = readFileSync(`${runtimeProcess.cwd()}/src/styles.css`, "utf8");
-    const box = styles.match(/\.session-activity-strip \{([^}]+)\}/)?.[1];
-    expect(box).toMatch(/flex: 0 0 3px;/);
-    for (const property of ["height", "min-height", "max-height"]) {
-      expect(box).toContain(`${property}: 3px;`);
-    }
-    expect(box).toMatch(/padding: 0;/);
-    expect(box).toMatch(/margin: 0;/);
-    expect(box).toMatch(/border: 0;/);
-    expect(box).not.toMatch(/position:\s*(sticky|fixed|absolute)/);
-    const sweep = styles.slice(styles.indexOf("@keyframes session-activity-sweep"), styles.indexOf("@media (prefers-reduced-motion: reduce)", styles.indexOf("@keyframes session-activity-sweep")));
-    expect(sweep).not.toMatch(/\b(height|width|margin|padding|top|left|bottom|right):/);
-    expect(sweep).toContain("transform:");
-    expect(sweep).toContain("opacity:");
-    const stateRules = styles.match(/\.session-activity-strip\[data-[^}]+\}/g) ?? [];
-    expect(stateRules.length).toBeGreaterThan(0);
-    expect(stateRules.join("\n")).not.toMatch(/\b(height|width|margin|padding|flex|display):/);
-    // Match the busy selector's specificity, so reduced motion really wins.
-    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.session-activity-strip\[data-animated\] \.session-activity-strip-fill\s*\{\s*animation: none;\s*transform: none;/);
-  });
+  // Pixel geometry and motion are exercised with production CSS in
+  // scripts/check-activity-indicators.mjs, rather than pinning stylesheet text.
 });

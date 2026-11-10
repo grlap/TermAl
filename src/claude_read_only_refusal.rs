@@ -323,4 +323,10 @@ const CLAUDE_READ_ONLY_GIT_SUBCOMMANDS: &[&str] = &[
     "grep",
     "remote",
     "branch",
+    "cat-file",
+    "merge-base",
+    "ls-tree",
+    "rev-list",
+    "show-ref",
+    "for-each-ref",
 ];

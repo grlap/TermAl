@@ -999,8 +999,8 @@ impl AppState {
 
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
-            if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch)
+            if let Some(started) = self.dispatch_next_queued_turn_with_prompt(session_id, false)? {
+                self.deliver_queued_turn_dispatch(started)
                     .into_background_result("turn completion queue drain")
                     .map_err(|err| {
                         anyhow!("failed to deliver queued turn dispatch: {}", err.message)
@@ -1498,8 +1498,8 @@ impl AppState {
         }
         self.resume_pending_orchestrator_transitions()?;
         if preserve_accepted_turn_state && has_queued_prompts {
-            if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch)
+            if let Some(started) = self.dispatch_next_queued_turn_with_prompt(session_id, false)? {
+                self.deliver_queued_turn_dispatch(started)
                     .into_background_result("turn failure queue drain")
                     .map_err(|error| {
                         anyhow!("failed to deliver queued turn dispatch: {}", error.message)
@@ -1776,8 +1776,8 @@ impl AppState {
 
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
-            if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch)
+            if let Some(started) = self.dispatch_next_queued_turn_with_prompt(session_id, false)? {
+                self.deliver_queued_turn_dispatch(started)
                     .into_background_result("turn stop queue drain")
                     .map_err(|err| {
                         anyhow!("failed to deliver queued turn dispatch: {}", err.message)
@@ -1992,8 +1992,8 @@ impl AppState {
 
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
-            if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch)
+            if let Some(started) = self.dispatch_next_queued_turn_with_prompt(session_id, false)? {
+                self.deliver_queued_turn_dispatch(started)
                     .into_background_result("turn reset queue drain")
                     .map_err(|err| {
                         anyhow!("failed to deliver queued turn dispatch: {}", err.message)
@@ -2379,8 +2379,8 @@ impl AppState {
 
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
-            if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch)
+            if let Some(started) = self.dispatch_next_queued_turn_with_prompt(session_id, false)? {
+                self.deliver_queued_turn_dispatch(started)
                     .into_background_result("turn recovery queue drain")
                     .map_err(|err| {
                         anyhow!("failed to deliver queued turn dispatch: {}", err.message)

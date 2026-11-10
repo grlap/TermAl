@@ -3,12 +3,12 @@
 //! The persist worker writes a session's status as it changes, so a crash,
 //! kill or power loss can leave rows stored as `Active` or `Approval` with no
 //! process behind them. These tests write such a store directly, with no
-//! shutdown step, and boot it the way a restart after a crash does. Boot must
+//! shutdown step, and exercise boot before the listener is ready. Boot must
 //! end every interrupted turn: the sessions come back as errors with no
 //! runtime, a pending request is marked interrupted, each gets one restart
-//! notice, a queued prompt is kept but not sent, and neither session stays
-//! busy, so a later prompt or mailbox wake is not queued behind a turn that no
-//! longer exists.
+//! notice, and a queued prompt is kept but not sent at this seam. Post-listen
+//! recovery is covered by session_restart_recovery: an eligible interrupted
+//! root gets one durable opening and then drains its saved work in FIFO order.
 
 use super::*;
 
@@ -80,7 +80,7 @@ fn counts_as_busy(record: &SessionRecord) -> bool {
 }
 
 #[test]
-fn crash_restart_ends_turns_stored_mid_flight_without_dispatching_their_queue() {
+fn crash_restart_before_listen_ends_turns_without_dispatching_their_queue() {
     let root = TestTempRoot::create("termal-crash-drill");
     let workdir = root.path().to_string_lossy().into_owned();
     let persistence_path = root.path().join("termal.sqlite");
@@ -125,7 +125,7 @@ fn crash_restart_ends_turns_stored_mid_flight_without_dispatching_their_queue() 
     persist_state(&persistence_path, &inner).expect("the mid-turn store should persist");
     drop(inner);
 
-    let state = AppState::new_with_paths(workdir, persistence_path, templates_path)
+    let state = AppState::new_before_listen_with_paths(workdir, persistence_path, templates_path)
         .expect("a crash restart should boot the mid-turn store");
     // Join the background workers before asserting, so a failed assertion
     // cannot leave them running with the store open. The booted state stays

@@ -635,6 +635,7 @@ fn spawn_claude_runtime_with_environment(
     host_mcp_servers_only: bool,
     model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
     project_environment: &AppliedProjectEnvironment,
+    read_only_git: bool,
 ) -> Result<ClaudeRuntimeHandle> {
     if !state.agent_runtime_spawning_enabled {
         return Err(anyhow!(
@@ -674,6 +675,7 @@ fn spawn_claude_runtime_with_environment(
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
     project_environment.apply(&mut command);
+    apply_read_only_git_environment(read_only_git, &mut command);
     // Decided once, from the environment the process is handed.
     let bash_tool_shell = claude_bash_tool_shell(&command);
 

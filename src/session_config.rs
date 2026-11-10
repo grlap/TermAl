@@ -944,6 +944,7 @@ impl AppState {
             ));
         }
         let agent = inner.sessions[index].session.agent;
+        let read_only_git = session_is_read_only_delegation_child_locked(&inner, session_id);
         let project_environment = AppliedProjectEnvironment {
             values: project_environment_for_session_locked(&inner, session_id),
         };
@@ -1023,6 +1024,7 @@ impl AppState {
                 host_mcp_servers_only,
                 Some(response_tx),
                 &project_environment,
+                read_only_git,
             )
             .map_err(|err| {
                 ApiError::internal(format!(
@@ -1232,6 +1234,7 @@ impl AppState {
                         record.session.gemini_approval_mode,
                         engram_mcp.as_ref().map(|config| &config.stdio),
                         &project_environment,
+                        read_only_git,
                     )
                     .map_err(|err| {
                         ApiError::internal(format!(

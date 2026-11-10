@@ -128,11 +128,13 @@ fn prune_queued_prompt_durability_holds(record: &mut SessionRecord) {
         return;
     }
     let queued = &record.queued_prompts;
-    record.queued_prompt_durability_holds.retain(|prompt_id, _| {
-        queued
-            .iter()
-            .any(|entry| entry.pending_prompt.id == *prompt_id)
-    });
+    record
+        .queued_prompt_durability_holds
+        .retain(|prompt_id, _| {
+            queued
+                .iter()
+                .any(|entry| entry.pending_prompt.id == *prompt_id)
+        });
 }
 
 /// What a durability fence of `prompt_id` compares, read from a persisted
@@ -317,25 +319,27 @@ impl AppState {
                 .find(|queued| queued.pending_prompt.id == prompt_id)
                 .map(queued_prompt_durability_content);
             let settlement = match record.queued_prompt_durability_holds.get_mut(prompt_id) {
-                Some(hold) if hold.nonce == nonce && !hold.acknowledged => match (current, result) {
-                    (None, _) => QueuedPromptDurabilitySettlement::Orphaned,
-                    (Some(current), _) if current != hold.content => {
-                        hold.nonce = Uuid::new_v4().to_string();
-                        hold.content = current;
-                        hold.failure = None;
-                        QueuedPromptDurabilitySettlement::Changed
+                Some(hold) if hold.nonce == nonce && !hold.acknowledged => {
+                    match (current, result) {
+                        (None, _) => QueuedPromptDurabilitySettlement::Orphaned,
+                        (Some(current), _) if current != hold.content => {
+                            hold.nonce = Uuid::new_v4().to_string();
+                            hold.content = current;
+                            hold.failure = None;
+                            QueuedPromptDurabilitySettlement::Changed
+                        }
+                        (Some(_), Ok(())) => {
+                            hold.acknowledged = true;
+                            hold.failure = None;
+                            QueuedPromptDurabilitySettlement::Acknowledged
+                        }
+                        (Some(_), Err(error)) => {
+                            let reason = format!("{error:?}");
+                            hold.failure = Some(reason.clone());
+                            QueuedPromptDurabilitySettlement::Failed(reason)
+                        }
                     }
-                    (Some(_), Ok(())) => {
-                        hold.acknowledged = true;
-                        hold.failure = None;
-                        QueuedPromptDurabilitySettlement::Acknowledged
-                    }
-                    (Some(_), Err(error)) => {
-                        let reason = format!("{error:?}");
-                        hold.failure = Some(reason.clone());
-                        QueuedPromptDurabilitySettlement::Failed(reason)
-                    }
-                },
+                }
                 // No hold, or a later one: this outcome settles nothing.
                 _ => QueuedPromptDurabilitySettlement::Stale,
             };
@@ -382,10 +386,10 @@ impl AppState {
     /// paused queue: a Resume that met the head held was refused, so the
     /// paused queue waits for the next explicit Resume.
     fn dispatch_released_queued_prompt(&self, session_id: &str, prompt_id: &str) {
-        match self.dispatch_next_queued_turn(session_id, false) {
-            Ok(Some(dispatch)) => {
+        match self.dispatch_next_queued_turn_with_prompt(session_id, false) {
+            Ok(Some(started)) => {
                 if let TurnDispatchDeliveryOutcome::Rejected(error) =
-                    deliver_turn_dispatch(self, dispatch)
+                    self.deliver_queued_turn_dispatch(started)
                 {
                     eprintln!(
                         "queued prompt durability> the runtime rejected the dispatch after releasing `{prompt_id}` in session `{session_id}`: {}",
@@ -437,8 +441,12 @@ impl AppState {
             .find_visible_session_index(session_id)
             .and_then(|index| {
                 let record = &inner.sessions[index];
-                ordinary_queue_position(record).and_then(|position|
-                    queued_prompt_durability_resume_refusal(record, &record.queued_prompts[position]))
+                ordinary_queue_position(record).and_then(|position| {
+                    queued_prompt_durability_resume_refusal(
+                        record,
+                        &record.queued_prompts[position],
+                    )
+                })
             })
             .unwrap_or_else(|| RESUME_QUEUE_CHANGED_REFUSAL.to_owned());
         Err(ApiError::conflict(refusal))
@@ -462,14 +470,17 @@ impl AppState {
         {
             return UnstartedResumeStep::Keep;
         }
-        if let Some(refusal) = ordinary_queue_position(record).and_then(|position|
-            queued_prompt_durability_resume_refusal(record, &record.queued_prompts[position])) {
+        if let Some(refusal) = ordinary_queue_position(record).and_then(|position| {
+            queued_prompt_durability_resume_refusal(record, &record.queued_prompts[position])
+        }) {
             return UnstartedResumeStep::Refuse(refusal);
         }
-        let changed_to_saved_entry = ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position)).is_some_and(|head| {
-            checked_head != Some(head.pending_prompt.id.as_str())
-                && queued_prompt_kept_standalone(record, head)
-        });
+        let changed_to_saved_entry = ordinary_queue_position(record)
+            .and_then(|position| record.queued_prompts.get(position))
+            .is_some_and(|head| {
+                checked_head != Some(head.pending_prompt.id.as_str())
+                    && queued_prompt_kept_standalone(record, head)
+            });
         if changed_to_saved_entry {
             UnstartedResumeStep::RetryOnce
         } else {

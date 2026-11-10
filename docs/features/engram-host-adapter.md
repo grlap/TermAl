@@ -3392,6 +3392,11 @@ remains asynchronous for a live local turn: runtime interruption finishes on
 the background owner, the turn's closing observation is retained before
 runtime ownership clears, and repeated Stop calls remain idempotent. Persisted
 `Stopping` is classified as an interrupted turn during restart recovery.
+An eligible interrupted local root receives one ordinary host-authored
+[restart recovery opening](session-restart-recovery.md), after restored runnable
+mailbox wakes and before saved ordinary work. Existing queue pauses and Engram
+operator pause/Stop markers suppress it; no Engram authorization or expired
+approval is revived.
 
 See [Agent mailboxes](./agent-mailboxes.md) for the durable delivery and
 recovery contract.

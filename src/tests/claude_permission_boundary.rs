@@ -5,6 +5,177 @@
 use super::*;
 
 #[test]
+fn read_only_git_guards_reach_locked_provider_startup_and_refresh() {
+    fn check_lock_requests(state: AppState) {
+        TEST_STATE_MUTEX_REQUESTED.with(|slot| {
+            slot.replace(Some(Box::new(move || {
+                assert!(
+                    state.inner.is_not_held_by_current_thread_for_test(),
+                    "recursive provider startup state lock"
+                );
+                check_lock_requests(state);
+            })))
+        });
+    }
+    struct ClearLaunchSeams;
+    impl Drop for ClearLaunchSeams {
+        fn drop(&mut self) {
+            TEST_STATE_MUTEX_REQUESTED.with(|slot| slot.borrow_mut().take());
+            TEST_DEDICATED_COMMAND.with(|slot| slot.borrow_mut().take());
+            TEST_DEDICATED_COMMAND_INSPECTOR.with(|slot| slot.borrow_mut().take());
+        }
+    }
+
+    home_fixture::run(
+        "tests::claude_permission_boundary::read_only_git_guards_reach_locked_provider_startup_and_refresh",
+        |_home| {
+            for agent in [
+                Agent::Claude,
+                Agent::Kimi,
+                Agent::Gemini,
+                Agent::Cursor,
+                Agent::OpenCode,
+            ] {
+                for read_only in [false, true] {
+                    for refresh in [false, true] {
+                        let _clear = ClearLaunchSeams;
+                        let root = TestTempRoot::create("git-guard-locked-startup");
+                        let mut state = test_app_state();
+                        state.agent_runtime_spawning_enabled = true;
+                        let parent = test_session_id(&state, agent);
+                        let session = if read_only {
+                            super::delegation_support::install_required_review_delegation(
+                                &state, &parent,
+                            )
+                            .1
+                        } else {
+                            parent
+                        };
+                        {
+                            let mut inner = state.inner.lock().unwrap();
+                            let project = inner.create_project(
+                                Some("startup env".to_owned()),
+                                root.path().to_string_lossy().into_owned(),
+                                LOCAL_REMOTE_ID.to_owned(),
+                            );
+                            inner
+                                .projects
+                                .iter_mut()
+                                .find(|p| p.id == project.id)
+                                .unwrap()
+                                .environment = ProjectEnvironment(BTreeMap::from([
+                                ("GIT_NO_LAZY_FETCH".to_owned(), "0".to_owned()),
+                                ("GIT_ALLOW_PROTOCOL".to_owned(), "ssh".to_owned()),
+                            ]));
+                            let index = inner.find_session_index(&session).unwrap();
+                            let record = &mut inner.sessions[index];
+                            record.session.agent = agent;
+                            record.session.project_id = Some(project.id);
+                            record.session.workdir = root.path().to_string_lossy().into_owned();
+                            record.session.status = SessionStatus::Idle;
+                            record.session.claude_approval_mode = Some(if read_only {
+                                ClaudeApprovalMode::ReadOnlyAutoApprove
+                            } else {
+                                ClaudeApprovalMode::Ask
+                            });
+                            if !refresh {
+                                queue_prompt_on_record(
+                                    record,
+                                    PendingPrompt {
+                                        id: "guard-start".to_owned(),
+                                        timestamp: stamp_now(),
+                                        text: "fixture".to_owned(),
+                                        expanded_text: None,
+                                        source: None,
+                                        attachments: Vec::new(),
+                                        engram_interrupted: false,
+                                        is_engram_retained: false,
+                                    },
+                                    Vec::new(),
+                                );
+                            }
+                        }
+                        let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        let seen = observed.clone();
+                        let inspecting_state = state.clone();
+                        TEST_DEDICATED_COMMAND.with(|slot| {
+                            slot.replace(Some(Command::new(
+                                root.path().join("fixture-provider-never-executed"),
+                            )))
+                        });
+                        TEST_DEDICATED_COMMAND_INSPECTOR.with(|slot| {
+                            slot.replace(Some(Box::new(move |command| {
+                                assert!(
+                                    !inspecting_state
+                                        .inner
+                                        .is_not_held_by_current_thread_for_test(),
+                                    "exercise the production locked caller"
+                                );
+                                let env: BTreeMap<_, _> = command
+                                    .get_envs()
+                                    .filter_map(|(name, value)| {
+                                        value.map(|value| {
+                                            (
+                                                name.to_string_lossy().into_owned(),
+                                                value.to_string_lossy().into_owned(),
+                                            )
+                                        })
+                                    })
+                                    .collect();
+                                assert_eq!(
+                                    env.get("GIT_NO_LAZY_FETCH").map(String::as_str),
+                                    Some(if read_only { "1" } else { "0" })
+                                );
+                                assert_eq!(
+                                    env.get("GIT_ALLOW_PROTOCOL").map(String::as_str),
+                                    Some(if read_only { "" } else { "ssh" })
+                                );
+                                seen.store(true, std::sync::atomic::Ordering::SeqCst);
+                                Err(anyhow!("fixture stopped before provider launch"))
+                            })))
+                        });
+                        // A regression fails at the lock request rather than hanging.
+                        // Re-arm after every outer request; reject nested requests.
+                        if refresh {
+                            check_lock_requests(state.clone());
+                            let error = state
+                                .refresh_session_model_options(&session)
+                                .err()
+                                .expect("fixture stops before launch");
+                            assert!(
+                                error
+                                    .message
+                                    .contains("fixture stopped before provider launch"),
+                                "{}",
+                                error.message
+                            );
+                        } else {
+                            let mut inner = state.inner.lock().unwrap();
+                            let index = inner.find_session_index(&session).unwrap();
+                            check_lock_requests(state.clone());
+                            let error = state
+                                .start_next_queued_turn_locked(&mut inner, index, true)
+                                .err()
+                                .expect("fixture stops before launch");
+                            assert!(
+                                format!("{error:#}")
+                                    .contains("fixture stopped before provider launch"),
+                                "{error:#}"
+                            );
+                        }
+                        TEST_STATE_MUTEX_REQUESTED.with(|slot| slot.borrow_mut().take());
+                        assert!(
+                            observed.load(std::sync::atomic::Ordering::SeqCst),
+                            "{agent:?}, read_only={read_only}, refresh={refresh}"
+                        );
+                    }
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn claude_read_only_spawn_overrides_inherited_permission_shortcuts() {
     for resume in [None, Some("existing-session")] {
         let args = claude_cli_persistent_args(
@@ -29,6 +200,8 @@ fn claude_read_only_spawn_overrides_inherited_permission_shortcuts() {
         assert_eq!(settings["permissions"]["ask"], json!(["*"]));
         assert_eq!(settings["sandbox"]["autoAllowBashIfSandboxed"], false);
         assert_eq!(settings["disableAllHooks"], true);
+        assert_eq!(settings["env"]["GIT_NO_LAZY_FETCH"], "1");
+        assert_eq!(settings["env"]["GIT_ALLOW_PROTOCOL"], "");
     }
     for mode in [
         ClaudeApprovalMode::Ask,

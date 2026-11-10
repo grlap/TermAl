@@ -582,7 +582,7 @@ impl AppState {
             config["mcp_servers"][TERMAL_DELEGATION_MCP_SERVER_NAME]["tools"] =
                 codex_never_root_coordination_tool_approvals();
         }
-        let applied = {
+        let (applied, read_only_child) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             // A queued setup can outlive Stop or session removal. Keep the
             // runtime fence without turning this stale prompt into a fatal
@@ -593,6 +593,8 @@ impl AppState {
             if !inner.sessions[index].runtime.matches_runtime_token(runtime_token) {
                 return Ok((config, engram_enabled));
             }
+            let read_only_child =
+                session_is_read_only_delegation_child_locked(&inner, parent_session_id);
             let values = project_environment_for_session_locked(&inner, parent_session_id);
             let mut applied = AppliedProjectEnvironment { values };
             {
@@ -603,10 +605,17 @@ impl AppState {
                 }
                 inner.sessions[index].project_environment = applied.clone();
             }
-            applied
+            (applied, read_only_child)
         };
         let names: Vec<_> = applied.values.0.keys().map(String::as_str).collect();
-        merge_owned_agent_shell_env_into_codex_config(&mut config, &applied.values.0, &names, &[], "Project")?;
+        merge_owned_agent_shell_env_into_codex_config(
+            &mut config,
+            &applied.values.0,
+            &names,
+            &[],
+            "Project",
+        )?;
+        merge_read_only_git_environment(read_only_child, &mut config)?;
         Ok((config, engram_enabled))
     }
 
@@ -721,6 +730,7 @@ impl AppState {
             )?;
         }
 
+        merge_read_only_git_environment(read_only_child, &mut config)?;
         Ok(config)
     }
 }

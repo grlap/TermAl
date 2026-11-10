@@ -259,6 +259,10 @@ impl StateInner {
             if !record.is_local_session() || !session_needs_interruption_recovery(record) {
                 continue;
             }
+            // Archiving an idle session's retained observation is not a new
+            // activation event; only an interrupted running turn gets a wake.
+            let interrupted_turn = matches!(record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping);
             let recovery = {
                 let record = self
                     .session_mut_by_index(index)
@@ -270,10 +274,21 @@ impl StateInner {
                 continue;
             };
 
+            let restarted_at = Local::now().to_rfc3339();
+
             let message_id = self.next_message_id();
             let record = self
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
+            if interrupted_turn && record.restart_recovery.is_none()
+                && !restart_recovery_is_suppressed(record) {
+                record.restart_recovery = Some(SessionRestartRecovery {
+                    notice: recovery.text.clone(),
+                    restarted_at: restarted_at.clone(),
+                    queued_prompt_count: record.queued_prompts.len(),
+                    prompt_id: None,
+                });
+            }
             push_message_on_record(
                 record,
                 Message::Text {

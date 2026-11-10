@@ -240,9 +240,14 @@ fn root_exit_provider_error(result: &io::Result<std::process::ExitStatus>, label
 
 // Disposable protocol producers use the production provider workers. These
 // thread-local seams replace only executable discovery and observe completion.
-#[cfg(all(test, windows))]
+#[cfg(test)]
 thread_local! {
     static TEST_DEDICATED_COMMAND: std::cell::RefCell<Option<Command>> = const { std::cell::RefCell::new(None) };
+    static TEST_DEDICATED_COMMAND_INSPECTOR: std::cell::RefCell<Option<Box<dyn FnOnce(&Command) -> Result<()>>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(all(test, windows))]
+thread_local! {
     static TEST_DEDICATED_WAITER: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
     static TEST_DEDICATED_EXIT_GATE: std::cell::RefCell<Option<TestStopFenceGate>> = const { std::cell::RefCell::new(None) };
     static TEST_DEDICATED_WRITER: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
@@ -256,7 +261,7 @@ thread_local! {
 }
 
 fn dedicated_provider_command(build: impl FnOnce() -> Result<Command>) -> Result<Command> {
-    #[cfg(all(test, windows))]
+    #[cfg(test)]
     if let Some(command) = TEST_DEDICATED_COMMAND.with(|command| command.borrow_mut().take()) {
         return Ok(command);
     }
@@ -505,6 +510,10 @@ fn schedule_runtime_launch_cleanup(registry: &FailedRuntimeLaunchRegistry, entry
 // Attach while suspended, before even extracting the pipes. The raw child
 // guard and the kill-on-close job also cover failed SharedChild construction.
 fn spawn_dedicated_runtime(command: &mut Command, label: &str) -> Result<DedicatedRuntimeChild> {
+    #[cfg(test)]
+    if let Some(inspect) = TEST_DEDICATED_COMMAND_INSPECTOR.with(|slot| slot.borrow_mut().take()) {
+        inspect(command)?;
+    }
     #[cfg(windows)]
     retry_failed_runtime_launch_cleanup()?;
     #[cfg(windows)]

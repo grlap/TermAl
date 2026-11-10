@@ -808,6 +808,29 @@ fn review_freeze_codex_auto_response_and_bridge_projection_fail_closed() {
 
 #[test]
 fn review_freeze_missing_promisor_object_never_invokes_transport() {
+    let (root, request, oid, object) = missing_promisor_fixture();
+    let error = check_review_freeze(&root, &request).unwrap_err();
+    assert!(error.to_string().contains("Git verification"), "{error:#}");
+    assert!(!root.join(".git/transport-ran").exists());
+    assert!(!object.exists(), "missing object must not be fetched");
+    // Negative control: the same fixture really attempts the configured local
+    // transport when both guards are removed. The sentinel exits before SSH.
+    let output = git_command()
+        .current_dir(&root)
+        .env_remove("GIT_NO_LAZY_FETCH")
+        .env_remove("GIT_ALLOW_PROTOCOL")
+        .args(["cat-file", "-p", &oid])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        root.join(".git/transport-ran").exists(),
+        "transport control did not execute"
+    );
+    assert!(!object.exists());
+}
+
+fn missing_promisor_fixture() -> (TestTempRoot, ReviewFreezeRequest, String, PathBuf) {
     let (root, request) = fixture();
     let oid = run_git_test_command_output(&root, &["rev-parse", "HEAD:tracked.txt"]);
     let object = root.join(".git/objects").join(&oid[..2]).join(&oid[2..]);
@@ -829,25 +852,141 @@ fn review_freeze_missing_promisor_object_never_invokes_transport() {
     ] {
         run_git_test_command(&root, &args);
     }
-    let error = check_review_freeze(&root, &request).unwrap_err();
-    assert!(error.to_string().contains("Git verification"), "{error:#}");
-    assert!(!root.join(".git/transport-ran").exists());
-    assert!(!object.exists(), "missing object must not be fetched");
-    // Negative control: the same fixture really attempts the configured local
-    // transport when both guards are removed. The sentinel exits before SSH.
-    let output = git_command()
-        .current_dir(&root)
-        .env_remove("GIT_NO_LAZY_FETCH")
-        .env_remove("GIT_ALLOW_PROTOCOL")
-        .args(["cat-file", "-p", &oid])
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
+    (root, request, oid, object)
+}
+
+#[test]
+fn read_only_git_permission_and_execution_do_not_fetch_missing_promisor_objects() {
+    let (root, _, oid, object) = missing_promisor_fixture();
+    let state = test_app_state();
+    let parent = test_session_id(&state, Agent::Codex);
+    let (_, child) = super::delegation_support::install_required_review_delegation(&state, &parent);
+    let (runtime, _commands) = test_codex_runtime_handle("promisor-config");
+    let token = {
+        let mut inner = state.inner.lock().unwrap();
+        let project = inner.create_project(
+            Some("guard overlay".to_owned()),
+            root.to_string_lossy().into_owned(),
+            LOCAL_REMOTE_ID.to_owned(),
+        );
+        inner
+            .projects
+            .iter_mut()
+            .find(|p| p.id == project.id)
+            .unwrap()
+            .environment = ProjectEnvironment(BTreeMap::from([
+            ("GIT_NO_LAZY_FETCH".to_owned(), "0".to_owned()),
+            ("GIT_ALLOW_PROTOCOL".to_owned(), "ssh".to_owned()),
+        ]));
+        let index = inner.find_session_index(&child).unwrap();
+        inner.sessions[index].session.project_id = Some(project.id);
+        inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+        inner.sessions[index].runtime.runtime_token().unwrap()
+    };
+    let command_text = format!("git cat-file -p {oid}");
+    let decision = classify_claude_control_request(
+        &json!({"type":"control_request", "request_id":"promisor",
+            "request":{"subtype":"can_use_tool", "tool_name":"Bash",
+                "input":{"command":command_text}}}),
+        &mut ClaudeTurnState::default(),
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        true,
+        root.to_str().unwrap(),
+        false,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(matches!(
+        decision,
+        ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow { .. })
+    ));
+
+    // A writable parent's command remains unaffected, and proves the fixture
+    // actually reaches the local transport sentinel before attempting SSH.
+    let mut control = git_command();
+    apply_read_only_git_environment(false, &mut control);
     assert!(
-        root.join(".git/transport-ran").exists(),
-        "transport control did not execute"
+        !control
+            .current_dir(&root)
+            .args(["cat-file", "-p", &oid])
+            .output()
+            .unwrap()
+            .status
+            .success()
     );
-    assert!(!object.exists());
+    assert!(root.join(".git/transport-ran").exists());
+    fs::remove_file(root.join(".git/transport-ran")).unwrap();
+
+    for codex in [false, true] {
+        let mut command = git_command();
+        command
+            .env("GIT_NO_LAZY_FETCH", "0")
+            .env("GIT_ALLOW_PROTOCOL", "ssh");
+        if codex {
+            let (config, _) = state
+                .termal_delegation_mcp_codex_config_for_shared_runtime(
+                    &child,
+                    &token,
+                    &root,
+                    CodexApprovalPolicy::Never,
+                )
+                .unwrap();
+            assert_eq!(
+                config["shell_environment_policy"]["set"]["GIT_NO_LAZY_FETCH"],
+                "1"
+            );
+            assert_eq!(
+                config["shell_environment_policy"]["set"]["GIT_ALLOW_PROTOCOL"],
+                ""
+            );
+            for (name, value) in config["shell_environment_policy"]["set"]
+                .as_object()
+                .unwrap()
+            {
+                command.env(name, value.as_str().unwrap());
+            }
+        } else {
+            apply_read_only_git_environment(true, &mut command);
+        }
+        let mut local = git_command();
+        for (name, value) in command.get_envs() {
+            match value {
+                Some(value) => {
+                    local.env(name, value);
+                }
+                None => {
+                    local.env_remove(name);
+                }
+            }
+        }
+        let local_output = local
+            .current_dir(&root)
+            .args(["cat-file", "-t", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(
+            local_output.status.success(),
+            "local object inspection failed"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&local_output.stdout).trim(),
+            "commit"
+        );
+        assert!(
+            !command
+                .current_dir(&root)
+                .args(["cat-file", "-p", &oid])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            !root.join(".git/transport-ran").exists(),
+            "transport ran: codex={codex}"
+        );
+        assert!(!object.exists(), "missing object was fetched");
+    }
 }
 
 #[test]

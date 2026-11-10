@@ -19,9 +19,11 @@
 // Failed first-follow-up starts carry typed attempt identity to the
 // delegation_followup_admission settlement hook. Both the off-lock wrapper
 // and direct locked callers must settle that error after releasing state.
-// from `turn_lifecycle.rs`. Persisted mailbox and user queues deliberately
-// remain dormant after process restart: the next user prompt, explicit resume,
-// or new inbound wake is the activation event that drains them. Workflow-owned
+// from `turn_lifecycle.rs`. Persisted mailbox and user queues without an
+// interrupted turn remain dormant after process restart: the next user prompt,
+// explicit resume, or new inbound wake activates their drain. An interrupted
+// eligible root instead gets one durable restart recovery opening, behind
+// runnable mailbox wakes and ahead of ordinary saved work. Workflow-owned
 // queue heads are different: delegation waits and orchestrator transitions
 // already consumed their durable trigger before committing the queued prompt,
 // so startup re-kicks those queue heads to preserve crash recovery. A user
@@ -203,6 +205,7 @@ impl AppState {
         gemini_approval_mode: Option<GeminiApprovalMode>,
         engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
         project_environment: &AppliedProjectEnvironment,
+        read_only_git: bool,
     ) -> Result<AcpRuntimeHandle> {
         #[cfg(test)]
         {
@@ -226,6 +229,7 @@ impl AppState {
             gemini_approval_mode,
             engram_mcp,
             project_environment,
+            read_only_git,
         )
     }
 
@@ -286,17 +290,31 @@ impl AppState {
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(inner, &session_id);
         let host_mcp_servers_only = session_is_acceptance_evaluator_child_locked(inner, &session_id);
         let host_shutdown = self.shutdown_signal_tx.borrow();
-        if *host_shutdown { return Ok(None); }
+        if *host_shutdown {
+            return Ok(None);
+        }
+        let read_only_git = session_is_read_only_delegation_child_locked(inner, &session_id);
         let project_environment = project_environment_for_session_locked(inner, &session_id);
-        let mut started = self.start_turn_on_record_with_environment(
-            &mut inner.sessions[index],
-            queued.pending_prompt.id.clone(), queued.pending_prompt.text.clone(),
-            queued.attachments.clone(), queued.pending_prompt.expanded_text.clone(),
-            queued.pending_prompt.source.clone(), engram_mcp, host_mcp_servers_only,
-            project_environment,
-        ).map_err(|error| annotate_queued_followup_start_failure(
-            inner, index, anyhow!("failed to dispatch queued prompt: {}", error.message),
-        ))?;
+        let mut started = self
+            .start_turn_on_record_with_environment(
+                &mut inner.sessions[index],
+                queued.pending_prompt.id.clone(),
+                queued.pending_prompt.text.clone(),
+                queued.attachments.clone(),
+                queued.pending_prompt.expanded_text.clone(),
+                queued.pending_prompt.source.clone(),
+                engram_mcp,
+                host_mcp_servers_only,
+                project_environment,
+                read_only_git,
+            )
+            .map_err(|error| {
+                annotate_queued_followup_start_failure(
+                    inner,
+                    index,
+                    anyhow!("failed to dispatch queued prompt: {}", error.message),
+                )
+            })?;
         drop(host_shutdown);
         EngramHost::turn_started(inner, index);
         let record = &mut inner.sessions[index];
@@ -359,6 +377,7 @@ impl AppState {
         engram_mcp: Option<EngramMcpRuntimeConfig>,
         host_mcp_servers_only: bool,
         project_environment: ProjectEnvironment,
+        read_only_git: bool,
     ) -> std::result::Result<StartedTurn, ApiError> {
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
@@ -390,6 +409,17 @@ impl AppState {
             .map(|attachment| attachment.metadata.clone())
             .collect::<Vec<_>>();
         record.active_turn_generation = record.active_turn_generation.wrapping_add(1).max(1);
+        // A later ordinary turn is a new interruption owner. Keep the marker
+        // while its recovery prompt is active or still queued; a restart of
+        // that recovery must not mint a second wake for the original turn.
+        if record.restart_recovery.as_ref().is_some_and(|recovery| {
+            recovery.prompt_id.as_deref() != Some(message_id.as_str())
+                && !record.queued_prompts.iter().any(|queued| {
+                    Some(queued.pending_prompt.id.as_str()) == recovery.prompt_id.as_deref()
+                })
+        }) {
+            record.restart_recovery = None;
+        }
         let active_turn_generation = record.active_turn_generation;
         // A successor never inherits the previous opening's presentation.
         record.active_turn_start_message_count = Some(record.session.messages.len());
@@ -514,6 +544,7 @@ impl AppState {
                             host_mcp_servers_only,
                             None,
                             &applied,
+                            read_only_git,
                         )
                         .map_err(|err| {
                             ApiError::internal(format!(
@@ -689,6 +720,7 @@ impl AppState {
                                 record.session.gemini_approval_mode,
                                 engram_mcp.as_ref().map(|config| &config.stdio),
                                 &applied,
+                                read_only_git,
                             )
                             .map_err(|err| {
                                 ApiError::internal(format!(
@@ -821,7 +853,9 @@ impl AppState {
     /// them at the queue front; in that mixed case the already-committed workflow
     /// activation drains the mailbox wake first without overtaking it.
     /// A user prompt before the workflow entry remains a strict FIFO barrier,
-    /// so restart leaves the entire queue dormant until a genuine activation.
+    /// so that queue stays dormant until a genuine activation. An eligible
+    /// interrupted root has a separate durable restart recovery opening ahead
+    /// of ordinary saved work; its ACK may activate the preceding mailbox wakes.
     fn dispatch_orphaned_workflow_prompts(&self) {
         let session_ids: Vec<String> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -926,7 +960,16 @@ impl AppState {
     fn requeue_rejected_orphaned_workflow_prompt(
         &self,
         session_id: &str,
+        queued: QueuedPromptRecord,
+    ) -> Result<()> {
+        self.requeue_rejected_workflow_prompt(session_id, queued, false)
+    }
+
+    fn requeue_rejected_workflow_prompt(
+        &self,
+        session_id: &str,
         mut queued: QueuedPromptRecord,
+        recovery_only: bool,
     ) -> Result<()> {
         if queued.source != QueuedPromptSource::Orchestrator {
             return Ok(());
@@ -935,6 +978,18 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        // Revalidate the producer's identity with the queue mutation: a later
+        // turn may already have replaced or cleared the recovery marker.
+        if recovery_only
+            && !inner.sessions[index]
+                .restart_recovery
+                .as_ref()
+                .is_some_and(|recovery| {
+                    recovery.prompt_id.as_deref() == Some(queued.pending_prompt.id.as_str())
+                })
+        {
+            return Ok(());
+        }
         // A receipted prompt comes back only under a new prompt id held for a
         // new durability acknowledgement (prompt_delivery.rs).
         if inner.sessions[index]
@@ -946,11 +1001,13 @@ impl AppState {
             self.requeue_rejected_prompt_delivery_at(session_id, &queued.pending_prompt.id, true)?;
             return Ok(());
         }
+        let previous_prompt_id = queued.pending_prompt.id.clone();
         queued.pending_prompt.id = inner.next_message_id();
         queued.pending_prompt.timestamp = stamp_now();
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
+        record.remap_restart_recovery_prompt(&previous_prompt_id, &queued.pending_prompt.id);
         record.queued_prompts.push_front(queued);
         sync_pending_prompts(record);
         self.commit_locked(&mut inner)?;
@@ -1026,6 +1083,27 @@ impl AppState {
         Ok(self
             .dispatch_next_queued_turn_with_prompt(session_id, allow_blocked_dispatch)?
             .map(|started| started.dispatch))
+    }
+
+    /// A queued recovery rejected before send stays owned by its persisted
+    /// marker. All other prompts and uncertain/accepted handoffs keep their
+    /// existing outcome; restoration never recursively drains the queue.
+    fn deliver_queued_turn_dispatch(
+        &self,
+        started: StartedQueuedTurn,
+    ) -> TurnDispatchDeliveryOutcome {
+        let session_id = started.dispatch.session_id().to_owned();
+        let outcome = deliver_turn_dispatch(self, started.dispatch);
+        if matches!(&outcome, TurnDispatchDeliveryOutcome::Rejected(_)) {
+            if let Err(error) =
+                self.requeue_rejected_workflow_prompt(&session_id, started.queued, true)
+            {
+                eprintln!(
+                    "restart recovery> failed restoring rejected opening for `{session_id}`: {error:#}"
+                );
+            }
+        }
+        outcome
     }
 
     /// Keeps the prompt actually admitted after mailbox revalidation, so a
@@ -1906,6 +1984,7 @@ impl AppState {
             let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
             let host_mcp_servers_only =
                 session_is_acceptance_evaluator_child_locked(&inner, session_id);
+            let read_only_git = session_is_read_only_delegation_child_locked(&inner, session_id);
             let project_environment = project_environment_for_session_locked(&inner, session_id);
             let started = self.start_turn_on_record_with_environment(
                 inner
@@ -1919,6 +1998,7 @@ impl AppState {
                 engram_mcp,
                 host_mcp_servers_only,
                 project_environment,
+                read_only_git,
             )?;
             EngramHost::turn_started(&mut inner, index);
             let revision = self
@@ -1984,6 +2064,7 @@ impl AppState {
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
         let host_mcp_servers_only =
             session_is_acceptance_evaluator_child_locked(&inner, session_id);
+        let read_only_git = session_is_read_only_delegation_child_locked(&inner, session_id);
         let project_environment = project_environment_for_session_locked(&inner, session_id);
         let started = self.start_turn_on_record_with_environment(
             inner
@@ -1997,6 +2078,7 @@ impl AppState {
             engram_mcp,
             host_mcp_servers_only,
             project_environment,
+            read_only_git,
         )?;
         EngramHost::turn_started(&mut inner, index);
         let revision = self

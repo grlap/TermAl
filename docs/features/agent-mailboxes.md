@@ -247,10 +247,14 @@ When recovery queues a never-woken row it advances from
 `durableButNotWoken` to `recoveredWake`. A boot pass may also recreate a wake
 for an unread row already marked `deliveredToIdleSession`; its mutable
 `notificationState` returns to `recoveredWake` while the immutable original
-receipt outcome remains `deliveredToIdleSession`. Boot recovery only
-materializes the visible queued prompt: restart itself never dispatches a
-mailbox-only queue. The next genuine activation of that session drains the
-recovery wake first. A committed delegation-wait or orchestrator resume is
+receipt outcome remains `deliveredToIdleSession`. For a root without an
+interrupted turn, boot recovery only materializes the visible queued prompt:
+restart alone does not dispatch its mailbox-only queue. The next genuine
+activation drains the recovery wake first. An eligible interrupted root gets
+one [restart recovery opening](session-restart-recovery.md); its durability
+acknowledgement drains runnable mailbox wakes before that opening, then saved
+ordinary work. Existing pause and Stop opt-outs still suppress recovery.
+A committed delegation-wait or orchestrator resume is
 itself a durable activation; if one is already queued behind a boot-recovered
 mailbox wake, startup drains the mailbox wake first and then continues the
 workflow normally. An ordinary user prompt already at the queue head remains an

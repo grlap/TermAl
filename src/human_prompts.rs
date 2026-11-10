@@ -682,6 +682,7 @@ impl AppState {
             inner.sessions[index]
                 .queued_prompts
                 .push_front(queued.clone());
+            let read_only_git = session_is_read_only_delegation_child_locked(&inner, session_id);
             let project_environment = project_environment_for_session_locked(&inner, session_id);
             let started = self.start_turn_on_record_with_environment(
                 &mut inner.sessions[index],
@@ -693,6 +694,7 @@ impl AppState {
                 mcp,
                 host_only,
                 project_environment,
+                read_only_git,
             );
             let mut started = match started {
                 Ok(started) => started,

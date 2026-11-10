@@ -1752,6 +1752,7 @@ impl AppState {
                 .ok_or_else(|| anyhow!("prompt `{prompt_id}` was already re-queued"))?;
             entry.pending_prompt.id = new_prompt_id.clone();
             entry.pending_prompt.timestamp = stamp_now();
+            record.remap_restart_recovery_prompt(prompt_id, &new_prompt_id);
             queue_receipted_orchestrator_prompt_on_record(
                 record,
                 entry.pending_prompt,

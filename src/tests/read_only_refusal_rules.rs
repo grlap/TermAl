@@ -10,6 +10,9 @@ use super::delegation_support::test_app_state_with_delegation_codex_runtime;
 use super::evaluator_tool_access::{delegation_child, tracker_project};
 use super::*;
 
+#[path = "read_only_git_inspection.rs"]
+mod git_inspection;
+
 const WORKSPACE: &str = "/work/repo";
 
 /// The host's answer to one request of a read-only child: `Ok` when it is
@@ -237,6 +240,12 @@ fn the_refusals_command_lists_match_what_the_checker_allows() {
         ("grep", "git grep -n refusal"),
         ("remote", "git remote -v"),
         ("branch", "git branch --show-current"),
+        ("cat-file", "git cat-file -t HEAD"),
+        ("merge-base", "git merge-base HEAD main"),
+        ("ls-tree", "git ls-tree HEAD"),
+        ("rev-list", "git rev-list HEAD"),
+        ("show-ref", "git show-ref"),
+        ("for-each-ref", "git for-each-ref"),
     ];
     assert_eq!(
         git_forms.iter().map(|(sub, _)| *sub).collect::<Vec<_>>(),
@@ -273,7 +282,6 @@ fn the_refusals_command_lists_match_what_the_checker_allows() {
         "am",
         "apply",
         "bisect",
-        "cat-file",
         "checkout",
         "cherry-pick",
         "clean",

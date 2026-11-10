@@ -1715,7 +1715,12 @@ fn restart_after_acceptance_reads_delivered_and_never_replays() {
         Some(generation),
         PromptDeliveryOutcome::Accepted,
     );
+    // This case isolates receipt replay from the separate root-recovery
+    // opening. An explicit pause opts out of that opening during the boot.
+    // Unpause before the original dispatch/non-replay assertions below.
+    fixture.set_paused(true);
     let fixture = host.restart(fixture);
+    fixture.set_paused(false);
     assert_eq!(
         fixture
             .delivery(&id)
@@ -1750,7 +1755,11 @@ fn restart_after_rejection_requeues_only_under_a_new_prompt_id_and_prerequisite(
         Some(generation),
         PromptDeliveryOutcome::Rejected("the runtime was gone".to_owned()),
     );
+    // Keep the receipt-only restart independent of the root recovery opening;
+    // the unpaused combination is covered in session_restart_recovery.
+    fixture.set_paused(true);
     let mut restarted = host.restart(fixture);
+    restarted.set_paused(false);
     assert_eq!(
         restarted
             .delivery(&id)

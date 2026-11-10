@@ -29,6 +29,11 @@ Frontend:
   source/diff/file/git panels, terminal panel behavior, remotes, themes, and
   the main `App` integration harness.
 - Run with `cd ui && npx vitest run`.
+- Activity indicators have a real-browser guard:
+  `node scripts/check-activity-indicators.mjs --chrome-executable ABSOLUTE_PATH`
+  from the repository root after `npm ci` in `ui/`. It checks working/stopping
+  labels, reserved geometry and absence of status animation timelines for one
+  and six sessions, including offscreen, hidden and reduced-motion cases.
 - Treat nondeterminism as a defect in the test, its assumptions, the runner
   resource contract, or the product. Do not use retries, quarantine, or larger
   timeouts as a substitute for finding and fixing the cause.

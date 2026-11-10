@@ -604,7 +604,7 @@ impl AppState {
         }
         let dispatch = self.drain_resumed_queue(session_id, owner.clone())?;
         let dispatch = self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
-        Ok(dispatch.map(|started| deliver_turn_dispatch(self, started.dispatch)))
+        Ok(dispatch.map(|started| self.deliver_queued_turn_dispatch(started)))
     }
 
     /// One drain of a resumed queue: bound to `owner` when given, otherwise

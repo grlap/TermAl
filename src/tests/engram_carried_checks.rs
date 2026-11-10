@@ -605,6 +605,14 @@ fn only_a_command_that_reads_leaves_a_carried_check_unfenced() {
         assert!(engram_command_reads_only(reads, workdir), "{reads}");
     }
     for writes in [
+        "git cat-file -p HEAD:README.md",
+        "git ls-tree HEAD",
+        "git rev-list HEAD",
+        "git for-each-ref refs/heads",
+        "git show-ref --heads",
+        "git merge-base HEAD HEAD",
+        "true && 'git' --no-pager cat-file -t HEAD",
+        "for rev in HEAD; do git cat-file -p \"$rev\"; done",
         "cargo build",
         "echo changed > README.md",
         "node scripts/test-launcher.mjs full",
@@ -1246,6 +1254,30 @@ fn a_read_only_command_in_the_worktree_preserves_artifact_custody_without_verifi
         .expect("the end should record");
     let run = finish_run(&worktree, "passed", &"f".repeat(64));
     assert_carried_artifact_custody(&turn, &run, true);
+}
+
+#[test]
+fn unguarded_object_queries_fence_writable_claude_carried_checks() {
+    for line in [
+        "git cat-file -p HEAD:README.md",
+        "true && 'git' --no-pager ls-tree HEAD",
+        "for rev in HEAD; do git rev-list \"$rev\"; done",
+    ] {
+        let (turn, worktree) = ordinary_carried_turn("carried-unguarded-object-query");
+        turn.record_mut(|record| record.session.agent = Agent::Claude);
+        ordinary_launch_gate(&turn, &worktree, false);
+        assert!(
+            claude_bash_command_is_read_only(line, worktree.to_str().unwrap()),
+            "guarded reviewer still admits {line}"
+        );
+        run_own_command(&turn, &worktree, "inspect", line);
+        assert!(
+            carried_fence(&turn).is_some(),
+            "unguarded command must fence: {line}"
+        );
+        finish_run(&worktree, "passed", &"f".repeat(64));
+        assert_carried_fence_custody(&turn, "this session ran");
+    }
 }
 
 #[test]

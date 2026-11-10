@@ -86,6 +86,7 @@ fn spawn_acp_runtime_with_environment(
     gemini_approval_mode: Option<GeminiApprovalMode>,
     engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
     project_environment: &AppliedProjectEnvironment,
+    read_only_git: bool,
 ) -> Result<AcpRuntimeHandle> {
     // Consumed before any early return, so a failed spawn cannot leave the
     // one-shot test seam armed for a later runtime on the same thread.
@@ -115,6 +116,7 @@ fn spawn_acp_runtime_with_environment(
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
     project_environment.apply(&mut command);
+    apply_read_only_git_environment(read_only_git, &mut command);
     command
         .current_dir(&cwd)
         .stdin(Stdio::piped())

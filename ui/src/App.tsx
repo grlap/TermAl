@@ -1,4 +1,5 @@
 import { ALL_SESSION_HOSTS } from "./session-host-filter";
+import { startActivityAnimationVisibility } from "./activity-animation-visibility";
 import {
   startTransition,
   useCallback,
@@ -263,6 +264,7 @@ import {
 } from "./app-shell-internals";
 
 export default function App() {
+  useEffect(() => startActivityAnimationVisibility(document.documentElement), []);
   const [workspaceViewId] = useState(() => ensureWorkspaceViewId());
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);

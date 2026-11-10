@@ -163,11 +163,24 @@ impl AppState {
 
 // Existing adapter fixtures exercise the no-project-settings path.
 #[cfg(test)]
-fn spawn_acp_runtime(state: AppState, session_id: String, cwd: String, agent: AcpAgent,
-    gemini_approval_mode: Option<GeminiApprovalMode>, engram: Option<&TermalDelegationMcpStdioConfig>)
-    -> Result<AcpRuntimeHandle> {
-    spawn_acp_runtime_with_environment(state, session_id, cwd, agent, gemini_approval_mode,
-        engram, &AppliedProjectEnvironment::default())
+fn spawn_acp_runtime(
+    state: AppState,
+    session_id: String,
+    cwd: String,
+    agent: AcpAgent,
+    gemini_approval_mode: Option<GeminiApprovalMode>,
+    engram: Option<&TermalDelegationMcpStdioConfig>,
+) -> Result<AcpRuntimeHandle> {
+    spawn_acp_runtime_with_environment(
+        state,
+        session_id,
+        cwd,
+        agent,
+        gemini_approval_mode,
+        engram,
+        &AppliedProjectEnvironment::default(),
+        false,
+    )
 }
 
 #[cfg(test)]
@@ -175,20 +188,49 @@ fn spawn_claude_runtime(state: AppState, session_id: String, cwd: String, model:
     approval_mode: ClaudeApprovalMode, effort: ClaudeEffortLevel, resume_session_id: Option<String>,
     delegation_mcp_config: String, engram: Option<&TermalDelegationMcpStdioConfig>,
     host_mcp_servers_only: bool,
-    model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>)
-    -> Result<ClaudeRuntimeHandle> {
-    spawn_claude_runtime_with_environment(state, session_id, cwd, model, approval_mode, effort,
-        resume_session_id, delegation_mcp_config, engram, host_mcp_servers_only, model_options_tx,
-        &AppliedProjectEnvironment::default())
+    model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
+) -> Result<ClaudeRuntimeHandle> {
+    spawn_claude_runtime_with_environment(
+        state,
+        session_id,
+        cwd,
+        model,
+        approval_mode,
+        effort,
+        resume_session_id,
+        delegation_mcp_config,
+        engram,
+        host_mcp_servers_only,
+        model_options_tx,
+        &AppliedProjectEnvironment::default(),
+        approval_mode == ClaudeApprovalMode::ReadOnlyAutoApprove,
+    )
 }
 
 #[cfg(test)]
 impl AppState {
-    fn start_turn_on_record(&self, record: &mut SessionRecord, message_id: String, prompt: String,
-        attachments: Vec<PromptImageAttachment>, expanded_prompt: Option<String>,
-        source: Option<MessageSource>, engram: Option<EngramMcpRuntimeConfig>, host_only: bool)
-        -> std::result::Result<StartedTurn, ApiError> {
-        self.start_turn_on_record_with_environment(record, message_id, prompt, attachments,
-            expanded_prompt, source, engram, host_only, ProjectEnvironment::default())
+    fn start_turn_on_record(
+        &self,
+        record: &mut SessionRecord,
+        message_id: String,
+        prompt: String,
+        attachments: Vec<PromptImageAttachment>,
+        expanded_prompt: Option<String>,
+        source: Option<MessageSource>,
+        engram: Option<EngramMcpRuntimeConfig>,
+        host_only: bool,
+    ) -> std::result::Result<StartedTurn, ApiError> {
+        self.start_turn_on_record_with_environment(
+            record,
+            message_id,
+            prompt,
+            attachments,
+            expanded_prompt,
+            source,
+            engram,
+            host_only,
+            ProjectEnvironment::default(),
+            false,
+        )
     }
 }

@@ -789,6 +789,8 @@ fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    restart_recovery: Option<SessionRestartRecovery>,
     // Only the writer that committed this captured row may acknowledge it.
     // The stamp and its incarnation are never stored or restored as proof.
     #[serde(skip)]
@@ -958,6 +960,7 @@ impl PersistedSessionRecord {
     fn clone_without_messages(&self) -> Self {
         Self {
             source_stamp: self.source_stamp.clone(),
+            restart_recovery: self.restart_recovery.clone(),
             federation_mailbox_binding: self.federation_mailbox_binding.clone(),
             federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding.clone(),
             federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings.clone(),
@@ -1005,6 +1008,7 @@ impl PersistedSessionRecord {
 
         Self {
             source_stamp: Some(PersistSessionWriteStamp::capture(record)),
+            restart_recovery: record.restart_recovery.clone(),
             active_codex_approval_policy: record.active_codex_approval_policy,
             federation_mailbox_binding: record.federation_mailbox_binding.clone(),
             federation_automatic_mailbox_binding: record.federation_automatic_mailbox_binding.clone(),
@@ -1144,6 +1148,7 @@ impl PersistedSessionRecord {
             })
             .collect();
         let mut record = SessionRecord {
+            restart_recovery: self.restart_recovery,
             federation_mailbox_binding: self.federation_mailbox_binding,
             federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding,
             federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings,

@@ -83,6 +83,7 @@ fn push_claude_cli_permission_args(
                 "permissions": { "ask": ["*"] },
                 "sandbox": { "autoAllowBashIfSandboxed": false },
                 "disableAllHooks": true,
+                "env": read_only_git_environment(true),
             })
             .to_string(),
         ]);

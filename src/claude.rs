@@ -707,6 +707,26 @@ fn claude_bash_command_is_read_only_with(
     cwd: &str,
     separators: ClaudeBashQuotedSeparators,
 ) -> bool {
+    claude_bash_command_is_read_only_with_git_policy(command, cwd, separators, true)
+}
+
+/// Writable command observations have no enforced no-fetch environment. Keep
+/// their carried-check exemptions separate from guarded reviewer permissions.
+fn claude_bash_command_preserves_carried_checks(command: &str, cwd: &str) -> bool {
+    claude_bash_command_is_read_only_with_git_policy(
+        command,
+        cwd,
+        ClaudeBashQuotedSeparators::Refused,
+        false,
+    )
+}
+
+fn claude_bash_command_is_read_only_with_git_policy(
+    command: &str,
+    cwd: &str,
+    separators: ClaudeBashQuotedSeparators,
+    allow_object_queries: bool,
+) -> bool {
     // Detect background separators on the ORIGINAL command, before the
     // `2>/dev/null` strip below. On input like `echo x \2>/dev/null& touch y`, a
     // text replace would delete `2>/dev/null` and leave `\&`, making the real
@@ -722,7 +742,12 @@ fn claude_bash_command_is_read_only_with(
     // is deliberately not a general Bash interpreter: dynamic loop values,
     // nested control flow, unknown variables, and trailing commands fail closed.
     if command.trim_start().starts_with("for ") {
-        return claude_bash_literal_for_loop_is_read_only(command, cwd, separators);
+        return claude_bash_literal_for_loop_is_read_only(
+            command,
+            cwd,
+            separators,
+            allow_object_queries,
+        );
     }
 
     let Some(normalized) = claude_bash_strip_stderr_discard(command) else {
@@ -830,6 +855,24 @@ fn claude_bash_command_is_read_only_with(
             continue;
         }
 
+        if !allow_object_queries && tokens.first() == Some(&"git") {
+            let Some(index) = claude_git_subcommand_index(&tokens) else {
+                return false;
+            };
+            if matches!(
+                tokens.get(index).copied(),
+                Some(
+                    "cat-file"
+                        | "ls-tree"
+                        | "rev-list"
+                        | "show-ref"
+                        | "for-each-ref"
+                        | "merge-base"
+                )
+            ) {
+                return false;
+            }
+        }
         if !claude_bash_tokens_are_read_only(&tokens) {
             return false;
         }
@@ -842,6 +885,7 @@ fn claude_bash_literal_for_loop_is_read_only(
     command: &str,
     cwd: &str,
     separators: ClaudeBashQuotedSeparators,
+    allow_object_queries: bool,
 ) -> bool {
     const MAX_LOOP_VALUES: usize = 64;
     const MAX_BODY_COMMANDS: usize = 16;
@@ -894,7 +938,12 @@ fn claude_bash_literal_for_loop_is_read_only(
             // Validate the body as one shell sequence, not isolated commands.
             // Directory changes persist between `;` clauses and iterations, so
             // separate checks would miss `cd other; git status` retargeting Git.
-            claude_bash_command_is_read_only_with(&commands.join(" && "), cwd, separators)
+            claude_bash_command_is_read_only_with_git_policy(
+                &commands.join(" && "),
+                cwd,
+                separators,
+                allow_object_queries,
+            )
         })
     })
 }
@@ -1493,7 +1542,32 @@ fn claude_bash_segment_tokens(segment: &str) -> Option<Vec<String>> {
             // `git diff *` with a tracked `--output=x` file). All rewrite the
             // argv before execution, so classifying the literal text would be
             // unsound. Fail closed instead.
-            '$' | '`' | '{' | '(' | '*' | '?' | '[' => return None,
+            '{' => {
+                if !claude_git_peel_revision_position(&tokens, &current) {
+                    return None;
+                }
+                let mut kind = String::new();
+                loop {
+                    let next = characters.next()?;
+                    if next == '}' {
+                        break;
+                    }
+                    if !next.is_ascii_lowercase() || kind.len() >= 6 {
+                        return None;
+                    }
+                    kind.push(next);
+                }
+                if !matches!(
+                    kind.as_str(),
+                    "" | "tree" | "commit" | "blob" | "tag" | "object"
+                ) {
+                    return None;
+                }
+                current.push('{');
+                current.push_str(&kind);
+                current.push('}');
+            }
+            '$' | '`' | '(' | '*' | '?' | '[' => return None,
             character if character.is_whitespace() => {
                 if !current.is_empty() {
                     tokens.push(std::mem::take(&mut current));
@@ -1774,6 +1848,24 @@ fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
         // subcommand through the same output/exec-sink denial as diff/log/show.
         "diff" | "log" | "show" | "blame" | "describe" | "ls-files" | "rev-parse" | "shortlog"
         | "status" | "patch-id" => claude_git_output_tokens_are_read_only(&normalized),
+        "cat-file" => claude_git_cat_file_is_inspection(&normalized[2..]),
+        "merge-base" => claude_git_merge_base_is_query(&normalized[2..]),
+        "ls-tree" | "show-ref" => claude_git_output_tokens_are_read_only(&normalized),
+        "for-each-ref" => {
+            claude_git_output_tokens_are_read_only(&normalized)
+                && claude_git_for_each_ref_is_query(&normalized[2..])
+        }
+        "rev-list" => {
+            claude_git_output_tokens_are_read_only(&normalized)
+                && claude_git_rev_list_formats_are_data(&normalized[2..])
+                && !normalized.iter().skip(2).any(|token| {
+                    // Stdin can carry revision pseudo-options past argv
+                    // inspection, including the configured alternate-ref command.
+                    ["--alternate-refs", "--stdin", "--show-signature"]
+                        .iter()
+                        .any(|option| claude_git_long_option_abbreviates(token, option))
+                })
+        }
         // `git hash-object` is deliberately NOT allowed: it applies gitattributes clean
         // filters (`filter.<name>.clean = <cmd>`) unless `--no-filters`, so hashing a
         // tracked file in the repo under review can execute a repo-defined command — an

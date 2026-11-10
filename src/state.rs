@@ -2205,6 +2205,8 @@ struct SessionRecord {
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
+    /// Durable once-per-interruption recovery; never an approval or grant.
+    restart_recovery: Option<SessionRestartRecovery>,
     /// Process-local identity of the currently active turn. Incremented for
     /// every dispatch so asynchronous callbacks cannot mistake a successor
     /// turn on the same shared runtime for the turn that armed them.
@@ -2367,6 +2369,7 @@ struct SessionRecord {
 /// where it was instead of leaving a half-started turn in memory: head gone,
 /// latch cleared, status Active, and nothing delivered to the runtime.
 struct QueuePromotionSnapshot {
+    restart_recovery: Option<SessionRestartRecovery>,
     unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
     queue_order: Vec<String>,
     body_sequence: SessionBodySequence,
@@ -2440,6 +2443,7 @@ impl SessionRecord {
 
     fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {
         QueuePromotionSnapshot {
+            restart_recovery: self.restart_recovery.clone(),
             unadmitted_active_turn: self.engram.unadmitted_active_turn.clone(),
             queue_order: self.queued_prompts.iter().map(|queued| queued.pending_prompt.id.clone()).collect(),
             body_sequence: self.body_sequence.clone(),
@@ -2512,6 +2516,7 @@ impl SessionRecord {
         self.prompt_deliveries = snapshot.prompt_deliveries;
         sync_pending_prompts(self);
         self.session.status = snapshot.status;
+        self.restart_recovery = snapshot.restart_recovery;
         self.active_turn_generation = snapshot.active_turn_generation;
         self.engram.unadmitted_active_turn = snapshot.unadmitted_active_turn;
         self.human_prompt_turn = snapshot.human_prompt_turn;

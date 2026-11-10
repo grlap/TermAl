@@ -2967,13 +2967,15 @@ textarea {
   opacity: 0;
 }
 
+/* Stepped motion draws a handful of frames per second. Visibility observations
+   enable it only on screen; the static ring is the safe startup/fallback state. */
 .status-agent-badge[data-status="active"]::before {
   inset: -0.22rem;
   border-width: 1.9px;
   border-color: var(--status-green-ring);
   border-top-color: var(--status-green-ring-bright);
   border-right-color: var(--status-green-ring-mid);
-  animation: spin 850ms linear infinite;
+  animation: activity-step-spin 1600ms steps(8) infinite paused;
 }
 
 .status-agent-badge[data-status="active"]::after {
@@ -2986,7 +2988,7 @@ textarea {
   border-width: 1.9px;
   border-color: color-mix(in srgb, var(--signal-gold) 52%, transparent);
   border-top-color: var(--signal-gold);
-  animation: spin 850ms linear infinite;
+  animation: activity-step-spin 1600ms steps(8) infinite paused;
 }
 
 .status-agent-badge[data-status="stopping"]::after {
@@ -3005,7 +3007,7 @@ textarea {
   border-width: 1.9px;
   border-color: color-mix(in srgb, var(--signal-blue) 36%, transparent);
   border-top-color: var(--signal-blue);
-  animation: spin 3200ms linear infinite;
+  animation: activity-step-spin 1600ms steps(8) infinite paused;
 }
 
 .status-agent-badge[data-status="approval"]::before {
@@ -5466,7 +5468,6 @@ textarea {
   display: block;
   height: 100%;
   background: var(--signal-blue);
-  transform-origin: left center;
 }
 
 .session-activity-strip[data-state="idle"] .session-activity-strip-track {
@@ -5482,21 +5483,7 @@ textarea {
   background: var(--signal-red);
 }
 
-.session-activity-strip[data-animated="true"] .session-activity-strip-fill {
-  animation: session-activity-sweep 3200ms ease-in-out infinite;
-}
-
-@keyframes session-activity-sweep {
-  0% { transform: translateX(-35%) scaleX(0.35); opacity: 0.45; }
-  50% { opacity: 1; }
-  100% { transform: translateX(100%) scaleX(0.35); opacity: 0.45; }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .session-activity-strip[data-animated] .session-activity-strip-fill {
-    animation: none;
-    transform: none;
-  }
   .session-activity-strip .session-activity-strip-track,
   .session-activity-strip .activity-tooltip {
     transition: none;
@@ -5644,9 +5631,9 @@ textarea {
 
 .activity-spinner {
   border-radius: 999px;
+  animation: activity-step-spin 1600ms steps(8) infinite paused;
   border: 3px solid var(--spinner-track);
   border-top-color: var(--signal-blue);
-  animation: spin 900ms linear infinite;
 }
 
 .activity-spinner {
@@ -9838,7 +9825,7 @@ textarea {
   border: 2px solid var(--spinner-track);
   border-top-color: var(--signal-blue);
   border-radius: 999px;
-  animation: spin 0.8s linear infinite;
+  animation: activity-step-spin 1600ms steps(8) infinite paused;
 }
 
 .composer-slash-error {
@@ -9928,7 +9915,7 @@ textarea {
   border: 2px solid var(--spinner-track);
   border-top-color: currentColor;
   border-radius: 999px;
-  animation: spin 0.8s linear infinite;
+  animation: activity-step-spin 1600ms steps(8) infinite paused;
 }
 
 .composer-mcp-servers {
@@ -10226,13 +10213,22 @@ textarea {
   }
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
+@keyframes activity-step-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
-  to {
-    transform: rotate(360deg);
+[data-activity-document-visible="true"] .status-agent-badge[data-activity-visible="true"]::before,
+[data-activity-document-visible="true"] :is(.activity-spinner, .composer-slash-status-spinner, .composer-slash-option-spinner)[data-activity-visible="true"] {
+  animation-play-state: running;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-agent-badge[data-status]::before,
+  .activity-spinner,
+  .composer-slash-status-spinner,
+  .composer-slash-option-spinner {
+    animation: none !important;
   }
 }
 

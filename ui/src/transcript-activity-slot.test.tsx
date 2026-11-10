@@ -1,5 +1,5 @@
 // Owns whole-turn labels, live-tail boundaries, accessibility and stable slot
-// reservation tests. JSDOM checks CSS contracts, not browser scroll geometry.
+// reservation tests. Browser activity checks own geometry and motion coverage.
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { TranscriptActivitySlot, transcriptActivityLabel } from "./transcript-activity-slot";
@@ -121,59 +121,18 @@ it("leaves session announcements to the activity strip", () => {
   expect(view.queryByRole("status")).toBeNull();
 });
 
-it("keeps the same one-line CSS box and DOM node through every activity state", async () => {
-  // CSS imports are stubbed by Vitest. Resolve the production file relative to
-  // this module, not the runner's working directory. Pass a URL string across
-  // the JSDOM/Node realm boundary.
-  const nodeFsModule = "node:fs";
-  const nodeUrlModule = "node:url";
-  const { readFileSync } = await import(nodeFsModule) as {
-    readFileSync: (path: string, encoding: "utf8") => string;
-  };
-  const { fileURLToPath } = await import(nodeUrlModule) as {
-    fileURLToPath: (url: string) => string;
-  };
-  // Keep Vite's browser-asset rewrite away from this filesystem lookup.
-  const moduleUrl = import.meta.url;
-  const css = readFileSync(fileURLToPath(new URL("./transcript-activity-slot.css", moduleUrl).href), "utf8");
-  const style = document.createElement("style");
-  expect(css, "test must load the actual slot stylesheet").toContain("height: 1.5em");
-  style.textContent = css;
-  document.head.append(style);
-  try {
-    const view = render(<TranscriptActivitySlot session={session([prompt])} />);
-    const slot = view.container.firstElementChild as HTMLElement;
-    const squares = slot.querySelector(".message-activity-squares")!;
-    expect(squares.children).toHaveLength(3);
-    expect(getComputedStyle(squares.children[0]).animation).toContain("transcript-activity-lift 1.1s");
-    expect(getComputedStyle(squares.children[1]).animationDelay).toBe("0.16s");
-    expect(getComputedStyle(squares.children[2]).animationDelay).toBe("0.32s");
-    expect(getComputedStyle(slot.querySelector(".message-activity-label")!).animation)
-      .toContain("transcript-activity-breathe 2.2s");
-    expect(getComputedStyle(slot.querySelector(".message-activity-status")!).textTransform).toBe("none");
-    for (const value of [session([prompt]), session([prompt, answer]), session([prompt, command]),
-      session([], { status: "stopping" }), session([], { status: "idle", pendingPrompts }),
-      session([], { status: "idle", pendingPrompts, queuePaused: true }),
-      session([], { status: "approval" }), session([], { status: "error" }),
-      session([prompt], { hasNewerHistory: true }), session([], { status: "idle" }), null]) {
-      view.rerender(<TranscriptActivitySlot session={value} />);
-      expect(view.container.firstElementChild).toBe(slot);
-      const computed = getComputedStyle(slot);
-      expect(computed.height).toBe("1.5em");
-      expect(computed.minHeight).toBe("1.5em");
-      expect(computed.maxHeight).toBe("1.5em");
-      expect(computed.overflow).toBe("hidden");
-    }
-    expect(slot).toBeEmptyDOMElement();
-    expect(css).toContain("@keyframes transcript-activity-lift");
-    expect(css).toContain("transform: translateY(-0.18em)");
-    const reducedMotion = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
-    expect(reducedMotion).toContain(".message-activity-label");
-    expect(reducedMotion).toContain(".message-activity-squares > span");
-    expect(reducedMotion).toContain("animation: none");
-    expect(reducedMotion).toContain("transform: none");
-    expect(reducedMotion).toContain("opacity: 0.7");
-  } finally {
-    style.remove();
+it("keeps the same reserved DOM node through every activity state", () => {
+  const view = render(<TranscriptActivitySlot session={session([prompt])} />);
+  const slot = view.container.firstElementChild as HTMLElement;
+  const squares = slot.querySelector(".message-activity-squares")!;
+  expect(squares.children).toHaveLength(3);
+  for (const value of [session([prompt]), session([prompt, answer]), session([prompt, command]),
+    session([], { status: "stopping" }), session([], { status: "idle", pendingPrompts }),
+    session([], { status: "idle", pendingPrompts, queuePaused: true }),
+    session([], { status: "approval" }), session([], { status: "error" }),
+    session([prompt], { hasNewerHistory: true }), session([], { status: "idle" }), null]) {
+    view.rerender(<TranscriptActivitySlot session={value} />);
+    expect(view.container.firstElementChild).toBe(slot);
   }
+  expect(slot).toBeEmptyDOMElement();
 });

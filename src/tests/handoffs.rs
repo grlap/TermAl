@@ -33,12 +33,18 @@ struct Fixture {
 
 fn boot(paths: &(PathBuf, PathBuf, PathBuf), root: &Arc<TestTempRoot>) -> AppState {
     super::delegation_support::boot_on_delegation_root(root, || {
-        AppState::new_with_paths(
+        let mut state = AppState::new_before_listen_with_paths(
             paths.0.to_string_lossy().into_owned(),
             paths.1.clone(),
             paths.2.clone(),
         )
-        .expect("state should boot")
+        .expect("state should boot");
+        // A delivered handoff can leave its owner Active in the saved state.
+        // Restart recovery must never launch a real provider before this
+        // fixture installs its test runtime.
+        state.agent_runtime_spawning_enabled = false;
+        state.run_post_listen_boot().expect("post-listen boot");
+        state
     })
 }
 
