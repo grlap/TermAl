@@ -756,6 +756,7 @@ impl AppState {
                 refusal: None,
                 prepared_brief: None,
                 citation_retry: None,
+                refused_submissions: Vec::new(),
             });
             target
         });

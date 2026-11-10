@@ -39,6 +39,7 @@ fn rejected_evaluation_key_has_no_effect(schema_one: bool) {
                 refusal: None,
                 prepared_brief: None,
                 citation_retry: None,
+                refused_submissions: Vec::new(),
             });
         });
     }

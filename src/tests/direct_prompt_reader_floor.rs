@@ -123,36 +123,70 @@ fn direct_prompt_delivery_keys_refuse_predecessors_without_writes() {
     ]) {
         for for_load in [false, true] {
             for key in ["remotePrompt", "remote_prompt"] {
-                for value in [Value::Null, json!({}), json!({"schemaVersion":999})] {
-                    let connection = match version {
-                        SQLITE_DIRECT_PROMPT_PREDECESSOR
-                        | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR => predecessor(false),
-                        SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
-                        | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR => predecessor(true),
-                        _ => source(version, false),
-                    };
-                    connection
-                        .execute(
-                            "UPDATE meta SET value=?1 WHERE key='schema_version'",
-                            [version],
-                        )
-                        .unwrap();
-                    let mut row = json!({"promptDeliveries":{"retained":{}}});
-                    row["promptDeliveries"]["retained"][key] = value;
-                    connection
-                        .execute(
-                            "INSERT INTO sessions VALUES('historical',?1)",
-                            [row.to_string()],
-                        )
-                        .unwrap();
-                    let before = image(&connection);
-                    let changes = connection.total_changes();
-                    let error = prepare_existing_sqlite_state_reader_floor(&connection, for_load)
-                        .err()
-                        .unwrap();
-                    assert!(format!("{error:#}").contains("direct-prompt delivery association"));
-                    assert_eq!(connection.total_changes(), changes);
-                    assert_eq!(image(&connection), before);
+                for container in ["promptDeliveries", "prompt_deliveries"] {
+                    for in_metadata in [false, true] {
+                        if in_metadata && version != "2" {
+                            continue;
+                        }
+                        for value in [Value::Null, json!({}), json!({"schemaVersion":999})] {
+                            let connection = match version {
+                                SQLITE_DIRECT_PROMPT_PREDECESSOR
+                                | SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR => predecessor(false),
+                                SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR
+                                | SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR => {
+                                    predecessor(true)
+                                }
+                                _ => source(version, false),
+                            };
+                            connection
+                                .execute(
+                                    "UPDATE meta SET value=?1 WHERE key='schema_version'",
+                                    [version],
+                                )
+                                .unwrap();
+                            let mut row = json!({});
+                            row[container] = json!({"retained":{}});
+                            row[container]["retained"][key] = value;
+                            if in_metadata {
+                                let encoded: String = connection
+                                    .query_row(
+                                        "SELECT value_json FROM app_state WHERE key=?1",
+                                        [SQLITE_METADATA_KEY],
+                                        |row| row.get(0),
+                                    )
+                                    .unwrap();
+                                let mut metadata: Value = serde_json::from_str(&encoded).unwrap();
+                                metadata["sessions"] = json!([row]);
+                                connection
+                                    .execute(
+                                        "UPDATE app_state SET value_json=?1 WHERE key=?2",
+                                        rusqlite::params![
+                                            metadata.to_string(),
+                                            SQLITE_METADATA_KEY
+                                        ],
+                                    )
+                                    .unwrap();
+                            } else {
+                                connection
+                                    .execute(
+                                        "INSERT INTO sessions VALUES('historical',?1)",
+                                        [row.to_string()],
+                                    )
+                                    .unwrap();
+                            }
+                            let before = image(&connection);
+                            let changes = connection.total_changes();
+                            let error =
+                                prepare_existing_sqlite_state_reader_floor(&connection, for_load)
+                                    .err()
+                                    .unwrap();
+                            assert!(
+                                format!("{error:#}").contains("direct-prompt delivery association")
+                            );
+                            assert_eq!(connection.total_changes(), changes);
+                            assert_eq!(image(&connection), before);
+                        }
+                    }
                 }
             }
         }

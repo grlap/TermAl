@@ -2267,7 +2267,7 @@ impl AppState {
             // judgment under the old cut. Only the typed resubmit asks for reads.
             (AcceptanceEvaluationRunOutcome::Refused { code, message: words, alternatives }, None) => {
                 let shown = alternatives.clone();
-                let retained = self.record_acceptance_evaluation_refusal(&authority, code.as_deref(), &words, original, alternatives)?;
+                let retained = self.record_acceptance_evaluation_refusal(&authority, &request, code.as_deref(), &words, original, alternatives)?;
                 if let Some(file) = &source_file { file.terminal(); }
                 if retained {
                     return Err(ApiError::conflict(acceptance_citation_retry_offer(&words, &shown)));

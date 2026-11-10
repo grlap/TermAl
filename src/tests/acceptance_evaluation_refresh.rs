@@ -2,6 +2,9 @@
 // writes. All transport replies are injected; no tracker process is launched.
 use super::*;
 
+#[path = "acceptance_evaluation_refused_view.rs"]
+mod refused_view;
+
 const REFRESH_SELECTED_PROOF: &str = "cccccccccccccccccccccccccccccccc";
 
 fn selected_refresh_reader(
@@ -758,6 +761,7 @@ fn enable_attempt_history(state: &AppState, id: &str, parent: &str, child: &str)
         refusal: None,
         prepared_brief: None,
         citation_retry: None,
+        refused_submissions: Vec::new(),
     });
     inner.mark_delegation_mutated(index);
     state.commit_locked(&mut inner).unwrap();

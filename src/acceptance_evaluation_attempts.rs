@@ -25,6 +25,14 @@ struct AcceptanceEvaluationAttemptHistory {
     /// (acceptance_evaluation_citation_retry.rs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     citation_retry: Option<AcceptanceEvaluationCitationRetry>,
+    /// Presentation only: confirmed no-record judgments, including the refusal
+    /// that allowed a citation retry. Kept across later host-authored keys.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_acceptance_refused_submissions"
+    )]
+    refused_submissions: Vec<AcceptanceEvaluationRefusedSubmission>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

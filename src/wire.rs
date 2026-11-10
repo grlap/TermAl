@@ -1909,6 +1909,7 @@ impl DelegationAcceptanceEvaluation {
             original.source_payload = None;
         }
         if let Some(history) = view.attempt_history.as_mut() {
+            history.expose_unavailable_refused_submissions(self);
             if let Some(refusal) = history.refusal.as_mut() {
                 refusal.original.args.clear();
                 refusal.original.source_payload = None;

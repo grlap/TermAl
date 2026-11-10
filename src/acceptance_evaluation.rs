@@ -2294,7 +2294,7 @@ struct SubmitAcceptanceEvaluationRequest {
     verdicts: Vec<SubmitAcceptanceEvaluationVerdict>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SubmitAcceptanceEvaluationVerdict {
     criterion: usize,
