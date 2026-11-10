@@ -1466,7 +1466,7 @@ and a run that has left the index shows "not indexed" and no elapsed time.
   in which a launcher run is one kind of execution.
 - [Handoff Ledger](./handoffs.md): a recorded next step the host offers its
   owner when a run ends or is credited, with no wake needed.
-- [Remote Full Gates](./remote-full-gates.md): the five-stage gate run on a
+- [Remote Full Gates](./remote-full-gates.md): the full gate run on a
   satellite and reported back to the central coordinator.
 - [Satellite Onboarding](./satellite-onboarding.md): adding the satellite a
   remote gate runs on.

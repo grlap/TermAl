@@ -2531,37 +2531,44 @@ fn isolated_worktree_max_fanout_rejection_does_not_leave_worktree() {
         }
     }
 
-    let err = match state.create_read_only_delegation(
-        &parent_session_id,
-        CreateDelegationRequest {
-            prompt: "This isolated reviewer should be rejected before worktree creation."
-                .to_owned(),
-            title: Some("Rejected Isolated Reviewer".to_owned()),
-            cwd: None,
-            agent: Some(Agent::Codex),
-            model: None,
-            mode: Some(DelegationMode::Reviewer),
-            write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
-                base: None,
-                owned_paths: vec!["README.md".to_owned()],
-                worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
-            }),
-        },
-    ) {
-        Ok(_) => panic!("max fanout should reject the isolated delegation"),
-        Err(err) => err,
-    };
+    for mode in [
+        DelegationMode::Reviewer,
+        DelegationMode::Explorer,
+        DelegationMode::Worker,
+    ] {
+        let err = match state.create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Reject before creating an isolated worktree.".to_owned(),
+                title: Some("Rejected isolated child".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(mode),
+                write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                    base: None,
+                    owned_paths: vec!["README.md".to_owned()],
+                    worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
+                }),
+            },
+        ) {
+            Ok(_) => panic!("max fanout should reject the isolated delegation"),
+            Err(err) => err,
+        };
 
-    assert_eq!(err.status, StatusCode::CONFLICT);
-    assert!(
-        err.message.contains("active delegations"),
-        "unexpected max fanout error: {}",
-        err.message
-    );
-    assert!(
-        !worktree_root.exists(),
-        "rejected isolated delegation must not leave a worktree"
-    );
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert!(
+            err.message.contains("4 active delegations")
+                && err.message.contains("limit is 4")
+                && err.message.contains("same frozen input"),
+            "unexpected max fanout error: {}",
+            err.message
+        );
+        assert!(
+            !worktree_root.exists(),
+            "rejected isolated delegation must not leave a worktree"
+        );
+    }
 
     remove_test_directory(&repo_root);
     remove_test_directory(&worktree_root);
@@ -4101,7 +4108,7 @@ fn delegation_limit_allows_new_children_after_terminal_states() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let mut created = Vec::new();
-    for index in 0..MAX_RUNNING_DELEGATIONS_PER_PARENT {
+    for index in 0..6 {
         created.push(
             state
                 .create_read_only_delegation(
@@ -4132,14 +4139,23 @@ fn delegation_limit_allows_new_children_after_terminal_states() {
             write_policy: Some(DelegationWritePolicy::ReadOnly),
         },
     ) {
-        Ok(_) => panic!("fifth active delegation should be rejected"),
+        Ok(_) => panic!("seventh active read-only reviewer should be rejected"),
         Err(err) => err,
     };
     assert_eq!(err.status, StatusCode::CONFLICT);
     assert!(
         err.message
-            .contains("parent session already has 4 active delegations")
+            .contains("parent session already has 6 active delegations")
     );
+    assert!(err.message.contains("limit is 6"), "{}", err.message);
+    assert!(err.message.contains("terminal"), "{}", err.message);
+    assert!(err.message.contains("fan-in"), "{}", err.message);
+    assert!(err.message.contains("same frozen input"), "{}", err.message);
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(inner.delegations.len(), 6, "refusal creates no delegation");
+        assert_eq!(inner.sessions.len(), 7, "refusal creates no child session");
+    }
 
     finish_delegation_child_with_assistant_text(
         &state,
@@ -4182,6 +4198,65 @@ fn delegation_limit_allows_new_children_after_terminal_states() {
         )
         .expect("canceled delegation should not count against active limit");
 
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_limit_counts_other_kinds_in_the_reviewer_total() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let request = |mode| CreateDelegationRequest {
+        prompt: "Inspect the frozen input.".to_owned(),
+        title: Some("Limited child".to_owned()),
+        cwd: None,
+        agent: Some(Agent::Codex),
+        model: None,
+        mode: Some(mode),
+        write_policy: Some(DelegationWritePolicy::ReadOnly),
+    };
+    for _ in 0..4 {
+        state
+            .create_read_only_delegation(&parent_session_id, request(DelegationMode::Explorer))
+            .expect("four explorers should be admitted");
+    }
+    let refused_explorer = match state
+        .create_read_only_delegation(&parent_session_id, request(DelegationMode::Explorer))
+    {
+        Ok(_) => panic!("a fifth explorer should retain the existing limit"),
+        Err(err) => err,
+    };
+    assert_eq!(refused_explorer.status, StatusCode::CONFLICT);
+    assert!(refused_explorer.message.contains("4 active delegations"));
+    assert!(refused_explorer.message.contains("limit is 4"));
+    assert!(refused_explorer.message.contains("same frozen input"));
+
+    for _ in 0..2 {
+        state
+            .create_read_only_delegation(&parent_session_id, request(DelegationMode::Reviewer))
+            .expect("read-only reviewers may use the remaining two slots");
+    }
+    for (mode, limit) in [(DelegationMode::Reviewer, 6), (DelegationMode::Explorer, 4)] {
+        let err = match state.create_read_only_delegation(&parent_session_id, request(mode)) {
+            Ok(_) => panic!("all kinds must count toward the active total"),
+            Err(err) => err,
+        };
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert!(
+            err.message.contains("6 active delegations"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message.contains(&format!("limit is {limit}")),
+            "{}",
+            err.message
+        );
+    }
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(inner.delegations.len(), 6);
+        assert_eq!(inner.sessions.len(), 7);
+    }
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

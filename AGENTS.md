@@ -454,7 +454,7 @@ sprawdzania czy mają okreslone frazy. Usunąć natychmiast.'
 
 ## Shared test launcher
 
-Use `node scripts/test-launcher.mjs full` for the maintained five-stage gate and
+Use `node scripts/test-launcher.mjs full` for the maintained full gate (its stages are listed in docs/test.md) and
 `node scripts/test-launcher.mjs focused -- COMMAND ARG...` for an authorized
 focused check. The launcher stores complete stdout/stderr and atomic terminal
 results under Git metadata, while context receives only a bounded summary.

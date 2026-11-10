@@ -224,7 +224,7 @@ On real machines, as of 2026-10-29:
   The Mac reconnected after a manual fix: an SSH key restriction on the Mac,
   pinned to the central's old IP address, was corrected by hand.
 - A live evaluation of hostname recovery on the running hosts is still owed.
-- Each satellite can run the five-stage gate as a
+- Each satellite can run the full gate as a
   [remote full gate](remote-full-gates.md).
 
 See [project status](project-status.md).

@@ -38,7 +38,7 @@ Linked from the [README](../../README.md#where-termal-stands). Related briefs:
 
 ### Remote full gates
 
-- The maintained five-stage gate runs on a satellite and reports back to the
+- The maintained full gate runs on a satellite and reports back to the
   central coordinator. See [remote full gates](remote-full-gates.md).
 - On 2026-10-29 the full gate passed on master `92572b94` on both satellites,
   all five stages each:

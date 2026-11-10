@@ -15,7 +15,7 @@ is a separate, explicit operator step.
 As of 2026-10-29 that step has been taken for one domain:
 - A Windows central host runs with two satellites, a second Windows machine and
   a Mac. Cross-host mail wakes idle satellite sessions.
-- The five-stage gate runs on both satellites as
+- The full gate runs on both satellites as
   [remote full gates](remote-full-gates.md).
 - A program cannot yet send a prompt directly to a chosen remote session.
 - Restart recovery after an address change still needs its live evaluation.
@@ -1050,7 +1050,7 @@ cross-host coordination.
 
 - [Satellite onboarding](satellite-onboarding.md): operator setup, the named
   verification checklist and the independent Engram readiness step.
-- [Remote full gates](remote-full-gates.md): running the five-stage gate on a
+- [Remote full gates](remote-full-gates.md): running the full gate on a
   satellite and reporting it back to the central coordinator.
 - [Project status](project-status.md): what runs on real machines today, its
   limits and what comes next.

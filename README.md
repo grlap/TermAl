@@ -74,7 +74,7 @@ and next steps, is in [Project status](docs/features/project-status.md).
   - Cross-host mail wakes idle satellite sessions.
   - See the [central control plane](docs/features/central-control-plane.md)
     and [satellite onboarding](docs/features/satellite-onboarding.md).
-- **Remote full gates.** The five-stage gate runs on a satellite and reports
+- **Remote full gates.** The full gate runs on a satellite and reports
   back to the coordinator. It passed on master on both the Windows satellite
   and the Mac. See [Remote full gates](docs/features/remote-full-gates.md).
 - **Execution Observability on every harness (live observation pending).**
@@ -365,14 +365,15 @@ Project digests and digest actions are temporarily disabled. Free text is forwar
 ## Testing
 
 After installing the UI dependencies, run the shared launcher from the repository
-root for the maintained **five-stage gate**:
+root for the maintained **six-stage gate**:
 
 ```bash
 node scripts/test-launcher.mjs full
 ```
 
-It runs Cargo check, TypeScript checking, fingerprint/launcher helper tests,
-Rust tests, and Vitest in order. For an authorized focused check:
+It runs Cargo fmt in check-only mode, Cargo check, TypeScript checking,
+fingerprint/launcher helper tests, Rust tests, and Vitest in order. For an
+authorized focused check:
 
 ```bash
 node scripts/test-launcher.mjs focused -- COMMAND ARG...
@@ -517,7 +518,7 @@ Instances can be **paused**, **resumed**, or **stopped** from the control panel 
   - [Central control plane](docs/features/central-control-plane.md) — central host, satellite hosts, cross-host mailboxes; running on a Windows central with Windows and Mac satellites
   - [Satellite onboarding](docs/features/satellite-onboarding.md) — adding a satellite, verification, hostname recovery
   - [Federation link](docs/features/federation-link.md) — the OpenSSH link between the central host and each satellite
-  - [Remote full gates](docs/features/remote-full-gates.md) — running the five-stage gate on a satellite
+  - [Remote full gates](docs/features/remote-full-gates.md) — running the full gate on a satellite
 
 ## License
 

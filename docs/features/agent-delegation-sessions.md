@@ -708,7 +708,15 @@ TermAl creates:
 
 Phase 1 REST spawn does not park records for a scheduler: it either creates a
 delegation immediately or rejects with `409` when the per-parent active limit is
-full. Once the delegation is created it is durable, and the spawn answers with
+full. An incoming `reviewer` with `readOnly` policy may bring the parent's total
+to six active delegations; every other mode or policy retains the limit of four.
+All nonterminal children count toward that total, regardless of their kind.
+The refusal states the current count, the applicable limit, and how to wait for
+a terminal delegation or use fan-in before retrying with the same frozen input.
+Nesting and fan-in limits are unchanged. This fan-out cap does not reserve host
+resources.
+
+Once the delegation is created it is durable, and the spawn answers with
 it whatever happens to its first turn. The response's `firstTurn` says how that
 turn was left: `delivered`, `scheduled`, `queued`, `superseded` or `held`. A held
 first turn answers `202 Accepted` with the hold (see "Held attempts" below) and

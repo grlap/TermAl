@@ -1,6 +1,6 @@
 # Remote full gates
 
-A remote full gate is the maintained five-stage gate
+A remote full gate is the maintained six-stage gate
 (`node scripts/test-launcher.mjs full`), run on a satellite host of the
 [central control plane](central-control-plane.md) instead of the coordinator's
 own machine. Its results are reported back to the central coordinator. It lets

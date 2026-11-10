@@ -158,7 +158,7 @@ describe("delegation error packets", () => {
     ["prompt bytes", "delegation prompt must be at most 65536 bytes"],
     ["title chars", "delegation title must be at most 200 characters"],
     ["model chars", "delegation model must be at most 200 characters"],
-    ["active limit", "parent session already has 4 active delegations"],
+    ["previous active limit", "parent session already has 4 active delegations"],
     ["depth limit", "delegation nesting depth is limited to 4"],
     [
       "drive-relative cwd",
@@ -180,6 +180,38 @@ describe("delegation error packets", () => {
         new ApiRequestError("request-failed", message, { status: 400 }),
       ),
     ).toBe(message);
+  });
+
+  it.each([
+    [4, 4],
+    [6, 6],
+    [6, 4],
+  ])(
+    "preserves fan-out refusal guidance for count %i and limit %i",
+    (count, limit) => {
+      const message = `parent session already has ${count} active delegations; this request's limit is ${limit}. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input.`;
+      expect(
+        spawnFailureMessage(
+          new ApiRequestError("request-failed", message, { status: 409 }),
+        ),
+      ).toBe(message);
+    },
+  );
+
+  it.each([
+    "unexpected prefix ",
+    " appended private detail",
+    "\nprivate detail",
+  ])("redacts altered fan-out refusals: %s", (extra) => {
+    const message =
+      "parent session already has 6 active delegations; this request's limit is 6. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input.";
+    for (const altered of [extra + message, message + extra]) {
+      expect(
+        spawnFailureMessage(
+          new ApiRequestError("request-failed", altered, { status: 409 }),
+        ),
+      ).toBe("Spawn delegation failed.");
+    }
   });
 
   it.each([

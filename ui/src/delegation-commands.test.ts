@@ -1073,7 +1073,7 @@ describe("delegation command surface", () => {
         if (request.title === "Rust review") {
           throw new ApiRequestError(
             "request-failed",
-            "parent session already has 4 active delegations",
+            "parent session already has 6 active delegations; this request's limit is 6. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input.",
             { status: 409 },
           );
         }
@@ -1109,7 +1109,7 @@ describe("delegation command surface", () => {
         {
           index: 1,
           title: "Rust review",
-          message: "parent session already has 4 active delegations",
+          message: "parent session already has 6 active delegations; this request's limit is 6. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input.",
           name: "ApiRequestError",
           kind: "spawn-failed",
           apiErrorKind: "request-failed",
@@ -1268,7 +1268,7 @@ describe("delegation command surface", () => {
           "request-failed",
           request.title === "React review"
             ? "session not found"
-            : "parent session already has 4 active delegations",
+            : "parent session already has 6 active delegations; this request's limit is 6. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input.",
           { status: request.title === "React review" ? 404 : 409 },
         );
       }),
@@ -1297,7 +1297,7 @@ describe("delegation command surface", () => {
           index: 1,
           title: "Rust review",
           kind: "spawn-failed",
-          message: "parent session already has 4 active delegations",
+          message: "parent session already has 6 active delegations; this request's limit is 6. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input.",
           status: 409,
         },
       ],
@@ -1309,6 +1309,12 @@ describe("delegation command surface", () => {
 
   it.each([
     ["parent session id is required"],
+    [
+      "parent session already has 6 active delegations; this request's limit is 6. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input.",
+    ],
+    [
+      "parent session already has 4 active delegations; this request's limit is 4. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input.",
+    ],
     ["session not found"],
     ["unknown project `project-1`"],
     ["delegation cwd `C:\\repo\\outside` must stay inside project `TermAl`"],

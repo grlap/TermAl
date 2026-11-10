@@ -137,6 +137,7 @@ const SAFE_SPAWN_DELEGATION_PATTERNS = [
   /^delegation title must be at most \d+ characters$/u,
   /^delegation model must be at most \d+ characters$/u,
   /^parent session already has \d+ active delegations$/u,
+  /^parent session already has \d+ active delegations; this request's limit is (?:4|6)\. Wait for an existing delegation to become terminal or use fan-in, then retry with the same frozen input\.$/u,
   /^delegation nesting depth is limited to \d+$/u,
   /^delegation cwd cannot be (?:a drive-relative Windows path|a UNC path|a Windows device namespace path)$/u,
   /^unknown project `[^`]+`$/u,
